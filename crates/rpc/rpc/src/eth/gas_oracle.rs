@@ -5,7 +5,7 @@ use crate::eth::{
     error::{EthApiError, EthResult, RpcInvalidTransactionError},
 };
 use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag, H256, U256};
-use reth_provider::BlockProviderIdExt;
+use reth_provider::BlockReaderIdExt;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::warn;
@@ -81,9 +81,9 @@ impl GasPriceOracleConfig {
 
 /// Calculates a gas price depending on recent blocks.
 #[derive(Debug)]
-pub struct GasPriceOracle<Client> {
+pub struct GasPriceOracle<Provider> {
     /// The type used to subscribe to block events and get block info
-    client: Client,
+    provider: Provider,
     /// The cache for blocks
     cache: EthStateCache,
     /// The config for the oracle
@@ -92,29 +92,34 @@ pub struct GasPriceOracle<Client> {
     last_price: Mutex<GasPriceOracleResult>,
 }
 
-impl<Client> GasPriceOracle<Client>
+impl<Provider> GasPriceOracle<Provider>
 where
-    Client: BlockProviderIdExt + 'static,
+    Provider: BlockReaderIdExt + 'static,
 {
     /// Creates and returns the [GasPriceOracle].
     pub fn new(
-        client: Client,
+        provider: Provider,
         mut oracle_config: GasPriceOracleConfig,
         cache: EthStateCache,
     ) -> Self {
         // sanitize the percentile to be less than 100
         if oracle_config.percentile > 100 {
-            warn!(prev_percentile=?oracle_config.percentile, "Invalid configured gas price percentile, using 100 instead");
+            warn!(prev_percentile = ?oracle_config.percentile, "Invalid configured gas price percentile, assuming 100.");
             oracle_config.percentile = 100;
         }
 
-        Self { client, oracle_config, last_price: Default::default(), cache }
+        Self { provider, oracle_config, last_price: Default::default(), cache }
+    }
+
+    /// Returns the configuration of the gas price oracle.
+    pub fn config(&self) -> &GasPriceOracleConfig {
+        &self.oracle_config
     }
 
     /// Suggests a gas price estimate based on recent blocks, using the configured percentile.
     pub async fn suggest_tip_cap(&self) -> EthResult<U256> {
         let header = self
-            .client
+            .provider
             .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
             .ok_or(EthApiError::UnknownBlockNumber)?;
 

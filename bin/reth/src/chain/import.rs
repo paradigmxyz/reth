@@ -1,5 +1,6 @@
 use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
+    init::init_genesis,
     node::events::{handle_events, NodeEvent},
     version::SHORT_VERSION,
 };
@@ -7,19 +8,17 @@ use clap::Parser;
 use eyre::Context;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
+use reth_provider::{ProviderFactory, StageCheckpointReader};
 
+use crate::args::{utils::genesis_value_parser, DatabaseArgs};
 use reth_config::Config;
-use reth_db::database::Database;
+use reth_db::{database::Database, init_db};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::FileClient,
 };
 use reth_interfaces::consensus::Consensus;
-use reth_primitives::{ChainSpec, H256};
-use reth_staged_sync::utils::{
-    chainspec::genesis_value_parser,
-    init::{init_db, init_genesis},
-};
+use reth_primitives::{stage::StageId, ChainSpec, H256};
 use reth_stages::{
     prelude::*,
     stages::{
@@ -65,6 +64,9 @@ pub struct ImportCommand {
     )]
     chain: Arc<ChainSpec>,
 
+    #[clap(flatten)]
+    db: DatabaseArgs,
+
     /// The path to a block file for import.
     ///
     /// The online stages (headers and bodies) are replaced by a file import, after which the
@@ -88,7 +90,7 @@ impl ImportCommand {
         let db_path = data_dir.db_path();
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(db_path)?);
+        let db = Arc::new(init_db(db_path, self.db.log_level)?);
         info!(target: "reth::cli", "Database opened");
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
@@ -107,13 +109,18 @@ impl ImportCommand {
         info!(target: "reth::cli", "Chain file imported");
 
         let (mut pipeline, events) =
-            self.build_import_pipeline(config, db, &consensus, file_client).await?;
+            self.build_import_pipeline(config, Arc::clone(&db), &consensus, file_client).await?;
 
         // override the tip
         pipeline.set_tip(tip);
         debug!(target: "reth::cli", ?tip, "Tip manually set");
 
-        tokio::spawn(handle_events(None, events));
+        let factory = ProviderFactory::new(&db, self.chain.clone());
+        let provider = factory.provider().map_err(PipelineError::Interface)?;
+
+        let latest_block_number =
+            provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
+        tokio::spawn(handle_events(None, latest_block_number, events));
 
         // Run pipeline
         info!(target: "reth::cli", "Starting sync pipeline");
@@ -176,11 +183,10 @@ impl ImportCommand {
                     ExecutionStageThresholds {
                         max_blocks: config.stages.execution.max_blocks,
                         max_changes: config.stages.execution.max_changes,
-                        max_changesets: config.stages.execution.max_changesets,
                     },
                 )),
             )
-            .build(db);
+            .build(db, self.chain.clone());
 
         let events = pipeline.events().map(Into::into);
 

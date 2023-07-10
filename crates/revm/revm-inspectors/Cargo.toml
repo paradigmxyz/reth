@@ -1,18 +1,31 @@
 [package]
 name = "reth-revm-inspectors"
-version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "revm inspector implementations used by reth"
 
 [dependencies]
 # reth 
-reth-primitives = { path = "../../primitives" }
-reth-rpc-types = { path = "../../rpc/rpc-types" }
+reth-primitives = { workspace = true }
+reth-rpc-types = { workspace = true }
 
-revm = { version = "3" }
+revm = { workspace = true }
 # remove from reth and reexport from revm
 hashbrown = "0.13"
 
-serde = { version = "1.0", features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
+thiserror = {version = "1.0", optional = true }
+serde_json = { version = "1.0", optional = true }
+
+# js-tracing-inspector
+boa_engine = { git = "https://github.com/boa-dev/boa", optional = true }
+boa_gc = { git = "https://github.com/boa-dev/boa", optional = true }
+tokio = { version = "1", features = ["sync"], optional = true }
+
+[features]
+default = ["js-tracer"]
+js-tracer = ["boa_engine", "boa_gc", "tokio","thiserror", "serde_json"]

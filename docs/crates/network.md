@@ -88,7 +88,7 @@ Let's begin by taking a look at the line where the network is started, with the 
 ```rust,ignore
 async fn start_network<C>(config: NetworkConfig<C>) -> Result<NetworkHandle, NetworkError>
 where
-    C: BlockProvider + HeaderProvider + 'static,
+    C: BlockReader + HeaderProvider + 'static,
 {
     let client = config.client.clone();
     let (handle, network, _txpool, eth) =

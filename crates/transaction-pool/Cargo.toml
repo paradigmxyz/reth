@@ -1,10 +1,11 @@
 [package]
 name = "reth-transaction-pool"
-version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
-readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = """
 Transaction pool implementation
 """
@@ -12,40 +13,41 @@ Transaction pool implementation
 [package.metadata.cargo-udeps.ignore]
 normal = [
     # Used for diagrams in docs
-    "aquamarine"
+    "aquamarine",
 ]
 
 [dependencies]
 # reth
-reth-primitives = { path  = "../primitives" }
-reth-provider = { path = "../storage/provider" }
-reth-interfaces = { path = "../interfaces" }
-reth-rlp = { path = "../rlp" }
-reth-metrics = { path = "../metrics" }
+reth-primitives = { workspace = true }
+reth-provider = { workspace = true }
+reth-interfaces = { workspace = true }
+reth-rlp = { workspace = true }
+reth-metrics = { workspace = true }
+reth-tasks = { workspace = true }
 
 # async/futures
-async-trait = "0.1"
-futures-util = "0.3"
+async-trait = { workspace = true}
+futures-util = { workspace = true }
 parking_lot = "0.12"
-tokio = { version = "1", default-features = false, features = ["sync"] }
+tokio = { workspace = true, default-features = false, features = ["sync"] }
+tokio-stream.workspace = true
 
 # misc
 aquamarine = "0.3.0"
-thiserror = "1.0"
+thiserror = { workspace = true }
 tracing = { workspace = true }
-serde = { version = "1.0", features = ["derive", "rc"], optional = true }
+serde = { workspace = true, features = ["derive", "rc"], optional = true }
 fnv = "1.0.7"
 bitflags = "1.3"
 auto_impl = "1.0"
 
 # testing
-rand = { version = "0.8", optional = true }
+rand = { workspace = true, optional = true }
 paste = { version = "1.0", optional = true }
 
 [dev-dependencies]
 paste = "1.0"
 rand = "0.8"
-
 
 [features]
 default = ["serde"]

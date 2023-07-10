@@ -4,13 +4,14 @@ use reth_db::{
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
+    DatabaseError,
 };
 use reth_interfaces::{consensus::Consensus, provider::ProviderError};
 use reth_primitives::{
-    stage::{StageCheckpoint, StageId},
+    stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     U256,
 };
-use reth_provider::Transaction;
+use reth_provider::DatabaseProviderRW;
 use std::sync::Arc;
 use tracing::*;
 
@@ -50,9 +51,14 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
     /// Write total difficulty entries
     async fn execute(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        let tx = provider.tx_ref();
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint()))
+        }
+
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
         let (start_block, end_block) = range.clone().into_inner();
 
@@ -81,39 +87,56 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
                 .map_err(|error| StageError::Validation { block: header.seal_slow(), error })?;
             cursor_td.append(block_number, td.into())?;
         }
-        info!(target: "sync::stages::total_difficulty", stage_progress = end_block, is_final_range, "Stage iteration finished");
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(end_block), done: is_final_range })
+
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(end_block)
+                .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
+            done: is_final_range,
+        })
     }
 
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (_, unwind_to, is_final_range) =
-            input.unwind_block_range_with_threshold(self.commit_threshold);
+        let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        tx.unwind_table_by_num::<tables::HeaderTD>(unwind_to)?;
+        provider.unwind_table_by_num::<tables::HeaderTD>(unwind_to)?;
 
-        info!(target: "sync::stages::total_difficulty", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) })
+        Ok(UnwindOutput {
+            checkpoint: StageCheckpoint::new(unwind_to)
+                .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
+        })
     }
+}
+
+fn stage_checkpoint<DB: Database>(
+    provider: &DatabaseProviderRW<'_, DB>,
+) -> Result<EntitiesCheckpoint, DatabaseError> {
+    Ok(EntitiesCheckpoint {
+        processed: provider.tx_ref().entries::<tables::HeaderTD>()? as u64,
+        total: provider.tx_ref().entries::<tables::Headers>()? as u64,
+    })
 }
 
 #[cfg(test)]
 mod tests {
+    use assert_matches::assert_matches;
     use reth_db::transaction::DbTx;
     use reth_interfaces::test_utils::{
+        generators,
         generators::{random_header, random_header_range},
         TestConsensus,
     };
-    use reth_primitives::{BlockNumber, SealedHeader};
+    use reth_primitives::{stage::StageUnitCheckpoint, BlockNumber, SealedHeader};
+    use reth_provider::HeaderProvider;
 
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
+        TestTransaction, UnwindStageTestRunner,
     };
 
     stage_test_suite_ext!(TotalDifficultyTestRunner, total_difficulty);
@@ -127,7 +150,7 @@ mod tests {
         runner.set_threshold(threshold);
 
         let first_input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            target: Some(previous_stage),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
@@ -137,23 +160,35 @@ mod tests {
         // Execute first time
         let result = runner.execute(first_input).await.unwrap();
         let expected_progress = stage_progress + threshold;
-        assert!(matches!(
+        assert_matches!(
             result,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, ..}, done: false })
-                if block_number == expected_progress
-        ));
+            Ok(ExecOutput { checkpoint: StageCheckpoint {
+                block_number,
+                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                    processed,
+                    total
+                }))
+            }, done: false }) if block_number == expected_progress && processed == 1 + threshold &&
+                total == runner.tx.table::<tables::Headers>().unwrap().len() as u64
+        );
 
         // Execute second time
         let second_input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            target: Some(previous_stage),
             checkpoint: Some(StageCheckpoint::new(expected_progress)),
         };
         let result = runner.execute(second_input).await.unwrap();
-        assert!(matches!(
+        assert_matches!(
             result,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, ..}, done: true })
-                if block_number == previous_stage
-        ));
+            Ok(ExecOutput { checkpoint: StageCheckpoint {
+                block_number,
+                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                    processed,
+                    total
+                }))
+            }, done: true }) if block_number == previous_stage && processed == total &&
+                total == runner.tx.table::<tables::Headers>().unwrap().len() as u64
+        );
 
         assert!(runner.validate_execution(first_input, result.ok()).is_ok(), "validation failed");
     }
@@ -194,8 +229,9 @@ mod tests {
         type Seed = Vec<SealedHeader>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
+            let mut rng = generators::rng();
             let start = input.checkpoint().block_number;
-            let head = random_header(start, None);
+            let head = random_header(&mut rng, start, None);
             self.tx.insert_headers(std::iter::once(&head))?;
             self.tx.commit(|tx| {
                 let td: U256 = tx
@@ -208,13 +244,13 @@ mod tests {
             })?;
 
             // use previous progress as seed size
-            let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default().block_number + 1;
+            let end = input.target.unwrap_or_default() + 1;
 
             if start + 1 >= end {
                 return Ok(Vec::default())
             }
 
-            let mut headers = random_header_range(start + 1..end, head.hash());
+            let mut headers = random_header_range(&mut rng, start + 1..end, head.hash());
             self.tx.insert_headers(headers.iter())?;
             headers.insert(0, head);
             Ok(headers)
@@ -229,27 +265,25 @@ mod tests {
             let initial_stage_progress = input.checkpoint().block_number;
             match output {
                 Some(output) if output.checkpoint.block_number > initial_stage_progress => {
-                    self.tx.query(|tx| {
-                        let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
-                        let (_, mut current_header) = header_cursor
-                            .seek_exact(initial_stage_progress)?
-                            .expect("no initial header");
-                        let mut td: U256 = tx
-                            .get::<tables::HeaderTD>(initial_stage_progress)?
-                            .expect("no initial td")
-                            .into();
+                    let provider = self.tx.inner();
 
-                        while let Some((next_key, next_header)) = header_cursor.next()? {
-                            assert_eq!(current_header.number + 1, next_header.number);
-                            td += next_header.difficulty;
-                            assert_eq!(
-                                tx.get::<tables::HeaderTD>(next_key)?.map(Into::into),
-                                Some(td)
-                            );
-                            current_header = next_header;
-                        }
-                        Ok(())
-                    })?;
+                    let mut header_cursor = provider.tx_ref().cursor_read::<tables::Headers>()?;
+                    let (_, mut current_header) = header_cursor
+                        .seek_exact(initial_stage_progress)?
+                        .expect("no initial header");
+                    let mut td: U256 = provider
+                        .header_td_by_number(initial_stage_progress)?
+                        .expect("no initial td");
+
+                    while let Some((next_key, next_header)) = header_cursor.next()? {
+                        assert_eq!(current_header.number + 1, next_header.number);
+                        td += next_header.difficulty;
+                        assert_eq!(
+                            provider.header_td_by_number(next_key)?.map(Into::into),
+                            Some(td)
+                        );
+                        current_header = next_header;
+                    }
                 }
                 _ => self.check_no_td_above(initial_stage_progress)?,
             };

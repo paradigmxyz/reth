@@ -1,24 +1,26 @@
 [package]
 name = "reth-rpc-builder"
-version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "Helpers for configuring RPC"
 
 [dependencies]
 # reth
-reth-primitives = { path = "../../primitives" }
+reth-primitives = { workspace = true }
 reth-ipc = { path = "../ipc" }
-reth-interfaces = { path = "../../interfaces" }
-reth-network-api = { path = "../../net/network-api" }
-reth-provider = { path = "../../storage/provider" }
+reth-interfaces = { workspace = true }
+reth-network-api = { workspace = true }
+reth-provider = { workspace = true }
 reth-rpc = { path = "../rpc" }
 reth-rpc-api = { path = "../rpc-api" }
 reth-rpc-engine-api = { path = "../rpc-engine-api" }
-reth-rpc-types = { path = "../rpc-types" }
-reth-tasks = { path = "../../tasks" }
-reth-transaction-pool = { path = "../../transaction-pool" }
+reth-rpc-types = { workspace = true }
+reth-tasks = { workspace = true }
+reth-transaction-pool = { workspace = true }
 
 # rpc/net
 jsonrpsee = { version = "0.18", features = ["server"] }
@@ -28,19 +30,19 @@ hyper = "0.14"
 
 # misc
 strum = { version = "0.24", features = ["derive"] }
-serde = { version = "1.0", features = ["derive"] }
-thiserror = "1.0"
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
 reth-tracing = { path = "../../tracing" }
 reth-rpc-api = { path = "../rpc-api", features = ["client"] }
-reth-transaction-pool = { path = "../../transaction-pool", features = ["test-utils"] }
-reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
-reth-network-api = { path = "../../net/network-api", features = ["test-utils"] }
-reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
+reth-transaction-pool = { workspace = true, features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-network-api = { workspace = true }
+reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-beacon-consensus = { path = "../../consensus/beacon" }
-reth-payload-builder = { path = "../../payload/builder", features = ["test-utils"] }
+reth-payload-builder = { workspace = true, features = ["test-utils"] }
 
-tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
-serde_json = "1.0.94"
+tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
+serde_json = { workspace = true }

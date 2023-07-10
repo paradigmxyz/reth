@@ -36,7 +36,7 @@ impl BuiltPayload {
         self.id
     }
 
-    /// Returns the identifier of the payload.
+    /// Returns the built block(sealed)
     pub fn block(&self) -> &SealedBlock {
         &self.block
     }
@@ -148,7 +148,7 @@ impl PayloadBuilderAttributes {
 
 /// Generates the payload id for the configured payload
 ///
-/// Returns an 8-byte identifier by hashing the payload components.
+/// Returns an 8-byte identifier by hashing the payload components with sha256 hash.
 pub(crate) fn payload_id(parent: &H256, attributes: &PayloadAttributes) -> PayloadId {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();

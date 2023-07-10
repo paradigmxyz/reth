@@ -14,14 +14,13 @@
 //! # use reth_stages::sets::{OfflineStages};
 //! # use reth_revm::Factory;
 //! # use reth_primitives::MAINNET;
-//! # use std::sync::Arc;
-//! use reth_db::mdbx::test_utils::create_test_rw_db;
+//! use reth_db::test_utils::create_test_rw_db;
 //!
-//! # let factory = Factory::new(Arc::new(MAINNET.clone()));
+//! # let factory = Factory::new(MAINNET.clone());
 //! # let db = create_test_rw_db();
 //! // Build a pipeline with all offline stages.
 //! # let pipeline =
-//! Pipeline::builder().add_stages(OfflineStages::new(factory)).build(db);
+//! Pipeline::builder().add_stages(OfflineStages::new(factory)).build(db, MAINNET.clone());
 //! ```
 //!
 //! ```ignore
@@ -29,9 +28,8 @@
 //! # use reth_stages::{StageSet, sets::OfflineStages};
 //! # use reth_revm::Factory;
 //! # use reth_primitives::MAINNET;
-//! # use std::sync::Arc;
 //! // Build a pipeline with all offline stages and a custom stage at the end.
-//! # let factory = Factory::new(Arc::new(MAINNET.clone()));
+//! # let factory = Factory::new(MAINNET.clone());
 //! Pipeline::builder()
 //!     .add_stages(
 //!         OfflineStages::new(factory).builder().add_stage(MyCustomStage)
@@ -64,13 +62,14 @@ use std::sync::Arc;
 ///
 /// This expands to the following series of stages:
 /// - [`HeaderStage`]
+/// - [`TotalDifficultyStage`]
 /// - [`BodyStage`]
 /// - [`SenderRecoveryStage`]
 /// - [`ExecutionStage`]
 /// - [`MerkleStage`] (unwind)
 /// - [`AccountHashingStage`]
 /// - [`StorageHashingStage`]
-/// - [`MerkleStage`] (execution)
+/// - [`MerkleStage`] (execute)
 /// - [`TransactionLookupStage`]
 /// - [`IndexStorageHistoryStage`]
 /// - [`IndexAccountHistoryStage`]

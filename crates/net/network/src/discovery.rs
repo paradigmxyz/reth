@@ -2,7 +2,7 @@
 
 use crate::error::{NetworkError, ServiceKind};
 use futures::StreamExt;
-use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config};
+use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
 };
@@ -100,7 +100,8 @@ impl Discovery {
     #[allow(unused)]
     pub(crate) fn update_fork_id(&self, fork_id: ForkId) {
         if let Some(discv4) = &self.discv4 {
-            discv4.set_eip868_rlp("eth".as_bytes().to_vec(), fork_id)
+            // use forward-compatible forkid entry
+            discv4.set_eip868_rlp("eth".as_bytes().to_vec(), EnrForkIdEntry::from(fork_id))
         }
     }
 

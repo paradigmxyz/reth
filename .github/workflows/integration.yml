@@ -1,7 +1,4 @@
 on:
-  push:
-    branches:
-      - main
   pull_request:
   merge_group:
 
@@ -9,6 +6,7 @@ env:
   RUSTFLAGS: -D warnings
   CARGO_TERM_COLOR: always
   GETH_BUILD: 1.12.0-e501b3b0
+  SEED: rustethereumethereumrust
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -18,7 +16,7 @@ name: integration
 jobs:
   test:
     name: test (partition ${{ matrix.partition }}/${{ strategy.job-total }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     strategy:
       matrix:
         partition: [1, 2]
@@ -65,7 +63,9 @@ jobs:
 
   sync:
     name: sync / 100k blocks
-    runs-on: ubuntu-latest
+    # Only run sync tests in merge groups
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-20.04
     env:
       RUST_LOG: info,sync=error
     steps:
@@ -84,15 +84,19 @@ jobs:
 
       - name: Run sync (${{ matrix.profile }})
         run: |
-          cargo run --profile release --features jemalloc,only-info-logs \
+          cargo run --profile release --features jemalloc,min-error-logs \
             --bin reth -- node \
             --debug.tip 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4 \
             --debug.max-block 100000 \
             --debug.terminate
 
   integration-success:
+    if: always()
     name: integration success
-    runs-on: ubuntu-latest
-    needs: [test, sync]
+    runs-on: ubuntu-20.04
+    needs: [test]
     steps:
-      - run: echo Success!
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}

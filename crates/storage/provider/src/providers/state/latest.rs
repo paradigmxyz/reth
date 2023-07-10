@@ -1,6 +1,6 @@
 use crate::{
-    providers::state::macros::delegate_provider_impls, AccountProvider, BlockHashProvider,
-    PostState, StateProvider, StateRootProvider,
+    providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader, PostState,
+    StateProvider, StateRootProvider,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -28,14 +28,14 @@ impl<'a, 'b, TX: DbTx<'a>> LatestStateProviderRef<'a, 'b, TX> {
     }
 }
 
-impl<'a, 'b, TX: DbTx<'a>> AccountProvider for LatestStateProviderRef<'a, 'b, TX> {
+impl<'a, 'b, TX: DbTx<'a>> AccountReader for LatestStateProviderRef<'a, 'b, TX> {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
         self.db.get::<tables::PlainAccountState>(address).map_err(Into::into)
     }
 }
 
-impl<'a, 'b, TX: DbTx<'a>> BlockHashProvider for LatestStateProviderRef<'a, 'b, TX> {
+impl<'a, 'b, TX: DbTx<'a>> BlockHashReader for LatestStateProviderRef<'a, 'b, TX> {
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> Result<Option<H256>> {
         self.db.get::<tables::CanonicalHeaders>(number).map_err(Into::into)

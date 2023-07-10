@@ -1,7 +1,7 @@
 use crate::{
     constants,
     error::{RpcError, ServerKind},
-    eth::DEFAULT_MAX_LOGS_IN_RESPONSE,
+    eth::DEFAULT_MAX_LOGS_PER_RESPONSE,
 };
 use hyper::header::AUTHORIZATION;
 pub use jsonrpsee::server::ServerBuilder;
@@ -11,11 +11,12 @@ use jsonrpsee::{
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockProviderIdExt, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt, StateProviderFactory,
+    BlockReaderIdExt, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
-    AuthLayer, Claims, EngineEthApi, EthApi, EthFilter, JwtAuthValidator, JwtSecret,
+    AuthLayer, Claims, EngineEthApi, EthApi, EthFilter, EthSubscriptionIdProvider,
+    JwtAuthValidator, JwtSecret,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::TaskSpawner;
@@ -27,8 +28,8 @@ use std::{
 
 /// Configure and launch a _standalone_ auth server with `engine` and a _new_ `eth` namespace.
 #[allow(clippy::too_many_arguments)]
-pub async fn launch<Client, Pool, Network, Tasks, EngineApi>(
-    client: Client,
+pub async fn launch<Provider, Pool, Network, Tasks, EngineApi>(
+    provider: Provider,
     pool: Pool,
     network: Network,
     executor: Tasks,
@@ -37,7 +38,7 @@ pub async fn launch<Client, Pool, Network, Tasks, EngineApi>(
     secret: JwtSecret,
 ) -> Result<AuthServerHandle, RpcError>
 where
-    Client: BlockProviderIdExt
+    Provider: BlockReaderIdExt
         + ReceiptProviderIdExt
         + HeaderProvider
         + StateProviderFactory
@@ -51,10 +52,11 @@ where
     EngineApi: EngineApiServer,
 {
     // spawn a new cache task
-    let eth_cache = EthStateCache::spawn_with(client.clone(), Default::default(), executor.clone());
-    let gas_oracle = GasPriceOracle::new(client.clone(), Default::default(), eth_cache.clone());
+    let eth_cache =
+        EthStateCache::spawn_with(provider.clone(), Default::default(), executor.clone());
+    let gas_oracle = GasPriceOracle::new(provider.clone(), Default::default(), eth_cache.clone());
     let eth_api = EthApi::with_spawner(
-        client.clone(),
+        provider.clone(),
         pool.clone(),
         network,
         eth_cache.clone(),
@@ -62,25 +64,25 @@ where
         Box::new(executor.clone()),
     );
     let eth_filter = EthFilter::new(
-        client,
+        provider,
         pool,
         eth_cache.clone(),
-        DEFAULT_MAX_LOGS_IN_RESPONSE,
+        DEFAULT_MAX_LOGS_PER_RESPONSE,
         Box::new(executor.clone()),
     );
     launch_with_eth_api(eth_api, eth_filter, engine_api, socket_addr, secret).await
 }
 
 /// Configure and launch a _standalone_ auth server with existing EthApi implementation.
-pub async fn launch_with_eth_api<Client, Pool, Network, EngineApi>(
-    eth_api: EthApi<Client, Pool, Network>,
-    eth_filter: EthFilter<Client, Pool>,
+pub async fn launch_with_eth_api<Provider, Pool, Network, EngineApi>(
+    eth_api: EthApi<Provider, Pool, Network>,
+    eth_filter: EthFilter<Provider, Pool>,
     engine_api: EngineApi,
     socket_addr: SocketAddr,
     secret: JwtSecret,
 ) -> Result<AuthServerHandle, RpcError>
 where
-    Client: BlockProviderIdExt
+    Provider: BlockReaderIdExt
         + HeaderProvider
         + StateProviderFactory
         + EvmEnvProvider
@@ -115,12 +117,14 @@ where
 }
 
 /// Server configuration for the auth server.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct AuthServerConfig {
     /// Where the server should listen.
     pub(crate) socket_addr: SocketAddr,
     /// The secrete for the auth layer of the server.
     pub(crate) secret: JwtSecret,
+    /// Configs for JSON-RPC Http.
+    pub(crate) server_config: ServerBuilder,
 }
 
 // === impl AuthServerConfig ===
@@ -133,7 +137,7 @@ impl AuthServerConfig {
 
     /// Convenience function to start a server in one step.
     pub async fn start(self, module: AuthRpcModule) -> Result<AuthServerHandle, RpcError> {
-        let Self { socket_addr, secret } = self;
+        let Self { socket_addr, secret, server_config } = self;
 
         // Create auth middleware.
         let middleware = tower::ServiceBuilder::new()
@@ -141,9 +145,9 @@ impl AuthServerConfig {
 
         // By default, both http and ws are enabled.
         let server =
-            ServerBuilder::new().set_middleware(middleware).build(socket_addr).await.map_err(
-                |err| RpcError::from_jsonrpsee_error(err, ServerKind::Auth(socket_addr)),
-            )?;
+            server_config.set_middleware(middleware).build(socket_addr).await.map_err(|err| {
+                RpcError::from_jsonrpsee_error(err, ServerKind::Auth(socket_addr))
+            })?;
 
         let local_addr = server.local_addr()?;
 
@@ -153,10 +157,11 @@ impl AuthServerConfig {
 }
 
 /// Builder type for configuring an `AuthServerConfig`.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct AuthServerConfigBuilder {
     socket_addr: Option<SocketAddr>,
     secret: JwtSecret,
+    server_config: Option<ServerBuilder>,
 }
 
 // === impl AuthServerConfigBuilder ===
@@ -164,7 +169,7 @@ pub struct AuthServerConfigBuilder {
 impl AuthServerConfigBuilder {
     /// Create a new `AuthServerConfigBuilder` with the given `secret`.
     pub fn new(secret: JwtSecret) -> Self {
-        Self { socket_addr: None, secret }
+        Self { socket_addr: None, secret, server_config: None }
     }
 
     /// Set the socket address for the server.
@@ -184,13 +189,34 @@ impl AuthServerConfigBuilder {
         self.secret = secret;
         self
     }
+
+    /// Configures the JSON-RPC server
+    ///
+    /// Note: this always configures an [EthSubscriptionIdProvider]
+    /// [IdProvider](jsonrpsee::server::IdProvider) for convenience.
+    pub fn with_server_config(mut self, config: ServerBuilder) -> Self {
+        self.server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
+        self
+    }
+
     /// Build the `AuthServerConfig`.
     pub fn build(self) -> AuthServerConfig {
         AuthServerConfig {
             socket_addr: self.socket_addr.unwrap_or_else(|| {
-                SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), constants::DEFAULT_AUTH_PORT)
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), constants::DEFAULT_AUTH_PORT)
             }),
             secret: self.secret,
+            server_config: self.server_config.unwrap_or_else(|| {
+                ServerBuilder::new()
+                    // This needs to large enough to handle large eth_getLogs responses and maximum
+                    // payload bodies limit for `engine_getPayloadBodiesByRangeV`
+                    // ~750MB per response should be enough
+                    .max_response_body_size(750 * 1024 * 1024)
+                    // bump the default request size slightly, there aren't any methods exposed with
+                    // dynamic request params that can exceed this
+                    .max_request_body_size(25 * 1024 * 1024)
+                    .set_id_provider(EthSubscriptionIdProvider::default())
+            }),
         }
     }
 }

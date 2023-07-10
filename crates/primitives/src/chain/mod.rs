@@ -1,8 +1,7 @@
 use crate::{
     net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
-    NodeRecord, U256,
+    NodeRecord, U256, U64,
 };
-use ethers_core::types::U64;
 use reth_codecs::add_arbitrary_tests;
 use reth_rlp::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
@@ -11,7 +10,8 @@ use std::{fmt, str::FromStr};
 // The chain spec module.
 mod spec;
 pub use spec::{
-    AllGenesisFormats, ChainSpec, ChainSpecBuilder, ForkCondition, GOERLI, MAINNET, SEPOLIA,
+    AllGenesisFormats, ChainSpec, ChainSpecBuilder, DisplayHardforks, ForkCondition,
+    ForkTimestamps, GOERLI, MAINNET, SEPOLIA,
 };
 
 // The chain info module.

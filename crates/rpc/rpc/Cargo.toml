@@ -1,34 +1,38 @@
 [package]
 name = "reth-rpc"
-version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
-readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = """
 Reth RPC implementation
 """
 [dependencies]
 # reth
-reth-interfaces = { path = "../../interfaces" }
-reth-primitives = { path = "../../primitives" }
+reth-interfaces = { workspace = true }
+reth-primitives = { workspace = true }
 reth-rpc-api = { path = "../rpc-api" }
-reth-rlp = { path = "../../rlp" }
-reth-rpc-types = { path = "../rpc-types" }
-reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
-reth-transaction-pool = { path = "../../transaction-pool", features = [
-    "test-utils",
-] }
-reth-network-api = { path = "../../net/network-api", features = ["test-utils"] }
+reth-rlp = { workspace = true }
+reth-rpc-types = { workspace = true }
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-transaction-pool = { workspace = true, features = ["test-utils"] }
+reth-network-api = { workspace = true }
 reth-rpc-engine-api = { path = "../rpc-engine-api" }
 reth-revm = { path = "../../revm" }
-reth-tasks = { path = "../../tasks" }
+reth-tasks = { workspace = true }
+reth-metrics = { workspace = true }
+reth-consensus-common = { path = "../../consensus/common" }
 
 # eth
-revm = { version = "3", features = ["optional_block_gas_limit", "optional_eip3607", "optional_no_base_fee"] }
-ethers-core = { version = "2.0.7", features = ["eip712"]}
-revm-primitives = { version = "1.1", features = ["serde"] }
-
+revm = { workspace = true, features = [
+    "optional_block_gas_limit",
+    "optional_eip3607",
+    "optional_no_base_fee",
+] }
+ethers-core = { workspace = true, features = ["eip712"] }
+revm-primitives = { workspace = true, features = ["serde"] }
 
 # rpc
 jsonrpsee = { version = "0.18" }
@@ -38,28 +42,27 @@ hyper = "0.14.24"
 jsonwebtoken = "8"
 
 # async
-async-trait = "0.1"
-tokio = { version = "1", features = ["sync"] }
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
 tower = "0.4"
-tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-stream = { workspace = true, features = ["sync"] }
 tokio-util = "0.7"
-pin-project = "1.0"
+pin-project = { workspace = true }
 
-bytes = "1.4"
-secp256k1 = { version = "0.27.0", features = [
-    "global-context",
-    "rand-std",
-    "recovery"
-] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "1.0"
+bytes.workspace = true
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
 hex = "0.4"
-rand = "0.8.5"
+rand = { workspace = true }
 tracing = { workspace = true }
 tracing-futures = "0.2"
 schnellru = "0.2"
-futures = "0.3.26"
+futures = { workspace = true }
 
 [dev-dependencies]
 jsonrpsee = { version = "0.18", features = ["client"] }
+assert_matches = "1.5.0"
+tempfile = "3.5.0"
+reth-interfaces = { workspace = true, features = ["test-utils"] }

@@ -1,17 +1,19 @@
 [package]
 name = "reth-net-common"
-version = "0.1.0"
-edition = "2021"
-license = "Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = """
 Types shared across network code
 """
 
 [dependencies]
 # reth
-reth-primitives = { path = "../../primitives" }
+reth-primitives = { workspace = true }
 
 # async
-pin-project = "1.0"
-tokio = { version = "1.21.2", features = ["full"] }
+pin-project = { workspace = true }
+tokio = { workspace = true, features = ["full"] }

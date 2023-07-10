@@ -1,15 +1,17 @@
 [package]
 name = "reth-rlp-derive"
-version = "0.1.1"
+version.workspace = true
 license = "Apache-2.0"
-edition = "2021"
+edition.workspace = true
+rust-version.workspace = true
 description = "Procedural macros for reth-rlp"
-repository = "https://github.com/paradigmxyz/reth"
+homepage.workspace = true
+repository.workspace = true
 
 [lib]
 proc-macro = true
 
 [dependencies]
 syn = "2"
-quote = "1"
-proc-macro2 = "1"
+quote.workspace = true
+proc-macro2.workspace = true

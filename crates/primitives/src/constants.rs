@@ -13,6 +13,9 @@ pub const SELECTOR_LEN: usize = 4;
 /// Maximum extra data size in a block after genesis
 pub const MAXIMUM_EXTRA_DATA_SIZE: usize = 32;
 
+/// An EPOCH is a series of 32 slots.
+pub const EPOCH_SLOTS: u64 = 32;
+
 /// The duration of a slot in seconds.
 ///
 /// This is the time period of 12 seconds in which a randomly chosen validator has time to propose a
@@ -20,10 +23,16 @@ pub const MAXIMUM_EXTRA_DATA_SIZE: usize = 32;
 pub const SLOT_DURATION: Duration = Duration::from_secs(12);
 
 /// An EPOCH is a series of 32 slots (~6.4min).
-pub const EPOCH_DURATION: Duration = Duration::from_secs(12 * 32);
+pub const EPOCH_DURATION: Duration = Duration::from_secs(12 * EPOCH_SLOTS);
 
 /// The default block nonce in the beacon consensus
 pub const BEACON_NONCE: u64 = 0u64;
+
+/// The default Ethereum block gas limit.
+///
+/// TODO: This should be a chain spec parameter.
+/// See <https://github.com/paradigmxyz/reth/issues/3233>.
+pub const ETHEREUM_BLOCK_GAS_LIMIT: u64 = 30_000_000;
 
 /// The minimal value the basefee can decrease to.
 ///
@@ -88,6 +97,16 @@ pub const EMPTY_TRANSACTIONS: H256 = EMPTY_SET_HASH;
 
 /// Withdrawals root of empty withdrawals set.
 pub const EMPTY_WITHDRAWALS: H256 = EMPTY_SET_HASH;
+
+/// The number of blocks to unwind during a reorg that already became a part of canonical chain.
+///
+/// In reality, the node can end up in this particular situation very rarely. It would happen only
+/// if the node process is abruptly terminated during ongoing reorg and doesn't boot back up for
+/// long period of time.
+///
+/// Unwind depth of `3` blocks significantly reduces the chance that the reorged block is kept in
+/// the database.
+pub const BEACON_CONSENSUS_REORG_UNWIND_DEPTH: u64 = 3;
 
 #[cfg(test)]
 mod tests {

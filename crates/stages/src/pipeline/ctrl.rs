@@ -12,13 +12,13 @@ pub enum ControlFlow {
     },
     /// The pipeline is allowed to continue executing stages.
     Continue {
-        /// The progress of the last stage
-        progress: BlockNumber,
+        /// Block number reached by the stage.
+        block_number: BlockNumber,
     },
     /// Pipeline made no progress
     NoProgress {
-        /// The current stage progress.
-        stage_progress: Option<BlockNumber>,
+        /// Block number reached by the stage.
+        block_number: Option<BlockNumber>,
     },
 }
 
@@ -37,8 +37,8 @@ impl ControlFlow {
     pub fn progress(&self) -> Option<BlockNumber> {
         match self {
             ControlFlow::Unwind { .. } => None,
-            ControlFlow::Continue { progress } => Some(*progress),
-            ControlFlow::NoProgress { stage_progress } => *stage_progress,
+            ControlFlow::Continue { block_number } => Some(*block_number),
+            ControlFlow::NoProgress { block_number } => *block_number,
         }
     }
 }

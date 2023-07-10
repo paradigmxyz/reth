@@ -1,15 +1,19 @@
 use itertools::concat;
 use reth_db::{
     cursor::DbCursorRO,
-    mdbx::{Env, WriteMap},
     tables,
     transaction::{DbTx, DbTxMut},
+    DatabaseEnv,
 };
-use reth_interfaces::test_utils::generators::{
-    random_block_range, random_contract_account_range, random_eoa_account_range,
-    random_transition_range,
+use reth_interfaces::test_utils::{
+    generators,
+    generators::{
+        random_block_range, random_contract_account_range, random_eoa_account_range,
+        random_transition_range,
+    },
 };
-use reth_primitives::{Account, Address, SealedBlock, H256};
+use reth_primitives::{Account, Address, SealedBlock, H256, MAINNET};
+use reth_provider::ProviderFactory;
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
     test_utils::TestTransaction,
@@ -18,7 +22,6 @@ use reth_stages::{
 use reth_trie::StateRoot;
 use std::{
     collections::BTreeMap,
-    ops::Deref,
     path::{Path, PathBuf},
 };
 
@@ -29,7 +32,7 @@ pub use account_hashing::*;
 
 pub(crate) type StageRange = (ExecInput, UnwindInput);
 
-pub(crate) fn stage_unwind<S: Clone + Stage<Env<WriteMap>>>(
+pub(crate) fn stage_unwind<S: Clone + Stage<DatabaseEnv>>(
     stage: S,
     tx: &TestTransaction,
     range: StageRange,
@@ -38,11 +41,12 @@ pub(crate) fn stage_unwind<S: Clone + Stage<Env<WriteMap>>>(
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let mut stage = stage.clone();
-        let mut db_tx = tx.inner();
+        let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
+        let provider = factory.provider_rw().unwrap();
 
         // Clear previous run
         stage
-            .unwind(&mut db_tx, unwind)
+            .unwind(&provider, unwind)
             .await
             .map_err(|e| {
                 format!(
@@ -52,11 +56,11 @@ pub(crate) fn stage_unwind<S: Clone + Stage<Env<WriteMap>>>(
             })
             .unwrap();
 
-        db_tx.commit().unwrap();
+        provider.commit().unwrap();
     });
 }
 
-pub(crate) fn unwind_hashes<S: Clone + Stage<Env<WriteMap>>>(
+pub(crate) fn unwind_hashes<S: Clone + Stage<DatabaseEnv>>(
     stage: S,
     tx: &TestTransaction,
     range: StageRange,
@@ -65,18 +69,19 @@ pub(crate) fn unwind_hashes<S: Clone + Stage<Env<WriteMap>>>(
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let mut stage = stage.clone();
-        let mut db_tx = tx.inner();
+        let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
+        let provider = factory.provider_rw().unwrap();
 
-        StorageHashingStage::default().unwind(&mut db_tx, unwind).await.unwrap();
-        AccountHashingStage::default().unwind(&mut db_tx, unwind).await.unwrap();
+        StorageHashingStage::default().unwind(&provider, unwind).await.unwrap();
+        AccountHashingStage::default().unwind(&provider, unwind).await.unwrap();
 
         // Clear previous run
-        stage.unwind(&mut db_tx, unwind).await.unwrap();
+        stage.unwind(&provider, unwind).await.unwrap();
 
-        AccountHashingStage::default().execute(&mut db_tx, input).await.unwrap();
-        StorageHashingStage::default().execute(&mut db_tx, input).await.unwrap();
+        AccountHashingStage::default().execute(&provider, input).await.unwrap();
+        StorageHashingStage::default().execute(&provider, input).await.unwrap();
 
-        db_tx.commit().unwrap();
+        provider.commit().unwrap();
     });
 }
 
@@ -96,6 +101,9 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
     let n_eoa = 131;
     let n_contract = 31;
 
+    // rng
+    let mut rng = generators::rng();
+
     if !path.exists() {
         // create the dirs
         std::fs::create_dir_all(&path).unwrap();
@@ -103,15 +111,16 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         let tx = TestTransaction::new(&path);
 
         let accounts: BTreeMap<Address, Account> = concat([
-            random_eoa_account_range(0..n_eoa),
-            random_contract_account_range(&mut (0..n_contract)),
+            random_eoa_account_range(&mut rng, 0..n_eoa),
+            random_contract_account_range(&mut rng, &mut (0..n_contract)),
         ])
         .into_iter()
         .collect();
 
-        let mut blocks = random_block_range(0..=num_blocks, H256::zero(), txs_range);
+        let mut blocks = random_block_range(&mut rng, 0..=num_blocks, H256::zero(), txs_range);
 
         let (transitions, start_state) = random_transition_range(
+            &mut rng,
             blocks.iter().take(2),
             accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
             n_changes.clone(),
@@ -121,7 +130,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         tx.insert_accounts_and_storages(start_state.clone()).unwrap();
 
         // make first block after genesis have valid state root
-        let (root, updates) = StateRoot::new(tx.inner().deref()).root_with_updates().unwrap();
+        let (root, updates) = StateRoot::new(tx.inner_rw().tx_ref()).root_with_updates().unwrap();
         let second_block = blocks.get_mut(1).unwrap();
         let cloned_second = second_block.clone();
         let mut updated_header = cloned_second.header.unseal();
@@ -133,8 +142,13 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         tx.insert_transitions(transitions, None).unwrap();
         tx.commit(|tx| updates.flush(tx)).unwrap();
 
-        let (transitions, final_state) =
-            random_transition_range(blocks.iter().skip(2), start_state, n_changes, key_range);
+        let (transitions, final_state) = random_transition_range(
+            &mut rng,
+            blocks.iter().skip(2),
+            start_state,
+            n_changes,
+            key_range,
+        );
 
         tx.insert_transitions(transitions, Some(offset)).unwrap();
 
@@ -142,8 +156,8 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
 
         // make last block have valid state root
         let root = {
-            let mut tx_mut = tx.inner();
-            let root = StateRoot::new(tx_mut.deref()).root().unwrap();
+            let tx_mut = tx.inner_rw();
+            let root = StateRoot::new(tx_mut.tx_ref()).root().unwrap();
             tx_mut.commit().unwrap();
             root
         };

@@ -9,12 +9,15 @@ reth --help
 ```
 
 Some of the most useful commands as a node developer are:
-* [`reth node`](./node.md): Starts the Reth node's components, including the JSON-RPC. 
-* [`reth db`](./db.md): Administrative TUI to the key-value store
-* [`reth p2p`](./p2p.md): P2P-related utilities
+* [`reth node`](./node.md): Starts the Reth node's components, including the JSON-RPC.
+* [`reth init`](./init.md): Initialize the database from a genesis file.
+* [`reth import`](./import.md): This syncs RLP encoded blocks from a file.
+* [`reth db`](./db.md): Administrative TUI to the key-value store.
 * [`reth stage`](./stage.md): Runs a stage in isolation. Useful for testing and benchmarking.
-* [`reth drop-stage`](./drop-stage.md): Drops all the tables associated with a stage. Useful for resetting state.
-* [`reth dump-stage`](./dump-stage.md): Dumps all the tables associated with a stage to a new database. Useful for creating snapshots
+* [`reth p2p`](./p2p.md): P2P-related utilities
+* [`reth test-vectors`](./test-vectors.md): Generate Test Vectors
+* [`reth config`](./config.md): Write config to stdout
+* [`reth debug`](./debug.md): Various debug routines
 
 See below for the full list of commands.
 
@@ -36,21 +39,15 @@ Commands:
   db
           Database debugging utilities
   stage
-          Run a single stage
-  dump-stage
-          Dumps a stage from a range into a new database
-  drop-stage
-          Drops a stage's tables from the database
+          Manipulate individual stages
   p2p
           P2P Debugging utilities
-  test-chain
-          Run Ethereum blockchain tests
   test-vectors
           Generate Test Vectors
   config
           Write config to stdout
-  merkle-debug
-          Debug state root calculation
+  debug
+          Various debug routines
   help
           Print this message or the help of the given subcommand(s)
 
@@ -68,7 +65,7 @@ Logging:
       --log.directory <PATH>
           The path to put log files in
           
-          [default: /Users/georgios/Library/Caches/reth/logs]
+          [default: /reth/logs]
 
       --log.journald
           Log events to journald
@@ -76,7 +73,7 @@ Logging:
       --log.filter <FILTER>
           The filter to use for logs written to the log file
           
-          [default: debug]
+          [default: error]
 
 Display:
   -v, --verbosity...

@@ -5,7 +5,7 @@ use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_payload_builder::PayloadStore;
 use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, U64};
-use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
+use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodies, ExecutionPayloadEnvelope, ForkchoiceUpdated,
@@ -23,9 +23,9 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
-pub struct EngineApi<Client> {
-    /// The client to interact with the chain.
-    client: Client,
+pub struct EngineApi<Provider> {
+    /// The provider to interact with the chain.
+    provider: Provider,
     /// Consensus configuration
     chain_spec: Arc<ChainSpec>,
     /// The channel to send messages to the beacon consensus engine.
@@ -34,21 +34,21 @@ pub struct EngineApi<Client> {
     payload_store: PayloadStore,
 }
 
-impl<Client> EngineApi<Client>
+impl<Provider> EngineApi<Provider>
 where
-    Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
 {
     /// Create new instance of [EngineApi].
     pub fn new(
-        client: Client,
+        provider: Provider,
         chain_spec: Arc<ChainSpec>,
         beacon_consensus: BeaconConsensusEngineHandle,
         payload_store: PayloadStore,
     ) -> Self {
-        Self { client, chain_spec, beacon_consensus, payload_store }
+        Self { provider, chain_spec, beacon_consensus, payload_store }
     }
 
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv1>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
     pub async fn new_payload_v1(
         &self,
@@ -62,7 +62,7 @@ where
         Ok(self.beacon_consensus.new_payload(payload).await?)
     }
 
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv1>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_newpayloadv2>
     pub async fn new_payload_v2(
         &self,
         payload: ExecutionPayload,
@@ -78,7 +78,7 @@ where
     /// Sends a message to the beacon consensus engine to update the fork choice _without_
     /// withdrawals.
     ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_forkchoiceUpdatedV1>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_forkchoiceUpdatedV1>
     ///
     /// Caution: This should not accept the `withdrawals` field
     pub async fn fork_choice_updated_v1(
@@ -99,7 +99,7 @@ where
     /// Sends a message to the beacon consensus engine to update the fork choice _with_ withdrawals,
     /// but only _after_ shanghai.
     ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_forkchoiceupdatedv2>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_forkchoiceupdatedv2>
     pub async fn fork_choice_updated_v2(
         &self,
         state: ForkchoiceState,
@@ -118,12 +118,12 @@ where
     /// Returns the most recent version of the payload that is available in the corresponding
     /// payload build process at the time of receiving this call.
     ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_getPayloadV1>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_getPayloadV1>
     ///
     /// Caution: This should not return the `withdrawals` field
     ///
     /// Note:
-    /// > Client software MAY stop the corresponding build process after serving this call.
+    /// > Provider software MAY stop the corresponding build process after serving this call.
     pub async fn get_payload_v1(&self, payload_id: PayloadId) -> EngineApiResult<ExecutionPayload> {
         Ok(self
             .payload_store
@@ -136,10 +136,10 @@ where
     /// Returns the most recent version of the payload that is available in the corresponding
     /// payload build process at the time of receiving this call.
     ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_getpayloadv2>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_getpayloadv2>
     ///
     /// Note:
-    /// > Client software MAY stop the corresponding build process after serving this call.
+    /// > Provider software MAY stop the corresponding build process after serving this call.
     async fn get_payload_v2(
         &self,
         payload_id: PayloadId,
@@ -180,7 +180,7 @@ where
         let end = start.saturating_add(count);
         for num in start..end {
             let block = self
-                .client
+                .provider
                 .block(BlockHashOrNumber::Number(num))
                 .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
             result.push(block.map(Into::into));
@@ -202,7 +202,7 @@ where
         let mut result = Vec::with_capacity(hashes.len());
         for hash in hashes {
             let block = self
-                .client
+                .provider
                 .block(BlockHashOrNumber::Hash(hash))
                 .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
             result.push(block.map(Into::into));
@@ -213,7 +213,7 @@ where
 
     /// Called to verify network configuration parameters and ensure that Consensus and Execution
     /// layers are using the latest configuration.
-    pub fn exchange_transition_configuration(
+    pub async fn exchange_transition_configuration(
         &self,
         config: TransitionConfiguration,
     ) -> EngineApiResult<TransitionConfiguration> {
@@ -237,6 +237,8 @@ where
             })
         }
 
+        self.beacon_consensus.transition_configuration_exchanged().await;
+
         // Short circuit if communicated block hash is zero
         if terminal_block_hash.is_zero() {
             return Ok(TransitionConfiguration {
@@ -247,7 +249,7 @@ where
 
         // Attempt to look up terminal block hash
         let local_hash = self
-            .client
+            .provider
             .block_hash(terminal_block_number.as_u64())
             .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
 
@@ -300,27 +302,27 @@ where
 }
 
 #[async_trait]
-impl<Client> EngineApiServer for EngineApi<Client>
+impl<Provider> EngineApiServer for EngineApi<Provider>
 where
-    Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
 {
     /// Handler for `engine_newPayloadV1`
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv1>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
     async fn new_payload_v1(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus> {
-        trace!(target: "rpc::eth", "Serving engine_newPayloadV1");
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV1");
         Ok(EngineApi::new_payload_v1(self, payload).await?)
     }
 
-    /// Handler for `engine_newPayloadV1`
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv1>
+    /// Handler for `engine_newPayloadV2`
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_newpayloadv2>
     async fn new_payload_v2(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus> {
-        trace!(target: "rpc::eth", "Serving engine_newPayloadV1");
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV2");
         Ok(EngineApi::new_payload_v2(self, payload).await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV1`
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_forkchoiceUpdatedV1>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
     /// Caution: This should not accept the `withdrawals` field
     async fn fork_choice_updated_v1(
@@ -328,18 +330,18 @@ where
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
-        trace!(target: "rpc::eth", "Serving engine_forkchoiceUpdatedV1");
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV1");
         Ok(EngineApi::fork_choice_updated_v1(self, fork_choice_state, payload_attributes).await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV2`
-    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_forkchoiceupdatedv2>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_forkchoiceupdatedv2>
     async fn fork_choice_updated_v2(
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
-        trace!(target: "rpc::eth", "Serving engine_forkchoiceUpdatedV2");
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV2");
         Ok(EngineApi::fork_choice_updated_v2(self, fork_choice_state, payload_attributes).await?)
     }
 
@@ -348,14 +350,14 @@ where
     /// Returns the most recent version of the payload that is available in the corresponding
     /// payload build process at the time of receiving this call.
     ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_getPayloadV1>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_getPayloadV1>
     ///
     /// Caution: This should not return the `withdrawals` field
     ///
     /// Note:
-    /// > Client software MAY stop the corresponding build process after serving this call.
+    /// > Provider software MAY stop the corresponding build process after serving this call.
     async fn get_payload_v1(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayload> {
-        trace!(target: "rpc::eth", "Serving engine_getPayloadV1");
+        trace!(target: "rpc::engine", "Serving engine_getPayloadV1");
         Ok(EngineApi::get_payload_v1(self, payload_id).await?)
     }
 
@@ -364,12 +366,12 @@ where
     /// Returns the most recent version of the payload that is available in the corresponding
     /// payload build process at the time of receiving this call.
     ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_getpayloadv2>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_getpayloadv2>
     ///
     /// Note:
-    /// > Client software MAY stop the corresponding build process after serving this call.
+    /// > Provider software MAY stop the corresponding build process after serving this call.
     async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelope> {
-        trace!(target: "rpc::eth", "Serving engine_getPayloadV2");
+        trace!(target: "rpc::engine", "Serving engine_getPayloadV2");
         Ok(EngineApi::get_payload_v2(self, payload_id).await?)
     }
 
@@ -379,7 +381,7 @@ where
         &self,
         block_hashes: Vec<BlockHash>,
     ) -> RpcResult<ExecutionPayloadBodies> {
-        trace!(target: "rpc::eth", "Serving engine_getPayloadBodiesByHashV1");
+        trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByHashV1");
         Ok(EngineApi::get_payload_bodies_by_hash(self, block_hashes)?)
     }
 
@@ -401,18 +403,18 @@ where
         start: U64,
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodies> {
-        trace!(target: "rpc::eth", "Serving engine_getPayloadBodiesByHashV1");
+        trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV1");
         Ok(EngineApi::get_payload_bodies_by_range(self, start.as_u64(), count.as_u64())?)
     }
 
     /// Handler for `engine_exchangeTransitionConfigurationV1`
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_exchangeTransitionConfigurationV1>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_exchangeTransitionConfigurationV1>
     async fn exchange_transition_configuration(
         &self,
         config: TransitionConfiguration,
     ) -> RpcResult<TransitionConfiguration> {
-        trace!(target: "rpc::eth", "Serving engine_getPayloadBodiesByHashV1");
-        Ok(EngineApi::exchange_transition_configuration(self, config)?)
+        trace!(target: "rpc::engine", "Serving engine_exchangeTransitionConfigurationV1");
+        Ok(EngineApi::exchange_transition_configuration(self, config).await?)
     }
 
     /// Handler for `engine_exchangeCapabilitiesV1`
@@ -422,7 +424,7 @@ where
     }
 }
 
-impl<Client> std::fmt::Debug for EngineApi<Client> {
+impl<Provider> std::fmt::Debug for EngineApi<Provider> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApi").finish_non_exhaustive()
     }
@@ -441,23 +443,23 @@ mod tests {
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
     fn setup_engine_api() -> (EngineApiTestHandle, EngineApi<Arc<MockEthProvider>>) {
-        let chain_spec = Arc::new(MAINNET.clone());
-        let client = Arc::new(MockEthProvider::default());
+        let chain_spec: Arc<ChainSpec> = MAINNET.clone();
+        let provider = Arc::new(MockEthProvider::default());
         let payload_store = spawn_test_payload_service();
         let (to_engine, engine_rx) = unbounded_channel();
         let api = EngineApi::new(
-            client.clone(),
+            provider.clone(),
             chain_spec.clone(),
             BeaconConsensusEngineHandle::new(to_engine),
             payload_store.into(),
         );
-        let handle = EngineApiTestHandle { chain_spec, client, from_api: engine_rx };
+        let handle = EngineApiTestHandle { chain_spec, provider, from_api: engine_rx };
         (handle, api)
     }
 
     struct EngineApiTestHandle {
         chain_spec: Arc<ChainSpec>,
-        client: Arc<MockEthProvider>,
+        provider: Arc<MockEthProvider>,
         from_api: UnboundedReceiver<BeaconEngineMessage>,
     }
 
@@ -474,7 +476,7 @@ mod tests {
     // tests covering `engine_getPayloadBodiesByRange` and `engine_getPayloadBodiesByHash`
     mod get_payload_bodies {
         use super::*;
-        use reth_interfaces::test_utils::generators::random_block_range;
+        use reth_interfaces::test_utils::{generators, generators::random_block_range};
 
         #[tokio::test]
         async fn invalid_params() {
@@ -505,11 +507,13 @@ mod tests {
 
         #[tokio::test]
         async fn returns_payload_bodies() {
+            let mut rng = generators::rng();
             let (handle, api) = setup_engine_api();
 
             let (start, count) = (1, 10);
-            let blocks = random_block_range(start..=start + count - 1, H256::default(), 0..2);
-            handle.client.extend_blocks(blocks.iter().cloned().map(|b| (b.hash(), b.unseal())));
+            let blocks =
+                random_block_range(&mut rng, start..=start + count - 1, H256::default(), 0..2);
+            handle.provider.extend_blocks(blocks.iter().cloned().map(|b| (b.hash(), b.unseal())));
 
             let expected =
                 blocks.iter().cloned().map(|b| Some(b.unseal().into())).collect::<Vec<_>>();
@@ -520,15 +524,17 @@ mod tests {
 
         #[tokio::test]
         async fn returns_payload_bodies_with_gaps() {
+            let mut rng = generators::rng();
             let (handle, api) = setup_engine_api();
 
             let (start, count) = (1, 100);
-            let blocks = random_block_range(start..=start + count - 1, H256::default(), 0..2);
+            let blocks =
+                random_block_range(&mut rng, start..=start + count - 1, H256::default(), 0..2);
 
             // Insert only blocks in ranges 1-25 and 50-75
             let first_missing_range = 26..=50;
             let second_missing_range = 76..=100;
-            handle.client.extend_blocks(
+            handle.provider.extend_blocks(
                 blocks
                     .iter()
                     .filter(|b| {
@@ -564,6 +570,7 @@ mod tests {
     // https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-3
     mod exchange_transition_configuration {
         use super::*;
+        use reth_interfaces::test_utils::generators;
         use reth_primitives::U256;
 
         #[tokio::test]
@@ -576,7 +583,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let res = api.exchange_transition_configuration(transition_config.clone());
+            let res = api.exchange_transition_configuration(transition_config.clone()).await;
 
             assert_matches!(
                 res,
@@ -587,11 +594,15 @@ mod tests {
 
         #[tokio::test]
         async fn terminal_block_hash_mismatch() {
+            let mut rng = generators::rng();
+
             let (handle, api) = setup_engine_api();
 
             let terminal_block_number = 1000;
-            let consensus_terminal_block = random_block(terminal_block_number, None, None, None);
-            let execution_terminal_block = random_block(terminal_block_number, None, None, None);
+            let consensus_terminal_block =
+                random_block(&mut rng, terminal_block_number, None, None, None);
+            let execution_terminal_block =
+                random_block(&mut rng, terminal_block_number, None, None, None);
 
             let transition_config = TransitionConfiguration {
                 terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap(),
@@ -600,7 +611,7 @@ mod tests {
             };
 
             // Unknown block number
-            let res = api.exchange_transition_configuration(transition_config.clone());
+            let res = api.exchange_transition_configuration(transition_config.clone()).await;
 
             assert_matches!(
                res,
@@ -609,12 +620,12 @@ mod tests {
             );
 
             // Add block and to provider local store and test for mismatch
-            handle.client.add_block(
+            handle.provider.add_block(
                 execution_terminal_block.hash(),
                 execution_terminal_block.clone().unseal(),
             );
 
-            let res = api.exchange_transition_configuration(transition_config.clone());
+            let res = api.exchange_transition_configuration(transition_config.clone()).await;
 
             assert_matches!(
                 res,
@@ -628,7 +639,8 @@ mod tests {
             let (handle, api) = setup_engine_api();
 
             let terminal_block_number = 1000;
-            let terminal_block = random_block(terminal_block_number, None, None, None);
+            let terminal_block =
+                random_block(&mut generators::rng(), terminal_block_number, None, None, None);
 
             let transition_config = TransitionConfiguration {
                 terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap(),
@@ -636,9 +648,10 @@ mod tests {
                 terminal_block_number: terminal_block_number.into(),
             };
 
-            handle.client.add_block(terminal_block.hash(), terminal_block.unseal());
+            handle.provider.add_block(terminal_block.hash(), terminal_block.unseal());
 
-            let config = api.exchange_transition_configuration(transition_config.clone()).unwrap();
+            let config =
+                api.exchange_transition_configuration(transition_config.clone()).await.unwrap();
             assert_eq!(config, transition_config);
         }
     }

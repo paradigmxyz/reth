@@ -2,19 +2,13 @@ name: book
 on:
   push:
     branches: [main]
-    paths:
-      - 'book/**'
-      - 'book.toml'
   pull_request:
     branches: [main]
-    paths:
-      - 'book/**'
-      - 'book.toml'
   merge_group:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     name: test
 
     steps:
@@ -35,12 +29,36 @@ jobs:
       - name: Run tests
         run: mdbook test
 
+  lint:
+    runs-on: ubuntu-20.04
+    name: lint
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install mdbook-linkcheck
+        run: |
+          mkdir mdbook-linkcheck
+          curl -sSL -o mdbook-linkcheck.zip https://github.com/Michael-F-Bryan/mdbook-linkcheck/releases/latest/download/mdbook-linkcheck.x86_64-unknown-linux-gnu.zip
+          unzip mdbook-linkcheck.zip -d ./mdbook-linkcheck
+          chmod +x `pwd`/mdbook-linkcheck/mdbook-linkcheck
+          echo `pwd`/mdbook-linkcheck >> $GITHUB_PATH
+
+      - name: Run linkcheck
+        run: mdbook-linkcheck --standalone
+
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
 
       - name: Install mdbook
         run: |
@@ -54,19 +72,44 @@ jobs:
           curl -sSL https://github.com/sgoudham/mdbook-template/releases/latest/download/mdbook-template-x86_64-unknown-linux-gnu.tar.gz | tar -xz --directory=./mdbook-template
           echo `pwd`/mdbook-template >> $GITHUB_PATH
 
-      - name: Build
+      - name: Build book
         run: mdbook build
 
-      - name: Save pages artifact
-        uses: actions/upload-pages-artifact@v1
+      - name: Build docs
+        run: RUSTDOCFLAGS="--enable-index-page -Zunstable-options" cargo +nightly doc --all --no-deps
+
+      - name: Move docs to book folder
+        run: |
+          mv target/doc target/book/docs
+
+      - name: Archive artifact
+        shell: sh
+        run: |
+          chmod -c -R +rX "target/book" |
+          while read line; do
+             echo "::warning title=Invalid file permissions automatically fixed::$line"
+          done
+          tar \
+            --dereference --hard-dereference \
+            --directory "target/book" \
+            -cvf "$RUNNER_TEMP/artifact.tar" \
+            --exclude=.git \
+            --exclude=.github \
+            .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
         with:
-          path: target/book
+          name: github-pages
+          path: ${{ runner.temp }}/artifact.tar
+          retention-days: 1
+          if-no-files-found: error
 
   deploy:
     # Only deploy if a push to main
     if: github.ref_name == 'main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    needs: [test, build]
+    runs-on: ubuntu-20.04
+    needs: [test, lint, build]
 
     # Grant GITHUB_TOKEN the permissions required to make a Pages deployment
     permissions:
@@ -80,4 +123,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v1
+        uses: actions/deploy-pages@v2

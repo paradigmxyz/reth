@@ -28,4 +28,32 @@ pub enum DatabaseError {
     /// Failed to decode a key from a table.
     #[error("Error decoding value.")]
     DecodeError,
+    /// Failed to get database stats.
+    #[error("Database stats error code: {0:?}")]
+    Stats(i32),
+    /// Failed to use the specified log level, as it's not available.
+    #[error("Log level is not available: {0:?}")]
+    LogLevelUnavailable(LogLevel),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
+/// Database log level.
+pub enum LogLevel {
+    /// Enables logging for critical conditions, i.e. assertion failures.
+    Fatal,
+    /// Enables logging for error conditions.
+    Error,
+    /// Enables logging for warning conditions.
+    Warn,
+    /// Enables logging for normal but significant condition.
+    Notice,
+    /// Enables logging for verbose informational.
+    Verbose,
+    /// Enables logging for debug-level messages.
+    Debug,
+    /// Enables logging for trace debug-level messages.
+    Trace,
+    /// Enables logging for extra debug-level messages.
+    Extra,
 }

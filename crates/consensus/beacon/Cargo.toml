@@ -1,42 +1,43 @@
 [package]
 name = "reth-beacon-consensus"
-version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
-readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 
 [dependencies]
 # reth
 reth-consensus-common = { path = "../common" }
-reth-primitives = { path = "../../primitives" }
-reth-interfaces = { path = "../../interfaces" }
+reth-primitives = { workspace = true }
+reth-interfaces = { workspace = true }
 reth-stages = { path = "../../stages" }
 reth-db = { path = "../../storage/db" }
-reth-provider = { path = "../../storage/provider" }
-reth-rpc-types = { path = "../../rpc/rpc-types" }
-reth-tasks = { path = "../../tasks" }
-reth-payload-builder = { path = "../../payload/builder" }
-reth-metrics = { path = "../../metrics" }
+reth-provider = { workspace = true }
+reth-rpc-types = { workspace = true }
+reth-tasks = { workspace = true }
+reth-payload-builder = { workspace = true }
+reth-metrics = { workspace = true }
 
 # async
-tokio = { version = "1.21.2", features = ["sync"] }
-tokio-stream = "0.1.10"
-futures = "0.3"
+tokio = { workspace = true, features = ["sync"] }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
 
 # misc
 tracing = { workspace = true }
-thiserror = "1.0"
+thiserror = { workspace = true }
 schnellru = "0.2"
 
 [dev-dependencies]
 # reth
-reth-payload-builder = { path = "../../payload/builder", features = ["test-utils"] }
-reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
+reth-payload-builder = { workspace = true, features = ["test-utils"] }
+reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-stages = { path = "../../stages", features = ["test-utils"] }
 reth-blockchain-tree = { path = "../../blockchain-tree", features = ["test-utils"] }
 reth-db = { path = "../../storage/db", features = ["test-utils"] }
-reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing = { path = "../../tracing" }
 
 assert_matches = "1.5"

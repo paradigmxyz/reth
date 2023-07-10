@@ -2,8 +2,9 @@
 //!
 //! Starts the client
 use crate::{
-    args::{get_secret_key, DebugArgs, NetworkArgs, RpcServerArgs},
+    args::{get_secret_key, DebugArgs, NetworkArgs, RpcServerArgs, TxPoolArgs},
     dirs::DataDirPath,
+    init::init_genesis,
     prometheus_exporter,
     runner::CliContext,
     utils::get_single_header,
@@ -12,20 +13,15 @@ use crate::{
 use clap::Parser;
 use eyre::Context;
 use fdlimit::raise_fd_limit;
-use futures::{pin_mut, stream::select as stream_select, StreamExt};
+use futures::{future::Either, pin_mut, stream, stream_select, StreamExt};
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine};
+use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine, MIN_BLOCKS_FOR_PIPELINE_RUN};
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
 use reth_config::Config;
-use reth_db::{
-    database::Database,
-    mdbx::{Env, WriteMap},
-    tables,
-    transaction::DbTx,
-};
+use reth_db::{database::Database, init_db, DatabaseEnv};
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
@@ -42,26 +38,22 @@ use reth_interfaces::{
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    stage::StageId, BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, H256,
+    stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, H256,
 };
 use reth_provider::{
-    providers::get_stage_checkpoint, BlockProvider, CanonStateSubscriptions, HeaderProvider,
-    ShareableDatabase,
+    BlockHashReader, BlockReader, CanonStateSubscriptions, HeaderProvider, ProviderFactory,
+    StageCheckpointReader,
 };
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
-use reth_staged_sync::utils::{
-    chainspec::genesis_value_parser,
-    init::{init_db, init_genesis},
-    parse_socket_address,
-};
 use reth_stages::{
     prelude::*,
     stages::{
         ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
         TotalDifficultyStage,
     },
+    MetricEventsSender, MetricsListener,
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{EthTransactionValidator, TransactionPool};
@@ -74,13 +66,24 @@ use std::{
 use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
 
-use crate::{args::PayloadBuilderArgs, dirs::MaybePlatformPath};
+use crate::{
+    args::{
+        utils::{genesis_value_parser, parse_socket_address},
+        DatabaseArgs, PayloadBuilderArgs,
+    },
+    dirs::MaybePlatformPath,
+    node::cl_events::ConsensusLayerHealthEvents,
+};
 use reth_interfaces::p2p::headers::client::HeadersClient;
 use reth_payload_builder::PayloadBuilderService;
-use reth_primitives::bytes::BytesMut;
+use reth_primitives::DisplayHardforks;
 use reth_provider::providers::BlockchainProvider;
-use reth_rlp::Encodable;
+use reth_stages::stages::{
+    AccountHashingStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
+    StorageHashingStage, TransactionLookupStage,
+};
 
+pub mod cl_events;
 pub mod events;
 
 /// Start the node
@@ -130,10 +133,16 @@ pub struct Command {
     rpc: RpcServerArgs,
 
     #[clap(flatten)]
+    txpool: TxPoolArgs,
+
+    #[clap(flatten)]
     builder: PayloadBuilderArgs,
 
     #[clap(flatten)]
     debug: DebugArgs,
+
+    #[clap(flatten)]
+    db: DatabaseArgs,
 
     /// Automatically mine blocks for new transactions
     #[arg(long)]
@@ -160,7 +169,7 @@ impl Command {
 
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(&db_path)?);
+        let db = Arc::new(init_db(&db_path, self.db.log_level)?);
         info!(target: "reth::cli", "Database opened");
 
         self.start_metrics_endpoint(Arc::clone(&db)).await?;
@@ -168,6 +177,8 @@ impl Command {
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
         let genesis_hash = init_genesis(db.clone(), self.chain.clone())?;
+
+        info!(target: "reth::cli", "{}", DisplayHardforks::from(self.chain.hardforks().clone()));
 
         let consensus: Arc<dyn Consensus> = if self.auto_mine {
             debug!(target: "reth::cli", "Using auto seal");
@@ -177,6 +188,11 @@ impl Command {
         };
 
         self.init_trusted_nodes(&mut config);
+
+        debug!(target: "reth::cli", "Spawning metrics listener task");
+        let (metrics_tx, metrics_rx) = unbounded_channel();
+        let metrics_listener = MetricsListener::new(metrics_rx);
+        ctx.task_executor.spawn_critical("metrics listener task", metrics_listener);
 
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
@@ -190,19 +206,27 @@ impl Command {
         // depth at least N blocks must be sent at once.
         let (canon_state_notification_sender, _receiver) =
             tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
-        let blockchain_tree = ShareableBlockchainTree::new(BlockchainTree::new(
-            tree_externals,
-            canon_state_notification_sender.clone(),
-            tree_config,
-        )?);
+        let blockchain_tree = ShareableBlockchainTree::new(
+            BlockchainTree::new(
+                tree_externals,
+                canon_state_notification_sender.clone(),
+                tree_config,
+            )?
+            .with_sync_metrics_tx(metrics_tx.clone()),
+        );
 
         // setup the blockchain provider
-        let shareable_db = ShareableDatabase::new(Arc::clone(&db), Arc::clone(&self.chain));
-        let blockchain_db = BlockchainProvider::new(shareable_db, blockchain_tree.clone())?;
+        let factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
+        let blockchain_db = BlockchainProvider::new(factory, blockchain_tree.clone())?;
 
         let transaction_pool = reth_transaction_pool::Pool::eth_pool(
-            EthTransactionValidator::new(blockchain_db.clone(), Arc::clone(&self.chain)),
-            Default::default(),
+            EthTransactionValidator::with_additional_tasks(
+                blockchain_db.clone(),
+                Arc::clone(&self.chain),
+                ctx.task_executor.clone(),
+                1,
+            ),
+            self.txpool.pool_config(),
         );
         info!(target: "reth::cli", "Transaction pool initialized");
 
@@ -213,14 +237,11 @@ impl Command {
             let client = blockchain_db.clone();
             ctx.task_executor.spawn_critical(
                 "txpool maintenance task",
-                Box::pin(async move {
-                    reth_transaction_pool::maintain::maintain_transaction_pool(
-                        client,
-                        pool,
-                        chain_events,
-                    )
-                    .await
-                }),
+                reth_transaction_pool::maintain::maintain_transaction_pool_future(
+                    client,
+                    pool,
+                    chain_events,
+                ),
             );
             debug!(target: "reth::cli", "Spawned txpool maintenance task");
         }
@@ -231,10 +252,12 @@ impl Command {
         debug!(target: "reth::cli", ?network_secret_path, "Loading p2p key file");
         let secret_key = get_secret_key(&network_secret_path)?;
         let default_peers_path = data_dir.known_peers_path();
+        let head = self.lookup_head(Arc::clone(&db)).expect("the head block is missing");
         let network_config = self.load_network_config(
             &config,
             Arc::clone(&db),
             ctx.task_executor.clone(),
+            head,
             secret_key,
             default_peers_path.clone(),
         );
@@ -252,9 +275,6 @@ impl Command {
 
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
-        // configure the payload builder
-        let mut extradata = BytesMut::new();
-        self.builder.extradata.as_bytes().encode(&mut extradata);
         let payload_generator = BasicPayloadJobGenerator::new(
             blockchain_db.clone(),
             transaction_pool.clone(),
@@ -263,7 +283,7 @@ impl Command {
                 .interval(self.builder.interval)
                 .deadline(self.builder.deadline)
                 .max_payload_tasks(self.builder.max_payload_tasks)
-                .extradata(extradata.freeze())
+                .extradata(self.builder.extradata_bytes())
                 .max_gas_limit(self.builder.max_gas_limit),
             Arc::clone(&self.chain),
         );
@@ -271,6 +291,14 @@ impl Command {
 
         debug!(target: "reth::cli", "Spawning payload builder service");
         ctx.task_executor.spawn_critical("payload builder service", payload_service);
+
+        let max_block = if let Some(block) = self.debug.max_block {
+            Some(block)
+        } else if let Some(tip) = self.debug.tip {
+            Some(self.lookup_or_fetch_tip(&db, &network_client, tip).await?)
+        } else {
+            None
+        };
 
         // Configure the pipeline
         let (mut pipeline, client) = if self.auto_mine {
@@ -290,6 +318,8 @@ impl Command {
                     Arc::clone(&consensus),
                     db.clone(),
                     &ctx.task_executor,
+                    metrics_tx,
+                    max_block,
                 )
                 .await?;
 
@@ -307,6 +337,8 @@ impl Command {
                     Arc::clone(&consensus),
                     db.clone(),
                     &ctx.task_executor,
+                    metrics_tx,
+                    max_block,
                 )
                 .await?;
 
@@ -335,24 +367,33 @@ impl Command {
             blockchain_db.clone(),
             Box::new(ctx.task_executor.clone()),
             Box::new(network.clone()),
-            self.debug.max_block,
+            max_block,
             self.debug.continuous,
             payload_builder.clone(),
             initial_target,
+            MIN_BLOCKS_FOR_PIPELINE_RUN,
             consensus_engine_tx,
             consensus_engine_rx,
         )?;
         info!(target: "reth::cli", "Consensus engine initialized");
 
-        let events = stream_select(
-            stream_select(
-                network.event_listener().map(Into::into),
-                beacon_engine_handle.event_listener().map(Into::into),
-            ),
+        let events = stream_select!(
+            network.event_listener().map(Into::into),
+            beacon_engine_handle.event_listener().map(Into::into),
             pipeline_events.map(Into::into),
+            if self.debug.tip.is_none() {
+                Either::Left(
+                    ConsensusLayerHealthEvents::new(Box::new(blockchain_db.clone()))
+                        .map(Into::into),
+                )
+            } else {
+                Either::Right(stream::empty())
+            }
         );
-        ctx.task_executor
-            .spawn_critical("events task", events::handle_events(Some(network.clone()), events));
+        ctx.task_executor.spawn_critical(
+            "events task",
+            events::handle_events(Some(network.clone()), Some(head.number), events),
+        );
 
         let engine_api = EngineApi::new(
             blockchain_db.clone(),
@@ -383,7 +424,7 @@ impl Command {
         // Run consensus engine to completion
         let (tx, rx) = oneshot::channel();
         info!(target: "reth::cli", "Starting consensus engine");
-        ctx.task_executor.spawn_critical("consensus engine", async move {
+        ctx.task_executor.spawn_critical_blocking("consensus engine", async move {
             let res = beacon_consensus_engine.await;
             let _ = tx.send(res);
         });
@@ -402,6 +443,7 @@ impl Command {
     }
 
     /// Constructs a [Pipeline] that's wired to the network
+    #[allow(clippy::too_many_arguments)]
     async fn build_networked_pipeline<DB, Client>(
         &self,
         config: &mut Config,
@@ -409,19 +451,13 @@ impl Command {
         consensus: Arc<dyn Consensus>,
         db: DB,
         task_executor: &TaskExecutor,
+        metrics_tx: MetricEventsSender,
+        max_block: Option<BlockNumber>,
     ) -> eyre::Result<Pipeline<DB>>
     where
         DB: Database + Unpin + Clone + 'static,
         Client: HeadersClient + BodiesClient + Clone + 'static,
     {
-        let max_block = if let Some(block) = self.debug.max_block {
-            Some(block)
-        } else if let Some(tip) = self.debug.tip {
-            Some(self.lookup_or_fetch_tip(&db, &client, tip).await?)
-        } else {
-            None
-        };
-
         // building network downloaders using the fetch client
         let header_downloader = ReverseHeadersDownloaderBuilder::from(config.stages.headers)
             .build(client.clone(), Arc::clone(&consensus))
@@ -440,6 +476,7 @@ impl Command {
                 consensus,
                 max_block,
                 self.debug.continuous,
+                metrics_tx,
             )
             .await?;
 
@@ -463,11 +500,11 @@ impl Command {
         }
     }
 
-    async fn start_metrics_endpoint(&self, db: Arc<Env<WriteMap>>) -> eyre::Result<()> {
+    async fn start_metrics_endpoint(&self, db: Arc<DatabaseEnv>) -> eyre::Result<()> {
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
-
-            prometheus_exporter::initialize_with_db_metrics(listen_addr, db).await?;
+            prometheus_exporter::initialize(listen_addr, db, metrics_process::Collector::default())
+                .await?;
         }
 
         Ok(())
@@ -483,7 +520,7 @@ impl Command {
         default_peers_path: PathBuf,
     ) -> Result<NetworkHandle, NetworkError>
     where
-        C: BlockProvider + HeaderProvider + Clone + Unpin + 'static,
+        C: BlockReader + HeaderProvider + Clone + Unpin + 'static,
         Pool: TransactionPool + Unpin + 'static,
     {
         let client = config.client.clone();
@@ -504,30 +541,31 @@ impl Command {
         Ok(handle)
     }
 
-    fn lookup_head(
-        &self,
-        db: Arc<Env<WriteMap>>,
-    ) -> Result<Head, reth_interfaces::db::DatabaseError> {
-        db.view(|tx| {
-            let head = get_stage_checkpoint(tx, StageId::Finish)?.unwrap_or_default().block_number;
-            let header = tx
-                .get::<tables::Headers>(head)?
-                .expect("the header for the latest block is missing, database is corrupt");
-            let total_difficulty = tx.get::<tables::HeaderTD>(head)?.expect(
-                "the total difficulty for the latest block is missing, database is corrupt",
-            );
-            let hash = tx
-                .get::<tables::CanonicalHeaders>(head)?
-                .expect("the hash for the latest block is missing, database is corrupt");
-            Ok::<Head, reth_interfaces::db::DatabaseError>(Head {
-                number: head,
-                hash,
-                difficulty: header.difficulty,
-                total_difficulty: total_difficulty.into(),
-                timestamp: header.timestamp,
-            })
-        })?
-        .map_err(Into::into)
+    fn lookup_head(&self, db: Arc<DatabaseEnv>) -> Result<Head, reth_interfaces::Error> {
+        let factory = ProviderFactory::new(db, self.chain.clone());
+        let provider = factory.provider()?;
+
+        let head = provider.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;
+
+        let header = provider
+            .header_by_number(head)?
+            .expect("the header for the latest block is missing, database is corrupt");
+
+        let total_difficulty = provider
+            .header_td_by_number(head)?
+            .expect("the total difficulty for the latest block is missing, database is corrupt");
+
+        let hash = provider
+            .block_hash(head)?
+            .expect("the hash for the latest block is missing, database is corrupt");
+
+        Ok(Head {
+            number: head,
+            hash,
+            difficulty: header.difficulty,
+            total_difficulty,
+            timestamp: header.timestamp,
+        })
     }
 
     /// Attempt to look up the block number for the tip hash in the database.
@@ -560,13 +598,10 @@ impl Command {
         DB: Database,
         Client: HeadersClient,
     {
-        let header = db.view(|tx| -> Result<Option<Header>, reth_db::DatabaseError> {
-            let number = match tip {
-                BlockHashOrNumber::Hash(hash) => tx.get::<tables::HeaderNumbers>(hash)?,
-                BlockHashOrNumber::Number(number) => Some(number),
-            };
-            Ok(number.map(|number| tx.get::<tables::Headers>(number)).transpose()?.flatten())
-        })??;
+        let factory = ProviderFactory::new(db, self.chain.clone());
+        let provider = factory.provider()?;
+
+        let header = provider.header_by_hash_or_number(tip)?;
 
         // try to look up the header in the database
         if let Some(header) = header {
@@ -591,13 +626,12 @@ impl Command {
     fn load_network_config(
         &self,
         config: &Config,
-        db: Arc<Env<WriteMap>>,
+        db: Arc<DatabaseEnv>,
         executor: TaskExecutor,
+        head: Head,
         secret_key: SecretKey,
         default_peers_path: PathBuf,
-    ) -> NetworkConfig<ShareableDatabase<Arc<Env<WriteMap>>>> {
-        let head = self.lookup_head(Arc::clone(&db)).expect("the head block is missing");
-
+    ) -> NetworkConfig<ProviderFactory<Arc<DatabaseEnv>>> {
         self.network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(executor))
@@ -610,7 +644,7 @@ impl Command {
                 Ipv4Addr::UNSPECIFIED,
                 self.network.discovery.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
             )))
-            .build(ShareableDatabase::new(db, self.chain.clone()))
+            .build(ProviderFactory::new(db, self.chain.clone()))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -623,13 +657,14 @@ impl Command {
         consensus: Arc<dyn Consensus>,
         max_block: Option<u64>,
         continuous: bool,
+        metrics_tx: MetricEventsSender,
     ) -> eyre::Result<Pipeline<DB>>
     where
         DB: Database + Clone + 'static,
         H: HeaderDownloader + 'static,
         B: BodyDownloader + 'static,
     {
-        let stage_conf = &config.stages;
+        let stage_config = &config.stages;
 
         let mut builder = Pipeline::builder();
 
@@ -661,6 +696,7 @@ impl Command {
             if continuous { HeaderSyncMode::Continuous } else { HeaderSyncMode::Tip(tip_rx) };
         let pipeline = builder
             .with_tip_sender(tip_tx)
+            .with_metrics_tx(metrics_tx.clone())
             .add_stages(
                 DefaultStages::new(
                     header_mode,
@@ -671,23 +707,39 @@ impl Command {
                 )
                 .set(
                     TotalDifficultyStage::new(consensus)
-                        .with_commit_threshold(stage_conf.total_difficulty.commit_threshold),
+                        .with_commit_threshold(stage_config.total_difficulty.commit_threshold),
                 )
                 .set(SenderRecoveryStage {
-                    commit_threshold: stage_conf.sender_recovery.commit_threshold,
+                    commit_threshold: stage_config.sender_recovery.commit_threshold,
                 })
-                .set(ExecutionStage::new(
-                    factory,
-                    ExecutionStageThresholds {
-                        max_blocks: stage_conf.execution.max_blocks,
-                        max_changes: stage_conf.execution.max_changes,
-                        max_changesets: stage_conf.execution.max_changesets,
-                    },
+                .set(
+                    ExecutionStage::new(
+                        factory,
+                        ExecutionStageThresholds {
+                            max_blocks: stage_config.execution.max_blocks,
+                            max_changes: stage_config.execution.max_changes,
+                        },
+                    )
+                    .with_metrics_tx(metrics_tx),
+                )
+                .set(AccountHashingStage::new(
+                    stage_config.account_hashing.clean_threshold,
+                    stage_config.account_hashing.commit_threshold,
                 ))
-                .disable_if(StageId::MerkleUnwind, || self.auto_mine)
-                .disable_if(StageId::MerkleExecute, || self.auto_mine),
+                .set(StorageHashingStage::new(
+                    stage_config.storage_hashing.clean_threshold,
+                    stage_config.storage_hashing.commit_threshold,
+                ))
+                .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
+                .set(TransactionLookupStage::new(stage_config.transaction_lookup.commit_threshold))
+                .set(IndexAccountHistoryStage::new(
+                    stage_config.index_account_history.commit_threshold,
+                ))
+                .set(IndexStorageHistoryStage::new(
+                    stage_config.index_storage_history.commit_threshold,
+                )),
             )
-            .build(db);
+            .build(db, self.chain.clone());
 
         Ok(pipeline)
     }
@@ -700,7 +752,7 @@ async fn run_network_until_shutdown<C>(
     network: NetworkManager<C>,
     persistent_peers_file: Option<PathBuf>,
 ) where
-    C: BlockProvider + HeaderProvider + Clone + Unpin + 'static,
+    C: BlockReader + HeaderProvider + Clone + Unpin + 'static,
 {
     pin_mut!(network, shutdown);
 
@@ -761,14 +813,14 @@ mod tests {
 
     #[test]
     fn parse_metrics_port() {
-        let cmd = Command::try_parse_from(["reth", "--metrics", "9000"]).unwrap();
-        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9000)));
+        let cmd = Command::try_parse_from(["reth", "--metrics", "9001"]).unwrap();
+        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
 
-        let cmd = Command::try_parse_from(["reth", "--metrics", ":9000"]).unwrap();
-        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9000)));
+        let cmd = Command::try_parse_from(["reth", "--metrics", ":9001"]).unwrap();
+        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
 
-        let cmd = Command::try_parse_from(["reth", "--metrics", "localhost:9000"]).unwrap();
-        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9000)));
+        let cmd = Command::try_parse_from(["reth", "--metrics", "localhost:9001"]).unwrap();
+        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
     }
 
     #[test]

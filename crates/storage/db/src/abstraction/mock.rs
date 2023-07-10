@@ -38,7 +38,7 @@ impl<'a> DatabaseGAT<'a> for DatabaseMock {
 }
 
 /// Mock read only tx
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct TxMock {
     /// Table representation
     _table: BTreeMap<Vec<u8>, Vec<u8>>,
@@ -74,6 +74,10 @@ impl<'a> DbTx<'a> for TxMock {
     fn cursor_dup_read<T: DupSort>(
         &self,
     ) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, DatabaseError> {
+        todo!()
+    }
+
+    fn entries<T: Table>(&self) -> Result<usize, DatabaseError> {
         todo!()
     }
 }

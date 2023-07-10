@@ -6,7 +6,7 @@ use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock, SealedBlockWithSenders,
     TransactionSigned, TxHash,
 };
-use std::{borrow::Cow, collections::BTreeMap};
+use std::{borrow::Cow, collections::BTreeMap, fmt};
 
 /// A chain of blocks and their final state.
 ///
@@ -82,8 +82,8 @@ impl Chain {
     /// Get the block at which this chain forked.
     #[track_caller]
     pub fn fork_block(&self) -> ForkBlock {
-        let tip = self.first();
-        ForkBlock { number: tip.number.saturating_sub(1), hash: tip.parent_hash }
+        let first = self.first();
+        ForkBlock { number: first.number.saturating_sub(1), hash: first.parent_hash }
     }
 
     /// Get the block number at which this chain forked.
@@ -126,6 +126,12 @@ impl Chain {
         Self { state, blocks: block_num_hash }
     }
 
+    /// Get all receipts for the given block.
+    pub fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<&[Receipt]> {
+        let num = self.block_number(block_hash)?;
+        Some(self.state.receipts(num))
+    }
+
     /// Get all receipts with attachment.
     ///
     /// Attachment includes block number, block hash, transaction hash and transaction index.
@@ -159,7 +165,7 @@ impl Chain {
         }
 
         // Insert blocks from other chain
-        self.blocks.extend(chain.blocks.into_iter());
+        self.blocks.extend(chain.blocks);
         self.state.extend(chain.state);
 
         Ok(())
@@ -186,7 +192,9 @@ impl Chain {
         let chain_tip = *self.blocks.last_entry().expect("chain is never empty").key();
         let block_number = match split_at {
             SplitAt::Hash(block_hash) => {
-                let Some(block_number) = self.block_number(block_hash) else { return ChainSplit::NoSplitPending(self)};
+                let Some(block_number) = self.block_number(block_hash) else {
+                    return ChainSplit::NoSplitPending(self)
+                };
                 // If block number is same as tip whole chain is becoming canonical.
                 if block_number == chain_tip {
                     return ChainSplit::NoSplitCanonical(self)
@@ -214,6 +222,34 @@ impl Chain {
             canonical: Chain { state: canonical_state, blocks: self.blocks },
             pending: Chain { state: self.state, blocks: higher_number_blocks },
         }
+    }
+}
+
+/// Wrapper type for `blocks` display in `Chain`
+pub struct DisplayBlocksChain<'a>(pub &'a BTreeMap<BlockNumber, SealedBlockWithSenders>);
+
+impl<'a> fmt::Display for DisplayBlocksChain<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.0.len() <= 3 {
+            write!(f, "[")?;
+            let mut iter = self.0.values().map(|block| block.num_hash());
+            if let Some(block_num_hash) = iter.next() {
+                write!(f, "{:?}", block_num_hash)?;
+                for block_num_hash_iter in iter {
+                    write!(f, ", {:?}", block_num_hash_iter)?;
+                }
+            }
+            write!(f, "]")?;
+        } else {
+            write!(
+                f,
+                "[{:?}, ..., {:?}]",
+                self.0.values().next().unwrap().num_hash(),
+                self.0.values().last().unwrap().num_hash()
+            )?;
+        }
+
+        Ok(())
     }
 }
 

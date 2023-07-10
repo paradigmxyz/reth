@@ -130,8 +130,11 @@ where
         b.iter_with_setup(
             || {
                 // Reset DB
-                let _ = std::fs::remove_dir_all(bench_db_path);
-                (input.clone(), create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path))
+                let _ = fs::remove_dir_all(bench_db_path);
+                (
+                    input.clone(),
+                    Arc::try_unwrap(create_test_rw_db_with_path(bench_db_path)).unwrap(),
+                )
             },
             |(input, db)| {
                 // Create TX
@@ -153,8 +156,8 @@ where
         b.iter_with_setup(
             || {
                 // Reset DB
-                let _ = std::fs::remove_dir_all(bench_db_path);
-                (input, create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path))
+                let _ = fs::remove_dir_all(bench_db_path);
+                (input, Arc::try_unwrap(create_test_rw_db_with_path(bench_db_path)).unwrap())
             },
             |(input, db)| {
                 // Create TX
@@ -224,8 +227,11 @@ where
         b.iter_with_setup(
             || {
                 // Reset DB
-                let _ = std::fs::remove_dir_all(bench_db_path);
-                (input.clone(), create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path))
+                let _ = fs::remove_dir_all(bench_db_path);
+                (
+                    input.clone(),
+                    Arc::try_unwrap(create_test_rw_db_with_path(bench_db_path)).unwrap(),
+                )
             },
             |(input, db)| {
                 // Create TX
@@ -247,9 +253,9 @@ where
         b.iter_with_setup(
             || {
                 // Reset DB
-                let _ = std::fs::remove_dir_all(bench_db_path);
+                let _ = fs::remove_dir_all(bench_db_path);
 
-                (input, create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path))
+                (input, Arc::try_unwrap(create_test_rw_db_with_path(bench_db_path)).unwrap())
             },
             |(input, db)| {
                 // Create TX

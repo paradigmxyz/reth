@@ -16,7 +16,7 @@ use reth_eth_wire::{
 };
 use reth_network_api::PeerKind;
 use reth_primitives::{ForkId, PeerId, H256};
-use reth_provider::BlockProvider;
+use reth_provider::BlockReader;
 use std::{
     collections::{HashMap, VecDeque},
     net::{IpAddr, SocketAddr},
@@ -65,7 +65,7 @@ pub struct NetworkState<C> {
 
 impl<C> NetworkState<C>
 where
-    C: BlockProvider,
+    C: BlockReader,
 {
     /// Create a new state instance with the given params
     pub(crate) fn new(

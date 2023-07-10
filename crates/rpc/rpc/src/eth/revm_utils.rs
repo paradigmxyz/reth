@@ -2,29 +2,67 @@
 
 use crate::eth::error::{EthApiError, EthResult, RpcInvalidTransactionError};
 use reth_primitives::{
-    AccessList, Address, TransactionSigned, TransactionSignedEcRecovered, TxHash, H256, U256,
+    constants::ETHEREUM_BLOCK_GAS_LIMIT, AccessList, Address, TransactionSigned,
+    TransactionSignedEcRecovered, TxHash, H256, U256,
 };
 use reth_revm::env::{fill_tx_env, fill_tx_env_with_recovered};
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
-    CallRequest,
+    BlockOverrides, CallRequest,
 };
 use revm::{
-    db::CacheDB,
+    db::{CacheDB, EmptyDB},
     precompile::{Precompiles, SpecId as PrecompilesSpecId},
     primitives::{BlockEnv, CfgEnv, Env, ResultAndState, SpecId, TransactTo, TxEnv},
     Database, Inspector,
 };
 use revm_primitives::{
     db::{DatabaseCommit, DatabaseRef},
-    Bytecode,
+    Bytecode, ExecutionResult,
 };
 use tracing::trace;
+
+/// Helper type that bundles various overrides for EVM Execution.
+///
+/// By `Default`, no overrides are included.
+#[derive(Debug, Clone, Default)]
+pub struct EvmOverrides {
+    /// Applies overrides to the state before execution.
+    pub state: Option<StateOverride>,
+    /// Applies overrides to the block before execution.
+    ///
+    /// This is a `Box` because less common and only available in debug trace endpoints.
+    pub block: Option<Box<BlockOverrides>>,
+}
+
+impl EvmOverrides {
+    /// Creates a new instance with the given overrides
+    pub fn new(state: Option<StateOverride>, block: Option<Box<BlockOverrides>>) -> Self {
+        Self { state, block }
+    }
+
+    /// Creates a new instance with the given state overrides.
+    pub fn state(state: Option<StateOverride>) -> Self {
+        Self { state, block: None }
+    }
+
+    /// Returns `true` if the overrides contain state overrides.
+    pub fn has_state(&self) -> bool {
+        self.state.is_some()
+    }
+}
+
+impl From<Option<StateOverride>> for EvmOverrides {
+    fn from(state: Option<StateOverride>) -> Self {
+        Self::state(state)
+    }
+}
 
 /// Helper type to work with different transaction types when configuring the EVM env.
 ///
 /// This makes it easier to handle errors.
 pub(crate) trait FillableTransaction {
+    /// Returns the hash of the transaction.
     fn hash(&self) -> TxHash;
 
     /// Fill the transaction environment with the given transaction.
@@ -90,16 +128,37 @@ where
 }
 
 /// Executes the [Env] against the given [Database] without committing state changes.
-pub(crate) fn inspect<S, I>(db: S, env: Env, inspector: I) -> EthResult<(ResultAndState, Env)>
+pub(crate) fn inspect<DB, I>(db: DB, env: Env, inspector: I) -> EthResult<(ResultAndState, Env)>
 where
-    S: Database,
-    <S as Database>::Error: Into<EthApiError>,
-    I: Inspector<S>,
+    DB: Database,
+    <DB as Database>::Error: Into<EthApiError>,
+    I: Inspector<DB>,
 {
     let mut evm = revm::EVM::with_env(env);
     evm.database(db);
     let res = evm.inspect(inspector)?;
     Ok((res, evm.env))
+}
+
+/// Same as [inspect] but also returns the database again.
+///
+/// Even though [Database] is also implemented on `&mut`
+/// this is still useful if there are certain trait bounds on the Inspector's database generic type
+pub(crate) fn inspect_and_return_db<DB, I>(
+    db: DB,
+    env: Env,
+    inspector: I,
+) -> EthResult<(ResultAndState, Env, DB)>
+where
+    DB: Database,
+    <DB as Database>::Error: Into<EthApiError>,
+    I: Inspector<DB>,
+{
+    let mut evm = revm::EVM::with_env(env);
+    evm.database(db);
+    let res = evm.inspect(inspector)?;
+    let db = evm.take_db();
+    Ok((res, evm.env, db))
 }
 
 /// Replays all the transactions until the target transaction is found.
@@ -145,7 +204,7 @@ pub(crate) fn prepare_call_env<DB>(
     block: BlockEnv,
     request: CallRequest,
     db: &mut CacheDB<DB>,
-    state_overrides: Option<StateOverride>,
+    overrides: EvmOverrides,
 ) -> EthResult<Env>
 where
     DB: DatabaseRef,
@@ -169,14 +228,30 @@ where
     let mut env = build_call_evm_env(cfg, block, request)?;
 
     // apply state overrides
-    if let Some(state_overrides) = state_overrides {
+    if let Some(state_overrides) = overrides.state {
         apply_state_overrides(state_overrides, db)?;
     }
 
-    if request_gas.is_none() && env.tx.gas_price > U256::ZERO {
-        trace!(target: "rpc::eth::call", ?env, "Applying gas limit cap");
-        // no gas limit was provided in the request, so we need to cap the request's gas limit
-        cap_tx_gas_limit_with_caller_allowance(db, &mut env.tx)?;
+    // apply block overrides
+    if let Some(block_overrides) = overrides.block {
+        apply_block_overrides(*block_overrides, &mut env.block);
+    }
+
+    if request_gas.is_none() {
+        // No gas limit was provided in the request, so we need to cap the transaction gas limit
+        if env.tx.gas_price > U256::ZERO {
+            // If gas price is specified, cap transaction gas limit with caller allowance
+            trace!(target: "rpc::eth::call", ?env, "Applying gas limit cap with caller allowance");
+            cap_tx_gas_limit_with_caller_allowance(db, &mut env.tx)?;
+        } else {
+            // If no gas price is specified, use maximum allowed gas limit. The reason for this is
+            // that both Erigon and Geth use pre-configured gas cap even if it's possible
+            // to derive the gas limit from the block:
+            // https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/cmd/rpcdaemon/commands/trace_adhoc.go#L956
+            // https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/eth/ethconfig/config.go#L94
+            trace!(target: "rpc::eth::call", ?env, "Applying gas limit cap as the maximum gas limit");
+            env.tx.gas_limit = ETHEREUM_BLOCK_GAS_LIMIT;
+        }
     }
 
     Ok(env)
@@ -242,29 +317,43 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
 }
 
 /// Caps the configured [TxEnv] `gas_limit` with the allowance of the caller.
-///
-/// Returns an error if the caller has insufficient funds
-pub(crate) fn cap_tx_gas_limit_with_caller_allowance<DB>(
-    mut db: DB,
-    env: &mut TxEnv,
-) -> EthResult<()>
+pub(crate) fn cap_tx_gas_limit_with_caller_allowance<DB>(db: DB, env: &mut TxEnv) -> EthResult<()>
 where
     DB: Database,
     EthApiError: From<<DB as Database>::Error>,
 {
-    let mut allowance = db.basic(env.caller)?.map(|acc| acc.balance).unwrap_or_default();
-
-    // subtract transferred value
-    allowance = allowance
-        .checked_sub(env.value)
-        .ok_or_else(|| RpcInvalidTransactionError::InsufficientFunds)?;
-
-    // cap the gas limit
-    if let Ok(gas_limit) = allowance.checked_div(env.gas_price).unwrap_or_default().try_into() {
+    if let Ok(gas_limit) = caller_gas_allowance(db, env)?.try_into() {
         env.gas_limit = gas_limit;
     }
 
     Ok(())
+}
+
+/// Calculates the caller gas allowance.
+///
+/// `allowance = (account.balance - tx.value) / tx.gas_price`
+///
+/// Returns an error if the caller has insufficient funds.
+/// Caution: This assumes non-zero `env.gas_price`. Otherwise, zero allowance will be returned.
+pub(crate) fn caller_gas_allowance<DB>(mut db: DB, env: &TxEnv) -> EthResult<U256>
+where
+    DB: Database,
+    EthApiError: From<<DB as Database>::Error>,
+{
+    Ok(db
+        // Get the caller account.
+        .basic(env.caller)?
+        // Get the caller balance.
+        .map(|acc| acc.balance)
+        .unwrap_or_default()
+        // Subtract transferred value from the caller balance.
+        .checked_sub(env.value)
+        // Return error if the caller has insufficient funds.
+        .ok_or_else(|| RpcInvalidTransactionError::InsufficientFunds)?
+        // Calculate the amount of gas the caller can afford with the specified gas price.
+        .checked_div(env.gas_price)
+        // This will be 0 if gas price is 0. It is fine, because we check it before.
+        .unwrap_or_default())
 }
 
 /// Helper type for representing the fees of a [CallRequest]
@@ -285,8 +374,8 @@ pub(crate) struct CallFees {
 impl CallFees {
     /// Ensures the fields of a [CallRequest] are not conflicting.
     ///
-    /// If no `gasPrice` or `maxFeePerGas` is set, then the `gas_price` in the response will
-    /// fallback to the given `basefee`.
+    /// If no `gasPrice` or `maxFeePerGas` is set, then the `gas_price` in the returned `gas_price`
+    /// will be `0`. See: <https://github.com/ethereum/go-ethereum/blob/2754b197c935ee63101cbbca2752338246384fec/internal/ethapi/transaction_args.go#L242-L255>
     fn ensure_fees(
         call_gas_price: Option<U256>,
         call_max_fee: Option<U256>,
@@ -294,14 +383,10 @@ impl CallFees {
         base_fee: U256,
     ) -> EthResult<CallFees> {
         match (call_gas_price, call_max_fee, call_priority_fee) {
-            (None, None, None) => {
-                // when none are specified, they are all set to zero
-                Ok(CallFees { gas_price: U256::ZERO, max_priority_fee_per_gas: None })
-            }
             (gas_price, None, None) => {
-                // request for a legacy transaction
-                // set everything to zero
-                let gas_price = gas_price.unwrap_or(base_fee);
+                // either legacy transaction or no fee fields are specified
+                // when no fields are specified, set gas price to zero
+                let gas_price = gas_price.unwrap_or(U256::ZERO);
                 Ok(CallFees { gas_price, max_priority_fee_per_gas: None })
             }
             (None, max_fee_per_gas, max_priority_fee_per_gas) => {
@@ -321,6 +406,34 @@ impl CallFees {
             }
             _ => Err(EthApiError::ConflictingFeeFieldsInRequest),
         }
+    }
+}
+
+/// Applies the given block overrides to the env
+fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
+    let BlockOverrides { number, difficulty, time, gas_limit, coinbase, random, base_fee } =
+        overrides;
+
+    if let Some(number) = number {
+        env.number = number;
+    }
+    if let Some(difficulty) = difficulty {
+        env.difficulty = difficulty;
+    }
+    if let Some(time) = time {
+        env.timestamp = U256::from(time.as_u64());
+    }
+    if let Some(gas_limit) = gas_limit {
+        env.gas_limit = U256::from(gas_limit.as_u64());
+    }
+    if let Some(coinbase) = coinbase {
+        env.coinbase = coinbase;
+    }
+    if let Some(random) = random {
+        env.prevrandao = Some(random);
+    }
+    if let Some(base_fee) = base_fee {
+        env.basefee = base_fee;
     }
 }
 
@@ -346,7 +459,9 @@ where
     DB: DatabaseRef,
     EthApiError: From<<DB as DatabaseRef>::Error>,
 {
-    let mut account_info = db.basic(account)?.unwrap_or_default();
+    // we need to fetch the account via the `DatabaseRef` to not update the state of the account,
+    // which is modified via `Database::basic`
+    let mut account_info = DatabaseRef::basic(db, account)?.unwrap_or_default();
 
     if let Some(nonce) = account_override.nonce {
         account_info.nonce = nonce.as_u64();
@@ -391,4 +506,44 @@ where
     };
 
     Ok(())
+}
+
+/// This clones and transforms the given [CacheDB] with an arbitrary [DatabaseRef] into a new
+/// [CacheDB] with [EmptyDB] as the database type
+#[inline]
+pub(crate) fn clone_into_empty_db<DB>(db: &CacheDB<DB>) -> CacheDB<EmptyDB>
+where
+    DB: DatabaseRef,
+{
+    CacheDB {
+        accounts: db.accounts.clone(),
+        contracts: db.contracts.clone(),
+        logs: db.logs.clone(),
+        block_hashes: db.block_hashes.clone(),
+        db: Default::default(),
+    }
+}
+
+/// Helper to get the output data from a result
+///
+/// TODO: Can be phased out when <https://github.com/bluealloy/revm/pull/509> is released
+#[inline]
+pub(crate) fn result_output(res: &ExecutionResult) -> Option<bytes::Bytes> {
+    match res {
+        ExecutionResult::Success { output, .. } => Some(output.clone().into_data()),
+        ExecutionResult::Revert { output, .. } => Some(output.clone()),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ensure_0_fallback() {
+        let CallFees { gas_price, .. } =
+            CallFees::ensure_fees(None, None, None, U256::from(99)).unwrap();
+        assert_eq!(gas_price, U256::ZERO);
+    }
 }

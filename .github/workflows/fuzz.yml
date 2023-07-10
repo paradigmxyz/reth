@@ -1,7 +1,4 @@
 on:
-  push:
-    branches:
-      - main
   pull_request:
   merge_group:
 
@@ -19,7 +16,7 @@ jobs:
     # Skip the Fuzzing Jobs until we make them run fast and reliably. Currently they will
     # always recompile the codebase for each test and that takes way too long.
     if: false
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     strategy:
       matrix:
         target:
@@ -63,8 +60,14 @@ jobs:
           flags: fuzz-tests
 
   fuzz-success:
+    if: always()
     name: fuzz success
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: all
     steps:
-      - run: echo Success!
+      # Note: This check is a dummy because we currently have fuzz tests disabled.
+      - run: echo OK.
+      #- name: Decide whether the needed jobs succeeded or failed
+      #  uses: re-actors/alls-green@release/v1
+      #  with:
+      #    jobs: ${{ toJSON(needs) }}

@@ -4,7 +4,6 @@ use reth_interfaces::{
     provider::ProviderError,
 };
 use reth_primitives::SealedHeader;
-use reth_provider::TransactionError;
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
@@ -19,6 +18,23 @@ pub enum StageError {
         /// The underlying consensus error.
         #[source]
         error: consensus::ConsensusError,
+    },
+    /// The stage encountered a downloader error where the responses cannot be attached to the
+    /// current head.
+    #[error(
+        "Stage encountered inconsistent chain. Downloaded header #{header_number} ({header_hash:?}) is detached from local head #{head_number} ({head_hash:?}). Details: {error}.",
+        header_number = header.number,
+        header_hash = header.hash,
+        head_number = local_head.number,
+        head_hash = local_head.hash,
+    )]
+    DetachedHead {
+        /// The local head we attempted to attach to.
+        local_head: SealedHeader,
+        /// The header we attempted to attach.
+        header: SealedHeader,
+        /// The error that occurred when attempting to attach the header.
+        error: Box<consensus::ConsensusError>,
     },
     /// The stage encountered a database error.
     #[error("An internal database error occurred: {0}")]
@@ -42,13 +58,13 @@ pub enum StageError {
     /// The stage encountered a database integrity error.
     #[error("A database integrity error occurred: {0}")]
     DatabaseIntegrity(#[from] ProviderError),
-    /// The stage encountered an error related to the current database transaction.
-    #[error("A database transaction error occurred: {0}")]
-    Transaction(#[from] TransactionError),
     /// Invalid download response. Applicable for stages which
     /// rely on external downloaders
     #[error("Invalid download response: {0}")]
     Download(#[from] DownloadError),
+    /// Internal error
+    #[error(transparent)]
+    Internal(#[from] reth_interfaces::Error),
     /// The stage encountered a recoverable error.
     ///
     /// These types of errors are caught by the [Pipeline][crate::Pipeline] and trigger a restart
@@ -72,8 +88,7 @@ impl StageError {
                 StageError::DatabaseIntegrity(_) |
                 StageError::StageCheckpoint(_) |
                 StageError::ChannelClosed |
-                StageError::Fatal(_) |
-                StageError::Transaction(_)
+                StageError::Fatal(_)
         )
     }
 }
@@ -87,6 +102,9 @@ pub enum PipelineError {
     /// The pipeline encountered a database error.
     #[error("A database error occurred.")]
     Database(#[from] DbError),
+    /// The pipeline encountered an irrecoverable error in one of the stages.
+    #[error("An interface error occurred.")]
+    Interface(#[from] reth_interfaces::Error),
     /// The pipeline encountered an error while trying to send an event.
     #[error("The pipeline encountered an error while trying to send an event.")]
     Channel(#[from] SendError<PipelineEvent>),

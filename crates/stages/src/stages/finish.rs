@@ -1,7 +1,7 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
 use reth_primitives::stage::{StageCheckpoint, StageId};
-use reth_provider::Transaction;
+use reth_provider::DatabaseProviderRW;
 
 /// The finish stage.
 ///
@@ -18,15 +18,15 @@ impl<DB: Database> Stage<DB> for FinishStage {
 
     async fn execute(
         &mut self,
-        _tx: &mut Transaction<'_, DB>,
+        _provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        Ok(ExecOutput { checkpoint: input.previous_stage_checkpoint(), done: true })
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
     }
 
     async fn unwind(
         &mut self,
-        _tx: &mut Transaction<'_, DB>,
+        _provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
@@ -40,7 +40,10 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestTransaction, UnwindStageTestRunner,
     };
-    use reth_interfaces::test_utils::generators::{random_header, random_header_range};
+    use reth_interfaces::test_utils::{
+        generators,
+        generators::{random_header, random_header_range},
+    };
     use reth_primitives::SealedHeader;
 
     stage_test_suite_ext!(FinishTestRunner, finish);
@@ -67,17 +70,18 @@ mod tests {
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let start = input.checkpoint().block_number;
-            let head = random_header(start, None);
+            let mut rng = generators::rng();
+            let head = random_header(&mut rng, start, None);
             self.tx.insert_headers_with_td(std::iter::once(&head))?;
 
             // use previous progress as seed size
-            let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default().block_number + 1;
+            let end = input.target.unwrap_or_default() + 1;
 
             if start + 1 >= end {
                 return Ok(Vec::default())
             }
 
-            let mut headers = random_header_range(start + 1..end, head.hash());
+            let mut headers = random_header_range(&mut rng, start + 1..end, head.hash());
             self.tx.insert_headers_with_td(headers.iter())?;
             headers.insert(0, head);
             Ok(headers)
@@ -91,8 +95,8 @@ mod tests {
             if let Some(output) = output {
                 assert!(output.done, "stage should always be done");
                 assert_eq!(
-                    output.checkpoint,
-                    input.previous_stage_checkpoint(),
+                    output.checkpoint.block_number,
+                    input.target(),
                     "stage progress should always match progress of previous stage"
                 );
             }

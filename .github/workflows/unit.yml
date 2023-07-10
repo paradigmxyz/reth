@@ -1,13 +1,11 @@
 on:
-  push:
-    branches:
-      - main
   pull_request:
   merge_group:
 
 env:
   RUSTFLAGS: -D warnings
   CARGO_TERM_COLOR: always
+  SEED: rustethereumethereumrust
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -17,7 +15,7 @@ name: unit
 jobs:
   test:
     name: test (partition ${{ matrix.partition }}/${{ strategy.job-total }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     strategy:
       matrix:
         partition: [1, 2, 3, 4]
@@ -53,7 +51,7 @@ jobs:
 
   eth-blockchain:
     name: ethereum / state tests (stable)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     env:
       RUST_LOG: info,sync=error
     steps:
@@ -85,7 +83,7 @@ jobs:
 
   doc-test:
     name: rustdoc
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v3
       - name: Install toolchain
@@ -95,8 +93,12 @@ jobs:
         run: cargo test --doc --all --all-features
 
   unit-success:
+    if: always()
     name: unit success
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [test, eth-blockchain, doc-test]
     steps:
-      - run: echo Success!
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}

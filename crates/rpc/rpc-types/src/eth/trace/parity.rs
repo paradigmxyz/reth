@@ -10,23 +10,6 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-/// Result type for parity style transaction trace
-pub type TraceResult = crate::trace::common::TraceResult<TraceOutput, String>;
-
-// === impl TraceResult ===
-
-impl TraceResult {
-    /// Wraps the result type in a [TraceResult::Success] variant
-    pub fn parity_success(result: TraceOutput) -> Self {
-        TraceResult::Success { result }
-    }
-
-    /// Wraps the result type in a [TraceResult::Error] variant
-    pub fn parity_error(error: String) -> Self {
-        TraceResult::Error { error }
-    }
-}
-
 /// Different Trace diagnostic targets.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -151,23 +134,35 @@ pub enum CallType {
     StaticCall,
 }
 
+/// Represents a certain [CallType] of a _call_ or message transaction.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CallAction {
+    /// Address of the sending account.
     pub from: Address,
+    /// Address of the destination/target account.
     pub to: Address,
+    /// Value transferred to the destination account.
     pub value: U256,
+    /// The gas available for executing the call.
     pub gas: U64,
+    /// The input data provided to the call.
     pub input: Bytes,
+    /// The type of the call.
     pub call_type: CallType,
 }
 
+/// Represents a _create_ action, either a `CREATE` operation or a CREATE transaction.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateAction {
+    /// The address of the creator.
     pub from: Address,
+    /// The value with which the new account is endowed.
     pub value: U256,
+    /// The gas available for the creation init code.
     pub gas: U64,
+    /// The init code.
     pub init: Bytes,
 }
 
@@ -181,16 +176,23 @@ pub enum RewardType {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RewardAction {
+    /// Author's address.
     pub author: Address,
+    /// Reward amount.
     pub value: U256,
+    /// Reward type.
     pub reward_type: RewardType,
 }
 
+/// Represents a _selfdestruct_ action fka `suicide`.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SelfdestructAction {
+    /// destroyed/suicided address.
     pub address: Address,
+    /// destroyed contract heir.
     pub refund_address: Address,
+    /// Balance of the contract just before it was destroyed.
     pub balance: U256,
 }
 
@@ -219,12 +221,13 @@ pub enum TraceOutput {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionTrace {
-    pub trace_address: Vec<usize>,
-    pub subtraces: usize,
     #[serde(flatten)]
     pub action: Action,
-    #[serde(flatten)]
-    pub result: Option<TraceResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub result: Option<TraceOutput>,
+    pub subtraces: usize,
+    pub trace_address: Vec<usize>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -298,4 +301,37 @@ pub struct MemoryDelta {
 pub struct StorageDelta {
     pub key: U256,
     pub val: U256,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_transaction_trace() {
+        let s = r#"{
+            "action": {
+                "from": "0x66e29f0b6b1b07071f2fde4345d512386cb66f5f",
+                "callType": "call",
+                "gas": "0x10bfc",
+                "input": "0xf6cd1e8d0000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000011c37937e080000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000ec6952892271c8ee13f12e118484e03149281c9600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000010480862479000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000002000000000000000000000000160f5f00288e9e1cc8655b327e081566e580a71d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000011c37937e080000fffffffffffffffffffffffffffffffffffffffffffffffffee3c86c81f8000000000000000000000000000000000000000000000000000000000000",
+                "to": "0x160f5f00288e9e1cc8655b327e081566e580a71d",
+                "value": "0x244b"
+            },
+            "blockHash": "0xbca9ee244882bd00a19737a66f24002a4562a949c4d5ebd03c32e04111cff536",
+            "blockNumber": 17600209,
+            "error": "Reverted",
+            "result": {
+                "gasUsed": "0x9daf",
+                "output": "0x000000000000000000000000000000000000000000000000011c37937e080000"
+            },
+            "subtraces": 3,
+            "traceAddress": [],
+            "transactionHash": "0x0e48a8d4419efaa2d3a9b8f625a1c559a4179fd19ddd10c02842965f3a7e7b63",
+            "transactionPosition": 0,
+            "type": "call"
+        }"#;
+        let val = serde_json::from_str::<TransactionTrace>(s).unwrap();
+        serde_json::to_value(val).unwrap();
+    }
 }

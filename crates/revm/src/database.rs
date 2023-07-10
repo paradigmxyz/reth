@@ -10,6 +10,7 @@ use revm::{
 pub type SubState<DB> = CacheDB<State<DB>>;
 
 /// Wrapper around StateProvider that implements revm database trait
+#[derive(Debug, Clone)]
 pub struct State<DB: StateProvider>(pub DB);
 
 impl<DB: StateProvider> State<DB> {

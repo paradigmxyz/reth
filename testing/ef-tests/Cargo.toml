@@ -1,25 +1,27 @@
 [package]
 name = "ef-tests"
-version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
-readme = "README.md"
-description = "Staged syncing primitives used in reth."
+version.workspace = true
+description = "EF testing support for reth."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 
 [features]
 ef-tests = []
 
 [dependencies]
-reth-primitives = { path = "../../crates/primitives" }
+reth-primitives = { workspace = true }
 reth-db = { path = "../../crates/storage/db", features = ["mdbx", "test-utils"] }
-reth-provider = { path = "../../crates/storage/provider" }
+reth-provider = { workspace = true }
 reth-stages = { path = "../../crates/stages" }
-reth-rlp = { path = "../../crates/rlp" }
-reth-interfaces = { path = "../../crates/interfaces" }
+reth-rlp = { workspace = true }
+reth-interfaces = { workspace = true }
 reth-revm = { path = "../../crates/revm" }
 tokio = "1.28.1"
 walkdir = "2.3.3"
 serde = "1.0.163"
-serde_json = "1.0.96"
-thiserror = "1.0.40"
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+serde_bytes = "0.11.9"

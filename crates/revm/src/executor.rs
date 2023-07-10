@@ -7,7 +7,7 @@ use crate::{
     to_reth_acc,
 };
 use reth_consensus_common::calc;
-use reth_interfaces::executor::BlockExecutionError;
+use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     Account, Address, Block, BlockNumber, Bloom, Bytecode, ChainSpec, Hardfork, Header, Receipt,
     ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
@@ -81,11 +81,13 @@ where
             if body.len() == senders.len() {
                 Ok(senders)
             } else {
-                Err(BlockExecutionError::SenderRecoveryError)
+                Err(BlockValidationError::SenderRecoveryError.into())
             }
         } else {
             body.iter()
-                .map(|tx| tx.recover_signer().ok_or(BlockExecutionError::SenderRecoveryError))
+                .map(|tx| {
+                    tx.recover_signer().ok_or(BlockValidationError::SenderRecoveryError.into())
+                })
                 .collect()
         }
     }
@@ -198,7 +200,7 @@ where
             // main execution.
             self.evm.transact()
         };
-        out.map_err(|e| BlockExecutionError::EVM { hash, message: format!("{e:?}") })
+        out.map_err(|e| BlockValidationError::EVM { hash, message: format!("{e:?}") }.into())
     }
 
     /// Runs the provided transactions and commits their state to the run-time database.
@@ -227,15 +229,16 @@ where
 
         let mut cumulative_gas_used = 0;
         let mut post_state = PostState::with_tx_capacity(block.number, block.body.len());
-        for (transaction, sender) in block.body.iter().zip(senders.into_iter()) {
+        for (transaction, sender) in block.body.iter().zip(senders) {
             // The sum of the transaction’s gas limit, Tg, and the gas utilised in this block prior,
             // must be no greater than the block’s gasLimit.
             let block_available_gas = block.header.gas_limit - cumulative_gas_used;
             if transaction.gas_limit() > block_available_gas {
-                return Err(BlockExecutionError::TransactionGasLimitMoreThanAvailableBlockGas {
+                return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
-                })
+                }
+                .into())
             }
             // Execute transaction.
             let ResultAndState { result, state } = self.transact(transaction, sender)?;
@@ -268,6 +271,27 @@ where
 
         Ok((post_state, cumulative_gas_used))
     }
+
+    /// Applies the post-block changes, assuming the poststate is generated after executing
+    /// tranactions
+    pub fn apply_post_block_changes(
+        &mut self,
+        block: &Block,
+        total_difficulty: U256,
+        mut post_state: PostState,
+    ) -> Result<PostState, BlockExecutionError> {
+        // Add block rewards
+        let balance_increments = self.post_block_balance_increments(block, total_difficulty);
+        for (address, increment) in balance_increments.into_iter() {
+            self.increment_account_balance(block.number, address, increment, &mut post_state)?;
+        }
+
+        // Perform DAO irregular state change
+        if self.chain_spec.fork(Hardfork::Dao).transitions_at_block(block.number) {
+            self.apply_dao_fork_changes(block.number, &mut post_state)?;
+        }
+        Ok(post_state)
+    }
 }
 
 impl<DB> BlockExecutor<DB> for Executor<DB>
@@ -280,28 +304,19 @@ where
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<PostState, BlockExecutionError> {
-        let (mut post_state, cumulative_gas_used) =
+        let (post_state, cumulative_gas_used) =
             self.execute_transactions(block, total_difficulty, senders)?;
 
         // Check if gas used matches the value set in header.
         if block.gas_used != cumulative_gas_used {
-            return Err(BlockExecutionError::BlockGasUsed {
+            return Err(BlockValidationError::BlockGasUsed {
                 got: cumulative_gas_used,
                 expected: block.gas_used,
-            })
+            }
+            .into())
         }
 
-        // Add block rewards
-        let balance_increments = self.post_block_balance_increments(block, total_difficulty);
-        for (address, increment) in balance_increments.into_iter() {
-            self.increment_account_balance(block.number, address, increment, &mut post_state)?;
-        }
-
-        // Perform DAO irregular state change
-        if self.chain_spec.fork(Hardfork::Dao).transitions_at_block(block.number) {
-            self.apply_dao_fork_changes(block.number, &mut post_state)?;
-        }
-        Ok(post_state)
+        self.apply_post_block_changes(block, total_difficulty, post_state)
     }
 
     fn execute_and_verify_receipt(
@@ -525,19 +540,21 @@ pub fn verify_receipt<'a>(
     let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
     let receipts_root = reth_primitives::proofs::calculate_receipt_root(&receipts_with_bloom);
     if receipts_root != expected_receipts_root {
-        return Err(BlockExecutionError::ReceiptRootDiff {
+        return Err(BlockValidationError::ReceiptRootDiff {
             got: receipts_root,
             expected: expected_receipts_root,
-        })
+        }
+        .into())
     }
 
     // Create header log bloom.
     let logs_bloom = receipts_with_bloom.iter().fold(Bloom::zero(), |bloom, r| bloom | r.bloom);
     if logs_bloom != expected_logs_bloom {
-        return Err(BlockExecutionError::BloomLogDiff {
+        return Err(BlockValidationError::BloomLogDiff {
             expected: Box::new(expected_logs_bloom),
             got: Box::new(logs_bloom),
-        })
+        }
+        .into())
     }
 
     Ok(())
@@ -637,7 +654,7 @@ mod tests {
     };
     use reth_provider::{
         post_state::{AccountChanges, Storage, StorageTransition, StorageWipe},
-        AccountProvider, BlockHashProvider, StateProvider, StateRootProvider,
+        AccountReader, BlockHashReader, StateProvider, StateRootProvider,
     };
     use reth_rlp::Decodable;
     use std::{collections::HashMap, str::FromStr};
@@ -676,14 +693,14 @@ mod tests {
         }
     }
 
-    impl AccountProvider for StateProviderTest {
+    impl AccountReader for StateProviderTest {
         fn basic_account(&self, address: Address) -> reth_interfaces::Result<Option<Account>> {
             let ret = Ok(self.accounts.get(&address).map(|(_, acc)| *acc));
             ret
         }
     }
 
-    impl BlockHashProvider for StateProviderTest {
+    impl BlockHashReader for StateProviderTest {
         fn block_hash(&self, number: u64) -> reth_interfaces::Result<Option<H256>> {
             Ok(self.block_hash.get(&number).cloned())
         }

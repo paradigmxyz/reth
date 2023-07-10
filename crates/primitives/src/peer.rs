@@ -52,3 +52,10 @@ impl<T> WithPeerId<T> {
         WithPeerId(self.0, op(self.1))
     }
 }
+
+impl<T> WithPeerId<Option<T>> {
+    /// returns `None` if the inner value is `None`, otherwise returns `Some(WithPeerId<T>)`.
+    pub fn transpose(self) -> Option<WithPeerId<T>> {
+        self.1.map(|v| WithPeerId(self.0, v))
+    }
+}

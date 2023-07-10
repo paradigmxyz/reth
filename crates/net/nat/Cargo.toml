@@ -1,9 +1,11 @@
 [package]
 name = "reth-net-nat"
-version = "0.1.0"
-edition = "2021"
-license = "Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = """
 Helpers for working around NAT
 """
@@ -13,21 +15,18 @@ Helpers for working around NAT
 # nat
 public-ip = "0.2"
 ## fork of rust-igd with ipv6 support: https://github.com/sbstp/rust-igd/issues/47
-igd = { git = "https://github.com/stevefan1999-personal/rust-igd", features = [
-    "aio",
-    "tokio1",
-] }
+igd = { git = "https://github.com/stevefan1999-personal/rust-igd", features = ["aio", "tokio1"] }
 
 # misc
 tracing = { workspace = true }
 pin-project-lite = "0.2.9"
-tokio = { version = "1", features = ["time"] }
-thiserror = "1.0"
+tokio = { workspace = true, features = ["time"] }
+thiserror = { workspace = true }
 serde_with = { version = "2.1.0", optional = true }
 
 [dev-dependencies]
 reth-tracing = { path = "../../tracing" }
-tokio = { version = "1", features = ["macros"] }
+tokio = { workspace = true, features = ["macros"] }
 
 [features]
 default = ["serde"]

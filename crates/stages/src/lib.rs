@@ -1,3 +1,9 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+)]
 #![warn(missing_debug_implementations, missing_docs, unreachable_pub)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
@@ -20,7 +26,7 @@
 //!
 //! ```
 //! # use std::sync::Arc;
-//! # use reth_db::mdbx::test_utils::create_test_rw_db;
+//! # use reth_db::test_utils::create_test_rw_db;
 //! # use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 //! # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
 //! # use reth_interfaces::consensus::Consensus;
@@ -43,7 +49,7 @@
 //! #    db.clone()
 //! # );
 //! # let (tip_tx, tip_rx) = watch::channel(H256::default());
-//! # let factory = Factory::new(Arc::new(MAINNET.clone()));
+//! # let factory = Factory::new(MAINNET.clone());
 //! // Create a pipeline that can fully sync
 //! # let pipeline =
 //! Pipeline::builder()
@@ -51,9 +57,14 @@
 //!     .add_stages(
 //!         DefaultStages::new(HeaderSyncMode::Tip(tip_rx), consensus, headers_downloader, bodies_downloader, factory)
 //!     )
-//!     .build(db);
+//!     .build(db, MAINNET.clone());
 //! ```
+//!
+//! ## Feature Flags
+//!
+//! - `test-utils`: Export utilities for testing
 mod error;
+mod metrics;
 mod pipeline;
 mod stage;
 mod util;
@@ -71,5 +82,6 @@ pub mod stages;
 pub mod sets;
 
 pub use error::*;
+pub use metrics::*;
 pub use pipeline::*;
 pub use stage::*;

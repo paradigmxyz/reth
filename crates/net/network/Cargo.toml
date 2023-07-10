@@ -1,10 +1,11 @@
 [package]
 name = "reth-network"
-version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
-readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = """
 Ethereum network support
 """
@@ -12,84 +13,80 @@ Ethereum network support
 [package.metadata.cargo-udeps.ignore]
 normal = [
     # Used for diagrams in docs
-    "aquamarine"
+    "aquamarine",
 ]
 
 [dependencies]
 # reth
-reth-interfaces = { path = "../../interfaces" }
-reth-primitives = { path = "../../primitives" }
+reth-interfaces = { workspace = true }
+reth-primitives = { workspace = true }
 reth-net-common = { path = "../common" }
-reth-network-api = { path = "../network-api" }
+reth-network-api = { workspace = true }
 reth-discv4 = { path = "../discv4" }
 reth-dns-discovery = { path = "../dns" }
 reth-eth-wire = { path = "../eth-wire" }
 reth-ecies = { path = "../ecies" }
-reth-rlp = { path = "../../rlp" }
+reth-rlp = { workspace = true }
 reth-rlp-derive = { path = "../../rlp/rlp-derive" }
-reth-tasks = { path = "../../tasks" }
-reth-transaction-pool = { path = "../../transaction-pool" }
-reth-provider = { path = "../../storage/provider"}
-reth-metrics = { path = "../../metrics", features = ["common"] }
-reth-rpc-types = { path = "../../rpc/rpc-types" }
+reth-tasks = { workspace = true }
+reth-transaction-pool = { workspace = true }
+reth-provider = { workspace = true }
+reth-metrics = { workspace = true, features = ["common"] }
+reth-rpc-types = { workspace = true }
 
 # async/futures
-futures = "0.3"
-pin-project = "1.0"
-tokio = { version = "1", features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
-tokio-stream = "0.1"
-tokio-util = { version = "0.7", features = ["codec"] }
+futures = { workspace = true }
+pin-project = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true, features = ["codec"] }
 
 # io
-serde = { version = "1.0", optional = true }
+serde = { workspace = true, optional = true }
 humantime-serde = { version = "1.1", optional = true }
-serde_json = { version = "1.0", optional = true }
+serde_json = { workspace = true, optional = true }
 
 # misc
 auto_impl = "1"
 aquamarine = "0.3.0"
 tracing = { workspace = true }
 fnv = "1.0"
-thiserror = "1.0"
+thiserror = { workspace = true }
 parking_lot = "0.12"
-async-trait = "0.1"
+async-trait = { workspace = true }
 linked_hash_set = "0.1"
 linked-hash-map = "0.5.6"
-rand = "0.8"
-secp256k1 = { version = "0.27.0", features = [
-    "global-context",
-    "rand-std",
-    "recovery",
-] }
+rand = { workspace = true }
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
 enr = { version = "0.8.1", features = ["rust-secp256k1"], optional = true }
-ethers-core = { version = "2.0.7", default-features = false, optional = true }
+ethers-core = { workspace = true, default-features = false, optional = true }
 tempfile = { version = "3.3", optional = true }
 
 [dev-dependencies]
 # reth
 reth-discv4 = { path = "../discv4", features = ["test-utils"] }
-reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
+reth-interfaces = { workspace = true, features = ["test-utils"] }
 
 # we need to enable the test-utils feature in our own crate to use utils in
 # integration tests
 reth-network = { path = ".", features = ["test-utils"] }
 
-reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing = { path = "../../tracing" }
-reth-transaction-pool = { path = "../../transaction-pool", features = ["test-utils"] }
+reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 
-ethers-core = { version = "2.0.7", default-features = false}
-ethers-providers = {version = "2.0.7", default-features = false }
-ethers-signers = {version = "2.0.7", default-features = false }
-ethers-middleware = {version = "2.0.7", default-features = false }
+ethers-core = { workspace = true, default-features = false }
+ethers-providers = { workspace = true, default-features = false, features = ["ws"] }
+ethers-signers = { workspace = true, default-features = false }
+ethers-middleware = { workspace = true, default-features = false }
 
 enr = { version = "0.8.1", features = ["serde", "rust-secp256k1"] }
 
 # misc
 hex = "0.4"
 tempfile = "3.3"
-serial_test = "0.10"
+serial_test = "2.0"
 
 [features]
 default = ["serde"]

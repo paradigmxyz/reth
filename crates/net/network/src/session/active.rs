@@ -19,7 +19,7 @@ use reth_eth_wire::{
     DisconnectReason, EthMessage, EthStream, P2PStream,
 };
 use reth_interfaces::p2p::error::RequestError;
-use reth_metrics::common::metered_sender::MeteredSender;
+use reth_metrics::common::mpsc::MeteredSender;
 use reth_net_common::bandwidth_meter::MeteredStream;
 use reth_primitives::PeerId;
 use std::{
@@ -37,7 +37,7 @@ use tokio::{
     time::Interval,
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, info, trace};
 
 /// Constants for timeout updating
 
@@ -76,7 +76,7 @@ pub(crate) struct ActiveSession {
     /// Incoming commands from the manager
     pub(crate) commands_rx: ReceiverStream<SessionCommand>,
     /// Sink to send messages to the [`SessionManager`](super::SessionManager).
-    pub(crate) to_session: MeteredSender<ActiveSessionMessage>,
+    pub(crate) to_session_manager: MeteredSender<ActiveSessionMessage>,
     /// A message that needs to be delivered to the session manager
     pub(crate) pending_message_to_session: Option<ActiveSessionMessage>,
     /// Incoming request to send to delegate to the remote peer.
@@ -107,6 +107,12 @@ impl ActiveSession {
         let id = self.next_id;
         self.next_id += 1;
         id
+    }
+
+    /// Shrinks the capacity of the internal buffers.
+    pub fn shrink_to_fit(&mut self) {
+        self.received_requests_from_remote.shrink_to_fit();
+        self.queued_outgoing.shrink_to_fit();
     }
 
     /// Handle a message read from the connection.
@@ -265,7 +271,7 @@ impl ActiveSession {
                 unreachable!("Not emitted by network")
             }
             PeerMessage::Other(other) => {
-                error!(target : "net::session", message_id=%other.id, "Ignoring unsupported message");
+                debug!(target : "net::session", message_id=%other.id, "Ignoring unsupported message");
             }
         }
     }
@@ -283,7 +289,7 @@ impl ActiveSession {
                 self.queued_outgoing.push_back(msg.into());
             }
             Err(err) => {
-                error!(target : "net", ?err, "Failed to respond to received request");
+                debug!(target : "net", ?err, "Failed to respond to received request");
             }
         }
     }
@@ -294,7 +300,7 @@ impl ActiveSession {
     #[allow(clippy::result_large_err)]
     fn try_emit_broadcast(&self, message: PeerMessage) -> Result<(), ActiveSessionMessage> {
         match self
-            .to_session
+            .to_session_manager
             .try_send(ActiveSessionMessage::ValidMessage { peer_id: self.remote_peer_id, message })
         {
             Ok(_) => Ok(()),
@@ -319,7 +325,7 @@ impl ActiveSession {
     #[allow(clippy::result_large_err)]
     fn try_emit_request(&self, message: PeerMessage) -> Result<(), ActiveSessionMessage> {
         match self
-            .to_session
+            .to_session_manager
             .try_send(ActiveSessionMessage::ValidMessage { peer_id: self.remote_peer_id, message })
         {
             Ok(_) => Ok(()),
@@ -344,7 +350,7 @@ impl ActiveSession {
     /// Notify the manager that the peer sent a bad message
     fn on_bad_message(&self) {
         let _ = self
-            .to_session
+            .to_session_manager
             .try_send(ActiveSessionMessage::BadMessage { peer_id: self.remote_peer_id });
     }
 
@@ -352,7 +358,7 @@ impl ActiveSession {
     fn emit_disconnect(&self) {
         trace!(target: "net::session", remote_peer_id=?self.remote_peer_id, "emitting disconnect");
         // NOTE: we clone here so there's enough capacity to deliver this message
-        let _ = self.to_session.clone().try_send(ActiveSessionMessage::Disconnected {
+        let _ = self.to_session_manager.clone().try_send(ActiveSessionMessage::Disconnected {
             peer_id: self.remote_peer_id,
             remote_addr: self.remote_addr,
         });
@@ -361,11 +367,13 @@ impl ActiveSession {
     /// Report back that this session has been closed due to an error
     fn close_on_error(&self, error: EthStreamError) {
         // NOTE: we clone here so there's enough capacity to deliver this message
-        let _ = self.to_session.clone().try_send(ActiveSessionMessage::ClosedOnConnectionError {
-            peer_id: self.remote_peer_id,
-            remote_addr: self.remote_addr,
-            error,
-        });
+        let _ = self.to_session_manager.clone().try_send(
+            ActiveSessionMessage::ClosedOnConnectionError {
+                peer_id: self.remote_peer_id,
+                remote_addr: self.remote_addr,
+                error,
+            },
+        );
     }
 
     /// Starts the disconnect process
@@ -395,7 +403,7 @@ impl ActiveSession {
                 self.poll_disconnect(cx)
             }
             Err(err) => {
-                error!(target: "net::session", ?err, remote_peer_id=?self.remote_peer_id, "could not send disconnect");
+                debug!(target: "net::session", ?err, remote_peer_id=?self.remote_peer_id, "could not send disconnect");
                 self.close_on_error(err);
                 Poll::Ready(())
             }
@@ -437,17 +445,6 @@ impl ActiveSession {
     }
 }
 
-/// Calculates a new timeout using an updated estimation of the RTT
-#[inline]
-fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> Duration {
-    let new_timeout = estimated_rtt.mul_f64(SAMPLE_IMPACT) * TIMEOUT_SCALING;
-
-    // this dampens sudden changes by taking a weighted mean of the old and new values
-    let smoothened_timeout = current_timeout.mul_f64(1.0 - SAMPLE_IMPACT) + new_timeout;
-
-    smoothened_timeout.clamp(MINIMUM_TIMEOUT, MAXIMUM_TIMEOUT)
-}
-
 impl Future for ActiveSession {
     type Output = ();
 
@@ -458,7 +455,15 @@ impl Future for ActiveSession {
             return this.poll_disconnect(cx)
         }
 
-        loop {
+        // The receive loop can be CPU intensive since it involves message decoding which could take
+        // up a lot of resources and increase latencies for other sessions if not yielded manually.
+        // If the budget is exhausted we manually yield back control to the (coop) scheduler. This
+        // manual yield point should prevent situations where polling appears to be frozen. See also <https://tokio.rs/blog/2020-04-preemption>
+        // And tokio's docs on cooperative scheduling <https://docs.rs/tokio/latest/tokio/task/#cooperative-scheduling>
+        let mut budget = 4;
+
+        // The main poll loop that drives the session
+        'main: loop {
             let mut progress = false;
 
             // we prioritize incoming commands sent from the session manager
@@ -474,7 +479,7 @@ impl Future for ActiveSession {
                         progress = true;
                         match cmd {
                             SessionCommand::Disconnect { reason } => {
-                                info!(target: "net::session", ?reason, remote_peer_id=?this.remote_peer_id, "session received disconnect command");
+                                info!(target: "net::session", ?reason, remote_peer_id=?this.remote_peer_id, "Received disconnect command for session");
                                 let reason =
                                     reason.unwrap_or(DisconnectReason::DisconnectRequested);
 
@@ -519,7 +524,7 @@ impl Future for ActiveSession {
                         OutgoingMessage::Broadcast(msg) => this.conn.start_send_broadcast(msg),
                     };
                     if let Err(err) = res {
-                        error!(target: "net::session", ?err,  remote_peer_id=?this.remote_peer_id, "failed to send message");
+                        debug!(target: "net::session", ?err,  remote_peer_id=?this.remote_peer_id, "failed to send message");
                         // notify the manager
                         this.close_on_error(err);
                         return Poll::Ready(())
@@ -532,10 +537,18 @@ impl Future for ActiveSession {
 
             // read incoming messages from the wire
             'receive: loop {
+                // ensure we still have enough budget for another iteration
+                budget -= 1;
+                if budget == 0 {
+                    // make sure we're woken up again
+                    cx.waker().wake_by_ref();
+                    break 'main
+                }
+
                 // try to resend the pending message that we could not send because the channel was
                 // full.
                 if let Some(msg) = this.pending_message_to_session.take() {
-                    match this.to_session.try_send(msg) {
+                    match this.to_session_manager.try_send(msg) {
                         Ok(_) => {}
                         Err(err) => {
                             match err {
@@ -573,7 +586,7 @@ impl Future for ActiveSession {
                                         progress = true;
                                     }
                                     OnIncomingMessageOutcome::BadMessage { error, message } => {
-                                        error!(target: "net::session", ?error, msg=?message,  remote_peer_id=?this.remote_peer_id, "received invalid protocol message");
+                                        debug!(target: "net::session", ?error, msg=?message,  remote_peer_id=?this.remote_peer_id, "received invalid protocol message");
                                         this.close_on_error(error);
                                         return Poll::Ready(())
                                     }
@@ -595,19 +608,23 @@ impl Future for ActiveSession {
             }
 
             if !progress {
-                if this.internal_request_timeout_interval.poll_tick(cx).is_ready() {
-                    let _ = this.internal_request_timeout_interval.poll_tick(cx);
-                    // check for timed out requests
-                    if this.check_timed_out_requests(Instant::now()) {
-                        let _ = this.to_session.clone().try_send(
-                            ActiveSessionMessage::ProtocolBreach { peer_id: this.remote_peer_id },
-                        );
-                    }
-                }
-
-                return Poll::Pending
+                break 'main
             }
         }
+
+        if this.internal_request_timeout_interval.poll_tick(cx).is_ready() {
+            let _ = this.internal_request_timeout_interval.poll_tick(cx);
+            // check for timed out requests
+            if this.check_timed_out_requests(Instant::now()) {
+                let _ = this.to_session_manager.clone().try_send(
+                    ActiveSessionMessage::ProtocolBreach { peer_id: this.remote_peer_id },
+                );
+            }
+        }
+
+        this.shrink_to_fit();
+
+        Poll::Pending
     }
 }
 
@@ -703,6 +720,16 @@ impl From<EthBroadcastMessage> for OutgoingMessage {
     }
 }
 
+/// Calculates a new timeout using an updated estimation of the RTT
+#[inline]
+fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> Duration {
+    let new_timeout = estimated_rtt.mul_f64(SAMPLE_IMPACT) * TIMEOUT_SCALING;
+
+    // this dampens sudden changes by taking a weighted mean of the old and new values
+    let smoothened_timeout = current_timeout.mul_f64(1.0 - SAMPLE_IMPACT) + new_timeout;
+
+    smoothened_timeout.clamp(MINIMUM_TIMEOUT, MAXIMUM_TIMEOUT)
+}
 #[cfg(test)]
 mod tests {
     #![allow(dead_code)]
@@ -822,7 +849,7 @@ mod tests {
                         remote_capabilities: Arc::clone(&capabilities),
                         session_id,
                         commands_rx: ReceiverStream::new(commands_rx),
-                        to_session: MeteredSender::new(
+                        to_session_manager: MeteredSender::new(
                             self.active_session_tx.clone(),
                             "network_active_session",
                         ),

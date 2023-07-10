@@ -1,6 +1,6 @@
 //! The internal transaction pool implementation.
 use crate::{
-    config::MAX_ACCOUNT_SLOTS_PER_SENDER,
+    config::TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
     error::{InvalidPoolTransactionError, PoolError},
     identifier::{SenderId, TransactionId},
     metrics::TxPoolMetrics,
@@ -13,10 +13,14 @@ use crate::{
         AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
     },
     traits::{BlockInfo, PoolSize},
-    PoolConfig, PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
+    PoolConfig, PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, PRICE_BUMP,
+    U256,
 };
 use fnv::FnvHashMap;
-use reth_primitives::{constants::MIN_PROTOCOL_BASE_FEE, TxHash, H256};
+use reth_primitives::{
+    constants::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE},
+    TxHash, H256,
+};
 use std::{
     cmp::Ordering,
     collections::{btree_map::Entry, hash_map, BTreeMap, HashMap},
@@ -116,6 +120,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             basefee_size: self.basefee_pool.size(),
             queued: self.queued_pool.len(),
             queued_size: self.queued_pool.size(),
+            total: self.all_transactions.len(),
         }
     }
 
@@ -268,6 +273,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.metrics.basefee_pool_size_bytes.set(stats.basefee_size as f64);
         self.metrics.queued_pool_transactions.set(stats.queued as f64);
         self.metrics.queued_pool_size_bytes.set(stats.queued_size as f64);
+        self.metrics.total_transactions.set(stats.total as f64);
     }
 
     /// Adds the transaction into the pool.
@@ -308,20 +314,22 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
             Ok(InsertOk { transaction, move_to, replaced_tx, updates, .. }) => {
-                self.add_new_transaction(transaction.clone(), replaced_tx, move_to);
+                self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
                 // Update inserted transactions metric
                 self.metrics.inserted_transactions.increment(1);
                 let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
 
                 // This transaction was moved to the pending pool.
+                let replaced = replaced_tx.map(|(tx, _)| tx);
                 let res = if move_to.is_pending() {
                     AddedTransaction::Pending(AddedPendingTransaction {
                         transaction,
                         promoted,
                         discarded,
+                        replaced,
                     })
                 } else {
-                    AddedTransaction::Parked { transaction, subpool: move_to }
+                    AddedTransaction::Parked { transaction, subpool: move_to, replaced }
                 };
 
                 Ok(res)
@@ -629,6 +637,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 
     /// Returns an iterator over all _unique_ hashes in the pool
+    #[allow(unused)]
     pub(crate) fn hashes_iter(&self) -> impl Iterator<Item = TxHash> + '_ {
         self.by_hash.keys().copied()
     }
@@ -744,7 +753,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     tx.state.insert(TxState::NO_NONCE_GAPS);
                     tx.state.insert(TxState::NO_PARKED_ANCESTORS);
                     tx.cumulative_cost = U256::ZERO;
-                    if tx.transaction.cost > info.balance {
+                    if tx.transaction.cost() > info.balance {
                         // sender lacks sufficient funds to pay for this transaction
                         tx.state.remove(TxState::ENOUGH_BALANCE);
                     } else {
@@ -968,6 +977,25 @@ impl<T: PoolTransaction> AllTransactions<T> {
         Ok(transaction)
     }
 
+    /// Returns true if `transaction_a` is underpriced compared to `transaction_B`.
+    fn is_underpriced(
+        transaction_a: &ValidPoolTransaction<T>,
+        transaction_b: &ValidPoolTransaction<T>,
+        price_bump: u128,
+    ) -> bool {
+        let tx_a_max_priority_fee_per_gas =
+            transaction_a.transaction.max_priority_fee_per_gas().unwrap_or(0);
+        let tx_b_max_priority_fee_per_gas =
+            transaction_b.transaction.max_priority_fee_per_gas().unwrap_or(0);
+
+        transaction_a.max_fee_per_gas() <=
+            transaction_b.max_fee_per_gas() * (100 + price_bump) / 100 ||
+            (tx_a_max_priority_fee_per_gas <=
+                tx_b_max_priority_fee_per_gas * (100 + price_bump) / 100 &&
+                tx_a_max_priority_fee_per_gas != 0 &&
+                tx_b_max_priority_fee_per_gas != 0)
+    }
+
     /// Inserts a new transaction into the pool.
     ///
     /// If the transaction already exists, it will be replaced if not underpriced.
@@ -1035,7 +1063,12 @@ impl<T: PoolTransaction> AllTransactions<T> {
             Entry::Occupied(mut entry) => {
                 // Transaction already exists
                 // Ensure the new transaction is not underpriced
-                if transaction.is_underpriced(entry.get().transaction.as_ref()) {
+
+                if Self::is_underpriced(
+                    transaction.as_ref(),
+                    entry.get().transaction.as_ref(),
+                    PRICE_BUMP,
+                ) {
                     return Err(InsertErr::Underpriced {
                         transaction: pool_tx.transaction,
                         existing: *entry.get().transaction.hash(),
@@ -1161,9 +1194,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
 impl<T: PoolTransaction> Default for AllTransactions<T> {
     fn default() -> Self {
         Self {
-            max_account_slots: MAX_ACCOUNT_SLOTS_PER_SENDER,
+            max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
-            block_gas_limit: 30_000_000,
+            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             by_hash: Default::default(),
             txs: Default::default(),
             tx_counter: Default::default(),
@@ -1240,7 +1273,7 @@ pub(crate) struct PoolInternalTransaction<T: PoolTransaction> {
 
 impl<T: PoolTransaction> PoolInternalTransaction<T> {
     fn next_cumulative_cost(&self) -> U256 {
-        self.cumulative_cost + self.transaction.cost
+        self.cumulative_cost + self.transaction.cost()
     }
 }
 
@@ -1405,6 +1438,21 @@ mod tests {
         assert!(!pool.contains(first.hash()));
         assert!(pool.contains(replacement.hash()));
         assert_eq!(pool.len(), 1);
+    }
+
+    #[test]
+    fn insert_replace_underpriced() {
+        let on_chain_balance = U256::ZERO;
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+        let tx = MockTransaction::eip1559().inc_price().inc_limit();
+        let first = f.validated(tx.clone());
+        let _res = pool.insert_tx(first, on_chain_balance, on_chain_nonce);
+        let mut replacement = f.validated(tx.rng_hash());
+        replacement.transaction = replacement.transaction.decr_price();
+        let err = pool.insert_tx(replacement, on_chain_balance, on_chain_nonce).unwrap_err();
+        assert!(matches!(err, InsertErr::Underpriced { .. }));
     }
 
     // insert nonce then nonce - 1

@@ -1,6 +1,6 @@
 use crate::tracing::{
     types::{CallKind, LogCallOrder, RawLog},
-    utils::{gas_used, get_create_address},
+    utils::get_create_address,
 };
 pub use arena::CallTraceArena;
 use reth_primitives::{bytes::Bytes, Address, H256, U256};
@@ -21,11 +21,21 @@ mod fourbyte;
 mod opcount;
 mod types;
 mod utils;
-use crate::tracing::types::StorageChange;
-pub use builder::{geth::GethTraceBuilder, parity::ParityTraceBuilder};
+use crate::tracing::{
+    arena::PushTraceKind,
+    types::{CallTraceNode, StorageChange},
+    utils::gas_used,
+};
+pub use builder::{
+    geth::{self, GethTraceBuilder},
+    parity::{self, ParityTraceBuilder},
+};
 pub use config::TracingInspectorConfig;
 pub use fourbyte::FourByteInspector;
 pub use opcount::OpcodeCountInspector;
+
+#[cfg(feature = "js-tracer")]
+pub mod js;
 
 /// An inspector that collects call traces.
 ///
@@ -76,7 +86,41 @@ impl TracingInspector {
         GethTraceBuilder::new(self.traces.arena, self.config)
     }
 
+    /// Returns true if we're no longer in the context of the root call.
+    fn is_deep(&self) -> bool {
+        // the root call will always be the first entry in the trace stack
+        !self.trace_stack.is_empty()
+    }
+
+    /// Returns true if this a call to a precompile contract.
+    ///
+    /// Returns true if the `to` address is a precompile contract and the value is zero.
+    #[inline]
+    fn is_precompile_call<DB: Database>(
+        &self,
+        data: &EVMData<'_, DB>,
+        to: &Address,
+        value: U256,
+    ) -> bool {
+        if data.precompiles.contains(to) {
+            // only if this is _not_ the root call
+            return self.is_deep() && value == U256::ZERO
+        }
+        false
+    }
+
+    /// Returns the currently active call trace.
+    ///
+    /// This will be the last call trace pushed to the stack: the call we entered most recently.
+    #[track_caller]
+    #[inline]
+    fn active_trace(&self) -> Option<&CallTraceNode> {
+        self.trace_stack.last().map(|idx| &self.traces.arena[*idx])
+    }
+
     /// Returns the last trace [CallTrace] index from the stack.
+    ///
+    /// This will be the currently active call trace.
     ///
     /// # Panics
     ///
@@ -101,6 +145,7 @@ impl TracingInspector {
     /// Starts tracking a new trace.
     ///
     /// Invoked on [Inspector::call].
+    #[allow(clippy::too_many_arguments)]
     fn start_trace_on_call(
         &mut self,
         depth: usize,
@@ -109,9 +154,21 @@ impl TracingInspector {
         value: U256,
         kind: CallKind,
         caller: Address,
+        gas_limit: u64,
+        maybe_precompile: Option<bool>,
     ) {
+        // This will only be true if the inspector is configured to exclude precompiles and the call
+        // is to a precompile
+        let push_kind = if maybe_precompile.unwrap_or(false) {
+            // We don't want to track precompiles
+            PushTraceKind::PushOnly
+        } else {
+            PushTraceKind::PushAndAttachToParent
+        };
+
         self.trace_stack.push(self.traces.push_trace(
             0,
+            push_kind,
             CallTrace {
                 depth,
                 address,
@@ -120,7 +177,8 @@ impl TracingInspector {
                 value,
                 status: InstructionResult::Continue,
                 caller,
-                last_call_return_value: self.last_call_return_data.clone(),
+                maybe_precompile,
+                gas_limit,
                 ..Default::default()
             },
         ));
@@ -133,21 +191,29 @@ impl TracingInspector {
     /// # Panics
     ///
     /// This expects an existing trace [Self::start_trace_on_call]
-    fn fill_trace_on_call_end(
+    fn fill_trace_on_call_end<DB: Database>(
         &mut self,
+        data: &EVMData<'_, DB>,
         status: InstructionResult,
-        gas_used: u64,
+        gas: &Gas,
         output: Bytes,
         created_address: Option<Address>,
     ) {
         let trace_idx = self.pop_trace_idx();
         let trace = &mut self.traces.arena[trace_idx].trace;
 
-        let success = matches!(status, return_ok!());
+        if trace_idx == 0 {
+            // this is the root call which should get the gas used of the transaction
+            // refunds are applied after execution, which is when the root call ends
+            trace.gas_used = gas_used(data.env.cfg.spec_id, gas.spend(), gas.refunded() as u64);
+        } else {
+            trace.gas_used = gas.spend();
+        }
+
         trace.status = status;
-        trace.success = success;
-        trace.gas_used = gas_used;
+        trace.success = matches!(status, return_ok!());
         trace.output = output.clone();
+
         self.last_call_return_data = Some(output);
 
         if let Some(address) = created_address {
@@ -177,16 +243,25 @@ impl TracingInspector {
         let stack =
             self.config.record_stack_snapshots.then(|| interp.stack.clone()).unwrap_or_default();
 
+        let op = OpCode::try_from_u8(interp.contract.bytecode.bytecode()[pc])
+            .or_else(|| {
+                // if the opcode is invalid, we'll use the invalid opcode to represent it because
+                // this is invoked before the opcode is executed, the evm will eventually return a
+                // `Halt` with invalid/unknown opcode as result
+                let invalid_opcode = 0xfe;
+                OpCode::try_from_u8(invalid_opcode)
+            })
+            .expect("is valid opcode;");
+
         trace.trace.steps.push(CallTraceStep {
             depth: data.journaled_state.depth(),
             pc,
-            op: OpCode::try_from_u8(interp.contract.bytecode.bytecode()[pc])
-                .expect("is valid opcode;"),
+            op,
             contract: interp.contract.address,
             stack,
             memory,
             memory_size: interp.memory.len(),
-            gas: self.gas_inspector.gas_remaining(),
+            gas_remaining: self.gas_inspector.gas_remaining(),
             gas_refund_counter: interp.gas.refunded() as u64,
 
             // fields will be populated end of call
@@ -208,6 +283,13 @@ impl TracingInspector {
         let StackStep { trace_idx, step_idx } =
             self.step_stack.pop().expect("can't fill step without starting a step first");
         let step = &mut self.traces.arena[trace_idx].trace.steps[step_idx];
+
+        if self.config.record_memory_snapshots {
+            // resize memory so opcodes that allocated memory is correctly displayed
+            if interp.memory.len() > step.memory.len() {
+                step.memory.resize(interp.memory.len());
+            }
+        }
 
         if let Some(pc) = interp.program_counter().checked_sub(1) {
             if self.config.record_state_diff {
@@ -237,7 +319,9 @@ impl TracingInspector {
                 };
             }
 
-            step.gas_cost = step.gas - self.gas_inspector.gas_remaining();
+            // The gas cost is the difference between the recorded gas remaining at the start of the
+            // step the remaining gas here, at the end of the step.
+            step.gas_cost = step.gas_remaining - self.gas_inspector.gas_remaining();
         }
 
         // set the status
@@ -283,8 +367,11 @@ where
 
         let trace_idx = self.last_trace_idx();
         let trace = &mut self.traces.arena[trace_idx];
-        trace.ordering.push(LogCallOrder::Log(trace.logs.len()));
-        trace.logs.push(RawLog { topics: topics.to_vec(), data: data.clone() });
+
+        if self.config.record_logs {
+            trace.ordering.push(LogCallOrder::Log(trace.logs.len()));
+            trace.logs.push(RawLog { topics: topics.to_vec(), data: data.clone() });
+        }
     }
 
     fn step_end(
@@ -310,7 +397,7 @@ where
     ) -> (InstructionResult, Gas, Bytes) {
         self.gas_inspector.call(data, inputs, is_static);
 
-        // determine correct `from` and `to`  based on the call scheme
+        // determine correct `from` and `to` based on the call scheme
         let (from, to) = match inputs.context.scheme {
             CallScheme::DelegateCall | CallScheme::CallCode => {
                 (inputs.context.address, inputs.context.code_address)
@@ -318,13 +405,30 @@ where
             _ => (inputs.context.caller, inputs.context.address),
         };
 
+        let value = if matches!(inputs.context.scheme, CallScheme::DelegateCall) {
+            // for delegate calls we need to use the value of the top trace
+            if let Some(parent) = self.active_trace() {
+                parent.trace.value
+            } else {
+                inputs.transfer.value
+            }
+        } else {
+            inputs.transfer.value
+        };
+
+        // if calls to precompiles should be excluded, check whether this is a call to a precompile
+        let maybe_precompile =
+            self.config.exclude_precompile_calls.then(|| self.is_precompile_call(data, &to, value));
+
         self.start_trace_on_call(
             data.journaled_state.depth() as usize,
             to,
             inputs.input.clone(),
-            inputs.transfer.value,
+            value,
             inputs.context.scheme.into(),
             from,
+            inputs.gas_limit,
+            maybe_precompile,
         );
 
         (InstructionResult::Continue, Gas::new(0), Bytes::new())
@@ -341,12 +445,7 @@ where
     ) -> (InstructionResult, Gas, Bytes) {
         self.gas_inspector.call_end(data, inputs, gas, ret, out.clone(), is_static);
 
-        self.fill_trace_on_call_end(
-            ret,
-            gas_used(data.env.cfg.spec_id, gas.spend(), gas.refunded() as u64),
-            out.clone(),
-            None,
-        );
+        self.fill_trace_on_call_end(data, ret, &gas, out.clone(), None);
 
         (ret, gas, out)
     }
@@ -367,6 +466,8 @@ where
             inputs.value,
             inputs.scheme.into(),
             inputs.caller,
+            inputs.gas_limit,
+            Some(false),
         );
 
         (InstructionResult::Continue, None, Gas::new(inputs.gas_limit), Bytes::default())
@@ -399,12 +500,7 @@ where
             })
             .unwrap_or_default();
 
-        self.fill_trace_on_call_end(
-            status,
-            gas_used(data.env.cfg.spec_id, gas.spend(), gas.refunded() as u64),
-            code.into(),
-            address,
-        );
+        self.fill_trace_on_call_end(data, status, &gas, code.into(), address);
 
         (status, address, gas, retdata)
     }

@@ -23,7 +23,7 @@ use crate::{
     import::{BlockImport, BlockImportOutcome, BlockValidation},
     listener::ConnectionListener,
     message::{NewBlockMessage, PeerMessage, PeerRequest, PeerRequestSender},
-    metrics::{DisconnectMetrics, NetworkMetrics},
+    metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
     network::{NetworkHandle, NetworkHandleMessage},
     peers::{PeersHandle, PeersManager},
     session::SessionManager,
@@ -38,10 +38,11 @@ use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     DisconnectReason, EthVersion, Status,
 };
+use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::ReputationChangeKind;
 use reth_primitives::{listener::EventListeners, NodeRecord, PeerId, H256};
-use reth_provider::BlockProvider;
+use reth_provider::BlockReader;
 use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
 use std::{
     net::SocketAddr,
@@ -54,7 +55,8 @@ use std::{
 };
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
+
 /// Manages the _entire_ state of the network.
 ///
 /// This is an endless [`Future`] that consistently drives the state of the entire network forward.
@@ -97,7 +99,7 @@ pub struct NetworkManager<C> {
     event_listeners: EventListeners<NetworkEvent>,
     /// Sender half to send events to the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager) task, if configured.
-    to_transactions_manager: Option<mpsc::UnboundedSender<NetworkTransactionEvent>>,
+    to_transactions_manager: Option<UnboundedMeteredSender<NetworkTransactionEvent>>,
     /// Sender half to send events to the
     /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler) task, if configured.
     ///
@@ -128,7 +130,8 @@ impl<C> NetworkManager<C> {
     /// Sets the dedicated channel for events indented for the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager).
     pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent>) {
-        self.to_transactions_manager = Some(tx);
+        self.to_transactions_manager =
+            Some(UnboundedMeteredSender::new(tx, NETWORK_POOL_TRANSACTIONS_SCOPE));
     }
 
     /// Sets the dedicated channel for events indented for the
@@ -153,7 +156,7 @@ impl<C> NetworkManager<C> {
 
 impl<C> NetworkManager<C>
 where
-    C: BlockProvider,
+    C: BlockReader,
 {
     /// Creates the manager of a new network.
     ///
@@ -501,7 +504,7 @@ where
                 unreachable!("Not emitted by session")
             }
             PeerMessage::Other(other) => {
-                error!(target : "net", message_id=%other.id, "Ignoring unsupported message");
+                debug!(target : "net", message_id=%other.id, "Ignoring unsupported message");
             }
         }
     }
@@ -514,7 +517,8 @@ where
             }
             NetworkHandleMessage::AnnounceBlock(block, hash) => {
                 if self.handle.mode().is_stake() {
-                    error!(target : "net", "Block propagation is not supported in POS - [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)");
+                    // See [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
+                    warn!(target: "net", "Peer performed block propagation, but it is not supported in proof of stake (EIP-3675)");
                     return
                 }
                 let msg = NewBlockMessage { hash, block: Arc::new(block) };
@@ -582,7 +586,7 @@ where
 
 impl<C> Future for NetworkManager<C>
 where
-    C: BlockProvider + Unpin,
+    C: BlockReader + Unpin,
 {
     type Output = ();
 
@@ -601,7 +605,7 @@ where
                 Poll::Ready(None) => {
                     // This is only possible if the channel was deliberately closed since we always
                     // have an instance of `NetworkHandle`
-                    error!("network message channel closed.");
+                    error!("Network message channel closed.");
                     return Poll::Ready(())
                 }
                 Poll::Ready(Some(msg)) => this.on_handle_message(msg),

@@ -1,3 +1,9 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+)]
 #![warn(missing_docs)]
 #![deny(
     unused_must_use,
@@ -79,26 +85,63 @@
 //! The transaction pool will be used by separate consumers (RPC, P2P), to make sharing easier, the
 //! [`Pool`](crate::Pool) type is just an `Arc` wrapper around `PoolInner`. This is the usable type
 //! that provides the `TransactionPool` interface.
-
-pub use crate::{
-    config::PoolConfig,
-    ordering::{CostOrdering, TransactionOrdering},
-    pool::TransactionEvents,
-    traits::{
-        AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
-        PoolTransaction, PooledTransaction, PropagateKind, PropagatedTransactions,
-        TransactionOrigin, TransactionPool,
-    },
-    validate::{
-        EthTransactionValidator, TransactionValidationOutcome, TransactionValidator,
-        ValidPoolTransaction,
-    },
-};
-use crate::{
-    error::PoolResult,
-    pool::PoolInner,
-    traits::{NewTransactionEvent, PoolSize},
-};
+//!
+//!
+//! ## Examples
+//!
+//! Listen for new transactions and print them:
+//!
+//! ```
+//! use reth_primitives::MAINNET;
+//! use reth_provider::StateProviderFactory;
+//! use reth_tasks::TokioTaskExecutor;
+//! use reth_transaction_pool::{EthTransactionValidator, Pool, TransactionPool};
+//!  async fn t<C>(client: C)  where C: StateProviderFactory + Clone + 'static{
+//!     let pool = Pool::eth_pool(
+//!         EthTransactionValidator::new(client, MAINNET.clone(), TokioTaskExecutor::default()),
+//!         Default::default(),
+//!     );
+//!   let mut transactions = pool.pending_transactions_listener();
+//!   tokio::task::spawn( async move {
+//!      while let Some(tx) = transactions.recv().await {
+//!          println!("New transaction: {:?}", tx);
+//!      }
+//!   });
+//!
+//!   // do something useful with the pool, like RPC integration
+//!
+//! # }
+//! ```
+//!
+//! Spawn maintenance task to keep the pool updated
+//!
+//! ```
+//! use futures_util::Stream;
+//! use reth_primitives::MAINNET;
+//! use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
+//! use reth_tasks::TokioTaskExecutor;
+//! use reth_transaction_pool::{EthTransactionValidator, Pool};
+//! use reth_transaction_pool::maintain::maintain_transaction_pool_future;
+//!  async fn t<C, St>(client: C, stream: St)
+//!    where C: StateProviderFactory + BlockReaderIdExt + Clone + 'static,
+//!     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
+//!     {
+//!     let pool = Pool::eth_pool(
+//!         EthTransactionValidator::new(client.clone(), MAINNET.clone(), TokioTaskExecutor::default()),
+//!         Default::default(),
+//!     );
+//!
+//!   // spawn a task that listens for new blocks and updates the pool's transactions, mined transactions etc..
+//!   tokio::task::spawn(  maintain_transaction_pool_future(client, pool, stream));
+//!
+//! # }
+//! ```
+//!
+//! ## Feature Flags
+//!
+//! - `serde` (default): Enable serde support
+//! - `test-utils`: Export utilities for testing
+use crate::pool::PoolInner;
 use aquamarine as _;
 use reth_primitives::{Address, TxHash, U256};
 use reth_provider::StateProviderFactory;
@@ -106,18 +149,42 @@ use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
 
-mod config;
+pub use crate::{
+    config::{
+        PoolConfig, SubPoolLimit, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
+        TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
+    },
+    error::PoolResult,
+    ordering::{GasCostOrdering, TransactionOrdering},
+    pool::{
+        state::SubPool, AllTransactionsEvents, FullTransactionEvent, TransactionEvent,
+        TransactionEvents,
+    },
+    traits::{
+        AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
+        NewTransactionEvent, PoolSize, PoolTransaction, PooledTransaction, PropagateKind,
+        PropagatedTransactions, TransactionOrigin, TransactionPool, TransactionPoolExt,
+    },
+    validate::{
+        EthTransactionValidator, TransactionValidationOutcome, TransactionValidator,
+        ValidPoolTransaction,
+    },
+};
+
 pub mod error;
-mod identifier;
 pub mod maintain;
 pub mod metrics;
-mod ordering;
+pub mod noop;
 pub mod pool;
+pub mod validate;
+
+mod config;
+mod identifier;
+mod ordering;
 mod traits;
-mod validate;
 
 #[cfg(any(test, feature = "test-utils"))]
-/// Common test helpers for mocking A pool
+/// Common test helpers for mocking a pool
 pub mod test_utils;
 
 // TX_SLOT_SIZE is used to calculate how many data slots a single transaction
@@ -137,6 +204,9 @@ pub(crate) const MAX_CODE_SIZE: usize = 24576;
 
 // Maximum initcode to permit in a creation transaction and create instructions
 pub(crate) const MAX_INIT_CODE_SIZE: usize = 2 * MAX_CODE_SIZE;
+
+// Price bump (in %) for the transaction pool underpriced check
+pub(crate) const PRICE_BUMP: u128 = 10;
 
 /// A shareable, generic, customizable `TransactionPool` implementation.
 #[derive(Debug)]
@@ -165,13 +235,6 @@ where
     /// Get the config the pool was configured with.
     pub fn config(&self) -> &PoolConfig {
         self.inner().config()
-    }
-
-    /// Sets the current block info for the pool.
-    #[instrument(skip(self), target = "txpool")]
-    pub fn set_block_info(&self, info: BlockInfo) {
-        trace!(target: "txpool", "updating pool block info");
-        self.pool.set_block_info(info)
     }
 
     /// Returns future that validates all transaction in the given iterator.
@@ -215,17 +278,32 @@ where
 }
 
 impl<Client>
-    Pool<EthTransactionValidator<Client, PooledTransaction>, CostOrdering<PooledTransaction>>
+    Pool<EthTransactionValidator<Client, PooledTransaction>, GasCostOrdering<PooledTransaction>>
 where
-    Client: StateProviderFactory,
+    Client: StateProviderFactory + Clone + 'static,
 {
     /// Returns a new [Pool] that uses the default [EthTransactionValidator] when validating
-    /// [PooledTransaction]s and ords via [CostOrdering]
+    /// [PooledTransaction]s and ords via [GasCostOrdering]
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use reth_provider::StateProviderFactory;
+    /// use reth_primitives::MAINNET;
+    /// use reth_tasks::TokioTaskExecutor;
+    /// use reth_transaction_pool::{EthTransactionValidator, Pool};
+    /// # fn t<C>(client: C)  where C: StateProviderFactory + Clone + 'static{
+    ///     let pool = Pool::eth_pool(
+    ///         EthTransactionValidator::new(client, MAINNET.clone(), TokioTaskExecutor::default()),
+    ///         Default::default(),
+    ///     );
+    /// # }
+    /// ```
     pub fn eth_pool(
         validator: EthTransactionValidator<Client, PooledTransaction>,
         config: PoolConfig,
     ) -> Self {
-        Self::new(validator, CostOrdering::default(), config)
+        Self::new(validator, GasCostOrdering::default(), config)
     }
 }
 
@@ -244,10 +322,6 @@ where
 
     fn block_info(&self) -> BlockInfo {
         self.pool.block_info()
-    }
-
-    fn on_canonical_state_change(&self, update: CanonicalStateUpdate) {
-        self.pool.on_canonical_state_change(update);
     }
 
     async fn add_transaction_and_subscribe(
@@ -279,12 +353,20 @@ where
         Ok(transactions)
     }
 
+    fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents> {
+        self.pool.add_transaction_event_listener(tx_hash)
+    }
+
+    fn all_transactions_event_listener(&self) -> AllTransactionsEvents<Self::Transaction> {
+        self.pool.add_all_transactions_event_listener()
+    }
+
     fn pending_transactions_listener(&self) -> Receiver<TxHash> {
         self.pool.add_pending_listener()
     }
 
-    fn transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
-        self.pool.add_transaction_listener()
+    fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
+        self.pool.add_new_transaction_listener()
     }
 
     fn pooled_transaction_hashes(&self) -> Vec<TxHash> {
@@ -355,6 +437,22 @@ where
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.get_transactions_by_sender(sender)
+    }
+}
+
+impl<V: TransactionValidator, T: TransactionOrdering> TransactionPoolExt for Pool<V, T>
+where
+    V: TransactionValidator,
+    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
+{
+    #[instrument(skip(self), target = "txpool")]
+    fn set_block_info(&self, info: BlockInfo) {
+        trace!(target: "txpool", "updating pool block info");
+        self.pool.set_block_info(info)
+    }
+
+    fn on_canonical_state_change(&self, update: CanonicalStateUpdate) {
+        self.pool.on_canonical_state_change(update);
     }
 }
 

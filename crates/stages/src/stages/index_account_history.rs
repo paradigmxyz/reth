@@ -1,9 +1,8 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
 use reth_primitives::stage::{StageCheckpoint, StageId};
-use reth_provider::Transaction;
+use reth_provider::{AccountExtReader, DatabaseProviderRW, HistoryWriter};
 use std::fmt::Debug;
-use tracing::*;
 
 /// Stage is indexing history the account changesets generated in
 /// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
@@ -13,6 +12,13 @@ pub struct IndexAccountHistoryStage {
     /// Number of blocks after which the control
     /// flow will be returned to the pipeline for commit.
     pub commit_threshold: u64,
+}
+
+impl IndexAccountHistoryStage {
+    /// Create new instance of [IndexAccountHistoryStage].
+    pub fn new(commit_threshold: u64) -> Self {
+        Self { commit_threshold }
+    }
 }
 
 impl Default for IndexAccountHistoryStage {
@@ -31,35 +37,33 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
     /// Execute the stage.
     async fn execute(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
-
-        if range.is_empty() {
-            return Ok(ExecOutput::done(StageCheckpoint::new(*range.end())))
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
 
-        let indices = tx.get_account_transition_ids_from_changeset(range.clone())?;
-        // Insert changeset to history index
-        tx.insert_account_history_index(indices)?;
+        let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
 
-        info!(target: "sync::stages::index_account_history", stage_progress = *range.end(), is_final_range, "Stage iteration finished");
+        let indices = provider.changed_accounts_and_blocks_with_range(range.clone())?;
+        // Insert changeset to history index
+        provider.insert_account_history_index(indices)?;
+
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: is_final_range })
     }
 
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (range, unwind_progress, is_final_range) =
+        let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        tx.unwind_account_history_indices(range)?;
+        provider.unwind_account_history_indices(range)?;
 
-        info!(target: "sync::stages::index_account_history", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
         // from HistoryIndex higher than that number.
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })
     }
@@ -67,10 +71,11 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
 
 #[cfg(test)]
 mod tests {
+    use reth_provider::ProviderFactory;
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::test_utils::{TestTransaction, PREV_STAGE_ID};
+    use crate::test_utils::TestTransaction;
     use reth_db::{
         models::{
             sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx, ShardedKey,
@@ -80,7 +85,7 @@ mod tests {
         transaction::DbTxMut,
         BlockNumberList,
     };
-    use reth_primitives::{hex_literal::hex, H160};
+    use reth_primitives::{hex_literal::hex, H160, MAINNET};
 
     const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));
 
@@ -134,15 +139,13 @@ mod tests {
     }
 
     async fn run(tx: &TestTransaction, run_to: u64) {
-        let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(run_to))),
-            ..Default::default()
-        };
+        let input = ExecInput { target: Some(run_to), ..Default::default() };
         let mut stage = IndexAccountHistoryStage::default();
-        let mut tx = tx.inner();
-        let out = stage.execute(&mut tx, input).await.unwrap();
+        let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
+        let provider = factory.provider_rw().unwrap();
+        let out = stage.execute(&provider, input).await.unwrap();
         assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(5), done: true });
-        tx.commit().unwrap();
+        provider.commit().unwrap();
     }
 
     async fn unwind(tx: &TestTransaction, unwind_from: u64, unwind_to: u64) {
@@ -152,10 +155,11 @@ mod tests {
             ..Default::default()
         };
         let mut stage = IndexAccountHistoryStage::default();
-        let mut tx = tx.inner();
-        let out = stage.unwind(&mut tx, input).await.unwrap();
+        let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
+        let provider = factory.provider_rw().unwrap();
+        let out = stage.unwind(&provider, input).await.unwrap();
         assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) });
-        tx.commit().unwrap();
+        provider.commit().unwrap();
     }
 
     #[tokio::test]

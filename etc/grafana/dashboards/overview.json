@@ -27,7 +27,7 @@
       "type": "grafana",
       "id": "grafana",
       "name": "Grafana",
-      "version": "9.4.7"
+      "version": "9.5.3"
     },
     {
       "type": "panel",
@@ -90,6 +90,20 @@
   "liveNow": false,
   "panels": [
     {
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 96,
+      "panels": [],
+      "repeat": "instance",
+      "repeatDirection": "h",
+      "title": "Overview ($instance)",
+      "type": "row"
+    },
+    {
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -128,9 +142,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 5,
+        "w": 12,
         "x": 0,
-        "y": 0
+        "y": 1
       },
       "id": 22,
       "options": {
@@ -145,7 +159,7 @@
         "showThresholdLabels": false,
         "showThresholdMarkers": true
       },
-      "pluginVersion": "9.4.7",
+      "pluginVersion": "9.5.3",
       "targets": [
         {
           "datasource": {
@@ -154,7 +168,7 @@
           },
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "reth_network_connected_peers",
+          "expr": "reth_network_connected_peers{instance=~\"$instance\"}",
           "instant": true,
           "legendFormat": "__auto",
           "range": false,
@@ -192,9 +206,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 9,
-        "x": 5,
-        "y": 0
+        "w": 12,
+        "x": 12,
+        "y": 1
       },
       "id": 20,
       "options": {
@@ -209,9 +223,10 @@
           "fields": "",
           "values": false
         },
-        "showUnfilled": true
+        "showUnfilled": true,
+        "valueMode": "color"
       },
-      "pluginVersion": "9.4.7",
+      "pluginVersion": "9.5.3",
       "targets": [
         {
           "datasource": {
@@ -220,7 +235,7 @@
           },
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "reth_sync_checkpoint",
+          "expr": "reth_sync_checkpoint{instance=~\"$instance\"}",
           "instant": true,
           "legendFormat": "{{stage}}",
           "range": false,
@@ -230,6 +245,97 @@
       "title": "Stage checkpoints",
       "transparent": true,
       "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "id": 69,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_sync_entities_processed{instance=~\"$instance\"} / reth_sync_entities_total{instance=~\"$instance\"}",
+          "legendFormat": "{{stage}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Sync progress (stage progress in %)",
+      "type": "timeseries"
     },
     {
       "datasource": {
@@ -290,9 +396,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 10,
-        "x": 14,
-        "y": 0
+        "w": 12,
+        "x": 12,
+        "y": 9
       },
       "id": 12,
       "options": {
@@ -314,13 +420,13 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_sync_checkpoint",
+          "expr": "reth_sync_checkpoint{instance=~\"$instance\"}",
           "legendFormat": "{{stage}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Sync progress",
+      "title": "Sync progress (stage progress as highest block number reached)",
       "type": "timeseries"
     },
     {
@@ -329,11 +435,13 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 8
+        "y": 17
       },
       "id": 38,
       "panels": [],
-      "title": "Database",
+      "repeat": "instance",
+      "repeatDirection": "h",
+      "title": "Database ($instance)",
       "type": "row"
     },
     {
@@ -397,7 +505,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 9
+        "y": 18
       },
       "id": 40,
       "options": {
@@ -421,7 +529,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "rate(reth_tx_commit_sum[$__rate_interval]) / rate(reth_tx_commit_count[$__rate_interval])",
+          "expr": "rate(reth_tx_commit_sum{instance=~\"$instance\"}[$__rate_interval]) / rate(reth_tx_commit_count{instance=~\"$instance\"}[$__rate_interval])",
           "format": "time_series",
           "instant": false,
           "legendFormat": "Commit time",
@@ -457,7 +565,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 9
+        "y": 18
       },
       "id": 42,
       "maxDataPoints": 25,
@@ -501,7 +609,7 @@
           "unit": "percentunit"
         }
       },
-      "pluginVersion": "9.4.7",
+      "pluginVersion": "9.5.3",
       "targets": [
         {
           "datasource": {
@@ -510,7 +618,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(increase(reth_tx_commit[$__interval])) by (quantile)",
+          "expr": "sum(increase(reth_tx_commit{instance=~\"$instance\"}[$__interval])) by (quantile)",
           "format": "time_series",
           "instant": false,
           "legendFormat": "{{quantile}}",
@@ -548,7 +656,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 17
+        "y": 26
       },
       "id": 48,
       "options": {
@@ -584,7 +692,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_db_table_size",
+          "expr": "reth_db_table_size{instance=~\"$instance\"}",
           "interval": "",
           "legendFormat": "{{table}}",
           "range": true,
@@ -657,7 +765,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 17
+        "y": 26
       },
       "id": 52,
       "options": {
@@ -679,7 +787,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (job) ( reth_db_table_size )",
+          "expr": "sum by (job) ( reth_db_table_size{instance=~\"$instance\"} )",
           "legendFormat": "Size ({{job}})",
           "range": true,
           "refId": "A"
@@ -715,7 +823,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 25
+        "y": 34
       },
       "id": 50,
       "options": {
@@ -747,7 +855,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "sum by (type) ( reth_db_table_pages )",
+          "expr": "sum by (type) ( reth_db_table_pages{instance=~\"$instance\"} )",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -883,10 +991,11 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 25
+        "y": 34
       },
       "id": 58,
       "options": {
+        "cellHeight": "sm",
         "footer": {
           "countRows": false,
           "fields": "",
@@ -897,7 +1006,7 @@
         },
         "showHeader": true
       },
-      "pluginVersion": "9.4.7",
+      "pluginVersion": "9.5.3",
       "targets": [
         {
           "datasource": {
@@ -906,7 +1015,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sort_desc(reth_db_table_pages{type=\"overflow\"} != 0)",
+          "expr": "sort_desc(reth_db_table_pages{instance=~\"$instance\", type=\"overflow\"} != 0)",
           "format": "table",
           "instant": true,
           "legendFormat": "__auto",
@@ -923,11 +1032,13 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 33
+        "y": 42
       },
       "id": 46,
       "panels": [],
-      "title": "Stage: Execution",
+      "repeat": "instance",
+      "repeatDirection": "h",
+      "title": "Stage: Execution ($instance)",
       "type": "row"
     },
     {
@@ -989,7 +1100,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 34
+        "y": 43
       },
       "id": 56,
       "options": {
@@ -1011,7 +1122,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "rate(reth_sync_execution_mgas_processed_total[30s])",
+          "expr": "rate(reth_sync_execution_mgas_processed_total{instance=~\"$instance\"}[30s])",
           "legendFormat": "Gas/s (30s)",
           "range": true,
           "refId": "A"
@@ -1022,7 +1133,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_sync_execution_mgas_processed_total[1m])",
+          "expr": "rate(reth_sync_execution_mgas_processed_total{instance=~\"$instance\"}[1m])",
           "hide": false,
           "legendFormat": "Gas/s (1m)",
           "range": true,
@@ -1034,7 +1145,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_sync_execution_mgas_processed_total[5m])",
+          "expr": "rate(reth_sync_execution_mgas_processed_total{instance=~\"$instance\"}[5m])",
           "hide": false,
           "legendFormat": "Gas/s (5m)",
           "range": true,
@@ -1046,7 +1157,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_sync_execution_mgas_processed_total[10m])",
+          "expr": "rate(reth_sync_execution_mgas_processed_total{instance=~\"$instance\"}[10m])",
           "hide": false,
           "legendFormat": "Gas/s (10m)",
           "range": true,
@@ -1062,11 +1173,13 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 42
+        "y": 51
       },
       "id": 6,
       "panels": [],
-      "title": "Networking",
+      "repeat": "instance",
+      "repeatDirection": "h",
+      "title": "Networking ($instance)",
       "type": "row"
     },
     {
@@ -1131,7 +1244,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 43
+        "y": 52
       },
       "id": 18,
       "options": {
@@ -1153,7 +1266,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_tracked_peers",
+          "expr": "reth_network_tracked_peers{instance=~\"$instance\"}",
           "legendFormat": "Tracked peers",
           "range": true,
           "refId": "A"
@@ -1224,7 +1337,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 43
+        "y": 52
       },
       "id": 16,
       "options": {
@@ -1246,7 +1359,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_outgoing_connections",
+          "expr": "reth_network_outgoing_connections{instance=~\"$instance\"}",
           "legendFormat": "Outgoing connections",
           "range": true,
           "refId": "A"
@@ -1257,7 +1370,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_incoming_connections",
+          "expr": "reth_network_incoming_connections{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Incoming connections",
           "range": true,
@@ -1269,7 +1382,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_connected_peers",
+          "expr": "reth_network_connected_peers{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Connected peers",
           "range": true,
@@ -1334,7 +1447,8 @@
                 "value": 80
               }
             ]
-          }
+          },
+          "unit": "cps"
         },
         "overrides": []
       },
@@ -1342,7 +1456,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 43
+        "y": 52
       },
       "id": 8,
       "options": {
@@ -1367,7 +1481,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_p2pstream_disconnected_errors",
+          "expr": "rate(reth_p2pstream_disconnected_errors{instance=~\"$instance\"}[$__rate_interval])",
           "legendFormat": "P2P stream disconnected",
           "range": true,
           "refId": "A"
@@ -1378,7 +1492,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_pending_session_failures",
+          "expr": "rate(reth_network_pending_session_failures{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Failed pending sessions",
           "range": true,
@@ -1390,7 +1504,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_invalid_messages_received",
+          "expr": "rate(reth_network_invalid_messages_received{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Invalid messages",
           "range": true,
@@ -1421,7 +1535,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 51
+        "y": 60
       },
       "id": 54,
       "options": {
@@ -1450,7 +1564,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_useless_peer",
+          "expr": "reth_network_useless_peer{instance=~\"$instance\"}",
           "legendFormat": "UselessPeer",
           "range": true,
           "refId": "A"
@@ -1461,7 +1575,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_subprotocol_specific",
+          "expr": "reth_network_subprotocol_specific{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "SubprotocolSpecific",
           "range": true,
@@ -1473,7 +1587,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_already_connected",
+          "expr": "reth_network_already_connected{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "AlreadyConnected",
           "range": true,
@@ -1485,7 +1599,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_client_quitting",
+          "expr": "reth_network_client_quitting{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "ClientQuitting",
           "range": true,
@@ -1497,7 +1611,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_unexpected_identity",
+          "expr": "reth_network_unexpected_identity{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "UnexpectedHandshakeIdentity",
           "range": true,
@@ -1509,7 +1623,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_disconnect_requested",
+          "expr": "reth_network_disconnect_requested{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "DisconnectRequested",
           "range": true,
@@ -1521,7 +1635,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_null_node_identity",
+          "expr": "reth_network_null_node_identity{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "NullNodeIdentity",
           "range": true,
@@ -1533,7 +1647,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_tcp_subsystem_error",
+          "expr": "reth_network_tcp_subsystem_error{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "TCPSubsystemError",
           "range": true,
@@ -1545,7 +1659,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_incompatible",
+          "expr": "reth_network_incompatible{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "IncompatibleP2PVersion",
           "range": true,
@@ -1557,7 +1671,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_protocol_breach",
+          "expr": "reth_network_protocol_breach{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "ProtocolBreach",
           "range": true,
@@ -1569,7 +1683,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_too_many_peers",
+          "expr": "reth_network_too_many_peers{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "TooManyPeers",
           "range": true,
@@ -1585,11 +1699,13 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 59
+        "y": 68
       },
       "id": 24,
       "panels": [],
-      "title": "Downloader: Headers",
+      "repeat": "instance",
+      "repeatDirection": "h",
+      "title": "Downloader: Headers ($instance)",
       "type": "row"
     },
     {
@@ -1678,7 +1794,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 60
+        "y": 69
       },
       "id": 26,
       "options": {
@@ -1700,7 +1816,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_headers_total_downloaded",
+          "expr": "reth_downloaders_headers_total_downloaded{instance=~\"$instance\"}",
           "legendFormat": "Downloaded",
           "range": true,
           "refId": "A"
@@ -1711,7 +1827,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_headers_total_flushed",
+          "expr": "reth_downloaders_headers_total_flushed{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Flushed",
           "range": true,
@@ -1723,7 +1839,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_downloaders_headers_total_downloaded[$__rate_interval])",
+          "expr": "rate(reth_downloaders_headers_total_downloaded{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "instant": false,
           "legendFormat": "Downloaded/s",
@@ -1736,7 +1852,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_downloaders_headers_total_flushed[$__rate_interval])",
+          "expr": "rate(reth_downloaders_headers_total_flushed{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Flushed/s",
           "range": true,
@@ -1800,7 +1916,8 @@
                 "value": 80
               }
             ]
-          }
+          },
+          "unit": "cps"
         },
         "overrides": []
       },
@@ -1808,7 +1925,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 60
+        "y": 69
       },
       "id": 33,
       "options": {
@@ -1830,7 +1947,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_headers_timeout_errors",
+          "expr": "rate(reth_downloaders_headers_timeout_errors{instance=~\"$instance\"}[$__rate_interval])",
           "legendFormat": "Request timed out",
           "range": true,
           "refId": "A"
@@ -1841,7 +1958,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_headers_unexpected_errors",
+          "expr": "rate(reth_downloaders_headers_unexpected_errors{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Unexpected error",
           "range": true,
@@ -1853,7 +1970,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_headers_validation_errors",
+          "expr": "rate(reth_downloaders_headers_validation_errors{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Invalid response",
           "range": true,
@@ -1925,7 +2042,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 68
+        "y": 77
       },
       "id": 36,
       "options": {
@@ -1947,7 +2064,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_headers_in_flight_requests",
+          "expr": "reth_downloaders_headers_in_flight_requests{instance=~\"$instance\"}",
           "legendFormat": "In flight requests",
           "range": true,
           "refId": "A"
@@ -1958,7 +2075,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_connected_peers",
+          "expr": "reth_network_connected_peers{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Connected peers",
           "range": true,
@@ -1974,11 +2091,13 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 76
+        "y": 85
       },
       "id": 32,
       "panels": [],
-      "title": "Downloader: Bodies",
+      "repeat": "instance",
+      "repeatDirection": "h",
+      "title": "Downloader: Bodies ($instance)",
       "type": "row"
     },
     {
@@ -2035,7 +2154,8 @@
                 "value": 80
               }
             ]
-          }
+          },
+          "unit": "locale"
         },
         "overrides": [
           {
@@ -2047,6 +2167,10 @@
               {
                 "id": "custom.axisPlacement",
                 "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "ops"
               }
             ]
           },
@@ -2059,6 +2183,10 @@
               {
                 "id": "custom.axisPlacement",
                 "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "ops"
               }
             ]
           }
@@ -2068,7 +2196,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 77
+        "y": 86
       },
       "id": 30,
       "options": {
@@ -2090,7 +2218,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_total_downloaded",
+          "expr": "reth_downloaders_bodies_total_downloaded{instance=~\"$instance\"}",
           "legendFormat": "Downloaded",
           "range": true,
           "refId": "A"
@@ -2101,7 +2229,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_total_flushed",
+          "expr": "reth_downloaders_bodies_total_flushed{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Flushed",
           "range": true,
@@ -2113,7 +2241,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_downloaders_bodies_total_flushed[$__rate_interval])",
+          "expr": "rate(reth_downloaders_bodies_total_flushed{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Flushed/s",
           "range": true,
@@ -2125,7 +2253,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_downloaders_bodies_total_downloaded[$__rate_interval])",
+          "expr": "rate(reth_downloaders_bodies_total_downloaded{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Downloaded/s",
           "range": true,
@@ -2137,7 +2265,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_buffered_responses",
+          "expr": "reth_downloaders_bodies_buffered_responses{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Buffered responses",
           "range": true,
@@ -2149,7 +2277,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_buffered_blocks",
+          "expr": "reth_downloaders_bodies_buffered_blocks{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Buffered blocks",
           "range": true,
@@ -2161,7 +2289,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_queued_blocks",
+          "expr": "reth_downloaders_bodies_queued_blocks{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Queued blocks",
           "range": true,
@@ -2222,7 +2350,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "unit": "cps"
         },
         "overrides": []
       },
@@ -2230,7 +2359,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 77
+        "y": 86
       },
       "id": 28,
       "options": {
@@ -2252,7 +2381,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_timeout_errors",
+          "expr": "rate(reth_downloaders_bodies_timeout_errors{instance=~\"$instance\"}[$__rate_interval])",
           "legendFormat": "Request timed out",
           "range": true,
           "refId": "A"
@@ -2263,7 +2392,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_unexpected_errors",
+          "expr": "rate(reth_downloaders_bodies_unexpected_errors{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Unexpected error",
           "range": true,
@@ -2275,7 +2404,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_validation_errors",
+          "expr": "rate(reth_downloaders_bodies_validation_errors{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Invalid response",
           "range": true,
@@ -2347,7 +2476,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 85
+        "y": 94
       },
       "id": 35,
       "options": {
@@ -2369,7 +2498,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_in_flight_requests",
+          "expr": "reth_downloaders_bodies_in_flight_requests{instance=~\"$instance\"}",
           "legendFormat": "In flight requests",
           "range": true,
           "refId": "A"
@@ -2380,7 +2509,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_connected_peers",
+          "expr": "reth_network_connected_peers{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Connected peers",
           "range": true,
@@ -2391,297 +2520,2118 @@
       "type": "timeseries"
     },
     {
-      "collapsed": true,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "The number of blocks and size in bytes of those blocks",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "blocks"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 94
+      },
+      "id": 73,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_downloaders_bodies_buffered_blocks_size_bytes{instance=~\"$instance\"}",
+          "hide": false,
+          "legendFormat": "Buffered blocks size ",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_downloaders_bodies_buffered_blocks{instance=~\"$instance\"}",
+          "hide": false,
+          "legendFormat": "Buffered blocks",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Downloader buffer",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 93
+        "y": 102
       },
-      "id": 68,
-      "panels": [
+      "id": 89,
+      "panels": [],
+      "repeat": "instance",
+      "repeatDirection": "h",
+      "title": "Transaction Pool ($instance)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Tracks a heuristic of the memory footprint of the various transaction pool sub-pools",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 103
+      },
+      "id": 91,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "description": "Number of active jobs",
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "drawStyle": "line",
-                "fillOpacity": 0,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "lineInterpolation": "linear",
-                "lineWidth": 3,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "auto",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              }
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 8,
-            "w": 11,
-            "x": 0,
-            "y": 1
-          },
-          "id": 60,
-          "options": {
-            "legend": {
-              "calcs": [],
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "single",
-              "sort": "none"
-            }
-          },
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
-              "editorMode": "builder",
-              "expr": "reth_payloads_active_jobs",
-              "legendFormat": "Active Jobs",
-              "range": true,
-              "refId": "A"
-            }
-          ],
-          "title": "Active Jobs",
-          "type": "timeseries"
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_basefee_pool_size_bytes{instance=~\"$instance\"}",
+          "legendFormat": "Base fee pool size",
+          "range": true,
+          "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "description": "Total number of initiated jobs",
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "drawStyle": "line",
-                "fillOpacity": 0,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "lineInterpolation": "linear",
-                "lineWidth": 3,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "auto",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              }
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 8,
-            "w": 13,
-            "x": 11,
-            "y": 1
-          },
-          "id": 62,
-          "options": {
-            "legend": {
-              "calcs": [],
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "single",
-              "sort": "none"
-            }
-          },
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
-              "editorMode": "builder",
-              "expr": "reth_payloads_initiated_jobs",
-              "legendFormat": "Initiated Jobs",
-              "range": true,
-              "refId": "A"
-            }
-          ],
-          "title": "Initiated Jobs",
-          "type": "timeseries"
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_pending_pool_size_bytes{instance=~\"$instance\"}",
+          "hide": false,
+          "legendFormat": "Pending pool size",
+          "range": true,
+          "refId": "B"
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "description": "Total number of failed jobs",
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "drawStyle": "line",
-                "fillOpacity": 0,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "lineInterpolation": "linear",
-                "lineWidth": 3,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "auto",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              }
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 7,
-            "w": 11,
-            "x": 0,
-            "y": 9
-          },
-          "id": 64,
-          "options": {
-            "legend": {
-              "calcs": [],
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "single",
-              "sort": "none"
-            }
-          },
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
-              "editorMode": "builder",
-              "expr": "reth_payloads_failed_jobs",
-              "legendFormat": "Failed Jobs",
-              "range": true,
-              "refId": "A"
-            }
-          ],
-          "title": "Failed Jobs",
-          "type": "timeseries"
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_queued_pool_size_bytes{instance=~\"$instance\"}",
+          "hide": false,
+          "legendFormat": "Queued pool size",
+          "range": true,
+          "refId": "C"
         }
       ],
-      "title": "Payload Builder",
+      "title": "Subpool sizes in bytes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Tracks the number of transactions in the various transaction pool sub-pools",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 103
+      },
+      "id": 92,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_basefee_pool_transactions{instance=~\"$instance\"}",
+          "legendFormat": "Base fee pool transactions",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_pending_pool_transactions{instance=~\"$instance\"}",
+          "hide": false,
+          "legendFormat": "Pending pool transactions",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_queued_pool_transactions{instance=~\"$instance\"}",
+          "hide": false,
+          "legendFormat": "Queued pool transactions",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Subpool transaction count",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Tracks the number of transactions inserted and removed from the transaction pool, as well as the number of invalid transactions",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": true,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "custom.transform",
+                "value": "negative-Y"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "cps"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 111
+      },
+      "id": 93,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "increase(reth_transaction_pool_inserted_transactions{instance=~\"$instance\"}[$__rate_interval])",
+          "legendFormat": "Inserted transactions",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "increase(reth_transaction_pool_removed_transactions{instance=~\"$instance\"}[$__rate_interval])",
+          "hide": false,
+          "legendFormat": "Removed transactions",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "increase(reth_transaction_pool_invalid_transactions{instance=~\"$instance\"}[$__rate_interval])",
+          "hide": false,
+          "legendFormat": "Invalid transactions",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Inserted transactions",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Number of transactions about to be imported into the pool.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 111
+      },
+      "id": 94,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_network_pending_pool_imports{instance=~\"$instance\"}",
+          "hide": false,
+          "legendFormat": "Transactions pending import",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Pending pool imports",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Tracks the number of transaction messages in the channel from the network to the transaction pool",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": true,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "cps"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "custom.transform",
+                "value": "negative-Y"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "events"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 119
+      },
+      "id": 95,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "increase(reth_network_pool_transactions_messages_sent{instance=~\"$instance\"}[$__rate_interval])",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "Tx",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "increase(reth_network_pool_transactions_messages_received{instance=~\"$instance\"}[$__rate_interval])",
+          "hide": false,
+          "legendFormat": "Rx",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_network_pool_transactions_messages_sent{instance=~\"$instance\"} - reth_network_pool_transactions_messages_received{instance=~\"$instance\"}",
+          "hide": false,
+          "legendFormat": "Messages in channel",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Network transaction channel",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 127
+      },
+      "id": 79,
+      "panels": [],
+      "repeat": "instance",
+      "repeatDirection": "h",
+      "title": "Blockchain Tree ($instance)",
       "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "The block number of the tip of the canonical chain from the blockchain tree.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 128
+      },
+      "id": 74,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_blockchain_tree_canonical_chain_height{instance=~\"$instance\"}",
+          "hide": false,
+          "legendFormat": "Canonical chain height",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Canonical chain height",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Total number of blocks in the tree's block buffer",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 128
+      },
+      "id": 80,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_blockchain_tree_block_buffer_blocks{instance=~\"$instance\"}",
+          "hide": false,
+          "legendFormat": "Buffered blocks",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Block buffer blocks",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Total number of sidechains in the blockchain tree",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 136
+      },
+      "id": 81,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_blockchain_tree_sidechains{instance=~\"$instance\"}",
+          "hide": false,
+          "legendFormat": "Total number of sidechains",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Sidechains",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 144
+      },
+      "id": 87,
+      "panels": [],
+      "repeat": "instance",
+      "repeatDirection": "h",
+      "title": "Engine API ($instance)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 145
+      },
+      "id": 83,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_consensus_engine_beacon_active_block_downloads{instance=~\"$instance\"}",
+          "legendFormat": "Active block downloads",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Active block downloads",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Engine API messages received by the CL, either engine_newPayload or engine_forkchoiceUpdated",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 145
+      },
+      "id": 84,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_consensus_engine_beacon_forkchoice_updated_messages{instance=~\"$instance\"}",
+          "legendFormat": "Forkchoice updated messages",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_consensus_engine_beacon_new_payload_messages{instance=~\"$instance\"}",
+          "hide": false,
+          "legendFormat": "New payload messages",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Engine API messages",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Total pipeline runs triggered by the sync controller",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 153
+      },
+      "id": 85,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_consensus_engine_beacon_pipeline_runs{instance=~\"$instance\"}",
+          "legendFormat": "Pipeline runs",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Pipeline runs",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 161
+      },
+      "id": 68,
+      "panels": [],
+      "repeat": "instance",
+      "repeatDirection": "h",
+      "title": "Payload Builder ($instance)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Number of active jobs",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 3,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 11,
+        "x": 0,
+        "y": 162
+      },
+      "id": 60,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_payloads_active_jobs{instance=~\"$instance\"}",
+          "legendFormat": "Active Jobs",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Active Jobs",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Total number of initiated jobs",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 3,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 13,
+        "x": 11,
+        "y": 162
+      },
+      "id": 62,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_payloads_initiated_jobs{instance=~\"$instance\"}",
+          "legendFormat": "Initiated Jobs",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Initiated Jobs",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Total number of failed jobs",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 3,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 11,
+        "x": 0,
+        "y": 170
+      },
+      "id": 64,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_payloads_failed_jobs{instance=~\"$instance\"}",
+          "legendFormat": "Failed Jobs",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Failed Jobs",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 177
+      },
+      "id": 97,
+      "panels": [],
+      "title": "Process",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "decbytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 178
+      },
+      "id": 98,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_jemalloc_active",
+          "instant": false,
+          "legendFormat": "Active",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_jemalloc_allocated",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "Allocated",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_jemalloc_mapped",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "Mapped",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_jemalloc_metadata",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "Metadata",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_jemalloc_resident",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "Resident",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_jemalloc_retained",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "Retained",
+          "range": true,
+          "refId": "F"
+        }
+      ],
+      "title": "Jemalloc Memory",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "decbytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 178
+      },
+      "id": 101,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_process_resident_memory_bytes",
+          "instant": false,
+          "legendFormat": "Resident",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Memory",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "100% = 1 core",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 186
+      },
+      "id": 99,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "avg(rate(reth_process_cpu_seconds_total[1m]))",
+          "instant": false,
+          "legendFormat": "Process",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "CPU",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "100% = 1 core",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 186
+      },
+      "id": 100,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_process_open_fds",
+          "instant": false,
+          "legendFormat": "Open",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "File Descriptors",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",
@@ -2690,7 +4640,30 @@
   "style": "dark",
   "tags": [],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "definition": "query_result(up)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "instance",
+        "options": [],
+        "query": {
+          "query": "query_result(up)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "regex": "/.*instance=\\\"([^\\\"]*).*/",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      }
+    ]
   },
   "time": {
     "from": "now-1h",
@@ -2700,6 +4673,6 @@
   "timezone": "",
   "title": "reth",
   "uid": "2k8BXz24x",
-  "version": 5,
+  "version": 2,
   "weekStart": ""
 }

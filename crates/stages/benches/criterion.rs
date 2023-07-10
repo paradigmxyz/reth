@@ -3,9 +3,10 @@ use criterion::{
     BenchmarkGroup, Criterion,
 };
 use pprof::criterion::{Output, PProfProfiler};
-use reth_db::mdbx::{Env, WriteMap};
+use reth_db::DatabaseEnv;
 use reth_interfaces::test_utils::TestConsensus;
-use reth_primitives::stage::{StageCheckpoint, StageId};
+use reth_primitives::{stage::StageCheckpoint, MAINNET};
+use reth_provider::ProviderFactory;
 use reth_stages::{
     stages::{MerkleStage, SenderRecoveryStage, TotalDifficultyStage, TransactionLookupStage},
     test_utils::TestTransaction,
@@ -121,7 +122,7 @@ fn measure_stage_with_path<F, S>(
     stage_range: StageRange,
     label: String,
 ) where
-    S: Clone + Stage<Env<WriteMap>>,
+    S: Clone + Stage<DatabaseEnv>,
     F: Fn(S, &TestTransaction, StageRange),
 {
     let tx = TestTransaction::new(&path);
@@ -135,9 +136,10 @@ fn measure_stage_with_path<F, S>(
             },
             |_| async {
                 let mut stage = stage.clone();
-                let mut db_tx = tx.inner();
-                stage.execute(&mut db_tx, input).await.unwrap();
-                db_tx.commit().unwrap();
+                let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
+                let provider = factory.provider_rw().unwrap();
+                stage.execute(&provider, input).await.unwrap();
+                provider.commit().unwrap();
             },
         )
     });
@@ -150,7 +152,7 @@ fn measure_stage<F, S>(
     block_interval: std::ops::Range<u64>,
     label: String,
 ) where
-    S: Clone + Stage<Env<WriteMap>>,
+    S: Clone + Stage<DatabaseEnv>,
     F: Fn(S, &TestTransaction, StageRange),
 {
     let path = setup::txs_testdata(block_interval.end);
@@ -162,10 +164,7 @@ fn measure_stage<F, S>(
         stage,
         (
             ExecInput {
-                previous_stage: Some((
-                    StageId::Other("Another"),
-                    StageCheckpoint::new(block_interval.end),
-                )),
+                target: Some(block_interval.end),
                 checkpoint: Some(StageCheckpoint::new(block_interval.start)),
             },
             UnwindInput {

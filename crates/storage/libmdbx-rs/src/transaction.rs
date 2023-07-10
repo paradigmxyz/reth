@@ -10,12 +10,8 @@ use indexmap::IndexSet;
 use libc::{c_uint, c_void};
 use parking_lot::Mutex;
 use std::{
-    fmt,
-    fmt::Debug,
-    marker::PhantomData,
-    mem::size_of,
-    ptr, result, slice,
-    sync::{mpsc::sync_channel, Arc},
+    fmt, fmt::Debug, marker::PhantomData, mem::size_of, ptr, rc::Rc, result, slice,
+    sync::mpsc::sync_channel,
 };
 
 mod private {
@@ -57,7 +53,7 @@ where
     K: TransactionKind,
     E: EnvironmentKind,
 {
-    txn: Arc<Mutex<*mut ffi::MDBX_txn>>,
+    txn: Rc<Mutex<*mut ffi::MDBX_txn>>,
     primed_dbis: Mutex<IndexSet<ffi::MDBX_dbi>>,
     committed: bool,
     env: &'env Environment<E>,
@@ -85,7 +81,7 @@ where
 
     pub(crate) fn new_from_ptr(env: &'env Environment<E>, txn: *mut ffi::MDBX_txn) -> Self {
         Self {
-            txn: Arc::new(Mutex::new(txn)),
+            txn: Rc::new(Mutex::new(txn)),
             primed_dbis: Mutex::new(IndexSet::new()),
             committed: false,
             env,
@@ -97,7 +93,7 @@ where
     ///
     /// The caller **must** ensure that the pointer is not used after the
     /// lifetime of the transaction.
-    pub(crate) fn txn_mutex(&self) -> Arc<Mutex<*mut ffi::MDBX_txn>> {
+    pub(crate) fn txn_mutex(&self) -> Rc<Mutex<*mut ffi::MDBX_txn>> {
         self.txn.clone()
     }
 
@@ -197,15 +193,23 @@ where
                 ffi::mdbx_dbi_flags_ex(txn, db.dbi(), &mut flags, ptr::null_mut())
             }))?;
         }
-        Ok(DatabaseFlags::from_bits_truncate(flags))
+
+        // The types are not the same on Windows. Great!
+        #[cfg_attr(not(windows), allow(clippy::useless_conversion))]
+        Ok(DatabaseFlags::from_bits_truncate(flags.try_into().unwrap()))
     }
 
     /// Retrieves database statistics.
     pub fn db_stat<'txn>(&'txn self, db: &Database<'txn>) -> Result<Stat> {
+        self.db_stat_with_dbi(db.dbi())
+    }
+
+    /// Retrieves database statistics by the given dbi.
+    pub fn db_stat_with_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<Stat> {
         unsafe {
             let mut stat = Stat::new();
             mdbx_result(txn_execute(&self.txn, |txn| {
-                ffi::mdbx_dbi_stat(txn, db.dbi(), stat.mdb_stat(), size_of::<Stat>())
+                ffi::mdbx_dbi_stat(txn, dbi, stat.mdb_stat(), size_of::<Stat>())
             }))?;
             Ok(stat)
         }

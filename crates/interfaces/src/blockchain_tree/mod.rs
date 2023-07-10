@@ -1,6 +1,7 @@
 use crate::{blockchain_tree::error::InsertBlockError, Error};
 use reth_primitives::{
-    BlockHash, BlockNumHash, BlockNumber, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    BlockHash, BlockNumHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader,
 };
 use std::collections::{BTreeMap, HashSet};
 
@@ -21,7 +22,7 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     fn insert_block_without_senders(
         &self,
         block: SealedBlock,
-    ) -> Result<BlockStatus, InsertBlockError> {
+    ) -> Result<InsertPayloadOk, InsertBlockError> {
         match block.try_seal_with_senders() {
             Ok(block) => self.insert_block(block),
             Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
@@ -43,7 +44,10 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError>;
 
     /// Insert block with senders
-    fn insert_block(&self, block: SealedBlockWithSenders) -> Result<BlockStatus, InsertBlockError>;
+    fn insert_block(
+        &self,
+        block: SealedBlockWithSenders,
+    ) -> Result<InsertPayloadOk, InsertBlockError>;
 
     /// Finalize blocks up until and including `finalized_block`, and remove them from the tree.
     fn finalize_block(&self, finalized_block: BlockNumber);
@@ -108,6 +112,11 @@ impl CanonicalOutcome {
             CanonicalOutcome::Committed { head } => head,
         }
     }
+
+    /// Returns true if the block was already canonical.
+    pub fn is_already_canonical(&self) -> bool {
+        matches!(self, CanonicalOutcome::AlreadyCanonical { .. })
+    }
 }
 
 /// From Engine API spec, block inclusion can be valid, accepted or invalid.
@@ -128,6 +137,18 @@ pub enum BlockStatus {
         /// The lowest parent block that is not connected to the canonical chain.
         missing_parent: BlockNumHash,
     },
+}
+
+/// How a payload was inserted if it was valid.
+///
+/// If the payload was valid, but has already been seen, [`InsertPayloadOk::AlreadySeen(_)`] is
+/// returned, otherwise [`InsertPayloadOk::Inserted(_)`] is returned.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InsertPayloadOk {
+    /// The payload was valid, but we have already seen it.
+    AlreadySeen(BlockStatus),
+    /// The payload was valid and inserted into the tree.
+    Inserted(BlockStatus),
 }
 
 /// Allows read only functionality on the blockchain tree.
@@ -151,8 +172,23 @@ pub trait BlockchainTreeViewer: Send + Sync {
 
     /// Returns the block with matching hash from the tree, if it exists.
     ///
-    /// Caution: This will not return blocks from the canonical chain.
+    /// Caution: This will not return blocks from the canonical chain or buffered blocks that are
+    /// disconnected from the canonical chain.
     fn block_by_hash(&self, hash: BlockHash) -> Option<SealedBlock>;
+
+    /// Returns the _buffered_ (disconnected) block with matching hash from the internal buffer if
+    /// it exists.
+    ///
+    /// Caution: Unlike [Self::block_by_hash] this will only return blocks that are currently
+    /// disconnected from the canonical chain.
+    fn buffered_block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock>;
+
+    /// Returns the _buffered_ (disconnected) header with matching hash from the internal buffer if
+    /// it exists.
+    ///
+    /// Caution: Unlike [Self::block_by_hash] this will only return headers that are currently
+    /// disconnected from the canonical chain.
+    fn buffered_header_by_hash(&self, block_hash: BlockHash) -> Option<SealedHeader>;
 
     /// Returns true if the tree contains the block with matching hash.
     fn contains(&self, hash: BlockHash) -> bool {
@@ -194,6 +230,20 @@ pub trait BlockchainTreeViewer: Send + Sync {
     fn pending_block(&self) -> Option<SealedBlock> {
         self.block_by_hash(self.pending_block_num_hash()?.hash)
     }
+
+    /// Returns the pending block and its receipts in one call.
+    ///
+    /// This exists to prevent a potential data race if the pending block changes in between
+    /// [Self::pending_block] and [Self::pending_receipts] calls.
+    fn pending_block_and_receipts(&self) -> Option<(SealedBlock, Vec<Receipt>)>;
+
+    /// Returns the pending receipts if there is one.
+    fn pending_receipts(&self) -> Option<Vec<Receipt>> {
+        self.receipts_by_block_hash(self.pending_block_num_hash()?.hash)
+    }
+
+    /// Returns the pending receipts if there is one.
+    fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<Receipt>>;
 
     /// Returns the pending block if there is one.
     fn pending_header(&self) -> Option<SealedHeader> {

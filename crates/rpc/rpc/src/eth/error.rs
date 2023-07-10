@@ -3,6 +3,7 @@
 use crate::result::{internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code};
 use jsonrpsee::{core::Error as RpcError, types::ErrorObject};
 use reth_primitives::{abi::decode_revert_reason, Address, Bytes, U256};
+use reth_revm::tracing::js::JsInspectorError;
 use reth_rpc_types::{error::EthRpcErrorCode, BlockError};
 use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolError};
 use revm::primitives::{EVMError, ExecutionResult, Halt, OutOfGasError};
@@ -47,7 +48,7 @@ pub enum EthApiError {
     BothStateAndStateDiffInOverride(Address),
     /// Other internal error
     #[error(transparent)]
-    Internal(#[from] reth_interfaces::Error),
+    Internal(reth_interfaces::Error),
     /// Error related to signing
     #[error(transparent)]
     Signing(#[from] SignError),
@@ -57,18 +58,27 @@ pub enum EthApiError {
     /// Some feature is unsupported
     #[error("unsupported")]
     Unsupported(&'static str),
+    /// General purpose error for invalid params
+    #[error("{0}")]
+    InvalidParams(String),
     /// When tracer config does not match the tracer
     #[error("invalid tracer config")]
     InvalidTracerConfig,
     /// Percentile array is invalid
-    #[error("invalid reward percentile")]
-    InvalidRewardPercentile(f64),
+    #[error("invalid reward percentiles")]
+    InvalidRewardPercentiles,
     /// Error thrown when a spawned tracing task failed to deliver an anticipated response.
+    ///
+    /// This only happens if the tracing task panics and is aborted before it can return a response
+    /// back to the request handler.
     #[error("internal error while tracing")]
     InternalTracingError,
     /// Error thrown when a spawned blocking task failed to deliver an anticipated response.
     #[error("internal eth error")]
     InternalEthError,
+    /// Internal Error thrown by the javascript tracer
+    #[error("{0}")]
+    InternalJsTracerError(String),
 }
 
 impl From<EthApiError> for ErrorObject<'static> {
@@ -92,7 +102,9 @@ impl From<EthApiError> for ErrorObject<'static> {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
-            EthApiError::InvalidRewardPercentile(msg) => internal_rpc_err(msg.to_string()),
+            EthApiError::InternalJsTracerError(msg) => internal_rpc_err(msg),
+            EthApiError::InvalidParams(msg) => invalid_params_rpc_err(msg),
+            EthApiError::InvalidRewardPercentiles => internal_rpc_err(error.to_string()),
             err @ EthApiError::InternalTracingError => internal_rpc_err(err.to_string()),
             err @ EthApiError::InternalEthError => internal_rpc_err(err.to_string()),
         }
@@ -102,6 +114,42 @@ impl From<EthApiError> for ErrorObject<'static> {
 impl From<EthApiError> for RpcError {
     fn from(error: EthApiError) -> Self {
         RpcError::Call(error.into())
+    }
+}
+impl From<JsInspectorError> for EthApiError {
+    fn from(error: JsInspectorError) -> Self {
+        match error {
+            err @ JsInspectorError::JsError(_) => {
+                EthApiError::InternalJsTracerError(err.to_string())
+            }
+            err => EthApiError::InvalidParams(err.to_string()),
+        }
+    }
+}
+
+impl From<reth_interfaces::Error> for EthApiError {
+    fn from(error: reth_interfaces::Error) -> Self {
+        match error {
+            reth_interfaces::Error::Provider(err) => err.into(),
+            err => EthApiError::Internal(err),
+        }
+    }
+}
+
+impl From<reth_interfaces::provider::ProviderError> for EthApiError {
+    fn from(error: reth_interfaces::provider::ProviderError) -> Self {
+        use reth_interfaces::provider::ProviderError;
+        match error {
+            ProviderError::HeaderNotFound(_) |
+            ProviderError::BlockHashNotFound(_) |
+            ProviderError::BestBlockNotFound |
+            ProviderError::FinalizedBlockNotFound |
+            ProviderError::SafeBlockNotFound |
+            ProviderError::BlockNumberForTransactionIndexNotFound |
+            ProviderError::TotalDifficultyNotFound { .. } |
+            ProviderError::UnknownBlockHash(_) => EthApiError::UnknownBlockNumber,
+            err => EthApiError::Internal(err.into()),
+        }
     }
 }
 

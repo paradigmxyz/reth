@@ -8,22 +8,22 @@ use reth_rpc::{
 use serde::{Deserialize, Serialize};
 
 /// The default maximum of logs in a single response.
-pub(crate) const DEFAULT_MAX_LOGS_IN_RESPONSE: usize = 10_000;
+pub(crate) const DEFAULT_MAX_LOGS_PER_RESPONSE: usize = 20_000;
 
 /// The default maximum number of concurrently executed tracing calls
 pub(crate) const DEFAULT_MAX_TRACING_REQUESTS: u32 = 25;
 
 /// All handlers for the `eth` namespace
 #[derive(Debug, Clone)]
-pub struct EthHandlers<Client, Pool, Network, Events> {
+pub struct EthHandlers<Provider, Pool, Network, Events> {
     /// Main `eth_` request handler
-    pub api: EthApi<Client, Pool, Network>,
+    pub api: EthApi<Provider, Pool, Network>,
     /// The async caching layer used by the eth handlers
     pub cache: EthStateCache,
     /// Polling based filter handler available on all transports
-    pub filter: EthFilter<Client, Pool>,
+    pub filter: EthFilter<Provider, Pool>,
     /// Handler for subscriptions only available for transports that support it (ws, ipc)
-    pub pubsub: EthPubSub<Client, Pool, Events, Network>,
+    pub pubsub: EthPubSub<Provider, Pool, Events, Network>,
 }
 
 /// Additional config values for the eth namespace
@@ -45,7 +45,7 @@ impl Default for EthConfig {
             cache: EthStateCacheConfig::default(),
             gas_oracle: GasPriceOracleConfig::default(),
             max_tracing_requests: DEFAULT_MAX_TRACING_REQUESTS,
-            max_logs_per_response: DEFAULT_MAX_LOGS_IN_RESPONSE,
+            max_logs_per_response: DEFAULT_MAX_LOGS_PER_RESPONSE,
         }
     }
 }

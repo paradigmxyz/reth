@@ -17,7 +17,9 @@ pub mod models;
 mod raw;
 pub(crate) mod utils;
 
-pub use raw::{RawDubSort, RawKey, RawTable, RawValue};
+use crate::abstraction::table::Table;
+pub use raw::{RawDupSort, RawKey, RawTable, RawValue};
+use std::{fmt::Display, str::FromStr};
 
 /// Declaration of all Database tables.
 use crate::{
@@ -40,7 +42,7 @@ use reth_primitives::{
 };
 
 /// Enum for the types of tables present in libmdbx.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum TableType {
     /// key value table
     Table,
@@ -51,34 +53,138 @@ pub enum TableType {
 /// Number of tables that should be present inside database.
 pub const NUM_TABLES: usize = 25;
 
-/// Default tables that should be present inside database.
-pub const TABLES: [(TableType, &str); NUM_TABLES] = [
-    (TableType::Table, CanonicalHeaders::const_name()),
-    (TableType::Table, HeaderTD::const_name()),
-    (TableType::Table, HeaderNumbers::const_name()),
-    (TableType::Table, Headers::const_name()),
-    (TableType::Table, BlockBodyIndices::const_name()),
-    (TableType::Table, BlockOmmers::const_name()),
-    (TableType::Table, BlockWithdrawals::const_name()),
-    (TableType::Table, TransactionBlock::const_name()),
-    (TableType::Table, Transactions::const_name()),
-    (TableType::Table, TxHashNumber::const_name()),
-    (TableType::Table, Receipts::const_name()),
-    (TableType::Table, PlainAccountState::const_name()),
-    (TableType::DupSort, PlainStorageState::const_name()),
-    (TableType::Table, Bytecodes::const_name()),
-    (TableType::Table, AccountHistory::const_name()),
-    (TableType::Table, StorageHistory::const_name()),
-    (TableType::DupSort, AccountChangeSet::const_name()),
-    (TableType::DupSort, StorageChangeSet::const_name()),
-    (TableType::Table, HashedAccount::const_name()),
-    (TableType::DupSort, HashedStorage::const_name()),
-    (TableType::Table, AccountsTrie::const_name()),
-    (TableType::DupSort, StoragesTrie::const_name()),
-    (TableType::Table, TxSenders::const_name()),
-    (TableType::Table, SyncStage::const_name()),
-    (TableType::Table, SyncStageProgress::const_name()),
-];
+/// The general purpose of this is to use with a combination of Tables enum,
+/// by implementing a `TableViewer` trait you can operate on db tables in an abstract way.
+///
+/// # Example
+///
+/// ```
+/// use reth_db::{ table::Table, TableViewer, Tables };
+/// use std::str::FromStr;
+///
+/// let headers = Tables::from_str("Headers").unwrap();
+/// let transactions = Tables::from_str("Transactions").unwrap();
+///
+/// struct MyTableViewer;
+///
+/// impl TableViewer<()> for MyTableViewer {
+///     type Error = &'static str;
+///
+///     fn view<T: Table>(&self) -> Result<(), Self::Error> {
+///         // operate on table in generic way
+///         Ok(())
+///     }
+/// }
+///
+/// let viewer = MyTableViewer {};
+///
+/// let _ = headers.view(&viewer);
+/// let _ = transactions.view(&viewer);
+/// ```
+pub trait TableViewer<R> {
+    /// type of error to return
+    type Error;
+
+    /// operate on table in generic way
+    fn view<T: Table>(&self) -> Result<R, Self::Error>;
+}
+
+macro_rules! tables {
+    ([$(($table:ident, $type:expr)),*]) => {
+        #[derive(Debug, PartialEq, Copy, Clone)]
+        /// Default tables that should be present inside database.
+        pub enum Tables {
+            $(
+                #[doc = concat!("Represents a ", stringify!($table), " table")]
+                $table,
+            )*
+        }
+
+        impl Tables {
+            /// Array of all tables in database
+            pub const ALL: [Tables; NUM_TABLES] = [$(Tables::$table,)*];
+
+            /// The name of the given table in database
+            pub const fn name(&self) -> &str {
+                match self {
+                    $(Tables::$table => {
+                        $table::NAME
+                    },)*
+                }
+            }
+
+            /// The type of the given table in database
+            pub const fn table_type(&self) -> TableType {
+                match self {
+                    $(Tables::$table => {
+                        $type
+                    },)*
+                }
+            }
+
+            /// Allows to operate on specific table type
+            pub fn view<T, R>(&self, visitor: &T) -> Result<R, T::Error>
+            where
+                T: TableViewer<R>,
+            {
+                match self {
+                    $(Tables::$table => {
+                        visitor.view::<$table>()
+                    },)*
+                }
+            }
+        }
+
+        impl Display for Tables {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", self.name())
+            }
+        }
+
+        impl FromStr for Tables {
+            type Err = String;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                match s {
+                    $($table::NAME => {
+                        return Ok(Tables::$table)
+                    },)*
+                    _ => {
+                        return Err("Unknown table".to_string())
+                    }
+                }
+            }
+        }
+    };
+}
+
+tables!([
+    (CanonicalHeaders, TableType::Table),
+    (HeaderTD, TableType::Table),
+    (HeaderNumbers, TableType::Table),
+    (Headers, TableType::Table),
+    (BlockBodyIndices, TableType::Table),
+    (BlockOmmers, TableType::Table),
+    (BlockWithdrawals, TableType::Table),
+    (TransactionBlock, TableType::Table),
+    (Transactions, TableType::Table),
+    (TxHashNumber, TableType::Table),
+    (Receipts, TableType::Table),
+    (PlainAccountState, TableType::Table),
+    (PlainStorageState, TableType::DupSort),
+    (Bytecodes, TableType::Table),
+    (AccountHistory, TableType::Table),
+    (StorageHistory, TableType::Table),
+    (AccountChangeSet, TableType::DupSort),
+    (StorageChangeSet, TableType::DupSort),
+    (HashedAccount, TableType::Table),
+    (HashedStorage, TableType::DupSort),
+    (AccountsTrie, TableType::Table),
+    (StoragesTrie, TableType::DupSort),
+    (TxSenders, TableType::Table),
+    (SyncStage, TableType::Table),
+    (SyncStageProgress, TableType::Table)
+]);
 
 #[macro_export]
 /// Macro to declare key value table.
@@ -170,7 +276,7 @@ table!(
 
 table!(
     /// (Canonical only) Stores the transaction body for canonical transactions.
-    (  Transactions ) TxNumber | TransactionSignedNoHash
+    ( Transactions ) TxNumber | TransactionSignedNoHash
 );
 
 table!(
@@ -211,7 +317,7 @@ dupsort!(
 table!(
     /// Stores pointers to block changeset with changes for each account key.
     ///
-    /// Last shard key of the storage will contains `u64::MAX` `BlockNumber`,
+    /// Last shard key of the storage will contain `u64::MAX` `BlockNumber`,
     /// this would allows us small optimization on db access when change is in plain state.
     ///
     /// Imagine having shards as:
@@ -233,7 +339,7 @@ table!(
 table!(
     /// Stores pointers to block number changeset with changes for each storage key.
     ///
-    /// Last shard key of the storage will contains `u64::MAX` `BlockNumber`,
+    /// Last shard key of the storage will contain `u64::MAX` `BlockNumber`,
     /// this would allows us small optimization on db access when change is in plain state.
     ///
     /// Imagine having shards as:
@@ -293,7 +399,7 @@ dupsort!(
 );
 
 table!(
-    /// Stores the transaction sender for each transaction.
+    /// Stores the transaction sender for each canonical transaction.
     /// It is needed to speed up execution stage and allows fetching signer without doing
     /// transaction signed recovery
     ( TxSenders ) TxNumber | Address
@@ -315,3 +421,49 @@ table!(
 pub type BlockNumberList = IntegerList;
 /// Encoded stage id.
 pub type StageId = String;
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use crate::*;
+
+    const TABLES: [(TableType, &str); NUM_TABLES] = [
+        (TableType::Table, CanonicalHeaders::const_name()),
+        (TableType::Table, HeaderTD::const_name()),
+        (TableType::Table, HeaderNumbers::const_name()),
+        (TableType::Table, Headers::const_name()),
+        (TableType::Table, BlockBodyIndices::const_name()),
+        (TableType::Table, BlockOmmers::const_name()),
+        (TableType::Table, BlockWithdrawals::const_name()),
+        (TableType::Table, TransactionBlock::const_name()),
+        (TableType::Table, Transactions::const_name()),
+        (TableType::Table, TxHashNumber::const_name()),
+        (TableType::Table, Receipts::const_name()),
+        (TableType::Table, PlainAccountState::const_name()),
+        (TableType::DupSort, PlainStorageState::const_name()),
+        (TableType::Table, Bytecodes::const_name()),
+        (TableType::Table, AccountHistory::const_name()),
+        (TableType::Table, StorageHistory::const_name()),
+        (TableType::DupSort, AccountChangeSet::const_name()),
+        (TableType::DupSort, StorageChangeSet::const_name()),
+        (TableType::Table, HashedAccount::const_name()),
+        (TableType::DupSort, HashedStorage::const_name()),
+        (TableType::Table, AccountsTrie::const_name()),
+        (TableType::DupSort, StoragesTrie::const_name()),
+        (TableType::Table, TxSenders::const_name()),
+        (TableType::Table, SyncStage::const_name()),
+        (TableType::Table, SyncStageProgress::const_name()),
+    ];
+
+    #[test]
+    fn parse_table_from_str() {
+        for (table_index, &(table_type, table_name)) in TABLES.iter().enumerate() {
+            let table = Tables::from_str(table_name).unwrap();
+
+            assert_eq!(table as usize, table_index);
+            assert_eq!(table.table_type(), table_type);
+            assert_eq!(table.name(), table_name);
+        }
+    }
+}

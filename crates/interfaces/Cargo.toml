@@ -1,55 +1,57 @@
 [package]
 name = "reth-interfaces"
-version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
-readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 
 [dependencies]
 reth-codecs = { path = "../storage/codecs" }
-reth-primitives = { path = "../primitives" }
-reth-rpc-types = { path = "../rpc/rpc-types" }
-reth-network-api = { path = "../net/network-api" }
+reth-primitives = { workspace = true }
+reth-rpc-types = { workspace = true }
+reth-network-api = { workspace = true }
 # TODO(onbjerg): We only need this for [BlockBody]
 reth-eth-wire = { path = "../net/eth-wire" }
 
 # eth
-revm-primitives = "1.1"
+revm-primitives = { workspace = true }
 parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
 
 # async
-async-trait = "0.1.57"
-futures = "0.3"
-tokio = { version = "1.21.2", features = ["sync"] }
-tokio-stream = "0.1.11"
+async-trait = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+tokio-stream = { workspace = true }
 
 # misc
 auto_impl = "1.0"
-thiserror = "1.0.37"
+thiserror = { workspace = true }
 tracing = { workspace = true }
-rand = "0.8.5"
+rand = { workspace = true }
 arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
-secp256k1 = { version = "0.27.0", default-features = false, features = [
+secp256k1 = { workspace = true, default-features = false, features = [
     "alloc",
     "recovery",
     "rand",
 ], optional = true }
 modular-bitfield = "0.11.2"
 parking_lot = "0.12.1"
+clap = { version = "4", features = ["derive"], optional = true }
 
 [dev-dependencies]
 reth-db = { path = "../storage/db", features = ["test-utils"] }
-tokio = { version = "1.21.2", features = ["full"] }
-tokio-stream = { version = "0.1.11", features = ["sync"] }
+tokio = { workspace = true, features = ["full"] }
+tokio-stream = { workspace = true, features = ["sync"] }
 arbitrary = { version = "1.1.7", features = ["derive"] }
 hex-literal = "0.3"
-secp256k1 = { version = "0.27.0", default-features = false, features = [
+secp256k1 = { workspace = true, features = [
     "alloc",
     "recovery",
     "rand",
 ] }
 
 [features]
-bench = []
-test-utils = ["tokio-stream/sync", "secp256k1"]
+test-utils = ["tokio-stream/sync", "secp256k1", "rand/std_rng"]
+cli = ["clap"]

@@ -1,3 +1,9 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+)]
 use proc_macro::{self, TokenStream, TokenTree};
 use quote::{format_ident, quote};
 use syn::{parse_macro_input, DeriveInput};
@@ -17,11 +23,13 @@ pub fn derive_zstd(input: TokenStream) -> TokenStream {
     compact::derive(input, is_zstd)
 }
 
-/// Implements the main codec. If the codec supports it, it will call `derive_arbitrary(..)`.
+/// This code implements the main codec. If the codec supports it, it will also provide the [derive_arbitrary()] function, which automatically implements arbitrary traits and roundtrip fuzz tests.
+///
+/// If you prefer to manually implement the arbitrary traits, you can still use the [add_arbitrary_tests()] function to add arbitrary fuzz tests.
 /// 
 /// Example usage:
 /// * `#[main_codec(rlp)]`: will implement `derive_arbitrary(rlp)` or `derive_arbitrary(compact, rlp)`, if `compact` is the `main_codec`.
-/// * `#[main_codec(no_arbitrary)]`: will skip `derive_arbitrary`
+/// * `#[main_codec(no_arbitrary)]`: will skip `derive_arbitrary` (both trait implementations and tests)
 #[proc_macro_attribute]
 #[rustfmt::skip]
 #[allow(unreachable_code)]
@@ -111,7 +119,7 @@ pub fn use_compact(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut args = args.into_iter().collect::<Vec<_>>();
     args.push(TokenTree::Ident(proc_macro::Ident::new("compact", proc_macro::Span::call_site())));
 
-    derive_arbitrary(TokenStream::from_iter(args.into_iter()), compact)
+    derive_arbitrary(TokenStream::from_iter(args), compact)
 }
 
 /// Adds `Arbitrary` and `proptest::Arbitrary` imports into scope and derives the struct/enum.

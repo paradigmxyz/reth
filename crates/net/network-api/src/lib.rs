@@ -1,3 +1,9 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+)]
 #![warn(missing_docs, unreachable_pub)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
@@ -8,7 +14,10 @@
 //! Reth network interface definitions.
 //!
 //! Provides abstractions for the reth-network crate.
-
+//!
+//! ## Feature Flags
+//!
+//! - `serde` (default): Enable serde support
 use async_trait::async_trait;
 use reth_eth_wire::DisconnectReason;
 use reth_primitives::{NodeRecord, PeerId};
@@ -23,9 +32,8 @@ pub mod error;
 /// Reputation score
 pub mod reputation;
 
-#[cfg(feature = "test-utils")]
-/// Implementation of network traits for testing purposes.
-pub mod test_utils;
+/// Implementation of network traits for that does nothing.
+pub mod noop;
 
 /// Provides general purpose information about the network.
 #[async_trait]

@@ -1,10 +1,11 @@
 [package]
 name = "reth-blockchain-tree"
-version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
-readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 
 [package.metadata.cargo-udeps.ignore]
 normal = [
@@ -14,14 +15,15 @@ normal = [
 
 [dependencies]
 # reth
-reth-primitives = { path = "../primitives" }
-reth-interfaces = { path = "../interfaces" }
+reth-primitives = { workspace = true }
+reth-interfaces = { workspace = true }
 reth-db = { path = "../storage/db" }
-reth-provider = { path = "../storage/provider" }
-
+reth-metrics = { workspace = true, features = ["common"] }
+reth-provider = { workspace = true }
+reth-stages = { path = "../stages" }
 
 # common
-parking_lot = { version = "0.12"}
+parking_lot = { version = "0.12" }
 lru = "0.10"
 tracing = { workspace = true }
 
@@ -29,15 +31,14 @@ tracing = { workspace = true }
 aquamarine = "0.3.0"
 linked_hash_set = "0.1.4"
 
-
 [dev-dependencies]
 reth-db = { path = "../storage/db", features = ["test-utils"] }
-reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
-reth-primitives = { path = "../primitives", features = ["test-utils"] }
-reth-provider = { path = "../storage/provider", features = ["test-utils"]  }
+reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-primitives = { workspace = true , features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
 parking_lot = "0.12"
 assert_matches = "1.5"
-tokio = { version = "1", features = ["macros", "sync"] }
+tokio = { workspace = true, features = ["macros", "sync"] }
 
 [features]
 test-utils = []

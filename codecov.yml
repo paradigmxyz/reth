@@ -8,4 +8,61 @@ coverage:
 github_checks:
   annotations: false
 comment:
+  layout: "reach, files, flags, components"
   require_changes: true
+component_management:
+  individual_components:
+    - component_id: reth_binary
+      name: reth binary
+      paths:
+        - bin/**
+        - crates/config/**
+        - crates/metrics/**
+        - crates/tracing/**
+    - component_id: blockchain_tree
+      name: blockchain tree
+      paths:
+        - crates/blockchain-tree/**
+    - component_id: staged_sync
+      name: pipeline
+      paths:
+        - crates/stages/**
+    - component_id: storage
+      name: storage (db)
+      paths:
+        - crates/storage/**
+    - component_id: trie
+      name: trie
+      paths:
+        - crates/trie/**
+    - component_id: txpool
+      name: txpool
+      paths:
+        - crates/transaction-pool/**
+    - component_id: networking
+      name: networking
+      paths:
+        - crates/net/**
+    - component_id: rpc
+      name: rpc
+      paths:
+        - crates/rpc/**
+    - component_id: consensus
+      name: consensus
+      paths:
+        - crates/consensus/**
+    - component_id: revm
+      name: revm
+      paths:
+        - crates/revm/**
+    - component_id: builder
+      name: payload builder
+      paths:
+        - crates/payload/**
+    - component_id: primitives
+      name: primitives
+      paths:
+        - crates/primitives/**
+        - crates/tasks/**
+        - crates/rlp/**
+        - crates/interfaces/**

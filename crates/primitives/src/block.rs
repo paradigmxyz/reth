@@ -1,7 +1,6 @@
 use crate::{
-    Address, BlockHash, BlockNumber, Header, SealedHeader, TransactionSigned, Withdrawal, H256,
+    Address, BlockHash, BlockNumber, Header, SealedHeader, TransactionSigned, Withdrawal, H256, U64,
 };
-use ethers_core::types::{BlockNumber as EthersBlockNumber, U64};
 use fixed_hash::rustc_hex::FromHexError;
 use reth_codecs::derive_arbitrary;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
@@ -138,6 +137,18 @@ impl SealedBlock {
     /// Splits the sealed block into underlying components
     pub fn split(self) -> (SealedHeader, Vec<TransactionSigned>, Vec<Header>) {
         (self.header, self.body, self.ommers)
+    }
+
+    /// Splits the [BlockBody] and [SealedHeader] into separate components
+    pub fn split_header_body(self) -> (SealedHeader, BlockBody) {
+        (
+            self.header,
+            BlockBody {
+                transactions: self.body,
+                ommers: self.ommers,
+                withdrawals: self.withdrawals,
+            },
+        )
     }
 
     /// Expensive operation that recovers transaction signer. See [SealedBlockWithSenders].
@@ -564,19 +575,6 @@ impl From<u64> for BlockNumberOrTag {
     }
 }
 
-impl From<EthersBlockNumber> for BlockNumberOrTag {
-    fn from(value: EthersBlockNumber) -> Self {
-        match value {
-            EthersBlockNumber::Latest => BlockNumberOrTag::Latest,
-            EthersBlockNumber::Finalized => BlockNumberOrTag::Finalized,
-            EthersBlockNumber::Safe => BlockNumberOrTag::Safe,
-            EthersBlockNumber::Earliest => BlockNumberOrTag::Earliest,
-            EthersBlockNumber::Pending => BlockNumberOrTag::Pending,
-            EthersBlockNumber::Number(num) => BlockNumberOrTag::Number(num.as_u64()),
-        }
-    }
-}
-
 impl From<U64> for BlockNumberOrTag {
     fn from(num: U64) -> Self {
         num.as_u64().into()
@@ -729,6 +727,14 @@ impl BlockNumHash {
     pub fn into_components(self) -> (BlockNumber, BlockHash) {
         (self.number, self.hash)
     }
+
+    /// Returns whether or not the block matches the given [BlockHashOrNumber].
+    pub fn matches_block_or_num(&self, block: &BlockHashOrNumber) -> bool {
+        match block {
+            BlockHashOrNumber::Hash(hash) => self.hash == *hash,
+            BlockHashOrNumber::Number(number) => self.number == *number,
+        }
+    }
 }
 
 impl From<(BlockNumber, BlockHash)> for BlockNumHash {
@@ -753,10 +759,28 @@ impl From<(BlockHash, BlockNumber)> for BlockNumHash {
 #[rlp(trailing)]
 pub struct BlockBody {
     /// Transactions in the block
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(
+            strategy = "proptest::collection::vec(proptest::arbitrary::any::<TransactionSigned>(), 0..=100)"
+        )
+    )]
     pub transactions: Vec<TransactionSigned>,
     /// Uncle headers for the given block
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(
+            strategy = "proptest::collection::vec(proptest::arbitrary::any::<Header>(), 0..=2)"
+        )
+    )]
     pub ommers: Vec<Header>,
     /// Withdrawals in the block.
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(
+            strategy = "proptest::option::of(proptest::collection::vec(proptest::arbitrary::any::<Withdrawal>(), 0..=16))"
+        )
+    )]
     pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
@@ -770,6 +794,43 @@ impl BlockBody {
             withdrawals: self.withdrawals.clone(),
         }
     }
+
+    /// Calculate the transaction root for the block body.
+    pub fn calculate_tx_root(&self) -> H256 {
+        crate::proofs::calculate_transaction_root(&self.transactions)
+    }
+
+    /// Calculate the ommers root for the block body.
+    pub fn calculate_ommers_root(&self) -> H256 {
+        crate::proofs::calculate_ommers_root(&self.ommers)
+    }
+
+    /// Calculate the withdrawals root for the block body, if withdrawals exist. If there are no
+    /// withdrawals, this will return `None`.
+    pub fn calculate_withdrawals_root(&self) -> Option<H256> {
+        self.withdrawals.as_ref().map(|w| crate::proofs::calculate_withdrawals_root(w))
+    }
+
+    /// Calculate all roots (transaction, ommers, withdrawals) for the block body.
+    pub fn calculate_roots(&self) -> BlockBodyRoots {
+        BlockBodyRoots {
+            tx_root: self.calculate_tx_root(),
+            ommers_hash: self.calculate_ommers_root(),
+            withdrawals_root: self.calculate_withdrawals_root(),
+        }
+    }
+}
+
+/// A struct that represents roots associated with a block body. This can be used to correlate
+/// block body responses with headers.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Hash)]
+pub struct BlockBodyRoots {
+    /// The transaction root for the block body.
+    pub tx_root: H256,
+    /// The ommers hash for the block body.
+    pub ommers_hash: H256,
+    /// The withdrawals root for the block body, if withdrawals exist.
+    pub withdrawals_root: Option<H256>,
 }
 
 #[cfg(test)]

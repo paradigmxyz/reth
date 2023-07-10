@@ -18,7 +18,8 @@ pub(crate) struct ForkchoiceStateTracker {
 impl ForkchoiceStateTracker {
     /// Sets the latest forkchoice state that we received.
     ///
-    /// If the status is valid, we also update the last valid forkchoice state.
+    /// If the status is `VALID`, we also update the last valid forkchoice state and set the
+    /// `sync_target` to `None`, since we're now fully synced.
     pub(crate) fn set_latest(&mut self, state: ForkchoiceState, status: ForkchoiceStatus) {
         if status.is_valid() {
             self.set_valid(state);
@@ -81,7 +82,7 @@ pub(crate) struct ReceivedForkchoiceState {
 
 /// A simplified representation of [PayloadStatusEnum] specifically for FCU.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum ForkchoiceStatus {
+pub enum ForkchoiceStatus {
     /// The forkchoice state is valid.
     Valid,
     /// The forkchoice state is invalid.
@@ -116,5 +117,43 @@ impl ForkchoiceStatus {
 impl From<PayloadStatusEnum> for ForkchoiceStatus {
     fn from(status: PayloadStatusEnum) -> Self {
         ForkchoiceStatus::from_payload_status(&status)
+    }
+}
+
+/// A helper type to check represent hashes of a [ForkchoiceState]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ForkchoiceStateHash {
+    Head(H256),
+    Safe(H256),
+    Finalized(H256),
+}
+
+impl ForkchoiceStateHash {
+    /// Tries to find a matching hash in the given [ForkchoiceState].
+    pub(crate) fn find(state: &ForkchoiceState, hash: H256) -> Option<Self> {
+        if state.head_block_hash == hash {
+            Some(ForkchoiceStateHash::Head(hash))
+        } else if state.safe_block_hash == hash {
+            Some(ForkchoiceStateHash::Safe(hash))
+        } else if state.finalized_block_hash == hash {
+            Some(ForkchoiceStateHash::Finalized(hash))
+        } else {
+            None
+        }
+    }
+
+    /// Returns true if this is the head hash of the [ForkchoiceState]
+    pub(crate) fn is_head(&self) -> bool {
+        matches!(self, ForkchoiceStateHash::Head(_))
+    }
+}
+
+impl AsRef<H256> for ForkchoiceStateHash {
+    fn as_ref(&self) -> &H256 {
+        match self {
+            ForkchoiceStateHash::Head(h) => h,
+            ForkchoiceStateHash::Safe(h) => h,
+            ForkchoiceStateHash::Finalized(h) => h,
+        }
     }
 }

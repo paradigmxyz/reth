@@ -7,11 +7,10 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{
-    keccak256, Account as RethAccount, Address, BigEndianHash, BlockNumber, Bloom, Bytecode, Bytes,
-    ChainSpec, ChainSpecBuilder, Header as RethHeader, JsonU256, SealedBlock, SealedHeader,
-    StorageEntry, Withdrawal, H160, H256, H64, U256,
+    keccak256, Account as RethAccount, Address, BigEndianHash, Bloom, Bytecode, Bytes, ChainSpec,
+    ChainSpecBuilder, Header as RethHeader, JsonU256, SealedHeader, StorageEntry, Withdrawal, H160,
+    H256, H64, U256,
 };
-use reth_rlp::Decodable;
 use serde::{self, Deserialize};
 use std::{collections::BTreeMap, ops::Deref};
 
@@ -37,6 +36,20 @@ pub struct BlockchainTest {
     #[serde(default)]
     /// Engine spec.
     pub self_engine: SealEngine,
+    #[serde(rename = "_info")]
+    #[allow(unused)]
+    info: BlockchainTestInfo,
+}
+
+#[derive(Debug, PartialEq, Eq, Deserialize)]
+struct BlockchainTestInfo {
+    #[serde(rename = "filling-rpc-server")]
+    #[allow(unused)]
+    // One test has an invalid string in this field, which breaks our CI:
+    // https://github.com/ethereum/tests/blob/6c252923bdd1bd5a70f680df1214f866f76839db/GeneralStateTests/stTransactionTest/ValueOverflow.json#L5
+    // By using `serde_bytes::ByteBuf`, we ignore the validation of this field as a string.
+    // TODO(alexey): remove when `ethereum/tests` is fixed
+    filling_rpc_server: serde_bytes::ByteBuf,
 }
 
 /// A block header in an Ethereum blockchain test.
@@ -122,19 +135,6 @@ pub struct Block {
     pub transaction_sequence: Option<Vec<TransactionSequence>>,
     /// Withdrawals
     pub withdrawals: Option<Vec<Withdrawal>>,
-}
-
-impl Block {
-    /// Write the block to the database.
-    pub fn write_to_db<'a, Tx>(&self, tx: &'a Tx) -> Result<BlockNumber, Error>
-    where
-        Tx: DbTx<'a> + DbTxMut<'a>,
-    {
-        let decoded = SealedBlock::decode(&mut self.rlp.as_ref())?;
-        let block_number = decoded.number;
-        reth_provider::insert_canonical_block(tx, decoded, None)?;
-        Ok(block_number)
-    }
 }
 
 /// Transaction sequence in block

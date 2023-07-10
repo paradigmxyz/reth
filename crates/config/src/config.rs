@@ -5,6 +5,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_network::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
+use reth_primitives::PruneMode;
 use secp256k1::SecretKey;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -16,6 +17,9 @@ pub struct Config {
     /// Configuration for each stage in the pipeline.
     // TODO(onbjerg): Can we make this easier to maintain when we add/remove stages?
     pub stages: StageConfig,
+    /// Configuration for pruning.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prune: Option<PruneConfig>,
     /// Configuration for the discovery service.
     pub peers: PeersConfig,
     /// Configuration for peer sessions.
@@ -51,14 +55,26 @@ impl Config {
 pub struct StageConfig {
     /// Header stage configuration.
     pub headers: HeadersConfig,
-    /// Total difficulty stage configuration
+    /// Total Difficulty stage configuration
     pub total_difficulty: TotalDifficultyConfig,
     /// Body stage configuration.
     pub bodies: BodiesConfig,
-    /// Sender recovery stage configuration.
+    /// Sender Recovery stage configuration.
     pub sender_recovery: SenderRecoveryConfig,
     /// Execution stage configuration.
     pub execution: ExecutionConfig,
+    /// Account Hashing stage configuration.
+    pub account_hashing: HashingConfig,
+    /// Storage Hashing stage configuration.
+    pub storage_hashing: HashingConfig,
+    /// Merkle stage configuration.
+    pub merkle: MerkleConfig,
+    /// Transaction Lookup stage configuration.
+    pub transaction_lookup: TransactionLookupConfig,
+    /// Index Account History stage configuration.
+    pub index_account_history: IndexHistoryConfig,
+    /// Index Storage History stage configuration.
+    pub index_storage_history: IndexHistoryConfig,
 }
 
 /// Header stage configuration.
@@ -132,11 +148,10 @@ pub struct BodiesConfig {
     ///
     /// Default: 10_000
     pub downloader_stream_batch_size: usize,
-    /// Maximum amount of received bodies to buffer internally.
-    /// The response contains multiple bodies.
+    /// The size of the internal block buffer in bytes.
     ///
-    /// Default: ~43_000 or 4GB with block size of 100kb
-    pub downloader_max_buffered_blocks: usize,
+    /// Default: 4GB
+    pub downloader_max_buffered_blocks_size_bytes: usize,
     /// The minimum number of requests to send concurrently.
     ///
     /// Default: 5
@@ -153,8 +168,7 @@ impl Default for BodiesConfig {
         Self {
             downloader_request_limit: 200,
             downloader_stream_batch_size: 10_000,
-            // With high block sizes at around 100kb this will be ~4GB of buffered blocks: ~43k
-            downloader_max_buffered_blocks: 4 * 1024 * 1024 * 1024 / 100_000,
+            downloader_max_buffered_blocks_size_bytes: 4 * 1024 * 1024 * 1024, // ~4GB
             downloader_min_concurrent_requests: 5,
             downloader_max_concurrent_requests: 100,
         }
@@ -166,7 +180,7 @@ impl From<BodiesConfig> for BodiesDownloaderBuilder {
         BodiesDownloaderBuilder::default()
             .with_stream_batch_size(config.downloader_stream_batch_size)
             .with_request_limit(config.downloader_request_limit)
-            .with_max_buffered_blocks(config.downloader_max_buffered_blocks)
+            .with_max_buffered_blocks_size_bytes(config.downloader_max_buffered_blocks_size_bytes)
             .with_concurrent_requests_range(
                 config.downloader_min_concurrent_requests..=
                     config.downloader_max_concurrent_requests,
@@ -178,13 +192,13 @@ impl From<BodiesConfig> for BodiesDownloaderBuilder {
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default)]
 pub struct SenderRecoveryConfig {
-    /// The maximum number of blocks to process before committing progress to the database.
+    /// The maximum number of transactions to process before committing progress to the database.
     pub commit_threshold: u64,
 }
 
 impl Default for SenderRecoveryConfig {
     fn default() -> Self {
-        Self { commit_threshold: 5_000 }
+        Self { commit_threshold: 5_000_000 }
     }
 }
 
@@ -196,22 +210,109 @@ pub struct ExecutionConfig {
     pub max_blocks: Option<u64>,
     /// The maximum amount of state changes to keep in memory before the execution stage commits.
     pub max_changes: Option<u64>,
-    /// The maximum amount of changesets to keep in memory before they are written to the pending
-    /// database transaction.
-    ///
-    /// If this is lower than `max_gas`, then history is periodically flushed to the database
-    /// transaction, which frees up memory.
-    pub max_changesets: Option<u64>,
 }
 
 impl Default for ExecutionConfig {
     fn default() -> Self {
-        Self {
-            max_blocks: Some(500_000),
-            max_changes: Some(5_000_000),
-            max_changesets: Some(1_000_000),
-        }
+        Self { max_blocks: Some(500_000), max_changes: Some(5_000_000) }
     }
+}
+
+/// Hashing stage configuration.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct HashingConfig {
+    /// The threshold (in number of blocks) for switching between
+    /// incremental hashing and full hashing.
+    pub clean_threshold: u64,
+    /// The maximum number of entities to process before committing progress to the database.
+    pub commit_threshold: u64,
+}
+
+impl Default for HashingConfig {
+    fn default() -> Self {
+        Self { clean_threshold: 500_000, commit_threshold: 100_000 }
+    }
+}
+
+/// Merkle stage configuration.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct MerkleConfig {
+    /// The threshold (in number of blocks) for switching from incremental trie building of changes
+    /// to whole rebuild.
+    pub clean_threshold: u64,
+}
+
+impl Default for MerkleConfig {
+    fn default() -> Self {
+        Self { clean_threshold: 50_000 }
+    }
+}
+
+/// Transaction Lookup stage configuration.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct TransactionLookupConfig {
+    /// The maximum number of transactions to process before committing progress to the database.
+    pub commit_threshold: u64,
+}
+
+impl Default for TransactionLookupConfig {
+    fn default() -> Self {
+        Self { commit_threshold: 5_000_000 }
+    }
+}
+
+/// History History stage configuration.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct IndexHistoryConfig {
+    /// The maximum number of blocks to process before committing progress to the database.
+    pub commit_threshold: u64,
+}
+
+impl Default for IndexHistoryConfig {
+    fn default() -> Self {
+        Self { commit_threshold: 100_000 }
+    }
+}
+
+/// Pruning configuration.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct PruneConfig {
+    /// Minimum pruning interval measured in blocks.
+    pub block_interval: u64,
+    /// Pruning configuration for every part of the data that can be pruned.
+    pub parts: PruneParts,
+}
+
+impl Default for PruneConfig {
+    fn default() -> Self {
+        Self { block_interval: 10, parts: PruneParts::default() }
+    }
+}
+
+/// Pruning configuration for every part of the data that can be pruned.
+#[derive(Debug, Clone, Default, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct PruneParts {
+    /// Sender Recovery pruning configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sender_recovery: Option<PruneMode>,
+    /// Transaction Lookup pruning configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transaction_lookup: Option<PruneMode>,
+    /// Receipts pruning configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receipts: Option<PruneMode>,
+    /// Account History pruning configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_history: Option<PruneMode>,
+    /// Storage History pruning configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage_history: Option<PruneMode>,
 }
 
 #[cfg(test)]

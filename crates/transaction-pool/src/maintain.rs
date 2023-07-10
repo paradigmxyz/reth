@@ -1,36 +1,49 @@
 //! Support for maintaining the state of the transaction pool
 
 use crate::{
-    traits::{CanonicalStateUpdate, ChangedAccount},
-    BlockInfo, Pool, TransactionOrdering, TransactionPool, TransactionValidator,
+    traits::{CanonicalStateUpdate, ChangedAccount, TransactionPoolExt},
+    BlockInfo, TransactionPool,
 };
-use futures_util::{Stream, StreamExt};
+use futures_util::{future::BoxFuture, FutureExt, Stream, StreamExt};
 use reth_primitives::{Address, BlockHash, BlockNumberOrTag, FromRecoveredTransaction};
-use reth_provider::{BlockProviderIdExt, CanonStateNotification, PostState, StateProviderFactory};
+use reth_provider::{BlockReaderIdExt, CanonStateNotification, PostState, StateProviderFactory};
 use std::{
     borrow::Borrow,
     collections::HashSet,
     hash::{Hash, Hasher},
 };
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// Maximum (reorg) depth we handle when updating the transaction pool: `new.number -
 /// last_seen.number`
 const MAX_UPDATE_DEPTH: u64 = 64;
 
+/// Returns a spawnable future for maintaining the state of the transaction pool.
+pub fn maintain_transaction_pool_future<Client, P, St>(
+    client: Client,
+    pool: P,
+    events: St,
+) -> BoxFuture<'static, ()>
+where
+    Client: StateProviderFactory + BlockReaderIdExt + Send + 'static,
+    P: TransactionPoolExt + 'static,
+    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
+{
+    async move {
+        maintain_transaction_pool(client, pool, events).await;
+    }
+    .boxed()
+}
+
 /// Maintains the state of the transaction pool by handling new blocks and reorgs.
 ///
 /// This listens for any new blocks and reorgs and updates the transaction pool's state accordingly
 #[allow(unused)]
-pub async fn maintain_transaction_pool<Client, V, T, St>(
-    client: Client,
-    pool: Pool<V, T>,
-    mut events: St,
-) where
-    Client: StateProviderFactory + BlockProviderIdExt,
-    V: TransactionValidator,
-    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
-    St: Stream<Item = CanonStateNotification> + Unpin,
+pub async fn maintain_transaction_pool<Client, P, St>(client: Client, pool: P, mut events: St)
+where
+    Client: StateProviderFactory + BlockReaderIdExt + Send + 'static,
+    P: TransactionPoolExt + 'static,
+    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 {
     // ensure the pool points to latest state
     if let Ok(Some(latest)) = client.block_by_number_or_tag(BlockNumberOrTag::Latest) {
@@ -98,7 +111,7 @@ pub async fn maintain_transaction_pool<Client, V, T, St>(
                         }
                         Err(err) => {
                             let (addresses, err) = *err;
-                            warn!(
+                            debug!(
                                 ?err,
                                 "failed to load missing changed accounts at new tip: {:?}",
                                 new_tip.hash
@@ -122,9 +135,7 @@ pub async fn maintain_transaction_pool<Client, V, T, St>(
                     .transactions()
                     .filter(|tx| !new_mined_transactions.contains(&tx.hash))
                     .filter_map(|tx| tx.clone().into_ecrecovered())
-                    .map(|tx| {
-                        <V as TransactionValidator>::Transaction::from_recovered_transaction(tx)
-                    })
+                    .map(<P as TransactionPool>::Transaction::from_recovered_transaction)
                     .collect();
 
                 // update the pool first
@@ -181,9 +192,7 @@ pub async fn maintain_transaction_pool<Client, V, T, St>(
                 let pruned_old_transactions = blocks
                     .transactions()
                     .filter_map(|tx| tx.clone().into_ecrecovered())
-                    .map(|tx| {
-                        <V as TransactionValidator>::Transaction::from_recovered_transaction(tx)
-                    })
+                    .map(<P as TransactionPool>::Transaction::from_recovered_transaction)
                     .collect();
 
                 // all transactions that were mined in the old chain need to be re-injected

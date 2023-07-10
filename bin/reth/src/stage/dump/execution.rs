@@ -3,14 +3,13 @@ use crate::utils::DbTool;
 use eyre::Result;
 use reth_db::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
+    DatabaseEnv,
 };
-use reth_primitives::{
-    stage::{StageCheckpoint, StageId},
-    MAINNET,
-};
-use reth_provider::Transaction;
+use reth_primitives::{stage::StageCheckpoint, ChainSpec};
+use reth_provider::ProviderFactory;
+use reth_revm::Factory;
 use reth_stages::{stages::ExecutionStage, Stage, UnwindInput};
-use std::{ops::DerefMut, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
 pub(crate) async fn dump_execution_stage<DB: Database>(
@@ -20,14 +19,14 @@ pub(crate) async fn dump_execution_stage<DB: Database>(
     output_db: &PathBuf,
     should_run: bool,
 ) -> Result<()> {
-    let (output_db, tip_block_number) = setup::<DB>(from, to, output_db, db_tool)?;
+    let (output_db, tip_block_number) = setup(from, to, output_db, db_tool)?;
 
-    import_tables_with_range::<DB>(&output_db, db_tool, from, to)?;
+    import_tables_with_range(&output_db, db_tool, from, to)?;
 
-    unwind_and_copy::<DB>(db_tool, from, tip_block_number, &output_db).await?;
+    unwind_and_copy(db_tool, from, tip_block_number, &output_db).await?;
 
     if should_run {
-        dry_run(output_db, to, from).await?;
+        dry_run(db_tool.chain.clone(), output_db, to, from).await?;
     }
 
     Ok(())
@@ -35,7 +34,7 @@ pub(crate) async fn dump_execution_stage<DB: Database>(
 
 /// Imports all the tables that can be copied over a range.
 fn import_tables_with_range<DB: Database>(
-    output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
+    output_db: &DatabaseEnv,
     db_tool: &mut DbTool<'_, DB>,
     from: u64,
     to: u64,
@@ -94,16 +93,16 @@ async fn unwind_and_copy<DB: Database>(
     db_tool: &mut DbTool<'_, DB>,
     from: u64,
     tip_block_number: u64,
-    output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
+    output_db: &DatabaseEnv,
 ) -> eyre::Result<()> {
-    let mut unwind_tx = Transaction::new(db_tool.db)?;
+    let factory = ProviderFactory::new(db_tool.db, db_tool.chain.clone());
+    let provider = factory.provider_rw()?;
 
-    let mut exec_stage =
-        ExecutionStage::new_with_factory(reth_revm::Factory::new(Arc::new(MAINNET.clone())));
+    let mut exec_stage = ExecutionStage::new_with_factory(Factory::new(db_tool.chain.clone()));
 
     exec_stage
         .unwind(
-            &mut unwind_tx,
+            &provider,
             UnwindInput {
                 unwind_to: from,
                 checkpoint: StageCheckpoint::new(tip_block_number),
@@ -112,40 +111,38 @@ async fn unwind_and_copy<DB: Database>(
         )
         .await?;
 
-    let unwind_inner_tx = unwind_tx.deref_mut();
+    let unwind_inner_tx = provider.into_tx();
 
-    output_db.update(|tx| tx.import_dupsort::<tables::PlainStorageState, _>(unwind_inner_tx))??;
-    output_db.update(|tx| tx.import_table::<tables::PlainAccountState, _>(unwind_inner_tx))??;
-    output_db.update(|tx| tx.import_table::<tables::Bytecodes, _>(unwind_inner_tx))??;
-
-    unwind_tx.drop()?;
+    output_db
+        .update(|tx| tx.import_dupsort::<tables::PlainStorageState, _>(&unwind_inner_tx))??;
+    output_db.update(|tx| tx.import_table::<tables::PlainAccountState, _>(&unwind_inner_tx))??;
+    output_db.update(|tx| tx.import_table::<tables::Bytecodes, _>(&unwind_inner_tx))??;
 
     Ok(())
 }
 
 /// Try to re-execute the stage without committing
-async fn dry_run(
-    output_db: reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
+async fn dry_run<DB: Database>(
+    chain: Arc<ChainSpec>,
+    output_db: DB,
     to: u64,
     from: u64,
 ) -> eyre::Result<()> {
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 
-    let mut tx = Transaction::new(&output_db)?;
-    let mut exec_stage =
-        ExecutionStage::new_with_factory(reth_revm::Factory::new(Arc::new(MAINNET.clone())));
+    let factory = ProviderFactory::new(&output_db, chain.clone());
+    let provider = factory.provider_rw()?;
+    let mut exec_stage = ExecutionStage::new_with_factory(Factory::new(chain.clone()));
 
     exec_stage
         .execute(
-            &mut tx,
+            &provider,
             reth_stages::ExecInput {
-                previous_stage: Some((StageId::Other("Another"), StageCheckpoint::new(to))),
+                target: Some(to),
                 checkpoint: Some(StageCheckpoint::new(from)),
             },
         )
         .await?;
-
-    tx.drop()?;
 
     info!(target: "reth::cli", "Success.");
 

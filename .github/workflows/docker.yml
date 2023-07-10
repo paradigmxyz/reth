@@ -1,0 +1,44 @@
+name: docker
+
+on:
+  push:
+    tags:
+      - v*
+
+env:
+  REPO_NAME: ${{ github.repository_owner }}/reth
+  IMAGE_NAME: ${{ github.repository_owner }}/reth
+  RUSTFLAGS: -D warnings
+  CARGO_TERM_COLOR: always
+  DOCKER_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/reth
+  DOCKER_USERNAME: ${{ github.actor }}
+
+jobs:
+  build:
+    name: build and push
+    runs-on: ubuntu-20.04
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v3
+      - name: Get latest version of stable Rust
+        run: rustup update stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Log in to Docker
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io --username ${DOCKER_USERNAME} --password-stdin
+
+      - name: Set up Docker builder
+        run: |
+          docker run --privileged --rm tonistiigi/binfmt --install arm64,amd64
+          docker buildx create --use --name cross-builder
+
+      - name: Build and push image
+        run: |
+          cargo install cross
+          env PROFILE=maxperf make docker-build-latest

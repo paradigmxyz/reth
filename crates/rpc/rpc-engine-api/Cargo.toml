@@ -1,33 +1,35 @@
 [package]
 name = "reth-rpc-engine-api"
-version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "Implementation of Engine API"
 
 [dependencies]
 # reth 
-reth-primitives = { path = "../../primitives" }
-reth-interfaces = { path = "../../interfaces" }
-reth-provider = { path = "../../storage/provider" }
-reth-rpc-types = { path = "../rpc-types" }
+reth-primitives = { workspace = true }
+reth-interfaces = { workspace = true }
+reth-provider = { workspace = true }
+reth-rpc-types = { workspace = true }
 reth-rpc-api = { path = "../rpc-api" }
 reth-beacon-consensus = { path = "../../consensus/beacon" }
-reth-payload-builder = { path = "../../payload/builder" }
+reth-payload-builder = { workspace = true }
 
 # async
-tokio = { version = "1", features = ["sync"] }
+tokio = { workspace = true, features = ["sync"] }
 
 # misc
-async-trait = "0.1"
-thiserror = "1.0.37"
+async-trait = { workspace = true }
+thiserror = { workspace = true }
 jsonrpsee-types = "0.18"
 jsonrpsee-core = "0.18"
 tracing = { workspace = true }
 
 [dev-dependencies]
-reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
-reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
-reth-payload-builder = { path = "../../payload/builder", features = ["test-utils"] }
+reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-payload-builder = { workspace = true, features = ["test-utils"] }
 assert_matches = "1.5.0"

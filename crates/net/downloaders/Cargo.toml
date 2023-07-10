@@ -1,50 +1,50 @@
 [package]
 name = "reth-downloaders"
-version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
-readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "Implementations of various block downloaders"
 
 [dependencies]
 # reth
-reth-interfaces = { path = "../../interfaces" }
-reth-primitives = { path = "../../primitives" }
+reth-interfaces = { workspace = true }
+reth-primitives = { workspace = true }
 reth-db = { path = "../../storage/db" }
-reth-tasks = { path = "../../tasks" }
-reth-metrics = { path = "../../metrics" }
+reth-tasks = { workspace = true }
+reth-metrics = { workspace = true }
 
 # async
-futures = "0.3"
-futures-util = "0.3.25"
-pin-project = "1.0"
-tokio = { version = "1.0", features = ["sync"] }
-tokio-stream = "0.1"
-tokio-util = { version = "0.7", features = ["codec"] }
+futures = { workspace = true }
+futures-util = { workspace = true }
+pin-project = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true, features = ["codec"] }
 
 # misc
 tracing = { workspace = true }
 rayon = "1.6.0"
+thiserror = { workspace = true }
 
 # optional deps for the test-utils feature
-thiserror = { version = "1", optional = true }
-reth-rlp = { path = "../../rlp", optional = true }
+reth-rlp = { workspace = true, optional = true }
 tempfile = { version = "3.3", optional = true }
 itertools = { version = "0.10", optional = true }
 
 [dev-dependencies]
 reth-db = { path = "../../storage/db", features = ["test-utils"] }
-reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
+reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-tracing = { path = "../../tracing" }
 
 assert_matches = "1.5.0"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-reth-rlp = { path = "../../rlp" }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+reth-rlp = { workspace = true }
 itertools = "0.10"
 
-thiserror = "1"
 tempfile = "3.3"
 
 [features]
-test-utils = ["dep:reth-rlp", "dep:thiserror", "dep:tempfile", "dep:itertools"]
+test-utils = ["dep:reth-rlp", "dep:tempfile", "dep:itertools"]

@@ -1,6 +1,22 @@
-/target
-/book
-/assets
-/.github
-/data
-*.tar.gz
+# exclude everything
+*
+
+# include source files
+!/bin
+!/crates
+!/testing
+!book.toml
+!Cargo.lock
+!Cargo.toml
+!Cross.toml
+!deny.toml
+!Makefile
+
+# include dist directory, where the reth binary is located after compilation
+!/dist
+
+# include licenses
+!LICENSE-*
+
+# include example files
+!/examples

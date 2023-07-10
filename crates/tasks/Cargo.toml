@@ -1,26 +1,27 @@
 [package]
 name = "reth-tasks"
-version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
-readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "Task management"
 
 [dependencies]
 
 ## async
-tokio = { version = "1", features = ["sync", "rt"] }
+tokio = { workspace = true, features = ["sync", "rt"] }
 tracing-futures = "0.2"
-futures-util = "0.3"
+futures-util = { workspace = true }
 
 ## misc
 tracing = { workspace = true }
-thiserror = "1.0"
+thiserror = { workspace = true }
 dyn-clone = "1.0"
 
 ## rpc/metrics
-reth-metrics = { path = "../metrics" }
+reth-metrics = { workspace = true }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }
+tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }

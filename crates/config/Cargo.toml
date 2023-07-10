@@ -1,30 +1,28 @@
 [package]
 name = "reth-config"
-version = "0.1.0"
-edition = "2021"
-license = "Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
-readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 
 [dependencies]
 # reth
 reth-network = { path = "../net/network" }
-reth-net-nat = { path = "../../crates/net/nat" }
-reth-discv4 = { path = "../../crates/net/discv4" }
-reth-downloaders = { path = "../../crates/net/downloaders" }
+reth-net-nat = { path = "../net/nat" }
+reth-discv4 = { path = "../net/discv4" }
+reth-downloaders = { path = "../net/downloaders" }
+reth-stages = { path = "../../crates/stages" }
+reth-primitives = { path = "../primitives" }
 
 # io
-serde = "1.0"
-serde_json = "1.0.91"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
-#crypto 
-secp256k1 = { version = "0.27.0", features = [
-    "global-context",
-    "rand-std",
-    "recovery",
-] }
+# crypto
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
 confy = "0.5"
 
 tempfile = "3.4"
-

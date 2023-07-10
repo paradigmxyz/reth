@@ -1,7 +1,8 @@
 //! Command for debugging execution.
 use crate::{
-    args::{get_secret_key, NetworkArgs},
+    args::{get_secret_key, utils::genesis_value_parser, DatabaseArgs, NetworkArgs},
     dirs::{DataDirPath, MaybePlatformPath},
+    init::init_genesis,
     node::events,
     runner::CliContext,
     utils::get_single_header,
@@ -10,10 +11,7 @@ use clap::Parser;
 use futures::{stream::select as stream_select, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
-use reth_db::{
-    database::Database,
-    mdbx::{Env, WriteMap},
-};
+use reth_db::{database::Database, init_db, DatabaseEnv};
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
@@ -25,19 +23,15 @@ use reth_interfaces::{
 };
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, H256};
-use reth_provider::{providers::get_stage_checkpoint, ShareableDatabase, Transaction};
-use reth_staged_sync::utils::{
-    chainspec::genesis_value_parser,
-    init::{init_db, init_genesis},
-};
+use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, H256};
+use reth_provider::{BlockExecutionWriter, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     sets::DefaultStages,
     stages::{
         ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
         TotalDifficultyStage,
     },
-    Pipeline, StageSet,
+    Pipeline, PipelineError, StageSet,
 };
 use reth_tasks::TaskExecutor;
 use std::{
@@ -80,6 +74,9 @@ pub struct Command {
 
     #[clap(flatten)]
     network: NetworkArgs,
+
+    #[clap(flatten)]
+    db: DatabaseArgs,
 
     /// Set the chain tip manually for testing purposes.
     ///
@@ -144,14 +141,10 @@ impl Command {
                 })
                 .set(ExecutionStage::new(
                     factory,
-                    ExecutionStageThresholds {
-                        max_blocks: None,
-                        max_changes: None,
-                        max_changesets: None,
-                    },
+                    ExecutionStageThresholds { max_blocks: None, max_changes: None },
                 )),
             )
-            .build(db);
+            .build(db, self.chain.clone());
 
         Ok(pipeline)
     }
@@ -160,7 +153,7 @@ impl Command {
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        db: Arc<Env<WriteMap>>,
+        db: Arc<DatabaseEnv>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
@@ -177,7 +170,7 @@ impl Command {
                 Ipv4Addr::UNSPECIFIED,
                 self.network.discovery.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
             )))
-            .build(ShareableDatabase::new(db, self.chain.clone()))
+            .build(ProviderFactory::new(db, self.chain.clone()))
             .start_network()
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
@@ -210,8 +203,8 @@ impl Command {
 
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
-        std::fs::create_dir_all(&db_path)?;
-        let db = Arc::new(init_db(db_path)?);
+        fs::create_dir_all(&db_path)?;
+        let db = Arc::new(init_db(db_path, self.db.log_level)?);
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
         init_genesis(db.clone(), self.chain.clone())?;
@@ -241,22 +234,27 @@ impl Command {
             &ctx.task_executor,
         )?;
 
+        let factory = ProviderFactory::new(&db, self.chain.clone());
+        let provider = factory.provider().map_err(PipelineError::Interface)?;
+
+        let latest_block_number =
+            provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
+        if latest_block_number.unwrap_or_default() >= self.to {
+            info!(target: "reth::cli", latest = latest_block_number, "Nothing to run");
+            return Ok(())
+        }
+
         let pipeline_events = pipeline.events();
         let events = stream_select(
             network.event_listener().map(Into::into),
             pipeline_events.map(Into::into),
         );
-        ctx.task_executor
-            .spawn_critical("events task", events::handle_events(Some(network.clone()), events));
+        ctx.task_executor.spawn_critical(
+            "events task",
+            events::handle_events(Some(network.clone()), latest_block_number, events),
+        );
 
-        let latest_block_number =
-            get_stage_checkpoint(&db.tx()?, StageId::Finish)?.unwrap_or_default().block_number;
-        if latest_block_number >= self.to {
-            info!(target: "reth::cli", latest = latest_block_number, "Nothing to run");
-            return Ok(())
-        }
-
-        let mut current_max_block = latest_block_number;
+        let mut current_max_block = latest_block_number.unwrap_or_default();
         while current_max_block < self.to {
             let next_block = current_max_block + 1;
             let target_block = self.to.min(current_max_block + self.interval);
@@ -271,8 +269,10 @@ impl Command {
 
             // Unwind the pipeline without committing.
             {
-                let tx = Transaction::new(db.as_ref())?;
-                tx.take_block_and_execution_range(&self.chain, next_block..=target_block)?;
+                factory
+                    .provider_rw()
+                    .map_err(PipelineError::Interface)?
+                    .take_block_and_execution_range(&self.chain, next_block..=target_block)?;
             }
 
             // Update latest block

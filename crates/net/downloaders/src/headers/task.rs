@@ -1,7 +1,10 @@
 use futures::{FutureExt, Stream};
 use futures_util::StreamExt;
 use pin_project::pin_project;
-use reth_interfaces::p2p::headers::downloader::{HeaderDownloader, SyncTarget};
+use reth_interfaces::p2p::headers::{
+    downloader::{HeaderDownloader, SyncTarget},
+    error::HeadersDownloaderResult,
+};
 use reth_primitives::SealedHeader;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
@@ -21,7 +24,7 @@ pub const HEADERS_TASK_BUFFER_SIZE: usize = 8;
 #[pin_project]
 pub struct TaskDownloader {
     #[pin]
-    from_downloader: ReceiverStream<Vec<SealedHeader>>,
+    from_downloader: ReceiverStream<HeadersDownloaderResult<Vec<SealedHeader>>>,
     to_downloader: UnboundedSender<DownloaderUpdates>,
 }
 
@@ -97,7 +100,7 @@ impl HeaderDownloader for TaskDownloader {
 }
 
 impl Stream for TaskDownloader {
-    type Item = Vec<SealedHeader>;
+    type Item = HeadersDownloaderResult<Vec<SealedHeader>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.project().from_downloader.poll_next(cx)
@@ -107,7 +110,7 @@ impl Stream for TaskDownloader {
 /// A [HeaderDownloader] that runs on its own task
 struct SpawnedDownloader<T> {
     updates: UnboundedReceiverStream<DownloaderUpdates>,
-    headers_tx: PollSender<Vec<SealedHeader>>,
+    headers_tx: PollSender<HeadersDownloaderResult<Vec<SealedHeader>>>,
     downloader: T,
 }
 
@@ -212,11 +215,11 @@ mod tests {
             .await;
 
         let headers = downloader.next().await.unwrap();
-        assert_eq!(headers, vec![p0]);
+        assert_eq!(headers, Ok(vec![p0]));
 
         let headers = downloader.next().await.unwrap();
-        assert_eq!(headers, vec![p1]);
+        assert_eq!(headers, Ok(vec![p1]));
         let headers = downloader.next().await.unwrap();
-        assert_eq!(headers, vec![p2]);
+        assert_eq!(headers, Ok(vec![p2]));
     }
 }

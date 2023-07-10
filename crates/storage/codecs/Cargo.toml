@@ -1,10 +1,11 @@
 [package]
 name = "reth-codecs"
-version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
-readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 
 [features]
 default = ["compact"]
@@ -12,18 +13,12 @@ compact = ["codecs-derive/compact"]
 scale = ["codecs-derive/scale"]
 postcard = ["codecs-derive/postcard"]
 no_codec = ["codecs-derive/no_codec"]
-arbitrary = [
-    "revm-primitives/arbitrary",
-    "dep:arbitrary",
-    "dep:proptest",
-    "dep:proptest-derive",
-]
-
+arbitrary = ["revm-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
 
 [dependencies]
-bytes = "1.4"
-codecs-derive = { version = "0.1.0", path = "./derive", default-features = false }
-revm-primitives = { version = "1.1", features = ["serde"] }
+bytes.workspace = true
+codecs-derive = { path = "./derive", default-features = false }
+revm-primitives = { workspace = true, features = ["serde"] }
 
 # arbitrary utils
 arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
@@ -31,14 +26,11 @@ proptest = { version = "1.0", optional = true }
 proptest-derive = { version = "0.3", optional = true }
 
 [dev-dependencies]
-revm-primitives = { version = "1.1", features = [
-    "serde",
-    "arbitrary"
-] }
+revm-primitives = { workspace = true, features = ["serde", "arbitrary"] }
 
 serde = "1.0"
 modular-bitfield = "0.11.2"
-test-fuzz = "3.0.4"
+test-fuzz = "4"
 
 arbitrary = { version = "1.1.7", features = ["derive"] }
 proptest = { version = "1.0" }

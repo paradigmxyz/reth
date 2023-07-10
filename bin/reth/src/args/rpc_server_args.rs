@@ -5,17 +5,16 @@ use clap::{
     builder::{PossibleValue, TypedValueParser},
     Arg, Args, Command,
 };
-use futures::{FutureExt, TryFutureExt};
+use futures::TryFutureExt;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockProviderIdExt, CanonStateSubscriptions, EvmEnvProvider, HeaderProvider,
+    BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider, HeaderProvider,
     StateProviderFactory,
 };
 use reth_rpc::{
     eth::{
         cache::{
-            DEFAULT_BLOCK_CACHE_SIZE_BYTES_MB, DEFAULT_ENV_CACHE_SIZE_BYTES_MB,
-            DEFAULT_RECEIPT_CACHE_SIZE_BYTES_MB,
+            DEFAULT_BLOCK_CACHE_MAX_LEN, DEFAULT_ENV_CACHE_MAX_LEN, DEFAULT_RECEIPT_CACHE_MAX_LEN,
         },
         gas_oracle::GasPriceOracleConfig,
     },
@@ -43,7 +42,7 @@ pub(crate) const RPC_DEFAULT_MAX_SUBS_PER_CONN: u32 = 1024;
 /// Default max request size in MB.
 pub(crate) const RPC_DEFAULT_MAX_REQUEST_SIZE_MB: u32 = 15;
 /// Default max response size in MB.
-pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 25;
+pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 100;
 /// Default number of incoming connections.
 pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 100;
 /// Default number of incoming connections.
@@ -137,17 +136,17 @@ pub struct RpcServerArgs {
     #[clap(flatten)]
     pub gas_price_oracle: GasPriceOracleArgs,
 
-    /// Max size for cached block data in megabytes.
-    #[arg(long, default_value_t = DEFAULT_BLOCK_CACHE_SIZE_BYTES_MB)]
-    pub block_cache_size: usize,
+    /// Maximum number of block cache entries.
+    #[arg(long, default_value_t = DEFAULT_BLOCK_CACHE_MAX_LEN)]
+    pub block_cache_len: u32,
 
-    /// Max size for cached receipt data in megabytes.
-    #[arg(long, default_value_t = DEFAULT_RECEIPT_CACHE_SIZE_BYTES_MB)]
-    pub receipt_cache_size: usize,
+    /// Maximum number of receipt cache entries.
+    #[arg(long, default_value_t = DEFAULT_RECEIPT_CACHE_MAX_LEN)]
+    pub receipt_cache_len: u32,
 
-    /// Max size for cached evm env data in megabytes.
-    #[arg(long, default_value_t = DEFAULT_ENV_CACHE_SIZE_BYTES_MB)]
-    pub env_cache_size: usize,
+    /// Maximum number of env cache entries.
+    #[arg(long, default_value_t = DEFAULT_ENV_CACHE_MAX_LEN)]
+    pub env_cache_len: u32,
 }
 
 impl RpcServerArgs {
@@ -159,21 +158,6 @@ impl RpcServerArgs {
     /// Returns the max response size in bytes.
     pub fn rpc_max_response_size_bytes(&self) -> u32 {
         self.rpc_max_response_size * 1024 * 1024
-    }
-
-    /// Returns the max number of bytes for cached block data in bytes
-    pub fn block_cache_size_bytes(&self) -> usize {
-        self.block_cache_size * 1024 * 1024
-    }
-
-    /// Returns the max number of bytes for cached receipt data in bytes
-    pub fn receipt_cache_size_bytes(&self) -> usize {
-        self.receipt_cache_size * 1024 * 1024
-    }
-
-    /// Returns the max number of bytes for cached evm env data in bytes
-    pub fn env_cache_size_bytes(&self) -> usize {
-        self.env_cache_size * 1024 * 1024
     }
 
     /// Extracts the gas price oracle config from the args.
@@ -237,9 +221,9 @@ impl RpcServerArgs {
     /// for the auth server that handles the `engine_` API that's accessed by the consensus
     /// layer.
     #[allow(clippy::too_many_arguments)]
-    pub async fn start_servers<Client, Pool, Network, Tasks, Events, Engine>(
+    pub async fn start_servers<Provider, Pool, Network, Tasks, Events, Engine>(
         &self,
-        client: Client,
+        provider: Provider,
         pool: Pool,
         network: Network,
         executor: Tasks,
@@ -248,10 +232,11 @@ impl RpcServerArgs {
         jwt_secret: JwtSecret,
     ) -> Result<(RpcServerHandle, AuthServerHandle), RpcError>
     where
-        Client: BlockProviderIdExt
+        Provider: BlockReaderIdExt
             + HeaderProvider
             + StateProviderFactory
             + EvmEnvProvider
+            + ChainSpecProvider
             + Clone
             + Unpin
             + 'static,
@@ -267,7 +252,7 @@ impl RpcServerArgs {
         debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
 
         let (rpc_modules, auth_module) = RpcModuleBuilder::default()
-            .with_client(client)
+            .with_provider(provider)
             .with_pool(pool)
             .with_network(network)
             .with_events(events)
@@ -277,19 +262,21 @@ impl RpcServerArgs {
         let server_config = self.rpc_server_config();
         let launch_rpc = rpc_modules.start_server(server_config).map_ok(|handle| {
             if let Some(url) = handle.ipc_endpoint() {
-                info!(target: "reth::cli", url=%url, "IPC server started");
+                info!(target: "reth::cli", url=%url, "RPC IPC server started");
             }
             if let Some(addr) = handle.http_local_addr() {
-                info!(target: "reth::cli", url=%addr, "HTTP server started");
+                info!(target: "reth::cli", url=%addr, "RPC HTTP server started");
             }
             if let Some(addr) = handle.ws_local_addr() {
-                info!(target: "reth::cli", url=%addr, "WS server started");
+                info!(target: "reth::cli", url=%addr, "RPC WS server started");
             }
             handle
         });
 
-        let launch_auth = auth_module.start_server(auth_config).inspect(|_| {
-            info!(target: "reth::cli", "Started Auth server");
+        let launch_auth = auth_module.start_server(auth_config).map_ok(|handle| {
+            let addr = handle.local_addr();
+            info!(target: "reth::cli", url=%addr, "RPC auth server started");
+            handle
         });
 
         // launch servers concurrently
@@ -297,19 +284,20 @@ impl RpcServerArgs {
     }
 
     /// Convenience function for starting a rpc server with configs which extracted from cli args.
-    pub async fn start_rpc_server<Client, Pool, Network, Tasks, Events>(
+    pub async fn start_rpc_server<Provider, Pool, Network, Tasks, Events>(
         &self,
-        client: Client,
+        provider: Provider,
         pool: Pool,
         network: Network,
         executor: Tasks,
         events: Events,
     ) -> Result<RpcServerHandle, RpcError>
     where
-        Client: BlockProviderIdExt
+        Provider: BlockReaderIdExt
             + HeaderProvider
             + StateProviderFactory
             + EvmEnvProvider
+            + ChainSpecProvider
             + Clone
             + Unpin
             + 'static,
@@ -319,7 +307,7 @@ impl RpcServerArgs {
         Events: CanonStateSubscriptions + Clone + 'static,
     {
         reth_rpc_builder::launch(
-            client,
+            provider,
             pool,
             network,
             self.transport_rpc_module_config(),
@@ -331,17 +319,17 @@ impl RpcServerArgs {
     }
 
     /// Create Engine API server.
-    pub async fn start_auth_server<Client, Pool, Network, Tasks>(
+    pub async fn start_auth_server<Provider, Pool, Network, Tasks>(
         &self,
-        client: Client,
+        provider: Provider,
         pool: Pool,
         network: Network,
         executor: Tasks,
-        engine_api: EngineApi<Client>,
+        engine_api: EngineApi<Provider>,
         jwt_secret: JwtSecret,
     ) -> Result<AuthServerHandle, RpcError>
     where
-        Client: BlockProviderIdExt
+        Provider: BlockReaderIdExt
             + HeaderProvider
             + StateProviderFactory
             + EvmEnvProvider
@@ -353,12 +341,12 @@ impl RpcServerArgs {
         Tasks: TaskSpawner + Clone + 'static,
     {
         let socket_address = SocketAddr::new(
-            self.auth_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+            self.auth_addr.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)),
             self.auth_port.unwrap_or(constants::DEFAULT_AUTH_PORT),
         );
 
         reth_rpc_builder::auth::launch(
-            client,
+            provider,
             pool,
             network,
             executor,
@@ -424,7 +412,7 @@ impl RpcServerArgs {
 
         if self.http {
             let socket_address = SocketAddr::new(
-                self.http_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+                self.http_addr.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)),
                 self.http_port.unwrap_or(constants::DEFAULT_HTTP_RPC_PORT),
             );
             config = config
@@ -436,7 +424,7 @@ impl RpcServerArgs {
 
         if self.ws {
             let socket_address = SocketAddr::new(
-                self.ws_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+                self.ws_addr.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)),
                 self.ws_port.unwrap_or(constants::DEFAULT_WS_RPC_PORT),
             );
             config = config.with_ws_address(socket_address).with_ws(self.http_ws_server_builder());
@@ -454,7 +442,7 @@ impl RpcServerArgs {
     /// Creates the [AuthServerConfig] from cli args.
     fn auth_server_config(&self, jwt_secret: JwtSecret) -> Result<AuthServerConfig, RpcError> {
         let address = SocketAddr::new(
-            self.auth_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+            self.auth_addr.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)),
             self.auth_port.unwrap_or(constants::DEFAULT_AUTH_PORT),
         );
 
@@ -556,7 +544,7 @@ mod tests {
         assert_eq!(
             config.http_address().unwrap(),
             SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::UNSPECIFIED,
+                Ipv4Addr::LOCALHOST,
                 constants::DEFAULT_HTTP_RPC_PORT
             ))
         );

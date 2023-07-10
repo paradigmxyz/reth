@@ -16,7 +16,7 @@ env:
 jobs:
   extract-version:
     name: extract version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - name: Extract version
         run: echo "VERSION=$(echo ${GITHUB_REF#refs/tags/})" >> $GITHUB_OUTPUT
@@ -34,10 +34,10 @@ jobs:
                x86_64-pc-windows-gnu]
         include:
           -   arch: aarch64-unknown-linux-gnu
-              platform: ubuntu-latest
+              platform: ubuntu-20.04
               profile: maxperf
           -   arch: x86_64-unknown-linux-gnu
-              platform: ubuntu-latest
+              platform: ubuntu-20.04
               profile: maxperf
           -   arch: x86_64-apple-darwin
               platform: macos-latest
@@ -46,7 +46,7 @@ jobs:
               platform: macos-latest
               profile: maxperf
           -   arch: x86_64-pc-windows-gnu
-              platform: ubuntu-latest
+              platform: ubuntu-20.04
               profile: maxperf
 
     runs-on: ${{ matrix.platform }}
@@ -129,7 +129,7 @@ jobs:
   draft-release:
     name: draft release
     needs:  [build, extract-version]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     env:
       VERSION:  ${{ needs.extract-version.outputs.VERSION }}
     permissions:
@@ -199,9 +199,7 @@ jobs:
           | Payload Builders     | <TODO> |
           | Non-Payload Builders | <TODO>    |
           
-          *See [Update
-          Priorities](https://paradigmxyz.github.io/reth/installation-priorities.html)
-          more information about this table.*
+          *See [Update Priorities](https://paradigmxyz.github.io/reth/installation/priorities.html) for more information about this table.*
           
           ## All Changes
           
@@ -209,7 +207,7 @@ jobs:
           
           ## Binaries
           
-          [See pre-built binaries documentation.](https://https://paradigmxyz.github.io/reth/installation/binaries.html)
+          [See pre-built binaries documentation.](https://paradigmxyz.github.io/reth/installation/binaries.html)
           
           The binaries are signed with the PGP key: `A3AE 097C 8909 3A12 4049  DF1F 5391 A3C4 1005 30B4`
           
@@ -222,7 +220,7 @@ jobs:
           | <img src="https://simpleicons.org/icons/apple.svg" style="width: 32px;"/> | aarch64 | [reth-${{ env.VERSION }}-aarch64-apple-darwin.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-apple-darwin.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-apple-darwin.tar.gz.asc) |
           | | | | |
           | **System** | **Option** | - | **Resource** |
-          | <img src="https://simpleicons.org/icons/docker.svg" style="width: 32px;"/> | Docker | [${{ env.VERSION }}](https://hub.docker.com/r/${{ env.IMAGE_NAME }}/tags?page=1&ordering=last_updated&name=${{ env.VERSION }}) | [${{ env.IMAGE_NAME }}](https://hub.docker.com/r/${{ env.IMAGE_NAME }}) |
+          | <img src="https://simpleicons.org/icons/docker.svg" style="width: 32px;"/> | Docker | [${{ env.VERSION }}](https://github.com/paradigmxyz/reth/pkgs/container/reth/102974600?tag=${{ env.VERSION }}) | [${{ env.IMAGE_NAME }}](https://github.com/paradigmxyz/reth/pkgs/container/reth) |
           ENDBODY
           )
           assets=()

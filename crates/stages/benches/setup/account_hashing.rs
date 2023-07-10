@@ -2,7 +2,7 @@ use super::{constants, StageRange};
 use reth_db::{
     cursor::DbCursorRO, database::Database, tables, transaction::DbTx, DatabaseError as DbError,
 };
-use reth_primitives::stage::{StageCheckpoint, StageId};
+use reth_primitives::stage::StageCheckpoint;
 use reth_stages::{
     stages::{AccountHashingStage, SeedOpts},
     test_utils::TestTransaction,
@@ -40,7 +40,7 @@ fn find_stage_range(db: &Path) -> StageRange {
 
             stage_range = Some((
                 ExecInput {
-                    previous_stage: Some((StageId::Other("Another"), to)),
+                    target: Some(to.block_number),
                     checkpoint: Some(StageCheckpoint::new(from)),
                 },
                 UnwindInput { unwind_to: from, checkpoint: to, bad_block: None },
@@ -63,17 +63,9 @@ fn generate_testdata_db(num_blocks: u64) -> (PathBuf, StageRange) {
         std::fs::create_dir_all(&path).unwrap();
         println!("Account Hashing testdata not found, generating to {:?}", path.display());
         let tx = TestTransaction::new(&path);
-        let mut tx = tx.inner();
-        let _accounts = AccountHashingStage::seed(&mut tx, opts);
+        let provider = tx.inner_rw();
+        let _accounts = AccountHashingStage::seed(&provider, opts);
+        provider.commit().expect("failed to commit");
     }
-    (
-        path,
-        (
-            ExecInput {
-                previous_stage: Some((StageId::Other("Another"), StageCheckpoint::new(num_blocks))),
-                ..Default::default()
-            },
-            UnwindInput::default(),
-        ),
-    )
+    (path, (ExecInput { target: Some(num_blocks), ..Default::default() }, UnwindInput::default()))
 }

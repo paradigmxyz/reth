@@ -1,3 +1,9 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+)]
 #![warn(missing_docs, unused_crate_dependencies)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
@@ -17,6 +23,11 @@
 //! state and drives the UDP socket. The (optional) [`Discv4`] serves as the frontend to interact
 //! with the service via a channel. Whenever the underlying table changes service produces a
 //! [`DiscoveryUpdate`] that listeners will receive.
+//!
+//! ## Feature Flags
+//!
+//! - `serde` (default): Enable serde support
+//! - `test-utils`: Export utilities for testing
 use crate::{
     error::{DecodePacketError, Discv4Error},
     proto::{FindNode, Message, Neighbours, Packet, Ping, Pong},
@@ -35,6 +46,7 @@ use reth_primitives::{
     bytes::{Bytes, BytesMut},
     ForkId, PeerId, H256,
 };
+use reth_rlp::{RlpDecodable, RlpEncodable};
 use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
@@ -54,7 +66,7 @@ use tokio::{
     time::Interval,
 };
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, trace, warn};
 
 pub mod error;
 mod proto;
@@ -322,10 +334,10 @@ impl Discv4 {
 
     fn send_to_service(&self, cmd: Discv4Command) {
         let _ = self.to_service.try_send(cmd).map_err(|err| {
-            warn!(
+            debug!(
                 target : "discv4",
                 %err,
-                "dropping command",
+                "channel capacity reached, dropping command",
             )
         });
     }
@@ -503,10 +515,10 @@ impl Discv4Service {
     /// discovery
     pub fn set_external_ip_addr(&mut self, external_ip: IpAddr) {
         if self.local_node_record.address != external_ip {
-            info!(target : "discv4",  ?external_ip, "Updating external ip");
+            debug!(target : "discv4",  ?external_ip, "Updating external ip");
             self.local_node_record.address = external_ip;
             let _ = self.local_eip_868_enr.set_ip(external_ip, &self.secret_key);
-            info!(target : "discv4", enr=?self.local_eip_868_enr, "Updated local ENR");
+            debug!(target : "discv4", enr=?self.local_eip_868_enr, "Updated local ENR");
         }
     }
 
@@ -857,10 +869,10 @@ impl Discv4Service {
         let (payload, hash) = msg.encode(&self.secret_key);
         trace!(target : "discv4",  r#type=?msg.msg_type(), ?to, ?hash, "sending packet");
         let _ = self.egress.try_send((payload, to)).map_err(|err| {
-            warn!(
+            debug!(
                 target : "discv4",
                 %err,
-                "drop outgoing packet",
+                "dropped outgoing packet",
             );
         });
         hash
@@ -1589,7 +1601,7 @@ pub(crate) async fn send_loop(udp: Arc<UdpSocket>, rx: EgressReceiver) {
 pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_id: PeerId) {
     let send = |event: IngressEvent| async {
         let _ = tx.send(event).await.map_err(|err| {
-            warn!(
+            debug!(
                 target : "discv4",
                  %err,
                 "failed send incoming packet",
@@ -1967,13 +1979,73 @@ pub enum DiscoveryUpdate {
     Batch(Vec<DiscoveryUpdate>),
 }
 
+/// Represents a forward-compatible ENR entry for including the forkid in a node record via
+/// EIP-868. Forward compatibility is achieved by allowing trailing fields.
+///
+/// See:
+/// <https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/discovery.go#L27-L38>
+///
+/// for how geth implements ForkId values and forward compatibility.
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[rlp(trailing)]
+pub struct EnrForkIdEntry {
+    /// The inner forkid
+    pub fork_id: ForkId,
+}
+
+impl From<ForkId> for EnrForkIdEntry {
+    fn from(fork_id: ForkId) -> Self {
+        Self { fork_id }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_utils::{create_discv4, create_discv4_with_config, rng_endpoint, rng_record};
     use rand::{thread_rng, Rng};
     use reth_primitives::{hex_literal::hex, mainnet_nodes, ForkHash};
+    use reth_rlp::{Decodable, Encodable};
     use std::{future::poll_fn, net::Ipv4Addr};
+
+    #[tokio::test]
+    async fn test_configured_enr_forkid_entry() {
+        let fork: ForkId = ForkId { hash: ForkHash([220, 233, 108, 45]), next: 0u64 };
+        let mut disc_conf = Discv4Config::default();
+        disc_conf.add_eip868_pair("eth", EnrForkIdEntry::from(fork));
+        let (_discv4, service) = create_discv4_with_config(disc_conf).await;
+        let eth = service.local_eip_868_enr.get_raw_rlp(b"eth").unwrap();
+        let fork_entry_id = EnrForkIdEntry::decode(&mut &eth[..]).unwrap();
+
+        let raw: [u8; 8] = [0xc7, 0xc6, 0x84, 0xdc, 0xe9, 0x6c, 0x2d, 0x80];
+        let decoded = EnrForkIdEntry::decode(&mut &raw[..]).unwrap();
+        let expected = EnrForkIdEntry {
+            fork_id: ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 0 },
+        };
+        assert_eq!(expected, fork_entry_id);
+        assert_eq!(expected, decoded);
+    }
+
+    #[test]
+    fn test_enr_forkid_entry_decode() {
+        let raw: [u8; 8] = [0xc7, 0xc6, 0x84, 0xdc, 0xe9, 0x6c, 0x2d, 0x80];
+        let decoded = EnrForkIdEntry::decode(&mut &raw[..]).unwrap();
+        let expected = EnrForkIdEntry {
+            fork_id: ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 0 },
+        };
+        assert_eq!(expected, decoded);
+    }
+
+    #[test]
+    fn test_enr_forkid_entry_encode() {
+        let original = EnrForkIdEntry {
+            fork_id: ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 0 },
+        };
+        let mut encoded = Vec::new();
+        original.encode(&mut encoded);
+        let expected: [u8; 8] = [0xc7, 0xc6, 0x84, 0xdc, 0xe9, 0x6c, 0x2d, 0x80];
+        assert_eq!(&expected[..], encoded.as_slice());
+    }
 
     #[test]
     fn test_local_rotator() {

@@ -4,14 +4,15 @@ use parking_lot::RwLock;
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
-        error::InsertBlockError, BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer,
-        CanonicalOutcome,
+        error::InsertBlockError, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
+        InsertPayloadOk,
     },
     consensus::Consensus,
     Error,
 };
 use reth_primitives::{
-    BlockHash, BlockNumHash, BlockNumber, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    BlockHash, BlockNumHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader,
 };
 use reth_provider::{
     BlockchainTreePendingStateProvider, CanonStateSubscriptions, ExecutorFactory,
@@ -41,32 +42,52 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
     for ShareableBlockchainTree<DB, C, EF>
 {
     fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
-        self.tree.write().buffer_block(block)
+        let mut tree = self.tree.write();
+        // Blockchain tree metrics shouldn't be updated here, see
+        // `BlockchainTree::update_chains_metrics` documentation.
+        tree.buffer_block(block)
     }
 
-    fn insert_block(&self, block: SealedBlockWithSenders) -> Result<BlockStatus, InsertBlockError> {
+    fn insert_block(
+        &self,
+        block: SealedBlockWithSenders,
+    ) -> Result<InsertPayloadOk, InsertBlockError> {
         trace!(target: "blockchain_tree", hash=?block.hash, number=block.number, parent_hash=?block.parent_hash, "Inserting block");
-        self.tree.write().insert_block(block)
+        let mut tree = self.tree.write();
+        let res = tree.insert_block(block);
+        tree.update_chains_metrics();
+        res
     }
 
     fn finalize_block(&self, finalized_block: BlockNumber) {
         trace!(target: "blockchain_tree", ?finalized_block, "Finalizing block");
-        self.tree.write().finalize_block(finalized_block)
+        let mut tree = self.tree.write();
+        tree.finalize_block(finalized_block);
+        tree.update_chains_metrics();
     }
 
     fn restore_canonical_hashes(&self, last_finalized_block: BlockNumber) -> Result<(), Error> {
         trace!(target: "blockchain_tree", ?last_finalized_block, "Restoring canonical hashes for last finalized block");
-        self.tree.write().restore_canonical_hashes(last_finalized_block)
+        let mut tree = self.tree.write();
+        let res = tree.restore_canonical_hashes(last_finalized_block);
+        tree.update_chains_metrics();
+        res
     }
 
     fn make_canonical(&self, block_hash: &BlockHash) -> Result<CanonicalOutcome, Error> {
         trace!(target: "blockchain_tree", ?block_hash, "Making block canonical");
-        self.tree.write().make_canonical(block_hash)
+        let mut tree = self.tree.write();
+        let res = tree.make_canonical(block_hash);
+        tree.update_chains_metrics();
+        res
     }
 
     fn unwind(&self, unwind_to: BlockNumber) -> Result<(), Error> {
         trace!(target: "blockchain_tree", ?unwind_to, "Unwinding to block number");
-        self.tree.write().unwind(unwind_to)
+        let mut tree = self.tree.write();
+        let res = tree.unwind(unwind_to);
+        tree.update_chains_metrics();
+        res
     }
 }
 
@@ -86,6 +107,14 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
     fn block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
         trace!(target: "blockchain_tree", ?block_hash, "Returning block by hash");
         self.tree.read().block_by_hash(block_hash).cloned()
+    }
+
+    fn buffered_block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
+        self.tree.read().get_buffered_block(&block_hash).map(|b| b.block.clone())
+    }
+
+    fn buffered_header_by_hash(&self, block_hash: BlockHash) -> Option<SealedHeader> {
+        self.tree.read().get_buffered_block(&block_hash).map(|b| b.header.clone())
     }
 
     fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash> {
@@ -131,6 +160,18 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
     fn pending_block(&self) -> Option<SealedBlock> {
         trace!(target: "blockchain_tree", "Returning first pending block");
         self.tree.read().pending_block().cloned()
+    }
+
+    fn pending_block_and_receipts(&self) -> Option<(SealedBlock, Vec<Receipt>)> {
+        let tree = self.tree.read();
+        let pending_block = tree.pending_block()?.clone();
+        let receipts = tree.receipts_by_block_hash(pending_block.hash)?.to_vec();
+        Some((pending_block, receipts))
+    }
+
+    fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<Receipt>> {
+        let tree = self.tree.read();
+        Some(tree.receipts_by_block_hash(block_hash)?.to_vec())
     }
 }
 

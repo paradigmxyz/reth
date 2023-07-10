@@ -11,9 +11,9 @@ pub use signature::Signature;
 pub use typed::*;
 
 use reth_primitives::{
-    rpc::transaction::eip2930::AccessListItem, Address, BlockNumber, Bytes,
-    Transaction as PrimitiveTransaction, TransactionKind as PrimitiveTransactionKind,
-    TransactionSignedEcRecovered, TxType, H256, U128, U256, U64,
+    AccessListItem, Address, BlockNumber, Bytes, Transaction as PrimitiveTransaction,
+    TransactionKind as PrimitiveTransactionKind, TransactionSignedEcRecovered, TxType, H256, U128,
+    U256, U64,
 };
 use serde::{Deserialize, Serialize};
 
