@@ -1075,7 +1075,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         let (blocks, state) = chain.into_inner();
 
-        provider.append_blocks_with_post_state(blocks.into_blocks().collect(), state)?;
+        provider.append_blocks_with_post_state(blocks.into_blocks().collect(), state).map_err(|err| match err {
+            Error::Provider(err) => Error::Execution(err.into()),
+            err => err,
+        })?;
 
         provider.commit()?;
 
