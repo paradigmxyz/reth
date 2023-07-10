@@ -1,0 +1,35 @@
+[package]
+name = "examples"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dev-dependencies]
+reth-primitives = { workspace = true }
+
+reth-db = { workspace = true }
+reth-provider = { workspace = true }
+
+reth-rpc-builder = { workspace = true }
+reth-rpc-types = { workspace = true }
+
+reth-revm = { workspace = true }
+reth-blockchain-tree = { workspace = true }
+reth-beacon-consensus = { workspace = true }
+reth-network-api = { workspace = true }
+reth-transaction-pool = { workspace = true }
+reth-tasks = { workspace = true }
+
+
+eyre = "0.6.8"
+futures = "0.3.0"
+tokio = { workspace = true }
+
+[[example]]
+name = "rpc-db"
+path = "rpc-db.rs"
+
+[[example]]
+name = "db-access"
+path = "db-access.rs"

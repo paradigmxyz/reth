@@ -1,6 +1,5 @@
 use bitflags::bitflags;
 use ffi::*;
-use libc::c_uint;
 
 /// MDBX sync mode
 #[derive(Clone, Copy, Debug)]
@@ -188,7 +187,7 @@ impl EnvironmentFlags {
 bitflags! {
     #[doc="Database options."]
     #[derive(Default)]
-    pub struct DatabaseFlags: c_uint {
+    pub struct DatabaseFlags: MDBX_env_flags_t {
         const REVERSE_KEY = MDBX_REVERSEKEY;
         const DUP_SORT = MDBX_DUPSORT;
         const INTEGER_KEY = MDBX_INTEGERKEY;
@@ -203,7 +202,7 @@ bitflags! {
 bitflags! {
     #[doc="Write options."]
     #[derive(Default)]
-    pub struct WriteFlags: c_uint {
+    pub struct WriteFlags: MDBX_env_flags_t {
         const UPSERT = MDBX_UPSERT;
         const NO_OVERWRITE = MDBX_NOOVERWRITE;
         const NO_DUP_DATA = MDBX_NODUPDATA;

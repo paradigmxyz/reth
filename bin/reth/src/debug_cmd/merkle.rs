@@ -1,6 +1,6 @@
 //! Command for debugging merkle trie calculation.
 use crate::{
-    args::utils::genesis_value_parser,
+    args::{utils::genesis_value_parser, DatabaseArgs},
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::Parser;
@@ -50,6 +50,9 @@ pub struct Command {
     )]
     chain: Arc<ChainSpec>,
 
+    #[clap(flatten)]
+    db: DatabaseArgs,
+
     /// The height to finish at
     #[arg(long)]
     to: u64,
@@ -67,7 +70,7 @@ impl Command {
         let db_path = data_dir.db_path();
         fs::create_dir_all(&db_path)?;
 
-        let db = Arc::new(init_db(db_path)?);
+        let db = Arc::new(init_db(db_path, self.db.log_level)?);
         let factory = ProviderFactory::new(&db, self.chain.clone());
         let provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
 

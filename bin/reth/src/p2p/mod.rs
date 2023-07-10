@@ -3,7 +3,7 @@ use crate::{
     args::{
         get_secret_key,
         utils::{chain_spec_value_parser, hash_or_num_value_parser},
-        DiscoveryArgs,
+        DatabaseArgs, DiscoveryArgs,
     },
     dirs::{DataDirPath, MaybePlatformPath},
     utils::get_single_header,
@@ -74,11 +74,14 @@ pub struct Command {
     #[arg(long, default_value = "5")]
     retries: usize,
 
-    #[clap(subcommand)]
-    command: Subcommands,
-
     #[arg(long, default_value = "any")]
     nat: NatResolver,
+
+    #[clap(flatten)]
+    db: DatabaseArgs,
+
+    #[clap(subcommand)]
+    command: Subcommands,
 }
 
 #[derive(Subcommand, Debug)]
@@ -101,7 +104,7 @@ impl Command {
     /// Execute `p2p` command
     pub async fn execute(&self) -> eyre::Result<()> {
         let tempdir = tempfile::TempDir::new()?;
-        let noop_db = Arc::new(open_db(&tempdir.into_path())?);
+        let noop_db = Arc::new(open_db(&tempdir.into_path(), self.db.log_level)?);
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);

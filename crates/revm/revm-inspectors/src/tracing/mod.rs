@@ -24,6 +24,7 @@ mod utils;
 use crate::tracing::{
     arena::PushTraceKind,
     types::{CallTraceNode, StorageChange},
+    utils::gas_used,
 };
 pub use builder::{
     geth::{self, GethTraceBuilder},
@@ -176,7 +177,6 @@ impl TracingInspector {
                 value,
                 status: InstructionResult::Continue,
                 caller,
-                last_call_return_value: self.last_call_return_data.clone(),
                 maybe_precompile,
                 gas_limit,
                 ..Default::default()
@@ -193,7 +193,7 @@ impl TracingInspector {
     /// This expects an existing trace [Self::start_trace_on_call]
     fn fill_trace_on_call_end<DB: Database>(
         &mut self,
-        _data: &EVMData<'_, DB>,
+        data: &EVMData<'_, DB>,
         status: InstructionResult,
         gas: &Gas,
         output: Bytes,
@@ -202,10 +202,18 @@ impl TracingInspector {
         let trace_idx = self.pop_trace_idx();
         let trace = &mut self.traces.arena[trace_idx].trace;
 
-        trace.gas_used = gas.spend();
+        if trace_idx == 0 {
+            // this is the root call which should get the gas used of the transaction
+            // refunds are applied after execution, which is when the root call ends
+            trace.gas_used = gas_used(data.env.cfg.spec_id, gas.spend(), gas.refunded() as u64);
+        } else {
+            trace.gas_used = gas.spend();
+        }
+
         trace.status = status;
         trace.success = matches!(status, return_ok!());
         trace.output = output.clone();
+
         self.last_call_return_data = Some(output);
 
         if let Some(address) = created_address {

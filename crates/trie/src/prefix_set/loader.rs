@@ -1,4 +1,4 @@
-use super::PrefixSet;
+use super::PrefixSetMut;
 use derive_more::Deref;
 use reth_db::{
     cursor::DbCursorRO,
@@ -29,10 +29,10 @@ where
     pub fn load(
         self,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<(PrefixSet, HashMap<H256, PrefixSet>), DatabaseError> {
+    ) -> Result<(PrefixSetMut, HashMap<H256, PrefixSetMut>), DatabaseError> {
         // Initialize prefix sets.
-        let mut account_prefix_set = PrefixSet::default();
-        let mut storage_prefix_set: HashMap<H256, PrefixSet> = HashMap::default();
+        let mut account_prefix_set = PrefixSetMut::default();
+        let mut storage_prefix_set: HashMap<H256, PrefixSetMut> = HashMap::default();
 
         // Walk account changeset and insert account prefixes.
         let mut account_cursor = self.cursor_read::<tables::AccountChangeSet>()?;

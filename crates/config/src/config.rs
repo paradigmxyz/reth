@@ -5,7 +5,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_network::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
-use reth_primitives::PruneMode;
+use reth_primitives::{serde_helper::deserialize_opt_prune_mode_with_min_distance, PruneMode};
 use secp256k1::SecretKey;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -148,8 +148,7 @@ pub struct BodiesConfig {
     ///
     /// Default: 10_000
     pub downloader_stream_batch_size: usize,
-    /// Maximum amount of received bodies to buffer internally.
-    /// The response contains multiple bodies.
+    /// The size of the internal block buffer in bytes.
     ///
     /// Default: 4GB
     pub downloader_max_buffered_blocks_size_bytes: usize,
@@ -306,7 +305,10 @@ pub struct PruneParts {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transaction_lookup: Option<PruneMode>,
     /// Receipts pruning configuration.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_opt_prune_mode_with_min_distance::<64, _>"
+    )]
     pub receipts: Option<PruneMode>,
     /// Account History pruning configuration.
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -139,7 +139,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             chains: Default::default(),
             block_indices: BlockIndices::new(
                 last_finalized_block_number,
-                BTreeMap::from_iter(last_canonical_hashes.into_iter()),
+                BTreeMap::from_iter(last_canonical_hashes),
             ),
             config,
             canon_state_notification_sender,
@@ -274,7 +274,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 .iter()
                 .filter(|&(key, _)| key < first_pending_block_number)
                 .collect::<Vec<_>>();
-            parent_block_hashed.extend(canonical_chain.into_iter());
+            parent_block_hashed.extend(canonical_chain);
 
             // get canonical fork.
             let canonical_fork = self.canonical_fork(chain_id)?;
@@ -1084,8 +1084,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
     }
 
-    /// Update blockchain tree and sync metrics
-    pub(crate) fn update_metrics(&mut self) {
+    /// Update blockchain tree chains (canonical and sidechains) and sync metrics.
+    ///
+    /// NOTE: this method should not be called during the pipeline sync, because otherwise the sync
+    /// checkpoint metric will get overwritten. Buffered blocks metrics are updated in
+    /// [BlockBuffer] during the pipeline sync.
+    pub(crate) fn update_chains_metrics(&mut self) {
         let height = self.canonical_chain().tip().number;
 
         self.metrics.sidechains.set(self.chains.len() as f64);

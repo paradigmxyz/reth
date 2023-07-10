@@ -256,7 +256,10 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
 mod tests {
 
     use super::*;
-    use crate::trie_cursor::{AccountTrieCursor, StorageTrieCursor};
+    use crate::{
+        prefix_set::PrefixSetMut,
+        trie_cursor::{AccountTrieCursor, StorageTrieCursor},
+    };
     use reth_db::{
         cursor::DbCursorRW, tables, test_utils::create_test_rw_db, transaction::DbTxMut,
     };
@@ -378,9 +381,9 @@ mod tests {
         assert_eq!(cursor.key(), None);
 
         // We insert something that's not part of the existing trie/prefix.
-        let mut changed = PrefixSet::default();
+        let mut changed = PrefixSetMut::default();
         changed.insert(&[0xF, 0x1]);
-        let mut cursor = TrieWalker::new(&mut trie, changed);
+        let mut cursor = TrieWalker::new(&mut trie, changed.freeze());
 
         // Root node
         assert_eq!(cursor.key(), Some(Nibbles::from_hex(vec![])));

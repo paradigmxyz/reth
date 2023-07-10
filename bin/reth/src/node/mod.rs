@@ -2,8 +2,9 @@
 //!
 //! Starts the client
 use crate::{
-    args::{get_secret_key, DebugArgs, NetworkArgs, RpcServerArgs},
+    args::{get_secret_key, DebugArgs, NetworkArgs, RpcServerArgs, TxPoolArgs},
     dirs::DataDirPath,
+    init::init_genesis,
     prometheus_exporter,
     runner::CliContext,
     utils::get_single_header,
@@ -46,7 +47,6 @@ use reth_provider::{
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
-use reth_staged_sync::utils::init::init_genesis;
 use reth_stages::{
     prelude::*,
     stages::{
@@ -69,7 +69,7 @@ use tracing::*;
 use crate::{
     args::{
         utils::{genesis_value_parser, parse_socket_address},
-        PayloadBuilderArgs,
+        DatabaseArgs, PayloadBuilderArgs,
     },
     dirs::MaybePlatformPath,
     node::cl_events::ConsensusLayerHealthEvents,
@@ -133,10 +133,16 @@ pub struct Command {
     rpc: RpcServerArgs,
 
     #[clap(flatten)]
+    txpool: TxPoolArgs,
+
+    #[clap(flatten)]
     builder: PayloadBuilderArgs,
 
     #[clap(flatten)]
     debug: DebugArgs,
+
+    #[clap(flatten)]
+    db: DatabaseArgs,
 
     /// Automatically mine blocks for new transactions
     #[arg(long)]
@@ -163,7 +169,7 @@ impl Command {
 
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(&db_path)?);
+        let db = Arc::new(init_db(&db_path, self.db.log_level)?);
         info!(target: "reth::cli", "Database opened");
 
         self.start_metrics_endpoint(Arc::clone(&db)).await?;
@@ -214,13 +220,13 @@ impl Command {
         let blockchain_db = BlockchainProvider::new(factory, blockchain_tree.clone())?;
 
         let transaction_pool = reth_transaction_pool::Pool::eth_pool(
-            EthTransactionValidator::new(
+            EthTransactionValidator::with_additional_tasks(
                 blockchain_db.clone(),
                 Arc::clone(&self.chain),
                 ctx.task_executor.clone(),
                 1,
             ),
-            Default::default(),
+            self.txpool.pool_config(),
         );
         info!(target: "reth::cli", "Transaction pool initialized");
 
@@ -690,7 +696,7 @@ impl Command {
             if continuous { HeaderSyncMode::Continuous } else { HeaderSyncMode::Tip(tip_rx) };
         let pipeline = builder
             .with_tip_sender(tip_tx)
-            .with_metrics_tx(metrics_tx)
+            .with_metrics_tx(metrics_tx.clone())
             .add_stages(
                 DefaultStages::new(
                     header_mode,
@@ -706,13 +712,16 @@ impl Command {
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_config.sender_recovery.commit_threshold,
                 })
-                .set(ExecutionStage::new(
-                    factory,
-                    ExecutionStageThresholds {
-                        max_blocks: stage_config.execution.max_blocks,
-                        max_changes: stage_config.execution.max_changes,
-                    },
-                ))
+                .set(
+                    ExecutionStage::new(
+                        factory,
+                        ExecutionStageThresholds {
+                            max_blocks: stage_config.execution.max_blocks,
+                            max_changes: stage_config.execution.max_changes,
+                        },
+                    )
+                    .with_metrics_tx(metrics_tx),
+                )
                 .set(AccountHashingStage::new(
                     stage_config.account_hashing.clean_threshold,
                     stage_config.account_hashing.commit_threshold,

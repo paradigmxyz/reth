@@ -1,6 +1,10 @@
 //! Ethereum types for pub-sub
 
-use crate::{eth::Filter, Log, RichHeader};
+use crate::{
+    eth::{Filter, Transaction},
+    Log, RichHeader,
+};
+
 use reth_primitives::H256;
 use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 
@@ -14,6 +18,8 @@ pub enum SubscriptionResult {
     Log(Box<Log>),
     /// Transaction hash
     TransactionHash(H256),
+    /// Full Transaction
+    FullTransaction(Box<Transaction>),
     /// SyncStatus
     SyncState(PubSubSyncStatus),
 }
@@ -49,6 +55,7 @@ impl Serialize for SubscriptionResult {
             SubscriptionResult::Header(ref header) => header.serialize(serializer),
             SubscriptionResult::Log(ref log) => log.serialize(serializer),
             SubscriptionResult::TransactionHash(ref hash) => hash.serialize(serializer),
+            SubscriptionResult::FullTransaction(ref tx) => tx.serialize(serializer),
             SubscriptionResult::SyncState(ref sync) => sync.serialize(serializer),
         }
     }
@@ -76,10 +83,10 @@ pub enum SubscriptionKind {
     Logs,
     /// New Pending Transactions subscription.
     ///
-    /// Returns the hash for all transactions that are added to the pending state and are signed
-    /// with a key that is available in the node. When a transaction that was previously part of
-    /// the canonical chain isn't part of the new canonical chain after a reorganization its again
-    /// emitted.
+    /// Returns the hash or full tx for all transactions that are added to the pending state and
+    /// are signed with a key that is available in the node. When a transaction that was
+    /// previously part of the canonical chain isn't part of the new canonical chain after a
+    /// reorganization its again emitted.
     NewPendingTransactions,
     /// Node syncing status subscription.
     ///
@@ -97,6 +104,8 @@ pub enum Params {
     None,
     /// Log parameters.
     Logs(Box<Filter>),
+    /// New pending transaction parameters.
+    NewPendingTransactions(bool),
 }
 
 impl Serialize for Params {
@@ -107,6 +116,7 @@ impl Serialize for Params {
         match self {
             Params::None => (&[] as &[serde_json::Value]).serialize(serializer),
             Params::Logs(logs) => logs.serialize(serializer),
+            Params::NewPendingTransactions(full) => full.serialize(serializer),
         }
     }
 }
