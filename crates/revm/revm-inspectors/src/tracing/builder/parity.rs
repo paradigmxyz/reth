@@ -8,7 +8,7 @@ use reth_rpc_types::{trace::parity::*, TransactionInfo};
 use revm::{
     db::DatabaseRef,
     interpreter::opcode,
-    primitives::{AccountInfo, ExecutionResult, ResultAndState},
+    primitives::{AccountInfo, ExecutionResult, ResultAndState, KECCAK_EMPTY},
 };
 use std::collections::{HashSet, VecDeque};
 
@@ -375,10 +375,13 @@ where
 
                 let db_acc = db.basic(addr)?.unwrap_or_default();
 
-                curr_ref.code = match db_acc.code {
-                    Some(code) => code.bytecode.into(),
-                    None => Default::default(),
+                let code_hash = if db_acc.code_hash != KECCAK_EMPTY {
+                    db_acc.code_hash
+                } else {
+                    continue;
                 };
+
+                curr_ref.code = db.code_by_hash(code_hash)?.bytecode.into();
             }
             None => break,
         }
