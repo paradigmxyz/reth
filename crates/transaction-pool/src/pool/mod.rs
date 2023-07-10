@@ -93,7 +93,7 @@ use tokio::sync::mpsc;
 use tracing::debug;
 
 mod events;
-pub use events::{PoolTransactionEvent, TransactionEvent};
+pub use events::{FullTransactionEvent, TransactionEvent};
 
 mod listener;
 pub use listener::{AllTransactionsEvents, TransactionEvents};
@@ -117,7 +117,7 @@ pub struct PoolInner<V: TransactionValidator, T: TransactionOrdering> {
     /// Pool settings.
     config: PoolConfig,
     /// Manages listeners for transaction state change events.
-    event_listener: RwLock<PoolEventBroadcast>,
+    event_listener: RwLock<PoolEventBroadcast<T::Transaction>>,
     /// Listeners for new ready transactions.
     pending_transaction_listener: Mutex<Vec<mpsc::Sender<TxHash>>>,
     /// Listeners for new transactions added to the pool.
@@ -223,20 +223,22 @@ where
     }
 
     /// Adds a listener for all transaction events.
-    pub(crate) fn add_all_transactions_event_listener(&self) -> AllTransactionsEvents {
+    pub(crate) fn add_all_transactions_event_listener(
+        &self,
+    ) -> AllTransactionsEvents<T::Transaction> {
         self.event_listener.write().subscribe_all()
     }
 
     /// Returns hashes of _all_ transactions in the pool.
     pub(crate) fn pooled_transactions_hashes(&self) -> Vec<TxHash> {
         let pool = self.pool.read();
-        pool.all().hashes_iter().collect()
+        pool.all().transactions_iter().filter(|tx| tx.propagate).map(|tx| *tx.hash()).collect()
     }
 
     /// Returns _all_ transactions in the pool.
     pub(crate) fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let pool = self.pool.read();
-        pool.all().transactions_iter().collect()
+        pool.all().transactions_iter().filter(|tx| tx.propagate).collect()
     }
 
     /// Updates the entire pool after a new block was executed.
@@ -272,7 +274,12 @@ where
         tx: TransactionValidationOutcome<T::Transaction>,
     ) -> PoolResult<TxHash> {
         match tx {
-            TransactionValidationOutcome::Valid { balance, state_nonce, transaction } => {
+            TransactionValidationOutcome::Valid {
+                balance,
+                state_nonce,
+                transaction,
+                propagate,
+            } => {
                 let sender_id = self.get_sender_id(transaction.sender());
                 let transaction_id = TransactionId::new(sender_id, transaction.nonce());
                 let encoded_length = transaction.encoded_length();
@@ -280,7 +287,7 @@ where
                 let tx = ValidPoolTransaction {
                     transaction,
                     transaction_id,
-                    propagate: false,
+                    propagate,
                     timestamp: Instant::now(),
                     origin,
                     encoded_length,
@@ -417,14 +424,14 @@ where
             AddedTransaction::Pending(tx) => {
                 let AddedPendingTransaction { transaction, promoted, discarded, replaced } = tx;
 
-                listener.pending(transaction.hash(), replaced.as_ref().map(|tx| tx.hash()));
+                listener.pending(transaction.hash(), replaced.clone());
                 promoted.iter().for_each(|tx| listener.pending(tx, None));
                 discarded.iter().for_each(|tx| listener.discarded(tx));
             }
             AddedTransaction::Parked { transaction, replaced, .. } => {
                 listener.queued(transaction.hash());
                 if let Some(replaced) = replaced {
-                    listener.replaced(replaced.hash(), transaction.hash());
+                    listener.replaced(replaced.clone(), *transaction.hash());
                 }
             }
         }

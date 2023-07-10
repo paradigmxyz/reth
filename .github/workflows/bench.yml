@@ -13,7 +13,7 @@ concurrency:
 name: bench
 jobs:
   iai:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     # Only run benchmarks in merge groups
     if: github.event_name != 'pull_request'
     steps:
@@ -60,7 +60,7 @@ jobs:
   # Checks that benchmarks not run in CI compile
   bench-check:
     name: check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v3
       - name: Install toolchain
@@ -74,7 +74,7 @@ jobs:
     if: always()
     name: bench success
     needs: bench-check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@release/v1

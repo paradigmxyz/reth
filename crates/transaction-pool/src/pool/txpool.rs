@@ -637,6 +637,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 
     /// Returns an iterator over all _unique_ hashes in the pool
+    #[allow(unused)]
     pub(crate) fn hashes_iter(&self) -> impl Iterator<Item = TxHash> + '_ {
         self.by_hash.keys().copied()
     }
