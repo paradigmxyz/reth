@@ -1,5 +1,5 @@
-use reth_primitives::{Address, BlockHash, BlockHashOrNumber, BlockNumber, TxNumber, H256};
 use crate::executor::{BlockExecutionError, BlockValidationError};
+use reth_primitives::{Address, BlockHash, BlockHashOrNumber, BlockNumber, TxNumber, H256};
 
 /// Bundled errors variants thrown by various providers.
 #[allow(missing_docs)]

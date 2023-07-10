@@ -518,9 +518,8 @@ where
         head: H256,
     ) -> Option<PayloadStatus> {
         // check if the check or head hash was previously marked as invalid
-        let header = self.invalid_headers
-            .get(&check)
-            .or_else(|| self.invalid_headers.get(&head))?;
+        let header =
+            self.invalid_headers.get(&check).or_else(|| self.invalid_headers.get(&head))?;
 
         // populate the latest valid hash field
         let status = self.prepare_invalid_response(header.parent_hash);
