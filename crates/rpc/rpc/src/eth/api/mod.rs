@@ -78,6 +78,7 @@ where
         network: Network,
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Provider>,
+        gas_cap: u64,
     ) -> Self {
         Self::with_spawner(
             provider,
@@ -85,6 +86,7 @@ where
             network,
             eth_cache,
             gas_oracle,
+            gas_cap,
             Box::<TokioTaskExecutor>::default(),
         )
     }
@@ -96,6 +98,7 @@ where
         network: Network,
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Provider>,
+        gas_cap: u64,
         task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         // get the block number of the latest block
@@ -113,6 +116,7 @@ where
             signers: Default::default(),
             eth_cache,
             gas_oracle,
+            gas_cap,
             starting_block: U256::from(latest_block),
             task_spawner,
         };
@@ -147,6 +151,11 @@ where
     /// Returns the gas oracle frontend
     pub(crate) fn gas_oracle(&self) -> &GasPriceOracle<Provider> {
         &self.inner.gas_oracle
+    }
+
+    // Returns the gas cap
+    pub(crate) fn rpc_cap(&self) -> &u64 {
+        &self.inner.gas_cap
     }
 
     /// Returns the inner `Provider`
@@ -280,6 +289,8 @@ struct EthApiInner<Provider, Pool, Network> {
     eth_cache: EthStateCache,
     /// The async gas oracle frontend for gas price suggestions
     gas_oracle: GasPriceOracle<Provider>,
+    // TODO
+    gas_cap: u64,
     /// The block number at which the node started
     starting_block: U256,
     /// The type that can spawn tasks which would otherwise block.
