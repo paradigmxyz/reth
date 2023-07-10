@@ -24,6 +24,12 @@ pub enum PayloadBuilderError {
     WithdrawalsBeforeShanghai,
 }
 
+impl From<reth_interfaces::Error> for Box<PayloadBuilderError> {
+    fn from(value: reth_interfaces::Error) -> Self {
+        Box::new(PayloadBuilderError::Internal(value))
+    }
+}
+
 impl From<oneshot::error::RecvError> for PayloadBuilderError {
     fn from(_: oneshot::error::RecvError) -> Self {
         PayloadBuilderError::ChannelClosed

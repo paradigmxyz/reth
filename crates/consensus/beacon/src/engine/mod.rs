@@ -1967,7 +1967,7 @@ mod tests {
         mut blocks: impl Iterator<Item = (&'a SealedBlockWithSenders, &'a PostState)>,
     ) {
         let factory = ProviderFactory::new(db, chain);
-        let mut provider = factory.provider_rw().unwrap();
+        let provider = factory.provider_rw().unwrap();
         blocks
             .try_for_each(|(block, state)| {
                 provider.append_blocks_with_post_state(vec![block.clone()], state.clone())

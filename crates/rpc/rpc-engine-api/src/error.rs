@@ -74,7 +74,13 @@ pub enum EngineApiError {
     Internal(Box<dyn std::error::Error + Send + Sync>),
     /// Fetching the payload failed
     #[error(transparent)]
-    GetPayloadError(#[from] PayloadBuilderError),
+    GetPayloadError(#[from] Box<PayloadBuilderError>),
+}
+
+impl From<PayloadBuilderError> for EngineApiError {
+    fn from(value: PayloadBuilderError) -> Self {
+        EngineApiError::GetPayloadError(Box::new(value))
+    }
 }
 
 impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {

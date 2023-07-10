@@ -548,6 +548,7 @@ fn build_payload<Pool, Client>(
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {
+    #[allow(clippy::result_large_err)]
     #[inline(always)]
     fn try_build<Pool, Client>(
         client: Client,
@@ -731,6 +732,7 @@ fn build_payload<Pool, Client>(
 }
 
 /// Builds an empty payload without any transactions.
+#[allow(clippy::result_large_err)]
 fn build_empty_payload<Client>(
     client: &Client,
     config: PayloadConfig,
