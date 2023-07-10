@@ -18,7 +18,7 @@ pub trait TransactionsProvider: BlockNumReader + Send + Sync {
     /// Get transaction by id.
     fn transaction_by_id(&self, id: TxNumber) -> Result<Option<TransactionSigned>>;
 
-    /// Get transaction by id.
+    /// Get transaction by id without computing the hash - note you can still call .hash() to generate it.
     fn transaction_by_id_no_hash(&self, id: TxNumber) -> Result<Option<TransactionSignedNoHash>>;
 
     /// Get transaction by transaction hash.
