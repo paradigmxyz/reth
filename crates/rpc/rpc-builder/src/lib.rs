@@ -31,13 +31,13 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider};
+//! use reth_provider::{BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider};
 //! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
 //! pub async fn launch<Provider, Pool, Network, Events>(provider: Provider, pool: Pool, network: Network, events: Events)
 //! where
-//!     Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+//!     Provider: BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions +  Clone + 'static,
@@ -64,7 +64,7 @@
 //! ```
 //! use tokio::try_join;
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider};
+//! use reth_provider::{BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider};
 //! use reth_rpc::JwtSecret;
 //! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig};
 //! use reth_tasks::TokioTaskExecutor;
@@ -73,7 +73,7 @@
 //! use reth_rpc_builder::auth::AuthServerConfig;
 //! pub async fn launch<Provider, Pool, Network, Events, EngineApi>(provider: Provider, pool: Pool, network: Network, events: Events, engine_api: EngineApi)
 //! where
-//!     Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+//!     Provider: BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions +  Clone + 'static,
@@ -113,7 +113,8 @@ use jsonrpsee::{
 use reth_ipc::server::IpcServer;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, CanonStateSubscriptions, EvmEnvProvider, StateProviderFactory,
+    BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider,
+    StateProviderFactory,
 };
 use reth_rpc::{
     eth::{
@@ -124,7 +125,7 @@ use reth_rpc::{
     NetApi, RPCApi, TraceApi, TracingCallGuard, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
-use reth_tasks::TaskSpawner;
+use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
 use serde::{Deserialize, Serialize, Serializer};
 use std::{
@@ -157,6 +158,8 @@ pub mod constants;
 pub use crate::eth::{EthConfig, EthHandlers};
 pub use jsonrpsee::server::ServerBuilder;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
+use reth_network_api::noop::NoopNetwork;
+use reth_transaction_pool::noop::NoopTransactionPool;
 
 /// Convenience function for starting a server in one step.
 pub async fn launch<Provider, Pool, Network, Tasks, Events>(
@@ -169,7 +172,13 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events>(
     events: Events,
 ) -> Result<RpcServerHandle, RpcError>
 where
-    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+    Provider: BlockReaderIdExt
+        + StateProviderFactory
+        + EvmEnvProvider
+        + ChainSpecProvider
+        + Clone
+        + Unpin
+        + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
@@ -185,7 +194,7 @@ where
 
 /// A builder type to configure the RPC module: See [RpcModule]
 ///
-/// This is the main entrypoint for up RPC servers.
+/// This is the main entrypoint and the easiest way to configure an RPC server.
 #[derive(Debug, Clone)]
 pub struct RpcModuleBuilder<Provider, Pool, Network, Tasks, Events> {
     /// The Provider type to when creating all rpc handlers
@@ -234,6 +243,24 @@ impl<Provider, Pool, Network, Tasks, Events>
         RpcModuleBuilder { provider, network, pool, executor, events }
     }
 
+    /// Configure a [NoopTransactionPool] instance.
+    ///
+    /// Caution: This will configure a pool API that does abosultely nothing.
+    /// This is only intended for allow easier setup of namespaces that depend on the [EthApi] which
+    /// requires a [TransactionPool] implementation.
+    pub fn with_noop_pool(
+        self,
+    ) -> RpcModuleBuilder<Provider, NoopTransactionPool, Network, Tasks, Events> {
+        let Self { provider, executor, events, network, .. } = self;
+        RpcModuleBuilder {
+            provider,
+            executor,
+            events,
+            network,
+            pool: NoopTransactionPool::default(),
+        }
+    }
+
     /// Configure the network instance.
     pub fn with_network<N>(self, network: N) -> RpcModuleBuilder<Provider, Pool, N, Tasks, Events>
     where
@@ -241,6 +268,16 @@ impl<Provider, Pool, Network, Tasks, Events>
     {
         let Self { provider, pool, executor, events, .. } = self;
         RpcModuleBuilder { provider, network, pool, executor, events }
+    }
+
+    /// Configure a [NoopNetwork] instance.
+    ///
+    /// Caution: This will configure a network API that does abosultely nothing.
+    /// This is only intended for allow easier setup of namespaces that depend on the [EthApi] which
+    /// requires a [NetworkInfo] implementation.
+    pub fn with_noop_network(self) -> RpcModuleBuilder<Provider, Pool, NoopNetwork, Tasks, Events> {
+        let Self { provider, pool, executor, events, .. } = self;
+        RpcModuleBuilder { provider, pool, executor, events, network: NoopNetwork::default() }
     }
 
     /// Configure the task executor to use for additional tasks.
@@ -253,6 +290,17 @@ impl<Provider, Pool, Network, Tasks, Events>
     {
         let Self { pool, network, provider, events, .. } = self;
         RpcModuleBuilder { provider, network, pool, executor, events }
+    }
+
+    /// Configure [TokioTaskExecutor] as the task executor to use for additional tasks.
+    ///
+    /// This will spawn additional tasks directly via `tokio::task::spawn`, See
+    /// [TokioTaskExecutor].
+    pub fn with_tokio_executor(
+        self,
+    ) -> RpcModuleBuilder<Provider, Pool, Network, TokioTaskExecutor, Events> {
+        let Self { pool, network, provider, events, .. } = self;
+        RpcModuleBuilder { provider, network, pool, events, executor: TokioTaskExecutor::default() }
     }
 
     /// Configure the event subscriber instance
@@ -268,7 +316,13 @@ impl<Provider, Pool, Network, Tasks, Events>
 impl<Provider, Pool, Network, Tasks, Events>
     RpcModuleBuilder<Provider, Pool, Network, Tasks, Events>
 where
-    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+    Provider: BlockReaderIdExt
+        + StateProviderFactory
+        + EvmEnvProvider
+        + ChainSpecProvider
+        + Clone
+        + Unpin
+        + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
@@ -485,8 +539,13 @@ impl RpcModuleSelection {
         config: RpcModuleConfig,
     ) -> RpcModule<()>
     where
-        Provider:
-            BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+        Provider: BlockReaderIdExt
+            + StateProviderFactory
+            + EvmEnvProvider
+            + ChainSpecProvider
+            + Clone
+            + Unpin
+            + 'static,
         Pool: TransactionPool + Clone + 'static,
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
@@ -545,9 +604,12 @@ impl FromStr for RpcModuleSelection {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let modules = s.split(',');
-
-        RpcModuleSelection::try_from_selection(modules)
+        let mut modules = s.split(',').peekable();
+        let first = modules.peek().copied().ok_or(ParseError::VariantNotFound)?;
+        match first {
+            "all" | "All" => Ok(RpcModuleSelection::All),
+            _ => RpcModuleSelection::try_from_selection(modules),
+        }
     }
 }
 
@@ -692,7 +754,13 @@ where
 impl<Provider, Pool, Network, Tasks, Events>
     RethModuleRegistry<Provider, Pool, Network, Tasks, Events>
 where
-    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+    Provider: BlockReaderIdExt
+        + StateProviderFactory
+        + EvmEnvProvider
+        + ChainSpecProvider
+        + Clone
+        + Unpin
+        + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
@@ -1642,6 +1710,12 @@ impl fmt::Debug for RpcServerHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_rpc_module_selection() {
+        let selection = "all".parse::<RpcModuleSelection>().unwrap();
+        assert_eq!(selection, RpcModuleSelection::All);
+    }
 
     #[test]
     fn identical_selection() {

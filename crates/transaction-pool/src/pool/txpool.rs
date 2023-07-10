@@ -1,6 +1,6 @@
 //! The internal transaction pool implementation.
 use crate::{
-    config::MAX_ACCOUNT_SLOTS_PER_SENDER,
+    config::TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
     error::{InvalidPoolTransactionError, PoolError},
     identifier::{SenderId, TransactionId},
     metrics::TxPoolMetrics,
@@ -120,6 +120,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             basefee_size: self.basefee_pool.size(),
             queued: self.queued_pool.len(),
             queued_size: self.queued_pool.size(),
+            total: self.all_transactions.len(),
         }
     }
 
@@ -272,6 +273,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.metrics.basefee_pool_size_bytes.set(stats.basefee_size as f64);
         self.metrics.queued_pool_transactions.set(stats.queued as f64);
         self.metrics.queued_pool_size_bytes.set(stats.queued_size as f64);
+        self.metrics.total_transactions.set(stats.total as f64);
     }
 
     /// Adds the transaction into the pool.
@@ -312,20 +314,22 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
             Ok(InsertOk { transaction, move_to, replaced_tx, updates, .. }) => {
-                self.add_new_transaction(transaction.clone(), replaced_tx, move_to);
+                self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
                 // Update inserted transactions metric
                 self.metrics.inserted_transactions.increment(1);
                 let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
 
                 // This transaction was moved to the pending pool.
+                let replaced = replaced_tx.map(|(tx, _)| tx);
                 let res = if move_to.is_pending() {
                     AddedTransaction::Pending(AddedPendingTransaction {
                         transaction,
                         promoted,
                         discarded,
+                        replaced,
                     })
                 } else {
-                    AddedTransaction::Parked { transaction, subpool: move_to }
+                    AddedTransaction::Parked { transaction, subpool: move_to, replaced }
                 };
 
                 Ok(res)
@@ -1189,7 +1193,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 impl<T: PoolTransaction> Default for AllTransactions<T> {
     fn default() -> Self {
         Self {
-            max_account_slots: MAX_ACCOUNT_SLOTS_PER_SENDER,
+            max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             by_hash: Default::default(),

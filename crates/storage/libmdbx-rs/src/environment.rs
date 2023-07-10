@@ -90,6 +90,7 @@ where
             spill_max_denominator: None,
             spill_min_denominator: None,
             geometry: None,
+            log_level: None,
             _marker: PhantomData,
         }
     }
@@ -384,6 +385,7 @@ where
     spill_max_denominator: Option<u64>,
     spill_min_denominator: Option<u64>,
     geometry: Option<Geometry<(Option<usize>, Option<usize>)>>,
+    log_level: Option<ffi::MDBX_log_level_t>,
     _marker: PhantomData<E>,
 }
 
@@ -408,7 +410,14 @@ where
     ) -> Result<Environment<E>> {
         let mut env: *mut ffi::MDBX_env = ptr::null_mut();
         unsafe {
+            if let Some(log_level) = self.log_level {
+                // Returns the previously debug_flags in the 0-15 bits and log_level in the
+                // 16-31 bits, no need to use `mdbx_result`.
+                ffi::mdbx_setup_debug(log_level, ffi::MDBX_DBG_DONTCHANGE, None);
+            }
+
             mdbx_result(ffi::mdbx_env_create(&mut env))?;
+
             if let Err(e) = (|| {
                 if let Some(geometry) = &self.geometry {
                     let mut min_size = -1;
@@ -616,6 +625,11 @@ where
             shrink_threshold: geometry.shrink_threshold,
             page_size: geometry.page_size,
         });
+        self
+    }
+
+    pub fn set_log_level(&mut self, log_level: ffi::MDBX_log_level_t) -> &mut Self {
+        self.log_level = Some(log_level);
         self
     }
 }

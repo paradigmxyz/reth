@@ -9,7 +9,7 @@ repository.workspace = true
 description = "reth metrics utilities"
 
 [dependencies]
-# reth 
+# reth
 reth-metrics-derive = { path = "./metrics-derive" }
 
 # metrics

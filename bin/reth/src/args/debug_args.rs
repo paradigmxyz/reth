@@ -5,7 +5,7 @@ use reth_primitives::{TxHash, H256};
 
 /// Parameters for debugging purposes
 #[derive(Debug, Args, PartialEq, Default)]
-#[command(next_help_heading = "Rpc")]
+#[command(next_help_heading = "Debug")]
 pub struct DebugArgs {
     /// Prompt the downloader to download blocks one at a time.
     ///

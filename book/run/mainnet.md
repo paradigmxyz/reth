@@ -35,7 +35,7 @@ So one might do:
 RUST_LOG=info reth node \
     --authrpc.jwtsecret /path/to/secret \
     --authrpc.addr 127.0.0.1 \
-    --authrpc.port 9999
+    --authrpc.port 8551
 ```
 
 At this point, our Reth node has started discovery, and even discovered some new peers. But it will not start syncing until you spin up the consensus layer!
@@ -50,14 +50,16 @@ Assuming you have done that, run:
 RUST_LOG=info lighthouse bn \
     --checkpoint-sync-url https://mainnet.checkpoint.sigp.io \
     --execution-endpoint http://localhost:8551 \
-    --execution-jwt ~/.local/share/reth/mainnet/jwt.hex
+    --execution-jwt /path/to/secret
 ```
 
-If you don't intend on running validators on your node you can add :
+If you don't intend on running validators on your node you can add:
 
 ``` bash
   --disable-deposit-contract-sync
 ```
+
+The `--checkpoint-sync-url` argument value can be replaced with any checkpoint sync endpoint from a [community maintained list](https://eth-clients.github.io/checkpoint-sync-endpoints/#mainnet). 
 
 Your Reth node should start receiving "fork choice updated" messages, and begin syncing the chain.
 

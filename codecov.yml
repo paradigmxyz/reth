@@ -27,7 +27,6 @@ component_management:
       name: pipeline
       paths:
         - crates/stages/**
-        - crates/staged-sync/**
     - component_id: storage
       name: storage (db)
       paths:

@@ -22,7 +22,7 @@ mod execution;
 use execution::dump_execution_stage;
 
 mod merkle;
-use crate::args::utils::genesis_value_parser;
+use crate::args::{utils::genesis_value_parser, DatabaseArgs};
 use merkle::dump_merkle_stage;
 
 /// `reth dump-stage` command
@@ -54,6 +54,9 @@ pub struct Command {
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
+
+    #[clap(flatten)]
+    db: DatabaseArgs,
 
     #[clap(subcommand)]
     command: Stages,
@@ -98,7 +101,7 @@ impl Command {
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(db_path)?);
+        let db = Arc::new(init_db(db_path, self.db.log_level)?);
         info!(target: "reth::cli", "Database opened");
 
         let mut tool = DbTool::new(&db, self.chain.clone())?;
@@ -134,7 +137,7 @@ pub(crate) fn setup<DB: Database>(
 
     info!(target: "reth::cli", ?output_db, "Creating separate db");
 
-    let output_db = init_db(output_db)?;
+    let output_db = init_db(output_db, None)?;
 
     output_db.update(|tx| {
         tx.import_table_with_range::<tables::BlockBodyIndices, _>(

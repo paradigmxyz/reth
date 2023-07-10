@@ -48,6 +48,9 @@ pub use chain::{
     CanonStateSubscriptions,
 };
 
+mod spec;
+pub use spec::ChainSpecProvider;
+
 mod stage_checkpoint;
 pub use stage_checkpoint::{StageCheckpointReader, StageCheckpointWriter};
 

@@ -1,3 +1,8 @@
+//! A network implementation that does nothing.
+//!
+//! This is useful for wiring components together that don't require network but still need to be
+//! generic over it.
+
 use crate::{
     NetworkError, NetworkInfo, PeerKind, Peers, PeersInfo, Reputation, ReputationChangeKind,
 };
@@ -11,6 +16,7 @@ use std::net::{IpAddr, SocketAddr};
 ///
 /// Intended for testing purposes where network is not used.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct NoopNetwork;
 
 #[async_trait]
