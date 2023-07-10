@@ -9,6 +9,7 @@ use reth_rpc_api::EthPubSubApiServer;
 use reth_rpc_types::FilteredParams;
 use std::sync::Arc;
 
+use crate::result::invalid_params_rpc_err;
 use reth_rpc_types::{
     pubsub::{
         Params, PubSubSyncStatus, SubscriptionKind, SubscriptionResult as EthSubscriptionResult,
@@ -120,21 +121,37 @@ where
                 pubsub.log_stream(filter).map(|log| EthSubscriptionResult::Log(Box::new(log)));
             pipe_from_stream(accepted_sink, stream).await
         }
-        SubscriptionKind::NewPendingTransactions => match params {
-            Some(Params::NewPendingTransactions(true)) => {
-                let stream = pubsub.full_pending_transaction_stream().map(|tx| {
-                    EthSubscriptionResult::FullTransaction(Transaction::from_recovered(
-                        tx.transaction.to_recovered_transaction(),
-                    ))
-                });
-                pipe_from_stream(accepted_sink, stream).await
+        SubscriptionKind::NewPendingTransactions => {
+            if let Some(params) = params {
+                match params {
+                    Params::NewPendingTransactions(true) => {
+                        // full transaction objects requested
+                        let stream = pubsub.full_pending_transaction_stream().map(|tx| {
+                            EthSubscriptionResult::FullTransaction(Box::new(
+                                Transaction::from_recovered(
+                                    tx.transaction.to_recovered_transaction(),
+                                ),
+                            ))
+                        });
+                        return pipe_from_stream(accepted_sink, stream).await
+                    }
+                    Params::NewPendingTransactions(false) | Params::None => {
+                        // only hashes requested
+                    }
+                    Params::Logs(_) => {
+                        return Err(invalid_params_rpc_err(
+                            "Invalid params for newPendingTransactions",
+                        )
+                        .into())
+                    }
+                }
             }
-            _ => {
-                let stream =
-                    pubsub.pending_transaction_stream().map(EthSubscriptionResult::TransactionHash);
-                pipe_from_stream(accepted_sink, stream).await
-            }
-        },
+
+            let stream = pubsub
+                .pending_transaction_hashes_stream()
+                .map(EthSubscriptionResult::TransactionHash);
+            pipe_from_stream(accepted_sink, stream).await
+        }
         SubscriptionKind::Syncing => {
             // get new block subscription
             let mut canon_state =
@@ -251,7 +268,7 @@ where
     Pool: TransactionPool + 'static,
 {
     /// Returns a stream that yields all transactions emitted by the txpool.
-    fn pending_transaction_stream(&self) -> impl Stream<Item = TxHash> {
+    fn pending_transaction_hashes_stream(&self) -> impl Stream<Item = TxHash> {
         ReceiverStream::new(self.pool.pending_transactions_listener())
     }
 
