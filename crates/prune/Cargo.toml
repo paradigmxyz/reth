@@ -22,4 +22,10 @@ tracing = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+# reth
 reth-db = { workspace = true, features = ["test-utils"] }
+reth-stages = { path = "../stages", features = ["test-utils"] }
+
+# misc
+
+assert_matches = "1.5.0"
