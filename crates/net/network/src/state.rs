@@ -3,6 +3,7 @@
 use crate::{
     cache::LruCache,
     discovery::{Discovery, DiscoveryEvent},
+    manager::{DiscoveredEvent},
     fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
     message::{
         BlockRequest, NewBlockMessage, PeerRequest, PeerRequestSender, PeerResponse,
@@ -11,6 +12,7 @@ use crate::{
     peers::{PeerAction, PeersManager},
     FetchClient,
 };
+
 use reth_eth_wire::{
     capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
 };
@@ -274,7 +276,7 @@ where
     /// Event hook for events received from the discovery service.
     fn on_discovery_event(&mut self, event: DiscoveryEvent) {
         match event {
-            DiscoveryEvent::Discovered { peer_id, socket_addr, fork_id } => {
+            DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued{ peer_id, socket_addr, fork_id }) => {
                 self.queued_messages.push_back(StateAction::DiscoveredNode {
                     peer_id,
                     socket_addr,
@@ -284,6 +286,9 @@ where
             DiscoveryEvent::EnrForkId(peer_id, fork_id) => {
                 self.queued_messages
                     .push_back(StateAction::DiscoveredEnrForkId { peer_id, fork_id });
+            }
+            _=>{
+                
             }
         }
     }

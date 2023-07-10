@@ -7,6 +7,7 @@ use crate::{
     session::SessionsConfig,
     NetworkHandle, NetworkManager,
 };
+use crate::discovery::DiscoveryEvent;
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_ecies::util::pk2id;
@@ -20,6 +21,7 @@ use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
 };
+use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 // re-export for convenience
 pub use secp256k1::SecretKey;
 
@@ -67,6 +69,10 @@ pub struct NetworkConfig<C> {
     pub status: Status,
     /// Sets the hello message for the p2p handshake in RLPx
     pub hello_message: HelloMessage,
+
+    pub discovery_manager_tx: UnboundedSender<DiscoveryEvent>,
+
+
 }
 
 // === impl NetworkConfig ===

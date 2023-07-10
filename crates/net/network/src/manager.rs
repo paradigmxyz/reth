@@ -56,6 +56,7 @@ use std::{
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, info, trace, warn};
+use reth_primitives::{ForkId};
 
 /// Manages the _entire_ state of the network.
 ///
@@ -180,6 +181,7 @@ where
             status,
             fork_filter,
             dns_discovery_config,
+            discovery_manager_tx,
             ..
         } = config;
 
@@ -199,7 +201,7 @@ where
         });
 
         let discovery =
-            Discovery::new(discovery_addr, secret_key, discovery_v4_config, dns_discovery_config)
+            Discovery::new(discovery_addr, secret_key, discovery_v4_config, dns_discovery_config,discovery_manager_tx)
                 .await?;
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
@@ -918,4 +920,12 @@ pub enum NetworkEvent {
     PeerAdded(PeerId),
     /// Event emitted when a new peer is removed
     PeerRemoved(PeerId),
+}
+
+pub enum DiscoveredEvent{
+    EventQueued{
+        peer_id: PeerId,
+        socket_addr: SocketAddr,
+        fork_id: Option<ForkId>
+    }
 }

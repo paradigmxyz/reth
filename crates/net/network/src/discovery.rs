@@ -1,11 +1,13 @@
 //! Discovery support for the network.
 
 use crate::error::{NetworkError, ServiceKind};
+use crate::{manager::DiscoveredEvent};
 use futures::StreamExt;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
 };
+use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use reth_primitives::{ForkId, NodeRecord, PeerId};
 use secp256k1::SecretKey;
 use std::{
@@ -16,6 +18,8 @@ use std::{
 };
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::wrappers::UnboundedReceiverStream;
+
 
 /// An abstraction over the configured discovery protocol.
 ///
@@ -41,6 +45,8 @@ pub struct Discovery {
     _dns_disc_service: Option<JoinHandle<()>>,
     /// Events buffered until polled.
     queued_events: VecDeque<DiscoveryEvent>,
+
+    discovery_manager_tx: UnboundedSender<DiscoveryEvent>,
 }
 
 impl Discovery {
@@ -53,6 +59,7 @@ impl Discovery {
         sk: SecretKey,
         discv4_config: Option<Discv4Config>,
         dns_discovery_config: Option<DnsDiscoveryConfig>,
+        discovery_manager_tx: UnboundedSender<DiscoveryEvent>,
     ) -> Result<Self, NetworkError> {
         // setup discv4
         let local_enr = NodeRecord::from_secret_key(discovery_addr, &sk);
@@ -84,6 +91,7 @@ impl Discovery {
             };
 
         Ok(Self {
+            discovery_manager_tx: (discovery_manager_tx),
             local_enr,
             discv4,
             discv4_updates,
@@ -94,6 +102,16 @@ impl Discovery {
             _dns_discovery,
             dns_discovery_updates,
         })
+    }
+
+    fn manager(&self) -> &UnboundedSender<DiscoveryEvent> {
+        &self.discovery_manager_tx
+    }
+
+    pub fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveredEvent> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let _ = self.manager().send(DiscoveryEvent::DiscoveryListener(tx));
+        UnboundedReceiverStream::new(rx)
     }
 
     /// Updates the `eth:ForkId` field in discv4.
@@ -139,11 +157,11 @@ impl Discovery {
             Entry::Occupied(_entry) => {}
             Entry::Vacant(entry) => {
                 entry.insert(addr);
-                self.queued_events.push_back(DiscoveryEvent::Discovered {
+                self.queued_events.push_back(DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued{
                     peer_id: id,
                     socket_addr: addr,
                     fork_id,
-                });
+                }));
             }
         }
     }
@@ -204,6 +222,9 @@ impl Discovery {
     ///
     /// NOTE: This instance does nothing
     pub(crate) fn noop() -> Self {
+
+        let (discovery_manager_tx, _) = mpsc::unbounded_channel();
+
         Self {
             discovered_nodes: Default::default(),
             local_enr: NodeRecord {
@@ -219,14 +240,17 @@ impl Discovery {
             _dns_discovery: None,
             dns_discovery_updates: None,
             _dns_disc_service: None,
+            discovery_manager_tx
         }
     }
 }
 
 /// Events produced by the [`Discovery`] manager.
-pub enum DiscoveryEvent {
-    /// A new node was discovered
-    Discovered { peer_id: PeerId, socket_addr: SocketAddr, fork_id: Option<ForkId> },
+pub(crate) enum DiscoveryEvent {
+
+    NewNode(DiscoveredEvent),
+    
+    DiscoveryListener(mpsc::UnboundedSender<DiscoveredEvent>),
     /// Retrieved a [`ForkId`] from the peer via ENR request, See <https://eips.ethereum.org/EIPS/eip-868>
     EnrForkId(PeerId, ForkId),
 }
@@ -243,8 +267,9 @@ mod tests {
         let mut rng = thread_rng();
         let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
         let discovery_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
+        let (tx, _) = mpsc::unbounded_channel();
         let _discovery =
-            Discovery::new(discovery_addr, secret_key, Default::default(), Default::default())
+            Discovery::new(discovery_addr, secret_key, Default::default(), Default::default(),tx)
                 .await
                 .unwrap();
     }
