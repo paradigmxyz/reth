@@ -25,8 +25,12 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
 pub struct EngineApi<Provider> {
+    inner: Arc<EngineApiInner<Provider>>,
+}
+
+struct EngineApiInner<Provider> {
     /// The provider to interact with the chain.
-    provider: Arc<Provider>,
+    provider: Provider,
     /// Consensus configuration
     chain_spec: Arc<ChainSpec>,
     /// The channel to send messages to the beacon consensus engine.
@@ -49,13 +53,14 @@ where
         payload_store: PayloadStore,
         task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
-        Self {
-            provider: Arc::new(provider),
+        let inner = Arc::new(EngineApiInner {
+            provider,
             chain_spec,
             beacon_consensus,
             payload_store,
             task_spawner,
-        }
+        });
+        Self { inner }
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
@@ -69,7 +74,7 @@ where
             payload.timestamp.as_u64(),
             payload.withdrawals.is_some(),
         )?;
-        Ok(self.beacon_consensus.new_payload(payload).await?)
+        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_newpayloadv2>
@@ -82,7 +87,7 @@ where
             payload.timestamp.as_u64(),
             payload.withdrawals.is_some(),
         )?;
-        Ok(self.beacon_consensus.new_payload(payload).await?)
+        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
     }
 
     /// Sends a message to the beacon consensus engine to update the fork choice _without_
@@ -103,7 +108,7 @@ where
                 attrs.withdrawals.is_some(),
             )?;
         }
-        Ok(self.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
+        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
     }
 
     /// Sends a message to the beacon consensus engine to update the fork choice _with_ withdrawals,
@@ -122,7 +127,7 @@ where
                 attrs.withdrawals.is_some(),
             )?;
         }
-        Ok(self.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
+        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
     }
 
     /// Returns the most recent version of the payload that is available in the corresponding
@@ -136,6 +141,7 @@ where
     /// > Provider software MAY stop the corresponding build process after serving this call.
     pub async fn get_payload_v1(&self, payload_id: PayloadId) -> EngineApiResult<ExecutionPayload> {
         Ok(self
+            .inner
             .payload_store
             .resolve(payload_id)
             .await
@@ -155,6 +161,7 @@ where
         payload_id: PayloadId,
     ) -> EngineApiResult<ExecutionPayloadEnvelope> {
         Ok(self
+            .inner
             .payload_store
             .resolve(payload_id)
             .await
@@ -178,9 +185,9 @@ where
         count: u64,
     ) -> EngineApiResult<ExecutionPayloadBodies> {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let provider = self.provider.clone();
+        let inner = self.inner.clone();
 
-        self.task_spawner.spawn_blocking(Box::pin(async move {
+        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
             if count > MAX_PAYLOAD_BODIES_LIMIT {
                 tx.send(Err(EngineApiError::PayloadRequestTooLarge { len: count })).ok();
                 return
@@ -195,7 +202,7 @@ where
 
             let end = start.saturating_add(count);
             for num in start..end {
-                let block_result = provider.block(BlockHashOrNumber::Number(num));
+                let block_result = inner.provider.block(BlockHashOrNumber::Number(num));
                 match block_result {
                     Ok(block) => {
                         result.push(block.map(Into::into));
@@ -225,6 +232,7 @@ where
         let mut result = Vec::with_capacity(hashes.len());
         for hash in hashes {
             let block = self
+                .inner
                 .provider
                 .block(BlockHashOrNumber::Hash(hash))
                 .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
@@ -247,6 +255,7 @@ where
         } = config;
 
         let merge_terminal_td = self
+            .inner
             .chain_spec
             .fork(Hardfork::Paris)
             .ttd()
@@ -260,7 +269,7 @@ where
             })
         }
 
-        self.beacon_consensus.transition_configuration_exchanged().await;
+        self.inner.beacon_consensus.transition_configuration_exchanged().await;
 
         // Short circuit if communicated block hash is zero
         if terminal_block_hash.is_zero() {
@@ -272,6 +281,7 @@ where
 
         // Attempt to look up terminal block hash
         let local_hash = self
+            .inner
             .provider
             .block_hash(terminal_block_number.as_u64())
             .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
@@ -299,7 +309,8 @@ where
         timestamp: u64,
         has_withdrawals: bool,
     ) -> EngineApiResult<()> {
-        let is_shanghai = self.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(timestamp);
+        let is_shanghai =
+            self.inner.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(timestamp);
 
         match version {
             EngineApiMessageVersion::V1 => {
