@@ -868,63 +868,83 @@ where
         let EthHandlers { api: eth_api, cache: eth_cache, filter: eth_filter, pubsub: eth_pubsub } =
             self.with_eth(|eth| eth.clone());
 
+        let mut methods = Vec::new();
+
         // Create a copy, so we can list out all the methods for rpc_ api
         let namespaces: Vec<_> = namespaces.collect();
+        let mut with_rpc_api_module = None;
 
-        namespaces
-            .iter()
-            .copied()
-            .map(|namespace| {
-                self.modules
-                    .entry(namespace)
-                    .or_insert_with(|| match namespace {
-                        RethRpcModule::Admin => {
-                            AdminApi::new(self.network.clone()).into_rpc().into()
-                        }
-                        RethRpcModule::Debug => DebugApi::new(
-                            self.provider.clone(),
-                            eth_api.clone(),
-                            Box::new(self.executor.clone()),
-                            self.tracing_call_guard.clone(),
-                        )
-                        .into_rpc()
-                        .into(),
-                        RethRpcModule::Eth => {
-                            // merge all eth handlers
-                            let mut module = eth_api.clone().into_rpc();
-                            module.merge(eth_filter.clone().into_rpc()).expect("No conflicts");
-                            module.merge(eth_pubsub.clone().into_rpc()).expect("No conflicts");
+        for (idx, namespace) in namespaces.iter().copied().enumerate() {
+            if matches!(namespace, RethRpcModule::Rpc) {
+                // track the position of the rpc_ namespace in the input iterator
+                with_rpc_api_module = Some(idx);
+                continue
+            }
 
-                            module.into()
-                        }
-                        RethRpcModule::Net => {
-                            NetApi::new(self.network.clone(), eth_api.clone()).into_rpc().into()
-                        }
-                        RethRpcModule::Trace => TraceApi::new(
-                            self.provider.clone(),
-                            eth_api.clone(),
-                            eth_cache.clone(),
-                            Box::new(self.executor.clone()),
-                            self.tracing_call_guard.clone(),
-                        )
-                        .into_rpc()
-                        .into(),
-                        RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
-                        RethRpcModule::Txpool => {
-                            TxPoolApi::new(self.pool.clone()).into_rpc().into()
-                        }
-                        RethRpcModule::Rpc => RPCApi::new(
-                            namespaces
-                                .iter()
-                                .map(|module| (module.to_string(), "1.0".to_string()))
-                                .collect(),
-                        )
-                        .into_rpc()
-                        .into(),
-                    })
-                    .clone()
-            })
-            .collect::<Vec<_>>()
+            let method = self
+                .modules
+                .entry(namespace)
+                .or_insert_with(|| match namespace {
+                    RethRpcModule::Admin => AdminApi::new(self.network.clone()).into_rpc().into(),
+                    RethRpcModule::Debug => DebugApi::new(
+                        self.provider.clone(),
+                        eth_api.clone(),
+                        Box::new(self.executor.clone()),
+                        self.tracing_call_guard.clone(),
+                    )
+                    .into_rpc()
+                    .into(),
+                    RethRpcModule::Eth => {
+                        // merge all eth handlers
+                        let mut module = eth_api.clone().into_rpc();
+                        module.merge(eth_filter.clone().into_rpc()).expect("No conflicts");
+                        module.merge(eth_pubsub.clone().into_rpc()).expect("No conflicts");
+
+                        module.into()
+                    }
+                    RethRpcModule::Net => {
+                        NetApi::new(self.network.clone(), eth_api.clone()).into_rpc().into()
+                    }
+                    RethRpcModule::Trace => TraceApi::new(
+                        self.provider.clone(),
+                        eth_api.clone(),
+                        eth_cache.clone(),
+                        Box::new(self.executor.clone()),
+                        self.tracing_call_guard.clone(),
+                    )
+                    .into_rpc()
+                    .into(),
+                    RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
+                    RethRpcModule::Txpool => TxPoolApi::new(self.pool.clone()).into_rpc().into(),
+                    RethRpcModule::Rpc => {
+                        unreachable!("rpc_ module is handled separately")
+                    }
+                })
+                .clone();
+
+            methods.push(method);
+        }
+
+        // add the rpc_ namespace last but at the correct position
+        if let Some(rpc_api_idx) = with_rpc_api_module {
+            let rpc_api = self
+                .modules
+                .entry(RethRpcModule::Rpc)
+                .or_insert_with(|| {
+                    RPCApi::new(
+                        namespaces
+                            .iter()
+                            .map(|module| (module.to_string(), "1.0".to_string()))
+                            .collect(),
+                    )
+                    .into_rpc()
+                    .into()
+                })
+                .clone();
+            methods.insert(rpc_api_idx, rpc_api);
+        }
+
+        methods
     }
 
     /// Returns the [EthStateCache] frontend
