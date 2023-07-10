@@ -97,12 +97,7 @@ impl EnginePruneController {
         }
 
         // Poll pruner and check its status
-        if let Poll::Ready(event) = self.poll_pruner(cx) {
-            return Poll::Ready(event)
-        }
-
-        // No progress
-        Poll::Pending
+        self.poll_pruner(cx)
     }
 }
 
