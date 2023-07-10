@@ -413,7 +413,7 @@ pub enum PayloadValidationError {
     #[error("invalid block number")]
     InvalidBlockNumber,
     /// Thrown when a new payload contains a wrong state root
-    #[error("invalid merkle root (remote: {remote:?} local: {local:?})")]
+    #[error("invalid merkle root: (remote: {remote:?} local: {local:?})")]
     InvalidStateRoot {
         /// The state root of the payload we received from remote (CL)
         remote: H256,
@@ -566,6 +566,54 @@ mod tests {
         assert!(status.latest_valid_hash.is_none());
         assert!(status.status.validation_error().is_none());
         assert_eq!(serde_json::to_string(&status).unwrap(), full);
+    }
+
+    #[test]
+    fn serde_payload_status_error_deserialize() {
+        let s = r#"{"status":"INVALID","latestValidHash":null,"validationError":"Failed to decode block"}"#;
+        let q = PayloadStatus {
+            latest_valid_hash: None,
+            status: PayloadStatusEnum::Invalid {
+                validation_error: "Failed to decode block".to_string(),
+            },
+        };
+        assert_eq!(q, serde_json::from_str(s).unwrap());
+
+        let s = r#"{"status":"INVALID","latestValidHash":null,"validationError":"links to previously rejected block"}"#;
+        let q = PayloadStatus {
+            latest_valid_hash: None,
+            status: PayloadStatusEnum::Invalid {
+                validation_error: PayloadValidationError::LinksToRejectedPayload.to_string(),
+            },
+        };
+        assert_eq!(q, serde_json::from_str(s).unwrap());
+
+        let s = r#"{"status":"INVALID","latestValidHash":null,"validationError":"invalid block number"}"#;
+        let q = PayloadStatus {
+            latest_valid_hash: None,
+            status: PayloadStatusEnum::Invalid {
+                validation_error: PayloadValidationError::InvalidBlockNumber.to_string(),
+            },
+        };
+        assert_eq!(q, serde_json::from_str(s).unwrap());
+
+        let s = r#"{"status":"INVALID","latestValidHash":null,"validationError":
+        "invalid merkle root: (remote: 0x3f77fb29ce67436532fee970e1add8f5cc80e8878c79b967af53b1fd92a0cab7 local: 0x603b9628dabdaadb442a3bb3d7e0360efc110e1948472909230909f1690fed17)"}"#;
+        let q = PayloadStatus {
+            latest_valid_hash: None,
+            status: PayloadStatusEnum::Invalid {
+                validation_error: PayloadValidationError::InvalidStateRoot {
+                    remote: "0x3f77fb29ce67436532fee970e1add8f5cc80e8878c79b967af53b1fd92a0cab7"
+                        .parse()
+                        .unwrap(),
+                    local: "0x603b9628dabdaadb442a3bb3d7e0360efc110e1948472909230909f1690fed17"
+                        .parse()
+                        .unwrap(),
+                }
+                .to_string(),
+            },
+        };
+        similar_asserts::assert_eq!(q, serde_json::from_str(s).unwrap());
     }
 
     #[test]
