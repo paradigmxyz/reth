@@ -335,7 +335,9 @@ where
     }
 
     /// Returns true if the distance from the local tip to the block is greater than the configured
-    /// threshold
+    /// threshold.
+    ///
+    /// If the `local_tip` is greater than the `block`, then this will return false.
     #[inline]
     fn exceeds_pipeline_run_threshold(&self, local_tip: u64, block: u64) -> bool {
         block > local_tip && block - local_tip > self.pipeline_run_threshold
@@ -1311,27 +1313,56 @@ where
                     )
                     .is_none()
                 {
-                    // Update the state and hashes of the blockchain tree if possible.
-                    match self
-                        .update_tree_on_finished_pipeline(sync_target_state.finalized_block_hash)
+                    let newest_finalized = self
+                        .forkchoice_state_tracker
+                        .sync_target_state()
+                        .map(|s| s.finalized_block_hash)
+                        .and_then(|h| self.blockchain.buffered_header_by_hash(h))
+                        .map(|header| header.number);
+
+                    // The block number that the pipeline finished at - if the progress or newest
+                    // finalized is None then we can't check the distance anyways.
+                    //
+                    // If both are Some, we perform another distance check and return the desired
+                    // pipeline target
+                    let pipeline_target = if let (Some(progress), Some(finalized_number)) =
+                        (ctrl.progress(), newest_finalized)
                     {
-                        Ok(synced) => {
-                            if synced {
-                                // we're consider this synced and transition to live sync
-                                self.sync_state_updater.update_sync_state(SyncState::Idle);
-                            } else {
-                                // We don't have the finalized block in the database, so
-                                // we need to run another pipeline.
-                                self.sync.set_pipeline_sync_target(
-                                    sync_target_state.finalized_block_hash,
-                                );
-                            }
-                        }
-                        Err(error) => {
-                            error!(target: "consensus::engine", ?error, "Error restoring blockchain tree state");
-                            return Some(Err(error.into()))
-                        }
+                        // Determines whether or not we should run the pipeline again, in case the
+                        // new gap is large enough to warrant running the pipeline.
+                        self.can_pipeline_sync_to_finalized(progress, finalized_number, None)
+                    } else {
+                        None
                     };
+
+                    // If the distance is large enough, we should run the pipeline again to prevent
+                    // the tree update from executing too many blocks and blocking.
+                    if let Some(target) = pipeline_target {
+                        // run the pipeline to the target since the distance is sufficient
+                        self.sync.set_pipeline_sync_target(target);
+                    } else {
+                        // Update the state and hashes of the blockchain tree if possible.
+                        match self.update_tree_on_finished_pipeline(
+                            sync_target_state.finalized_block_hash,
+                        ) {
+                            Ok(synced) => {
+                                if synced {
+                                    // we're consider this synced and transition to live sync
+                                    self.sync_state_updater.update_sync_state(SyncState::Idle);
+                                } else {
+                                    // We don't have the finalized block in the database, so
+                                    // we need to run another pipeline.
+                                    self.sync.set_pipeline_sync_target(
+                                        sync_target_state.finalized_block_hash,
+                                    );
+                                }
+                            }
+                            Err(error) => {
+                                error!(target: "consensus::engine", ?error, "Error restoring blockchain tree state");
+                                return Some(Err(error.into()))
+                            }
+                        };
+                    }
                 }
             }
             // Any pipeline error at this point is fatal.
