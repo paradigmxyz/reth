@@ -17,11 +17,10 @@ use reth_blockchain_tree::{
 };
 use reth_revm::Factory as ExecutionFactory;
 // Configuring the network parts, ideally also wouldn't ned to think about this.
-use reth_network_api::test_utils::NoopNetwork;
+use reth_network_api::noop::NoopNetwork;
 use reth_provider::test_utils::TestCanonStateSubscriptions;
 use reth_tasks::TokioTaskExecutor;
-use reth_transaction_pool::test_utils::testing_pool;
-
+use reth_transaction_pool::noop::NoopTransactionPool;
 use std::{path::Path, sync::Arc};
 
 // Example illustrating how to run the ETH JSON RPC API as standalone over a DB file.
@@ -30,7 +29,7 @@ use std::{path::Path, sync::Arc};
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     // 1. Setup the DB
-    let db = Arc::new(open_db_read_only(&Path::new(&std::env::var("RETH_DB_PATH")?), None)?);
+    let db = Arc::new(open_db_read_only(Path::new(&std::env::var("RETH_DB_PATH")?), None)?);
     let spec = Arc::new(ChainSpecBuilder::mainnet().build());
     let factory = ProviderFactory::new(db.clone(), spec.clone());
 
@@ -47,20 +46,18 @@ async fn main() -> eyre::Result<()> {
 
         let tree = ShareableBlockchainTree::new(BlockchainTree::new(
             externals,
-            canon_state_notification_sender.clone(),
+            canon_state_notification_sender,
             tree_config,
         )?);
 
         BlockchainProvider::new(factory, tree)?
     };
 
-    let noop_pool = testing_pool();
     let rpc_builder = RpcModuleBuilder::default()
         .with_provider(provider)
-        // Rest is just defaults
-        // TODO: How do we make this easier to configure?
-        .with_pool(noop_pool)
-        .with_network(NoopNetwork)
+        // Rest is just noops that do nothing
+        .with_pool(NoopTransactionPool::default())
+        .with_network(NoopNetwork::default())
         .with_executor(TokioTaskExecutor::default())
         .with_events(TestCanonStateSubscriptions::default());
 

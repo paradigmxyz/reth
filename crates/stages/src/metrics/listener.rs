@@ -1,5 +1,6 @@
 use crate::metrics::SyncMetrics;
 use reth_primitives::{
+    constants::MGAS_TO_GAS,
     stage::{StageCheckpoint, StageId},
     BlockNumber,
 };
@@ -9,6 +10,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tracing::trace;
 
 /// Alias type for metric producers to use.
 pub type MetricEventsSender = UnboundedSender<MetricEvent>;
@@ -31,6 +33,11 @@ pub enum MetricEvent {
         /// If specified, `entities_total` metric is updated.
         max_block_number: Option<BlockNumber>,
     },
+    /// Execution stage processed some amount of gas.
+    ExecutionStageGas {
+        /// Gas processed.
+        gas: u64,
+    },
 }
 
 /// Metrics routine that listens to new metric events on the `events_rx` receiver.
@@ -48,6 +55,7 @@ impl MetricsListener {
     }
 
     fn handle_event(&mut self, event: MetricEvent) {
+        trace!(target: "sync::metrics", ?event, "Metric event received");
         match event {
             MetricEvent::SyncHeight { height } => {
                 for stage_id in StageId::ALL {
@@ -71,6 +79,11 @@ impl MetricsListener {
                     stage_metrics.entities_total.set(total as f64);
                 }
             }
+            MetricEvent::ExecutionStageGas { gas } => self
+                .sync_metrics
+                .execution_stage
+                .mgas_processed_total
+                .increment(gas as f64 / MGAS_TO_GAS as f64),
         }
     }
 }

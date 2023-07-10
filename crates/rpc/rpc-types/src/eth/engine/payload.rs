@@ -4,7 +4,7 @@ use reth_primitives::{
     Address, Block, Bloom, Bytes, Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawal,
     H256, H64, U256, U64,
 };
-use reth_rlp::{Decodable, Encodable};
+use reth_rlp::Decodable;
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 
 /// The execution payload body response that allows for `null` values.
@@ -229,7 +229,7 @@ impl From<Block> for ExecutionPayloadBody {
     fn from(value: Block) -> Self {
         let transactions = value.body.into_iter().map(|tx| {
             let mut out = Vec::new();
-            tx.encode(&mut out);
+            tx.encode_enveloped(&mut out);
             out.into()
         });
         ExecutionPayloadBody {
