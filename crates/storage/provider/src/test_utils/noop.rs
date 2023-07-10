@@ -11,7 +11,7 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, Bytecode, Bytes,
     ChainInfo, ChainSpec, Header, Receipt, SealedBlock, SealedHeader, StorageKey, StorageValue,
-    TransactionMeta, TransactionSigned, TxHash, TxNumber, H256, KECCAK_EMPTY, MAINNET, U256,
+    TransactionMeta, TransactionSigned, TxHash, TxNumber, H256, KECCAK_EMPTY, MAINNET, U256, TransactionSignedNoHash,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::{ops::RangeBounds, sync::Arc};
@@ -127,6 +127,10 @@ impl TransactionsProvider for NoopProvider {
     }
 
     fn transaction_by_id(&self, _id: TxNumber) -> Result<Option<TransactionSigned>> {
+        Ok(None)
+    }
+
+    fn transaction_by_id_no_hash(&self, _id: TxNumber) -> Result<Option<TransactionSignedNoHash>> {
         Ok(None)
     }
 

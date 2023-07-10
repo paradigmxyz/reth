@@ -395,7 +395,7 @@ where
                 None => return Ok(None),
             };
 
-            this.build_transaction_receipt(tx, meta, receipt).await.map(Some)
+            this.build_transaction_receipt(tx.into(), meta, receipt).await.map(Some)
         })
         .await
     }
@@ -667,7 +667,7 @@ where
             Some(recpts) => recpts,
             None => return Err(EthApiError::UnknownBlockNumber),
         };
-        build_transaction_receipt_with_block_receipts(tx, meta, receipt, &all_receipts)
+        build_transaction_receipt_with_block_receipts(tx.into(), meta, receipt, &all_receipts)
     }
 }
 

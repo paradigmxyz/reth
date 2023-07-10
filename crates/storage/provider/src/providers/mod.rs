@@ -271,6 +271,10 @@ where
         self.database.provider()?.transaction_by_id(id)
     }
 
+    fn transaction_by_id_no_hash(&self, id: TxNumber) -> Result<Option<TransactionSignedNoHash>> {
+        self.database.provider()?.transaction_by_id_no_hash(id)
+    }
+
     fn transaction_by_hash(&self, hash: TxHash) -> Result<Option<TransactionSigned>> {
         self.database.provider()?.transaction_by_hash(hash)
     }
