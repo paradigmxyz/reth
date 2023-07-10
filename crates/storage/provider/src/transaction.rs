@@ -1,8 +1,4 @@
-use reth_interfaces::{
-    db::DatabaseError as DbError,
-    executor::{BlockExecutionError, BlockValidationError},
-    provider::ProviderError,
-};
+use reth_interfaces::{db::DatabaseError as DbError, provider::ProviderError};
 use reth_primitives::{BlockHash, BlockNumber, H256};
 use reth_trie::StateRootError;
 use std::fmt::Debug;
