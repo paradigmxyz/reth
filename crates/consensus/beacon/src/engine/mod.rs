@@ -878,10 +878,10 @@ where
             // we can only insert new payloads if the pipeline and the pruner are _not_ running,
             // because they hold exclusive access to the database
             self.try_insert_new_payload(block)
-        } else if self.is_prune_active() {
-            warn!(target: "consensus::engine", "Pruning is in progress, buffering new payload.");
-            self.try_buffer_payload(block)
         } else {
+            if self.is_prune_active() {
+                warn!(target: "consensus::engine", "Pruning is in progress, buffering new payload.");
+            }
             self.try_buffer_payload(block)
         };
 
@@ -1480,7 +1480,7 @@ where
 
             // check prune events if pipeline is idle and both engine and sync events are pending
             if this.sync.is_pipeline_idle() && engine_messages_pending & sync_pending {
-                if let Some(prune) = &mut this.prune {
+                if let Some(ref mut prune) = this.prune {
                     match prune.poll(cx, this.blockchain.canonical_tip().number) {
                         Poll::Ready(prune_event) => {
                             if let Some(res) = this.on_prune_event(prune_event) {
