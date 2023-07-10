@@ -84,8 +84,8 @@ toml = "0.7.4"
 # necessary so we don't hit a "undeclared 'std'": 
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198 
 secp256k1 = { workspace = true }
-criterion = "0.4.0"
-pprof = { version = "0.11", features = ["flamegraph", "frame-pointer", "criterion"] }
+criterion = "0.5"
+pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterion"] }
 
 [features]
 default = []
