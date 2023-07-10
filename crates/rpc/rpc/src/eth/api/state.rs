@@ -164,6 +164,7 @@ mod tests {
             (),
             cache.clone(),
             GasPriceOracle::new(NoopProvider::default(), Default::default(), cache),
+            ETHEREUM_BLOCK_GAS_LIMIT,
         );
         let address = Address::random();
         let storage = eth_api.storage_at(address, U256::ZERO.into(), None).unwrap();
