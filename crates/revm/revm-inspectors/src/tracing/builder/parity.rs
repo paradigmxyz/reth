@@ -182,7 +182,7 @@ impl ParityTraceBuilder {
 
         // check the vm trace case
         if let Some(ref mut vm_trace) = trace_res.vm_trace {
-            populate_vm_trace_bytecodes(&db, breadth_first_addresses, vm_trace)?;
+            populate_vm_trace_bytecodes(&db, vm_trace, breadth_first_addresses)?;
         }
 
         Ok(trace_res)
@@ -350,8 +350,8 @@ impl ParityTraceBuilder {
 /// iteratively fill the [VmTrace] code fields
 pub(crate) fn populate_vm_trace_bytecodes<DB, I>(
     db: &DB,
-    breadth_first_addresses: I,
     trace: &mut VmTrace,
+    breadth_first_addresses: I,
 ) -> Result<(), DB::Error>
 where
     DB: DatabaseRef,
