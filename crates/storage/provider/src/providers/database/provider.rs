@@ -14,7 +14,7 @@ use reth_db::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
         ShardedKey, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals,
     },
-    table::Table,
+    table::{Key, Table},
     tables,
     transaction::{DbTx, DbTxMut},
     BlockNumberList, DatabaseError,
@@ -613,6 +613,28 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             self.tx.delete::<T2>(value, None)?;
         }
         Ok(())
+    }
+
+    /// Prune the table for the specified key range.
+    /// Returns number of rows pruned.
+    pub fn prune_table<T, K>(
+        &self,
+        range: impl RangeBounds<K>,
+    ) -> std::result::Result<usize, DatabaseError>
+    where
+        T: Table<Key = K>,
+        K: Key,
+    {
+        let mut cursor = self.tx.cursor_write::<T>()?;
+        let mut walker = cursor.walk_range(range)?;
+        let mut deleted = 0;
+
+        while let Some(Ok(_)) = walker.next() {
+            walker.delete_current()?;
+            deleted += 1;
+        }
+
+        Ok(deleted)
     }
 
     /// Load shard and remove it. If list is empty, last shard was full or

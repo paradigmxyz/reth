@@ -1,17 +1,24 @@
 //! Support for pruning.
 
 use crate::PrunerError;
-use reth_primitives::BlockNumber;
+use reth_db::{database::Database, tables};
+use reth_primitives::{BlockNumber, ChainSpec};
+use reth_provider::{
+    BlockReader, DatabaseProvider, DatabaseProviderRW, ProviderError, ProviderFactory,
+    TransactionsProvider,
+};
+use std::sync::Arc;
 use tracing::debug;
 
 /// Result of [Pruner::run] execution
 pub type PrunerResult = Result<(), PrunerError>;
 
 /// The pipeline type itself with the result of [Pruner::run]
-pub type PrunerWithResult = (Pruner, PrunerResult);
+pub type PrunerWithResult<DB> = (Pruner<DB>, PrunerResult);
 
 /// Pruning routine. Main pruning logic happens in [Pruner::run].
-pub struct Pruner {
+pub struct Pruner<DB> {
+    provider_factory: ProviderFactory<DB>,
     /// Minimum pruning interval measured in blocks. All prune parts are checked and, if needed,
     /// pruned, when the chain advances by the specified number of blocks.
     min_block_interval: u64,
@@ -24,15 +31,29 @@ pub struct Pruner {
     last_pruned_block_number: Option<BlockNumber>,
 }
 
-impl Pruner {
+impl<DB: Database> Pruner<DB> {
     /// Creates a new [Pruner].
-    pub fn new(min_block_interval: u64, max_prune_depth: u64) -> Self {
-        Self { min_block_interval, max_prune_depth, last_pruned_block_number: None }
+    pub fn new(
+        db: DB,
+        chain_spec: Arc<ChainSpec>,
+        min_block_interval: u64,
+        max_prune_depth: u64,
+    ) -> Self {
+        Self {
+            provider_factory: ProviderFactory::new(db, chain_spec),
+            min_block_interval,
+            max_prune_depth,
+            last_pruned_block_number: None,
+        }
     }
 
     /// Run the pruner
     pub fn run(&mut self, tip_block_number: BlockNumber) -> PrunerResult {
-        // Pruning logic
+        let provider = self.provider_factory.provider_rw()?;
+
+        self.prune_receipts(&provider, tip_block_number)?;
+
+        provider.commit()?;
 
         self.last_pruned_block_number = Some(tip_block_number);
         Ok(())
@@ -57,6 +78,24 @@ impl Pruner {
         } else {
             false
         }
+    }
+
+    fn prune_receipts(
+        &self,
+        provider: &DatabaseProviderRW<'_, DB>,
+        tip_block_number: BlockNumber,
+    ) -> PrunerResult {
+        const PRUNE_RECEIPTS: u64 = 64;
+        let to_block = tip_block_number - PRUNE_RECEIPTS;
+        let body = provider
+            .block_body_indices(to_block)?
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(to_block))?;
+
+        debug!(target: "pruner", %to_block, "Pruning receipts");
+        let pruned_receipts = provider.prune_table::<tables::Receipts, _>(..=body.last_tx_num())?;
+        debug!(target: "pruner", %to_block, pruned = %pruned_receipts, "Finished pruning receipts");
+
+        Ok(())
     }
 }
 

@@ -5560,7 +5560,10 @@ dependencies = [
 name = "reth-prune"
 version = "0.1.0-alpha.3"
 dependencies = [
+ "reth-db",
+ "reth-interfaces",
  "reth-primitives",
+ "reth-provider",
  "thiserror",
  "tracing",
 ]

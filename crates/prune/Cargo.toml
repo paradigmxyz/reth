@@ -13,6 +13,9 @@ Pruning implementation
 [dependencies]
 # reth
 reth-primitives = { workspace = true }
+reth-db = { workspace = true }
+reth-provider = { workspace = true }
+reth-interfaces = { workspace = true }
 
 # misc
 tracing = { workspace = true }
