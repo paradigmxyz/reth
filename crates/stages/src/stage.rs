@@ -99,23 +99,25 @@ impl ExecInput {
         }
 
         let tx_cnt: u64 = min(all_tx_cnt, tx_threshold);
+        let next_tx_num = first_tx_num + tx_cnt;
         let is_final_range = tx_cnt == all_tx_cnt;
         // get block of this tx
-        let (end_block, tx_cnt) = if is_final_range {
-            (target_block, tx_cnt)
+        let (end_block, next_tx_num) = if is_final_range {
+            (target_block, next_tx_num)
         } else {
-            // get tx block number
+            // get tx block number. next_tx_num in this case will be less thean all_tx_cnt.
+            // So we are sure that transaction must exist.
             let end_block_number =
-                provider.transaction_block(first_tx_num + tx_cnt)?.expect("block of tx must exist");
+                provider.transaction_block(next_tx_num)?.expect("block of tx must exist");
             // we want to get range of all transactions of this block, so we are fetching block
             // body.
             let end_block_body = provider
                 .block_body_indices(end_block_number)?
                 .ok_or(ProviderError::BlockBodyIndicesNotFound(target_block))?;
-            (end_block_number, end_block_body.next_tx_num() - first_tx_num)
+            (end_block_number, end_block_body.next_tx_num())
         };
 
-        let tx_range = first_tx_num..first_tx_num + tx_cnt;
+        let tx_range = first_tx_num..next_tx_num;
         Ok((tx_range, start_block..=end_block, is_final_range))
     }
 }
