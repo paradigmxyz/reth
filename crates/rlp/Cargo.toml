@@ -13,7 +13,7 @@ arrayvec = { version = "0.7", default-features = false }
 auto_impl = "1"
 bytes.workspace = true
 ethnum = { version = "1", default-features = false, optional = true }
-smol_str = { version = "0.1", default-features = false, optional = true }
+smol_str = { version = "0.2", default-features = false, optional = true }
 ethereum-types = { version = "0.14", features = ["codec"], optional = true }
 revm-primitives = { workspace = true, features = ["serde"] }
 reth-rlp-derive = {  path = "./rlp-derive", optional = true }
@@ -27,7 +27,7 @@ reth-rlp = { workspace = true, features = [
     "smol_str",
 ] }
 criterion = "0.4.0"
-hex-literal = "0.3"
+hex-literal = "0.4"
 pprof = { version = "0.11", features = ["flamegraph", "frame-pointer", "criterion"] }
 
 [features]
