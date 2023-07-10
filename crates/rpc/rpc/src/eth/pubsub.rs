@@ -276,7 +276,7 @@ where
     fn full_pending_transaction_stream(
         &self,
     ) -> impl Stream<Item = NewTransactionEvent<<Pool as TransactionPool>::Transaction>> {
-        ReceiverStream::new(self.pool.new_transactions_listener())
+        self.pool.new_pending_pool_transactions_listener()
     }
 }
 
