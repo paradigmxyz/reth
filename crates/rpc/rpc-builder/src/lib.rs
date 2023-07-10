@@ -857,10 +857,13 @@ where
         module
     }
 
-    /// Returns the [Methods] for the given [RethRpcModule]
+    /// Returns the _unique_ [Methods] for the given [RethRpcModule]
     ///
     /// If this is the first time the namespace is requested, a new instance of API implementation
     /// will be created.
+    ///
+    /// Note: this only returns unique methods, so if `namespaces` contains duplicates, they will be
+    /// deduped.
     pub fn reth_methods(
         &mut self,
         namespaces: impl Iterator<Item = RethRpcModule>,
@@ -868,8 +871,8 @@ where
         let EthHandlers { api: eth_api, cache: eth_cache, filter: eth_filter, pubsub: eth_pubsub } =
             self.with_eth(|eth| eth.clone());
 
-        // Create a copy, so we can list out all the methods for rpc_ api
-        let namespaces: Vec<_> = namespaces.collect();
+        // Dedup and a create a copy, so we can list out all the methods for rpc_ api
+        let namespaces: HashSet<_> = namespaces.collect();
 
         namespaces
             .iter()
