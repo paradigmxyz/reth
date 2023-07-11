@@ -228,6 +228,10 @@ impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
         self.provider()?.transaction_by_id(id)
     }
 
+    fn transaction_by_id_no_hash(&self, id: TxNumber) -> Result<Option<TransactionSignedNoHash>> {
+        self.provider()?.transaction_by_id_no_hash(id)
+    }
+
     fn transaction_by_hash(&self, hash: TxHash) -> Result<Option<TransactionSigned>> {
         self.provider()?.transaction_by_hash(hash)
     }
