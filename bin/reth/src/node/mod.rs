@@ -400,6 +400,7 @@ impl Command {
             self.chain.clone(),
             beacon_engine_handle,
             payload_builder.into(),
+            Box::new(ctx.task_executor.clone()),
         );
         info!(target: "reth::cli", "Engine API handler initialized");
 
