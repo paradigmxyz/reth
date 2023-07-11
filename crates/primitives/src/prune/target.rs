@@ -19,10 +19,16 @@ pub struct PruneTargets {
     )]
     pub receipts: Option<PruneMode>,
     /// Account History pruning configuration.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_opt_prune_mode_with_min_distance::<64, _>"
+    )]
     pub account_history: Option<PruneMode>,
     /// Storage History pruning configuration.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_opt_prune_mode_with_min_distance::<64, _>"
+    )]
     pub storage_history: Option<PruneMode>,
 }
 
