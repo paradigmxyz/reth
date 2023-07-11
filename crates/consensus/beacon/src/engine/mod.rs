@@ -887,8 +887,15 @@ where
         let block_hash = block.hash();
         let block_num_hash = block.num_hash();
 
+        let mut lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block.hash);
+        if lowest_buffered_ancestor == block.hash {
+            lowest_buffered_ancestor = block.parent_hash;
+        }
+
         // now check the block itself
-        if let Some(status) = self.check_invalid_ancestor_with_head(block.parent_hash, block.hash) {
+        if let Some(status) =
+            self.check_invalid_ancestor_with_head(lowest_buffered_ancestor, block.hash)
+        {
             return Ok(status)
         }
 
