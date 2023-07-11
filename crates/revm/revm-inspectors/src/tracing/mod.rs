@@ -146,15 +146,15 @@ impl TracingInspector {
     ///
     /// Invoked on [Inspector::call].
     #[allow(clippy::too_many_arguments)]
-    fn start_trace_on_call(
+    fn start_trace_on_call<DB: Database>(
         &mut self,
-        depth: usize,
+        data: &EVMData<'_, DB>,
         address: Address,
-        data: Bytes,
+        input_data: Bytes,
         value: U256,
         kind: CallKind,
         caller: Address,
-        gas_limit: u64,
+        mut gas_limit: u64,
         maybe_precompile: Option<bool>,
     ) {
         // This will only be true if the inspector is configured to exclude precompiles and the call
@@ -166,14 +166,20 @@ impl TracingInspector {
             PushTraceKind::PushAndAttachToParent
         };
 
+        if self.trace_stack.is_empty() {
+            // this is the root call which should get the original gas limit of the transaction,
+            // because initialization costs are already subtracted from gas_limit
+            gas_limit = data.env.tx.gas_limit;
+        }
+
         self.trace_stack.push(self.traces.push_trace(
             0,
             push_kind,
             CallTrace {
-                depth,
+                depth: data.journaled_state.depth() as usize,
                 address,
                 kind,
-                data,
+                data: input_data,
                 value,
                 status: InstructionResult::Continue,
                 caller,
@@ -421,7 +427,7 @@ where
             self.config.exclude_precompile_calls.then(|| self.is_precompile_call(data, &to, value));
 
         self.start_trace_on_call(
-            data.journaled_state.depth() as usize,
+            data,
             to,
             inputs.input.clone(),
             value,
@@ -460,7 +466,7 @@ where
         let _ = data.journaled_state.load_account(inputs.caller, data.db);
         let nonce = data.journaled_state.account(inputs.caller).info.nonce;
         self.start_trace_on_call(
-            data.journaled_state.depth() as usize,
+            data,
             get_create_address(inputs, nonce),
             inputs.init_code.clone(),
             inputs.value,
