@@ -161,7 +161,10 @@ impl CallTrace {
 
     /// Returns the error message if it is an erroneous result.
     pub(crate) fn as_error(&self) -> Option<String> {
-        self.is_error().then(|| format!("{:?}", self.status))
+        self.is_error().then(|| match self.status {
+            InstructionResult::Revert => "Reverted".to_string(),
+            status => format!("{:?}", status),
+        })
     }
 }
 
@@ -321,9 +324,10 @@ impl CallTraceNode {
     pub(crate) fn parity_transaction_trace(&self, trace_address: Vec<usize>) -> TransactionTrace {
         let action = self.parity_action();
         let output = self.parity_trace_output();
+        let error = self.trace.as_error();
         TransactionTrace {
             action,
-            error: None,
+            error,
             result: Some(output),
             trace_address,
             subtraces: self.children.len(),

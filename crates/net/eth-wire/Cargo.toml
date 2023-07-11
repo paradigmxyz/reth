@@ -36,7 +36,7 @@ tokio-stream = { workspace = true }
 pin-project = { workspace = true }
 tracing = { workspace = true }
 snap = "1.0.5"
-smol_str = "0.1"
+smol_str = "0.2"
 async-trait = { workspace = true }
 
 # arbitrary utils

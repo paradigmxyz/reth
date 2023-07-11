@@ -54,8 +54,8 @@ reth-interfaces = { workspace = true }
 tempfile = "3.3.0"
 test-fuzz = "4"
 
-pprof = { version = "0.11", features = ["flamegraph", "frame-pointer", "criterion"] }
-criterion = "0.4.0"
+pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterion"] }
+criterion = "0.5"
 iai = "0.1.1"
 tokio = { workspace = true, features = ["full"] }
 reth-db = { path = ".", features = ["test-utils", "bench"] }

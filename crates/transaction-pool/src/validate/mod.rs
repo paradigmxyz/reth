@@ -30,6 +30,8 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
         state_nonce: u64,
         /// Validated transaction.
         transaction: T,
+        /// Whether to propagate the transaction to the network.
+        propagate: bool,
     },
     /// The transaction is considered invalid indefinitely: It violates constraints that prevent
     /// this transaction from ever becoming valid.

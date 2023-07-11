@@ -1,4 +1,4 @@
-use crate::{BlockNumber, PruneMode};
+use crate::{serde_helper::deserialize_opt_prune_mode_with_min_distance, BlockNumber, PruneMode};
 use paste::paste;
 use serde::{Deserialize, Serialize};
 
@@ -13,7 +13,10 @@ pub struct PruneTargets {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transaction_lookup: Option<PruneMode>,
     /// Receipts pruning configuration.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_opt_prune_mode_with_min_distance::<64, _>"
+    )]
     pub receipts: Option<PruneMode>,
     /// Account History pruning configuration.
     #[serde(skip_serializing_if = "Option::is_none")]

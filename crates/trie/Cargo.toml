@@ -44,7 +44,7 @@ triehash = "0.8"
 proptest = "1.0"
 tokio = { workspace = true, default-features = false, features = ["sync", "rt", "macros"] }
 tokio-stream = { workspace = true }
-criterion = "0.4"
+criterion = "0.5"
 
 [features]
 test-utils = ["triehash"]
