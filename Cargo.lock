@@ -5736,6 +5736,7 @@ dependencies = [
  "reth-provider",
  "reth-rpc-api",
  "reth-rpc-types",
+ "reth-tasks",
  "thiserror",
  "tokio",
  "tracing",
