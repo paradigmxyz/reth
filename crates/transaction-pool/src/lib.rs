@@ -156,7 +156,10 @@ pub use crate::{
     },
     error::PoolResult,
     ordering::{GasCostOrdering, TransactionOrdering},
-    pool::{AllTransactionsEvents, FullTransactionEvent, TransactionEvent, TransactionEvents},
+    pool::{
+        state::SubPool, AllTransactionsEvents, FullTransactionEvent, TransactionEvent,
+        TransactionEvents,
+    },
     traits::{
         AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
         NewTransactionEvent, PoolSize, PoolTransaction, PooledTransaction, PropagateKind,
