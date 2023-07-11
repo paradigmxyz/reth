@@ -957,7 +957,12 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
     ) -> Result<Option<(TransactionSigned, TransactionMeta)>> {
         let mut transaction_cursor = self.tx.cursor_read::<tables::TransactionBlock>()?;
         if let Some(transaction_id) = self.transaction_id(tx_hash)? {
-            if let Some(transaction) = self.transaction_by_id(transaction_id)? {
+            if let Some(tx) = self.transaction_by_id_no_hash(transaction_id)? {
+                let transaction = TransactionSigned {
+                    hash: tx_hash,
+                    signature: tx.signature,
+                    transaction: tx.transaction,
+                };
                 if let Some(block_number) =
                     transaction_cursor.seek(transaction_id).map(|b| b.map(|(_, bn)| bn))?
                 {
