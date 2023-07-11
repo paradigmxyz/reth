@@ -1326,7 +1326,7 @@ where
                     // If both are Some, we perform another distance check and return the desired
                     // pipeline target
                     let pipeline_target = if let (Some(progress), Some(finalized_number)) =
-                        (ctrl.progress(), newest_finalized)
+                        (ctrl.block_number(), newest_finalized)
                     {
                         // Determines whether or not we should run the pipeline again, in case the
                         // new gap is large enough to warrant running the pipeline.
