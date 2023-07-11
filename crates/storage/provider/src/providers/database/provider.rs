@@ -956,30 +956,28 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
         tx_hash: TxHash,
     ) -> Result<Option<(TransactionSigned, TransactionMeta)>> {
         let mut transaction_cursor = self.tx.cursor_read::<tables::TransactionBlock>()?;
-        if let Some(transaction_id) = self.transaction_id(tx_hash)? {
-            if let Some(transaction) = self.transaction_by_id(transaction_id)? {
-                if let Some(block_number) =
-                    transaction_cursor.seek(transaction_id).map(|b| b.map(|(_, bn)| bn))?
-                {
-                    if let Some(sealed_header) = self.sealed_header(block_number)? {
-                        let (header, block_hash) = sealed_header.split();
-                        if let Some(block_body) = self.block_body_indices(block_number)? {
-                            // the index of the tx in the block is the offset:
-                            // len([start..tx_id])
-                            // SAFETY: `transaction_id` is always `>=` the block's first
-                            // index
-                            let index = transaction_id - block_body.first_tx_num();
+        if let Some(transaction) = self.transaction_by_hash(tx_hash)? {
+            if let Some(block_number) =
+                transaction_cursor.seek(transaction_id).map(|b| b.map(|(_, bn)| bn))?
+            {
+                if let Some(sealed_header) = self.sealed_header(block_number)? {
+                    let (header, block_hash) = sealed_header.split();
+                    if let Some(block_body) = self.block_body_indices(block_number)? {
+                        // the index of the tx in the block is the offset:
+                        // len([start..tx_id])
+                        // SAFETY: `transaction_id` is always `>=` the block's first
+                        // index
+                        let index = transaction_id - block_body.first_tx_num();
 
-                            let meta = TransactionMeta {
-                                tx_hash,
-                                index,
-                                block_hash,
-                                block_number,
-                                base_fee: header.base_fee_per_gas,
-                            };
+                        let meta = TransactionMeta {
+                            tx_hash,
+                            index,
+                            block_hash,
+                            block_number,
+                            base_fee: header.base_fee_per_gas,
+                        };
 
-                            return Ok(Some((transaction, meta)))
-                        }
+                        return Ok(Some((transaction, meta)))
                     }
                 }
             }
