@@ -4,4 +4,4 @@ mod target;
 
 pub use checkpoint::PruneCheckpoint;
 pub use mode::PruneMode;
-pub use target::PruneConfig;
+pub use target::PruneTargets;
