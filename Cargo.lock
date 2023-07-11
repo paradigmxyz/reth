@@ -5504,6 +5504,7 @@ dependencies = [
  "impl-serde",
  "modular-bitfield",
  "once_cell",
+ "paste",
  "plain_hasher",
  "pprof",
  "proptest",
