@@ -1306,7 +1306,7 @@ where
 
                 // update the canon chain if continuous is enabled
                 if self.sync.run_pipeline_continuously() {
-                    let max_block = ctrl.progress().unwrap_or_default();
+                    let max_block = ctrl.block_number().unwrap_or_default();
                     let max_header = match self.blockchain.sealed_header(max_block) {
                         Ok(header) => match header {
                             Some(header) => header,
@@ -1371,7 +1371,7 @@ where
                     // If both are Some, we perform another distance check and return the desired
                     // pipeline target
                     let pipeline_target = if let (Some(progress), Some(finalized_number)) =
-                        (ctrl.progress(), newest_finalized)
+                        (ctrl.block_number(), newest_finalized)
                     {
                         // Determines whether or not we should run the pipeline again, in case the
                         // new gap is large enough to warrant running the pipeline.
