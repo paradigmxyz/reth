@@ -96,7 +96,7 @@ pub enum SubscriptionKind {
     Syncing,
 }
 
-/// Subscription kind.
+/// Any additional parameters for a subscription.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum Params {
     /// No parameters passed.
@@ -106,6 +106,20 @@ pub enum Params {
     Logs(Box<Filter>),
     /// Boolean parameter for new pending transactions.
     Bool(bool),
+}
+
+impl Params {
+    /// Returns true if it's a bool parameter.
+    #[inline]
+    pub fn is_bool(&self) -> bool {
+        matches!(self, Params::Bool(_))
+    }
+
+    /// Returns true if it's a log parameter.
+    #[inline]
+    pub fn is_logs(&self) -> bool {
+        matches!(self, Params::Logs(_))
+    }
 }
 
 impl Serialize for Params {
@@ -139,5 +153,18 @@ impl<'a> Deserialize<'a> for Params {
         serde_json::from_value(v)
             .map(|f| Params::Logs(Box::new(f)))
             .map_err(|e| D::Error::custom(format!("Invalid Pub-Sub parameters: {e}")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn params_serde() {
+        let s: Params = serde_json::from_str("true").unwrap();
+        assert_eq!(s, Params::Bool(true));
+        let s: Params = serde_json::from_str("null").unwrap();
+        assert_eq!(s, Params::None);
     }
 }
