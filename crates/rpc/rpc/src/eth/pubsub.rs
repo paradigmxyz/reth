@@ -124,7 +124,7 @@ where
         SubscriptionKind::NewPendingTransactions => {
             if let Some(params) = params {
                 match params {
-                    Params::NewPendingTransactions(true) => {
+                    Params::Bool(true) => {
                         // full transaction objects requested
                         let stream = pubsub.full_pending_transaction_stream().map(|tx| {
                             EthSubscriptionResult::FullTransaction(Box::new(
@@ -135,7 +135,7 @@ where
                         });
                         return pipe_from_stream(accepted_sink, stream).await
                     }
-                    Params::NewPendingTransactions(false) | Params::None => {
+                    Params::Bool(false) | Params::None => {
                         // only hashes requested
                     }
                     Params::Logs(_) => {
