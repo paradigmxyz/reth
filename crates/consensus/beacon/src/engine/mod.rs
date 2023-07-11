@@ -25,7 +25,8 @@ use reth_primitives::{
     Head, Header, SealedBlock, SealedHeader, H256, U256,
 };
 use reth_provider::{
-    BlockReader, BlockSource, CanonChainTracker, ProviderError, StageCheckpointReader,
+    BlockIdReader, BlockReader, BlockSource, CanonChainTracker, ProviderError,
+    StageCheckpointReader,
 };
 use reth_rpc_types::engine::{
     ExecutionPayload, PayloadAttributes, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
@@ -147,7 +148,11 @@ pub struct BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database,
     Client: HeadersClient + BodiesClient,
-    BT: BlockchainTreeEngine + BlockReader + CanonChainTracker + StageCheckpointReader,
+    BT: BlockchainTreeEngine
+        + BlockReader
+        + BlockIdReader
+        + CanonChainTracker
+        + StageCheckpointReader,
 {
     /// Controls syncing triggered by engine updates.
     sync: EngineSyncController<DB, Client>,
@@ -187,7 +192,12 @@ where
 impl<DB, BT, Client> BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database + Unpin + 'static,
-    BT: BlockchainTreeEngine + BlockReader + CanonChainTracker + StageCheckpointReader + 'static,
+    BT: BlockchainTreeEngine
+        + BlockReader
+        + BlockIdReader
+        + CanonChainTracker
+        + StageCheckpointReader
+        + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
     /// Create a new instance of the [BeaconConsensusEngine].
@@ -657,25 +667,8 @@ where
         // we update the the tracked header first
         self.blockchain.set_canonical_head(head);
 
-        if !update.finalized_block_hash.is_zero() {
-            let finalized = self
-                .blockchain
-                .find_block_by_hash(update.finalized_block_hash, BlockSource::Any)?
-                .ok_or_else(|| {
-                    Error::Provider(ProviderError::UnknownBlockHash(update.finalized_block_hash))
-                })?;
-            self.blockchain.set_finalized(finalized.header.seal(update.finalized_block_hash));
-        }
-
-        if !update.safe_block_hash.is_zero() {
-            let safe = self
-                .blockchain
-                .find_block_by_hash(update.safe_block_hash, BlockSource::Any)?
-                .ok_or_else(|| {
-                    Error::Provider(ProviderError::UnknownBlockHash(update.safe_block_hash))
-                })?;
-            self.blockchain.set_safe(safe.header.seal(update.safe_block_hash));
-        }
+        self.update_finalized_block(update.finalized_block_hash)?;
+        self.update_safe_block(update.safe_block_hash)?;
 
         head_block.total_difficulty =
             self.blockchain.header_td_by_number(head_block.number)?.ok_or_else(|| {
@@ -685,6 +678,51 @@ where
             })?;
         self.sync_state_updater.update_status(head_block);
 
+        Ok(())
+    }
+
+    /// Updates the tracked safe block if we have it
+    ///
+    /// Returns an error if the block is not found.
+    #[inline]
+    fn update_safe_block(&self, safe_block_hash: H256) -> Result<(), reth_interfaces::Error> {
+        if !safe_block_hash.is_zero() {
+            if self.blockchain.safe_block_hash()? == Some(safe_block_hash) {
+                // nothing to update
+                return Ok(())
+            }
+
+            let safe = self
+                .blockchain
+                .find_block_by_hash(safe_block_hash, BlockSource::Any)?
+                .ok_or_else(|| Error::Provider(ProviderError::UnknownBlockHash(safe_block_hash)))?;
+            self.blockchain.set_safe(safe.header.seal(safe_block_hash));
+        }
+        Ok(())
+    }
+
+    /// Updates the tracked finalized block if we have it
+    ///
+    /// Returns an error if the block is not found.
+    #[inline]
+    fn update_finalized_block(
+        &self,
+        finalized_block_hash: H256,
+    ) -> Result<(), reth_interfaces::Error> {
+        if !finalized_block_hash.is_zero() {
+            if self.blockchain.finalized_block_hash()? == Some(finalized_block_hash) {
+                // nothing to update
+                return Ok(())
+            }
+
+            let finalized = self
+                .blockchain
+                .find_block_by_hash(finalized_block_hash, BlockSource::Any)?
+                .ok_or_else(|| {
+                    Error::Provider(ProviderError::UnknownBlockHash(finalized_block_hash))
+                })?;
+            self.blockchain.set_finalized(finalized.header.seal(finalized_block_hash));
+        }
         Ok(())
     }
 
@@ -1386,6 +1424,7 @@ where
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
     BT: BlockchainTreeEngine
         + BlockReader
+        + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader
         + Unpin
