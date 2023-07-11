@@ -92,8 +92,10 @@ impl EnginePruneController {
         tip_block_number: BlockNumber,
     ) -> Poll<EnginePruneEvent> {
         // Try to spawn a pruner
-        if let Some(event) = self.try_spawn_pruner(tip_block_number) {
-            return Poll::Ready(event)
+        match self.try_spawn_pruner(tip_block_number) {
+            Some(EnginePruneEvent::NotReady) => return Poll::Pending,
+            Some(event) => return Poll::Ready(event),
+            None => (),
         }
 
         // Poll pruner and check its status
