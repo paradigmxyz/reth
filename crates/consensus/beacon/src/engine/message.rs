@@ -40,7 +40,7 @@ impl OnForkChoiceUpdated {
     }
 
     /// Returns the determined status of the received ForkchoiceState.
-    pub(crate) fn forkchoice_status(&self) -> ForkchoiceStatus {
+    pub fn forkchoice_status(&self) -> ForkchoiceStatus {
         self.forkchoice_status
     }
 

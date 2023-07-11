@@ -61,6 +61,7 @@ use invalid_headers::InvalidHeaderCache;
 mod event;
 pub use event::BeaconConsensusEngineEvent;
 mod forkchoice;
+pub use forkchoice::ForkchoiceStatus;
 mod metrics;
 pub(crate) mod sync;
 
