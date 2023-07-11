@@ -750,12 +750,16 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     ///
     /// This finalizes `last_finalized_block` prior to reading the canonical hashes (using
     /// [`BlockchainTree::finalize_block`]).
-    pub fn restore_canonical_hashes(
+    pub fn restore_canonical_hashes_and_finalize(
         &mut self,
         last_finalized_block: BlockNumber,
     ) -> Result<(), Error> {
         self.finalize_block(last_finalized_block);
 
+        self.restore_canonical_hashes()
+    }
+
+    pub fn restore_canonical_hashes(&mut self) -> Result<(), Error> {
         let num_of_canonical_hashes =
             self.config.max_reorg_depth() + self.config.num_of_additional_canonical_block_hashes();
 

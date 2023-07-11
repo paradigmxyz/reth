@@ -210,7 +210,7 @@ where
         target: Option<H256>,
         pipeline_run_threshold: u64,
         pruner: Option<Pruner>,
-    ) -> Result<(Self, BeaconConsensusEngineHandle), reth_interfaces::Error> {
+    ) -> Result<(Self, BeaconConsensusEngineHandle), Error> {
         let (to_engine, rx) = mpsc::unbounded_channel();
         Self::with_channel(
             client,
@@ -256,7 +256,7 @@ where
         to_engine: UnboundedSender<BeaconEngineMessage>,
         rx: UnboundedReceiver<BeaconEngineMessage>,
         pruner: Option<Pruner>,
-    ) -> Result<(Self, BeaconConsensusEngineHandle), reth_interfaces::Error> {
+    ) -> Result<(Self, BeaconConsensusEngineHandle), Error> {
         let handle = BeaconConsensusEngineHandle { to_engine };
         let sync = EngineSyncController::new(
             pipeline,
@@ -305,7 +305,7 @@ where
     /// # Returns
     ///
     /// A target block hash if the pipeline is inconsistent, otherwise `None`.
-    fn check_pipeline_consistency(&self) -> Result<Option<H256>, reth_interfaces::Error> {
+    fn check_pipeline_consistency(&self) -> Result<Option<H256>, Error> {
         // If no target was provided, check if the stages are congruent - check if the
         // checkpoint of the last stage matches the checkpoint of the first.
         let first_stage_checkpoint = self
@@ -533,7 +533,7 @@ where
         &mut self,
         state: ForkchoiceState,
         attrs: Option<PayloadAttributes>,
-        tx: oneshot::Sender<Result<OnForkChoiceUpdated, reth_interfaces::Error>>,
+        tx: oneshot::Sender<Result<OnForkChoiceUpdated, Error>>,
     ) -> bool {
         self.metrics.forkchoice_updated_messages.increment(1);
         self.blockchain.on_forkchoice_update_received(&state);
@@ -584,7 +584,7 @@ where
         &mut self,
         state: ForkchoiceState,
         attrs: Option<PayloadAttributes>,
-    ) -> Result<OnForkChoiceUpdated, reth_interfaces::Error> {
+    ) -> Result<OnForkChoiceUpdated, Error> {
         trace!(target: "consensus::engine", ?state, "Received new forkchoice state update");
         if state.head_block_hash.is_zero() {
             return Ok(OnForkChoiceUpdated::invalid_state())
@@ -666,7 +666,7 @@ where
         &self,
         head: SealedHeader,
         update: &ForkchoiceState,
-    ) -> Result<(), reth_interfaces::Error> {
+    ) -> Result<(), Error> {
         let mut head_block = Head {
             number: head.number,
             hash: head.hash,
@@ -1050,12 +1050,16 @@ where
         let synced_to_finalized = match self.blockchain.block_number(block_hash)? {
             Some(number) => {
                 // Attempt to restore the tree.
-                self.blockchain.restore_canonical_hashes(number)?;
+                self.blockchain.restore_canonical_hashes_and_finalize(number)?;
                 true
             }
             None => false,
         };
         Ok(synced_to_finalized)
+    }
+
+    fn update_tree_on_finished_pruner(&mut self) -> Result<(), Error> {
+        self.blockchain.restore_canonical_hashes()
     }
 
     /// Invoked if we successfully downloaded a new block from the network.
@@ -1206,9 +1210,7 @@ where
                     // it's part of the canonical chain: if it's the safe or the finalized block
                     if matches!(
                         err,
-                        reth_interfaces::Error::Execution(
-                            BlockExecutionError::BlockHashNotFoundInChain { .. }
-                        )
+                        Error::Execution(BlockExecutionError::BlockHashNotFoundInChain { .. })
                     ) {
                         // if the inserted block is the currently targeted `finalized` or `safe`
                         // block, we will attempt to make them canonical,
@@ -1417,7 +1419,16 @@ where
             EnginePruneEvent::Finished { result } => {
                 trace!(target: "consensus::engine", ?result, "Pruner finished");
                 match result {
-                    Ok(_) => (),
+                    Ok(_) => {
+                        // Update the state and hashes of the blockchain tree if possible.
+                        match self.update_tree_on_finished_pruner() {
+                            Ok(()) => {}
+                            Err(error) => {
+                                error!(target: "consensus::engine", ?error, "Error restoring blockchain tree state");
+                                return Some(Err(error.into()))
+                            }
+                        };
+                    }
                     // Any pruner error at this point is fatal.
                     Err(error) => return Some(Err(error.into())),
                 };
@@ -1812,6 +1823,14 @@ mod tests {
         // consensus engine is still idle
         let _ = env.send_new_payload(SealedBlock::default().into()).await;
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
+
+        // consensus engine receives a forkchoice state and skips it because of pruning
+        let _ = env
+            .send_forkchoice_updated(ForkchoiceState {
+                head_block_hash: H256::random(),
+                ..Default::default()
+            })
+            .await;
 
         // consensus engine receives a forkchoice state and triggers the pipeline
         let _ = env
