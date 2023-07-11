@@ -453,8 +453,14 @@ mod tests {
 
                     while let Some((_, body)) = body_cursor.next()? {
                         for tx_id in body.tx_num_range() {
-                            let transaction: TransactionSigned =
-                                provider.transaction_by_id(tx_id)?.expect("no transaction entry");
+                            let transaction: TransactionSigned = provider
+                                .transaction_by_id_no_hash(tx_id)?
+                                .map(|tx| TransactionSigned {
+                                    hash: Default::default(), // we don't require the hash
+                                    signature: tx.signature,
+                                    transaction: tx.transaction,
+                                })
+                                .expect("no transaction entry");
                             let signer =
                                 transaction.recover_signer().expect("failed to recover signer");
                             assert_eq!(Some(signer), provider.transaction_sender(tx_id)?)
