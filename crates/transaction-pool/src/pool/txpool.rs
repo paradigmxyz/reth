@@ -261,6 +261,8 @@ impl<T: TransactionOrdering> TxPool<T> {
         // update the metrics after the update
         self.update_size_metrics();
 
+        self.metrics.performed_state_updates.increment(1);
+
         OnNewCanonicalStateOutcome { block_hash, mined: mined_transactions, promoted, discarded }
     }
 
