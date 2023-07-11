@@ -11,7 +11,8 @@ use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber,
     BlockWithSenders, Bytecode, Bytes, ChainInfo, Header, Receipt, SealedBlock, SealedHeader,
-    StorageKey, StorageValue, TransactionMeta, TransactionSigned, TxHash, TxNumber, H256, U256, TransactionSignedNoHash,
+    StorageKey, StorageValue, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
+    TxHash, TxNumber, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::{
