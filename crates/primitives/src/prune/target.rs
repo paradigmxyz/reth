@@ -30,12 +30,23 @@ macro_rules! should_prune_method {
     ($($config:ident),+) => {
         $(
             paste! {
-                #[allow(missing_docs)]
+                /// Check if target block should be pruned
                 pub fn [<should_prune_ $config>](&self, block: BlockNumber, tip: BlockNumber) -> bool {
                     if let Some(config) = &self.$config {
                         return self.should_prune(config, block, tip)
                     }
                     false
+                }
+
+                /// At which block should it stop pruning.
+                ///
+                /// Returns `Some(BlockNumber)` on the first unprunable block, or `None` if everything should be
+                /// pruned.
+                pub fn [<stop_prune_ $config>](&self, tip: BlockNumber) -> Option<BlockNumber> {
+                    if let Some(config) = &self.$config {
+                        return self.stop_prune(config, tip)
+                    }
+                    Some(0)
                 }
             }
         )+
@@ -69,6 +80,23 @@ impl PruneTargets {
                 block < tip - *distance
             }
             PruneMode::Before(n) => *n > block,
+        }
+    }
+
+    /// At which block should it stop pruning.
+    ///
+    /// Returns `Some(BlockNumber)` on the first unprunable block, or `None` if everything should be
+    /// pruned.
+    pub fn stop_prune(&self, target: &PruneMode, tip: BlockNumber) -> Option<BlockNumber> {
+        match target {
+            PruneMode::Full => None,
+            PruneMode::Distance(distance) => {
+                if *distance > tip {
+                    return Some(0)
+                }
+                Some(tip - *distance)
+            }
+            PruneMode::Before(n) => Some(*n + 1),
         }
     }
 

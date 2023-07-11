@@ -1,6 +1,9 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::{database::Database, models::BlockNumberAddress};
-use reth_primitives::stage::{StageCheckpoint, StageId};
+use reth_primitives::{
+    stage::{StageCheckpoint, StageId},
+    PruneTargets,
+};
 use reth_provider::{DatabaseProviderRW, HistoryWriter, StorageReader};
 use std::fmt::Debug;
 
@@ -12,18 +15,20 @@ pub struct IndexStorageHistoryStage {
     /// Number of blocks after which the control
     /// flow will be returned to the pipeline for commit.
     pub commit_threshold: u64,
+    /// Pruning configuration.
+    prune_targets: PruneTargets,
 }
 
 impl IndexStorageHistoryStage {
     /// Create new instance of [IndexStorageHistoryStage].
     pub fn new(commit_threshold: u64) -> Self {
-        Self { commit_threshold }
+        Self { commit_threshold, prune_targets: PruneTargets::default() }
     }
 }
 
 impl Default for IndexStorageHistoryStage {
     fn default() -> Self {
-        Self { commit_threshold: 100_000 }
+        Self { commit_threshold: 100_000, prune_targets: PruneTargets::default() }
     }
 }
 
@@ -38,10 +43,19 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
     async fn execute(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
-        input: ExecInput,
+        mut input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
+        }
+
+        let unprunable_block_start = self
+            .prune_targets
+            .stop_prune_storage_history(input.target())
+            .expect("Pruning configuration for history doesn't allow to prune all blocks.");
+
+        if unprunable_block_start > input.checkpoint().block_number {
+            input.checkpoint = Some(StageCheckpoint::new(unprunable_block_start - 1));
         }
 
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
