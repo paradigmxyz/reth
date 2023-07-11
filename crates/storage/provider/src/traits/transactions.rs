@@ -15,8 +15,7 @@ pub trait TransactionsProvider: BlockNumReader + Send + Sync {
     /// Returns None if the transaction is not found.
     fn transaction_id(&self, tx_hash: TxHash) -> Result<Option<TxNumber>>;
 
-    /// Get transaction by id - computes hash everytime so more 
-    /// expensive than [TransactionsProvider::transaction_by_id_no_hash].
+    /// Get transaction by id, computes hash everytime so more expensive.
     fn transaction_by_id(&self, id: TxNumber) -> Result<Option<TransactionSigned>>;
 
     /// Get transaction by id without computing the hash.
