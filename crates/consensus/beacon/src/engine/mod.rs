@@ -1043,10 +1043,7 @@ where
     ///
     /// If the given block is missing from the database, this will return `false`. Otherwise, `true`
     /// is returned: the database contains the hash and the tree was updated.
-    fn update_tree_on_finished_pipeline(
-        &mut self,
-        block_hash: H256,
-    ) -> Result<bool, reth_interfaces::Error> {
+    fn update_tree_on_finished_pipeline(&mut self, block_hash: H256) -> Result<bool, Error> {
         let synced_to_finalized = match self.blockchain.block_number(block_hash)? {
             Some(number) => {
                 // Attempt to restore the tree.
@@ -1058,6 +1055,10 @@ where
         Ok(synced_to_finalized)
     }
 
+    /// Attempt to restore the tree.
+    ///
+    /// This is invoked after a pruner run to update the tree with the most recent canonical
+    /// hashes.
     fn update_tree_on_finished_pruner(&mut self) -> Result<(), Error> {
         self.blockchain.restore_canonical_hashes()
     }
@@ -1820,29 +1821,41 @@ mod tests {
         std::thread::sleep(Duration::from_millis(100));
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
-        // consensus engine is still idle
+        // consensus engine is still idle because no FCUs were received
         let _ = env.send_new_payload(SealedBlock::default().into()).await;
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
-        // consensus engine receives a forkchoice state and skips it because of pruning
+        // consensus engine is still idle because pruning is running
         let _ = env
             .send_forkchoice_updated(ForkchoiceState {
                 head_block_hash: H256::random(),
                 ..Default::default()
             })
             .await;
+        assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
-        // consensus engine receives a forkchoice state and triggers the pipeline
-        let _ = env
-            .send_forkchoice_updated(ForkchoiceState {
-                head_block_hash: H256::random(),
-                ..Default::default()
-            })
-            .await;
-        assert_matches!(
-            rx.await,
-            Ok(Err(BeaconConsensusEngineError::Pipeline(n))) if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
-        );
+        // consensus engine receives a forkchoice state and triggers the pipeline when pruning is
+        // finished
+        loop {
+            match rx.try_recv() {
+                Ok(result) => {
+                    assert_matches!(
+                        result,
+                        Err(BeaconConsensusEngineError::Pipeline(n)) if matches!(*n.as_ref(), PipelineError::Stage(StageError::ChannelClosed))
+                    );
+                    break
+                }
+                Err(TryRecvError::Empty) => {
+                    let _ = env
+                        .send_forkchoice_updated(ForkchoiceState {
+                            head_block_hash: H256::random(),
+                            ..Default::default()
+                        })
+                        .await;
+                }
+                Err(err) => panic!("receive error: {err}"),
+            }
+        }
     }
 
     // Test that the consensus engine runs the pipeline again if the tree cannot be restored.

@@ -759,6 +759,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         self.restore_canonical_hashes()
     }
 
+    /// Reads the last `N` canonical hashes from the database and updates the block indices of the
+    /// tree.
+    ///
+    /// `N` is the `max_reorg_depth` plus the number of block hashes needed to satisfy the
+    /// `BLOCKHASH` opcode in the EVM.
     pub fn restore_canonical_hashes(&mut self) -> Result<(), Error> {
         let num_of_canonical_hashes =
             self.config.max_reorg_depth() + self.config.num_of_additional_canonical_block_hashes();
