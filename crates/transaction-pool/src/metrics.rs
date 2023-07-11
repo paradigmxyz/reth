@@ -34,3 +34,26 @@ pub struct TxPoolMetrics {
     /// Number of all transactions of all sub-pools: pending + basefee + queued
     pub(crate) total_transactions: Gauge,
 }
+
+/// Transaction pool maintenance metrics
+#[derive(Metrics)]
+#[metrics(scope = "transaction_pool")]
+pub struct MaintainPoolMetrics {
+    /// Number of currently dirty addresses that need to be updated in the pool by fetching account
+    /// info
+    pub(crate) dirty_accounts: Gauge,
+    /// Number of transaction reinserted into the pool after reorg.
+    pub(crate) reinserted_transactions: Counter,
+}
+
+impl MaintainPoolMetrics {
+    #[inline]
+    pub(crate) fn set_dirty_accounts_len(&self, count: usize) {
+        self.dirty_accounts.set(count as f64);
+    }
+
+    #[inline]
+    pub(crate) fn inc_reinserted_transactions(&self, count: usize) {
+        self.reinserted_transactions.increment(count as u64);
+    }
+}
