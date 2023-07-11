@@ -14,7 +14,7 @@ use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
     },
-    BlockNumber, Header, U256,
+    BlockNumber, Header, PruneTargets, U256,
 };
 use reth_provider::{
     post_state::PostState, BlockExecutor, BlockReader, DatabaseProviderRW, ExecutorFactory,
@@ -59,19 +59,25 @@ pub struct ExecutionStage<EF: ExecutorFactory> {
     executor_factory: EF,
     /// The commit thresholds of the execution stage.
     thresholds: ExecutionStageThresholds,
+    /// Pruning configuration.
+    prune_targets: PruneTargets,
 }
 
 impl<EF: ExecutorFactory> ExecutionStage<EF> {
     /// Create new execution stage with specified config.
-    pub fn new(executor_factory: EF, thresholds: ExecutionStageThresholds) -> Self {
-        Self { metrics_tx: None, executor_factory, thresholds }
+    pub fn new(
+        executor_factory: EF,
+        thresholds: ExecutionStageThresholds,
+        prune_targets: PruneTargets,
+    ) -> Self {
+        Self { metrics_tx: None, executor_factory, thresholds, prune_targets }
     }
 
     /// Create an execution stage with the provided  executor factory.
     ///
     /// The commit threshold will be set to 10_000.
     pub fn new_with_factory(executor_factory: EF) -> Self {
-        Self::new(executor_factory, ExecutionStageThresholds::default())
+        Self::new(executor_factory, ExecutionStageThresholds::default(), PruneTargets::default())
     }
 
     /// Set the metric events sender.
@@ -104,6 +110,8 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // Execute block range
         let mut state = PostState::default();
+        state.add_prune_targets(self.prune_targets);
+
         for block_number in start_block..=max_block {
             let td = provider
                 .header_td_by_number(block_number)?
@@ -145,7 +153,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         // Write remaining changes
         trace!(target: "sync::stages::execution", accounts = state.accounts().len(), "Writing updated state to database");
         let start = Instant::now();
-        state.write_to_db(provider.tx_ref())?;
+        state.write_to_db(provider.tx_ref(), max_block)?;
         trace!(target: "sync::stages::execution", took = ?start.elapsed(), "Wrote state");
 
         let done = stage_progress == max_block;
@@ -417,7 +425,8 @@ mod tests {
     use reth_db::{models::AccountBeforeTx, test_utils::create_test_rw_db};
     use reth_primitives::{
         hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Bytecode,
-        ChainSpecBuilder, SealedBlock, StorageEntry, H160, H256, MAINNET, U256,
+        ChainSpecBuilder, PruneMode, PruneTargets, SealedBlock, StorageEntry, H160, H256, MAINNET,
+        U256,
     };
     use reth_provider::{AccountReader, BlockWriter, ProviderFactory, ReceiptProvider};
     use reth_revm::Factory;
@@ -430,6 +439,7 @@ mod tests {
         ExecutionStage::new(
             factory,
             ExecutionStageThresholds { max_blocks: Some(100), max_changes: None },
+            PruneTargets::none(),
         )
     }
 
@@ -883,5 +893,87 @@ mod tests {
                 )
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn test_prune() {
+        let test_tx = TestTransaction::default();
+        let factory = Arc::new(ProviderFactory::new(test_tx.tx.as_ref(), MAINNET.clone()));
+
+        let provider = factory.provider_rw().unwrap();
+        let input = ExecInput {
+            target: Some(1),
+            /// The progress of this stage the last time it was executed.
+            checkpoint: None,
+        };
+        let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
+        let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
+        let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
+        let block = SealedBlock::decode(&mut block_rlp).unwrap();
+        provider.insert_block(genesis, None).unwrap();
+        provider.insert_block(block.clone(), None).unwrap();
+        provider.commit().unwrap();
+
+        // insert pre state
+        let provider = factory.provider_rw().unwrap();
+        let code = hex!("5a465a905090036002900360015500");
+        let code_hash = keccak256(hex!("5a465a905090036002900360015500"));
+        provider
+            .tx_ref()
+            .put::<tables::PlainAccountState>(
+                H160(hex!("1000000000000000000000000000000000000000")),
+                Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::PlainAccountState>(
+                H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b")),
+                Account {
+                    nonce: 0,
+                    balance: U256::from(0x3635c9adc5dea00000u128),
+                    bytecode_hash: None,
+                },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into()))
+            .unwrap();
+        provider.commit().unwrap();
+
+        let check_pruning = |factory: Arc<ProviderFactory<_>>,
+                             prune_targets: PruneTargets,
+                             expect_num_receipts: usize| async move {
+            let provider = factory.provider_rw().unwrap();
+
+            let mut execution_stage = ExecutionStage::new(
+                Factory::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build())),
+                ExecutionStageThresholds { max_blocks: Some(100), max_changes: None },
+                prune_targets,
+            );
+
+            execution_stage.execute(&provider, input).await.unwrap();
+            assert_eq!(
+                provider.receipts_by_block(1.into()).unwrap().unwrap().len(),
+                expect_num_receipts
+            );
+        };
+
+        let mut prune = PruneTargets::none();
+
+        check_pruning(factory.clone(), prune, 1).await;
+
+        prune.receipts = Some(PruneMode::Full);
+        check_pruning(factory.clone(), prune, 0).await;
+
+        prune.receipts = Some(PruneMode::Before(1));
+        check_pruning(factory.clone(), prune, 1).await;
+
+        prune.receipts = Some(PruneMode::Before(2));
+        check_pruning(factory.clone(), prune, 0).await;
+
+        prune.receipts = Some(PruneMode::Distance(0));
+        check_pruning(factory.clone(), prune, 1).await;
     }
 }
