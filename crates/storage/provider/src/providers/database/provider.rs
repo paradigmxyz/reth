@@ -935,12 +935,16 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
     }
 
     fn transaction_by_id_no_hash(&self, id: TxNumber) -> Result<Option<TransactionSignedNoHash>> {
-        Ok(self.tx.get::<tables::Transactions>(id)?.map(Into::into))
+        Ok(self.tx.get::<tables::Transactions>(id)?)
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> Result<Option<TransactionSigned>> {
         if let Some(id) = self.transaction_id(hash)? {
-            Ok(self.transaction_by_id(id)?)
+            Ok(self.transaction_by_id_no_hash(id)?.map(|tx| TransactionSigned {
+                hash,
+                signature: tx.signature,
+                transaction: tx.transaction,
+            }))
         } else {
             Ok(None)
         }
