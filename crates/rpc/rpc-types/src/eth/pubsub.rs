@@ -104,8 +104,8 @@ pub enum Params {
     None,
     /// Log parameters.
     Logs(Box<Filter>),
-    /// New pending transaction parameters.
-    NewPendingTransactions(bool),
+    /// Boolean parameter for new pending transactions.
+    Bool(bool),
 }
 
 impl Serialize for Params {
@@ -116,7 +116,7 @@ impl Serialize for Params {
         match self {
             Params::None => (&[] as &[serde_json::Value]).serialize(serializer),
             Params::Logs(logs) => logs.serialize(serializer),
-            Params::NewPendingTransactions(full) => full.serialize(serializer),
+            Params::Bool(full) => full.serialize(serializer),
         }
     }
 }
@@ -130,6 +130,10 @@ impl<'a> Deserialize<'a> for Params {
 
         if v.is_null() {
             return Ok(Params::None)
+        }
+
+        if let Some(val) = v.as_bool() {
+            return Ok(Params::Bool(val))
         }
 
         serde_json::from_value(v)
