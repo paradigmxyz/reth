@@ -184,7 +184,7 @@ where
         start: BlockNumber,
         count: u64,
     ) -> EngineApiResult<ExecutionPayloadBodies> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         let inner = self.inner.clone();
 
         self.inner.task_spawner.spawn_blocking(Box::pin(async move {
