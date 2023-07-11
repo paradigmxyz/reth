@@ -33,6 +33,9 @@ pub struct TxPoolMetrics {
 
     /// Number of all transactions of all sub-pools: pending + basefee + queued
     pub(crate) total_transactions: Gauge,
+
+    /// How often the pool was updated after the canonical state changed
+    pub(crate) performed_state_updates: Counter,
 }
 
 /// Transaction pool maintenance metrics
