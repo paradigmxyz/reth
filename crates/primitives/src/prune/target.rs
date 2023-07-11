@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 /// Pruning configuration for every part of the data that can be pruned.
 #[derive(Debug, Clone, Default, Copy, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
-pub struct PruneTargets {
+pub struct PruneConfig {
     /// Sender Recovery pruning configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sender_recovery: Option<PruneMode>,
@@ -42,7 +42,7 @@ macro_rules! should_prune_method {
 
         /// Sets pruning to all targets.
         pub fn all() -> Self {
-            PruneTargets {
+            PruneConfig {
                 $(
                     $config: Some(PruneMode::Full),
                 )+
@@ -52,10 +52,10 @@ macro_rules! should_prune_method {
     };
 }
 
-impl PruneTargets {
+impl PruneConfig {
     /// Sets pruning to no target.
     pub fn none() -> Self {
-        PruneTargets::default()
+        PruneConfig::default()
     }
 
     /// Check if target block should be pruned
