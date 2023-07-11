@@ -17,7 +17,7 @@ pub enum PruneMode {
 #[cfg(test)]
 impl Default for PruneMode {
     fn default() -> Self {
-        Self::Distance(0)
+        Self::Full
     }
 }
 
