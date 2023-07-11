@@ -518,6 +518,7 @@ impl PostState {
     pub fn write_history_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         &mut self,
         tx: &TX,
+        tip: BlockNumber,
     ) -> Result<(), DbError> {
         // Write storage changes
         tracing::trace!(target: "provider::post_state", "Writing storage changes");
@@ -560,6 +561,10 @@ impl PostState {
                     }
                 }
 
+                if self.prune_targets.should_prune_storage_history(block_number, tip) {
+                    continue
+                }
+
                 for (slot, old_value) in storage.storage {
                     tracing::trace!(target: "provider::post_state", ?storage_id, ?slot, ?old_value, "Storage changed");
                     storage_changeset_cursor.append_dup(
@@ -576,6 +581,10 @@ impl PostState {
         for (block_number, account_changes) in
             std::mem::take(&mut self.account_changes).inner.into_iter()
         {
+            if self.prune_targets.should_prune_account_history(block_number, tip) {
+                continue
+            }
+
             for (address, info) in account_changes.into_iter() {
                 tracing::trace!(target: "provider::post_state", block_number, ?address, old = ?info, "Account changed");
                 account_changeset_cursor
@@ -592,7 +601,7 @@ impl PostState {
         tx: &TX,
         tip: BlockNumber,
     ) -> Result<(), DbError> {
-        self.write_history_to_db(tx)?;
+        self.write_history_to_db(tx, tip)?;
 
         // Write new storage state
         tracing::trace!(target: "provider::post_state", len = self.storage.len(), "Writing new storage state");
