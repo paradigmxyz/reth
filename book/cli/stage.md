@@ -63,10 +63,6 @@ $ reth stage drop --help
 
 Usage: reth stage drop [OPTIONS] <STAGE>
 
-Arguments:
-  <STAGE>
-          [possible values: headers, bodies, senders, execution, account-hashing, storage-hashing, hashing, merkle, tx-lookup, history, account-history, storage-history, total-difficulty]
-
 Options:
       --datadir <DATA_DIR>
           The path to the data dir for all reth files and subdirectories.
@@ -93,6 +89,23 @@ Options:
 
   -h, --help
           Print help (see a summary with '-h')
+
+Database:
+      --db.log-level <LOG_LEVEL>
+          Database logging level. Levels higher than "notice" require a debug build
+
+          Possible values:
+          - fatal:   Enables logging for critical conditions, i.e. assertion failures
+          - error:   Enables logging for error conditions
+          - warn:    Enables logging for warning conditions
+          - notice:  Enables logging for normal but significant condition
+          - verbose: Enables logging for verbose informational
+          - debug:   Enables logging for debug-level messages
+          - trace:   Enables logging for trace debug-level messages
+          - extra:   Enables logging for extra debug-level messages
+
+  <STAGE>
+          [possible values: headers, bodies, senders, execution, account-hashing, storage-hashing, hashing, merkle, tx-lookup, history, account-history, storage-history, total-difficulty]
 
 Logging:
       --log.persistent
@@ -172,6 +185,20 @@ Options:
 
   -h, --help
           Print help (see a summary with '-h')
+
+Database:
+      --db.log-level <LOG_LEVEL>
+          Database logging level. Levels higher than "notice" require a debug build
+
+          Possible values:
+          - fatal:   Enables logging for critical conditions, i.e. assertion failures
+          - error:   Enables logging for error conditions
+          - warn:    Enables logging for warning conditions
+          - notice:  Enables logging for normal but significant condition
+          - verbose: Enables logging for verbose informational
+          - debug:   Enables logging for debug-level messages
+          - trace:   Enables logging for trace debug-level messages
+          - extra:   Enables logging for extra debug-level messages
 
 Logging:
       --log.persistent
@@ -543,6 +570,20 @@ Networking:
       --port <PORT>
           Network listening port. default: 30303
 
+Database:
+      --db.log-level <LOG_LEVEL>
+          Database logging level. Levels higher than "notice" require a debug build
+
+          Possible values:
+          - fatal:   Enables logging for critical conditions, i.e. assertion failures
+          - error:   Enables logging for error conditions
+          - warn:    Enables logging for warning conditions
+          - notice:  Enables logging for normal but significant condition
+          - verbose: Enables logging for verbose informational
+          - debug:   Enables logging for debug-level messages
+          - trace:   Enables logging for trace debug-level messages
+          - extra:   Enables logging for extra debug-level messages
+
   -c, --commit
           Commits the changes in the database. WARNING: potentially destructive.
           
@@ -622,6 +663,20 @@ Options:
 
   -h, --help
           Print help (see a summary with '-h')
+
+Database:
+      --db.log-level <LOG_LEVEL>
+          Database logging level. Levels higher than "notice" require a debug build
+
+          Possible values:
+          - fatal:   Enables logging for critical conditions, i.e. assertion failures
+          - error:   Enables logging for error conditions
+          - warn:    Enables logging for warning conditions
+          - notice:  Enables logging for normal but significant condition
+          - verbose: Enables logging for verbose informational
+          - debug:   Enables logging for debug-level messages
+          - trace:   Enables logging for trace debug-level messages
+          - extra:   Enables logging for extra debug-level messages
 
 Logging:
       --log.persistent

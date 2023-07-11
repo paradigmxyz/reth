@@ -1,13 +1,17 @@
 use crate::{
-    engine::{message::OnForkChoiceUpdated, metrics::EngineMetrics},
+    engine::{
+        forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker},
+        message::OnForkChoiceUpdated,
+        metrics::EngineMetrics,
+    },
     sync::{EngineSyncController, EngineSyncEvent},
 };
-use futures::{Future, StreamExt, TryFutureExt};
+use futures::{Future, StreamExt};
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
         error::{InsertBlockError, InsertBlockErrorKind},
-        BlockStatus, BlockchainTreeEngine,
+        BlockStatus, BlockchainTreeEngine, InsertPayloadOk,
     },
     consensus::ForkchoiceState,
     executor::{BlockExecutionError, BlockValidationError},
@@ -17,15 +21,14 @@ use reth_interfaces::{
 };
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
-    listener::EventListeners, stage::StageId, BlockNumHash, BlockNumber, Head, Header, SealedBlock,
-    SealedHeader, H256, U256,
+    constants::EPOCH_SLOTS, listener::EventListeners, stage::StageId, BlockNumHash, BlockNumber,
+    Head, Header, SealedBlock, SealedHeader, H256, U256,
 };
 use reth_provider::{
     BlockReader, BlockSource, CanonChainTracker, ProviderError, StageCheckpointReader,
 };
 use reth_rpc_types::engine::{
-    ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
-    PayloadValidationError,
+    ExecutionPayload, PayloadAttributes, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
 use reth_stages::{ControlFlow, Pipeline, PipelineError};
 use reth_tasks::TaskSpawner;
@@ -53,16 +56,15 @@ pub use error::{
 
 mod invalid_headers;
 use invalid_headers::InvalidHeaderCache;
-mod metrics;
 
 mod event;
+pub use event::BeaconConsensusEngineEvent;
 mod forkchoice;
+mod metrics;
 pub(crate) mod sync;
 
-use crate::engine::forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker};
-pub use event::BeaconConsensusEngineEvent;
-use reth_interfaces::blockchain_tree::InsertPayloadOk;
-use reth_primitives::constants::EPOCH_SLOTS;
+mod handle;
+pub use handle::BeaconConsensusEngineHandle;
 
 /// The maximum number of invalid headers that can be tracked by the engine.
 const MAX_INVALID_HEADERS: u32 = 512u32;
@@ -73,81 +75,6 @@ const MAX_INVALID_HEADERS: u32 = 512u32;
 /// This is the default threshold, the distance to the head that the tree will be used for sync.
 /// If the distance exceeds this threshold, the pipeline will be used for sync.
 pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
-
-/// A _shareable_ beacon consensus frontend. Used to interact with the spawned beacon consensus
-/// engine.
-///
-/// See also [`BeaconConsensusEngine`].
-#[derive(Clone, Debug)]
-pub struct BeaconConsensusEngineHandle {
-    to_engine: UnboundedSender<BeaconEngineMessage>,
-}
-
-// === impl BeaconConsensusEngineHandle ===
-
-impl BeaconConsensusEngineHandle {
-    /// Creates a new beacon consensus engine handle.
-    pub fn new(to_engine: UnboundedSender<BeaconEngineMessage>) -> Self {
-        Self { to_engine }
-    }
-
-    /// Sends a new payload message to the beacon consensus engine and waits for a response.
-    ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_newpayloadv2>
-    pub async fn new_payload(
-        &self,
-        payload: ExecutionPayload,
-    ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx });
-        rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
-    }
-
-    /// Sends a forkchoice update message to the beacon consensus engine and waits for a response.
-    ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_forkchoiceupdatedv2>
-    pub async fn fork_choice_updated(
-        &self,
-        state: ForkchoiceState,
-        payload_attrs: Option<PayloadAttributes>,
-    ) -> Result<ForkchoiceUpdated, BeaconForkChoiceUpdateError> {
-        Ok(self
-            .send_fork_choice_updated(state, payload_attrs)
-            .map_err(|_| BeaconForkChoiceUpdateError::EngineUnavailable)
-            .await??
-            .await?)
-    }
-
-    /// Sends a forkchoice update message to the beacon consensus engine and returns the receiver to
-    /// wait for a response.
-    fn send_fork_choice_updated(
-        &self,
-        state: ForkchoiceState,
-        payload_attrs: Option<PayloadAttributes>,
-    ) -> oneshot::Receiver<Result<OnForkChoiceUpdated, reth_interfaces::Error>> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.to_engine.send(BeaconEngineMessage::ForkchoiceUpdated {
-            state,
-            payload_attrs,
-            tx,
-        });
-        rx
-    }
-
-    /// Sends a transition configuration exchagne message to the beacon consensus engine.
-    ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_exchangetransitionconfigurationv1>
-    pub async fn transition_configuration_exchanged(&self) {
-        let _ = self.to_engine.send(BeaconEngineMessage::TransitionConfigurationExchanged);
-    }
-
-    /// Creates a new [`BeaconConsensusEngineEvent`] listener stream.
-    pub fn event_listener(&self) -> UnboundedReceiverStream<BeaconConsensusEngineEvent> {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let _ = self.to_engine.send(BeaconEngineMessage::EventListener(tx));
-        UnboundedReceiverStream::new(rx)
-    }
-}
 
 /// The beacon consensus engine is the driver that switches between historical and live sync.
 ///
@@ -385,6 +312,13 @@ where
             // If the checkpoint of any stage is less than the checkpoint of the first stage,
             // retrieve and return the block hash of the latest header and use it as the target.
             if stage_checkpoint < first_stage_checkpoint {
+                warn!(
+                    target: "consensus::engine",
+                    first_stage_checkpoint,
+                    inconsistent_stage_id = %stage_id,
+                    inconsistent_stage_checkpoint = stage_checkpoint,
+                    "Pipeline sync progress is inconsistent"
+                );
                 return self.blockchain.block_hash(first_stage_checkpoint)
             }
         }
@@ -401,7 +335,9 @@ where
     }
 
     /// Returns true if the distance from the local tip to the block is greater than the configured
-    /// threshold
+    /// threshold.
+    ///
+    /// If the `local_tip` is greater than the `block`, then this will return false.
     #[inline]
     fn exceeds_pipeline_run_threshold(&self, local_tip: u64, block: u64) -> bool {
         block > local_tip && block - local_tip > self.pipeline_run_threshold
@@ -1377,27 +1313,56 @@ where
                     )
                     .is_none()
                 {
-                    // Update the state and hashes of the blockchain tree if possible.
-                    match self
-                        .update_tree_on_finished_pipeline(sync_target_state.finalized_block_hash)
+                    let newest_finalized = self
+                        .forkchoice_state_tracker
+                        .sync_target_state()
+                        .map(|s| s.finalized_block_hash)
+                        .and_then(|h| self.blockchain.buffered_header_by_hash(h))
+                        .map(|header| header.number);
+
+                    // The block number that the pipeline finished at - if the progress or newest
+                    // finalized is None then we can't check the distance anyways.
+                    //
+                    // If both are Some, we perform another distance check and return the desired
+                    // pipeline target
+                    let pipeline_target = if let (Some(progress), Some(finalized_number)) =
+                        (ctrl.progress(), newest_finalized)
                     {
-                        Ok(synced) => {
-                            if synced {
-                                // we're consider this synced and transition to live sync
-                                self.sync_state_updater.update_sync_state(SyncState::Idle);
-                            } else {
-                                // We don't have the finalized block in the database, so
-                                // we need to run another pipeline.
-                                self.sync.set_pipeline_sync_target(
-                                    sync_target_state.finalized_block_hash,
-                                );
-                            }
-                        }
-                        Err(error) => {
-                            error!(target: "consensus::engine", ?error, "Error restoring blockchain tree state");
-                            return Some(Err(error.into()))
-                        }
+                        // Determines whether or not we should run the pipeline again, in case the
+                        // new gap is large enough to warrant running the pipeline.
+                        self.can_pipeline_sync_to_finalized(progress, finalized_number, None)
+                    } else {
+                        None
                     };
+
+                    // If the distance is large enough, we should run the pipeline again to prevent
+                    // the tree update from executing too many blocks and blocking.
+                    if let Some(target) = pipeline_target {
+                        // run the pipeline to the target since the distance is sufficient
+                        self.sync.set_pipeline_sync_target(target);
+                    } else {
+                        // Update the state and hashes of the blockchain tree if possible.
+                        match self.update_tree_on_finished_pipeline(
+                            sync_target_state.finalized_block_hash,
+                        ) {
+                            Ok(synced) => {
+                                if synced {
+                                    // we're consider this synced and transition to live sync
+                                    self.sync_state_updater.update_sync_state(SyncState::Idle);
+                                } else {
+                                    // We don't have the finalized block in the database, so
+                                    // we need to run another pipeline.
+                                    self.sync.set_pipeline_sync_target(
+                                        sync_target_state.finalized_block_hash,
+                                    );
+                                }
+                            }
+                            Err(error) => {
+                                error!(target: "consensus::engine", ?error, "Error restoring blockchain tree state");
+                                return Some(Err(error.into()))
+                            }
+                        };
+                    }
                 }
             }
             // Any pipeline error at this point is fatal.
@@ -1486,7 +1451,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::error::BeaconForkChoiceUpdateError;
+    use crate::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
     use assert_matches::assert_matches;
     use reth_blockchain_tree::{
         config::BlockchainTreeConfig, externals::TreeExternals, post_state::PostState,
@@ -1502,6 +1467,9 @@ mod tests {
     use reth_provider::{
         providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockWriter,
         ProviderFactory,
+    };
+    use reth_rpc_types::engine::{
+        ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
     };
     use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
     use reth_tasks::TokioTaskExecutor;

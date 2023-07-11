@@ -18,7 +18,7 @@ fn main() -> eyre::Result<()> {
     // Opens a RO handle to the database file.
     // TODO: Should be able to do `ProviderFactory::new_with_db_path_ro(...)` instead of
     // doing in 2 steps.
-    let db = open_db_read_only(&Path::new(&std::env::var("RETH_DB_PATH")?), None)?;
+    let db = open_db_read_only(Path::new(&std::env::var("RETH_DB_PATH")?), None)?;
 
     // Instantiate a provider factory for Ethereum mainnet using the provided DB.
     // TODO: Should the DB version include the spec so that you do not need to specify it here?
@@ -197,7 +197,7 @@ fn receipts_provider_example<T: ReceiptProvider + TransactionsProvider + HeaderP
     {
         let receipts = provider.receipt(header_num)?.ok_or(eyre::eyre!("receipt not found"))?;
         for log in &receipts.logs {
-            if filter_params.filter_address(log) && filter_params.filter_topics(&log) {
+            if filter_params.filter_address(log) && filter_params.filter_topics(log) {
                 // Do something with the log e.g. decode it.
                 println!("Matching log found! {log:?}")
             }
