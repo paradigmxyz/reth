@@ -16,7 +16,7 @@ jobs:
     # Skip the Fuzzing Jobs until we make them run fast and reliably. Currently they will
     # always recompile the codebase for each test and that takes way too long.
     if: false
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     strategy:
       matrix:
         target:
@@ -62,7 +62,7 @@ jobs:
   fuzz-success:
     if: always()
     name: fuzz success
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: all
     steps:
       # Note: This check is a dummy because we currently have fuzz tests disabled.

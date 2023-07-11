@@ -39,7 +39,7 @@ reth-tracing = { path = "../../tracing" }
 reth-rpc-api = { path = "../rpc-api", features = ["client"] }
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
-reth-network-api = { workspace = true, features = ["test-utils"] }
+reth-network-api = { workspace = true }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-beacon-consensus = { path = "../../consensus/beacon" }
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
