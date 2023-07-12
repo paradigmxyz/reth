@@ -846,6 +846,7 @@ where
                 .ok_or_else(|| {
                     Error::Provider(ProviderError::UnknownBlockHash(finalized_block_hash))
                 })?;
+            self.blockchain.finalize_block(finalized.number);
             self.blockchain.set_finalized(finalized.header.seal(finalized_block_hash));
         }
         Ok(())
