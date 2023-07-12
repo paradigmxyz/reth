@@ -477,9 +477,8 @@ impl SessionManager {
                 self.active_sessions.insert(peer_id, handle);
                 self.counter.inc_active(&direction);
 
-                match direction {
-                    Direction::Outgoing(_) => self.metrics.total_dial_successes.increment(1),
-                    _ => {}
+                if direction.is_outgoing() {
+                    self.metrics.total_dial_successes.increment(1);
                 }
 
                 Poll::Ready(SessionEvent::SessionEstablished {
@@ -703,6 +702,11 @@ impl Direction {
     /// Returns `true` if this an incoming connection.
     pub(crate) fn is_incoming(&self) -> bool {
         matches!(self, Direction::Incoming)
+    }
+
+    /// Returns `true` if this an outgoing connection.
+    pub(crate) fn is_outgoing(&self) -> bool {
+        matches!(self, Direction::Outgoing(_))
     }
 }
 
