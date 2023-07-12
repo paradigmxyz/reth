@@ -40,5 +40,5 @@ pub mod test_vectors;
 pub mod utils;
 pub mod version;
 
-#[cfg(all(feature = "jemalloc", not(target_os = "windows")))]
+#[cfg(all(feature = "jemalloc", target_family = "unix"))]
 use jemallocator as _;

@@ -1,5 +1,5 @@
 // We use jemalloc for performance reasons
-#[cfg(all(feature = "jemalloc", not(target_os = "windows")))]
+#[cfg(all(feature = "jemalloc", target_family = "unix"))]
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
