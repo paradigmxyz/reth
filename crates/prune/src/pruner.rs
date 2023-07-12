@@ -7,7 +7,7 @@ use reth_provider::{
     BlockReader, DatabaseProviderRW, ProviderError, ProviderFactory, PruneCheckpointWriter,
 };
 use std::sync::Arc;
-use tracing::debug;
+use tracing::{debug, instrument, trace};
 
 /// Result of [Pruner::run] execution
 pub type PrunerResult = Result<(), PrunerError>;
@@ -50,6 +50,7 @@ impl<DB: Database> Pruner<DB> {
     }
 
     /// Run the pruner
+    #[instrument(level = "trace", skip(self), target = "pruner")]
     pub fn run(&mut self, tip_block_number: BlockNumber) -> PrunerResult {
         let provider = self.provider_factory.provider_rw()?;
 
@@ -85,6 +86,7 @@ impl<DB: Database> Pruner<DB> {
     }
 
     /// Prune receipts up to the provided block, inclusive.
+    #[instrument(level = "trace", skip(self, provider), target = "pruner")]
     fn prune_receipts(
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
@@ -95,10 +97,9 @@ impl<DB: Database> Pruner<DB> {
             .block_body_indices(to_block)?
             .ok_or(ProviderError::BlockBodyIndicesNotFound(to_block))?;
 
-        debug!(target: "pruner", %to_block, "Pruning receipts");
         let pruned_receipts =
             provider.prune_table::<tables::Receipts, _>(..=to_block_body.last_tx_num())?;
-        debug!(target: "pruner", %to_block, pruned = %pruned_receipts, "Finished pruning receipts");
+        trace!(target: "pruner", %to_block, %pruned_receipts, "Pruned receipts");
 
         provider.save_prune_checkpoint(
             PrunePart::Receipts,
