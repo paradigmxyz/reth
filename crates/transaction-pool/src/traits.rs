@@ -175,6 +175,15 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
 
+    /// Returns an iterator that yields transactions that are ready for block production with the
+    /// given base fee.
+    ///
+    /// Consumer: Block production
+    fn best_transactions_with_base_fee(
+        &self,
+        base_fee: u128,
+    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
+
     /// Returns all transactions that can be included in the next block.
     ///
     /// This is primarily used for the `txpool_` RPC namespace: <https://geth.ethereum.org/docs/interacting-with-geth/rpc/ns-txpool> which distinguishes between `pending` and `queued` transactions, where `pending` are transactions ready for inclusion in the next block and `queued` are transactions that are ready for inclusion in future blocks.
