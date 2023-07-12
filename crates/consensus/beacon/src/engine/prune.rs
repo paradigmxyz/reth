@@ -1,6 +1,7 @@
 //! Prune management for the engine implementation.
 
 use futures::FutureExt;
+use reth_db::database::Database;
 use reth_primitives::BlockNumber;
 use reth_prune::{Pruner, PrunerError, PrunerWithResult};
 use reth_tasks::TaskSpawner;
@@ -10,16 +11,16 @@ use tokio::sync::oneshot;
 /// Manages pruning under the control of the engine.
 ///
 /// This type controls the [Pruner].
-pub(crate) struct EnginePruneController {
+pub(crate) struct EnginePruneController<DB> {
     /// The current state of the pruner.
-    pruner_state: PrunerState,
+    pruner_state: PrunerState<DB>,
     /// The type that can spawn the pruner task.
     pruner_task_spawner: Box<dyn TaskSpawner>,
 }
 
-impl EnginePruneController {
+impl<DB: Database + 'static> EnginePruneController<DB> {
     /// Create a new instance
-    pub(crate) fn new(pruner: Pruner, pruner_task_spawner: Box<dyn TaskSpawner>) -> Self {
+    pub(crate) fn new(pruner: Pruner<DB>, pruner_task_spawner: Box<dyn TaskSpawner>) -> Self {
         Self { pruner_state: PrunerState::Idle(Some(pruner)), pruner_task_spawner }
     }
 
@@ -131,14 +132,14 @@ pub(crate) enum EnginePruneEvent {
 /// running, it acquires the write lock over the database. This means that we cannot forward to the
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
-enum PrunerState {
+enum PrunerState<DB> {
     /// Pruner is idle.
-    Idle(Option<Pruner>),
+    Idle(Option<Pruner<DB>>),
     /// Pruner is running and waiting for a response
-    Running(oneshot::Receiver<PrunerWithResult>),
+    Running(oneshot::Receiver<PrunerWithResult<DB>>),
 }
 
-impl PrunerState {
+impl<DB> PrunerState<DB> {
     /// Returns `true` if the state matches idle.
     fn is_idle(&self) -> bool {
         matches!(self, PrunerState::Idle(_))

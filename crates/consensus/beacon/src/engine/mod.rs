@@ -192,7 +192,7 @@ where
     /// be used to download and execute the missing blocks.
     pipeline_run_threshold: u64,
     /// Controls pruning triggered by engine updates.
-    prune: Option<EnginePruneController>,
+    prune: Option<EnginePruneController<DB>>,
 }
 
 impl<DB, BT, Client> BeaconConsensusEngine<DB, BT, Client>
@@ -219,7 +219,7 @@ where
         payload_builder: PayloadBuilderHandle,
         target: Option<H256>,
         pipeline_run_threshold: u64,
-        pruner: Option<Pruner>,
+        pruner: Option<Pruner<DB>>,
     ) -> Result<(Self, BeaconConsensusEngineHandle), Error> {
         let (to_engine, rx) = mpsc::unbounded_channel();
         Self::with_channel(
@@ -265,7 +265,7 @@ where
         pipeline_run_threshold: u64,
         to_engine: UnboundedSender<BeaconEngineMessage>,
         rx: UnboundedReceiver<BeaconEngineMessage>,
-        pruner: Option<Pruner>,
+        pruner: Option<Pruner<DB>>,
     ) -> Result<(Self, BeaconConsensusEngineHandle), Error> {
         let handle = BeaconConsensusEngineHandle { to_engine };
         let sync = EngineSyncController::new(
