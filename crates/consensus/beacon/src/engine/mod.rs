@@ -761,7 +761,7 @@ where
     /// Additionally, updates the head used for p2p handshakes.
     ///
     /// This also updates the tracked safe and finalized blocks, and should be called before
-    /// return a VALID forkchoice update response
+    /// returning a VALID forkchoice update response
     fn update_canon_chain(
         &self,
         head: SealedHeader,
@@ -779,7 +779,7 @@ where
     /// This expects the given head to be the new canonical head.
     /// Additionally, updates the head used for p2p handshakes.
     ///
-    /// This should be called before issuing a VALID forkchoice update.
+    /// This should be called before returning a VALID forkchoice update response
     #[inline]
     fn update_head(&self, head: SealedHeader) -> Result<(), reth_interfaces::Error> {
         let mut head_block = Head {
