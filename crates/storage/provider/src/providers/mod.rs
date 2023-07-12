@@ -655,6 +655,10 @@ where
         self.tree.canonical_tip()
     }
 
+    fn is_canonical(&self, hash: BlockHash) -> std::result::Result<bool, Error> {
+        self.tree.is_canonical(hash)
+    }
+
     fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {
         self.tree.pending_blocks()
     }
