@@ -606,13 +606,6 @@ where
             return Ok(OnForkChoiceUpdated::with_invalid(status))
         }
 
-        // ensure that the finalized block, if not zero, is known and in the canonical chain
-        if !state.finalized_block_hash.is_zero() &&
-            !self.blockchain.is_canonical(&state.finalized_block_hash)?
-        {
-            return Ok(OnForkChoiceUpdated::invalid_state())
-        }
-
         if self.sync.is_pipeline_active() {
             // We can only process new forkchoice updates if the pipeline is idle, since it requires
             // exclusive access to the database
@@ -667,6 +660,28 @@ where
                 self.on_failed_canonical_forkchoice_update(&state, error)
             }
         };
+
+        // Ensure that the finalized block, if not zero, is known and in the canonical chain after
+        // the head block is canonicalized.
+        //
+        // This ensures that the finalized block is consistent with the head block, i.e. the
+        // finalized block is an ancestor of the head block.
+        if !state.finalized_block_hash.is_zero() &&
+            !self.blockchain.is_canonical(state.finalized_block_hash)?
+        {
+            return Ok(OnForkChoiceUpdated::invalid_state())
+        }
+
+        // Also ensure that the safe block, if not zero, is known and in the canonical chain after
+        // the head block is canonicalized.
+        //
+        // This ensures that the safe block is consistent with the head block, i.e. the safe block
+        // is an ancestor of the head block.
+        if !state.safe_block_hash.is_zero() &&
+            !self.blockchain.is_canonical(state.safe_block_hash)?
+        {
+            return Ok(OnForkChoiceUpdated::invalid_state())
+        }
 
         trace!(target: "consensus::engine", ?status, ?state, "Returning forkchoice status");
         Ok(OnForkChoiceUpdated::valid(status))
