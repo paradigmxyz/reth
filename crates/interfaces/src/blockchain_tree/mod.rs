@@ -62,7 +62,17 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     ///
     /// This finalizes `last_finalized_block` prior to reading the canonical hashes (using
     /// [`BlockchainTreeEngine::finalize_block`]).
-    fn restore_canonical_hashes(&self, last_finalized_block: BlockNumber) -> Result<(), Error>;
+    fn restore_canonical_hashes_and_finalize(
+        &self,
+        last_finalized_block: BlockNumber,
+    ) -> Result<(), Error>;
+
+    /// Reads the last `N` canonical hashes from the database and updates the block indices of the
+    /// tree.
+    ///
+    /// `N` is the `max_reorg_depth` plus the number of block hashes needed to satisfy the
+    /// `BLOCKHASH` opcode in the EVM.
+    fn restore_canonical_hashes(&self) -> Result<(), Error>;
 
     /// Make a block and its parent chain part of the canonical chain by committing it to the
     /// database.
