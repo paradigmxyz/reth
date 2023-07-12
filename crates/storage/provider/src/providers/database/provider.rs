@@ -934,9 +934,17 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
         Ok(self.tx.get::<tables::Transactions>(id)?.map(Into::into))
     }
 
+    fn transaction_by_id_no_hash(&self, id: TxNumber) -> Result<Option<TransactionSignedNoHash>> {
+        Ok(self.tx.get::<tables::Transactions>(id)?)
+    }
+
     fn transaction_by_hash(&self, hash: TxHash) -> Result<Option<TransactionSigned>> {
         if let Some(id) = self.transaction_id(hash)? {
-            Ok(self.transaction_by_id(id)?)
+            Ok(self.transaction_by_id_no_hash(id)?.map(|tx| TransactionSigned {
+                hash,
+                signature: tx.signature,
+                transaction: tx.transaction,
+            }))
         } else {
             Ok(None)
         }
@@ -949,7 +957,12 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
     ) -> Result<Option<(TransactionSigned, TransactionMeta)>> {
         let mut transaction_cursor = self.tx.cursor_read::<tables::TransactionBlock>()?;
         if let Some(transaction_id) = self.transaction_id(tx_hash)? {
-            if let Some(transaction) = self.transaction_by_id(transaction_id)? {
+            if let Some(tx) = self.transaction_by_id_no_hash(transaction_id)? {
+                let transaction = TransactionSigned {
+                    hash: tx_hash,
+                    signature: tx.signature,
+                    transaction: tx.transaction,
+                };
                 if let Some(block_number) =
                     transaction_cursor.seek(transaction_id).map(|b| b.map(|(_, bn)| bn))?
                 {
@@ -1214,14 +1227,15 @@ impl<'this, TX: DbTxMut<'this>> StageCheckpointWriter for DatabaseProvider<'this
     ) -> Result<()> {
         // iterate over all existing stages in the table and update its progress.
         let mut cursor = self.tx.cursor_write::<tables::SyncStage>()?;
-        while let Some((stage_name, checkpoint)) = cursor.next()? {
+        for stage_id in StageId::ALL {
+            let (_, checkpoint) = cursor.seek_exact(stage_id.to_string())?.unwrap_or_default();
             cursor.upsert(
-                stage_name,
+                stage_id.to_string(),
                 StageCheckpoint {
                     block_number,
                     ..if drop_stage_checkpoint { Default::default() } else { checkpoint }
                 },
-            )?
+            )?;
         }
 
         Ok(())
@@ -1774,7 +1788,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
 
         // Write state and changesets to the database.
         // Must be written after blocks because of the receipt lookup.
-        state.write_to_db(self.tx_ref())?;
+        state.write_to_db(self.tx_ref(), new_tip_number)?;
 
         self.insert_hashes(first_number..=last_block_number, last_block_hash, expected_state_root)?;
 

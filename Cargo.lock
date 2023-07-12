@@ -4956,6 +4956,7 @@ dependencies = [
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
+ "reth-prune",
  "reth-revm",
  "reth-revm-inspectors",
  "reth-rlp",
@@ -5029,6 +5030,7 @@ dependencies = [
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
+ "reth-prune",
  "reth-rpc-types",
  "reth-stages",
  "reth-tasks",
@@ -5504,6 +5506,7 @@ dependencies = [
  "impl-serde",
  "modular-bitfield",
  "once_cell",
+ "paste",
  "plain_hasher",
  "pprof",
  "proptest",
@@ -5550,6 +5553,15 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
+ "tracing",
+]
+
+[[package]]
+name = "reth-prune"
+version = "0.1.0-alpha.3"
+dependencies = [
+ "reth-primitives",
+ "thiserror",
  "tracing",
 ]
 
@@ -5735,6 +5747,7 @@ dependencies = [
  "reth-provider",
  "reth-rpc-api",
  "reth-rpc-types",
+ "reth-tasks",
  "thiserror",
  "tokio",
  "tracing",

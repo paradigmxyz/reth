@@ -220,7 +220,7 @@ impl StageCheckpoint {
     /// Get the underlying [`EntitiesCheckpoint`], if any, to determine the number of entities
     /// processed, and the number of total entities to process.
     pub fn entities(&self) -> Option<EntitiesCheckpoint> {
-        let Some(stage_checkpoint) = self.stage_checkpoint else { return None };
+        let stage_checkpoint = self.stage_checkpoint?;
 
         match stage_checkpoint {
             StageUnitCheckpoint::Account(AccountHashingCheckpoint {

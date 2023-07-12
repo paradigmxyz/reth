@@ -159,10 +159,11 @@ impl ImportCommand {
         let (tip_tx, tip_rx) = watch::channel(H256::zero());
         let factory = reth_revm::Factory::new(self.chain.clone());
 
+        let max_block = file_client.max_block().unwrap_or(0);
         let mut pipeline = Pipeline::builder()
             .with_tip_sender(tip_tx)
             // we want to sync all blocks the file client provides or 0 if empty
-            .with_max_block(file_client.max_block().unwrap_or(0))
+            .with_max_block(max_block)
             .add_stages(
                 DefaultStages::new(
                     HeaderSyncMode::Tip(tip_rx),
@@ -184,6 +185,7 @@ impl ImportCommand {
                         max_blocks: config.stages.execution.max_blocks,
                         max_changes: config.stages.execution.max_changes,
                     },
+                    config.prune.map(|prune| prune.parts).unwrap_or_default(),
                 )),
             )
             .build(db, self.chain.clone());

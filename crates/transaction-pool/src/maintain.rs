@@ -1,6 +1,7 @@
 //! Support for maintaining the state of the transaction pool
 
 use crate::{
+    metrics::MaintainPoolMetrics,
     traits::{CanonicalStateUpdate, ChangedAccount, TransactionPoolExt},
     BlockInfo, TransactionPool,
 };
@@ -45,6 +46,7 @@ where
     P: TransactionPoolExt + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 {
+    let mut metrics = MaintainPoolMetrics::default();
     // ensure the pool points to latest state
     if let Ok(Some(latest)) = client.block_by_number_or_tag(BlockNumberOrTag::Latest) {
         let latest = latest.seal_slow();
@@ -63,7 +65,11 @@ where
     let mut maintained_state = MaintainedPoolState::InSync;
 
     // Listen for new chain events and derive the update action for the pool
-    while let Some(event) = events.next().await {
+    loop {
+        metrics.set_dirty_accounts_len(dirty_addresses.len());
+
+        let Some(event) = events.next().await else { break };
+
         let pool_info = pool.block_info();
 
         // TODO from time to time re-check the unique accounts in the pool and remove and resync
@@ -136,7 +142,7 @@ where
                     .filter(|tx| !new_mined_transactions.contains(&tx.hash))
                     .filter_map(|tx| tx.clone().into_ecrecovered())
                     .map(<P as TransactionPool>::Transaction::from_recovered_transaction)
-                    .collect();
+                    .collect::<Vec<_>>();
 
                 // update the pool first
                 let update = CanonicalStateUpdate {
@@ -153,8 +159,8 @@ where
                 // to be re-injected
                 //
                 // Note: we no longer know if the tx was local or external
+                metrics.inc_reinserted_transactions(pruned_old_transactions.len());
                 let _ = pool.add_external_transactions(pruned_old_transactions).await;
-                // TODO: metrics
             }
             CanonStateNotification::Revert { old } => {
                 // this similar to the inverse of a commit where we need to insert the transactions
@@ -193,13 +199,13 @@ where
                     .transactions()
                     .filter_map(|tx| tx.clone().into_ecrecovered())
                     .map(<P as TransactionPool>::Transaction::from_recovered_transaction)
-                    .collect();
+                    .collect::<Vec<_>>();
 
                 // all transactions that were mined in the old chain need to be re-injected
                 //
                 // Note: we no longer know if the tx was local or external
+                metrics.inc_reinserted_transactions(pruned_old_transactions.len());
                 let _ = pool.add_external_transactions(pruned_old_transactions).await;
-                // TODO: metrics
             }
             CanonStateNotification::Commit { new } => {
                 let (blocks, state) = new.inner();

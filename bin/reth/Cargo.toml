@@ -36,6 +36,7 @@ reth-payload-builder = { workspace = true }
 reth-basic-payload-builder = { path = "../../crates/payload/basic" }
 reth-discv4 = { path = "../../crates/net/discv4" }
 reth-metrics = { workspace = true }
+reth-prune = { path = "../../crates/prune" }
 jemallocator = { version = "0.5.0", optional = true }
 jemalloc-ctl = { version = "0.5.0", optional = true }
 

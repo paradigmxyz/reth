@@ -360,6 +360,11 @@ impl Command {
             None
         };
 
+        let pruner = config.prune.map(|prune_config| {
+            info!(target: "reth::cli", "Pruner initialized");
+            reth_prune::Pruner::new(prune_config.block_interval, tree_config.max_reorg_depth())
+        });
+
         // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
             client,
@@ -374,6 +379,7 @@ impl Command {
             MIN_BLOCKS_FOR_PIPELINE_RUN,
             consensus_engine_tx,
             consensus_engine_rx,
+            pruner,
         )?;
         info!(target: "reth::cli", "Consensus engine initialized");
 
@@ -400,6 +406,7 @@ impl Command {
             self.chain.clone(),
             beacon_engine_handle,
             payload_builder.into(),
+            Box::new(ctx.task_executor.clone()),
         );
         info!(target: "reth::cli", "Engine API handler initialized");
 
@@ -719,6 +726,7 @@ impl Command {
                             max_blocks: stage_config.execution.max_blocks,
                             max_changes: stage_config.execution.max_changes,
                         },
+                        config.prune.map(|prune| prune.parts).unwrap_or_default(),
                     )
                     .with_metrics_tx(metrics_tx),
                 )
