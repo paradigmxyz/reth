@@ -7,7 +7,7 @@ use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
 };
-use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
+use tokio::sync::{mpsc,mpsc::error::TrySendError};
 use reth_primitives::{ForkId, NodeRecord, PeerId};
 use secp256k1::SecretKey;
 use std::{
@@ -18,12 +18,12 @@ use std::{
 };
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
-use tokio_stream::wrappers::UnboundedReceiverStream;
 
 
 /// An abstraction over the configured discovery protocol.
 ///
-/// Listens for new discovered nodes and emits events for discovered nodes and their address.
+/// Listens for new discovered nodes and emits events for discovered nodes and their address.#[derive(Debug, Clone)]
+
 pub struct Discovery {
     /// All nodes discovered via discovery protocol.
     ///
@@ -45,8 +45,8 @@ pub struct Discovery {
     _dns_disc_service: Option<JoinHandle<()>>,
     /// Events buffered until polled.
     queued_events: VecDeque<DiscoveryEvent>,
-
-    discovery_manager_tx: UnboundedSender<DiscoveryEvent>,
+    /// List of listeners subscribed to discovery events.
+    discovery_listeners: Vec<mpsc::Sender<DiscoveryEvent>>,
 }
 
 impl Discovery {
@@ -58,8 +58,7 @@ impl Discovery {
         discovery_addr: SocketAddr,
         sk: SecretKey,
         discv4_config: Option<Discv4Config>,
-        dns_discovery_config: Option<DnsDiscoveryConfig>,
-        discovery_manager_tx: UnboundedSender<DiscoveryEvent>,
+        dns_discovery_config: Option<DnsDiscoveryConfig>
     ) -> Result<Self, NetworkError> {
         // setup discv4
         let local_enr = NodeRecord::from_secret_key(discovery_addr, &sk);
@@ -91,7 +90,7 @@ impl Discovery {
             };
 
         Ok(Self {
-            discovery_manager_tx: (discovery_manager_tx),
+            discovery_listeners: Vec::with_capacity(1),  
             local_enr,
             discv4,
             discv4_updates,
@@ -104,15 +103,22 @@ impl Discovery {
         })
     }
 
-    fn manager(&self) -> &UnboundedSender<DiscoveryEvent> {
-        &self.discovery_manager_tx
+    pub fn register_listener(&mut self) -> mpsc::Receiver<DiscoveryEvent> {
+        let (tx, rx) = mpsc::channel(512);
+        self.discovery_listeners.push(tx);
+        rx
     }
 
-    pub fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveredEvent> {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let _ = self.manager().send(DiscoveryEvent::DiscoveryListener(tx));
-        UnboundedReceiverStream::new(rx)
+    fn notify_listeners(&mut self, update: DiscoveryEvent) {
+        self.discovery_listeners.retain_mut(|listener| {
+            match listener.try_send(update.clone()) {
+                Ok(_) => true,
+                Err(TrySendError::Full(_)) => true,
+                Err(TrySendError::Closed(_)) => false,
+            }
+        });
     }
+
 
     /// Updates the `eth:ForkId` field in discv4.
     #[allow(unused)]
@@ -223,7 +229,7 @@ impl Discovery {
     /// NOTE: This instance does nothing
     pub(crate) fn noop() -> Self {
 
-        let (discovery_manager_tx, _) = mpsc::unbounded_channel();
+        let (discovery_listeners, _) : (mpsc::UnboundedSender<DiscoveryEvent>, _) = mpsc::unbounded_channel();
 
         Self {
             discovered_nodes: Default::default(),
@@ -240,13 +246,14 @@ impl Discovery {
             _dns_discovery: None,
             dns_discovery_updates: None,
             _dns_disc_service: None,
-            discovery_manager_tx
+             discovery_listeners: Vec::with_capacity(1),
         }
     }
 }
 
 /// Events produced by the [`Discovery`] manager.
-pub(crate) enum DiscoveryEvent {
+ #[derive(Debug, Clone)]
+pub enum DiscoveryEvent {
 
     NewNode(DiscoveredEvent),
     
@@ -267,9 +274,8 @@ mod tests {
         let mut rng = thread_rng();
         let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
         let discovery_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
-        let (tx, _) = mpsc::unbounded_channel();
         let _discovery =
-            Discovery::new(discovery_addr, secret_key, Default::default(), Default::default(),tx)
+            Discovery::new(discovery_addr, secret_key, Default::default(), Default::default())
                 .await
                 .unwrap();
     }
