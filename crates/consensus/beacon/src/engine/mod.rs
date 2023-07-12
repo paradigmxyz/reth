@@ -1605,7 +1605,9 @@ mod tests {
         test_utils::{NoopFullBlockClient, TestConsensus},
     };
     use reth_payload_builder::test_utils::spawn_test_payload_service;
-    use reth_primitives::{stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, H256, MAINNET};
+    use reth_primitives::{
+        stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, PruneModes, H256, MAINNET,
+    };
     use reth_provider::{
         providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockWriter,
         ProviderFactory,
@@ -1777,7 +1779,8 @@ mod tests {
             let latest = self.chain_spec.genesis_header().seal_slow();
             let blockchain_provider = BlockchainProvider::with_latest(shareable_db, tree, latest);
 
-            let pruner = Pruner::new(5, 0);
+            let pruner =
+                Pruner::new(db.clone(), self.chain_spec.clone(), 5, 0, PruneModes::default());
 
             let (mut engine, handle) = BeaconConsensusEngine::new(
                 NoopFullBlockClient::default(),

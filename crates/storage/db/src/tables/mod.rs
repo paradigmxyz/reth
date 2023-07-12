@@ -430,7 +430,6 @@ pub type StageId = String;
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::PruneCheckpoint;
     use std::str::FromStr;
 
     use crate::*;
