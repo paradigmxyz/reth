@@ -461,7 +461,7 @@ mod tests {
         (TableType::Table, TxSenders::const_name()),
         (TableType::Table, SyncStage::const_name()),
         (TableType::Table, SyncStageProgress::const_name()),
-        (TableType::Table, PruneCheckpoint::const_name()),
+        (TableType::Table, PruneCheckpoints::const_name()),
     ];
 
     #[test]
