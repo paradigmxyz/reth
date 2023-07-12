@@ -715,6 +715,13 @@ where
                 return Ok(())
             }
 
+            let block_number =
+                self.blockchain.block_number(finalized_block_hash)?.ok_or_else(|| {
+                    Error::Provider(ProviderError::UnknownBlockHash(finalized_block_hash))
+                })?;
+
+            self.blockchain.finalize_block(block_number);
+
             let finalized = self
                 .blockchain
                 .find_block_by_hash(finalized_block_hash, BlockSource::Any)?
