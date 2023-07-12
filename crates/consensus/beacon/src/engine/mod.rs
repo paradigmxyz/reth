@@ -67,6 +67,7 @@ mod handle;
 pub use handle::BeaconConsensusEngineHandle;
 
 mod forkchoice;
+pub use forkchoice::ForkchoiceStatus;
 mod metrics;
 pub(crate) mod prune;
 pub(crate) mod sync;
