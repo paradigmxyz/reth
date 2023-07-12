@@ -3,7 +3,8 @@ use crate::{
     traits::{AccountExtReader, BlockSource, ReceiptProvider, StageCheckpointWriter},
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
     EvmEnvProvider, HashingWriter, HeaderProvider, HistoryWriter, PostState, ProviderError,
-    StageCheckpointReader, StorageReader, TransactionsProvider, WithdrawalsProvider,
+    PruneCheckpointReader, PruneCheckpointWriter, StageCheckpointReader, StorageReader,
+    TransactionsProvider, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -24,9 +25,10 @@ use reth_primitives::{
     keccak256,
     stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainInfo, ChainSpec, Hardfork, Head, Header, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
-    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256, U256,
+    ChainInfo, ChainSpec, Hardfork, Head, Header, PruneCheckpoint, PrunePart, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta, TransactionSigned,
+    TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256,
+    U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
@@ -1820,5 +1822,17 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
         self.update_pipeline_stages(new_tip_number, false)?;
 
         Ok(())
+    }
+}
+
+impl<'this, TX: DbTx<'this>> PruneCheckpointReader for DatabaseProvider<'this, TX> {
+    fn get_prune_checkpoint(&self, part: PrunePart) -> Result<Option<PruneCheckpoint>> {
+        Ok(self.tx.get::<tables::PruneCheckpoints>(part)?)
+    }
+}
+
+impl<'this, TX: DbTxMut<'this>> PruneCheckpointWriter for DatabaseProvider<'this, TX> {
+    fn save_prune_checkpoint(&self, part: PrunePart, checkpoint: PruneCheckpoint) -> Result<()> {
+        Ok(self.tx.put::<tables::PruneCheckpoints>(part, checkpoint)?)
     }
 }

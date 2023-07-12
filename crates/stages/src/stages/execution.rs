@@ -14,7 +14,7 @@ use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
     },
-    BlockNumber, Header, PruneTargets, U256,
+    BlockNumber, Header, PruneModes, U256,
 };
 use reth_provider::{
     post_state::PostState, BlockExecutor, BlockReader, DatabaseProviderRW, ExecutorFactory,
@@ -60,7 +60,7 @@ pub struct ExecutionStage<EF: ExecutorFactory> {
     /// The commit thresholds of the execution stage.
     thresholds: ExecutionStageThresholds,
     /// Pruning configuration.
-    prune_targets: PruneTargets,
+    prune_targets: PruneModes,
 }
 
 impl<EF: ExecutorFactory> ExecutionStage<EF> {
@@ -68,7 +68,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     pub fn new(
         executor_factory: EF,
         thresholds: ExecutionStageThresholds,
-        prune_targets: PruneTargets,
+        prune_targets: PruneModes,
     ) -> Self {
         Self { metrics_tx: None, executor_factory, thresholds, prune_targets }
     }
@@ -77,7 +77,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     ///
     /// The commit threshold will be set to 10_000.
     pub fn new_with_factory(executor_factory: EF) -> Self {
-        Self::new(executor_factory, ExecutionStageThresholds::default(), PruneTargets::default())
+        Self::new(executor_factory, ExecutionStageThresholds::default(), PruneModes::default())
     }
 
     /// Set the metric events sender.
@@ -425,7 +425,7 @@ mod tests {
     use reth_db::{models::AccountBeforeTx, test_utils::create_test_rw_db};
     use reth_primitives::{
         hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Bytecode,
-        ChainSpecBuilder, PruneMode, PruneTargets, SealedBlock, StorageEntry, H160, H256, MAINNET,
+        ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, StorageEntry, H160, H256, MAINNET,
         U256,
     };
     use reth_provider::{AccountReader, BlockWriter, ProviderFactory, ReceiptProvider};
@@ -439,7 +439,7 @@ mod tests {
         ExecutionStage::new(
             factory,
             ExecutionStageThresholds { max_blocks: Some(100), max_changes: None },
-            PruneTargets::none(),
+            PruneModes::none(),
         )
     }
 
@@ -943,7 +943,7 @@ mod tests {
         provider.commit().unwrap();
 
         let check_pruning = |factory: Arc<ProviderFactory<_>>,
-                             prune_targets: PruneTargets,
+                             prune_targets: PruneModes,
                              expect_num_receipts: usize| async move {
             let provider = factory.provider_rw().unwrap();
 
@@ -960,7 +960,7 @@ mod tests {
             );
         };
 
-        let mut prune = PruneTargets::none();
+        let mut prune = PruneModes::none();
 
         check_pruning(factory.clone(), prune, 1).await;
 

@@ -5,7 +5,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_network::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
-use reth_primitives::PruneTargets;
+use reth_primitives::PruneModes;
 use secp256k1::SecretKey;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -285,12 +285,12 @@ pub struct PruneConfig {
     /// Minimum pruning interval measured in blocks.
     pub block_interval: u64,
     /// Pruning configuration for every part of the data that can be pruned.
-    pub parts: PruneTargets,
+    pub parts: PruneModes,
 }
 
 impl Default for PruneConfig {
     fn default() -> Self {
-        Self { block_interval: 10, parts: PruneTargets::default() }
+        Self { block_interval: 10, parts: PruneModes::default() }
     }
 }
 

@@ -2,13 +2,12 @@
 
 use crate::PrunerError;
 use reth_db::{database::Database, tables};
-use reth_primitives::{BlockNumber, ChainSpec};
-use reth_provider::{BlockReader, DatabaseProviderRW, ProviderError, ProviderFactory};
+use reth_primitives::{BlockNumber, ChainSpec, PruneCheckpoint, PruneModes, PrunePart};
+use reth_provider::{
+    BlockReader, DatabaseProviderRW, ProviderError, ProviderFactory, PruneCheckpointWriter,
+};
 use std::sync::Arc;
 use tracing::debug;
-
-const PRUNE_RECEIPTS_DISTANCE: u64 = 64;
-const PRUNE_RECEIPTS_BEFORE: u64 = 10;
 
 /// Result of [Pruner::run] execution
 pub type PrunerResult = Result<(), PrunerError>;
@@ -29,6 +28,7 @@ pub struct Pruner<DB> {
     /// Last pruned block number. Used in conjunction with `min_block_interval` to determine
     /// when the pruning needs to be initiated.
     last_pruned_block_number: Option<BlockNumber>,
+    modes: PruneModes,
 }
 
 impl<DB: Database> Pruner<DB> {
@@ -38,12 +38,14 @@ impl<DB: Database> Pruner<DB> {
         chain_spec: Arc<ChainSpec>,
         min_block_interval: u64,
         max_prune_depth: u64,
+        modes: PruneModes,
     ) -> Self {
         Self {
             provider_factory: ProviderFactory::new(db, chain_spec),
             min_block_interval,
             max_prune_depth,
             last_pruned_block_number: None,
+            modes,
         }
     }
 
@@ -51,7 +53,9 @@ impl<DB: Database> Pruner<DB> {
     pub fn run(&mut self, tip_block_number: BlockNumber) -> PrunerResult {
         let provider = self.provider_factory.provider_rw()?;
 
-        self.prune_receipts(&provider, tip_block_number, true)?;
+        if let Some(to_block) = self.modes.prune_to_block_receipts(tip_block_number) {
+            self.prune_receipts(&provider, to_block)?;
+        }
 
         provider.commit()?;
 
@@ -83,15 +87,8 @@ impl<DB: Database> Pruner<DB> {
     fn prune_receipts(
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
-        tip_block_number: BlockNumber,
-        distance_over_before: bool,
+        to_block: BlockNumber,
     ) -> PrunerResult {
-        // Block to prune towards, inclusive
-        let to_block = if distance_over_before {
-            tip_block_number.saturating_sub(PRUNE_RECEIPTS_DISTANCE)
-        } else {
-            PRUNE_RECEIPTS_BEFORE.saturating_sub(1)
-        };
         let to_block_body = provider
             .block_body_indices(to_block)?
             .ok_or(ProviderError::BlockBodyIndicesNotFound(to_block))?;
@@ -101,7 +98,10 @@ impl<DB: Database> Pruner<DB> {
             provider.prune_table::<tables::Receipts, _>(..=to_block_body.last_tx_num())?;
         debug!(target: "pruner", %to_block, pruned = %pruned_receipts, "Finished pruning receipts");
 
-        // TODO(alexey): save prune checkpoint for Receipts prune part
+        provider.save_prune_checkpoint(
+            PrunePart::Receipts,
+            PruneCheckpoint { block_number: to_block, prune_mode: self.modes.receipts.unwrap() },
+        )?;
 
         Ok(())
     }
@@ -109,23 +109,21 @@ impl<DB: Database> Pruner<DB> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        pruner::{PRUNE_RECEIPTS_BEFORE, PRUNE_RECEIPTS_DISTANCE},
-        Pruner,
-    };
+    use crate::Pruner;
     use assert_matches::assert_matches;
     use reth_db::{tables, test_utils::create_test_rw_db};
     use reth_interfaces::test_utils::{
         generators,
         generators::{random_block_range, random_receipt},
     };
-    use reth_primitives::{BlockNumber, SealedBlock, H256, MAINNET};
+    use reth_primitives::{PruneCheckpoint, PruneMode, PruneModes, PrunePart, H256, MAINNET};
+    use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::TestTransaction;
 
     #[test]
     fn is_pruning_needed() {
         let db = create_test_rw_db();
-        let pruner = Pruner::new(db, MAINNET.clone(), 5, 0);
+        let pruner = Pruner::new(db, MAINNET.clone(), 5, 0, PruneModes::default());
 
         // No last pruned block number was set before
         let first_block_number = 1;
@@ -140,10 +138,12 @@ mod tests {
         assert!(pruner.is_pruning_needed(third_block_number));
     }
 
-    fn setup_db(tx: &TestTransaction, tip_block_number: BlockNumber) -> Vec<SealedBlock> {
+    #[test]
+    fn prune_receipts() {
+        let tx = TestTransaction::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=tip_block_number, H256::zero(), 0..10);
+        let blocks = random_block_range(&mut rng, 0..=100, H256::zero(), 0..10);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let mut receipts = Vec::new();
@@ -164,48 +164,30 @@ mod tests {
             tx.table::<tables::Receipts>().unwrap().len()
         );
 
-        blocks
-    }
-
-    #[test]
-    fn prune_receipts_distance() {
-        let tx = TestTransaction::default();
-        let tip_block_number = 100;
-        let blocks = setup_db(&tx, tip_block_number);
-
-        let pruner = Pruner::new(tx.inner_raw(), MAINNET.clone(), 5, 0);
+        let prune_to_block = 10;
+        let prune_mode = PruneMode::Before(prune_to_block);
+        let pruner = Pruner::new(
+            tx.inner_raw(),
+            MAINNET.clone(),
+            5,
+            0,
+            PruneModes { receipts: Some(prune_mode), ..Default::default() },
+        );
 
         let provider = tx.inner_rw();
-        assert_matches!(pruner.prune_receipts(&provider, tip_block_number, true), Ok(()));
+        assert_matches!(pruner.prune_receipts(&provider, prune_to_block), Ok(()));
         provider.commit().expect("commit");
 
         assert_eq!(
             tx.table::<tables::Receipts>().unwrap().len(),
-            blocks[blocks.len().saturating_sub(PRUNE_RECEIPTS_DISTANCE as usize)..]
+            blocks[prune_to_block as usize + 1..]
                 .iter()
                 .map(|block| block.body.len())
                 .sum::<usize>()
         );
-    }
-
-    #[test]
-    fn prune_receipts_from_block() {
-        let tx = TestTransaction::default();
-        let tip_block_number = 100;
-        let blocks = setup_db(&tx, tip_block_number);
-
-        let pruner = Pruner::new(tx.inner_raw(), MAINNET.clone(), 5, 0);
-
-        let provider = tx.inner_rw();
-        assert_matches!(pruner.prune_receipts(&provider, tip_block_number, false), Ok(()));
-        provider.commit().expect("commit");
-
         assert_eq!(
-            tx.table::<tables::Receipts>().unwrap().len(),
-            blocks[PRUNE_RECEIPTS_BEFORE as usize..]
-                .iter()
-                .map(|block| block.body.len())
-                .sum::<usize>()
+            tx.inner().get_prune_checkpoint(PrunePart::Receipts).unwrap(),
+            Some(PruneCheckpoint { block_number: prune_to_block, prune_mode })
         );
     }
 }

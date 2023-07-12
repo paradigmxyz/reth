@@ -362,7 +362,13 @@ impl Command {
 
         let pruner = config.prune.map(|prune_config| {
             info!(target: "reth::cli", "Pruner initialized");
-            reth_prune::Pruner::new(prune_config.block_interval, tree_config.max_reorg_depth())
+            reth_prune::Pruner::new(
+                blockchain_db.clone(),
+                self.chain.clone(),
+                prune_config.block_interval,
+                tree_config.max_reorg_depth(),
+                prune_config.parts,
+            )
         });
 
         // Configure the consensus engine
