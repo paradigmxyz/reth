@@ -750,12 +750,21 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     ///
     /// This finalizes `last_finalized_block` prior to reading the canonical hashes (using
     /// [`BlockchainTree::finalize_block`]).
-    pub fn restore_canonical_hashes(
+    pub fn restore_canonical_hashes_and_finalize(
         &mut self,
         last_finalized_block: BlockNumber,
     ) -> Result<(), Error> {
         self.finalize_block(last_finalized_block);
 
+        self.restore_canonical_hashes()
+    }
+
+    /// Reads the last `N` canonical hashes from the database and updates the block indices of the
+    /// tree.
+    ///
+    /// `N` is the `max_reorg_depth` plus the number of block hashes needed to satisfy the
+    /// `BLOCKHASH` opcode in the EVM.
+    pub fn restore_canonical_hashes(&mut self) -> Result<(), Error> {
         let num_of_canonical_hashes =
             self.config.max_reorg_depth() + self.config.num_of_additional_canonical_block_hashes();
 
@@ -1578,7 +1587,7 @@ mod tests {
             .assert(&tree);
 
         // update canonical block to b2, this would make b2a be removed
-        assert_eq!(tree.restore_canonical_hashes(12), Ok(()));
+        assert_eq!(tree.restore_canonical_hashes_and_finalize(12), Ok(()));
 
         assert_eq!(tree.is_block_known(block2.num_hash()).unwrap(), Some(BlockStatus::Valid));
 

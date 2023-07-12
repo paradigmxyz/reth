@@ -21,6 +21,7 @@ members = [
     "crates/net/downloaders",
     "crates/payload/basic",
     "crates/primitives",
+    "crates/prune",
     "crates/revm",
     "crates/revm/revm-primitives",
     "crates/revm/revm-inspectors",
