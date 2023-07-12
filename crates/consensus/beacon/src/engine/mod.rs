@@ -631,12 +631,20 @@ where
                     debug!(target: "consensus::engine", hash=?state.head_block_hash, number=outcome.header().number, "canonicalized new head");
 
                     // new VALID update that moved the canonical chain forward
-                    let _ = self.update_canon_chain(outcome.header().clone(), &state);
+                    let _ = self.update_head(outcome.header().clone());
                 } else {
                     debug!(target: "consensus::engine", fcu_head_num=?outcome.header().number, current_head_num=?self.blockchain.canonical_tip().number, "Ignoring beacon update to old head");
                 }
 
                 if let Some(attrs) = attrs {
+                    // if we return early then we wouldn't perform these consistency checks, so we
+                    // need to do them here, and should do them before we process any payload
+                    // attributes
+                    if let Some(invalid_fcu_response) = self.ensure_consistent_state(state)? {
+                        trace!(target: "consensus::engine", ?state, head=?state.head_block_hash, "Forkchoice state is inconsistent, returning invalid response");
+                        return Ok(invalid_fcu_response)
+                    }
+
                     // the CL requested to build a new payload on top of this new VALID head
                     let payload_response = self.process_payload_attributes(
                         attrs,
@@ -662,8 +670,89 @@ where
             }
         };
 
+        if let Some(invalid_fcu_response) =
+            self.ensure_consistent_state_with_status(state, &status)?
+        {
+            trace!(target: "consensus::engine", ?status, ?state, "Forkchoice state is inconsistent, returning invalid response");
+            return Ok(invalid_fcu_response)
+        }
+
         trace!(target: "consensus::engine", ?status, ?state, "Returning forkchoice status");
         Ok(OnForkChoiceUpdated::valid(status))
+    }
+
+    /// Ensures that the given forkchoice state is consistent, assuming the head block has been
+    /// made canonical. This takes a status as input, and will only perform consistency checks if
+    /// the input status is VALID.
+    ///
+    /// If the forkchoice state is consistent, this will return Ok(None). Otherwise, this will
+    /// return an instance of [OnForkChoiceUpdated] that is INVALID.
+    ///
+    /// This also updates the safe and finalized blocks in the [CanonChainTracker], if they are
+    /// consistent with the head block.
+    fn ensure_consistent_state_with_status(
+        &mut self,
+        state: ForkchoiceState,
+        status: &PayloadStatus,
+    ) -> Result<Option<OnForkChoiceUpdated>, reth_interfaces::Error> {
+        // We only perform consistency checks if the status is VALID because if the status is
+        // INVALID, we want to return the correct _type_ of error to the CL so we can properly
+        // describe the reason it is invalid. For example, it's possible that the status is invalid
+        // because the safe block has an invalid state root. In that case, we want to preserve the
+        // correct `latestValidHash`, instead of returning a generic "invalid state" error that
+        // does not contain a `latestValidHash`.
+        //
+        // We also should not perform these checks if the status is SYNCING, because in that case
+        // we likely do not have the finalized or safe blocks, and would return an incorrect
+        // INVALID status instead.
+        if status.is_valid() {
+            return self.ensure_consistent_state(state)
+        }
+
+        Ok(None)
+    }
+
+    /// Ensures that the given forkchoice state is consistent, assuming the head block has been
+    /// made canonical.
+    ///
+    /// If the forkchoice state is consistent, this will return Ok(None). Otherwise, this will
+    /// return an instance of [OnForkChoiceUpdated] that is INVALID.
+    ///
+    /// This also updates the safe and finalized blocks in the [CanonChainTracker], if they are
+    /// consistent with the head block.
+    fn ensure_consistent_state(
+        &mut self,
+        state: ForkchoiceState,
+    ) -> Result<Option<OnForkChoiceUpdated>, reth_interfaces::Error> {
+        // Ensure that the finalized block, if not zero, is known and in the canonical chain
+        // after the head block is canonicalized.
+        //
+        // This ensures that the finalized block is consistent with the head block, i.e. the
+        // finalized block is an ancestor of the head block.
+        if !state.finalized_block_hash.is_zero() &&
+            !self.blockchain.is_canonical(state.finalized_block_hash)?
+        {
+            return Ok(Some(OnForkChoiceUpdated::invalid_state()))
+        }
+
+        // Finalized block is consistent, so update it in the canon chain tracker.
+        self.update_finalized_block(state.finalized_block_hash)?;
+
+        // Also ensure that the safe block, if not zero, is known and in the canonical chain
+        // after the head block is canonicalized.
+        //
+        // This ensures that the safe block is consistent with the head block, i.e. the safe
+        // block is an ancestor of the head block.
+        if !state.safe_block_hash.is_zero() &&
+            !self.blockchain.is_canonical(state.safe_block_hash)?
+        {
+            return Ok(Some(OnForkChoiceUpdated::invalid_state()))
+        }
+
+        // Safe block is consistent, so update it in the canon chain tracker.
+        self.update_safe_block(state.safe_block_hash)?;
+
+        Ok(None)
     }
 
     /// Sets the state of the canon chain tracker based to the given head.
@@ -672,12 +761,28 @@ where
     ///
     /// Additionally, updates the head used for p2p handshakes.
     ///
-    /// This should be called before issuing a VALID forkchoice update.
+    /// This also updates the tracked safe and finalized blocks, and should be called before
+    /// returning a VALID forkchoice update response
     fn update_canon_chain(
         &self,
         head: SealedHeader,
         update: &ForkchoiceState,
     ) -> Result<(), Error> {
+        self.update_head(head)?;
+        self.update_finalized_block(update.finalized_block_hash)?;
+        self.update_safe_block(update.safe_block_hash)?;
+
+        Ok(())
+    }
+
+    /// Updates the state of the canon chain tracker based on the given head.
+    ///
+    /// This expects the given head to be the new canonical head.
+    /// Additionally, updates the head used for p2p handshakes.
+    ///
+    /// This should be called before returning a VALID forkchoice update response
+    #[inline]
+    fn update_head(&self, head: SealedHeader) -> Result<(), reth_interfaces::Error> {
         let mut head_block = Head {
             number: head.number,
             hash: head.hash,
@@ -689,9 +794,6 @@ where
 
         // we update the the tracked header first
         self.blockchain.set_canonical_head(head);
-
-        self.update_finalized_block(update.finalized_block_hash)?;
-        self.update_safe_block(update.safe_block_hash)?;
 
         head_block.total_difficulty =
             self.blockchain.header_td_by_number(head_block.number)?.ok_or_else(|| {

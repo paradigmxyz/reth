@@ -158,6 +158,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
         self.tree.read().block_indices().canonical_tip()
     }
 
+    fn is_canonical(&self, hash: BlockHash) -> Result<bool, Error> {
+        trace!(target: "blockchain_tree", ?hash, "Checking if block is canonical");
+        self.tree.read().is_block_hash_canonical(&hash)
+    }
+
     fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {
         trace!(target: "blockchain_tree", "Returning all pending blocks");
         self.tree.read().block_indices().pending_blocks()
