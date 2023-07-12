@@ -122,7 +122,7 @@ use reth_rpc::{
         gas_oracle::GasPriceOracle,
     },
     AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider,
-    NetApi, RPCApi, TraceApi, TracingCallGuard, TxPoolApi, Web3Api,
+    NetApi, OtterscanApi, RPCApi, TraceApi, TracingCallGuard, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -646,6 +646,8 @@ pub enum RethRpcModule {
     Web3,
     /// `rpc_` module
     Rpc,
+    /// `ots_` module
+    Ots,
 }
 
 // === impl RethRpcModule ===
@@ -770,6 +772,13 @@ where
     pub fn register_eth(&mut self) -> &mut Self {
         let eth_api = self.eth_api();
         self.modules.insert(RethRpcModule::Eth, eth_api.into_rpc().into());
+        self
+    }
+
+    /// Register Otterscan Namespace
+    pub fn register_ots(&mut self) -> &mut Self {
+        let eth_api = self.eth_api();
+        self.modules.insert(RethRpcModule::Ots, OtterscanApi::new(eth_api).into_rpc().into());
         self
     }
 
@@ -921,6 +930,7 @@ where
                         )
                         .into_rpc()
                         .into(),
+                        RethRpcModule::Ots => OtterscanApi::new(eth_api.clone()).into_rpc().into(),
                     })
                     .clone()
             })

@@ -26,6 +26,7 @@ mod eth;
 mod eth_filter;
 mod eth_pubsub;
 mod net;
+mod otterscan;
 mod rpc;
 mod trace;
 mod txpool;
@@ -44,6 +45,7 @@ pub mod servers {
         eth_filter::EthFilterApiServer,
         eth_pubsub::EthPubSubApiServer,
         net::NetApiServer,
+        otterscan::OtterscanServer,
         rpc::RpcApiServer,
         trace::TraceApiServer,
         txpool::TxPoolApiServer,
@@ -64,6 +66,7 @@ pub mod clients {
         engine::{EngineApiClient, EngineEthApiClient},
         eth::EthApiClient,
         net::NetApiClient,
+        otterscan::OtterscanClient,
         rpc::RpcApiServer,
         trace::TraceApiClient,
         txpool::TxPoolApiClient,
