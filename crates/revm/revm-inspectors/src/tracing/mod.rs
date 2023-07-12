@@ -104,7 +104,7 @@ impl TracingInspector {
     ) -> bool {
         if data.precompiles.contains(to) {
             // only if this is _not_ the root call
-            return self.is_deep() && value == U256::ZERO;
+            return self.is_deep() && value == U256::ZERO
         }
         false
     }
@@ -395,7 +395,7 @@ where
         if self.config.record_steps {
             self.gas_inspector.step_end(interp, data, is_static, eval);
             self.fill_step_on_step_end(interp, data, eval);
-            return eval;
+            return eval
         }
         InstructionResult::Continue
     }

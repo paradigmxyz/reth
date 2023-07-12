@@ -239,12 +239,12 @@ impl CallTraceNode {
 
             // If the opcode is a call, put the child trace on the stack
             match step.op.u8() {
-                opcode::CREATE
-                | opcode::CREATE2
-                | opcode::DELEGATECALL
-                | opcode::CALL
-                | opcode::STATICCALL
-                | opcode::CALLCODE => {
+                opcode::CREATE |
+                opcode::CREATE2 |
+                opcode::DELEGATECALL |
+                opcode::CALL |
+                opcode::STATICCALL |
+                opcode::CALLCODE => {
                     let call_id = self.children[child_id];
                     item.call_child_id = Some(call_id);
                     child_id += 1;
@@ -358,7 +358,7 @@ impl CallTraceNode {
                 address: self.trace.address,
                 refund_address: self.trace.selfdestruct_refund_target.unwrap_or_default(),
                 balance: self.trace.value,
-            });
+            })
         }
         match self.kind() {
             CallKind::Call | CallKind::StaticCall | CallKind::CallCode | CallKind::DelegateCall => {

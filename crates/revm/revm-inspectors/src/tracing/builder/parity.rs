@@ -62,12 +62,12 @@ impl ParityTraceBuilder {
     fn trace_address(&self, idx: usize) -> Vec<usize> {
         if idx == 0 {
             // root call has empty traceAddress
-            return vec![];
+            return vec![]
         }
         let mut graph = vec![];
         let mut node = &self.nodes[idx];
         if node.is_precompile() {
-            return graph;
+            return graph
         }
         while let Some(parent) = node.parent {
             // the index of the child call in the arena
@@ -194,7 +194,7 @@ impl ParityTraceBuilder {
         trace_types: &HashSet<TraceType>,
     ) -> (Option<Vec<TransactionTrace>>, Option<VmTrace>, Option<StateDiff>) {
         if trace_types.is_empty() || self.nodes.is_empty() {
-            return (None, None, None);
+            return (None, None, None)
         }
 
         let with_traces = trace_types.contains(&TraceType::Trace);
@@ -239,7 +239,7 @@ impl ParityTraceBuilder {
         self.into_transaction_traces_iter().collect()
     }
 
-    /// Creates a VM trace by walking over [CallTraceNode]s
+    /// Creates a VM trace by walking over `CallTraceNode`s
     ///
     /// does not have the code fields filled in
     pub fn vm_trace(&self) -> VmTrace {
@@ -274,12 +274,12 @@ impl ParityTraceBuilder {
 
                     for step in &current.trace.steps {
                         let maybe_sub = match step.op.u8() {
-                            opcode::CALL
-                            | opcode::CALLCODE
-                            | opcode::DELEGATECALL
-                            | opcode::STATICCALL
-                            | opcode::CREATE
-                            | opcode::CREATE2 => {
+                            opcode::CALL |
+                            opcode::CALLCODE |
+                            opcode::DELEGATECALL |
+                            opcode::STATICCALL |
+                            opcode::CREATE |
+                            opcode::CREATE2 => {
                                 sub_stack.pop_front().expect("there should be a sub trace")
                             }
                             _ => None,
@@ -308,16 +308,13 @@ impl ParityTraceBuilder {
         VmTrace { code: Default::default(), ops: instructions }
     }
 
-    /// todo::n config
-    ///
-    /// Creates a VM instruction from a [CallTraceStep] and a [VmTrace] for the subcall if there is one
+    /// Creates a VM instruction from a [CallTraceStep] and a [VmTrace] for the subcall if there is
+    /// one
     fn make_instruction(step: &CallTraceStep, maybe_sub: Option<VmTrace>) -> VmInstruction {
-        let maybe_storage = match step.storage_change {
-            Some(storage_change) => {
-                Some(StorageDelta { key: storage_change.key, val: storage_change.value })
-            }
-            None => None,
-        };
+        let maybe_storage = step.storage_change.map(|storage_change| StorageDelta {
+            key: storage_change.key,
+            val: storage_change.value,
+        });
 
         let maybe_memory = match step.memory.len() {
             0 => None,
@@ -328,24 +325,22 @@ impl ParityTraceBuilder {
 
         let maybe_execution = Some(VmExecutedOperation {
             used: step.gas_cost,
-            push: match step.new_stack {
-                Some(new_stack) => Some(new_stack.into()),
-                None => None,
-            },
+            push: step.new_stack.map(|new_stack| new_stack.into()),
             mem: maybe_memory,
             store: maybe_storage,
         });
 
         VmInstruction {
             pc: step.pc,
-            cost: 0, // todo::n
+            cost: 0, // TODO: use op gas cost
             ex: maybe_execution,
             sub: maybe_sub,
         }
     }
 }
 
-/// addresses are presorted via breadth first walk thru [CallTraceNode]s, this  can be done by a walker in [crate::tracing::builder::walker]
+/// addresses are presorted via breadth first walk thru [CallTraceNode]s, this  can be done by a
+/// walker in [crate::tracing::builder::walker]
 ///
 /// iteratively fill the [VmTrace] code fields
 pub(crate) fn populate_vm_trace_bytecodes<DB, I>(
@@ -362,29 +357,20 @@ where
 
     let mut addrs = breadth_first_addresses.into_iter();
 
-    loop {
-        match stack.pop_front() {
-            Some(curr_ref) => {
-                for op in curr_ref.ops.iter_mut() {
-                    if let Some(sub) = op.sub.as_mut() {
-                        stack.push_back(sub);
-                    }
-                }
-
-                let addr = addrs.next().expect("there should be an address");
-
-                let db_acc = db.basic(addr)?.unwrap_or_default();
-
-                let code_hash = if db_acc.code_hash != KECCAK_EMPTY {
-                    db_acc.code_hash
-                } else {
-                    continue;
-                };
-
-                curr_ref.code = db.code_by_hash(code_hash)?.bytecode.into();
+    while let Some(curr_ref) = stack.pop_front() {
+        for op in curr_ref.ops.iter_mut() {
+            if let Some(sub) = op.sub.as_mut() {
+                stack.push_back(sub);
             }
-            None => break,
         }
+
+        let addr = addrs.next().expect("there should be an address");
+
+        let db_acc = db.basic(addr)?.unwrap_or_default();
+
+        let code_hash = if db_acc.code_hash != KECCAK_EMPTY { db_acc.code_hash } else { continue };
+
+        curr_ref.code = db.code_by_hash(code_hash)?.bytecode.into();
     }
 
     Ok(())
