@@ -99,11 +99,38 @@ impl DerefMut for StateDiff {
 pub enum Action {
     Call(CallAction),
     Create(CreateAction),
+    /// Parity style traces never renamed suicide to selfdestruct: <https://eips.ethereum.org/EIPS/eip-6>
+    ///
+    /// For compatibility reasons, this is serialized as `suicide`: <https://github.com/paradigmxyz/reth/issues/3721>
+    #[serde(rename = "suicide", alias = "selfdestruct")]
     Selfdestruct(SelfdestructAction),
     Reward(RewardAction),
 }
 
+impl Action {
+    /// Returns true if this is a call action
+    pub fn is_call(&self) -> bool {
+        matches!(self, Action::Call(_))
+    }
+
+    /// Returns true if this is a create action
+    pub fn is_create(&self) -> bool {
+        matches!(self, Action::Call(_))
+    }
+
+    /// Returns true if this is a selfdestruct action
+    pub fn is_selfdestruct(&self) -> bool {
+        matches!(self, Action::Selfdestruct(_))
+    }
+    /// Returns true if this is a reward action
+    pub fn is_reward(&self) -> bool {
+        matches!(self, Action::Reward(_))
+    }
+}
+
 /// An external action type.
+///
+/// Used as enum identifier for [Action]
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ActionType {
@@ -112,6 +139,7 @@ pub enum ActionType {
     /// Contract creation.
     Create,
     /// Contract suicide/selfdestruct.
+    #[serde(rename = "suicide", alias = "selfdestruct")]
     Selfdestruct,
     /// A block reward.
     Reward,
@@ -318,8 +346,6 @@ mod tests {
                 "to": "0x160f5f00288e9e1cc8655b327e081566e580a71d",
                 "value": "0x244b"
             },
-            "blockHash": "0xbca9ee244882bd00a19737a66f24002a4562a949c4d5ebd03c32e04111cff536",
-            "blockNumber": 17600209,
             "error": "Reverted",
             "result": {
                 "gasUsed": "0x9daf",
@@ -327,11 +353,41 @@ mod tests {
             },
             "subtraces": 3,
             "traceAddress": [],
-            "transactionHash": "0x0e48a8d4419efaa2d3a9b8f625a1c559a4179fd19ddd10c02842965f3a7e7b63",
-            "transactionPosition": 0,
             "type": "call"
         }"#;
         let val = serde_json::from_str::<TransactionTrace>(s).unwrap();
         serde_json::to_value(val).unwrap();
+    }
+
+    #[test]
+    fn test_selfdestruct_suicide() {
+        let input = r#"{
+            "action": {
+                "address": "0x66e29f0b6b1b07071f2fde4345d512386cb66f5f",
+                "refundAddress": "0x66e29f0b6b1b07071f2fde4345d512386cb66f5f",
+                "balance": "0x244b"
+            },
+            "error": "Reverted",
+            "result": {
+                "gasUsed": "0x9daf",
+                "output": "0x000000000000000000000000000000000000000000000000011c37937e080000"
+            },
+            "subtraces": 3,
+            "traceAddress": [],
+            "type": "suicide"
+        }"#;
+        let val = serde_json::from_str::<TransactionTrace>(input).unwrap();
+        assert!(val.action.is_selfdestruct());
+
+        let json = serde_json::to_value(val.clone()).unwrap();
+        let expect = serde_json::from_str::<serde_json::Value>(input).unwrap();
+        similar_asserts::assert_eq!(json, expect);
+        let s = serde_json::to_string(&val).unwrap();
+        let json = serde_json::from_str::<serde_json::Value>(&s).unwrap();
+        similar_asserts::assert_eq!(json, expect);
+
+        let input = input.replace("suicide", "selfdestruct");
+        let val = serde_json::from_str::<TransactionTrace>(&input).unwrap();
+        assert!(val.action.is_selfdestruct());
     }
 }
