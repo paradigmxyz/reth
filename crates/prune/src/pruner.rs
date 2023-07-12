@@ -2,7 +2,7 @@
 
 use crate::PrunerError;
 use reth_db::{database::Database, tables};
-use reth_primitives::{BlockNumber, ChainSpec, PruneCheckpoint, PruneModes, PrunePart};
+use reth_primitives::{BlockNumber, ChainSpec, PruneCheckpoint, PruneMode, PruneModes, PrunePart};
 use reth_provider::{
     BlockReader, DatabaseProviderRW, ProviderError, ProviderFactory, PruneCheckpointWriter,
 };
@@ -53,8 +53,8 @@ impl<DB: Database> Pruner<DB> {
     pub fn run(&mut self, tip_block_number: BlockNumber) -> PrunerResult {
         let provider = self.provider_factory.provider_rw()?;
 
-        if let Some(to_block) = self.modes.prune_to_block_receipts(tip_block_number) {
-            self.prune_receipts(&provider, to_block)?;
+        if let Some((to_block, prune_mode)) = self.modes.prune_to_block_receipts(tip_block_number) {
+            self.prune_receipts(&provider, to_block, prune_mode)?;
         }
 
         provider.commit()?;
@@ -84,10 +84,12 @@ impl<DB: Database> Pruner<DB> {
         }
     }
 
+    /// Prune receipts up to the provided block, inclusive.
     fn prune_receipts(
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
         to_block: BlockNumber,
+        prune_mode: PruneMode,
     ) -> PrunerResult {
         let to_block_body = provider
             .block_body_indices(to_block)?
@@ -100,7 +102,7 @@ impl<DB: Database> Pruner<DB> {
 
         provider.save_prune_checkpoint(
             PrunePart::Receipts,
-            PruneCheckpoint { block_number: to_block, prune_mode: self.modes.receipts.unwrap() },
+            PruneCheckpoint { block_number: to_block, prune_mode },
         )?;
 
         Ok(())
@@ -175,7 +177,7 @@ mod tests {
         );
 
         let provider = tx.inner_rw();
-        assert_matches!(pruner.prune_receipts(&provider, prune_to_block), Ok(()));
+        assert_matches!(pruner.prune_receipts(&provider, prune_to_block, prune_mode), Ok(()));
         provider.commit().expect("commit");
 
         assert_eq!(
