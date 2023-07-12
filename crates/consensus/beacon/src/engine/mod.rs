@@ -759,7 +759,7 @@ where
     /// Additionally, updates the head used for p2p handshakes.
     ///
     /// This also updates the tracked safe and finalized blocks, and should be called before
-    /// issuing a VALID forkchoice update.
+    /// return a VALID forkchoice update response
     fn update_canon_chain(
         &self,
         head: SealedHeader,
