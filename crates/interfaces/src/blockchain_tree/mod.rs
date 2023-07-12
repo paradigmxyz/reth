@@ -217,6 +217,9 @@ pub trait BlockchainTreeViewer: Send + Sync {
     /// Note: this could be the given `parent_hash` if it's already canonical.
     fn find_canonical_ancestor(&self, parent_hash: BlockHash) -> Option<BlockHash>;
 
+    /// Return whether or not the block is known and in the canonical chain.
+    fn is_canonical(&self, hash: BlockHash) -> Result<bool, Error>;
+
     /// Given the hash of a block, this checks the buffered blocks for the lowest ancestor in the
     /// buffer.
     ///

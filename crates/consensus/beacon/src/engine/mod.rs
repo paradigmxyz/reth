@@ -606,6 +606,13 @@ where
             return Ok(OnForkChoiceUpdated::with_invalid(status))
         }
 
+        // ensure that the finalized block, if not zero, is known and in the canonical chain
+        if !state.finalized_block_hash.is_zero() &&
+            !self.blockchain.is_canonical(&state.finalized_block_hash)?
+        {
+            return Ok(OnForkChoiceUpdated::invalid_state())
+        }
+
         if self.sync.is_pipeline_active() {
             // We can only process new forkchoice updates if the pipeline is idle, since it requires
             // exclusive access to the database
