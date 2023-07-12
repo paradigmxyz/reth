@@ -241,6 +241,8 @@ impl Command {
                     client,
                     pool,
                     chain_events,
+                    ctx.task_executor.clone(),
+                    Default::default(),
                 ),
             );
             debug!(target: "reth::cli", "Spawned txpool maintenance task");
