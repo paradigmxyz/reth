@@ -13,6 +13,8 @@ pub(crate) struct EngineMetrics {
     pub(crate) forkchoice_updated_messages: Counter,
     /// The total count of new payload messages received.
     pub(crate) new_payload_messages: Counter,
+    /// The number of times the pruner was run.
+    pub(crate) pruner_runs: Counter,
 }
 
 /// Metrics for the `EngineSyncController`.
