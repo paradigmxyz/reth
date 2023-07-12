@@ -1090,12 +1090,12 @@ impl<'this, TX: DbTx<'this>> ReceiptProvider for DatabaseProvider<'this, TX> {
                 return if tx_range.is_empty() {
                     Ok(Some(Vec::new()))
                 } else {
-                    let mut tx_cursor = self.tx.cursor_read::<tables::Receipts>()?;
-                    let transactions = tx_cursor
+                    let mut receipts_cursor = self.tx.cursor_read::<tables::Receipts>()?;
+                    let receipts = receipts_cursor
                         .walk_range(tx_range)?
-                        .map(|result| result.map(|(_, tx)| tx))
+                        .map(|result| result.map(|(_, receipt)| receipt))
                         .collect::<std::result::Result<Vec<_>, _>>()?;
-                    Ok(Some(transactions))
+                    Ok(Some(receipts))
                 }
             }
         }
