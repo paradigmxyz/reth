@@ -639,7 +639,7 @@ where
                     // if we return early then we wouldn't perform these consistency checks, so we
                     // need to do them here, and should do them before we process any payload
                     // attributes
-                    if let Some(invalid_fcu_response) = self.ensure_consistent(state)? {
+                    if let Some(invalid_fcu_response) = self.ensure_consistent_state(state)? {
                         trace!(target: "consensus::engine", ?state, head=?state.head_block_hash, "Forkchoice state is inconsistent, returning invalid response");
                         return Ok(invalid_fcu_response)
                     }
@@ -669,7 +669,9 @@ where
             }
         };
 
-        if let Some(invalid_fcu_response) = self.ensure_consistent_with_status(state, &status)? {
+        if let Some(invalid_fcu_response) =
+            self.ensure_consistent_state_with_status(state, &status)?
+        {
             trace!(target: "consensus::engine", ?status, ?state, "Forkchoice state is inconsistent, returning invalid response");
             return Ok(invalid_fcu_response)
         }
@@ -687,7 +689,7 @@ where
     ///
     /// This also updates the safe and finalized blocks in the [CanonChainTracker], if they are
     /// consistent with the head block.
-    fn ensure_consistent_with_status(
+    fn ensure_consistent_state_with_status(
         &mut self,
         state: ForkchoiceState,
         status: &PayloadStatus,
@@ -703,7 +705,7 @@ where
         // we likely do not have the finalized or safe blocks, and would return an incorrect
         // INVALID status instead.
         if status.is_valid() {
-            return self.ensure_consistent(state)
+            return self.ensure_consistent_state(state)
         }
 
         Ok(None)
@@ -717,7 +719,7 @@ where
     ///
     /// This also updates the safe and finalized blocks in the [CanonChainTracker], if they are
     /// consistent with the head block.
-    fn ensure_consistent(
+    fn ensure_consistent_state(
         &mut self,
         state: ForkchoiceState,
     ) -> Result<Option<OnForkChoiceUpdated>, reth_interfaces::Error> {
