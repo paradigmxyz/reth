@@ -65,9 +65,9 @@ impl BodyDownloaderMetrics {
 /// Metrics for an individual response, i.e. the size in bytes, and length (number of bodies) in the
 /// response.
 ///
-/// These metrics will be initialized with the `downloaders.bodies` scope.
+/// These metrics will be initialized with the `downloaders.bodies.response` scope.
 #[derive(Clone, Metrics)]
-#[metrics(scope = "downloaders.bodies")]
+#[metrics(scope = "downloaders.bodies.response")]
 pub struct ResponseMetrics {
     /// The size (in bytes) of an individual bodies response received by the downloader.
     pub response_size_bytes: Gauge,
