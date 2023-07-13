@@ -50,7 +50,6 @@ impl<DB: Database> Pruner<DB> {
     }
 
     /// Run the pruner
-    #[instrument(level = "trace", skip(self), target = "pruner")]
     pub fn run(&mut self, tip_block_number: BlockNumber) -> PrunerResult {
         let provider = self.provider_factory.provider_rw()?;
 
@@ -93,13 +92,25 @@ impl<DB: Database> Pruner<DB> {
         to_block: BlockNumber,
         prune_mode: PruneMode,
     ) -> PrunerResult {
-        let to_block_body = provider
-            .block_body_indices(to_block)?
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(to_block))?;
+        let to_block_body = match provider.block_body_indices(to_block)? {
+            Some(body) => body,
+            None => {
+                trace!(target: "pruner", "No receipts to prune");
+                return Ok(())
+            }
+        };
 
-        let pruned_receipts =
-            provider.prune_table::<tables::Receipts, _>(..=to_block_body.last_tx_num())?;
-        trace!(target: "pruner", %to_block, %pruned_receipts, "Pruned receipts");
+        provider.prune_table_in_chunks::<tables::Receipts, _, _>(
+            ..=to_block_body.last_tx_num(),
+            10000,
+            |receipts| {
+                trace!(
+                    target: "pruner",
+                    %receipts,
+                    "Pruned receipts"
+                );
+            },
+        )?;
 
         provider.save_prune_checkpoint(
             PrunePart::Receipts,

@@ -20,6 +20,7 @@ reth-interfaces = { workspace = true }
 # misc
 tracing = { workspace = true }
 thiserror = { workspace = true }
+itertools = "0.10"
 
 [dev-dependencies]
 # reth

@@ -627,6 +627,24 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         T: Table<Key = K>,
         K: Key,
     {
+        self.prune_table_in_chunks::<T, K, _>(range, usize::MAX, |_| {})
+    }
+
+    /// Prune the table for the specified key range calling `chunk_callback` after every
+    /// `chunk_size` pruned rows.
+    ///
+    /// Returns number of rows pruned.
+    pub fn prune_table_in_chunks<T, K, F>(
+        &self,
+        range: impl RangeBounds<K>,
+        chunk_size: usize,
+        chunk_callback: F,
+    ) -> std::result::Result<usize, DatabaseError>
+    where
+        T: Table<Key = K>,
+        K: Key,
+        F: Fn(usize),
+    {
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut walker = cursor.walk_range(range)?;
         let mut deleted = 0;
@@ -634,6 +652,14 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         while let Some(Ok(_)) = walker.next() {
             walker.delete_current()?;
             deleted += 1;
+
+            if deleted % chunk_size == 0 {
+                chunk_callback(chunk_size);
+            }
+        }
+
+        if deleted % chunk_size != 0 {
+            chunk_callback(deleted % chunk_size);
         }
 
         Ok(deleted)
