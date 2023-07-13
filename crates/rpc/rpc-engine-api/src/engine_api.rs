@@ -8,7 +8,7 @@ use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hard
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadBodies, ExecutionPayloadEnvelope, ForkchoiceUpdated,
+    ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadEnvelope, ForkchoiceUpdated,
     PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration, CAPABILITIES,
 };
 use reth_tasks::TaskSpawner;
@@ -183,7 +183,7 @@ where
         &self,
         start: BlockNumber,
         count: u64,
-    ) -> EngineApiResult<ExecutionPayloadBodies> {
+    ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
         let (tx, rx) = oneshot::channel();
         let inner = self.inner.clone();
 
@@ -223,7 +223,7 @@ where
     pub fn get_payload_bodies_by_hash(
         &self,
         hashes: Vec<BlockHash>,
-    ) -> EngineApiResult<ExecutionPayloadBodies> {
+    ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
         let len = hashes.len() as u64;
         if len > MAX_PAYLOAD_BODIES_LIMIT {
             return Err(EngineApiError::PayloadRequestTooLarge { len })
@@ -414,7 +414,7 @@ where
     async fn get_payload_bodies_by_hash_v1(
         &self,
         block_hashes: Vec<BlockHash>,
-    ) -> RpcResult<ExecutionPayloadBodies> {
+    ) -> RpcResult<ExecutionPayloadBodiesV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByHashV1");
         Ok(EngineApi::get_payload_bodies_by_hash(self, block_hashes)?)
     }
@@ -432,11 +432,13 @@ where
     /// Implementors should take care when acting on the input to this method, specifically
     /// ensuring that the range is limited properly, and that the range boundaries are computed
     /// correctly and without panics.
+    ///
+    /// Note: If a block is pre shanghai, `withdrawals` field will be `null
     async fn get_payload_bodies_by_range_v1(
         &self,
         start: U64,
         count: U64,
-    ) -> RpcResult<ExecutionPayloadBodies> {
+    ) -> RpcResult<ExecutionPayloadBodiesV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV1");
         Ok(EngineApi::get_payload_bodies_by_range(self, start.as_u64(), count.as_u64()).await?)
     }
@@ -482,7 +484,7 @@ mod tests {
         let provider = Arc::new(MockEthProvider::default());
         let payload_store = spawn_test_payload_service();
         let (to_engine, engine_rx) = unbounded_channel();
-        let task_executor = Box::new(TokioTaskExecutor::default());
+        let task_executor = Box::<TokioTaskExecutor>::default();
         let api = EngineApi::new(
             provider.clone(),
             chain_spec.clone(),
