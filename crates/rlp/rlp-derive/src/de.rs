@@ -72,12 +72,12 @@ pub(crate) fn impl_decodable(ast: &syn::DeriveInput) -> Result<TokenStream> {
 }
 
 pub(crate) fn impl_decodable_wrapper(ast: &syn::DeriveInput) -> Result<TokenStream> {
-    let body = parse_struct(ast, "RlpEncodableWrapper")?;
+    let body = parse_struct(ast, "RlpDecodableWrapper")?;
 
     assert_eq!(
         body.fields.iter().count(),
         1,
-        "#[derive(RlpEncodableWrapper)] is only defined for structs with one field."
+        "#[derive(RlpDecodableWrapper)] is only defined for structs with one field."
     );
 
     let name = &ast.ident;
