@@ -543,8 +543,6 @@ where
         let mut db = SubState::new(State::new(state));
 
         let env = prepare_call_env(cfg, block_env, request, &mut db, overrides)?;
-        dbg!(&env.cfg);
-        dbg!(&env.block);
         inspect_and_return_db(db, env, inspector)
     }
 
