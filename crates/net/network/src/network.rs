@@ -10,6 +10,7 @@ use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::{
     NetworkError, NetworkInfo, PeerKind, Peers, PeersInfo, Reputation, ReputationChangeKind,
 };
+use crate::{discovery::DiscoveryEvent};
 use reth_primitives::{Head, NodeRecord, PeerId, TransactionSigned, H256};
 use reth_rpc_types::NetworkStatus;
 use std::{
@@ -80,6 +81,13 @@ impl NetworkHandle {
     pub fn event_listener(&self) -> UnboundedReceiverStream<NetworkEvent> {
         let (tx, rx) = mpsc::unbounded_channel();
         let _ = self.manager().send(NetworkHandleMessage::EventListener(tx));
+        UnboundedReceiverStream::new(rx)
+    }
+
+    /// Returns a new [`DiscoveryEvent`] listener channel.
+    pub fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveryEvent> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let _ = self.manager().send(NetworkHandleMessage::DiscoveryListener(tx));
         UnboundedReceiverStream::new(rx)
     }
 
@@ -320,4 +328,6 @@ pub(crate) enum NetworkHandleMessage {
     GetReputationById(PeerId, oneshot::Sender<Option<Reputation>>),
     /// Gracefully shutdown network
     Shutdown(oneshot::Sender<()>),
+    /// Add a new listener for `DiscoveryEvent`.
+    DiscoveryListener(UnboundedSender<DiscoveryEvent>),
 }

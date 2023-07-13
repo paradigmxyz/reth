@@ -90,7 +90,7 @@ impl Discovery {
             };
 
         Ok(Self {
-            discovery_listeners: Vec::with_capacity(1),  
+            discovery_listeners: Vec::default(),  
             local_enr,
             discv4,
             discv4_updates,
@@ -103,13 +103,15 @@ impl Discovery {
         })
     }
 
-    pub fn register_listener(&mut self) -> mpsc::Receiver<DiscoveryEvent> {
+/// Registers a listener for receiving `DiscoveryEvent` updates.
+pub fn register_listener(&mut self) -> mpsc::Receiver<DiscoveryEvent> {
         let (tx, rx) = mpsc::channel(512);
         self.discovery_listeners.push(tx);
         rx
     }
 
-    fn notify_listeners(&mut self, update: DiscoveryEvent) {
+/// Notifies all registered listeners with the provided `update`.
+pub fn notify_listeners(&mut self, update: DiscoveryEvent) {
         self.discovery_listeners.retain_mut(|listener| {
             match listener.try_send(update.clone()) {
                 Ok(_) => true,
@@ -246,7 +248,7 @@ impl Discovery {
             _dns_discovery: None,
             dns_discovery_updates: None,
             _dns_disc_service: None,
-             discovery_listeners: Vec::with_capacity(1),
+            discovery_listeners: Vec::default()
         }
     }
 }
