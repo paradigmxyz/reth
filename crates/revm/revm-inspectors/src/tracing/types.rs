@@ -6,8 +6,7 @@ use reth_rpc_types::trace::{
     geth::{CallFrame, CallLogFrame, GethDefaultTracingOptions, StructLog},
     parity::{
         Action, ActionType, CallAction, CallOutput, CallType, ChangedType, CreateAction,
-        CreateOutput, Delta, SelfdestructAction, StateDiff, TraceOutput, TraceResult,
-        TransactionTrace,
+        CreateOutput, Delta, SelfdestructAction, StateDiff, TraceOutput, TransactionTrace,
     },
 };
 use revm::interpreter::{
@@ -142,8 +141,6 @@ pub(crate) struct CallTrace {
     /// The return data of the call if this was not a contract creation, otherwise it is the
     /// runtime bytecode of the created contract
     pub(crate) output: Bytes,
-    /// The return data of the last call, if any
-    pub(crate) last_call_return_value: Option<Bytes>,
     /// The gas cost of the call
     pub(crate) gas_used: u64,
     /// The gas limit of the call
@@ -164,7 +161,10 @@ impl CallTrace {
 
     /// Returns the error message if it is an erroneous result.
     pub(crate) fn as_error(&self) -> Option<String> {
-        self.is_error().then(|| format!("{:?}", self.status))
+        self.is_error().then(|| match self.status {
+            InstructionResult::Revert => "Reverted".to_string(),
+            status => format!("{:?}", status),
+        })
     }
 }
 
@@ -181,7 +181,6 @@ impl Default for CallTrace {
             data: Default::default(),
             maybe_precompile: None,
             output: Default::default(),
-            last_call_return_value: None,
             gas_used: Default::default(),
             gas_limit: Default::default(),
             status: InstructionResult::Continue,
@@ -324,9 +323,11 @@ impl CallTraceNode {
     /// Converts this node into a parity `TransactionTrace`
     pub(crate) fn parity_transaction_trace(&self, trace_address: Vec<usize>) -> TransactionTrace {
         let action = self.parity_action();
-        let output = TraceResult::parity_success(self.parity_trace_output());
+        let output = self.parity_trace_output();
+        let error = self.trace.as_error();
         TransactionTrace {
             action,
+            error,
             result: Some(output),
             trace_address,
             subtraces: self.children.len(),
@@ -462,11 +463,13 @@ pub(crate) struct CallTraceStep {
     pub(crate) contract: Address,
     /// Stack before step execution
     pub(crate) stack: Stack,
+    /// The new stack item placed by this step if any
+    pub(crate) new_stack: Option<U256>,
     /// All allocated memory in a step
     ///
     /// This will be empty if memory capture is disabled
     pub(crate) memory: Memory,
-    /// Size of memory
+    /// Size of memory at the beginning of the step
     pub(crate) memory_size: usize,
     /// Remaining gas before step execution
     pub(crate) gas_remaining: u64,

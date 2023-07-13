@@ -37,8 +37,8 @@ use crate::{
 use reth_primitives::{
     stage::StageCheckpoint,
     trie::{BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey},
-    Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, Receipt, StorageEntry,
-    TransactionSignedNoHash, TxHash, TxNumber, H256,
+    Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, PruneCheckpoint,
+    PrunePart, Receipt, StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, H256,
 };
 
 /// Enum for the types of tables present in libmdbx.
@@ -413,6 +413,11 @@ table!(
 table!(
     /// Stores arbitrary data to keep track of a stage first-sync progress.
     ( SyncStageProgress ) StageId | Vec<u8>
+);
+
+table!(
+    /// Stores the highest pruned block number and prune mode of each prune part.
+    ( PruneParts ) PrunePart | PruneCheckpoint
 );
 
 /// Alias Types

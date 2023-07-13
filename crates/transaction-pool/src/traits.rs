@@ -2,13 +2,21 @@ use crate::{
     error::PoolResult,
     pool::{state::SubPool, TransactionEvents},
     validate::ValidPoolTransaction,
+    AllTransactionsEvents,
 };
+use futures_util::{ready, Stream};
 use reth_primitives::{
     Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
     TransactionKind, TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, H256, U256,
 };
 use reth_rlp::Encodable;
-use std::{collections::HashMap, fmt, sync::Arc};
+use std::{
+    collections::HashMap,
+    fmt,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
 use tokio::sync::mpsc::Receiver;
 
 #[cfg(feature = "serde")]
@@ -94,13 +102,44 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Returns `None` if the transaction is not in the pool.
     fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents>;
 
+    /// Returns a new transaction change event stream for _all_ transactions in the pool.
+    fn all_transactions_event_listener(&self) -> AllTransactionsEvents<Self::Transaction>;
+
     /// Returns a new Stream that yields transactions hashes for new ready transactions.
     ///
     /// Consumer: RPC
     fn pending_transactions_listener(&self) -> Receiver<TxHash>;
 
     /// Returns a new stream that yields new valid transactions added to the pool.
-    fn transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>>;
+    fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>>;
+
+    /// Returns a new Stream that yields new transactions added to the basefee-pool.
+    ///
+    /// This is a convenience wrapper around [Self::new_transactions_listener] that filters for
+    /// [SubPool::Pending](crate::SubPool).
+    fn new_pending_pool_transactions_listener(
+        &self,
+    ) -> NewSubpoolTransactionStream<Self::Transaction> {
+        NewSubpoolTransactionStream::new(self.new_transactions_listener(), SubPool::Pending)
+    }
+
+    /// Returns a new Stream that yields new transactions added to the basefee sub-pool.
+    ///
+    /// This is a convenience wrapper around [Self::new_transactions_listener] that filters for
+    /// [SubPool::BaseFee](crate::SubPool).
+    fn new_basefee_pool_transactions_listener(
+        &self,
+    ) -> NewSubpoolTransactionStream<Self::Transaction> {
+        NewSubpoolTransactionStream::new(self.new_transactions_listener(), SubPool::BaseFee)
+    }
+
+    /// Returns a new Stream that yields new transactions added to the queued-pool.
+    ///
+    /// This is a convenience wrapper around [Self::new_transactions_listener] that filters for
+    /// [SubPool::Queued](crate::SubPool).
+    fn new_queued_transactions_listener(&self) -> NewSubpoolTransactionStream<Self::Transaction> {
+        NewSubpoolTransactionStream::new(self.new_transactions_listener(), SubPool::Queued)
+    }
 
     /// Returns the _hashes_ of all transactions in the pool.
     ///
@@ -220,7 +259,7 @@ pub trait TransactionPoolExt: TransactionPool {
 }
 
 /// A Helper type that bundles all transactions in the pool.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct AllPoolTransactions<T: PoolTransaction> {
     /// Transactions that are ready for inclusion in the next block.
     pub pending: Vec<Arc<ValidPoolTransaction<T>>>,
@@ -241,6 +280,12 @@ impl<T: PoolTransaction> AllPoolTransactions<T> {
     /// Returns an iterator over all queued [TransactionSignedEcRecovered] transactions.
     pub fn queued_recovered(&self) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
         self.queued.iter().map(|tx| tx.transaction.to_recovered_transaction())
+    }
+}
+
+impl<T: PoolTransaction> Default for AllPoolTransactions<T> {
+    fn default() -> Self {
+        Self { pending: Default::default(), queued: Default::default() }
     }
 }
 
@@ -577,7 +622,7 @@ impl IntoRecoveredTransaction for PooledTransaction {
 }
 
 /// Represents the current status of the pool.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PoolSize {
     /// Number of transactions in the _pending_ sub-pool.
     pub pending: usize,
@@ -609,4 +654,38 @@ pub struct BlockInfo {
     /// Note: this is the derived base fee of the _next_ block that builds on the clock the pool is
     /// currently tracking.
     pub pending_basefee: u128,
+}
+
+/// A Stream that yields full transactions the subpool
+#[must_use = "streams do nothing unless polled"]
+#[derive(Debug)]
+pub struct NewSubpoolTransactionStream<Tx: PoolTransaction> {
+    st: Receiver<NewTransactionEvent<Tx>>,
+    subpool: SubPool,
+}
+
+// === impl NewSubpoolTransactionStream ===
+
+impl<Tx: PoolTransaction> NewSubpoolTransactionStream<Tx> {
+    /// Create a new stream that yields full transactions from the subpool
+    pub fn new(st: Receiver<NewTransactionEvent<Tx>>, subpool: SubPool) -> Self {
+        Self { st, subpool }
+    }
+}
+
+impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
+    type Item = NewTransactionEvent<Tx>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        loop {
+            match ready!(self.st.poll_recv(cx)) {
+                Some(event) => {
+                    if event.subpool == self.subpool {
+                        return Poll::Ready(Some(event))
+                    }
+                }
+                None => return Poll::Ready(None),
+            }
+        }
+    }
 }

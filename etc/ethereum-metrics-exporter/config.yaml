@@ -1,0 +1,12 @@
+consensus:
+  enabled: true
+  url: "http://lighthouse:5052"
+  name: "consensus-client"
+execution:
+  enabled: true
+  url: "http://reth:8545"
+  name: "execution-client"
+  modules:
+    - "eth"
+    - "net"
+    - "web3"

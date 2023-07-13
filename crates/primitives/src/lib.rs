@@ -30,6 +30,7 @@ mod compression;
 pub mod constants;
 pub mod contract;
 mod forkid;
+pub mod fs;
 mod genesis;
 mod hardfork;
 mod header;
@@ -53,8 +54,8 @@ pub mod proofs;
 pub use account::{Account, Bytecode};
 pub use bits::H512;
 pub use block::{
-    Block, BlockBody, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, BlockWithSenders,
-    ForkBlock, SealedBlock, SealedBlockWithSenders,
+    Block, BlockBody, BlockBodyRoots, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
+    BlockWithSenders, ForkBlock, SealedBlock, SealedBlockWithSenders,
 };
 pub use bloom::Bloom;
 pub use chain::{
@@ -77,7 +78,7 @@ pub use net::{
     SEPOLIA_BOOTNODES,
 };
 pub use peer::{PeerId, WithPeerId};
-pub use prune::{PruneCheckpoint, PruneMode};
+pub use prune::{PruneCheckpoint, PruneMode, PrunePart, PruneTargets};
 pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef};
 pub use revm_primitives::JumpMap;
 pub use serde_helper::JsonU256;

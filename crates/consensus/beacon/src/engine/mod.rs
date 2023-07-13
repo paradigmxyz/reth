@@ -1,13 +1,18 @@
 use crate::{
-    engine::{message::OnForkChoiceUpdated, metrics::EngineMetrics},
+    engine::{
+        forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker},
+        message::OnForkChoiceUpdated,
+        metrics::EngineMetrics,
+        prune::{EnginePruneController, EnginePruneEvent},
+    },
     sync::{EngineSyncController, EngineSyncEvent},
 };
-use futures::{Future, StreamExt, TryFutureExt};
+use futures::{Future, StreamExt};
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
         error::{InsertBlockError, InsertBlockErrorKind},
-        BlockStatus, BlockchainTreeEngine,
+        BlockStatus, BlockchainTreeEngine, InsertPayloadOk,
     },
     consensus::ForkchoiceState,
     executor::{BlockExecutionError, BlockValidationError},
@@ -17,17 +22,18 @@ use reth_interfaces::{
 };
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
-    listener::EventListeners, stage::StageId, BlockNumHash, BlockNumber, Head, Header, SealedBlock,
-    SealedHeader, H256, U256,
+    constants::EPOCH_SLOTS, listener::EventListeners, stage::StageId, BlockNumHash, BlockNumber,
+    Head, Header, SealedBlock, SealedHeader, H256, U256,
 };
 use reth_provider::{
-    BlockReader, BlockSource, CanonChainTracker, ProviderError, StageCheckpointReader,
+    BlockIdReader, BlockReader, BlockSource, CanonChainTracker, ProviderError,
+    StageCheckpointReader,
 };
+use reth_prune::Pruner;
 use reth_rpc_types::engine::{
-    ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
-    PayloadValidationError,
+    ExecutionPayload, PayloadAttributes, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
-use reth_stages::{ControlFlow, Pipeline};
+use reth_stages::{ControlFlow, Pipeline, PipelineError};
 use reth_tasks::TaskSpawner;
 use std::{
     pin::Pin,
@@ -53,98 +59,28 @@ pub use error::{
 
 mod invalid_headers;
 use invalid_headers::InvalidHeaderCache;
-mod metrics;
 
 mod event;
-mod forkchoice;
-pub(crate) mod sync;
-
-use crate::engine::forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker};
 pub use event::BeaconConsensusEngineEvent;
-use reth_interfaces::blockchain_tree::InsertPayloadOk;
-use reth_primitives::constants::EPOCH_SLOTS;
+
+mod handle;
+pub use handle::BeaconConsensusEngineHandle;
+
+mod forkchoice;
+pub use forkchoice::ForkchoiceStatus;
+mod metrics;
+pub(crate) mod prune;
+pub(crate) mod sync;
 
 /// The maximum number of invalid headers that can be tracked by the engine.
 const MAX_INVALID_HEADERS: u32 = 512u32;
 
 /// The largest gap for which the tree will be used for sync. See docs for `pipeline_run_threshold`
 /// for more information.
-pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
-
-/// A _shareable_ beacon consensus frontend. Used to interact with the spawned beacon consensus
-/// engine.
 ///
-/// See also [`BeaconConsensusEngine`].
-#[derive(Clone, Debug)]
-pub struct BeaconConsensusEngineHandle {
-    to_engine: UnboundedSender<BeaconEngineMessage>,
-}
-
-// === impl BeaconConsensusEngineHandle ===
-
-impl BeaconConsensusEngineHandle {
-    /// Creates a new beacon consensus engine handle.
-    pub fn new(to_engine: UnboundedSender<BeaconEngineMessage>) -> Self {
-        Self { to_engine }
-    }
-
-    /// Sends a new payload message to the beacon consensus engine and waits for a response.
-    ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_newpayloadv2>
-    pub async fn new_payload(
-        &self,
-        payload: ExecutionPayload,
-    ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx });
-        rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
-    }
-
-    /// Sends a forkchoice update message to the beacon consensus engine and waits for a response.
-    ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_forkchoiceupdatedv2>
-    pub async fn fork_choice_updated(
-        &self,
-        state: ForkchoiceState,
-        payload_attrs: Option<PayloadAttributes>,
-    ) -> Result<ForkchoiceUpdated, BeaconForkChoiceUpdateError> {
-        Ok(self
-            .send_fork_choice_updated(state, payload_attrs)
-            .map_err(|_| BeaconForkChoiceUpdateError::EngineUnavailable)
-            .await??
-            .await?)
-    }
-
-    /// Sends a forkchoice update message to the beacon consensus engine and returns the receiver to
-    /// wait for a response.
-    fn send_fork_choice_updated(
-        &self,
-        state: ForkchoiceState,
-        payload_attrs: Option<PayloadAttributes>,
-    ) -> oneshot::Receiver<Result<OnForkChoiceUpdated, reth_interfaces::Error>> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.to_engine.send(BeaconEngineMessage::ForkchoiceUpdated {
-            state,
-            payload_attrs,
-            tx,
-        });
-        rx
-    }
-
-    /// Sends a transition configuration exchagne message to the beacon consensus engine.
-    ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_exchangetransitionconfigurationv1>
-    pub async fn transition_configuration_exchanged(&self) {
-        let _ = self.to_engine.send(BeaconEngineMessage::TransitionConfigurationExchanged);
-    }
-
-    /// Creates a new [`BeaconConsensusEngineEvent`] listener stream.
-    pub fn event_listener(&self) -> UnboundedReceiverStream<BeaconConsensusEngineEvent> {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let _ = self.to_engine.send(BeaconEngineMessage::EventListener(tx));
-        UnboundedReceiverStream::new(rx)
-    }
-}
+/// This is the default threshold, the distance to the head that the tree will be used for sync.
+/// If the distance exceeds this threshold, the pipeline will be used for sync.
+pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// The beacon consensus engine is the driver that switches between historical and live sync.
 ///
@@ -217,7 +153,11 @@ pub struct BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database,
     Client: HeadersClient + BodiesClient,
-    BT: BlockchainTreeEngine + BlockReader + CanonChainTracker + StageCheckpointReader,
+    BT: BlockchainTreeEngine
+        + BlockReader
+        + BlockIdReader
+        + CanonChainTracker
+        + StageCheckpointReader,
 {
     /// Controls syncing triggered by engine updates.
     sync: EngineSyncController<DB, Client>,
@@ -252,12 +192,19 @@ where
     /// blocks using the pipeline. Otherwise, the engine, sync controller, and blockchain tree will
     /// be used to download and execute the missing blocks.
     pipeline_run_threshold: u64,
+    /// Controls pruning triggered by engine updates.
+    prune: Option<EnginePruneController>,
 }
 
 impl<DB, BT, Client> BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database + Unpin + 'static,
-    BT: BlockchainTreeEngine + BlockReader + CanonChainTracker + StageCheckpointReader + 'static,
+    BT: BlockchainTreeEngine
+        + BlockReader
+        + BlockIdReader
+        + CanonChainTracker
+        + StageCheckpointReader
+        + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
     /// Create a new instance of the [BeaconConsensusEngine].
@@ -273,7 +220,8 @@ where
         payload_builder: PayloadBuilderHandle,
         target: Option<H256>,
         pipeline_run_threshold: u64,
-    ) -> Result<(Self, BeaconConsensusEngineHandle), reth_interfaces::Error> {
+        pruner: Option<Pruner>,
+    ) -> Result<(Self, BeaconConsensusEngineHandle), Error> {
         let (to_engine, rx) = mpsc::unbounded_channel();
         Self::with_channel(
             client,
@@ -288,6 +236,7 @@ where
             pipeline_run_threshold,
             to_engine,
             rx,
+            pruner,
         )
     }
 
@@ -317,15 +266,17 @@ where
         pipeline_run_threshold: u64,
         to_engine: UnboundedSender<BeaconEngineMessage>,
         rx: UnboundedReceiver<BeaconEngineMessage>,
-    ) -> Result<(Self, BeaconConsensusEngineHandle), reth_interfaces::Error> {
+        pruner: Option<Pruner>,
+    ) -> Result<(Self, BeaconConsensusEngineHandle), Error> {
         let handle = BeaconConsensusEngineHandle { to_engine };
         let sync = EngineSyncController::new(
             pipeline,
             client,
-            task_spawner,
+            task_spawner.clone(),
             run_pipeline_continuously,
             max_block,
         );
+        let prune = pruner.map(|pruner| EnginePruneController::new(pruner, task_spawner));
         let mut this = Self {
             sync,
             blockchain,
@@ -338,6 +289,7 @@ where
             invalid_headers: InvalidHeaderCache::new(MAX_INVALID_HEADERS),
             metrics: EngineMetrics::default(),
             pipeline_run_threshold,
+            prune,
         };
 
         let maybe_pipeline_target = match target {
@@ -364,7 +316,7 @@ where
     /// # Returns
     ///
     /// A target block hash if the pipeline is inconsistent, otherwise `None`.
-    fn check_pipeline_consistency(&self) -> Result<Option<H256>, reth_interfaces::Error> {
+    fn check_pipeline_consistency(&self) -> Result<Option<H256>, Error> {
         // If no target was provided, check if the stages are congruent - check if the
         // checkpoint of the last stage matches the checkpoint of the first.
         let first_stage_checkpoint = self
@@ -382,6 +334,13 @@ where
             // If the checkpoint of any stage is less than the checkpoint of the first stage,
             // retrieve and return the block hash of the latest header and use it as the target.
             if stage_checkpoint < first_stage_checkpoint {
+                warn!(
+                    target: "consensus::engine",
+                    first_stage_checkpoint,
+                    inconsistent_stage_id = %stage_id,
+                    inconsistent_stage_checkpoint = stage_checkpoint,
+                    "Pipeline sync progress is inconsistent"
+                );
                 return self.blockchain.block_hash(first_stage_checkpoint)
             }
         }
@@ -398,9 +357,88 @@ where
     }
 
     /// Returns true if the distance from the local tip to the block is greater than the configured
-    /// threshold
+    /// threshold.
+    ///
+    /// If the `local_tip` is greater than the `block`, then this will return false.
+    #[inline]
     fn exceeds_pipeline_run_threshold(&self, local_tip: u64, block: u64) -> bool {
         block > local_tip && block - local_tip > self.pipeline_run_threshold
+    }
+
+    /// Returns the finalized hash to sync to if the distance from the local tip to the block is
+    /// greater than the configured threshold and we're not synced to the finalized block yet block
+    /// yet (if we've seen that block already).
+    ///
+    /// If this is invoked after a new block has been downloaded, the downloaded block could be the
+    /// (missing) finalized block.
+    fn can_pipeline_sync_to_finalized(
+        &self,
+        canonical_tip_num: u64,
+        target_block_number: u64,
+        downloaded_block: Option<BlockNumHash>,
+    ) -> Option<H256> {
+        let sync_target_state = self.forkchoice_state_tracker.sync_target_state();
+
+        // check if the distance exceeds the threshold for pipeline sync
+        let mut exceeds_pipeline_run_threshold =
+            self.exceeds_pipeline_run_threshold(canonical_tip_num, target_block_number);
+
+        // check if the downloaded block is the tracked finalized block
+        if let Some(ref buffered_finalized) = sync_target_state
+            .as_ref()
+            .and_then(|state| self.blockchain.buffered_header_by_hash(state.finalized_block_hash))
+        {
+            // if we have buffered the finalized block, we should check how far
+            // we're off
+            exceeds_pipeline_run_threshold =
+                self.exceeds_pipeline_run_threshold(canonical_tip_num, buffered_finalized.number);
+        }
+
+        // If this is invoked after we downloaded a block we can check if this block is the
+        // finalized block
+        if let (Some(downloaded_block), Some(ref state)) = (downloaded_block, sync_target_state) {
+            if downloaded_block.hash == state.finalized_block_hash {
+                // we downloaded the finalized block
+                exceeds_pipeline_run_threshold =
+                    self.exceeds_pipeline_run_threshold(canonical_tip_num, downloaded_block.number);
+            }
+        }
+
+        // if the number of missing blocks is greater than the max, run the
+        // pipeline
+        if exceeds_pipeline_run_threshold {
+            if let Some(state) = sync_target_state {
+                // if we have already canonicalized the finalized block, we should
+                // skip the pipeline run
+                match self.blockchain.header_by_hash_or_number(state.finalized_block_hash.into()) {
+                    Err(err) => {
+                        warn!(target: "consensus::engine", ?err, "Failed to get finalized block header");
+                    }
+                    Ok(None) => {
+                        // we don't have the block yet and the distance exceeds the allowed
+                        // threshold
+                        return Some(state.finalized_block_hash)
+                    }
+                    Ok(Some(_)) => {
+                        // we're fully synced to the finalized block
+                        // but we want to continue downloading the missing parent
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Returns how far the local tip is from the given block. If the local tip is at the same
+    /// height or its block number is greater than the given block, this returns None.
+    #[inline]
+    fn distance_from_local_tip(&self, local_tip: u64, block: u64) -> Option<u64> {
+        if block > local_tip {
+            Some(block - local_tip)
+        } else {
+            None
+        }
     }
 
     /// If validation fails, the response MUST contain the latest valid hash:
@@ -506,7 +544,7 @@ where
         &mut self,
         state: ForkchoiceState,
         attrs: Option<PayloadAttributes>,
-        tx: oneshot::Sender<Result<OnForkChoiceUpdated, reth_interfaces::Error>>,
+        tx: oneshot::Sender<Result<OnForkChoiceUpdated, Error>>,
     ) -> bool {
         self.metrics.forkchoice_updated_messages.increment(1);
         self.blockchain.on_forkchoice_update_received(&state);
@@ -533,9 +571,10 @@ where
         // Terminate the sync early if it's reached the maximum user
         // configured block.
         if is_valid_response {
-            // node's fully synced, clear pending requests
-            self.sync.clear_full_block_requests();
+            // node's fully synced, clear active download requests
+            self.sync.clear_block_download_requests();
 
+            // check if we reached the maximum configured block
             let tip_number = self.blockchain.canonical_tip().number;
             if self.sync.has_reached_max_block(tip_number) {
                 return true
@@ -556,7 +595,7 @@ where
         &mut self,
         state: ForkchoiceState,
         attrs: Option<PayloadAttributes>,
-    ) -> Result<OnForkChoiceUpdated, reth_interfaces::Error> {
+    ) -> Result<OnForkChoiceUpdated, Error> {
         trace!(target: "consensus::engine", ?state, "Received new forkchoice state update");
         if state.head_block_hash.is_zero() {
             return Ok(OnForkChoiceUpdated::invalid_state())
@@ -575,18 +614,37 @@ where
             return Ok(OnForkChoiceUpdated::syncing())
         }
 
+        if self.is_prune_active() {
+            // We can only process new forkchoice updates if the pruner is idle, since it requires
+            // exclusive access to the database
+            warn!(
+                target: "consensus::engine",
+                "Pruning is in progress, skipping forkchoice update. \
+                This may affect the performance of your node as a validator."
+            );
+            return Ok(OnForkChoiceUpdated::syncing())
+        }
+
         let status = match self.blockchain.make_canonical(&state.head_block_hash) {
             Ok(outcome) => {
                 if !outcome.is_already_canonical() {
                     debug!(target: "consensus::engine", hash=?state.head_block_hash, number=outcome.header().number, "canonicalized new head");
 
                     // new VALID update that moved the canonical chain forward
-                    let _ = self.update_canon_chain(outcome.header().clone(), &state);
+                    let _ = self.update_head(outcome.header().clone());
                 } else {
                     debug!(target: "consensus::engine", fcu_head_num=?outcome.header().number, current_head_num=?self.blockchain.canonical_tip().number, "Ignoring beacon update to old head");
                 }
 
                 if let Some(attrs) = attrs {
+                    // if we return early then we wouldn't perform these consistency checks, so we
+                    // need to do them here, and should do them before we process any payload
+                    // attributes
+                    if let Some(invalid_fcu_response) = self.ensure_consistent_state(state)? {
+                        trace!(target: "consensus::engine", ?state, head=?state.head_block_hash, "Forkchoice state is inconsistent, returning invalid response");
+                        return Ok(invalid_fcu_response)
+                    }
+
                     // the CL requested to build a new payload on top of this new VALID head
                     let payload_response = self.process_payload_attributes(
                         attrs,
@@ -612,8 +670,89 @@ where
             }
         };
 
+        if let Some(invalid_fcu_response) =
+            self.ensure_consistent_state_with_status(state, &status)?
+        {
+            trace!(target: "consensus::engine", ?status, ?state, "Forkchoice state is inconsistent, returning invalid response");
+            return Ok(invalid_fcu_response)
+        }
+
         trace!(target: "consensus::engine", ?status, ?state, "Returning forkchoice status");
         Ok(OnForkChoiceUpdated::valid(status))
+    }
+
+    /// Ensures that the given forkchoice state is consistent, assuming the head block has been
+    /// made canonical. This takes a status as input, and will only perform consistency checks if
+    /// the input status is VALID.
+    ///
+    /// If the forkchoice state is consistent, this will return Ok(None). Otherwise, this will
+    /// return an instance of [OnForkChoiceUpdated] that is INVALID.
+    ///
+    /// This also updates the safe and finalized blocks in the [CanonChainTracker], if they are
+    /// consistent with the head block.
+    fn ensure_consistent_state_with_status(
+        &mut self,
+        state: ForkchoiceState,
+        status: &PayloadStatus,
+    ) -> Result<Option<OnForkChoiceUpdated>, reth_interfaces::Error> {
+        // We only perform consistency checks if the status is VALID because if the status is
+        // INVALID, we want to return the correct _type_ of error to the CL so we can properly
+        // describe the reason it is invalid. For example, it's possible that the status is invalid
+        // because the safe block has an invalid state root. In that case, we want to preserve the
+        // correct `latestValidHash`, instead of returning a generic "invalid state" error that
+        // does not contain a `latestValidHash`.
+        //
+        // We also should not perform these checks if the status is SYNCING, because in that case
+        // we likely do not have the finalized or safe blocks, and would return an incorrect
+        // INVALID status instead.
+        if status.is_valid() {
+            return self.ensure_consistent_state(state)
+        }
+
+        Ok(None)
+    }
+
+    /// Ensures that the given forkchoice state is consistent, assuming the head block has been
+    /// made canonical.
+    ///
+    /// If the forkchoice state is consistent, this will return Ok(None). Otherwise, this will
+    /// return an instance of [OnForkChoiceUpdated] that is INVALID.
+    ///
+    /// This also updates the safe and finalized blocks in the [CanonChainTracker], if they are
+    /// consistent with the head block.
+    fn ensure_consistent_state(
+        &mut self,
+        state: ForkchoiceState,
+    ) -> Result<Option<OnForkChoiceUpdated>, reth_interfaces::Error> {
+        // Ensure that the finalized block, if not zero, is known and in the canonical chain
+        // after the head block is canonicalized.
+        //
+        // This ensures that the finalized block is consistent with the head block, i.e. the
+        // finalized block is an ancestor of the head block.
+        if !state.finalized_block_hash.is_zero() &&
+            !self.blockchain.is_canonical(state.finalized_block_hash)?
+        {
+            return Ok(Some(OnForkChoiceUpdated::invalid_state()))
+        }
+
+        // Finalized block is consistent, so update it in the canon chain tracker.
+        self.update_finalized_block(state.finalized_block_hash)?;
+
+        // Also ensure that the safe block, if not zero, is known and in the canonical chain
+        // after the head block is canonicalized.
+        //
+        // This ensures that the safe block is consistent with the head block, i.e. the safe
+        // block is an ancestor of the head block.
+        if !state.safe_block_hash.is_zero() &&
+            !self.blockchain.is_canonical(state.safe_block_hash)?
+        {
+            return Ok(Some(OnForkChoiceUpdated::invalid_state()))
+        }
+
+        // Safe block is consistent, so update it in the canon chain tracker.
+        self.update_safe_block(state.safe_block_hash)?;
+
+        Ok(None)
     }
 
     /// Sets the state of the canon chain tracker based to the given head.
@@ -622,12 +761,28 @@ where
     ///
     /// Additionally, updates the head used for p2p handshakes.
     ///
-    /// This should be called before issuing a VALID forkchoice update.
+    /// This also updates the tracked safe and finalized blocks, and should be called before
+    /// returning a VALID forkchoice update response
     fn update_canon_chain(
         &self,
         head: SealedHeader,
         update: &ForkchoiceState,
-    ) -> Result<(), reth_interfaces::Error> {
+    ) -> Result<(), Error> {
+        self.update_head(head)?;
+        self.update_finalized_block(update.finalized_block_hash)?;
+        self.update_safe_block(update.safe_block_hash)?;
+
+        Ok(())
+    }
+
+    /// Updates the state of the canon chain tracker based on the given head.
+    ///
+    /// This expects the given head to be the new canonical head.
+    /// Additionally, updates the head used for p2p handshakes.
+    ///
+    /// This should be called before returning a VALID forkchoice update response
+    #[inline]
+    fn update_head(&self, head: SealedHeader) -> Result<(), reth_interfaces::Error> {
         let mut head_block = Head {
             number: head.number,
             hash: head.hash,
@@ -640,26 +795,6 @@ where
         // we update the the tracked header first
         self.blockchain.set_canonical_head(head);
 
-        if !update.finalized_block_hash.is_zero() {
-            let finalized = self
-                .blockchain
-                .find_block_by_hash(update.finalized_block_hash, BlockSource::Any)?
-                .ok_or_else(|| {
-                    Error::Provider(ProviderError::UnknownBlockHash(update.finalized_block_hash))
-                })?;
-            self.blockchain.set_finalized(finalized.header.seal(update.finalized_block_hash));
-        }
-
-        if !update.safe_block_hash.is_zero() {
-            let safe = self
-                .blockchain
-                .find_block_by_hash(update.safe_block_hash, BlockSource::Any)?
-                .ok_or_else(|| {
-                    Error::Provider(ProviderError::UnknownBlockHash(update.safe_block_hash))
-                })?;
-            self.blockchain.set_safe(safe.header.seal(update.safe_block_hash));
-        }
-
         head_block.total_difficulty =
             self.blockchain.header_td_by_number(head_block.number)?.ok_or_else(|| {
                 Error::Provider(ProviderError::TotalDifficultyNotFound {
@@ -668,6 +803,52 @@ where
             })?;
         self.sync_state_updater.update_status(head_block);
 
+        Ok(())
+    }
+
+    /// Updates the tracked safe block if we have it
+    ///
+    /// Returns an error if the block is not found.
+    #[inline]
+    fn update_safe_block(&self, safe_block_hash: H256) -> Result<(), reth_interfaces::Error> {
+        if !safe_block_hash.is_zero() {
+            if self.blockchain.safe_block_hash()? == Some(safe_block_hash) {
+                // nothing to update
+                return Ok(())
+            }
+
+            let safe = self
+                .blockchain
+                .find_block_by_hash(safe_block_hash, BlockSource::Any)?
+                .ok_or_else(|| Error::Provider(ProviderError::UnknownBlockHash(safe_block_hash)))?;
+            self.blockchain.set_safe(safe.header.seal(safe_block_hash));
+        }
+        Ok(())
+    }
+
+    /// Updates the tracked finalized block if we have it
+    ///
+    /// Returns an error if the block is not found.
+    #[inline]
+    fn update_finalized_block(
+        &self,
+        finalized_block_hash: H256,
+    ) -> Result<(), reth_interfaces::Error> {
+        if !finalized_block_hash.is_zero() {
+            if self.blockchain.finalized_block_hash()? == Some(finalized_block_hash) {
+                // nothing to update
+                return Ok(())
+            }
+
+            let finalized = self
+                .blockchain
+                .find_block_by_hash(finalized_block_hash, BlockSource::Any)?
+                .ok_or_else(|| {
+                    Error::Provider(ProviderError::UnknownBlockHash(finalized_block_hash))
+                })?;
+            self.blockchain.finalize_block(finalized.number);
+            self.blockchain.set_finalized(finalized.header.seal(finalized_block_hash));
+        }
         Ok(())
     }
 
@@ -832,16 +1013,26 @@ where
         let block_hash = block.hash();
         let block_num_hash = block.num_hash();
 
+        let mut lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block.hash);
+        if lowest_buffered_ancestor == block.hash {
+            lowest_buffered_ancestor = block.parent_hash;
+        }
+
         // now check the block itself
-        if let Some(status) = self.check_invalid_ancestor_with_head(block.parent_hash, block.hash) {
+        if let Some(status) =
+            self.check_invalid_ancestor_with_head(lowest_buffered_ancestor, block.hash)
+        {
             return Ok(status)
         }
 
-        let res = if self.sync.is_pipeline_idle() {
-            // we can only insert new payloads if the pipeline is _not_ running, because it holds
-            // exclusive access to the database
+        let res = if self.sync.is_pipeline_idle() && self.is_prune_idle() {
+            // we can only insert new payloads if the pipeline and the pruner are _not_ running,
+            // because they hold exclusive access to the database
             self.try_insert_new_payload(block)
         } else {
+            if self.is_prune_active() {
+                warn!(target: "consensus::engine", "Pruning is in progress, buffering new payload.");
+            }
             self.try_buffer_payload(block)
         };
 
@@ -902,12 +1093,12 @@ where
         Ok(block)
     }
 
-    /// When the pipeline is actively syncing the tree is unable to commit any additional blocks
-    /// since the pipeline holds exclusive access to the database.
+    /// When the pipeline or the pruner is active, the tree is unable to commit any additional
+    /// blocks since the pipeline holds exclusive access to the database.
     ///
     /// In this scenario we buffer the payload in the tree if the payload is valid, once the
-    /// pipeline finished syncing the tree is then able to also use the buffered payloads to commit
-    /// to a (newer) canonical chain.
+    /// pipeline or pruner is finished, the tree is then able to also use the buffered payloads to
+    /// commit to a (newer) canonical chain.
     ///
     /// This will return `SYNCING` if the block was buffered successfully, and an error if an error
     /// occurred while buffering the block.
@@ -922,7 +1113,7 @@ where
 
     /// Attempts to insert a new payload into the tree.
     ///
-    /// Caution: This expects that the pipeline is idle.
+    /// Caution: This expects that the pipeline and the pruner are idle.
     #[instrument(level = "trace", skip_all, target = "consensus::engine", ret)]
     fn try_insert_new_payload(
         &mut self,
@@ -1001,19 +1192,24 @@ where
     ///
     /// If the given block is missing from the database, this will return `false`. Otherwise, `true`
     /// is returned: the database contains the hash and the tree was updated.
-    fn update_tree_on_finished_pipeline(
-        &mut self,
-        block_hash: H256,
-    ) -> Result<bool, reth_interfaces::Error> {
+    fn update_tree_on_finished_pipeline(&mut self, block_hash: H256) -> Result<bool, Error> {
         let synced_to_finalized = match self.blockchain.block_number(block_hash)? {
             Some(number) => {
                 // Attempt to restore the tree.
-                self.blockchain.restore_canonical_hashes(number)?;
+                self.blockchain.restore_canonical_hashes_and_finalize(number)?;
                 true
             }
             None => false,
         };
         Ok(synced_to_finalized)
+    }
+
+    /// Attempt to restore the tree.
+    ///
+    /// This is invoked after a pruner run to update the tree with the most recent canonical
+    /// hashes.
+    fn update_tree_on_finished_pruner(&mut self) -> Result<(), Error> {
+        self.blockchain.restore_canonical_hashes()
     }
 
     /// Invoked if we successfully downloaded a new block from the network.
@@ -1065,53 +1261,9 @@ where
                         self.try_make_sync_target_canonical(downloaded_num_hash);
                     }
                     InsertPayloadOk::Inserted(BlockStatus::Disconnected { missing_parent }) => {
-                        // compare the missing parent with the canonical tip
-                        let canonical_tip_num = self.blockchain.canonical_tip().number;
-                        let sync_target_state = self.forkchoice_state_tracker.sync_target_state();
-
-                        let mut requires_pipeline = self.exceeds_pipeline_run_threshold(
-                            canonical_tip_num,
-                            missing_parent.number,
-                        );
-
-                        // check if the downloaded block is the tracked finalized block
-                        if let Some(ref state) = sync_target_state {
-                            if downloaded_num_hash.hash == state.finalized_block_hash {
-                                // we downloaded the finalized block
-                                requires_pipeline = self.exceeds_pipeline_run_threshold(
-                                    canonical_tip_num,
-                                    downloaded_num_hash.number,
-                                );
-                            }
-                        }
-
-                        // if the number of missing blocks is greater than the max, run the
-                        // pipeline
-                        if requires_pipeline {
-                            if let Some(state) = sync_target_state {
-                                // if we have already canonicalized the finalized block, we should
-                                // skip the pipeline run
-                                if Ok(None) ==
-                                    self.blockchain.header_by_hash_or_number(
-                                        state.finalized_block_hash.into(),
-                                    )
-                                {
-                                    self.sync.set_pipeline_sync_target(state.finalized_block_hash)
-                                }
-                            }
-                        } else {
-                            // continue downloading the missing parent
-                            //
-                            // this happens if either:
-                            //  * the missing parent block num < canonical tip num
-                            //    * this case represents a missing block on a fork that is shorter
-                            //      than the canonical chain
-                            //  * the missing parent block num >= canonical tip num, but the number
-                            //    of missing blocks is less than the pipeline threshold
-                            //    * this case represents a potentially long range of blocks to
-                            //      download and execute
-                            self.sync.download_full_block(missing_parent.hash);
-                        }
+                        // block is not connected to the canonical head, we need to download its
+                        // missing branch first
+                        self.on_disconnected_block(downloaded_num_hash, missing_parent);
                     }
                     _ => (),
                 }
@@ -1122,6 +1274,56 @@ where
                     self.invalid_headers.insert(err.into_block().header);
                 }
             }
+        }
+    }
+
+    /// This handles downloaded blocks that are shown to be disconnected from the canonical chain.
+    ///
+    /// This mainly compares the missing parent of the downloaded block with the current canonical
+    /// tip, and decides whether or not the pipeline should be run.
+    ///
+    /// The canonical tip is compared to the missing parent using `exceeds_pipeline_run_threshold`,
+    /// which returns true if the missing parent is sufficiently ahead of the canonical tip. If so,
+    /// the pipeline is run. Otherwise, we need to insert blocks using the blockchain tree, and
+    /// must download blocks outside of the pipeline. In this case, the distance is used to
+    /// determine how many blocks we should download at once.
+    fn on_disconnected_block(
+        &mut self,
+        downloaded_block: BlockNumHash,
+        missing_parent: BlockNumHash,
+    ) {
+        // compare the missing parent with the canonical tip
+        let canonical_tip_num = self.blockchain.canonical_tip().number;
+
+        if let Some(target) = self.can_pipeline_sync_to_finalized(
+            canonical_tip_num,
+            missing_parent.number,
+            Some(downloaded_block),
+        ) {
+            // we don't have the block yet and the distance exceeds the allowed
+            // threshold
+            self.sync.set_pipeline_sync_target(target);
+            // we can exit early here because the pipeline will take care of syncing
+            return
+        }
+
+        // continue downloading the missing parent
+        //
+        // this happens if either:
+        //  * the missing parent block num < canonical tip num
+        //    * this case represents a missing block on a fork that is shorter than the canonical
+        //      chain
+        //  * the missing parent block num >= canonical tip num, but the number of missing blocks is
+        //    less than the pipeline threshold
+        //    * this case represents a potentially long range of blocks to download and execute
+        if let Some(distance) =
+            self.distance_from_local_tip(canonical_tip_num, missing_parent.number)
+        {
+            self.sync.download_block_range(missing_parent.hash, distance)
+        } else {
+            // This happens when the missing parent is on an outdated
+            // sidechain
+            self.sync.download_full_block(missing_parent.hash);
         }
     }
 
@@ -1150,7 +1352,7 @@ where
                     self.sync_state_updater.update_sync_state(SyncState::Idle);
 
                     // clear any active block requests
-                    self.sync.clear_full_block_requests();
+                    self.sync.clear_block_download_requests();
                 }
                 Err(err) => {
                     // if we failed to make the FCU's head canonical, because we don't have that
@@ -1158,9 +1360,7 @@ where
                     // it's part of the canonical chain: if it's the safe or the finalized block
                     if matches!(
                         err,
-                        reth_interfaces::Error::Execution(
-                            BlockExecutionError::BlockHashNotFoundInChain { .. }
-                        )
+                        Error::Execution(BlockExecutionError::BlockHashNotFoundInChain { .. })
                     ) {
                         // if the inserted block is the currently targeted `finalized` or `safe`
                         // block, we will attempt to make them canonical,
@@ -1182,9 +1382,9 @@ where
     /// This returns a result to indicate whether the engine future should resolve (fatal error).
     fn on_sync_event(
         &mut self,
-        ev: EngineSyncEvent,
+        event: EngineSyncEvent,
     ) -> Option<Result<(), BeaconConsensusEngineError>> {
-        match ev {
+        match event {
             EngineSyncEvent::FetchedFullBlock(block) => {
                 self.on_downloaded_block(block);
             }
@@ -1198,110 +1398,204 @@ where
                 return Some(Err(BeaconConsensusEngineError::PipelineChannelClosed))
             }
             EngineSyncEvent::PipelineFinished { result, reached_max_block } => {
-                trace!(target: "consensus::engine", ?result, ?reached_max_block, "Pipeline finished");
-                match result {
-                    Ok(ctrl) => {
-                        if reached_max_block {
-                            // Terminate the sync early if it's reached the maximum user
-                            // configured block.
-                            return Some(Ok(()))
-                        }
+                return self.on_pipeline_finished(result, reached_max_block)
+            }
+        };
 
-                        if let ControlFlow::Unwind { bad_block, .. } = ctrl {
-                            trace!(target: "consensus::engine", hash=?bad_block.hash, "Bad block detected in unwind");
+        None
+    }
 
-                            // update the `invalid_headers` cache with the new invalid headers
-                            self.invalid_headers.insert(bad_block);
-                            return None
-                        }
+    /// Invoked when the pipeline has finished.
+    ///
+    /// Returns an Option to indicate whether the engine future should resolve:
+    ///
+    /// Returns a result if:
+    ///  - Ok(()) if the pipeline finished successfully
+    ///  - Err(..) if the pipeline failed fatally
+    ///
+    /// Returns None if the pipeline finished successfully and engine should continue.
+    fn on_pipeline_finished(
+        &mut self,
+        result: Result<ControlFlow, PipelineError>,
+        reached_max_block: bool,
+    ) -> Option<Result<(), BeaconConsensusEngineError>> {
+        trace!(target: "consensus::engine", ?result, ?reached_max_block, "Pipeline finished");
+        match result {
+            Ok(ctrl) => {
+                if reached_max_block {
+                    // Terminate the sync early if it's reached the maximum user
+                    // configured block.
+                    return Some(Ok(()))
+                }
 
-                        // update the canon chain if continuous is enabled
-                        if self.sync.run_pipeline_continuously() {
-                            let max_block = ctrl.progress().unwrap_or_default();
-                            let max_header = match self.blockchain.sealed_header(max_block) {
-                                Ok(header) => match header {
-                                    Some(header) => header,
-                                    None => {
-                                        return Some(Err(Error::Provider(
-                                            ProviderError::HeaderNotFound(max_block.into()),
-                                        )
-                                        .into()))
-                                    }
-                                },
-                                Err(error) => {
-                                    error!(target: "consensus::engine", ?error, "Error getting canonical header for continuous sync");
-                                    return Some(Err(error.into()))
-                                }
-                            };
-                            self.blockchain.set_canonical_head(max_header);
-                        }
+                if let ControlFlow::Unwind { bad_block, .. } = ctrl {
+                    trace!(target: "consensus::engine", hash=?bad_block.hash, "Bad block detected in unwind");
 
-                        let sync_target_state = match self
-                            .forkchoice_state_tracker
-                            .sync_target_state()
-                        {
-                            Some(current_state) => current_state,
+                    // update the `invalid_headers` cache with the new invalid headers
+                    self.invalid_headers.insert(bad_block);
+                    return None
+                }
+
+                // update the canon chain if continuous is enabled
+                if self.sync.run_pipeline_continuously() {
+                    let max_block = ctrl.block_number().unwrap_or_default();
+                    let max_header = match self.blockchain.sealed_header(max_block) {
+                        Ok(header) => match header {
+                            Some(header) => header,
                             None => {
-                                // This is only possible if the node was run with `debug.tip`
-                                // argument and without CL.
-                                warn!(target: "consensus::engine", "No fork choice state available");
-                                return None
+                                return Some(Err(Error::Provider(ProviderError::HeaderNotFound(
+                                    max_block.into(),
+                                ))
+                                .into()))
+                            }
+                        },
+                        Err(error) => {
+                            error!(target: "consensus::engine", ?error, "Error getting canonical header for continuous sync");
+                            return Some(Err(error.into()))
+                        }
+                    };
+                    self.blockchain.set_canonical_head(max_header);
+                }
+
+                let sync_target_state = match self.forkchoice_state_tracker.sync_target_state() {
+                    Some(current_state) => current_state,
+                    None => {
+                        // This is only possible if the node was run with `debug.tip`
+                        // argument and without CL.
+                        warn!(target: "consensus::engine", "No fork choice state available");
+                        return None
+                    }
+                };
+
+                // Next, we check if we need to schedule another pipeline run or transition
+                // to live sync via tree.
+                // This can arise if we buffer the forkchoice head, and if the head is an
+                // ancestor of an invalid block.
+                //
+                //  * The forkchoice head could be buffered if it were first sent as a `newPayload`
+                //    request.
+                //
+                // In this case, we won't have the head hash in the database, so we would
+                // set the pipeline sync target to a known-invalid head.
+                //
+                // This is why we check the invalid header cache here.
+                let lowest_buffered_ancestor =
+                    self.lowest_buffered_ancestor_or(sync_target_state.head_block_hash);
+
+                // this inserts the head if the lowest buffered ancestor is invalid
+                if self
+                    .check_invalid_ancestor_with_head(
+                        lowest_buffered_ancestor,
+                        sync_target_state.head_block_hash,
+                    )
+                    .is_none()
+                {
+                    let newest_finalized = self
+                        .forkchoice_state_tracker
+                        .sync_target_state()
+                        .map(|s| s.finalized_block_hash)
+                        .and_then(|h| self.blockchain.buffered_header_by_hash(h))
+                        .map(|header| header.number);
+
+                    // The block number that the pipeline finished at - if the progress or newest
+                    // finalized is None then we can't check the distance anyways.
+                    //
+                    // If both are Some, we perform another distance check and return the desired
+                    // pipeline target
+                    let pipeline_target = if let (Some(progress), Some(finalized_number)) =
+                        (ctrl.block_number(), newest_finalized)
+                    {
+                        // Determines whether or not we should run the pipeline again, in case the
+                        // new gap is large enough to warrant running the pipeline.
+                        self.can_pipeline_sync_to_finalized(progress, finalized_number, None)
+                    } else {
+                        None
+                    };
+
+                    // If the distance is large enough, we should run the pipeline again to prevent
+                    // the tree update from executing too many blocks and blocking.
+                    if let Some(target) = pipeline_target {
+                        // run the pipeline to the target since the distance is sufficient
+                        self.sync.set_pipeline_sync_target(target);
+                    } else {
+                        // Update the state and hashes of the blockchain tree if possible.
+                        match self.update_tree_on_finished_pipeline(
+                            sync_target_state.finalized_block_hash,
+                        ) {
+                            Ok(synced) => {
+                                if synced {
+                                    // we're consider this synced and transition to live sync
+                                    self.sync_state_updater.update_sync_state(SyncState::Idle);
+                                } else {
+                                    // We don't have the finalized block in the database, so
+                                    // we need to run another pipeline.
+                                    self.sync.set_pipeline_sync_target(
+                                        sync_target_state.finalized_block_hash,
+                                    );
+                                }
+                            }
+                            Err(error) => {
+                                error!(target: "consensus::engine", ?error, "Error restoring blockchain tree state");
+                                return Some(Err(error.into()))
                             }
                         };
-
-                        // Next, we check if we need to schedule another pipeline run or transition
-                        // to live sync via tree.
-                        // This can arise if we buffer the forkchoice head, and if the head is an
-                        // ancestor of an invalid block.
-                        //
-                        //  * The forkchoice head could be buffered if it were first sent as a
-                        //    `newPayload` request.
-                        //
-                        // In this case, we won't have the head hash in the database, so we would
-                        // set the pipeline sync target to a known-invalid head.
-                        //
-                        // This is why we check the invalid header cache here.
-                        let lowest_buffered_ancestor =
-                            self.lowest_buffered_ancestor_or(sync_target_state.head_block_hash);
-
-                        // this inserts the head if the lowest buffered ancestor is invalid
-                        if self
-                            .check_invalid_ancestor_with_head(
-                                lowest_buffered_ancestor,
-                                sync_target_state.head_block_hash,
-                            )
-                            .is_none()
-                        {
-                            // Update the state and hashes of the blockchain tree if possible.
-                            match self.update_tree_on_finished_pipeline(
-                                sync_target_state.finalized_block_hash,
-                            ) {
-                                Ok(synced) => {
-                                    if synced {
-                                        // we're consider this synced and transition to live sync
-                                        self.sync_state_updater.update_sync_state(SyncState::Idle);
-                                    } else {
-                                        // We don't have the finalized block in the database, so
-                                        // we need to run another pipeline.
-                                        self.sync.set_pipeline_sync_target(
-                                            sync_target_state.finalized_block_hash,
-                                        );
-                                    }
-                                }
-                                Err(error) => {
-                                    error!(target: "consensus::engine", ?error, "Error restoring blockchain tree state");
-                                    return Some(Err(error.into()))
-                                }
-                            };
-                        }
                     }
-                    // Any pipeline error at this point is fatal.
+                }
+            }
+            // Any pipeline error at this point is fatal.
+            Err(error) => return Some(Err(error.into())),
+        };
+
+        None
+    }
+
+    /// Event handler for events emitted by the [EnginePruneController].
+    ///
+    /// This returns a result to indicate whether the engine future should resolve (fatal error).
+    fn on_prune_event(
+        &mut self,
+        event: EnginePruneEvent,
+    ) -> Option<Result<(), BeaconConsensusEngineError>> {
+        match event {
+            EnginePruneEvent::NotReady => {}
+            EnginePruneEvent::Started(tip_block_number) => {
+                trace!(target: "consensus::engine", %tip_block_number, "Pruner started");
+                self.metrics.pruner_runs.increment(1);
+            }
+            EnginePruneEvent::TaskDropped => {
+                error!(target: "consensus::engine", "Failed to receive spawned pruner");
+                return Some(Err(BeaconConsensusEngineError::PrunerChannelClosed))
+            }
+            EnginePruneEvent::Finished { result } => {
+                trace!(target: "consensus::engine", ?result, "Pruner finished");
+                match result {
+                    Ok(_) => {
+                        // Update the state and hashes of the blockchain tree if possible.
+                        match self.update_tree_on_finished_pruner() {
+                            Ok(()) => {}
+                            Err(error) => {
+                                error!(target: "consensus::engine", ?error, "Error restoring blockchain tree state");
+                                return Some(Err(error.into()))
+                            }
+                        };
+                    }
+                    // Any pruner error at this point is fatal.
                     Err(error) => return Some(Err(error.into())),
                 };
             }
         };
 
         None
+    }
+
+    /// Returns `true` if the prune controller's pruner is idle.
+    fn is_prune_idle(&self) -> bool {
+        self.prune.as_ref().map(|prune| prune.is_pruner_idle()).unwrap_or(true)
+    }
+
+    /// Returns `true` if the prune controller's pruner is active.
+    fn is_prune_active(&self) -> bool {
+        !self.is_prune_idle()
     }
 }
 
@@ -1318,6 +1612,7 @@ where
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
     BT: BlockchainTreeEngine
         + BlockReader
+        + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader
         + Unpin
@@ -1332,6 +1627,7 @@ where
         // SyncController, hence they are polled first, and they're also time sensitive.
         loop {
             let mut engine_messages_pending = false;
+            let mut sync_pending = false;
 
             // handle next engine message
             match this.engine_message_rx.poll_next_unpin(cx) {
@@ -1370,10 +1666,28 @@ where
                     }
                 }
                 Poll::Pending => {
-                    if engine_messages_pending {
-                        // both the sync and the engine message receiver are pending
-                        return Poll::Pending
+                    // no more sync events to process
+                    sync_pending = true;
+                }
+            }
+
+            // check prune events if pipeline is idle AND (pruning is running and we need to
+            // prioritize checking its events OR no engine and sync messages are pending and we may
+            // start pruning)
+            if this.sync.is_pipeline_idle() &&
+                (this.is_prune_active() || engine_messages_pending & sync_pending)
+            {
+                if let Some(ref mut prune) = this.prune {
+                    match prune.poll(cx, this.blockchain.canonical_tip().number) {
+                        Poll::Ready(prune_event) => {
+                            if let Some(res) = this.on_prune_event(prune_event) {
+                                return Poll::Ready(res)
+                            }
+                        }
+                        Poll::Pending => return Poll::Pending,
                     }
+                } else {
+                    return Poll::Pending
                 }
             }
         }
@@ -1383,7 +1697,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::error::BeaconForkChoiceUpdateError;
+    use crate::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
     use assert_matches::assert_matches;
     use reth_blockchain_tree::{
         config::BlockchainTreeConfig, externals::TreeExternals, post_state::PostState,
@@ -1399,6 +1713,9 @@ mod tests {
     use reth_provider::{
         providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockWriter,
         ProviderFactory,
+    };
+    use reth_rpc_types::engine::{
+        ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
     };
     use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
     use reth_tasks::TokioTaskExecutor;
@@ -1563,6 +1880,9 @@ mod tests {
             let shareable_db = ProviderFactory::new(db.clone(), self.chain_spec.clone());
             let latest = self.chain_spec.genesis_header().seal_slow();
             let blockchain_provider = BlockchainProvider::with_latest(shareable_db, tree, latest);
+
+            let pruner = Pruner::new(5, 0);
+
             let (mut engine, handle) = BeaconConsensusEngine::new(
                 NoopFullBlockClient::default(),
                 pipeline,
@@ -1574,6 +1894,7 @@ mod tests {
                 payload_builder,
                 None,
                 self.pipeline_run_threshold.unwrap_or(MIN_BLOCKS_FOR_PIPELINE_RUN),
+                Some(pruner),
             )
             .expect("failed to create consensus engine");
 
@@ -1650,21 +1971,41 @@ mod tests {
         std::thread::sleep(Duration::from_millis(100));
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
-        // consensus engine is still idle
+        // consensus engine is still idle because no FCUs were received
         let _ = env.send_new_payload(SealedBlock::default().into()).await;
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
-        // consensus engine receives a forkchoice state and triggers the pipeline
+        // consensus engine is still idle because pruning is running
         let _ = env
             .send_forkchoice_updated(ForkchoiceState {
                 head_block_hash: H256::random(),
                 ..Default::default()
             })
             .await;
-        assert_matches!(
-            rx.await,
-            Ok(Err(BeaconConsensusEngineError::Pipeline(n))) if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
-        );
+        assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
+
+        // consensus engine receives a forkchoice state and triggers the pipeline when pruning is
+        // finished
+        loop {
+            match rx.try_recv() {
+                Ok(result) => {
+                    assert_matches!(
+                        result,
+                        Err(BeaconConsensusEngineError::Pipeline(n)) if matches!(*n.as_ref(), PipelineError::Stage(StageError::ChannelClosed))
+                    );
+                    break
+                }
+                Err(TryRecvError::Empty) => {
+                    let _ = env
+                        .send_forkchoice_updated(ForkchoiceState {
+                            head_block_hash: H256::random(),
+                            ..Default::default()
+                        })
+                        .await;
+                }
+                Err(err) => panic!("receive error: {err}"),
+            }
+        }
     }
 
     // Test that the consensus engine runs the pipeline again if the tree cannot be restored.

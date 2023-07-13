@@ -1,8 +1,9 @@
 use crate::{
     providers::state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
     traits::{BlockSource, ReceiptProvider},
-    BlockHashReader, BlockNumReader, BlockReader, EvmEnvProvider, HeaderProvider, ProviderError,
-    StageCheckpointReader, StateProviderBox, TransactionsProvider, WithdrawalsProvider,
+    BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, EvmEnvProvider,
+    HeaderProvider, ProviderError, StageCheckpointReader, StateProviderBox, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_interfaces::Result;
@@ -18,6 +19,7 @@ use tracing::trace;
 
 mod provider;
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
+use reth_interfaces::db::LogLevel;
 
 /// A common provider that fetches data from a database.
 ///
@@ -60,9 +62,11 @@ impl<DB: Database> ProviderFactory<DB> {
     pub fn new_with_database_path<P: AsRef<std::path::Path>>(
         path: P,
         chain_spec: Arc<ChainSpec>,
+        log_level: Option<LogLevel>,
     ) -> Result<ProviderFactory<DatabaseEnv>> {
         Ok(ProviderFactory::<DatabaseEnv> {
-            db: init_db(path).map_err(|e| reth_interfaces::Error::Custom(e.to_string()))?,
+            db: init_db(path, log_level)
+                .map_err(|e| reth_interfaces::Error::Custom(e.to_string()))?,
             chain_spec,
         })
     }
@@ -224,6 +228,10 @@ impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
         self.provider()?.transaction_by_id(id)
     }
 
+    fn transaction_by_id_no_hash(&self, id: TxNumber) -> Result<Option<TransactionSignedNoHash>> {
+        self.provider()?.transaction_by_id_no_hash(id)
+    }
+
     fn transaction_by_hash(&self, hash: TxHash) -> Result<Option<TransactionSigned>> {
         self.provider()?.transaction_by_hash(hash)
     }
@@ -343,6 +351,15 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
     }
 }
 
+impl<DB> ChainSpecProvider for ProviderFactory<DB>
+where
+    DB: Send + Sync,
+{
+    fn chain_spec(&self) -> Arc<ChainSpec> {
+        self.chain_spec.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::ProviderFactory;
@@ -392,6 +409,7 @@ mod tests {
         let factory = ProviderFactory::<DatabaseEnv>::new_with_database_path(
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
             Arc::new(chain_spec),
+            None,
         )
         .unwrap();
 

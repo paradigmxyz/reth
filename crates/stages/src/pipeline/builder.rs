@@ -62,7 +62,7 @@ where
     }
 
     /// Set the metric events sender.
-    pub fn with_metric_events(mut self, metrics_tx: MetricEventsSender) -> Self {
+    pub fn with_metrics_tx(mut self, metrics_tx: MetricEventsSender) -> Self {
         self.metrics_tx = Some(metrics_tx);
         self
     }

@@ -1,5 +1,6 @@
-use crate::metrics::{StageMetrics, SyncMetrics};
+use crate::metrics::SyncMetrics;
 use reth_primitives::{
+    constants::MGAS_TO_GAS,
     stage::{StageCheckpoint, StageId},
     BlockNumber,
 };
@@ -9,6 +10,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tracing::trace;
 
 /// Alias type for metric producers to use.
 pub type MetricEventsSender = UnboundedSender<MetricEvent>;
@@ -16,6 +18,11 @@ pub type MetricEventsSender = UnboundedSender<MetricEvent>;
 /// Collection of metric events.
 #[derive(Clone, Copy, Debug)]
 pub enum MetricEvent {
+    /// Sync reached new height. All stage checkpoints are updated.
+    SyncHeight {
+        /// Maximum height measured in block number that sync reached.
+        height: BlockNumber,
+    },
     /// Stage reached new checkpoint.
     StageCheckpoint {
         /// Stage ID.
@@ -25,6 +32,11 @@ pub enum MetricEvent {
         /// Maximum known block number reachable by this stage.
         /// If specified, `entities_total` metric is updated.
         max_block_number: Option<BlockNumber>,
+    },
+    /// Execution stage processed some amount of gas.
+    ExecutionStageGas {
+        /// Gas processed.
+        gas: u64,
     },
 }
 
@@ -43,11 +55,16 @@ impl MetricsListener {
     }
 
     fn handle_event(&mut self, event: MetricEvent) {
+        trace!(target: "sync::metrics", ?event, "Metric event received");
         match event {
+            MetricEvent::SyncHeight { height } => {
+                for stage_id in StageId::ALL {
+                    let stage_metrics = self.sync_metrics.get_stage_metrics(stage_id);
+                    stage_metrics.checkpoint.set(height as f64);
+                }
+            }
             MetricEvent::StageCheckpoint { stage_id, checkpoint, max_block_number } => {
-                let stage_metrics = self.sync_metrics.stages.entry(stage_id).or_insert_with(|| {
-                    StageMetrics::new_with_labels(&[("stage", stage_id.to_string())])
-                });
+                let stage_metrics = self.sync_metrics.get_stage_metrics(stage_id);
 
                 stage_metrics.checkpoint.set(checkpoint.block_number as f64);
 
@@ -62,6 +79,11 @@ impl MetricsListener {
                     stage_metrics.entities_total.set(total as f64);
                 }
             }
+            MetricEvent::ExecutionStageGas { gas } => self
+                .sync_metrics
+                .execution_stage
+                .mgas_processed_total
+                .increment(gas as f64 / MGAS_TO_GAS as f64),
         }
     }
 }

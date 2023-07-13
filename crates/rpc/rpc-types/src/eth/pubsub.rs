@@ -1,6 +1,10 @@
 //! Ethereum types for pub-sub
 
-use crate::{eth::Filter, Log, RichHeader};
+use crate::{
+    eth::{Filter, Transaction},
+    Log, RichHeader,
+};
+
 use reth_primitives::H256;
 use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 
@@ -14,6 +18,8 @@ pub enum SubscriptionResult {
     Log(Box<Log>),
     /// Transaction hash
     TransactionHash(H256),
+    /// Full Transaction
+    FullTransaction(Box<Transaction>),
     /// SyncStatus
     SyncState(PubSubSyncStatus),
 }
@@ -49,6 +55,7 @@ impl Serialize for SubscriptionResult {
             SubscriptionResult::Header(ref header) => header.serialize(serializer),
             SubscriptionResult::Log(ref log) => log.serialize(serializer),
             SubscriptionResult::TransactionHash(ref hash) => hash.serialize(serializer),
+            SubscriptionResult::FullTransaction(ref tx) => tx.serialize(serializer),
             SubscriptionResult::SyncState(ref sync) => sync.serialize(serializer),
         }
     }
@@ -76,10 +83,10 @@ pub enum SubscriptionKind {
     Logs,
     /// New Pending Transactions subscription.
     ///
-    /// Returns the hash for all transactions that are added to the pending state and are signed
-    /// with a key that is available in the node. When a transaction that was previously part of
-    /// the canonical chain isn't part of the new canonical chain after a reorganization its again
-    /// emitted.
+    /// Returns the hash or full tx for all transactions that are added to the pending state and
+    /// are signed with a key that is available in the node. When a transaction that was
+    /// previously part of the canonical chain isn't part of the new canonical chain after a
+    /// reorganization its again emitted.
     NewPendingTransactions,
     /// Node syncing status subscription.
     ///
@@ -89,7 +96,7 @@ pub enum SubscriptionKind {
     Syncing,
 }
 
-/// Subscription kind.
+/// Any additional parameters for a subscription.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum Params {
     /// No parameters passed.
@@ -97,6 +104,22 @@ pub enum Params {
     None,
     /// Log parameters.
     Logs(Box<Filter>),
+    /// Boolean parameter for new pending transactions.
+    Bool(bool),
+}
+
+impl Params {
+    /// Returns true if it's a bool parameter.
+    #[inline]
+    pub fn is_bool(&self) -> bool {
+        matches!(self, Params::Bool(_))
+    }
+
+    /// Returns true if it's a log parameter.
+    #[inline]
+    pub fn is_logs(&self) -> bool {
+        matches!(self, Params::Logs(_))
+    }
 }
 
 impl Serialize for Params {
@@ -107,6 +130,7 @@ impl Serialize for Params {
         match self {
             Params::None => (&[] as &[serde_json::Value]).serialize(serializer),
             Params::Logs(logs) => logs.serialize(serializer),
+            Params::Bool(full) => full.serialize(serializer),
         }
     }
 }
@@ -122,8 +146,25 @@ impl<'a> Deserialize<'a> for Params {
             return Ok(Params::None)
         }
 
+        if let Some(val) = v.as_bool() {
+            return Ok(Params::Bool(val))
+        }
+
         serde_json::from_value(v)
             .map(|f| Params::Logs(Box::new(f)))
             .map_err(|e| D::Error::custom(format!("Invalid Pub-Sub parameters: {e}")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn params_serde() {
+        let s: Params = serde_json::from_str("true").unwrap();
+        assert_eq!(s, Params::Bool(true));
+        let s: Params = serde_json::from_str("null").unwrap();
+        assert_eq!(s, Params::None);
     }
 }

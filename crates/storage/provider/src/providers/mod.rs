@@ -1,9 +1,10 @@
 use crate::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
-    CanonStateSubscriptions, EvmEnvProvider, HeaderProvider, PostStateDataProvider, ProviderError,
-    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox,
-    StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
+    CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider, HeaderProvider,
+    PostStateDataProvider, ProviderError, ReceiptProvider, ReceiptProviderIdExt,
+    StageCheckpointReader, StateProviderBox, StateProviderFactory, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use reth_db::{database::Database, models::StoredBlockBodyIndices};
 use reth_interfaces::{
@@ -14,7 +15,7 @@ use reth_interfaces::{
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
-    BlockNumberOrTag, BlockWithSenders, ChainInfo, Header, Receipt, SealedBlock,
+    BlockNumberOrTag, BlockWithSenders, ChainInfo, ChainSpec, Header, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256, U256,
 };
@@ -26,6 +27,7 @@ pub use state::{
 use std::{
     collections::{BTreeMap, HashSet},
     ops::RangeBounds,
+    sync::Arc,
     time::Instant,
 };
 use tracing::trace;
@@ -269,6 +271,10 @@ where
         self.database.provider()?.transaction_by_id(id)
     }
 
+    fn transaction_by_id_no_hash(&self, id: TxNumber) -> Result<Option<TransactionSignedNoHash>> {
+        self.database.provider()?.transaction_by_id_no_hash(id)
+    }
+
     fn transaction_by_hash(&self, hash: TxHash) -> Result<Option<TransactionSigned>> {
         self.database.provider()?.transaction_by_hash(hash)
     }
@@ -431,6 +437,16 @@ where
     }
 }
 
+impl<DB, Tree> ChainSpecProvider for BlockchainProvider<DB, Tree>
+where
+    DB: Send + Sync,
+    Tree: Send + Sync,
+{
+    fn chain_spec(&self) -> Arc<ChainSpec> {
+        self.database.chain_spec()
+    }
+}
+
 impl<DB, Tree> StateProviderFactory for BlockchainProvider<DB, Tree>
 where
     DB: Database,
@@ -578,8 +594,15 @@ where
         self.tree.finalize_block(finalized_block)
     }
 
-    fn restore_canonical_hashes(&self, last_finalized_block: BlockNumber) -> Result<()> {
-        self.tree.restore_canonical_hashes(last_finalized_block)
+    fn restore_canonical_hashes_and_finalize(
+        &self,
+        last_finalized_block: BlockNumber,
+    ) -> Result<()> {
+        self.tree.restore_canonical_hashes_and_finalize(last_finalized_block)
+    }
+
+    fn restore_canonical_hashes(&self) -> Result<()> {
+        self.tree.restore_canonical_hashes()
     }
 
     fn make_canonical(&self, block_hash: &BlockHash) -> Result<CanonicalOutcome> {
@@ -608,6 +631,14 @@ where
         self.tree.block_by_hash(block_hash)
     }
 
+    fn buffered_block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
+        self.tree.buffered_block_by_hash(block_hash)
+    }
+
+    fn buffered_header_by_hash(&self, block_hash: BlockHash) -> Option<SealedHeader> {
+        self.tree.buffered_header_by_hash(block_hash)
+    }
+
     fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash> {
         self.tree.canonical_blocks()
     }
@@ -622,6 +653,10 @@ where
 
     fn canonical_tip(&self) -> BlockNumHash {
         self.tree.canonical_tip()
+    }
+
+    fn is_canonical(&self, hash: BlockHash) -> std::result::Result<bool, Error> {
+        self.tree.is_canonical(hash)
     }
 
     fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {

@@ -518,11 +518,9 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         let mut block_withdrawals = block_withdrawals_iter.next();
 
         let mut blocks = Vec::new();
-        for ((main_block_number, header), (_, header_hash), (_, tx)) in izip!(
-            block_header_iter.into_iter(),
-            block_header_hashes_iter.into_iter(),
-            block_tx_iter.into_iter()
-        ) {
+        for ((main_block_number, header), (_, header_hash), (_, tx)) in
+            izip!(block_header_iter.into_iter(), block_header_hashes_iter, block_tx_iter)
+        {
             let header = header.seal(header_hash);
 
             let (body, senders) = tx.into_iter().map(|tx| tx.to_components()).unzip();
@@ -936,9 +934,17 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
         Ok(self.tx.get::<tables::Transactions>(id)?.map(Into::into))
     }
 
+    fn transaction_by_id_no_hash(&self, id: TxNumber) -> Result<Option<TransactionSignedNoHash>> {
+        Ok(self.tx.get::<tables::Transactions>(id)?)
+    }
+
     fn transaction_by_hash(&self, hash: TxHash) -> Result<Option<TransactionSigned>> {
         if let Some(id) = self.transaction_id(hash)? {
-            Ok(self.transaction_by_id(id)?)
+            Ok(self.transaction_by_id_no_hash(id)?.map(|tx| TransactionSigned {
+                hash,
+                signature: tx.signature,
+                transaction: tx.transaction,
+            }))
         } else {
             Ok(None)
         }
@@ -951,7 +957,12 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
     ) -> Result<Option<(TransactionSigned, TransactionMeta)>> {
         let mut transaction_cursor = self.tx.cursor_read::<tables::TransactionBlock>()?;
         if let Some(transaction_id) = self.transaction_id(tx_hash)? {
-            if let Some(transaction) = self.transaction_by_id(transaction_id)? {
+            if let Some(tx) = self.transaction_by_id_no_hash(transaction_id)? {
+                let transaction = TransactionSigned {
+                    hash: tx_hash,
+                    signature: tx.signature,
+                    transaction: tx.transaction,
+                };
                 if let Some(block_number) =
                     transaction_cursor.seek(transaction_id).map(|b| b.map(|(_, bn)| bn))?
                 {
@@ -1079,12 +1090,12 @@ impl<'this, TX: DbTx<'this>> ReceiptProvider for DatabaseProvider<'this, TX> {
                 return if tx_range.is_empty() {
                     Ok(Some(Vec::new()))
                 } else {
-                    let mut tx_cursor = self.tx.cursor_read::<tables::Receipts>()?;
-                    let transactions = tx_cursor
+                    let mut receipts_cursor = self.tx.cursor_read::<tables::Receipts>()?;
+                    let receipts = receipts_cursor
                         .walk_range(tx_range)?
-                        .map(|result| result.map(|(_, tx)| tx))
+                        .map(|result| result.map(|(_, receipt)| receipt))
                         .collect::<std::result::Result<Vec<_>, _>>()?;
-                    Ok(Some(transactions))
+                    Ok(Some(receipts))
                 }
             }
         }
@@ -1216,14 +1227,15 @@ impl<'this, TX: DbTxMut<'this>> StageCheckpointWriter for DatabaseProvider<'this
     ) -> Result<()> {
         // iterate over all existing stages in the table and update its progress.
         let mut cursor = self.tx.cursor_write::<tables::SyncStage>()?;
-        while let Some((stage_name, checkpoint)) = cursor.next()? {
+        for stage_id in StageId::ALL {
+            let (_, checkpoint) = cursor.seek_exact(stage_id.to_string())?.unwrap_or_default();
             cursor.upsert(
-                stage_name,
+                stage_id.to_string(),
                 StageCheckpoint {
                     block_number,
                     ..if drop_stage_checkpoint { Default::default() } else { checkpoint }
                 },
-            )?
+            )?;
         }
 
         Ok(())
@@ -1303,15 +1315,15 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
         // storage hashing stage
         {
             let lists = self.changed_storages_with_range(range.clone())?;
-            let storages = self.plainstate_storages(lists.into_iter())?;
-            self.insert_storage_for_hashing(storages.into_iter())?;
+            let storages = self.plainstate_storages(lists)?;
+            self.insert_storage_for_hashing(storages)?;
         }
 
         // account hashing stage
         {
             let lists = self.changed_accounts_with_range(range.clone())?;
-            let accounts = self.basic_accounts(lists.into_iter())?;
-            self.insert_account_for_hashing(accounts.into_iter())?;
+            let accounts = self.basic_accounts(lists)?;
+            self.insert_account_for_hashing(accounts)?;
         }
 
         // merkle tree
@@ -1649,8 +1661,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockExecutionWriter for DatabaseP
         // get execution res
         let execution_res = self.get_take_block_execution_result_range::<TAKE>(range.clone())?;
         // combine them
-        let blocks_with_exec_result: Vec<_> =
-            blocks.into_iter().zip(execution_res.into_iter()).collect();
+        let blocks_with_exec_result: Vec<_> = blocks.into_iter().zip(execution_res).collect();
 
         // remove block bodies it is needed for both get block range and get block execution results
         // that is why it is deleted afterwards.
@@ -1712,7 +1723,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
 
         let senders_len = senders.as_ref().map(|s| s.len());
         let tx_iter = if Some(block.body.len()) == senders_len {
-            block.body.into_iter().zip(senders.unwrap().into_iter()).collect::<Vec<(_, _)>>()
+            block.body.into_iter().zip(senders.unwrap()).collect::<Vec<(_, _)>>()
         } else {
             block
                 .body
@@ -1777,7 +1788,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
 
         // Write state and changesets to the database.
         // Must be written after blocks because of the receipt lookup.
-        state.write_to_db(self.tx_ref())?;
+        state.write_to_db(self.tx_ref(), new_tip_number)?;
 
         self.insert_hashes(first_number..=last_block_number, last_block_hash, expected_state_root)?;
 

@@ -2,8 +2,9 @@
 //!
 //! Starts the client
 use crate::{
-    args::{get_secret_key, DebugArgs, NetworkArgs, RpcServerArgs},
+    args::{get_secret_key, DebugArgs, NetworkArgs, RpcServerArgs, TxPoolArgs},
     dirs::DataDirPath,
+    init::init_genesis,
     prometheus_exporter,
     runner::CliContext,
     utils::get_single_header,
@@ -46,7 +47,6 @@ use reth_provider::{
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
-use reth_staged_sync::utils::init::init_genesis;
 use reth_stages::{
     prelude::*,
     stages::{
@@ -69,7 +69,7 @@ use tracing::*;
 use crate::{
     args::{
         utils::{genesis_value_parser, parse_socket_address},
-        PayloadBuilderArgs,
+        DatabaseArgs, PayloadBuilderArgs,
     },
     dirs::MaybePlatformPath,
     node::cl_events::ConsensusLayerHealthEvents,
@@ -133,10 +133,16 @@ pub struct Command {
     rpc: RpcServerArgs,
 
     #[clap(flatten)]
+    txpool: TxPoolArgs,
+
+    #[clap(flatten)]
     builder: PayloadBuilderArgs,
 
     #[clap(flatten)]
     debug: DebugArgs,
+
+    #[clap(flatten)]
+    db: DatabaseArgs,
 
     /// Automatically mine blocks for new transactions
     #[arg(long)]
@@ -163,7 +169,7 @@ impl Command {
 
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(&db_path)?);
+        let db = Arc::new(init_db(&db_path, self.db.log_level)?);
         info!(target: "reth::cli", "Database opened");
 
         self.start_metrics_endpoint(Arc::clone(&db)).await?;
@@ -183,6 +189,11 @@ impl Command {
 
         self.init_trusted_nodes(&mut config);
 
+        debug!(target: "reth::cli", "Spawning metrics listener task");
+        let (metrics_tx, metrics_rx) = unbounded_channel();
+        let metrics_listener = MetricsListener::new(metrics_rx);
+        ctx.task_executor.spawn_critical("metrics listener task", metrics_listener);
+
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
             db.clone(),
@@ -195,24 +206,27 @@ impl Command {
         // depth at least N blocks must be sent at once.
         let (canon_state_notification_sender, _receiver) =
             tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
-        let blockchain_tree = ShareableBlockchainTree::new(BlockchainTree::new(
-            tree_externals,
-            canon_state_notification_sender.clone(),
-            tree_config,
-        )?);
+        let blockchain_tree = ShareableBlockchainTree::new(
+            BlockchainTree::new(
+                tree_externals,
+                canon_state_notification_sender.clone(),
+                tree_config,
+            )?
+            .with_sync_metrics_tx(metrics_tx.clone()),
+        );
 
         // setup the blockchain provider
         let factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
         let blockchain_db = BlockchainProvider::new(factory, blockchain_tree.clone())?;
 
         let transaction_pool = reth_transaction_pool::Pool::eth_pool(
-            EthTransactionValidator::new(
+            EthTransactionValidator::with_additional_tasks(
                 blockchain_db.clone(),
                 Arc::clone(&self.chain),
                 ctx.task_executor.clone(),
                 1,
             ),
-            Default::default(),
+            self.txpool.pool_config(),
         );
         info!(target: "reth::cli", "Transaction pool initialized");
 
@@ -277,11 +291,6 @@ impl Command {
 
         debug!(target: "reth::cli", "Spawning payload builder service");
         ctx.task_executor.spawn_critical("payload builder service", payload_service);
-
-        debug!(target: "reth::cli", "Spawning metrics listener task");
-        let (metrics_tx, metrics_rx) = unbounded_channel();
-        let metrics_listener = MetricsListener::new(metrics_rx);
-        ctx.task_executor.spawn_critical("metrics listener task", metrics_listener);
 
         let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
@@ -351,6 +360,11 @@ impl Command {
             None
         };
 
+        let pruner = config.prune.map(|prune_config| {
+            info!(target: "reth::cli", "Pruner initialized");
+            reth_prune::Pruner::new(prune_config.block_interval, tree_config.max_reorg_depth())
+        });
+
         // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
             client,
@@ -365,6 +379,7 @@ impl Command {
             MIN_BLOCKS_FOR_PIPELINE_RUN,
             consensus_engine_tx,
             consensus_engine_rx,
+            pruner,
         )?;
         info!(target: "reth::cli", "Consensus engine initialized");
 
@@ -391,6 +406,7 @@ impl Command {
             self.chain.clone(),
             beacon_engine_handle,
             payload_builder.into(),
+            Box::new(ctx.task_executor.clone()),
         );
         info!(target: "reth::cli", "Engine API handler initialized");
 
@@ -687,7 +703,7 @@ impl Command {
             if continuous { HeaderSyncMode::Continuous } else { HeaderSyncMode::Tip(tip_rx) };
         let pipeline = builder
             .with_tip_sender(tip_tx)
-            .with_metric_events(metrics_tx)
+            .with_metrics_tx(metrics_tx.clone())
             .add_stages(
                 DefaultStages::new(
                     header_mode,
@@ -703,13 +719,17 @@ impl Command {
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_config.sender_recovery.commit_threshold,
                 })
-                .set(ExecutionStage::new(
-                    factory,
-                    ExecutionStageThresholds {
-                        max_blocks: stage_config.execution.max_blocks,
-                        max_changes: stage_config.execution.max_changes,
-                    },
-                ))
+                .set(
+                    ExecutionStage::new(
+                        factory,
+                        ExecutionStageThresholds {
+                            max_blocks: stage_config.execution.max_blocks,
+                            max_changes: stage_config.execution.max_changes,
+                        },
+                        config.prune.map(|prune| prune.parts).unwrap_or_default(),
+                    )
+                    .with_metrics_tx(metrics_tx),
+                )
                 .set(AccountHashingStage::new(
                     stage_config.account_hashing.clean_threshold,
                     stage_config.account_hashing.commit_threshold,

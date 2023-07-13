@@ -84,7 +84,7 @@ where
         // Setup phase before each benchmark iteration
         let setup = || {
             // Reset DB
-            let _ = std::fs::remove_dir_all(bench_db_path);
+            let _ = fs::remove_dir_all(bench_db_path);
             let db = Arc::try_unwrap(create_test_rw_db_with_path(bench_db_path)).unwrap();
 
             let mut unsorted_input = unsorted_input.clone();
