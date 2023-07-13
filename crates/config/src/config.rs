@@ -150,7 +150,7 @@ pub struct BodiesConfig {
     pub downloader_stream_batch_size: usize,
     /// The size of the internal block buffer in bytes.
     ///
-    /// Default: 4GB
+    /// Default: 2GB
     pub downloader_max_buffered_blocks_size_bytes: usize,
     /// The minimum number of requests to send concurrently.
     ///
@@ -168,7 +168,7 @@ impl Default for BodiesConfig {
         Self {
             downloader_request_limit: 200,
             downloader_stream_batch_size: 10_000,
-            downloader_max_buffered_blocks_size_bytes: 4 * 1024 * 1024 * 1024, // ~4GB
+            downloader_max_buffered_blocks_size_bytes: 2 * 1024 * 1024 * 1024, // ~2GB
             downloader_min_concurrent_requests: 5,
             downloader_max_concurrent_requests: 100,
         }
