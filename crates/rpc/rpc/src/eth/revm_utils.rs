@@ -227,6 +227,12 @@ where
 
     let mut env = build_call_evm_env(cfg, block, request)?;
 
+    if env.tx.gas_price == U256::ZERO {
+        // if gas price is not specific or was set to 0, we disable the balance check, which
+        // bypasses the initial `LackOfFundForGasLimit` check
+        env.cfg.disable_balance_check = true;
+    }
+
     // apply state overrides
     if let Some(state_overrides) = overrides.state {
         apply_state_overrides(state_overrides, db)?;
