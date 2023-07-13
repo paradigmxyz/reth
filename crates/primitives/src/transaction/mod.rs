@@ -780,6 +780,8 @@ impl Decodable for TransactionKind {
 }
 
 /// Signed transaction without its Hash. Used type for inserting into the DB.
+///
+/// This can by converted to [`TransactionSigned`] by calling [`TransactionSignedNoHash::hash`].
 #[derive_arbitrary(compact)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
 pub struct TransactionSignedNoHash {
@@ -798,6 +800,14 @@ impl TransactionSignedNoHash {
         let mut buf = Vec::new();
         self.transaction.encode_with_signature(&self.signature, &mut buf, false);
         keccak256(&buf)
+    }
+
+    /// Recover signer from signature and hash.
+    ///
+    /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
+    pub fn recover_signer(&self) -> Option<Address> {
+        let signature_hash = self.signature_hash();
+        self.signature.recover_signer(signature_hash)
     }
 
     /// Converts into a transaction type with its hash: [`TransactionSigned`].
@@ -938,7 +948,7 @@ impl TransactionSigned {
         self.signature.recover_signer(signature_hash)
     }
 
-    /// Devour Self, recover signer and return [`TransactionSignedEcRecovered`]
+    /// Consumes the type, recover signer and return [`TransactionSignedEcRecovered`]
     ///
     /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
     pub fn into_ecrecovered(self) -> Option<TransactionSignedEcRecovered> {
@@ -946,10 +956,21 @@ impl TransactionSigned {
         Some(TransactionSignedEcRecovered { signed_transaction: self, signer })
     }
 
-    /// try to recover signer and return [`TransactionSignedEcRecovered`]
+    /// Tries to recover signer and return [`TransactionSignedEcRecovered`] by cloning the type.
     pub fn try_ecrecovered(&self) -> Option<TransactionSignedEcRecovered> {
         let signer = self.recover_signer()?;
         Some(TransactionSignedEcRecovered { signed_transaction: self.clone(), signer })
+    }
+
+    /// Tries to recover signer and return [`TransactionSignedEcRecovered`].
+    ///
+    /// Returns `Err(Self)` if the transaction's signature is invalid, see also
+    /// [Self::recover_signer].
+    pub fn try_into_ecrecovered(self) -> Result<TransactionSignedEcRecovered, Self> {
+        match self.recover_signer() {
+            None => Err(self),
+            Some(signer) => Ok(TransactionSignedEcRecovered { signed_transaction: self, signer }),
+        }
     }
 
     /// Returns the enveloped encoded transactions.
