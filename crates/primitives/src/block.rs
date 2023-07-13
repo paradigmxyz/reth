@@ -841,6 +841,15 @@ impl BlockBody {
             withdrawals_root: self.calculate_withdrawals_root(),
         }
     }
+
+    /// Calculates a heuristic for the in-memory size of the [BlockBody].
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.transactions.iter().map(TransactionSigned::size).sum::<usize>() + (self.transactions.capacity() - self.transactions.len()) * std::mem::size_of::<TransactionSigned>() +
+        self.ommers.iter().map(Header::size).sum::<usize>() + (self.ommers.capacity() - self.ommers.len()) * std::mem::size_of::<Header>() +
+        // use 1 byte if None... not sure what the size actually is
+        self.withdrawals.as_ref().map(|w| w.iter().map(Withdrawal::size).sum::<usize>() + (w.capacity() - w.len()) * std::mem::size_of::<Withdrawal>()).unwrap_or(1)
+    }
 }
 
 /// A struct that represents roots associated with a block body. This can be used to correlate
