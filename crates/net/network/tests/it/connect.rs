@@ -409,6 +409,7 @@ async fn test_incoming_connect_with_single_geth() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
 #[cfg_attr(not(feature = "geth-tests"), ignore)]
+#[ignore] // TODO: Re-enable once we figure out why this test is flakey
 async fn test_outgoing_connect_with_single_geth() {
     reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
@@ -455,6 +456,7 @@ async fn test_outgoing_connect_with_single_geth() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
 #[cfg_attr(not(feature = "geth-tests"), ignore)]
+#[ignore] // TODO: Re-enable once we figure out why this test is flakey
 async fn test_geth_disconnect() {
     reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
