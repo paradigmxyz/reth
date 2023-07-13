@@ -3,14 +3,14 @@ use crate::tracing::{
     types::{CallTraceNode, CallTraceStep},
     TracingInspectorConfig,
 };
-use reth_primitives::{Address, U64};
+use reth_primitives::{Address, U256, U64};
 use reth_rpc_types::{trace::parity::*, TransactionInfo};
 use revm::{
     db::DatabaseRef,
     interpreter::opcode,
     primitives::{AccountInfo, ExecutionResult, ResultAndState, KECCAK_EMPTY},
 };
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// A type for creating parity style traces
 ///
@@ -410,4 +410,27 @@ where
     }
 
     Ok(())
+}
+
+/// Loops over all given accounts and compares the given account balances against the database state
+pub fn account_balance_changes<DB, I>(
+    db: DB,
+    account_balances: I,
+) -> Result<HashMap<Address, Delta<U256>>, DB::Error>
+where
+    I: IntoIterator<Item = (Address, U256)>,
+    DB: DatabaseRef,
+{
+    let mut deltas = HashMap::new();
+    for (addr, balance) in account_balances.into_iter() {
+        let db_acc = db.basic(addr)?.unwrap_or_default();
+        let delta = if db_acc.balance == balance {
+            Delta::Unchanged
+        } else {
+            Delta::Changed(ChangedType { from: db_acc.balance, to: balance })
+        };
+        deltas.insert(addr, delta);
+    }
+
+    Ok(deltas)
 }

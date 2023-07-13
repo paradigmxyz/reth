@@ -12,7 +12,7 @@ use crate::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_consensus_common::calc::{base_block_reward, block_reward};
-use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, SealedHeader, H256, U256, Address};
+use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, SealedHeader, H256, U256};
 use reth_provider::{
     BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
 };
@@ -20,7 +20,8 @@ use reth_revm::{
     database::{State, SubState},
     env::tx_env_with_recovered,
     tracing::{
-        parity::populate_account_balance_nonce_diffs, TracingInspector, TracingInspectorConfig,
+        parity::{account_balance_changes, populate_account_balance_nonce_diffs},
+        TracingInspector, TracingInspectorConfig,
     },
 };
 use reth_rpc_api::TraceApiServer;
@@ -32,8 +33,11 @@ use reth_rpc_types::{
 use reth_tasks::TaskSpawner;
 use revm::{db::CacheDB, primitives::Env};
 use revm_primitives::{db::DatabaseCommit, ExecutionResult, ResultAndState};
-use std::{collections::HashSet, future::Future, sync::Arc};
-use std::collections::HashMap;
+use std::{
+    collections::{HashMap, HashSet},
+    future::Future,
+    sync::Arc,
+};
 use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit};
 
 /// `trace` API implementation.
@@ -489,24 +493,42 @@ where
         &self,
         block_id: BlockId,
     ) -> EthResult<Option<HashMap<Address, U256>>> {
-        let traced: EthResult<Option<Vec<Vec<(Address, U256)>>>> = self
-            .trace_block_with(
-                block_id,
-                TracingInspectorConfig::default_parity(),
-                |_, _, _, state, _| {
-                    Ok(state
-                        .iter()
-                        .map(|(address, account)| (*address, account.info.balance))
-                        .collect())
-                },
-            )
+        // record all accounts with changed balances
+        let traced: EthResult<Option<Vec<_>>> = self
+            .trace_block_with(block_id, TracingInspectorConfig::none(), |_, _, _, state, db| {
+                let unique_accounts =
+                    state.iter().map(|(address, account)| (*address, account.info.balance));
+                // get the changes compare against initial db state
+                // Note: this could be improved because this is slightly inefficient since we're
+                // fetching the account again
+                let balance_changes = account_balance_changes(&db.db, unique_accounts)?;
+                Ok(balance_changes)
+            })
             .await;
-        return if let Ok(Some(v)) = traced {
-            let accounts: HashMap<Address, U256> = v.into_iter().flatten().collect();
-            Ok(Some(accounts))
+
+        if let Ok(Some(block_change_set)) = traced {
+            let mut balance_changes = HashMap::new();
+            for tx_changes in block_change_set {
+                for (acc, delta) in tx_changes {
+                    match delta {
+                        Delta::Unchanged => {
+                            // balance is unchanged compared the beginning of the block, so we need
+                            // to remove any previously recorded changes
+                            balance_changes.remove(&acc);
+                        }
+                        Delta::Changed(change) => {
+                            balance_changes.insert(acc, change.to);
+                        }
+                        _ => {
+                            // can only be unchanged or changed
+                        }
+                    }
+                }
+            }
+            Ok(Some(balance_changes))
         } else {
             Ok(None)
-        };
+        }
     }
 }
 
@@ -619,6 +641,7 @@ where
         &self,
         block_id: BlockId,
     ) -> Result<Option<HashMap<Address, U256>>> {
+        let _permit = self.acquire_trace_permit().await;
         Ok(TraceApi::get_balances_changes_in_block(self, block_id).await?)
     }
 }
