@@ -94,7 +94,7 @@ impl PruneModes {
     pub fn prune_to_block(&self, mode: &PruneMode, tip: BlockNumber) -> BlockNumber {
         match mode {
             PruneMode::Full => tip,
-            PruneMode::Distance(distance) => tip - *distance,
+            PruneMode::Distance(distance) => tip.saturating_sub(*distance),
             PruneMode::Before(n) => *n,
         }
     }

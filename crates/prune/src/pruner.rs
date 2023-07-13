@@ -3,9 +3,7 @@
 use crate::PrunerError;
 use reth_db::{database::Database, tables};
 use reth_primitives::{BlockNumber, ChainSpec, PruneCheckpoint, PruneMode, PruneModes, PrunePart};
-use reth_provider::{
-    BlockReader, DatabaseProviderRW, ProviderError, ProviderFactory, PruneCheckpointWriter,
-};
+use reth_provider::{BlockReader, DatabaseProviderRW, ProviderFactory, PruneCheckpointWriter};
 use std::sync::Arc;
 use tracing::{debug, instrument, trace};
 
