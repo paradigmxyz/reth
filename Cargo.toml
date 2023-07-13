@@ -101,6 +101,7 @@ reth-revm = { path = "./crates/revm" }
 reth-payload-builder = { path = "./crates/payload/builder" }
 reth-transaction-pool = { path = "./crates/transaction-pool" }
 reth-tasks = { path = "./crates/tasks" }
+reth-network = { path = "./crates/net/network" }
 reth-network-api = { path = "./crates/net/network-api" }
 
 ## eth
