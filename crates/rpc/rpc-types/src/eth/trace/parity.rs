@@ -168,16 +168,16 @@ pub enum CallType {
 pub struct CallAction {
     /// Address of the sending account.
     pub from: Address,
-    /// Address of the destination/target account.
-    pub to: Address,
-    /// Value transferred to the destination account.
-    pub value: U256,
+    /// The type of the call.
+    pub call_type: CallType,
     /// The gas available for executing the call.
     pub gas: U64,
     /// The input data provided to the call.
     pub input: Bytes,
-    /// The type of the call.
-    pub call_type: CallType,
+    /// Address of the destination/target account.
+    pub to: Address,
+    /// Value transferred to the destination account.
+    pub value: U256,
 }
 
 /// Represents a _create_ action, either a `CREATE` operation or a CREATE transaction.
