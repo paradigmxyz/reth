@@ -240,7 +240,7 @@ mod tests {
             .unwrap(),
             odd_y_parity: false,
         };
-     
+
         assert!(signature.size() >= 65);
     }
 }
