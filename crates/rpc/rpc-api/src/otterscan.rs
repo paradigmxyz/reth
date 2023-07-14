@@ -14,7 +14,7 @@ pub trait Otterscan {
     async fn has_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<bool>;
 
     /// Very simple API versioning scheme. Every time we add a new capability, the number is
-    /// incremented. This allows for Otterscan to check if the Erigon node contains all API it
+    /// incremented. This allows for Otterscan to check if the node contains all API it
     /// needs.
     #[method(name = "getApiLevel")]
     async fn get_api_level(&self) -> RpcResult<u64>;
