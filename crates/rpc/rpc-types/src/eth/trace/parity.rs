@@ -30,12 +30,13 @@ pub enum TraceType {
 pub struct TraceResults {
     /// Output of the trace
     pub output: Bytes,
-    /// Enabled if [TraceType::Trace] is provided
-    pub trace: Option<Vec<TransactionTrace>>,
-    /// Enabled if [TraceType::VmTrace] is provided
-    pub vm_trace: Option<VmTrace>,
     /// Enabled if [TraceType::StateDiff] is provided
     pub state_diff: Option<StateDiff>,
+    /// Enabled if [TraceType::Trace] is provided, otherwise an empty vec
+    #[serde(default)]
+    pub trace: Vec<TransactionTrace>,
+    /// Enabled if [TraceType::VmTrace] is provided
+    pub vm_trace: Option<VmTrace>,
 }
 
 /// A `FullTrace` with an additional transaction hash
