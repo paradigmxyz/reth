@@ -1068,6 +1068,16 @@ pub struct PeersConfig {
     pub trusted_nodes: HashSet<NodeRecord>,
     /// Connect to trusted nodes only?
     pub connect_trusted_nodes_only: bool,
+    /// Maximum number of backoff attempts before we give up on a peer and dropping.
+    ///
+    /// The max time spent of a peer before it's removed from the set is determined by the
+    /// configured backoff duration and the max backoff count.
+    ///
+    /// With a backoff counter of 5 and a backoff duration of 1h, the minimum time spent of the
+    /// peer in the table is the sum of all backoffs (1h + 2h + 3h + 4h + 5h = 15h).
+    ///
+    /// Note: this does not apply to trusted peers.
+    pub max_backoff_count: u32,
     /// Basic nodes to connect to.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub basic_nodes: HashSet<NodeRecord>,
@@ -1086,16 +1096,6 @@ pub struct PeersConfig {
     ///
     /// The backoff duration increases with number of backoff attempts.
     pub backoff_durations: PeerBackoffDurations,
-    /// Maximum number of backoff attempts before we give up on a peer and dropping.
-    ///
-    /// The max time spent of a peer before it's removed from the set is determined by the
-    /// configured backoff duration and the max backoff count.
-    ///
-    /// With a backoff counter of 5 and a backoff duration of 1h, the minimum time spent of the
-    /// peer in the table is the sum of all backoffs (1h + 2h + 3h + 4h + 5h = 15h).
-    ///
-    /// Note: this does not apply to trusted peers.
-    pub max_backoff_count: u32,
 }
 
 impl Default for PeersConfig {
@@ -1160,6 +1160,12 @@ impl PeersConfig {
     /// Nodes available at launch.
     pub fn with_basic_nodes(mut self, nodes: HashSet<NodeRecord>) -> Self {
         self.basic_nodes = nodes;
+        self
+    }
+
+    /// Configures the max allowed backoff count.
+    pub fn with_max_backoff_count(mut self, max_backoff_count: u32) -> Self {
+        self.max_backoff_count = max_backoff_count;
         self
     }
 
