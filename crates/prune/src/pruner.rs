@@ -13,6 +13,16 @@ pub type PrunerResult = Result<(), PrunerError>;
 /// The pipeline type itself with the result of [Pruner::run]
 pub type PrunerWithResult<DB> = (Pruner<DB>, PrunerResult);
 
+pub struct BatchSizes {
+    receipts: usize,
+}
+
+impl Default for BatchSizes {
+    fn default() -> Self {
+        Self { receipts: 10000 }
+    }
+}
+
 /// Pruning routine. Main pruning logic happens in [Pruner::run].
 pub struct Pruner<DB> {
     provider_factory: ProviderFactory<DB>,
@@ -27,6 +37,7 @@ pub struct Pruner<DB> {
     /// when the pruning needs to be initiated.
     last_pruned_block_number: Option<BlockNumber>,
     modes: PruneModes,
+    batch_sizes: BatchSizes,
 }
 
 impl<DB: Database> Pruner<DB> {
@@ -37,6 +48,7 @@ impl<DB: Database> Pruner<DB> {
         min_block_interval: u64,
         max_prune_depth: u64,
         modes: PruneModes,
+        batch_sizes: BatchSizes,
     ) -> Self {
         Self {
             provider_factory: ProviderFactory::new(db, chain_spec),
@@ -44,6 +56,7 @@ impl<DB: Database> Pruner<DB> {
             max_prune_depth,
             last_pruned_block_number: None,
             modes,
+            batch_sizes,
         }
     }
 
@@ -98,9 +111,9 @@ impl<DB: Database> Pruner<DB> {
             }
         };
 
-        provider.prune_table_in_chunks::<tables::Receipts, _, _>(
+        provider.prune_table_in_batches::<tables::Receipts, _, _>(
             ..=to_block_body.last_tx_num(),
-            10000,
+            self.batch_sizes.receipts,
             |receipts| {
                 trace!(
                     target: "pruner",
@@ -121,7 +134,7 @@ impl<DB: Database> Pruner<DB> {
 
 #[cfg(test)]
 mod tests {
-    use crate::Pruner;
+    use crate::{pruner::BatchSizes, Pruner};
     use assert_matches::assert_matches;
     use reth_db::{tables, test_utils::create_test_rw_db};
     use reth_interfaces::test_utils::{
@@ -135,7 +148,8 @@ mod tests {
     #[test]
     fn is_pruning_needed() {
         let db = create_test_rw_db();
-        let pruner = Pruner::new(db, MAINNET.clone(), 5, 0, PruneModes::default());
+        let pruner =
+            Pruner::new(db, MAINNET.clone(), 5, 0, PruneModes::default(), BatchSizes::default());
 
         // No last pruned block number was set before
         let first_block_number = 1;
@@ -184,6 +198,10 @@ mod tests {
             5,
             0,
             PruneModes { receipts: Some(prune_mode), ..Default::default() },
+            BatchSizes {
+                // Less than total amount of blocks to prune to test the batching logic
+                receipts: 10,
+            },
         );
 
         let provider = tx.inner_rw();
