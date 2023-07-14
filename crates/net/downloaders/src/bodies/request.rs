@@ -36,7 +36,7 @@ use std::{
 /// All errors regarding the response cause the peer to get penalized, meaning that adversaries
 /// that try to give us bodies that do not match the requested order are going to be penalized
 /// and eventually disconnected.
-pub(crate) struct BodiesRequestFuture<B: BodiesClient> {
+pub struct BodiesRequestFuture<B: BodiesClient> {
     client: Arc<B>,
     consensus: Arc<dyn Consensus>,
     metrics: BodyDownloaderMetrics,
