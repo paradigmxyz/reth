@@ -249,7 +249,6 @@ where
 
     /// Returns a response if it's first block number matches the next expected.
     fn try_next_buffered(&mut self) -> Option<Vec<BlockResponse>> {
-        tracing::trace!(target: "downloaders::bodies", actual_next=?self.buffered_responses.peek().map(|thing| thing.block_range()), expected_next=?self.next_expected_block_number(), "try_next_buffered");
         if let Some(next) = self.buffered_responses.peek() {
             let expected = self.next_expected_block_number();
             let next_block_range = next.block_range();
