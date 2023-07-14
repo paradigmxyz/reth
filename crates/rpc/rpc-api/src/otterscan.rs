@@ -50,7 +50,6 @@ pub trait Otterscan {
         page_size: u8,
     ) -> RpcResult<Vec<Transaction>>;
 
-    //custom return
     /// Gets paginated inbound/outbound transaction calls for a certain address.
     #[method(name = "searchTransactionsBefore")]
     async fn search_transactions_before(
@@ -60,7 +59,6 @@ pub trait Otterscan {
         page_size: u8,
     ) -> RpcResult<TransactionsWithReceipts>;
 
-    //custom return
     /// Gets paginated inbound/outbound transaction calls for a certain address.
     #[method(name = "searchTransactionsAfter")]
     async fn search_transactions_after(
@@ -78,7 +76,6 @@ pub trait Otterscan {
         nonce: u64,
     ) -> RpcResult<Transaction>;
 
-    //custom return
     /// Gets the transaction hash and the address who created a contract.
     #[method(name = "getContractCreator")]
     async fn get_contract_creator(&self, address: Address) -> RpcResult<ContractCreator>;

@@ -1,4 +1,5 @@
 #![allow(dead_code, unused_variables)]
+use crate::result::internal_rpc_err;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{Address, BlockId, TxHash, H256, U256};
@@ -20,66 +21,88 @@ impl<Eth> OtterscanApi<Eth> {
         Self { eth }
     }
 }
+
 #[async_trait]
 impl<Eth> OtterscanServer for OtterscanApi<Eth>
 where
     Eth: EthApiServer,
 {
+    /// Handler for `ots_hasCode`
     async fn has_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<bool> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for `ots_getApiLevel`
     async fn get_api_level(&self) -> RpcResult<u64> {
-        todo!()
+        Err(internal_rpc_err("unimplmented"))
     }
+
+    /// Handler for `ots_getInternalOperations`
     async fn get_internal_operations(&self, tx_hash: TxHash) -> RpcResult<Vec<InternalOperation>> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
+
+    /// Handler for `ots_getTransactionError`
     async fn get_transaction_error(&self, tx_hash: TxHash) -> RpcResult<String> {
-        todo!()
+        Err(internal_rpc_err("unimplmented"))
     }
+
+    /// Handler for `ots_traceTransaction`
     async fn trace_transaction(&self, tx_hash: TxHash) -> RpcResult<TraceEntry> {
-        todo!()
+        Err(internal_rpc_err("unimplmented"))
     }
+
+    /// Handler for `ots_getBlockDetails`
     async fn get_block_details(&self, block_number: U256) -> RpcResult<BlockDetails> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
+
+    /// Handler for `getBlockDetailsByHash`
     async fn get_block_details_by_hash(&self, block_hash: H256) -> RpcResult<BlockDetails> {
-        todo!()
+        Err(internal_rpc_err("unimplmented"))
     }
+
+    /// Handler for `getBlockTransactions`
     async fn get_block_transactions(
         &self,
         block_number: U256,
         page_number: u8,
         page_size: u8,
     ) -> RpcResult<Vec<Transaction>> {
-        todo!()
+        Err(internal_rpc_err("unimplmented"))
     }
 
+    /// Handler for `searchTransactionsBefore`
     async fn search_transactions_before(
         &self,
         address: Address,
         block_number: U256,
         page_size: u8,
     ) -> RpcResult<TransactionsWithReceipts> {
-        todo!()
+        Err(internal_rpc_err("unimplmented"))
     }
+
+    /// Handler for `searchTransactionsAfter`
     async fn search_transactions_after(
         &self,
         address: Address,
         block_number: U256,
         page_size: u8,
     ) -> RpcResult<TransactionsWithReceipts> {
-        todo!()
+        Err(internal_rpc_err("unimplmented"))
     }
+
+    /// Handler for `getTransactionBySenderAndNonce`
     async fn get_transaction_by_sender_and_nonce(
         &self,
         sender: Address,
         nonce: u64,
     ) -> RpcResult<Transaction> {
-        todo!()
+        Err(internal_rpc_err("unimplmented"))
     }
+
+    /// Handler for `getContractCreator`
     async fn get_contract_creator(&self, address: Address) -> RpcResult<ContractCreator> {
-        todo!()
+        Err(internal_rpc_err("unimplmented"))
     }
 }
