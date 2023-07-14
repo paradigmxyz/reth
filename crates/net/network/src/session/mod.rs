@@ -1,6 +1,7 @@
 //! Support for handling peer sessions.
 use crate::{
     message::PeerMessage,
+    metrics::SesssionManagerMetrics,
     session::{
         active::ActiveSession,
         config::SessionCounter,
@@ -101,6 +102,8 @@ pub(crate) struct SessionManager {
     active_session_rx: ReceiverStream<ActiveSessionMessage>,
     /// Used to measure inbound & outbound bandwidth across all managed streams
     bandwidth_meter: BandwidthMeter,
+    /// Metrics for the session manager.
+    metrics: SesssionManagerMetrics,
 }
 
 // === impl SessionManager ===
@@ -137,6 +140,7 @@ impl SessionManager {
             active_session_tx: MeteredSender::new(active_session_tx, "network_active_session"),
             active_session_rx: ReceiverStream::new(active_session_rx),
             bandwidth_meter,
+            metrics: Default::default(),
         }
     }
 
@@ -473,6 +477,10 @@ impl SessionManager {
                 self.active_sessions.insert(peer_id, handle);
                 self.counter.inc_active(&direction);
 
+                if direction.is_outgoing() {
+                    self.metrics.total_dial_successes.increment(1);
+                }
+
                 Poll::Ready(SessionEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
@@ -694,6 +702,11 @@ impl Direction {
     /// Returns `true` if this an incoming connection.
     pub(crate) fn is_incoming(&self) -> bool {
         matches!(self, Direction::Incoming)
+    }
+
+    /// Returns `true` if this an outgoing connection.
+    pub(crate) fn is_outgoing(&self) -> bool {
+        matches!(self, Direction::Outgoing(_))
     }
 }
 
