@@ -240,8 +240,7 @@ mod tests {
             .unwrap(),
             odd_y_parity: false,
         };
-
-        // the size of the struct will be larger due to alignment
+     
         assert!(signature.size() >= 65);
     }
 }
