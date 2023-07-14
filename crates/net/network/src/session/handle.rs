@@ -39,7 +39,7 @@ impl PendingSessionHandle {
         }
     }
 
-    /// Gets the direction of the pending session (inbound or outbound).
+    /// Returns the direction of the pending session (inbound or outbound).
     pub fn direction(&self) -> Direction {
         self.direction
     }
@@ -53,23 +53,23 @@ impl PendingSessionHandle {
 #[allow(unused)]
 pub struct ActiveSessionHandle {
     /// The direction of the session
-    pub direction: Direction,
+    pub(crate) direction: Direction,
     /// The assigned id for this session
-    pub session_id: SessionId,
+    pub(crate) session_id: SessionId,
     /// negotiated eth version
-    pub version: EthVersion,
+    pub(crate) version: EthVersion,
     /// The identifier of the remote peer
-    pub remote_id: PeerId,
+    pub(crate) remote_id: PeerId,
     /// The timestamp when the session has been established.
-    pub established: Instant,
+    pub(crate) established: Instant,
     /// Announced capabilities of the peer.
-    pub capabilities: Arc<Capabilities>,
+    pub(crate) capabilities: Arc<Capabilities>,
     /// Sender half of the command channel used send commands _to_ the spawned session
-    pub commands_to_session: mpsc::Sender<SessionCommand>,
+    pub(crate) commands_to_session: mpsc::Sender<SessionCommand>,
     /// The client's name and version
-    pub client_version: Arc<String>,
+    pub(crate) client_version: Arc<String>,
     /// The address we're connected to
-    pub remote_addr: SocketAddr,
+    pub(crate) remote_addr: SocketAddr,
 }
 
 // === impl ActiveSessionHandle ===
@@ -79,6 +79,46 @@ impl ActiveSessionHandle {
     pub fn disconnect(&self, reason: Option<DisconnectReason>) {
         // Note: we clone the sender which ensures the channel has capacity to send the message
         let _ = self.commands_to_session.clone().try_send(SessionCommand::Disconnect { reason });
+    }
+
+    /// Returns the direction of the active session (inbound or outbound).
+    pub fn direction(&self) -> Direction {
+        self.direction
+    }
+
+    /// Returns the assigned session id for this session.
+    pub fn session_id(&self) -> SessionId {
+        self.session_id
+    }
+
+    /// Returns the negotiated eth version for this session.
+    pub fn version(&self) -> EthVersion {
+        self.version
+    }
+
+    /// Returns the identifier of the remote peer.
+    pub fn remote_id(&self) -> PeerId {
+        self.remote_id
+    }
+
+    /// Returns the timestamp when the session has been established.
+    pub fn established(&self) -> Instant {
+        self.established
+    }
+
+    /// Returns the announced capabilities of the peer.
+    pub fn capabilities(&self) -> Arc<Capabilities> {
+        self.capabilities.clone()
+    }
+
+    /// Returns the client's name and version.
+    pub fn client_version(&self) -> Arc<String> {
+        self.client_version.clone()
+    }
+
+    /// Returns the address we're connected to.
+    pub fn remote_addr(&self) -> SocketAddr {
+        self.remote_addr
     }
 }
 
