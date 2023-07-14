@@ -138,8 +138,8 @@ impl Command {
                     let max_widths = stats_table.column_max_content_widths();
 
                     let mut seperator = Row::new();
-                    for (i, width) in max_widths.iter().enumerate() {
-                        seperator.add_cell(Cell::new("-".repeat(*width as usize)));
+                    for width in max_widths {
+                        seperator.add_cell(Cell::new("-".repeat(width as usize)));
                     }
                     stats_table.add_row(seperator);
 
