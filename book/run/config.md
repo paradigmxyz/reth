@@ -89,7 +89,7 @@ downloader_request_limit = 200
 #
 # A lower value means more frequent disk I/O (writes), but also
 # lowers memory usage.
-downloader_stream_batch_size = 10000
+downloader_stream_batch_size = 5000
 # The size of the internal block buffer in bytes.
 #
 # A bigger buffer means that bandwidth can be saturated for longer periods,
