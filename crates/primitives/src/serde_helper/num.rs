@@ -88,6 +88,33 @@ pub mod u64_hex_or_decimal {
         U64HexOrNumber::from(*value).serialize(s)
     }
 }
+
+/// serde functions for handling primitive optional `u64` as [U64](crate::U64)
+pub mod u64_hex_or_decimal_opt {
+    use crate::serde_helper::num::U64HexOrNumber;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    /// Deserializes an `u64` accepting a hex quantity string with optional 0x prefix or
+    /// a number
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match Option::<U64HexOrNumber>::deserialize(deserializer)? {
+            Some(val) => Ok(Some(val.into())),
+            None => Ok(None),
+        }
+    }
+
+    /// Serializes u64 as hex string
+    pub fn serialize<S: Serializer>(value: &Option<u64>, s: S) -> Result<S::Ok, S::Error> {
+        match value {
+            Some(val) => U64HexOrNumber::from(*val).serialize(s),
+            None => s.serialize_none(),
+        }
+    }
+}
+
 /// Deserializes the input into an `Option<U256>`, using [`from_int_or_hex`] to deserialize the
 /// inner value.
 pub fn from_int_or_hex_opt<'de, D>(deserializer: D) -> Result<Option<U256>, D::Error>
