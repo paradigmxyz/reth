@@ -1721,6 +1721,7 @@ mod tests {
         providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockWriter,
         ProviderFactory,
     };
+    use reth_prune::BatchSizes;
     use reth_rpc_types::engine::{
         ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
     };
@@ -1888,8 +1889,14 @@ mod tests {
             let latest = self.chain_spec.genesis_header().seal_slow();
             let blockchain_provider = BlockchainProvider::with_latest(shareable_db, tree, latest);
 
-            let pruner =
-                Pruner::new(db.clone(), self.chain_spec.clone(), 5, 0, PruneModes::default());
+            let pruner = Pruner::new(
+                db.clone(),
+                self.chain_spec.clone(),
+                5,
+                0,
+                PruneModes::default(),
+                BatchSizes::default(),
+            );
 
             let (mut engine, handle) = BeaconConsensusEngine::new(
                 NoopFullBlockClient::default(),
