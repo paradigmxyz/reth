@@ -2,14 +2,7 @@
 use crate::{
     message::PeerMessage,
     metrics::SesssionManagerMetrics,
-    session::{
-        active::ActiveSession,
-        config::SessionCounter,
-        handle::{
-            ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
-            SessionCommand,
-        },
-    },
+    session::{active::ActiveSession, config::SessionCounter},
 };
 pub use crate::{message::PeerRequestSender, session::handle::PeerInfo};
 use fnv::FnvHashMap;
