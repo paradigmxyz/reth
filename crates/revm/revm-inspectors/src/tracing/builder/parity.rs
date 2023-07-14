@@ -138,7 +138,12 @@ impl ParityTraceBuilder {
 
         let (trace, vm_trace, state_diff) = self.into_trace_type_traces(trace_types);
 
-        TraceResults { output: output.into(), trace, vm_trace, state_diff }
+        TraceResults {
+            output: output.into(),
+            trace: trace.unwrap_or_default(),
+            vm_trace,
+            state_diff,
+        }
     }
 
     /// Consumes the inspector and returns the trace results according to the configured trace
