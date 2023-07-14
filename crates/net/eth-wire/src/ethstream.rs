@@ -235,6 +235,7 @@ where
         };
 
         if bytes.len() > MAX_MESSAGE_SIZE {
+            dbg!("message too big");
             return Poll::Ready(Some(Err(EthStreamError::MessageTooBig(bytes.len()))))
         }
 
