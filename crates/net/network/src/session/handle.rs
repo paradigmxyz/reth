@@ -24,9 +24,9 @@ use tokio::{
 #[derive(Debug)]
 pub struct PendingSessionHandle {
     /// Can be used to tell the session to disconnect the connection/abort the handshake process.
-    pub disconnect_tx: Option<oneshot::Sender<()>>,
+    pub(crate) disconnect_tx: Option<oneshot::Sender<()>>,
     /// The direction of the session
-    pub direction: Direction,
+    pub(crate) direction: Direction,
 }
 
 // === impl PendingSessionHandle ===
@@ -37,6 +37,11 @@ impl PendingSessionHandle {
         if let Some(tx) = self.disconnect_tx.take() {
             let _ = tx.send(());
         }
+    }
+
+    /// Gets the direction of the pending session (inbound or outbound).
+    pub fn direction(&self) -> Direction {
+        self.direction
     }
 }
 
