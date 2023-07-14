@@ -119,11 +119,11 @@ where
         // Increment total downloaded metric
         self.metrics.total_downloaded.increment(response_len as u64);
 
-        // Malicious peers often return a single block. Mark responses with single
-        // block when more than 1 were requested invalid.
-        // TODO: Instead of marking single block responses invalid, calculate
-        // soft response size lower limit and use that for filtering.
-        if bodies.is_empty() || (request_len != 1 && response_len == 1) {
+        // TODO: Malicious peers often return a single block even if it does not exceed the soft
+        // response limit (2MB).  this could be penalized by checking if this block and the
+        // next one exceed the soft response limit, if not then peer either does not have the next
+        // block or deliberately sent a single block.
+        if bodies.is_empty() {
             return Err(DownloadError::EmptyResponse)
         }
 
