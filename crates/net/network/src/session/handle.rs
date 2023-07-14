@@ -14,7 +14,10 @@ use reth_primitives::PeerId;
 use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::{
     net::TcpStream,
-    sync::{mpsc, oneshot},
+    sync::{
+        mpsc::{self, error::SendError},
+        oneshot,
+    },
 };
 
 /// A handler attached to a peer session that's not authenticated yet, pending Handshake and hello
@@ -79,6 +82,15 @@ impl ActiveSessionHandle {
     pub fn disconnect(&self, reason: Option<DisconnectReason>) {
         // Note: we clone the sender which ensures the channel has capacity to send the message
         let _ = self.commands_to_session.clone().try_send(SessionCommand::Disconnect { reason });
+    }
+
+    /// Sends a disconnect command to the session, awaiting the command channel for available
+    /// capacity.
+    pub async fn try_disconnect(
+        &self,
+        reason: Option<DisconnectReason>,
+    ) -> Result<(), SendError<SessionCommand>> {
+        self.commands_to_session.clone().send(SessionCommand::Disconnect { reason }).await
     }
 
     /// Returns the direction of the active session (inbound or outbound).
