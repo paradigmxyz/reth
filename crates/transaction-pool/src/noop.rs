@@ -10,7 +10,7 @@ use crate::{
     TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
 use reth_primitives::{Address, TxHash};
-use std::{marker::PhantomData, sync::Arc};
+use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
 /// A [`TransactionPool`] implementation that does nothing.
@@ -149,6 +149,10 @@ impl TransactionPool for NoopTransactionPool {
         _sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         vec![]
+    }
+
+    fn unique_senders(&self) -> HashSet<Address> {
+        Default::default()
     }
 }
 

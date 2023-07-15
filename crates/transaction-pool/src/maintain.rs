@@ -5,33 +5,57 @@ use crate::{
     traits::{CanonicalStateUpdate, ChangedAccount, TransactionPoolExt},
     BlockInfo, TransactionPool,
 };
-use futures_util::{future::BoxFuture, FutureExt, Stream, StreamExt};
+use futures_util::{
+    future::{BoxFuture, Fuse, FusedFuture},
+    FutureExt, Stream, StreamExt,
+};
 use reth_primitives::{Address, BlockHash, BlockNumberOrTag, FromRecoveredTransaction};
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, PostState, StateProviderFactory};
+use reth_tasks::TaskSpawner;
 use std::{
     borrow::Borrow,
     collections::HashSet,
     hash::{Hash, Hasher},
 };
-use tracing::debug;
+use tokio::sync::oneshot;
+use tracing::{debug, trace};
 
-/// Maximum (reorg) depth we handle when updating the transaction pool: `new.number -
-/// last_seen.number`
-const MAX_UPDATE_DEPTH: u64 = 64;
+/// Additional settings for maintaining the transaction pool
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MaintainPoolConfig {
+    /// Maximum (reorg) depth we handle when updating the transaction pool: `new.number -
+    /// last_seen.number`
+    ///
+    /// Default: 64 (2 epochs)
+    pub max_update_depth: u64,
+    /// Maximum number of accounts to reload from state at once when updating the transaction pool.
+    ///
+    /// Default: 250
+    pub max_reload_accounts: usize,
+}
+
+impl Default for MaintainPoolConfig {
+    fn default() -> Self {
+        Self { max_update_depth: 64, max_reload_accounts: 250 }
+    }
+}
 
 /// Returns a spawnable future for maintaining the state of the transaction pool.
-pub fn maintain_transaction_pool_future<Client, P, St>(
+pub fn maintain_transaction_pool_future<Client, P, St, Tasks>(
     client: Client,
     pool: P,
     events: St,
+    task_spawner: Tasks,
+    config: MaintainPoolConfig,
 ) -> BoxFuture<'static, ()>
 where
-    Client: StateProviderFactory + BlockReaderIdExt + Send + 'static,
+    Client: StateProviderFactory + BlockReaderIdExt + Clone + Send + 'static,
     P: TransactionPoolExt + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
+    Tasks: TaskSpawner + 'static,
 {
     async move {
-        maintain_transaction_pool(client, pool, events).await;
+        maintain_transaction_pool(client, pool, events, task_spawner, config).await;
     }
     .boxed()
 }
@@ -39,14 +63,20 @@ where
 /// Maintains the state of the transaction pool by handling new blocks and reorgs.
 ///
 /// This listens for any new blocks and reorgs and updates the transaction pool's state accordingly
-#[allow(unused)]
-pub async fn maintain_transaction_pool<Client, P, St>(client: Client, pool: P, mut events: St)
-where
-    Client: StateProviderFactory + BlockReaderIdExt + Send + 'static,
+pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
+    client: Client,
+    pool: P,
+    mut events: St,
+    task_spawner: Tasks,
+    config: MaintainPoolConfig,
+) where
+    Client: StateProviderFactory + BlockReaderIdExt + Clone + Send + 'static,
     P: TransactionPoolExt + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
+    Tasks: TaskSpawner + 'static,
 {
-    let mut metrics = MaintainPoolMetrics::default();
+    let metrics = MaintainPoolMetrics::default();
+    let MaintainPoolConfig { max_update_depth, max_reload_accounts } = config;
     // ensure the pool points to latest state
     if let Ok(Some(latest)) = client.block_by_number_or_tag(BlockNumberOrTag::Latest) {
         let latest = latest.seal_slow();
@@ -64,17 +94,100 @@ where
     // keeps track of the state of the pool wrt to blocks
     let mut maintained_state = MaintainedPoolState::InSync;
 
+    // the future that reloads accounts from state
+    let mut reload_accounts_fut = Fuse::terminated();
+
+    // The update loop that waits for new blocks and reorgs and performs pool updated
     // Listen for new chain events and derive the update action for the pool
     loop {
+        trace!(target = "txpool", state=?maintained_state, "awaiting new block or reorg");
+
         metrics.set_dirty_accounts_len(dirty_addresses.len());
-
-        let Some(event) = events.next().await else { break };
-
         let pool_info = pool.block_info();
 
-        // TODO from time to time re-check the unique accounts in the pool and remove and resync
-        // based on the tracked state
+        // after performing a pool update after a new block we have some time to properly update
+        // dirty accounts and correct if the pool drifted from current state, for example after
+        // restart or a pipeline run
+        if maintained_state.is_drifted() {
+            // assuming all senders are dirty
+            dirty_addresses = pool.unique_senders();
+            maintained_state = MaintainedPoolState::InSync;
+        }
 
+        // if we have accounts that are out of sync with the pool, we reload them in chunks
+        if !dirty_addresses.is_empty() && reload_accounts_fut.is_terminated() {
+            let (tx, rx) = oneshot::channel();
+            let c = client.clone();
+            let at = pool_info.last_seen_block_hash;
+            let fut = if dirty_addresses.len() > max_reload_accounts {
+                // need to chunk accounts to reload
+                let accs_to_reload =
+                    dirty_addresses.iter().copied().take(max_reload_accounts).collect::<Vec<_>>();
+                for acc in &accs_to_reload {
+                    // make sure we remove them from the dirty set
+                    dirty_addresses.remove(acc);
+                }
+                async move {
+                    let res = load_accounts(c, at, accs_to_reload.into_iter());
+                    let _ = tx.send(res);
+                }
+                .boxed()
+            } else {
+                // can fetch all dirty accounts at once
+                let accs_to_reload = std::mem::take(&mut dirty_addresses);
+                async move {
+                    let res = load_accounts(c, at, accs_to_reload.into_iter());
+                    let _ = tx.send(res);
+                }
+                .boxed()
+            };
+            reload_accounts_fut = rx.fuse();
+            task_spawner.spawn_blocking(fut);
+        }
+
+        // outcomes of the futures we are waiting on
+        let mut event = None;
+        let mut reloaded = None;
+
+        // select of account reloads and new canonical state updates which should arrive at the rate
+        // of the block time (12s)
+        tokio::select! {
+            res = &mut reload_accounts_fut =>  {
+                reloaded = Some(res);
+            }
+            ev = events.next() =>  {
+                 if ev.is_none() {
+                    // the stream ended, we are done
+                    break;
+                }
+                event = ev;
+            }
+        }
+
+        // handle the result of the account reload
+        match reloaded {
+            Some(Ok(Ok(LoadedAccounts { accounts, failed_to_load }))) => {
+                // reloaded accounts successfully
+                // extend accounts we failed to load from database
+                dirty_addresses.extend(failed_to_load);
+                // update the pool with the loaded accounts
+                pool.update_accounts(accounts);
+            }
+            Some(Ok(Err(res))) => {
+                // Failed to load accounts from state
+                let (accs, err) = *res;
+                debug!(target = "txpool", ?err, "failed to load accounts");
+                dirty_addresses.extend(accs);
+            }
+            Some(Err(_)) => {
+                // failed to receive the accounts, sender dropped, only possible if task panicked
+                maintained_state = MaintainedPoolState::Drifted;
+            }
+            None => {}
+        }
+
+        // handle the new block or reorg
+        let Some(event) = event else { continue };
         match event {
             CanonStateNotification::Reorg { old, new } => {
                 let (old_blocks, old_state) = old.inner();
@@ -88,7 +201,7 @@ where
                     new_first.parent_hash == pool_info.last_seen_block_hash)
                 {
                     // the new block points to a higher block than the oldest block in the old chain
-                    maintained_state = MaintainedPoolState::Drift;
+                    maintained_state = MaintainedPoolState::Drifted;
                 }
 
                 // base fee for the next block: `new_tip+1`
@@ -108,7 +221,7 @@ where
 
                 // for these we need to fetch the nonce+balance from the db at the new tip
                 let mut changed_accounts =
-                    match load_accounts(&client, new_tip.hash, missing_changed_acc) {
+                    match load_accounts(client.clone(), new_tip.hash, missing_changed_acc) {
                         Ok(LoadedAccounts { accounts, failed_to_load }) => {
                             // extend accounts we failed to load from database
                             dirty_addresses.extend(failed_to_load);
@@ -118,6 +231,7 @@ where
                         Err(err) => {
                             let (addresses, err) = *err;
                             debug!(
+                                target = "txpool",
                                 ?err,
                                 "failed to load missing changed accounts at new tip: {:?}",
                                 new_tip.hash
@@ -170,13 +284,20 @@ where
                 let pending_block_base_fee = tip.next_block_base_fee().unwrap_or_default() as u128;
 
                 let first_block = blocks.first();
+                trace!(
+                    target = "txpool",
+                    first = first_block.number,
+                    tip = tip.number,
+                    pool_block = pool_info.last_seen_block_number,
+                    "update pool on new commit"
+                );
 
                 // check if the depth is too large and should be skipped, this could happen after
                 // initial sync or long re-sync
                 let depth = tip.number.abs_diff(pool_info.last_seen_block_number);
-                if depth > MAX_UPDATE_DEPTH {
-                    maintained_state = MaintainedPoolState::Drift;
-                    debug!(?depth, "skipping deep canonical update");
+                if depth > max_update_depth {
+                    maintained_state = MaintainedPoolState::Drifted;
+                    debug!(target = "txpool", ?depth, "skipping deep canonical update");
                     let info = BlockInfo {
                         last_seen_block_hash: tip.hash,
                         last_seen_block_number: tip.number,
@@ -200,7 +321,7 @@ where
                     // we received a new canonical chain commit but the commit is not canonical with
                     // the pool's block, this could happen after initial sync or
                     // long re-sync
-                    maintained_state = MaintainedPoolState::Drift;
+                    maintained_state = MaintainedPoolState::Drifted;
                 }
 
                 // Canonical update
@@ -219,12 +340,19 @@ where
 
 /// Keeps track of the pool's state, whether the accounts in the pool are in sync with the actual
 /// state.
-#[derive(Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 enum MaintainedPoolState {
-    /// Pool is assumed to be in sync with the state
+    /// Pool is assumed to be in sync with the current state
     InSync,
     /// Pool could be out of sync with the state
-    Drift,
+    Drifted,
+}
+
+impl MaintainedPoolState {
+    /// Returns `true` if the pool is assumed to be out of sync with the current state.
+    fn is_drifted(&self) -> bool {
+        matches!(self, MaintainedPoolState::Drifted)
+    }
 }
 
 /// A unique ChangedAccount identified by its address that can be used for deduplication
@@ -263,7 +391,7 @@ struct LoadedAccounts {
 ///
 /// Note: this expects _unique_ addresses
 fn load_accounts<Client, I>(
-    client: &Client,
+    client: Client,
     at: BlockHash,
     addresses: I,
 ) -> Result<LoadedAccounts, Box<(HashSet<Address>, reth_interfaces::Error)>>
