@@ -28,7 +28,7 @@ operating system:
 
 - **Ubuntu**: `apt-get install libclang-dev pkg-config build-essential`
 - **macOS**: `brew install llvm pkg-config`
-- **Windows**: `choco install make; choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'; choco install llvm; choco install protoc`
+- **Windows**: `choco install llvm`
 
 These are needed to build bindings for Reth's database.
 
