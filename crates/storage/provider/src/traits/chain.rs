@@ -67,6 +67,7 @@ pub enum CanonStateNotification {
     /// Chain got extended without reorg and only new chain is returned.
     Commit { new: Arc<Chain> },
     /// Chain reorgs and both old and new chain are returned.
+    /// Revert is just a subset of reorg where the new chain is empty.
     Reorg { old: Arc<Chain>, new: Arc<Chain> },
 }
 
