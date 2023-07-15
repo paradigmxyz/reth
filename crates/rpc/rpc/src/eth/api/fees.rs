@@ -60,7 +60,6 @@ where
                 truncated = max_fee_history,
                 "Sanitizing fee history block count"
             );
-            dbg!("truncate max fee history");
             block_count = max_fee_history
         }
 
