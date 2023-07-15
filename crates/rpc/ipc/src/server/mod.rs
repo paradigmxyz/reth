@@ -4,7 +4,7 @@ use crate::server::{
     connection::{Incoming, IpcConn, JsonRpcStream},
     future::{ConnectionGuard, FutureDriver, StopHandle},
 };
-use futures::{FutureExt, SinkExt, Stream, StreamExt};
+use futures::{FutureExt, Stream, StreamExt};
 use jsonrpsee::{
     core::{Error, TEN_MB_SIZE_BYTES},
     server::{logger::Logger, IdProvider, RandomIntegerIdProvider, ServerHandle},
@@ -25,6 +25,7 @@ use tower::{layer::util::Identity, Service};
 use tracing::{debug, trace, warn};
 
 // re-export so can be used during builder setup
+use crate::server::connection::IpcConnDriver;
 pub use parity_tokio_ipc::Endpoint;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -285,7 +286,7 @@ impl<L: Logger> Service<String> for TowerService<L> {
 /// Spawns the IPC connection onto a new task
 async fn spawn_connection<S, T>(
     conn: IpcConn<JsonRpcStream<T>>,
-    mut service: S,
+    service: S,
     mut stop_handle: StopHandle,
     rx: mpsc::Receiver<String>,
 ) where
@@ -296,51 +297,29 @@ async fn spawn_connection<S, T>(
 {
     let task = tokio::task::spawn(async move {
         let rx_item = ReceiverStream::new(rx);
+        let conn = IpcConnDriver {
+            conn,
+            service,
+            pending_calls: Default::default(),
+            items: Default::default(),
+        };
         tokio::pin!(conn, rx_item);
 
         loop {
-            let item = tokio::select! {
-                res = conn.next() => {
-                    match res {
-                        Some(Ok(request)) => {
-                            // handle the RPC request
-                            match service.call(request).await {
-                                Ok(Some(resp)) => {
-                                    resp
-                                },
-                                Ok(None) => {
-                                    continue
-                                },
-                                Err(err) => err.into().to_string(),
-                            }
-                        },
-                        Some(Err(e)) => {
-                             tracing::warn!("IPC request failed: {:?}", e);
-                             break
-                        }
-                        None => {
-                            return
-                        }
-                    }
+            tokio::select! {
+                _ = &mut conn => {
+                   break
                 }
                 item = rx_item.next() => {
-                    match item {
-                        Some(item) => item,
-                        None => {
-                            continue
-                        }
+                    if let Some(item) = item {
+                        conn.push_back(item);
                     }
                 }
                 _ = stop_handle.shutdown() => {
+                    // shutdown
                     break
                 }
             };
-
-            // send item over ipc
-            if let Err(err) = conn.send(item).await {
-                warn!("Failed to send IPC response: {:?}", err);
-                break
-            }
         }
     });
 
@@ -593,7 +572,6 @@ mod tests {
     use parity_tokio_ipc::dummy_endpoint;
     use tokio::sync::broadcast;
     use tokio_stream::wrappers::BroadcastStream;
-    use tracing_test::traced_test;
 
     async fn pipe_from_stream_with_bounded_buffer(
         pending: PendingSubscriptionSink,
@@ -641,7 +619,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[traced_test]
     async fn test_rpc_request() {
         let endpoint = dummy_endpoint();
         let server = Builder::default().build(&endpoint).unwrap();
@@ -672,7 +649,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[traced_test]
     async fn test_rpc_subscription() {
         let endpoint = dummy_endpoint();
         let server = Builder::default().build(&endpoint).unwrap();

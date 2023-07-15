@@ -1,8 +1,10 @@
 //! A IPC connection.
 
 use crate::stream_codec::StreamCodec;
-use futures::{ready, Sink, Stream, StreamExt};
+use futures::{ready, stream::FuturesUnordered, Sink, Stream, StreamExt};
 use std::{
+    collections::VecDeque,
+    future::Future,
     io,
     marker::PhantomData,
     pin::Pin,
@@ -10,6 +12,7 @@ use std::{
 };
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_util::codec::Framed;
+use tower::Service;
 
 pub(crate) type JsonRpcStream<T> = Framed<T, StreamCodec>;
 
@@ -111,5 +114,82 @@ where
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.project().0.poll_close(cx)
+    }
+}
+
+/// Drives an [IpcConn] forward.
+///
+/// This forwards received requests from the connection to the service and sends responses to the
+/// connection.
+///
+/// This future terminates when the connection is closed.
+#[pin_project::pin_project]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
+pub(crate) struct IpcConnDriver<T, S, Fut> {
+    #[pin]
+    pub(crate) conn: IpcConn<JsonRpcStream<T>>,
+    pub(crate) service: S,
+    #[pin]
+    pub(crate) pending_calls: FuturesUnordered<Fut>,
+    pub(crate) items: VecDeque<String>,
+}
+
+impl<T, S, Fut> IpcConnDriver<T, S, Fut> {
+    /// Add a new item to the send queue.
+    pub(crate) fn push_back(&mut self, item: String) {
+        self.items.push_back(item);
+    }
+}
+
+impl<T, S> Future for IpcConnDriver<T, S, S::Future>
+where
+    S: Service<String, Response = Option<String>> + Send + 'static,
+    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    S::Future: Send,
+    T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
+
+        loop {
+            // process calls
+            if !this.pending_calls.is_empty() {
+                while let Poll::Ready(Some(res)) = this.pending_calls.as_mut().poll_next(cx) {
+                    let item = match res {
+                        Ok(Some(resp)) => resp,
+                        Ok(None) => continue,
+                        Err(err) => err.into().to_string(),
+                    };
+                    this.items.push_back(item);
+                }
+            }
+
+            // write to the sink
+            while this.conn.as_mut().poll_ready(cx).is_ready() {
+                if let Some(item) = this.items.pop_front() {
+                    if let Err(err) = this.conn.as_mut().start_send(item) {
+                        tracing::warn!("IPC response failed: {:?}", err);
+                        return Poll::Ready(())
+                    }
+                } else {
+                    break
+                }
+            }
+
+            // read from the stream
+            match ready!(this.conn.as_mut().poll_next(cx)) {
+                Some(Ok(item)) => {
+                    let call = this.service.call(item);
+                    this.pending_calls.push(call);
+                }
+                Some(Err(err)) => {
+                    tracing::warn!("IPC request failed: {:?}", err);
+                    return Poll::Ready(())
+                }
+                None => return Poll::Ready(()),
+            }
+        }
     }
 }

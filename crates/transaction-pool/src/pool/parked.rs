@@ -110,13 +110,24 @@ impl<T: ParkedOrd> ParkedPool<T> {
 }
 
 impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
-    /// Removes all transactions and their dependent transaction from the subpool that no longer
-    /// satisfy the given basefee.
+    /// Returns all transactions that satisfy the given basefee.
     ///
-    /// Note: the transactions are not returned in a particular order.
-    pub(crate) fn enforce_basefee(&mut self, basefee: u128) -> Vec<Arc<ValidPoolTransaction<T>>> {
-        let mut to_remove = Vec::new();
+    /// Note: this does _not_ remove the transactions
+    pub(crate) fn satisfy_base_fee_transactions(
+        &self,
+        basefee: u128,
+    ) -> Vec<Arc<ValidPoolTransaction<T>>> {
+        let ids = self.satisfy_base_fee_ids(basefee);
+        let mut txs = Vec::with_capacity(ids.len());
+        for id in ids {
+            txs.push(self.by_id.get(&id).expect("transaction exists").transaction.clone().into());
+        }
+        txs
+    }
 
+    /// Returns all transactions that satisfy the given basefee.
+    fn satisfy_base_fee_ids(&self, basefee: u128) -> Vec<TransactionId> {
+        let mut transactions = Vec::new();
         {
             let mut iter = self.by_id.iter().peekable();
 
@@ -130,10 +141,19 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
                         iter.next();
                     }
                 } else {
-                    to_remove.push(*id);
+                    transactions.push(*id);
                 }
             }
         }
+        transactions
+    }
+
+    /// Removes all transactions and their dependent transaction from the subpool that no longer
+    /// satisfy the given basefee.
+    ///
+    /// Note: the transactions are not returned in a particular order.
+    pub(crate) fn enforce_basefee(&mut self, basefee: u128) -> Vec<Arc<ValidPoolTransaction<T>>> {
+        let to_remove = self.satisfy_base_fee_ids(basefee);
 
         let mut removed = Vec::with_capacity(to_remove.len());
         for id in to_remove {
