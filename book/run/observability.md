@@ -49,7 +49,7 @@ Depending on your installation you may find the config for the Prometheus servic
 
 - OSX: `/opt/homebrew/etc/prometheus.yml`
 - Linuxbrew: `/home/linuxbrew/.linuxbrew/etc/prometheus.yml`
-- Others: `/usr/local/etc/prometheus/prometheus.yml`ß
+- Others: `/usr/local/etc/prometheus/prometheus.yml`
 
 Next, open up "localhost:3000" in your browser, which is the default URL for Grafana. Here, "admin" is the default for both the username and password.
 
