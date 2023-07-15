@@ -31,13 +31,13 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider};
+//! use reth_provider::{BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider, AccountChangeReader};
 //! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
 //! pub async fn launch<Provider, Pool, Network, Events>(provider: Provider, pool: Pool, network: Network, events: Events)
 //! where
-//!     Provider: BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+//!     Provider: AccountChangeReader + BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions +  Clone + 'static,
@@ -64,7 +64,7 @@
 //! ```
 //! use tokio::try_join;
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider};
+//! use reth_provider::{BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider, AccountChangeReader};
 //! use reth_rpc::JwtSecret;
 //! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig};
 //! use reth_tasks::TokioTaskExecutor;
@@ -73,7 +73,7 @@
 //! use reth_rpc_builder::auth::AuthServerConfig;
 //! pub async fn launch<Provider, Pool, Network, Events, EngineApi>(provider: Provider, pool: Pool, network: Network, events: Events, engine_api: EngineApi)
 //! where
-//!     Provider: BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+//!     Provider: AccountChangeReader + BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions +  Clone + 'static,
