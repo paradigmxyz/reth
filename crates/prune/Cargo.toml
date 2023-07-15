@@ -1,0 +1,20 @@
+[package]
+name = "reth-prune"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = """
+Pruning implementation
+"""
+
+[dependencies]
+# reth
+reth-primitives = { workspace = true }
+
+# misc
+tracing = { workspace = true }
+thiserror = { workspace = true }
+

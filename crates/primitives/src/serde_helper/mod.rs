@@ -10,6 +10,8 @@ use crate::H256;
 pub use jsonu256::*;
 
 pub mod num;
+mod prune;
+pub use prune::deserialize_opt_prune_mode_with_min_distance;
 
 /// serde functions for handling primitive `u64` as [U64](crate::U64)
 pub mod u64_hex {

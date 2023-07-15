@@ -13,7 +13,7 @@ use reth_stages::{ControlFlow, Pipeline, PipelineError, PipelineWithResult};
 use reth_tasks::TaskSpawner;
 use std::{
     cmp::{Ordering, Reverse},
-    collections::BinaryHeap,
+    collections::{binary_heap::PeekMut, BinaryHeap},
     task::{ready, Context, Poll},
 };
 use tokio::sync::oneshot;
@@ -166,9 +166,9 @@ where
             return false
         }
         trace!(
-            target: "consensus::engine",
+            target: "consensus::engine::sync",
             ?hash,
-            "start downloading full block."
+            "Start downloading full block"
         );
         let request = self.full_block_client.get_full_block(hash);
         self.inflight_full_block_requests.push(request);
@@ -191,10 +191,10 @@ where
             self.max_block.map(|target| progress >= target).unwrap_or_default();
         if has_reached_max_block {
             trace!(
-                target: "consensus::engine",
+                target: "consensus::engine::sync",
                 ?progress,
                 max_block = ?self.max_block,
-                "Consensus engine reached max block."
+                "Consensus engine reached max block"
             );
         }
         has_reached_max_block
@@ -304,6 +304,14 @@ where
 
         // drain an element of the block buffer if there are any
         if let Some(block) = self.range_buffered_blocks.pop() {
+            // peek ahead and pop duplicates
+            while let Some(peek) = self.range_buffered_blocks.peek_mut() {
+                if peek.0 .0.hash() == block.0 .0.hash() {
+                    PeekMut::pop(peek);
+                } else {
+                    break
+                }
+            }
             return Poll::Ready(EngineSyncEvent::FetchedFullBlock(block.0 .0))
         }
 

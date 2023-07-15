@@ -51,6 +51,9 @@ pub struct NetworkState<C> {
     /// Buffered messages until polled.
     queued_messages: VecDeque<StateAction>,
     /// The client type that can interact with the chain.
+    ///
+    /// This type is used to fetch the block number after we established a session and received the
+    /// [Status] block hash.
     client: C,
     /// Network discovery.
     discovery: Discovery,

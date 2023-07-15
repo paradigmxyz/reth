@@ -3,7 +3,9 @@
 use futures::{future::Either, Stream, StreamExt};
 use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{Block, Receipt, SealedBlock, TransactionSigned, H256};
-use reth_provider::{BlockReader, CanonStateNotification, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{
+    BlockReader, BlockSource, CanonStateNotification, EvmEnvProvider, StateProviderFactory,
+};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use revm::primitives::{BlockEnv, CfgEnv};
 use schnellru::{ByLength, Limiter};
@@ -307,7 +309,10 @@ where
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
-                                    let res = provider.block_by_hash(block_hash);
+                                    // Only look in the database to prevent situations where we
+                                    // looking up the tree is blocking
+                                    let res = provider
+                                        .find_block_by_hash(block_hash, BlockSource::Database);
                                     let _ = action_tx
                                         .send(CacheAction::BlockResult { block_hash, res });
                                 }));
@@ -325,7 +330,10 @@ where
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
-                                    let res = provider.block_by_hash(block_hash);
+                                    // Only look in the database to prevent situations where we
+                                    // looking up the tree is blocking
+                                    let res = provider
+                                        .find_block_by_hash(block_hash, BlockSource::Database);
                                     let _ = action_tx
                                         .send(CacheAction::BlockResult { block_hash, res });
                                 }));

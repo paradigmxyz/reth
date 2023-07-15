@@ -15,7 +15,7 @@ env:
 name: sanity
 jobs:
   dep-version-constraints:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     name: dep version constraints test (partition ${{ matrix.partition }}/${{ strategy.job-total }})
     strategy:
       matrix:
@@ -64,7 +64,7 @@ jobs:
           filename: .github/SANITY_DEPS_ISSUE_TEMPLATE.md
 
   unused-deps:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     name: unused dependencies
     steps:
       - name: Checkout sources

@@ -21,6 +21,7 @@ members = [
     "crates/net/downloaders",
     "crates/payload/basic",
     "crates/primitives",
+    "crates/prune",
     "crates/revm",
     "crates/revm/revm-primitives",
     "crates/revm/revm-inspectors",
@@ -54,7 +55,7 @@ default-members = ["bin/reth"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.3"
 edition = "2021"
 rust-version = "1.70" # Remember to update .clippy.toml and README.md
 license = "MIT OR Apache-2.0"
@@ -100,6 +101,7 @@ reth-revm = { path = "./crates/revm" }
 reth-payload-builder = { path = "./crates/payload/builder" }
 reth-transaction-pool = { path = "./crates/transaction-pool" }
 reth-tasks = { path = "./crates/tasks" }
+reth-network = { path = "./crates/net/network" }
 reth-network-api = { path = "./crates/net/network-api" }
 
 ## eth

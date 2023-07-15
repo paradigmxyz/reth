@@ -311,6 +311,7 @@ where
             balance: account.balance,
             state_nonce: account.nonce,
             transaction,
+            propagate: true,
         }
     }
 }

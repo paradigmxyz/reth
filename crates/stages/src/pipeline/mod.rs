@@ -206,6 +206,11 @@ where
     /// If any stage is unsuccessful at execution, we proceed to
     /// unwind. This will undo the progress across the entire pipeline
     /// up to the block that caused the error.
+    ///
+    /// Returns the control flow after it ran the pipeline.
+    /// This will be [ControlFlow::Continue] or [ControlFlow::NoProgress] of the _last_ stage in the
+    /// pipeline (for example the `Finish` stage). Or [ControlFlow::Unwind] of the stage that caused
+    /// the unwind.
     pub async fn run_loop(&mut self) -> Result<ControlFlow, PipelineError> {
         let mut previous_stage = None;
         for stage_index in 0..self.stages.len() {
