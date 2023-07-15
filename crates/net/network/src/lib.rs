@@ -142,6 +142,7 @@ mod session;
 mod state;
 mod swarm;
 pub mod transactions;
+pub mod discovery_listeners;
 
 pub use builder::NetworkBuilder;
 pub use config::{NetworkConfig, NetworkConfigBuilder};

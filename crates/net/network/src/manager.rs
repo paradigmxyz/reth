@@ -41,7 +41,8 @@ use reth_eth_wire::{
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::ReputationChangeKind;
-use reth_primitives::{listener::{EventListeners,DiscoveryListeners}, NodeRecord, PeerId, H256};
+use reth_primitives::{listener::{EventListeners}, NodeRecord, PeerId, H256};
+use crate::discovery_listeners::{DiscoveryListeners};
 use reth_provider::BlockReader;
 use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
 use std::{

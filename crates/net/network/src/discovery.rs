@@ -90,7 +90,7 @@ impl Discovery {
             };
 
         Ok(Self {
-            discovery_listeners: Vec::default(),  
+            discovery_listeners: Default::default(),  
             local_enr,
             discv4,
             discv4_updates,
@@ -248,7 +248,7 @@ impl Discovery {
             _dns_discovery: None,
             dns_discovery_updates: None,
             _dns_disc_service: None,
-            discovery_listeners: Vec::default()
+            discovery_listeners: Default::default()
         }
     }
 }
