@@ -11,5 +11,5 @@ pub trait RethApi {
     async fn reth_get_balance_changes_in_block(
         &self,
         block_id: BlockId,
-    ) -> RpcResult<Option<HashMap<Address, Option<U256>>>>;
+    ) -> RpcResult<HashMap<Address, U256>>;
 }

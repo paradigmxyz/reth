@@ -86,15 +86,12 @@ where
     async fn balance_changes_in_block(
         &self,
         block_id: BlockId,
-    ) -> EthResult<HashMap<Address, Option<U256>>> {
+    ) -> EthResult<HashMap<Address, U256>> {
         self.on_blocking_task(|this| async move { this.try_balance_changes_in_block(block_id) })
             .await
     }
 
-    fn try_balance_changes_in_block(
-        &self,
-        block_id: BlockId,
-    ) -> EthResult<HashMap<Address, Option<U256>>> {
+    fn try_balance_changes_in_block(&self, block_id: BlockId) -> EthResult<HashMap<Address, U256>> {
         let block_id = block_id;
         let Some(block_number) = self.provider().block_number_for_id(block_id)? else {
             return Err(EthApiError::UnknownBlockNumber)
@@ -108,7 +105,7 @@ where
                 let current_balance = state.account_balance(account_before.address)?;
                 let prev_balance = account_before.info.map(|info| info.balance);
                 if current_balance != prev_balance {
-                    hash_map.insert(account_before.address, current_balance);
+                    hash_map.insert(account_before.address, current_balance.unwrap_or_default());
                 }
                 Ok(hash_map)
             },
@@ -132,8 +129,8 @@ where
     async fn reth_get_balance_changes_in_block(
         &self,
         block_id: BlockId,
-    ) -> RpcResult<Option<HashMap<Address, Option<U256>>>> {
-        Ok(Option::from(RethApi::balance_changes_in_block(self, block_id).await?))
+    ) -> RpcResult<HashMap<Address, U256>> {
+        Ok(RethApi::balance_changes_in_block(self, block_id).await?)
     }
 }
 
