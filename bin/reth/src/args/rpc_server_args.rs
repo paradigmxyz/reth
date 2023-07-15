@@ -527,6 +527,25 @@ mod tests {
     }
 
     #[test]
+    fn test_transport_rpc_module_trim_config() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http.api",
+            " eth, admin, debug",
+            "--http",
+            "--ws",
+        ])
+        .args;
+        let config = args.transport_rpc_module_config();
+        let expected = vec![RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
+        assert_eq!(config.http().cloned().unwrap().into_selection(), expected);
+        assert_eq!(
+            config.ws().cloned().unwrap().into_selection(),
+            RpcModuleSelection::standard_modules()
+        );
+    }
+
+    #[test]
     fn test_rpc_server_config() {
         let args = CommandParser::<RpcServerArgs>::parse_from([
             "reth",
