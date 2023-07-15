@@ -113,8 +113,8 @@ use jsonrpsee::{
 use reth_ipc::server::IpcServer;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider,
-    StateProviderFactory,
+    AccountChangeReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
+    EvmEnvProvider, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{
@@ -122,7 +122,7 @@ use reth_rpc::{
         gas_oracle::GasPriceOracle,
     },
     AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider,
-    NetApi, RPCApi, TraceApi, TracingCallGuard, TxPoolApi, Web3Api,
+    NetApi, RPCApi, RethApi, TraceApi, TracingCallGuard, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -172,7 +172,8 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events>(
     events: Events,
 ) -> Result<RpcServerHandle, RpcError>
 where
-    Provider: BlockReaderIdExt
+    Provider: AccountChangeReader
+        + BlockReaderIdExt
         + StateProviderFactory
         + EvmEnvProvider
         + ChainSpecProvider
@@ -316,7 +317,8 @@ impl<Provider, Pool, Network, Tasks, Events>
 impl<Provider, Pool, Network, Tasks, Events>
     RpcModuleBuilder<Provider, Pool, Network, Tasks, Events>
 where
-    Provider: BlockReaderIdExt
+    Provider: AccountChangeReader
+        + BlockReaderIdExt
         + StateProviderFactory
         + EvmEnvProvider
         + ChainSpecProvider
@@ -539,7 +541,8 @@ impl RpcModuleSelection {
         config: RpcModuleConfig,
     ) -> RpcModule<()>
     where
-        Provider: BlockReaderIdExt
+        Provider: AccountChangeReader
+            + BlockReaderIdExt
             + StateProviderFactory
             + EvmEnvProvider
             + ChainSpecProvider
@@ -646,6 +649,8 @@ pub enum RethRpcModule {
     Web3,
     /// `rpc_` module
     Rpc,
+    /// `reth_` module
+    Reth,
 }
 
 // === impl RethRpcModule ===
@@ -754,7 +759,8 @@ where
 impl<Provider, Pool, Network, Tasks, Events>
     RethModuleRegistry<Provider, Pool, Network, Tasks, Events>
 where
-    Provider: BlockReaderIdExt
+    Provider: AccountChangeReader
+        + BlockReaderIdExt
         + StateProviderFactory
         + EvmEnvProvider
         + ChainSpecProvider
@@ -835,6 +841,15 @@ where
         self.modules.insert(
             RethRpcModule::Net,
             NetApi::new(self.network.clone(), eth_api).into_rpc().into(),
+        );
+        self
+    }
+
+    /// Register Reth namespace
+    pub fn register_reth(&mut self) -> &mut Self {
+        self.modules.insert(
+            RethRpcModule::Reth,
+            RethApi::new(self.provider.clone(), Box::new(self.executor.clone())).into_rpc().into(),
         );
         self
     }
@@ -921,6 +936,11 @@ where
                         )
                         .into_rpc()
                         .into(),
+                        RethRpcModule::Reth => {
+                            RethApi::new(self.provider.clone(), Box::new(self.executor.clone()))
+                                .into_rpc()
+                                .into()
+                        }
                     })
                     .clone()
             })
@@ -1754,6 +1774,7 @@ mod tests {
                 "trace" =>  RethRpcModule::Trace,
                 "web3" =>  RethRpcModule::Web3,
                 "rpc" => RethRpcModule::Rpc,
+                "reth" => RethRpcModule::Reth,
             );
     }
 
