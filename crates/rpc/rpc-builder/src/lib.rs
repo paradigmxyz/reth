@@ -1763,6 +1763,7 @@ mod tests {
                 "trace" =>  RethRpcModule::Trace,
                 "web3" =>  RethRpcModule::Web3,
                 "rpc" => RethRpcModule::Rpc,
+                "ots" => RethRpcModule::Ots,
             );
     }
 

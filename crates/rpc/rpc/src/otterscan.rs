@@ -34,7 +34,7 @@ where
 
     /// Handler for `ots_getApiLevel`
     async fn get_api_level(&self) -> RpcResult<u64> {
-        Err(internal_rpc_err("unimplmented"))
+        Err(internal_rpc_err("unimplemented"))
     }
 
     /// Handler for `ots_getInternalOperations`
@@ -44,12 +44,12 @@ where
 
     /// Handler for `ots_getTransactionError`
     async fn get_transaction_error(&self, tx_hash: TxHash) -> RpcResult<String> {
-        Err(internal_rpc_err("unimplmented"))
+        Err(internal_rpc_err("unimplemented"))
     }
 
     /// Handler for `ots_traceTransaction`
     async fn trace_transaction(&self, tx_hash: TxHash) -> RpcResult<TraceEntry> {
-        Err(internal_rpc_err("unimplmented"))
+        Err(internal_rpc_err("unimplemented"))
     }
 
     /// Handler for `ots_getBlockDetails`
@@ -59,7 +59,7 @@ where
 
     /// Handler for `getBlockDetailsByHash`
     async fn get_block_details_by_hash(&self, block_hash: H256) -> RpcResult<BlockDetails> {
-        Err(internal_rpc_err("unimplmented"))
+        Err(internal_rpc_err("unimplemented"))
     }
 
     /// Handler for `getBlockTransactions`
@@ -69,7 +69,7 @@ where
         page_number: u8,
         page_size: u8,
     ) -> RpcResult<Vec<Transaction>> {
-        Err(internal_rpc_err("unimplmented"))
+        Err(internal_rpc_err("unimplemented"))
     }
 
     /// Handler for `searchTransactionsBefore`
@@ -79,7 +79,7 @@ where
         block_number: U256,
         page_size: u8,
     ) -> RpcResult<TransactionsWithReceipts> {
-        Err(internal_rpc_err("unimplmented"))
+        Err(internal_rpc_err("unimplemented"))
     }
 
     /// Handler for `searchTransactionsAfter`
@@ -89,7 +89,7 @@ where
         block_number: U256,
         page_size: u8,
     ) -> RpcResult<TransactionsWithReceipts> {
-        Err(internal_rpc_err("unimplmented"))
+        Err(internal_rpc_err("unimplemented"))
     }
 
     /// Handler for `getTransactionBySenderAndNonce`
@@ -98,11 +98,11 @@ where
         sender: Address,
         nonce: u64,
     ) -> RpcResult<Transaction> {
-        Err(internal_rpc_err("unimplmented"))
+        Err(internal_rpc_err("unimplemented"))
     }
 
     /// Handler for `getContractCreator`
     async fn get_contract_creator(&self, address: Address) -> RpcResult<ContractCreator> {
-        Err(internal_rpc_err("unimplmented"))
+        Err(internal_rpc_err("unimplemented"))
     }
 }
