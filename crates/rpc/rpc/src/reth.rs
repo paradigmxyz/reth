@@ -53,7 +53,11 @@ where
     }
 
     #[allow(unused)]
-    async fn account_changes_in_block(
+    /// Returns a map of addresses to changed accounts (or None for deleted accounts) for a
+    /// particular block.
+    ///
+    /// Note: not currently used, included as an example.
+    pub async fn account_changes_in_block(
         &self,
         block_id: BlockId,
     ) -> EthResult<HashMap<Address, Option<Account>>> {
@@ -83,7 +87,8 @@ where
         Ok(hash_map)
     }
 
-    async fn balance_changes_in_block(
+    /// Returns a map of addresses to changed account balanced for a particular block.
+    pub async fn balance_changes_in_block(
         &self,
         block_id: BlockId,
     ) -> EthResult<HashMap<Address, U256>> {
@@ -114,12 +119,6 @@ where
     }
 }
 
-impl<Provider> std::fmt::Debug for RethApi<Provider> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RethApi").finish_non_exhaustive()
-    }
-}
-
 #[async_trait]
 impl<Provider> RethApiServer for RethApi<Provider>
 where
@@ -131,6 +130,12 @@ where
         block_id: BlockId,
     ) -> RpcResult<HashMap<Address, U256>> {
         Ok(RethApi::balance_changes_in_block(self, block_id).await?)
+    }
+}
+
+impl<Provider> std::fmt::Debug for RethApi<Provider> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RethApi").finish_non_exhaustive()
     }
 }
 
