@@ -8,7 +8,7 @@ use reth_rlp::Decodable;
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 
 /// The execution payload body response that allows for `null` values.
-pub type ExecutionPayloadBodies = Vec<Option<ExecutionPayloadBody>>;
+pub type ExecutionPayloadBodiesV1 = Vec<Option<ExecutionPayloadBodyV1>>;
 
 /// And 8-byte identifier for an execution payload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
@@ -220,21 +220,25 @@ impl PayloadError {
 ///
 /// See also: <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#executionpayloadbodyv1>
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExecutionPayloadBody {
+pub struct ExecutionPayloadBodyV1 {
+    /// Enveloped encoded transactions.
     pub transactions: Vec<Bytes>,
-    pub withdrawals: Vec<Withdrawal>,
+    /// All withdrawals in the block.
+    ///
+    /// Will always be `None` if pre shanghai.
+    pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
-impl From<Block> for ExecutionPayloadBody {
+impl From<Block> for ExecutionPayloadBodyV1 {
     fn from(value: Block) -> Self {
         let transactions = value.body.into_iter().map(|tx| {
             let mut out = Vec::new();
             tx.encode_enveloped(&mut out);
             out.into()
         });
-        ExecutionPayloadBody {
+        ExecutionPayloadBodyV1 {
             transactions: transactions.collect(),
-            withdrawals: value.withdrawals.unwrap_or_default(),
+            withdrawals: value.withdrawals,
         }
     }
 }
@@ -456,7 +460,7 @@ mod tests {
         let mut rng = generators::rng();
         for block in random_block_range(&mut rng, 0..=99, H256::default(), 0..2) {
             let unsealed = block.clone().unseal();
-            let payload_body: ExecutionPayloadBody = unsealed.into();
+            let payload_body: ExecutionPayloadBodyV1 = unsealed.into();
 
             assert_eq!(
                 Ok(block.body),
@@ -467,7 +471,7 @@ mod tests {
                     .collect::<Result<Vec<_>, _>>(),
             );
 
-            assert_eq!(block.withdrawals.unwrap_or_default(), payload_body.withdrawals);
+            assert_eq!(block.withdrawals, payload_body.withdrawals);
         }
     }
 

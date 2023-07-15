@@ -313,7 +313,7 @@ mod tests {
     fn test_store_config() {
         with_tempdir("config-store-test", |config_path| {
             let config = Config::default();
-            confy::store_path(config_path, config).unwrap();
+            confy::store_path(config_path, config).expect("Failed to store config");
         })
     }
 

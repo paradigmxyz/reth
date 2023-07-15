@@ -2162,6 +2162,7 @@ dependencies = [
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-db",
+ "reth-network",
  "reth-network-api",
  "reth-primitives",
  "reth-provider",
@@ -4956,6 +4957,7 @@ dependencies = [
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
+ "reth-prune",
  "reth-revm",
  "reth-revm-inspectors",
  "reth-rlp",
@@ -5029,6 +5031,7 @@ dependencies = [
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
+ "reth-prune",
  "reth-rpc-types",
  "reth-stages",
  "reth-tasks",
@@ -5551,6 +5554,15 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
+ "tracing",
+]
+
+[[package]]
+name = "reth-prune"
+version = "0.1.0-alpha.3"
+dependencies = [
+ "reth-primitives",
+ "thiserror",
  "tracing",
 ]
 

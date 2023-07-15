@@ -360,6 +360,11 @@ impl Command {
             None
         };
 
+        let pruner = config.prune.map(|prune_config| {
+            info!(target: "reth::cli", "Pruner initialized");
+            reth_prune::Pruner::new(prune_config.block_interval, tree_config.max_reorg_depth())
+        });
+
         // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
             client,
@@ -374,6 +379,7 @@ impl Command {
             MIN_BLOCKS_FOR_PIPELINE_RUN,
             consensus_engine_tx,
             consensus_engine_rx,
+            pruner,
         )?;
         info!(target: "reth::cli", "Consensus engine initialized");
 
