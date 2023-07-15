@@ -68,7 +68,6 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
     pool: P,
     mut events: St,
     task_spawner: Tasks,
-
     config: MaintainPoolConfig,
 ) where
     Client: StateProviderFactory + BlockReaderIdExt + Clone + Send + 'static,
