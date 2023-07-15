@@ -271,6 +271,10 @@ where
         self.database.provider()?.transaction_by_id(id)
     }
 
+    fn transaction_by_id_no_hash(&self, id: TxNumber) -> Result<Option<TransactionSignedNoHash>> {
+        self.database.provider()?.transaction_by_id_no_hash(id)
+    }
+
     fn transaction_by_hash(&self, hash: TxHash) -> Result<Option<TransactionSigned>> {
         self.database.provider()?.transaction_by_hash(hash)
     }
@@ -590,8 +594,15 @@ where
         self.tree.finalize_block(finalized_block)
     }
 
-    fn restore_canonical_hashes(&self, last_finalized_block: BlockNumber) -> Result<()> {
-        self.tree.restore_canonical_hashes(last_finalized_block)
+    fn restore_canonical_hashes_and_finalize(
+        &self,
+        last_finalized_block: BlockNumber,
+    ) -> Result<()> {
+        self.tree.restore_canonical_hashes_and_finalize(last_finalized_block)
+    }
+
+    fn restore_canonical_hashes(&self) -> Result<()> {
+        self.tree.restore_canonical_hashes()
     }
 
     fn make_canonical(&self, block_hash: &BlockHash) -> Result<CanonicalOutcome> {
@@ -642,6 +653,10 @@ where
 
     fn canonical_tip(&self) -> BlockNumHash {
         self.tree.canonical_tip()
+    }
+
+    fn is_canonical(&self, hash: BlockHash) -> std::result::Result<bool, Error> {
+        self.tree.is_canonical(hash)
     }
 
     fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {

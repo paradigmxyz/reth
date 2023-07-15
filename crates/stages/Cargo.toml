@@ -63,8 +63,8 @@ rand = { workspace = true }
 paste = "1.0"
 
 # Stage benchmarks
-pprof = { version = "0.11", features = ["flamegraph", "frame-pointer", "criterion"] }
-criterion = { version = "0.4.0", features = ["async_futures"] }
+pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterion"] }
+criterion = { version = "0.5", features = ["async_futures"] }
 
 # io
 serde_json = { workspace = true }

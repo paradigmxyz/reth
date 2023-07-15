@@ -261,6 +261,8 @@ impl<T: TransactionOrdering> TxPool<T> {
         // update the metrics after the update
         self.update_size_metrics();
 
+        self.metrics.performed_state_updates.increment(1);
+
         OnNewCanonicalStateOutcome { block_hash, mined: mined_transactions, promoted, discarded }
     }
 
@@ -637,6 +639,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 
     /// Returns an iterator over all _unique_ hashes in the pool
+    #[allow(unused)]
     pub(crate) fn hashes_iter(&self) -> impl Iterator<Item = TxHash> + '_ {
         self.by_hash.keys().copied()
     }

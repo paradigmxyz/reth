@@ -1,6 +1,7 @@
 //! Support for maintaining the state of the transaction pool
 
 use crate::{
+    metrics::MaintainPoolMetrics,
     traits::{CanonicalStateUpdate, ChangedAccount, TransactionPoolExt},
     BlockInfo, TransactionPool,
 };
@@ -45,6 +46,7 @@ where
     P: TransactionPoolExt + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 {
+    let mut metrics = MaintainPoolMetrics::default();
     // ensure the pool points to latest state
     if let Ok(Some(latest)) = client.block_by_number_or_tag(BlockNumberOrTag::Latest) {
         let latest = latest.seal_slow();
@@ -63,7 +65,11 @@ where
     let mut maintained_state = MaintainedPoolState::InSync;
 
     // Listen for new chain events and derive the update action for the pool
-    while let Some(event) = events.next().await {
+    loop {
+        metrics.set_dirty_accounts_len(dirty_addresses.len());
+
+        let Some(event) = events.next().await else { break };
+
         let pool_info = pool.block_info();
 
         // TODO from time to time re-check the unique accounts in the pool and remove and resync
@@ -136,7 +142,7 @@ where
                     .filter(|tx| !new_mined_transactions.contains(&tx.hash))
                     .filter_map(|tx| tx.clone().into_ecrecovered())
                     .map(<P as TransactionPool>::Transaction::from_recovered_transaction)
-                    .collect();
+                    .collect::<Vec<_>>();
 
                 // update the pool first
                 let update = CanonicalStateUpdate {
@@ -153,53 +159,8 @@ where
                 // to be re-injected
                 //
                 // Note: we no longer know if the tx was local or external
+                metrics.inc_reinserted_transactions(pruned_old_transactions.len());
                 let _ = pool.add_external_transactions(pruned_old_transactions).await;
-                // TODO: metrics
-            }
-            CanonStateNotification::Revert { old } => {
-                // this similar to the inverse of a commit where we need to insert the transactions
-                // back into the pool and update the pool's state accordingly
-
-                let (blocks, state) = old.inner();
-                let first_block = blocks.first();
-
-                if first_block.hash == pool_info.last_seen_block_hash {
-                    // nothing to update
-                    continue
-                }
-
-                // base fee for the next block: `first_block+1`
-                let pending_block_base_fee =
-                    first_block.next_block_base_fee().unwrap_or_default() as u128;
-
-                let mut changed_accounts = Vec::with_capacity(state.accounts().len());
-                for acc in changed_accounts_iter(state) {
-                    // we can always clear the dirty flag for this account
-                    dirty_addresses.remove(&acc.address);
-                    changed_accounts.push(acc);
-                }
-
-                let update = CanonicalStateUpdate {
-                    hash: first_block.hash,
-                    number: first_block.number,
-                    pending_block_base_fee,
-                    changed_accounts,
-                    // no tx to prune in the reverted chain
-                    mined_transactions: vec![],
-                };
-                pool.on_canonical_state_change(update);
-
-                let pruned_old_transactions = blocks
-                    .transactions()
-                    .filter_map(|tx| tx.clone().into_ecrecovered())
-                    .map(<P as TransactionPool>::Transaction::from_recovered_transaction)
-                    .collect();
-
-                // all transactions that were mined in the old chain need to be re-injected
-                //
-                // Note: we no longer know if the tx was local or external
-                let _ = pool.add_external_transactions(pruned_old_transactions).await;
-                // TODO: metrics
             }
             CanonStateNotification::Commit { new } => {
                 let (blocks, state) = new.inner();

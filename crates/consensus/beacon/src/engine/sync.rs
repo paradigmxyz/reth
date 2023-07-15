@@ -166,9 +166,9 @@ where
             return false
         }
         trace!(
-            target: "consensus::engine",
+            target: "consensus::engine::sync",
             ?hash,
-            "start downloading full block."
+            "Start downloading full block"
         );
         let request = self.full_block_client.get_full_block(hash);
         self.inflight_full_block_requests.push(request);
@@ -191,10 +191,10 @@ where
             self.max_block.map(|target| progress >= target).unwrap_or_default();
         if has_reached_max_block {
             trace!(
-                target: "consensus::engine",
+                target: "consensus::engine::sync",
                 ?progress,
                 max_block = ?self.max_block,
-                "Consensus engine reached max block."
+                "Consensus engine reached max block"
             );
         }
         has_reached_max_block
