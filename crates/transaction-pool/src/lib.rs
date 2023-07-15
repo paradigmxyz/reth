@@ -397,6 +397,13 @@ where
         Box::new(self.pool.best_transactions())
     }
 
+    fn best_transactions_with_base_fee(
+        &self,
+        base_fee: u128,
+    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
+        self.pool.best_transactions_with_base_fee(base_fee)
+    }
+
     fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.pending_transactions()
     }
