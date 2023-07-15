@@ -234,7 +234,7 @@ where
     fn buffer_bodies_response(&mut self, response: Vec<BlockResponse>) {
         // take into account capacity
         let size = response.iter().map(BlockResponse::size).sum::<usize>() +
-            (response.capacity() - response.len()) * mem::size_of::<BlockResponse>();
+            response.capacity() * mem::size_of::<BlockResponse>();
 
         let response = OrderedBodiesResponse { resp: response, size };
         let response_len = response.len();

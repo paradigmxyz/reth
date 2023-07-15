@@ -162,8 +162,7 @@ where
         let bodies_len = bodies.len();
         let mut bodies = bodies.into_iter().peekable();
 
-        // set to the size of the vec that is part of vec capacity but not initialized
-        let mut total_size = (bodies_len - bodies_capacity) * mem::size_of::<BlockBody>();
+        let mut total_size = bodies_capacity * mem::size_of::<BlockBody>();
         while bodies.peek().is_some() {
             let next_header = match self.pending_headers.pop_front() {
                 Some(header) => header,
