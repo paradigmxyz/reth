@@ -43,7 +43,13 @@ brew services start prometheus
 brew services start grafana
 ```
 
-This will start a Prometheus service which by default scrapes the metrics exposed at `localhost:9001`. If you launched reth with a different `--metrics` endpoint, you can change the Prometheus config file at `/usr/local/etc/prometheus/prometheus.yml` to point to the correct endpoint, and then restart the Prometheus service. You can also stop the service and launch Prometheus with a custom `prometheus.yml` like the one provided under [`etc/prometheus/prometheus.yml`](https://github.com/paradigmxyz/reth/blob/main/etc/prometheus/prometheus.yml) in this repo.
+This will start a Prometheus service which [by default scrapes itself about the current instance](https://prometheus.io/docs/introduction/first_steps/#:~:text=The%20job%20contains%20a%20single,%3A%2F%2Flocalhost%3A9090%2Fmetrics.). So you'll need to change this config to hit your Reth nodes metrics endpoint. You can find an example config in the repo here: [`etc/prometheus/prometheus.yml`](https://github.com/paradigmxyz/reth/blob/main/etc/prometheus/prometheus.yml)
+
+Depending on your installation you may find the config for the Prometheus service at:
+
+- OSX: `/opt/homebrew/etc/prometheus.yml`
+- Linuxbrew: `/home/linuxbrew/.linuxbrew/etc/prometheus.yml`
+- Others: `/usr/local/etc/prometheus/prometheus.yml`ß
 
 Next, open up "localhost:3000" in your browser, which is the default URL for Grafana. Here, "admin" is the default for both the username and password.
 
