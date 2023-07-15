@@ -96,8 +96,6 @@ impl CanonStateNotification {
     /// Get the new chain if any.
     ///
     /// Returns the new committed [Chain] for [Self::Reorg] and [Self::Commit] variants.
-    ///
-    /// Returns None for [Self::Revert] variant.
     pub fn committed(&self) -> Option<Arc<Chain>> {
         match self {
             Self::Reorg { new, .. } => Some(new.clone()),
@@ -108,8 +106,7 @@ impl CanonStateNotification {
     /// Returns the new tip of the chain.
     ///
     /// Returns the new tip for [Self::Reorg] and [Self::Commit] variants which commit at least 1
-    /// new block. Returns the first block of the chain for [Self::Revert] variant, which is the
-    /// block that the chain reverted to.
+    /// new block.
     pub fn tip(&self) -> &SealedBlockWithSenders {
         match self {
             Self::Reorg { new, .. } => new.tip(),
