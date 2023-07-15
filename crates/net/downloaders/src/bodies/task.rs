@@ -122,7 +122,10 @@ impl<T: BodyDownloader> Future for SpawnedDownloader<T> {
 
                         // Clone the sender ensure its availability. See [PollSender::clone].
                         let mut bodies_tx = this.bodies_tx.clone();
-                        if bodies_tx.send_item(Err(err)).is_err() {
+
+                        let forward_error_result = ready!(bodies_tx.poll_reserve(cx))
+                            .and_then(|_| bodies_tx.send_item(Err(err)));
+                        if forward_error_result.is_err() {
                             // channel closed, this means [TaskDownloader] was dropped,
                             // so we can also exit
                             return Poll::Ready(())
