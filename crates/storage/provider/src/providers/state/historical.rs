@@ -49,7 +49,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
     pub fn account_history_lookup(&self, address: Address) -> Result<HistoryInfo> {
         // history key to search IntegerList of block number changesets.
         let history_key = ShardedKey::new(address, self.block_number);
-        self.history_info::<tables::AccountHistory, _, _>(history_key, |key| key.key == address)
+        self.history_info::<tables::AccountHistory, _>(history_key, |key| key.key == address)
     }
 
     /// Lookup a storage key in the StorageHistory table
@@ -60,15 +60,14 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
     ) -> Result<HistoryInfo> {
         // history key to search IntegerList of block number changesets.
         let history_key = StorageShardedKey::new(address, storage_key, self.block_number);
-        self.history_info::<tables::StorageHistory, _, _>(history_key, |key| {
+        self.history_info::<tables::StorageHistory, _>(history_key, |key| {
             key.address == address && key.sharded_key.key == storage_key
         })
     }
 
-    fn history_info<T, K, F>(&self, key: K, key_filter: F) -> Result<HistoryInfo>
+    fn history_info<T, K>(&self, key: K, key_filter: impl Fn(&K) -> bool) -> Result<HistoryInfo>
     where
         T: Table<Key = K, Value = BlockNumberList>,
-        F: (Fn(&K) -> bool),
     {
         let mut cursor = self.tx.cursor_read::<T>()?;
 
