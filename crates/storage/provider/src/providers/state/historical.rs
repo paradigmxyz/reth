@@ -5,8 +5,10 @@ use crate::{
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+    table::Table,
     tables,
     transaction::DbTx,
+    BlockNumberList,
 };
 use reth_interfaces::Result;
 use reth_primitives::{
@@ -17,11 +19,11 @@ use std::marker::PhantomData;
 /// State provider for a given transition id which takes a tx reference.
 ///
 /// Historical state provider reads the following tables:
-/// [tables::AccountHistory]
-/// [tables::Bytecodes]
-/// [tables::StorageHistory]
-/// [tables::AccountChangeSet]
-/// [tables::StorageChangeSet]
+/// - [tables::AccountHistory]
+/// - [tables::Bytecodes]
+/// - [tables::StorageHistory]
+/// - [tables::AccountChangeSet]
+/// - [tables::StorageChangeSet]
 pub struct HistoricalStateProviderRef<'a, 'b, TX: DbTx<'a>> {
     /// Transaction
     tx: &'b TX,
@@ -47,24 +49,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
     pub fn account_history_lookup(&self, address: Address) -> Result<HistoryInfo> {
         // history key to search IntegerList of block number changesets.
         let history_key = ShardedKey::new(address, self.block_number);
-        let mut cursor = self.tx.cursor_read::<tables::AccountHistory>()?;
-
-        if let Some(chunk) =
-            cursor.seek(history_key)?.filter(|(key, _)| key.key == address).map(|x| x.1 .0)
-        {
-            let chunk = chunk.enable_rank();
-            let rank = chunk.rank(self.block_number as usize);
-            if rank == 0 && !cursor.prev()?.is_some_and(|(key, _)| key.key == address) {
-                return Ok(HistoryInfo::NotWritten)
-            }
-            if rank < chunk.len() {
-                Ok(HistoryInfo::InChangeset(chunk.select(rank) as u64))
-            } else {
-                Ok(HistoryInfo::InPlainState)
-            }
-        } else {
-            Ok(HistoryInfo::NotWritten)
-        }
+        self.history_info::<tables::AccountHistory, _, _>(history_key, |key| key.key == address)
     }
 
     /// Lookup a storage key in the StorageHistory table
@@ -75,25 +60,37 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
     ) -> Result<HistoryInfo> {
         // history key to search IntegerList of block number changesets.
         let history_key = StorageShardedKey::new(address, storage_key, self.block_number);
-        let mut cursor = self.tx.cursor_read::<tables::StorageHistory>()?;
+        self.history_info::<tables::StorageHistory, _, _>(history_key, |key| {
+            key.address == address && key.sharded_key.key == storage_key
+        })
+    }
 
-        if let Some(chunk) = cursor
-            .seek(history_key)?
-            .filter(|(key, _)| key.address == address && key.sharded_key.key == storage_key)
-            .map(|x| x.1 .0)
-        {
+    fn history_info<T, K, F>(&self, key: K, key_filter: F) -> Result<HistoryInfo>
+    where
+        T: Table<Key = K, Value = BlockNumberList>,
+        F: (Fn(&K) -> bool),
+    {
+        let mut cursor = self.tx.cursor_read::<T>()?;
+
+        // Check if there's a value in history table greater than or equal to the provided key.
+        if let Some(chunk) = cursor.seek(key)?.filter(|(key, _)| key_filter(key)).map(|x| x.1 .0) {
             let chunk = chunk.enable_rank();
             let rank = chunk.rank(self.block_number as usize);
-            if rank == 0 &&
-                !cursor.prev()?.is_some_and(|(key, _)| {
-                    key.address == address && key.sharded_key.key == storage_key
-                })
-            {
+            if rank == 0 && !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key)) {
+                // If there are 0 elements in that entry AND there exists a previous entry in the
+                // table for that key, meaning it was previously written and now there was no
+                // change.
+                // We use this later for the optimization in the changeset read. In practice
+                // this is going to be rare as in most cases it will be `rank != 0` and
+                // the if statement will short circuit.
                 return Ok(HistoryInfo::NotWritten)
             }
             if rank < chunk.len() {
+                // If the number of items less than block number in that bucket is less than the
+                // items in the bucket, return the corresponding changeset key.
                 Ok(HistoryInfo::InChangeset(chunk.select(rank) as u64))
             } else {
+                // If it's larger than the bucket len, then it means it's in the plain state
                 Ok(HistoryInfo::InPlainState)
             }
         } else {
