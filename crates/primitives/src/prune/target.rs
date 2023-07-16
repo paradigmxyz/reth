@@ -102,7 +102,7 @@ impl PruneTargets {
                 }
                 Some(tip - *distance)
             }
-            PruneMode::Before(n) => Some(*n + 1),
+            PruneMode::Before(n) => Some(*n),
         }
     }
 

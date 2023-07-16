@@ -420,9 +420,12 @@ impl ExecutionStageThresholds {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::TestTransaction;
+    use crate::{
+        stages::{IndexAccountHistoryStage, IndexStorageHistoryStage},
+        test_utils::TestTransaction,
+    };
     use assert_matches::assert_matches;
-    use reth_db::{models::AccountBeforeTx, test_utils::create_test_rw_db};
+    use reth_db::{models::AccountBeforeTx, test_utils::create_test_rw_db, DatabaseEnv};
     use reth_primitives::{
         hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Bytecode,
         ChainSpecBuilder, PruneMode, PruneTargets, SealedBlock, StorageEntry, H160, H256, MAINNET,
@@ -950,7 +953,7 @@ mod tests {
                              expect_num_receipts: usize,
                              expect_num_acc_changesets: usize,
                              expect_num_storage_changesets: usize| async move {
-            let provider = factory.provider_rw().unwrap();
+            let provider: DatabaseProviderRW<'_, &DatabaseEnv> = factory.provider_rw().unwrap();
 
             let mut execution_stage = ExecutionStage::new(
                 Factory::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build())),
@@ -973,6 +976,38 @@ mod tests {
                 provider.changed_accounts_and_blocks_with_range(0..=1000).unwrap().len(),
                 expect_num_acc_changesets
             );
+
+            // Check AccountHistory
+            let mut acc_indexing_stage =
+                IndexAccountHistoryStage { prune_targets, ..Default::default() };
+
+            if let Some(PruneMode::Full) = prune_targets.account_history {
+                // Full is not supported
+                assert!(acc_indexing_stage.execute(&provider, input).await.is_err());
+            } else {
+                acc_indexing_stage.execute(&provider, input).await.unwrap();
+                let mut account_history =
+                    provider.tx_ref().cursor_read::<tables::AccountHistory>().unwrap();
+                assert_eq!(account_history.walk(None).unwrap().count(), expect_num_acc_changesets);
+            }
+
+            // Check StorageHistory
+            let mut storage_indexing_stage =
+                IndexStorageHistoryStage { prune_targets, ..Default::default() };
+
+            if let Some(PruneMode::Full) = prune_targets.storage_history {
+                // Full is not supported
+                assert!(acc_indexing_stage.execute(&provider, input).await.is_err());
+            } else {
+                storage_indexing_stage.execute(&provider, input).await.unwrap();
+
+                let mut storage_history =
+                    provider.tx_ref().cursor_read::<tables::StorageHistory>().unwrap();
+                assert_eq!(
+                    storage_history.walk(None).unwrap().count(),
+                    expect_num_storage_changesets
+                );
+            }
         };
 
         let mut prune = PruneTargets::none();

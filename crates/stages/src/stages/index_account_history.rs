@@ -16,7 +16,7 @@ pub struct IndexAccountHistoryStage {
     /// flow will be returned to the pipeline for commit.
     pub commit_threshold: u64,
     /// Pruning configuration.
-    prune_targets: PruneTargets,
+    pub prune_targets: PruneTargets,
 }
 
 impl IndexAccountHistoryStage {
@@ -52,7 +52,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         let unprunable_block_start = self
             .prune_targets
             .stop_prune_account_history(input.target())
-            .expect("Pruning configuration for history doesn't allow to prune all blocks.");
+            .ok_or(StageError::PruningConfiguration)?;
 
         if unprunable_block_start > input.checkpoint().block_number {
             input.checkpoint = Some(StageCheckpoint::new(unprunable_block_start - 1));
