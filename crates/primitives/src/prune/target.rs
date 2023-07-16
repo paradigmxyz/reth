@@ -32,7 +32,7 @@ pub struct PruneTargets {
     pub storage_history: Option<PruneMode>,
 }
 
-macro_rules! should_prune_method {
+macro_rules! gen_prune_methods {
     ($($config:ident),+) => {
         $(
             paste! {
@@ -106,7 +106,7 @@ impl PruneTargets {
         }
     }
 
-    should_prune_method!(
+    gen_prune_methods!(
         sender_recovery,
         transaction_lookup,
         receipts,
