@@ -59,7 +59,7 @@ pub struct BlockDetails {
 #[serde(rename_all = "camelCase")]
 pub struct TransactionsWithReceipts {
     txs: Vec<Transaction>,
-    receipts: TransactionReceipt,
+    receipts: Vec<TransactionReceipt>,
     first_page: bool,
     last_page: bool,
 }
