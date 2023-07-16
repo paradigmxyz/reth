@@ -428,7 +428,10 @@ mod tests {
         ChainSpecBuilder, PruneMode, PruneTargets, SealedBlock, StorageEntry, H160, H256, MAINNET,
         U256,
     };
-    use reth_provider::{AccountReader, BlockWriter, ProviderFactory, ReceiptProvider};
+    use reth_provider::{
+        AccountExtReader, AccountReader, BlockWriter, ProviderFactory, ReceiptProvider,
+        StorageReader,
+    };
     use reth_revm::Factory;
     use reth_rlp::Decodable;
     use std::sync::Arc;
@@ -944,7 +947,9 @@ mod tests {
 
         let check_pruning = |factory: Arc<ProviderFactory<_>>,
                              prune_targets: PruneTargets,
-                             expect_num_receipts: usize| async move {
+                             expect_num_receipts: usize,
+                             expect_num_acc_changesets: usize,
+                             expect_num_storage_changesets: usize| async move {
             let provider = factory.provider_rw().unwrap();
 
             let mut execution_stage = ExecutionStage::new(
@@ -958,22 +963,40 @@ mod tests {
                 provider.receipts_by_block(1.into()).unwrap().unwrap().len(),
                 expect_num_receipts
             );
+
+            assert_eq!(
+                provider.changed_storages_and_blocks_with_range(0..=1000).unwrap().len(),
+                expect_num_storage_changesets
+            );
+
+            assert_eq!(
+                provider.changed_accounts_and_blocks_with_range(0..=1000).unwrap().len(),
+                expect_num_acc_changesets
+            );
         };
 
         let mut prune = PruneTargets::none();
 
-        check_pruning(factory.clone(), prune, 1).await;
+        check_pruning(factory.clone(), prune, 1, 2, 1).await;
 
         prune.receipts = Some(PruneMode::Full);
-        check_pruning(factory.clone(), prune, 0).await;
+        prune.account_history = Some(PruneMode::Full);
+        prune.storage_history = Some(PruneMode::Full);
+        check_pruning(factory.clone(), prune, 0, 0, 0).await;
 
         prune.receipts = Some(PruneMode::Before(1));
-        check_pruning(factory.clone(), prune, 1).await;
+        prune.account_history = Some(PruneMode::Before(1));
+        prune.storage_history = Some(PruneMode::Before(1));
+        check_pruning(factory.clone(), prune, 1, 2, 1).await;
 
         prune.receipts = Some(PruneMode::Before(2));
-        check_pruning(factory.clone(), prune, 0).await;
+        prune.account_history = Some(PruneMode::Before(2));
+        prune.storage_history = Some(PruneMode::Before(2));
+        check_pruning(factory.clone(), prune, 0, 0, 0).await;
 
         prune.receipts = Some(PruneMode::Distance(0));
-        check_pruning(factory.clone(), prune, 1).await;
+        prune.account_history = Some(PruneMode::Distance(0));
+        prune.storage_history = Some(PruneMode::Distance(0));
+        check_pruning(factory.clone(), prune, 1, 2, 1).await;
     }
 }
