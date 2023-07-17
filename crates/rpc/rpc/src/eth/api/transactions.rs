@@ -1,6 +1,7 @@
 //! Contains RPC handler implementations specific to transactions
 use crate::{
     eth::{
+        api::pending_block::PendingBlockEnv,
         error::{EthApiError, EthResult, SignError},
         revm_utils::{
             inspect, inspect_and_return_db, prepare_call_env, replay_transactions_until, transact,
@@ -239,31 +240,8 @@ where
 
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
         if at.is_pending() {
-            let header = if let Some(pending) = self.provider().pending_header()? {
-                pending
-            } else {
-                // no pending block from the CL yet, so we use the latest block and modify the env
-                // values that we can
-                let mut latest = self
-                    .provider()
-                    .latest_header()?
-                    .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-
-                // child block
-                latest.number += 1;
-                // assumed child block is in the next slot
-                latest.timestamp += 12;
-                // base fee of the child block
-                latest.base_fee_per_gas = latest.next_block_base_fee();
-
-                latest
-            };
-
-            let mut cfg = CfgEnv::default();
-            let mut block_env = BlockEnv::default();
-            self.provider().fill_block_env_with_header(&mut block_env, &header)?;
-            self.provider().fill_cfg_env_with_header(&mut cfg, &header)?;
-            return Ok((cfg, block_env, header.hash.into()))
+            let PendingBlockEnv { cfg, block_env, origin } = self.pending_block_env_and_cfg()?;
+            Ok((cfg, block_env, origin.header().hash.into()))
         } else {
             //  Use cached values if there is no pending block
             let block_hash = self
@@ -652,6 +630,7 @@ where
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Network: 'static,
 {
     /// Helper function for `eth_getTransactionReceipt`
     ///
@@ -675,7 +654,7 @@ impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Pool: TransactionPool + 'static,
     Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: 'static,
+    Network: Send + Sync + 'static,
 {
     pub(crate) fn sign_request(
         &self,

@@ -11,7 +11,8 @@ use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber,
     BlockWithSenders, Bytecode, Bytes, ChainInfo, Header, Receipt, SealedBlock, SealedHeader,
-    StorageKey, StorageValue, TransactionMeta, TransactionSigned, TxHash, TxNumber, H256, U256,
+    StorageKey, StorageValue, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash,
+    TxNumber, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::{
@@ -165,6 +166,10 @@ impl TransactionsProvider for MockEthProvider {
     }
 
     fn transaction_by_id(&self, _id: TxNumber) -> Result<Option<TransactionSigned>> {
+        Ok(None)
+    }
+
+    fn transaction_by_id_no_hash(&self, _id: TxNumber) -> Result<Option<TransactionSignedNoHash>> {
         Ok(None)
     }
 

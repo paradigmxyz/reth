@@ -4,6 +4,7 @@ use crate::{
     TransactionOrdering, ValidPoolTransaction,
 };
 
+use crate::pool::best::BestTransactionsWithBasefee;
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
@@ -82,6 +83,43 @@ impl<T: TransactionOrdering> PendingPool<T> {
             independent: self.independent_transactions.clone(),
             invalid: Default::default(),
         }
+    }
+
+    /// Same as `best` but only returns transactions that satisfy the given basefee.
+    pub(crate) fn best_with_basefee(&self, base_fee: u128) -> BestTransactionsWithBasefee<T> {
+        BestTransactionsWithBasefee { best: self.best(), base_fee }
+    }
+
+    /// Same as `best` but also includes the given unlocked transactions.
+    ///
+    /// This mimics the [Self::add_transaction] method, but does not insert the transactions into
+    /// pool but only into the returned iterator.
+    ///
+    /// Note: this does not insert the unlocked transactions into the pool.
+    ///
+    /// # Panics
+    ///
+    /// if the transaction is already included
+    pub(crate) fn best_with_unlocked(
+        &self,
+        unlocked: Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
+    ) -> BestTransactions<T> {
+        let mut best = self.best();
+        let mut submission_id = self.submission_id;
+        for tx in unlocked {
+            submission_id += 1;
+            debug_assert!(!best.all.contains_key(tx.id()), "transaction already included");
+            let priority = self.ordering.priority(&tx.transaction);
+            let tx_id = *tx.id();
+            let transaction = PendingTransactionRef { submission_id, transaction: tx, priority };
+            if best.ancestor(&tx_id).is_none() {
+                best.independent.insert(transaction.clone());
+            }
+            let transaction = Arc::new(PendingTransaction { transaction });
+            best.all.insert(tx_id, transaction);
+        }
+
+        best
     }
 
     /// Returns an iterator over all transactions in the pool

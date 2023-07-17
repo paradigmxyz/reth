@@ -109,7 +109,7 @@ pub fn insert_genesis_state<DB: Database>(
             state.change_storage(0, *address, storage_changes);
         }
     }
-    state.write_to_db(tx)?;
+    state.write_to_db(tx, 0)?;
 
     Ok(())
 }

@@ -26,6 +26,10 @@ pub enum EthApiError {
     PoolError(RpcPoolError),
     #[error("Unknown block number")]
     UnknownBlockNumber,
+    /// Thrown when querying for `finalized` or `safe` block before the merge transition is
+    /// finalized, <https://github.com/ethereum/execution-apis/blob/6d17705a875e52c26826124c2a8a15ed542aeca2/src/schemas/block.yaml#L109>
+    #[error("Unknown block")]
+    UnknownSafeOrFinalizedBlock,
     #[error("Unknown block or tx index")]
     UnknownBlockOrTxIndex,
     #[error("Invalid block range")]
@@ -101,6 +105,9 @@ impl From<EthApiError> for ErrorObject<'static> {
             EthApiError::UnknownBlockNumber | EthApiError::UnknownBlockOrTxIndex => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
+            EthApiError::UnknownSafeOrFinalizedBlock => {
+                rpc_error_with_code(EthRpcErrorCode::UnknownBlock.code(), error.to_string())
+            }
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
             EthApiError::InternalJsTracerError(msg) => internal_rpc_err(msg),
             EthApiError::InvalidParams(msg) => invalid_params_rpc_err(msg),
@@ -143,11 +150,12 @@ impl From<reth_interfaces::provider::ProviderError> for EthApiError {
             ProviderError::HeaderNotFound(_) |
             ProviderError::BlockHashNotFound(_) |
             ProviderError::BestBlockNotFound |
-            ProviderError::FinalizedBlockNotFound |
-            ProviderError::SafeBlockNotFound |
             ProviderError::BlockNumberForTransactionIndexNotFound |
             ProviderError::TotalDifficultyNotFound { .. } |
             ProviderError::UnknownBlockHash(_) => EthApiError::UnknownBlockNumber,
+            ProviderError::FinalizedBlockNotFound | ProviderError::SafeBlockNotFound => {
+                EthApiError::UnknownSafeOrFinalizedBlock
+            }
             err => EthApiError::Internal(err.into()),
         }
     }

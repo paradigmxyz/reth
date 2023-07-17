@@ -30,5 +30,4 @@ bytes = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-tracing-test = "0.2"
 tokio-stream = { workspace = true, features = ["sync"] }

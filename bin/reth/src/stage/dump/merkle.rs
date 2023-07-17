@@ -2,7 +2,7 @@ use super::setup;
 use crate::utils::DbTool;
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables, DatabaseEnv};
-use reth_primitives::{stage::StageCheckpoint, BlockNumber, ChainSpec};
+use reth_primitives::{stage::StageCheckpoint, BlockNumber, ChainSpec, PruneTargets};
 use reth_provider::ProviderFactory;
 use reth_stages::{
     stages::{
@@ -70,6 +70,7 @@ async fn unwind_and_copy<DB: Database>(
     let mut exec_stage = ExecutionStage::new(
         reth_revm::Factory::new(db_tool.chain.clone()),
         ExecutionStageThresholds { max_blocks: Some(u64::MAX), max_changes: None },
+        PruneTargets::all(),
     );
 
     exec_stage

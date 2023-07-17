@@ -59,6 +59,16 @@ impl Block {
 
         BlockWithSenders { block: self, senders }
     }
+
+    /// Calculates a heuristic for the in-memory size of the [Block].
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.header.size() +
+            // take into account capacity
+            self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * std::mem::size_of::<TransactionSigned>() +
+            self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * std::mem::size_of::<Header>() +
+            self.withdrawals.as_ref().map(|w| w.iter().map(Withdrawal::size).sum::<usize>() + w.capacity() * std::mem::size_of::<Withdrawal>()).unwrap_or(std::mem::size_of::<Option<Vec<Withdrawal>>>())
+    }
 }
 
 impl Deref for Block {
@@ -177,6 +187,16 @@ impl SealedBlock {
             ommers: self.ommers,
             withdrawals: self.withdrawals,
         }
+    }
+
+    /// Calculates a heuristic for the in-memory size of the [SealedBlock].
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.header.size() +
+            // take into account capacity
+            self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * std::mem::size_of::<TransactionSigned>() +
+            self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * std::mem::size_of::<Header>() +
+            self.withdrawals.as_ref().map(|w| w.iter().map(Withdrawal::size).sum::<usize>() + w.capacity() * std::mem::size_of::<Withdrawal>()).unwrap_or(std::mem::size_of::<Option<Vec<Withdrawal>>>())
     }
 }
 
@@ -818,6 +838,22 @@ impl BlockBody {
             ommers_hash: self.calculate_ommers_root(),
             withdrawals_root: self.calculate_withdrawals_root(),
         }
+    }
+
+    /// Calculates a heuristic for the in-memory size of the [BlockBody].
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.transactions.iter().map(TransactionSigned::size).sum::<usize>() +
+            self.transactions.capacity() * std::mem::size_of::<TransactionSigned>() +
+            self.ommers.iter().map(Header::size).sum::<usize>() +
+            self.ommers.capacity() * std::mem::size_of::<Header>() +
+            self.withdrawals
+                .as_ref()
+                .map(|w| {
+                    w.iter().map(Withdrawal::size).sum::<usize>() +
+                        w.capacity() * std::mem::size_of::<Withdrawal>()
+                })
+                .unwrap_or(std::mem::size_of::<Option<Vec<Withdrawal>>>())
     }
 }
 

@@ -115,6 +115,9 @@ where
             // if no params are provided, used default filter params
             let filter = match params {
                 Some(Params::Logs(filter)) => FilteredParams::new(Some(*filter)),
+                Some(Params::Bool(_)) => {
+                    return Err(invalid_params_rpc_err("Invalid params for logs").into())
+                }
                 _ => FilteredParams::default(),
             };
             let stream =
@@ -124,7 +127,7 @@ where
         SubscriptionKind::NewPendingTransactions => {
             if let Some(params) = params {
                 match params {
-                    Params::NewPendingTransactions(true) => {
+                    Params::Bool(true) => {
                         // full transaction objects requested
                         let stream = pubsub.full_pending_transaction_stream().map(|tx| {
                             EthSubscriptionResult::FullTransaction(Box::new(
@@ -135,7 +138,7 @@ where
                         });
                         return pipe_from_stream(accepted_sink, stream).await
                     }
-                    Params::NewPendingTransactions(false) | Params::None => {
+                    Params::Bool(false) | Params::None => {
                         // only hashes requested
                     }
                     Params::Logs(_) => {

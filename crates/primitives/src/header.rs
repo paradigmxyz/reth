@@ -9,7 +9,10 @@ use bytes::{Buf, BufMut, BytesMut};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, Encodable, EMPTY_STRING_CODE};
 use serde::{Deserialize, Serialize};
-use std::ops::{Deref, DerefMut};
+use std::{
+    mem,
+    ops::{Deref, DerefMut},
+};
 
 /// Describes the current head block.
 ///
@@ -180,6 +183,28 @@ impl Header {
         self.seal(hash)
     }
 
+    /// Calculate a heuristic for the in-memory size of the [Header].
+    #[inline]
+    pub fn size(&self) -> usize {
+        mem::size_of::<H256>() + // parent hash
+        mem::size_of::<H256>() + // ommers hash
+        mem::size_of::<H160>() + // beneficiary
+        mem::size_of::<H256>() + // state root
+        mem::size_of::<H256>() + // transactions root
+        mem::size_of::<H256>() + // receipts root
+        mem::size_of::<Option<H256>>() + // withdrawals root
+        mem::size_of::<Bloom>() + // logs bloom
+        mem::size_of::<U256>() + // difficulty
+        mem::size_of::<BlockNumber>() + // number
+        mem::size_of::<u64>() + // gas limit
+        mem::size_of::<u64>() + // gas used
+        mem::size_of::<u64>() + // timestamp
+        mem::size_of::<H256>() + // mix hash
+        mem::size_of::<u64>() + // nonce
+        mem::size_of::<Option<u64>>() + // base fee per gas
+        self.extra_data.len() // extra data
+    }
+
     fn header_payload_length(&self) -> usize {
         let mut length = 0;
         length += self.parent_hash.length();
@@ -330,6 +355,12 @@ impl SealedHeader {
     /// Return the number hash tuple.
     pub fn num_hash(&self) -> BlockNumHash {
         BlockNumHash::new(self.number, self.hash)
+    }
+
+    /// Calculates a heuristic for the in-memory size of the [SealedHeader].
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.header.size() + mem::size_of::<BlockHash>()
     }
 }
 

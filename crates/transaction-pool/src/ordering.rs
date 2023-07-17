@@ -45,3 +45,9 @@ impl<T> Default for GasCostOrdering<T> {
         Self(Default::default())
     }
 }
+
+impl<T> Clone for GasCostOrdering<T> {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
