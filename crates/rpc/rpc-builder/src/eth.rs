@@ -1,3 +1,4 @@
+use reth_primitives::constants::ETHEREUM_BLOCK_GAS_LIMIT;
 use reth_rpc::{
     eth::{
         cache::{EthStateCache, EthStateCacheConfig},
@@ -37,6 +38,8 @@ pub struct EthConfig {
     pub max_tracing_requests: u32,
     /// Maximum number of logs that can be returned in a single response in `eth_getLogs` calls.
     pub max_logs_per_response: usize,
+    /// Maximum gas limit for `eth_call` and call tracing RPC methods.
+    pub rpc_gas_cap: u64,
 }
 
 impl Default for EthConfig {
@@ -46,6 +49,7 @@ impl Default for EthConfig {
             gas_oracle: GasPriceOracleConfig::default(),
             max_tracing_requests: DEFAULT_MAX_TRACING_REQUESTS,
             max_logs_per_response: DEFAULT_MAX_LOGS_PER_RESPONSE,
+            rpc_gas_cap: ETHEREUM_BLOCK_GAS_LIMIT,
         }
     }
 }
@@ -72,6 +76,12 @@ impl EthConfig {
     /// Configures the maximum number of logs per response
     pub fn max_logs_per_response(mut self, max_logs: usize) -> Self {
         self.max_logs_per_response = max_logs;
+        self
+    }
+
+    /// Configures the maximum gas limit for `eth_call` and call tracing RPC methods
+    pub fn rpc_gas_cap(mut self, rpc_gas_cap: u64) -> Self {
+        self.rpc_gas_cap = rpc_gas_cap;
         self
     }
 }

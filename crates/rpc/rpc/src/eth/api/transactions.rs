@@ -872,7 +872,7 @@ mod tests {
         EthApi,
     };
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives::{hex_literal::hex, Bytes};
+    use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, hex_literal::hex, Bytes};
     use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
 
@@ -890,6 +890,7 @@ mod tests {
             noop_network_provider,
             cache.clone(),
             GasPriceOracle::new(noop_provider, Default::default(), cache),
+            ETHEREUM_BLOCK_GAS_LIMIT,
         );
 
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d

@@ -187,6 +187,9 @@ Gas Price Oracle:
           The percentile of gas prices to use for the estimate
           
           [default: 60]
+   
+      --rpc.gascap
+          Maximum gas limit for `eth_call` and call tracing RPC methods
 
       --block-cache-len <BLOCK_CACHE_LEN>
           Maximum number of block cache entries

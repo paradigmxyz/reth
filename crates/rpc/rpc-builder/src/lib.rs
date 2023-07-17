@@ -967,6 +967,7 @@ where
                 self.network.clone(),
                 cache.clone(),
                 gas_oracle,
+                self.config.eth.rpc_gas_cap,
                 executor.clone(),
             );
             let filter = EthFilter::new(
