@@ -22,7 +22,7 @@ Audience:
 
 When a program consumes all of the system's available memory (and swap, if any), the OOM killer starts killing processes that are taking up the most memory, until the system has
 memory available again. [todo: go here for more info on oomkiller?]().
-Reth is in the class of rust programs that distributes to many different hardware targets, some with less memory than others. As a result, sometimes bugs can cause memory-related crashes for _some_ users, but not others.
+Reth is in the class of rust programs that distributes to many different hardware targets, some with less memory than others. As a result, sometimes bugs can cause memory leaks or out-of-memory crashes for _some_ users, but not others.
 Reth is also a complex program, with many moving pieces, and it can be difficult to know where to start when debugging an OOM or other memory leak.
 Understanding how to profile memory usage is an extremely valuable skill when faced with this type of problem, and can quickly help shed light on the root cause of a memory leak.
 
