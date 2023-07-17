@@ -7,7 +7,6 @@ use clap::{
 };
 use futures::TryFutureExt;
 use reth_network_api::{NetworkInfo, Peers};
-use reth_primitives::constants::ETHEREUM_BLOCK_GAS_LIMIT;
 use reth_provider::{
     BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider, HeaderProvider,
     StateProviderFactory,
@@ -24,6 +23,7 @@ use reth_rpc::{
 use reth_rpc_builder::{
     auth::{AuthServerConfig, AuthServerHandle},
     constants,
+    constants::RPC_DEFAULT_GAS_CAP,
     error::RpcError,
     EthConfig, IpcServerBuilder, RethRpcModule, RpcModuleBuilder, RpcModuleConfig,
     RpcModuleSelection, RpcServerConfig, RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
@@ -48,9 +48,6 @@ pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 100;
 pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 100;
 /// Default number of incoming connections.
 pub(crate) const RPC_DEFAULT_MAX_TRACING_REQUESTS: u32 = 25;
-
-/// Default max gas limit for `eth_call` and call tracing RPC methods.
-pub(crate) const RPC_DEFAULT_GAS_CAP: u64 = ETHEREUM_BLOCK_GAS_LIMIT;
 
 /// Parameters for configuring the rpc more granularity via CLI
 #[derive(Debug, Args, PartialEq, Eq, Default)]
