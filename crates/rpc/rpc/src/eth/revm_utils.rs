@@ -2,8 +2,7 @@
 
 use crate::eth::error::{EthApiError, EthResult, RpcInvalidTransactionError};
 use reth_primitives::{
-    constants::ETHEREUM_BLOCK_GAS_LIMIT, AccessList, Address, TransactionSigned,
-    TransactionSignedEcRecovered, TxHash, H256, U256,
+    AccessList, Address, TransactionSigned, TransactionSignedEcRecovered, TxHash, H256, U256,
 };
 use reth_revm::env::{fill_tx_env, fill_tx_env_with_recovered};
 use reth_rpc_types::{
@@ -203,6 +202,7 @@ pub(crate) fn prepare_call_env<DB>(
     mut cfg: CfgEnv,
     block: BlockEnv,
     request: CallRequest,
+    gas_limit: u64,
     db: &mut CacheDB<DB>,
     overrides: EvmOverrides,
 ) -> EthResult<Env>
@@ -247,10 +247,10 @@ where
             // If no gas price is specified, use maximum allowed gas limit. The reason for this is
             // that both Erigon and Geth use pre-configured gas cap even if it's possible
             // to derive the gas limit from the block:
-            // https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/cmd/rpcdaemon/commands/trace_adhoc.go#L956
-            // https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/eth/ethconfig/config.go#L94
+            // <https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/cmd/rpcdaemon/commands/trace_adhoc.go#L956
+            // https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/eth/ethconfig/config.go#L94>
             trace!(target: "rpc::eth::call", ?env, "Applying gas limit cap as the maximum gas limit");
-            env.tx.gas_limit = ETHEREUM_BLOCK_GAS_LIMIT;
+            env.tx.gas_limit = gas_limit;
         }
     }
 
