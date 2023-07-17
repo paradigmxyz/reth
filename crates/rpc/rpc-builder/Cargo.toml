@@ -29,7 +29,7 @@ tower = { version = "0.4", features = ["full"] }
 hyper = "0.14"
 
 # misc
-strum = { version = "0.24", features = ["derive"] }
+strum = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
