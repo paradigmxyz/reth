@@ -3,8 +3,8 @@
 use crate::{
     cache::LruCache,
     discovery::{Discovery, DiscoveryEvent},
-    manager::{DiscoveredEvent},
     fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
+    manager::DiscoveredEvent,
     message::{
         BlockRequest, NewBlockMessage, PeerRequest, PeerRequestSender, PeerResponse,
         PeerResponseResult,
@@ -95,6 +95,11 @@ where
     /// Returns mutable access to the [`PeersManager`]
     pub(crate) fn peers_mut(&mut self) -> &mut PeersManager {
         &mut self.peers_manager
+    }
+
+    /// Returns mutable access to the [`Discovery`]
+    pub(crate) fn discovery_mut(&mut self) -> &mut Discovery {
+        &mut self.discovery
     }
 
     /// Returns access to the [`PeersManager`]
@@ -279,7 +284,11 @@ where
     /// Event hook for events received from the discovery service.
     fn on_discovery_event(&mut self, event: DiscoveryEvent) {
         match event {
-            DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued{ peer_id, socket_addr, fork_id }) => {
+            DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
+                peer_id,
+                socket_addr,
+                fork_id,
+            }) => {
                 self.queued_messages.push_back(StateAction::DiscoveredNode {
                     peer_id,
                     socket_addr,
@@ -289,9 +298,6 @@ where
             DiscoveryEvent::EnrForkId(peer_id, fork_id) => {
                 self.queued_messages
                     .push_back(StateAction::DiscoveredEnrForkId { peer_id, fork_id });
-            }
-            _=>{
-                
             }
         }
     }

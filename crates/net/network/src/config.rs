@@ -500,4 +500,3 @@ mod tests {
         assert_eq!(fork_filter.current().hash, genesis_fork_hash);
     }
 }
-

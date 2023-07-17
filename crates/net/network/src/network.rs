@@ -1,6 +1,6 @@
 use crate::{
-    config::NetworkMode, manager::NetworkEvent, message::PeerRequest, peers::PeersHandle,
-    session::PeerInfo, FetchClient,
+    config::NetworkMode, discovery::DiscoveryEvent, manager::NetworkEvent, message::PeerRequest,
+    peers::PeersHandle, session::PeerInfo, FetchClient,
 };
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -10,7 +10,6 @@ use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::{
     NetworkError, NetworkInfo, PeerKind, Peers, PeersInfo, Reputation, ReputationChangeKind,
 };
-use crate::{discovery::DiscoveryEvent};
 use reth_primitives::{Head, NodeRecord, PeerId, TransactionSigned, H256};
 use reth_rpc_types::NetworkStatus;
 use std::{
@@ -84,7 +83,9 @@ impl NetworkHandle {
         UnboundedReceiverStream::new(rx)
     }
 
-    /// Returns a new [`DiscoveryEvent`] listener channel.
+    /// Returns a new [`DiscoveryEvent`] stream.
+    ///
+    /// This stream yields [`DiscoveryEvent`]s for each peer that is discovered.
     pub fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveryEvent> {
         let (tx, rx) = mpsc::unbounded_channel();
         let _ = self.manager().send(NetworkHandleMessage::DiscoveryListener(tx));

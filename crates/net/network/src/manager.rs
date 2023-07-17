@@ -41,8 +41,7 @@ use reth_eth_wire::{
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::ReputationChangeKind;
-use reth_primitives::{listener::{EventListeners}, NodeRecord, PeerId, H256};
-use crate::discovery_listeners::{DiscoveryListeners};
+use reth_primitives::{listener::EventListeners, ForkId, NodeRecord, PeerId, H256};
 use reth_provider::BlockReader;
 use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
 use std::{
@@ -57,8 +56,7 @@ use std::{
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, info, trace, warn};
-use reth_primitives::{ForkId};
-use crate::{discovery::DiscoveryEvent};
+
 /// Manages the _entire_ state of the network.
 ///
 /// This is an endless [`Future`] that consistently drives the state of the entire network forward.
@@ -125,9 +123,6 @@ pub struct NetworkManager<C> {
     metrics: NetworkMetrics,
     /// Disconnect metrics for the Network
     disconnect_metrics: DisconnectMetrics,
-
-    discovery_listeners:DiscoveryListeners<DiscoveryEvent>,
-
 }
 
 // === impl NetworkManager ===
@@ -256,7 +251,6 @@ where
             num_active_peers,
             metrics: Default::default(),
             disconnect_metrics: Default::default(),
-            discovery_listeners:Default::default()
         })
     }
 
@@ -522,7 +516,7 @@ where
                 self.event_listeners.push_listener(tx);
             }
             NetworkHandleMessage::DiscoveryListener(tx) => {
-                self.discovery_listeners.push_listener(tx);
+                self.swarm.state_mut().discovery_mut().add_listener(tx);
             }
             NetworkHandleMessage::AnnounceBlock(block, hash) => {
                 if self.handle.mode().is_stake() {
@@ -930,10 +924,6 @@ pub enum NetworkEvent {
 }
 
 #[derive(Debug, Clone)]
-pub enum DiscoveredEvent{
-    EventQueued{
-        peer_id: PeerId,
-        socket_addr: SocketAddr,
-        fork_id: Option<ForkId>
-    }
+pub enum DiscoveredEvent {
+    EventQueued { peer_id: PeerId, socket_addr: SocketAddr, fork_id: Option<ForkId> },
 }
