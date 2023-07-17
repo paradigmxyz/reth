@@ -37,11 +37,28 @@ In this tutorial, we will be reviewing:
 
 ### Jemalloc
 
- * What is jemalloc
- * What jemalloc provides (jeprof, jemalloc metrics)
- * Compiling with the `jemalloc` feature
- * Compiling with the `jemalloc-prof` feature
- * `debug-fast` for debug symbols
+[Jemalloc](https://jemalloc.net/) is a general-purpose allocator that is used [across the industry for production](https://engineering.fb.com/2011/01/03/core-data/scalable-memory-allocation-using-jemalloc/), well known for its performance benefits, predictability, and profiling capabilities.
+We've seen significant performance benefits in reth when using jemalloc, but will be primarily focusing on its profiling capabilities.
+Jemalloc also provides tools for analyzing and visualizing its the allocation profiles it generates, notably `jeprof`.
+
+
+#### Enabling jemalloc in reth
+Reth includes a `jemalloc` feature to explicitly use jemalloc instead of the system allocator:
+```
+cargo build --features jemalloc
+```
+
+While the `jemalloc` feature does enable jemalloc, reth has an additional feature, `profiling`, that must be used to enable heap profiling. This feature implicitly enables the `jemalloc`
+feature as well:
+```
+cargo build --features jemalloc-prof
+```
+
+When performing a longer-running or performance-sensitive task with reth, such as a sync test or load benchmark, it's usually recommended to use the `maxperf` profile. However, the `maxperf`
+profile does not enable debug symbols, which are required for tools like `perf` and `jemalloc` to produce results that a human can interpret. Reth includes a performance profile with debug symbols called `debug-fast`. To compile reth with debug symbols, jemalloc, and a performance profile:
+```
+cargo build --features jemalloc-prof --profile debug-fast
+```
 
 ### Monitoring memory usage
 
