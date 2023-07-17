@@ -156,7 +156,7 @@ Rpc:
       --rpc-max-tracing-requests
           Maximum number of concurrent tracing requests.
     
-      --rpc-gas-cap
+      --rpc.gascap
           Maximum gas limit for `eth_call` and call tracing RPC methods
 
       --gas-price-oracle

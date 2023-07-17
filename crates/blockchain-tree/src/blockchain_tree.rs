@@ -903,7 +903,9 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let Some(chain_id) = self.block_indices.get_blocks_chain_id(block_hash) else {
             warn!(target: "blockchain_tree", ?block_hash,  "Block hash not found in block indices");
             // TODO: better error
-            return Err(BlockExecutionError::BlockHashNotFoundInChain { block_hash: *block_hash }.into())
+            return Err(
+                BlockExecutionError::BlockHashNotFoundInChain { block_hash: *block_hash }.into()
+            )
         };
         let chain = self.chains.remove(&chain_id).expect("To be present");
 

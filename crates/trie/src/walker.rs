@@ -146,7 +146,7 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
         let Some((key, node)) = self.node(false)? else {
             // If no next node is found, clear the stack.
             self.stack.clear();
-            return Ok(());
+            return Ok(())
         };
 
         // Overwrite the root node's first nibble
@@ -178,9 +178,7 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
         &mut self,
         allow_root_to_child_nibble: bool,
     ) -> Result<(), DatabaseError> {
-        let Some(subnode) = self.stack.last_mut() else {
-            return Ok(());
-        };
+        let Some(subnode) = self.stack.last_mut() else { return Ok(()) };
 
         // Check if the walker needs to backtrack to the previous level in the trie during its
         // traversal.

@@ -2,7 +2,7 @@
 
 use crate::args::GasPriceOracleArgs;
 use clap::{
-    builder::{PossibleValue, TypedValueParser},
+    builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
 };
 use futures::TryFutureExt;
@@ -48,6 +48,7 @@ pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 100;
 pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 100;
 /// Default number of incoming connections.
 pub(crate) const RPC_DEFAULT_MAX_TRACING_REQUESTS: u32 = 25;
+
 /// Default max gas limit for `eth_call` and call tracing RPC methods.
 pub(crate) const RPC_DEFAULT_GAS_CAP: u64 = ETHEREUM_BLOCK_GAS_LIMIT;
 
@@ -136,7 +137,13 @@ pub struct RpcServerArgs {
     pub rpc_max_tracing_requests: u32,
 
     /// Maximum gas limit for `eth_call` and call tracing RPC methods.
-    #[arg(long, alias = "rpc.gascap", value_name = "GAS_CAP", default_value_t = RPC_DEFAULT_GAS_CAP)]
+    #[arg(
+        long,
+        alias = "rpc.gascap",
+        value_name = "GAS_CAP",
+        value_parser = RangedU64ValueParser::<u64>::new().range(1..),
+        default_value_t = RPC_DEFAULT_GAS_CAP
+    )]
     pub rpc_gas_cap: u64,
 
     /// Gas price oracle configuration.
@@ -196,6 +203,7 @@ impl RpcServerArgs {
     pub fn eth_config(&self) -> EthConfig {
         EthConfig::default()
             .max_tracing_requests(self.rpc_max_tracing_requests)
+            .rpc_gas_cap(self.rpc_gas_cap)
             .gpo_config(self.gas_price_oracle_config())
     }
 
@@ -513,6 +521,21 @@ mod tests {
     struct CommandParser<T: Args> {
         #[clap(flatten)]
         args: T,
+    }
+
+    #[test]
+    fn test_rpc_gas_cap() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        let config = args.eth_config();
+        assert_eq!(config.rpc_gas_cap, RPC_DEFAULT_GAS_CAP);
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.gascap", "1000"]).args;
+        let config = args.eth_config();
+        assert_eq!(config.rpc_gas_cap, 1000);
+
+        let args = CommandParser::<RpcServerArgs>::try_parse_from(["reth", "--rpc.gascap", "0"]);
+        assert!(args.is_err());
     }
 
     #[test]

@@ -153,9 +153,10 @@ where
         &self.inner.gas_oracle
     }
 
-    // Returns the gas cap
-    pub(crate) fn rpc_cap(&self) -> &u64 {
-        &self.inner.gas_cap
+    /// Returns the configured gas limit cap for `eth_call` and tracing related calls
+    #[allow(unused)]
+    pub(crate) fn gas_cap(&self) -> u64 {
+        self.inner.gas_cap
     }
 
     /// Returns the inner `Provider`
@@ -289,7 +290,7 @@ struct EthApiInner<Provider, Pool, Network> {
     eth_cache: EthStateCache,
     /// The async gas oracle frontend for gas price suggestions
     gas_oracle: GasPriceOracle<Provider>,
-    // TODO
+    /// Maximum gas limit for `eth_call` and call tracing RPC methods.
     gas_cap: u64,
     /// The block number at which the node started
     starting_block: U256,
