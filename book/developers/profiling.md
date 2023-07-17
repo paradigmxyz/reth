@@ -26,7 +26,11 @@ Reth is in the class of rust programs that distributes to many different hardwar
 Reth is also a complex program, with many moving pieces, and it can be difficult to know where to start when debugging an OOM or other memory leak.
 Understanding how to profile memory usage is an extremely valuable skill when faced with this type of problem, and can quickly help shed light on the root cause of a memory leak.
 
-In this tutorial, we will be reviewing how to use `jemalloc` to solve these types of problems, [todo: rest of "here is what we are going to do"]().
+In this tutorial, we will be reviewing:
+ * How to monitor reth's memory usage,
+ * How to emulate a low-memory environment to lab-reproduce OOM crashes,
+ * How to enable `jemalloc` and its built-in memory profiling, and
+ * How to use `jeprof` to interpret heap profiles and identify potential root causes for a memory leak.
 
 ### Jemalloc
 
