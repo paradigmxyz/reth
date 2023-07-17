@@ -1,18 +1,18 @@
 use crate::{Block, Transaction, TransactionReceipt};
-use reth_primitives::{Address, Bytes};
+use reth_primitives::{Address, Bytes, U256};
 use serde::{Deserialize, Serialize};
 
 /// Operation type enum for `InternalOperation` struct
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum OperationType {
     /// Operation Transfer
-    OpTransfer,
+    OpTransfer = 0,
     /// Operation Contract self destruct
-    OpSelfDestruct,
+    OpSelfDestruct = 1,
     /// Operation Create
-    OpCreate,
+    OpCreate = 2,
     /// Operation Create2
-    OpCreate2,
+    OpCreate2 = 3,
 }
 
 /// Custom struct for otterscan `getInternalOperations` RPC response
@@ -39,18 +39,43 @@ pub struct TraceEntry {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InternalIssuance {
-    block_reward: String,
-    uncle_reward: String,
-    issuance: String,
+    block_reward: U256,
+    uncle_reward: U256,
+    issuance: U256,
+}
+
+/// Custom `Block` struct that includes transaction count for Otterscan responses
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OtsBlock {
+    #[serde(flatten)]
+    block: Block,
+    transaction_count: usize,
 }
 
 /// Custom struct for otterscan `getBlockDetails` RPC response
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockDetails {
-    block: Block,
+    block: OtsBlock,
     issuance: InternalIssuance,
-    total_fees: u64,
+    total_fees: U256,
+}
+
+/// Custom transaction receipt struct for otterscan `OtsBlockTransactions` struct
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OtsTransactionReceipt {
+    #[serde(flatten)]
+    receipt: TransactionReceipt,
+    timestamp: u64,
+}
+
+/// Custom struct for otterscan `getBlockTransactions` RPC response
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct OtsBlockTransactions {
+    fullblock: OtsBlock,
+    receipts: Vec<OtsTransactionReceipt>,
 }
 
 /// Custom struct for otterscan `searchTransactionsAfter`and `searchTransactionsBefore` RPC
@@ -59,7 +84,7 @@ pub struct BlockDetails {
 #[serde(rename_all = "camelCase")]
 pub struct TransactionsWithReceipts {
     txs: Vec<Transaction>,
-    receipts: Vec<TransactionReceipt>,
+    receipts: Vec<OtsTransactionReceipt>,
     first_page: bool,
     last_page: bool,
 }

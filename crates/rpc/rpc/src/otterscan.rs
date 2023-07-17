@@ -5,8 +5,8 @@ use jsonrpsee::core::RpcResult;
 use reth_primitives::{Address, BlockId, TxHash, H256, U256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_types::{
-    BlockDetails, ContractCreator, InternalOperation, TraceEntry, Transaction,
-    TransactionsWithReceipts,
+    BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
+    Transaction, TransactionsWithReceipts,
 };
 
 /// Otterscan Api
@@ -53,12 +53,12 @@ where
     }
 
     /// Handler for `ots_getBlockDetails`
-    async fn get_block_details(&self, block_number: U256) -> RpcResult<BlockDetails> {
+    async fn get_block_details(&self, block_number: U256) -> RpcResult<Option<BlockDetails>> {
         Err(internal_rpc_err("unimplemented"))
     }
 
     /// Handler for `getBlockDetailsByHash`
-    async fn get_block_details_by_hash(&self, block_hash: H256) -> RpcResult<BlockDetails> {
+    async fn get_block_details_by_hash(&self, block_hash: H256) -> RpcResult<Option<BlockDetails>> {
         Err(internal_rpc_err("unimplemented"))
     }
 
@@ -66,9 +66,9 @@ where
     async fn get_block_transactions(
         &self,
         block_number: U256,
-        page_number: u8,
-        page_size: u8,
-    ) -> RpcResult<Vec<Transaction>> {
+        page_number: usize,
+        page_size: usize,
+    ) -> RpcResult<OtsBlockTransactions> {
         Err(internal_rpc_err("unimplemented"))
     }
 
@@ -77,7 +77,7 @@ where
         &self,
         address: Address,
         block_number: U256,
-        page_size: u8,
+        page_size: usize,
     ) -> RpcResult<TransactionsWithReceipts> {
         Err(internal_rpc_err("unimplemented"))
     }
@@ -87,7 +87,7 @@ where
         &self,
         address: Address,
         block_number: U256,
-        page_size: u8,
+        page_size: usize,
     ) -> RpcResult<TransactionsWithReceipts> {
         Err(internal_rpc_err("unimplemented"))
     }
@@ -97,12 +97,12 @@ where
         &self,
         sender: Address,
         nonce: u64,
-    ) -> RpcResult<Transaction> {
+    ) -> RpcResult<Option<Transaction>> {
         Err(internal_rpc_err("unimplemented"))
     }
 
     /// Handler for `getContractCreator`
-    async fn get_contract_creator(&self, address: Address) -> RpcResult<ContractCreator> {
+    async fn get_contract_creator(&self, address: Address) -> RpcResult<Option<ContractCreator>> {
         Err(internal_rpc_err("unimplemented"))
     }
 }
