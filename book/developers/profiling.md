@@ -67,5 +67,7 @@ In this tutorial, we will be reviewing how to use `jemalloc` to solve these type
 
 ### TODO / to resolve
  * tips?
+ * intro / background on memory?
+ * write a brief description / introduction to the OOM acronym before using it all over the place
  * how can this document give the reader more intuition on debugging memory leaks beyond providing tutorials on tools
 
