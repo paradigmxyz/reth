@@ -48,7 +48,7 @@ pub struct NetworkMetrics {
 /// Metrics for SessionManager
 #[derive(Metrics)]
 #[metrics(scope = "network")]
-pub struct SesssionManagerMetrics {
+pub struct SessionManagerMetrics {
     /// Number of dials that resulted in a peer being added to the peerset
     pub(crate) total_dial_successes: Counter,
 }
