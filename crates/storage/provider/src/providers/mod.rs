@@ -1,8 +1,8 @@
 use crate::{
-    AccountChangeReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
-    BlockReaderIdExt, BlockchainTreePendingStateProvider, CanonChainTracker,
-    CanonStateNotifications, CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider,
-    HeaderProvider, PostStateDataProvider, ProviderError, ReceiptProvider, ReceiptProviderIdExt,
+    BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
+    BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
+    CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider,
+    PostStateDataProvider, ProviderError, ReceiptProvider, ReceiptProviderIdExt,
     StageCheckpointReader, StateProviderBox, StateProviderFactory, TransactionsProvider,
     WithdrawalsProvider,
 };
@@ -815,7 +815,7 @@ where
     }
 }
 
-impl<DB, Tree> AccountChangeReader for BlockchainProvider<DB, Tree>
+impl<DB, Tree> ChangeSetReader for BlockchainProvider<DB, Tree>
 where
     DB: Database,
     Tree: Sync + Send,

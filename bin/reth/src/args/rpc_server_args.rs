@@ -8,8 +8,8 @@ use clap::{
 use futures::TryFutureExt;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    AccountChangeReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
-    EvmEnvProvider, HeaderProvider, StateProviderFactory,
+    BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider,
+    HeaderProvider, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{
@@ -244,12 +244,12 @@ impl RpcServerArgs {
         jwt_secret: JwtSecret,
     ) -> Result<(RpcServerHandle, AuthServerHandle), RpcError>
     where
-        Provider: AccountChangeReader
-            + BlockReaderIdExt
+        Provider: BlockReaderIdExt
             + HeaderProvider
             + StateProviderFactory
             + EvmEnvProvider
             + ChainSpecProvider
+            + ChangeSetReader
             + Clone
             + Unpin
             + 'static,
@@ -306,12 +306,12 @@ impl RpcServerArgs {
         events: Events,
     ) -> Result<RpcServerHandle, RpcError>
     where
-        Provider: AccountChangeReader
-            + BlockReaderIdExt
+        Provider: BlockReaderIdExt
             + HeaderProvider
             + StateProviderFactory
             + EvmEnvProvider
             + ChainSpecProvider
+            + ChangeSetReader
             + Clone
             + Unpin
             + 'static,

@@ -2,8 +2,8 @@ use crate::eth::error::{EthApiError, EthResult};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_interfaces::Result;
-use reth_primitives::{Account, Address, BlockId, U256};
-use reth_provider::{AccountChangeReader, BlockReaderIdExt, StateProviderFactory};
+use reth_primitives::{Address, BlockId, U256};
+use reth_provider::{BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
 use reth_rpc_api::RethApiServer;
 use reth_tasks::TaskSpawner;
 use std::{collections::HashMap, future::Future, sync::Arc};
@@ -33,7 +33,7 @@ impl<Provider> RethApi<Provider> {
 
 impl<Provider> RethApi<Provider>
 where
-    Provider: AccountChangeReader + BlockReaderIdExt + StateProviderFactory + 'static,
+    Provider: BlockReaderIdExt + ChangeSetReader + StateProviderFactory + 'static,
 {
     /// Executes the future on a new blocking task.
     async fn on_blocking_task<C, F, R>(&self, c: C) -> EthResult<R>
@@ -50,41 +50,6 @@ where
             let _ = tx.send(res);
         }));
         rx.await.map_err(|_| EthApiError::InternalEthError)?
-    }
-
-    #[allow(unused)]
-    /// Returns a map of addresses to changed accounts (or None for deleted accounts) for a
-    /// particular block.
-    ///
-    /// Note: not currently used, included as an example.
-    pub async fn account_changes_in_block(
-        &self,
-        block_id: BlockId,
-    ) -> EthResult<HashMap<Address, Option<Account>>> {
-        self.on_blocking_task(|this| async move { this.try_account_changes_in_block(block_id) })
-            .await
-    }
-
-    fn try_account_changes_in_block(
-        &self,
-        block_id: BlockId,
-    ) -> EthResult<HashMap<Address, Option<Account>>> {
-        let block_id = block_id;
-        let Some(block_number) = self.provider().block_number_for_id(block_id)? else {
-            return Err(EthApiError::UnknownBlockNumber)
-        };
-
-        let state = self.provider().state_by_block_id(block_id)?;
-        let accounts_before = self.provider().account_block_changeset(block_number)?;
-        let hash_map = accounts_before.iter().try_fold(
-            HashMap::new(),
-            |mut hash_map, account_before| -> Result<_> {
-                let account = state.basic_account(account_before.address)?;
-                hash_map.insert(account_before.address, account);
-                Ok(hash_map)
-            },
-        )?;
-        Ok(hash_map)
     }
 
     /// Returns a map of addresses to changed account balanced for a particular block.
@@ -122,7 +87,7 @@ where
 #[async_trait]
 impl<Provider> RethApiServer for RethApi<Provider>
 where
-    Provider: AccountChangeReader + BlockReaderIdExt + StateProviderFactory + 'static,
+    Provider: BlockReaderIdExt + ChangeSetReader + StateProviderFactory + 'static,
 {
     /// Handler for `reth_getBalanceChangesInBlock`
     async fn reth_get_balance_changes_in_block(

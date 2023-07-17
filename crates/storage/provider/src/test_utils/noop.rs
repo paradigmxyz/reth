@@ -1,7 +1,7 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
-    AccountChangeReader, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader,
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, PostState,
+    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
+    ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider, PostState,
     ReceiptProviderIdExt, StageCheckpointReader, StateProvider, StateProviderBox,
     StateProviderFactory, StateRootProvider, TransactionsProvider, WithdrawalsProvider,
 };
@@ -235,7 +235,7 @@ impl AccountReader for NoopProvider {
     }
 }
 
-impl AccountChangeReader for NoopProvider {
+impl ChangeSetReader for NoopProvider {
     fn account_block_changeset(&self, _block_number: BlockNumber) -> Result<Vec<AccountBeforeTx>> {
         Ok(Vec::default())
     }
