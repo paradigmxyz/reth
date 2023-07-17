@@ -28,6 +28,7 @@ Audience:
  * What jemalloc provides (jeprof, jemalloc metrics)
  * Compiling with the `jemalloc` feature
  * Compiling with the `jemalloc-prof` feature
+ * `debug-fast` for debug symbols
 
 ### Monitoring memory usage
 
@@ -40,13 +41,23 @@ Audience:
  * Why limit memory usage
  * What is `cgroups`
  * How to use `cgroups` to limit memory usage
- * How to make sure the cgroup limits memory usage
+   * Enable cgroups on your system
+     * grub var
+   * Create a cgroup
+   * Important - check swap!
+   * Using `cgexec`
 
 ### Understanding allocation with jeprof
 
  * How to enable profiling with environment variables
+   * `_RJEM_MALLOC_blah=blah`
  * What is produced by jemalloc
+   * When are snapshots taken
+   * `jeprof.*.heap`
  * How to visualize jemalloc heap profiles
+   * jeprof
+   * `--pdf`
+   * flamegraphs
 
 ### TODO / to resolve
  * tips?
