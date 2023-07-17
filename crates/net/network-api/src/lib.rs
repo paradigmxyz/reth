@@ -32,9 +32,8 @@ pub mod error;
 /// Reputation score
 pub mod reputation;
 
-#[cfg(feature = "test-utils")]
-/// Implementation of network traits for testing purposes.
-pub mod test_utils;
+/// Implementation of network traits for that does nothing.
+pub mod noop;
 
 /// Provides general purpose information about the network.
 #[async_trait]

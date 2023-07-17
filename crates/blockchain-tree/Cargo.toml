@@ -20,6 +20,7 @@ reth-interfaces = { workspace = true }
 reth-db = { path = "../storage/db" }
 reth-metrics = { workspace = true, features = ["common"] }
 reth-provider = { workspace = true }
+reth-stages = { path = "../stages" }
 
 # common
 parking_lot = { version = "0.12" }

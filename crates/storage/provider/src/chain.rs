@@ -165,7 +165,7 @@ impl Chain {
         }
 
         // Insert blocks from other chain
-        self.blocks.extend(chain.blocks.into_iter());
+        self.blocks.extend(chain.blocks);
         self.state.extend(chain.state);
 
         Ok(())

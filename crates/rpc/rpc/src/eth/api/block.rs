@@ -10,10 +10,13 @@ use crate::{
 use reth_primitives::{BlockId, BlockNumberOrTag, TransactionMeta};
 use reth_provider::{BlockReaderIdExt, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{Block, Index, RichBlock, TransactionReceipt};
+use reth_transaction_pool::TransactionPool;
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Pool: TransactionPool + Clone + 'static,
+    Network: Send + Sync + 'static,
 {
     /// Returns the uncle headers of the given block
     ///
@@ -121,7 +124,12 @@ where
 
         if block_id.is_pending() {
             // Pending block can be fetched directly without need for caching
-            return Ok(self.provider().pending_block()?)
+            let maybe_pending = self.provider().pending_block()?;
+            return if maybe_pending.is_some() {
+                return Ok(maybe_pending)
+            } else {
+                self.local_pending_block().await
+            }
         }
 
         let block_hash = match self.provider().block_hash_for_id(block_id)? {

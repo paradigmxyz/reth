@@ -250,7 +250,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             // `previous_stage_progress` state.
             let accounts = provider.basic_accounts(lists)?;
             // Insert and hash accounts to hashing table
-            provider.insert_account_for_hashing(accounts.into_iter())?;
+            provider.insert_account_for_hashing(accounts)?;
         }
 
         // We finished the hashing stage, no future iterations is expected for the same block range,

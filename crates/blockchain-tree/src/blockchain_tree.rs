@@ -26,6 +26,7 @@ use reth_provider::{
     CanonStateNotificationSender, CanonStateNotifications, Chain, DatabaseProvider,
     DisplayBlocksChain, ExecutorFactory, HeaderProvider,
 };
+use reth_stages::{MetricEvent, MetricEventsSender};
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
@@ -90,6 +91,8 @@ pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
     canon_state_notification_sender: CanonStateNotificationSender,
     /// Metrics for the blockchain tree.
     metrics: TreeMetrics,
+    /// Metrics for sync stages.
+    sync_metrics_tx: Option<MetricEventsSender>,
 }
 
 /// A container that wraps chains and block indices to allow searching for block hashes across all
@@ -136,12 +139,19 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             chains: Default::default(),
             block_indices: BlockIndices::new(
                 last_finalized_block_number,
-                BTreeMap::from_iter(last_canonical_hashes.into_iter()),
+                BTreeMap::from_iter(last_canonical_hashes),
             ),
             config,
             canon_state_notification_sender,
             metrics: Default::default(),
+            sync_metrics_tx: None,
         })
+    }
+
+    /// Set the sync metric events sender.
+    pub fn with_sync_metrics_tx(mut self, metrics_tx: MetricEventsSender) -> Self {
+        self.sync_metrics_tx = Some(metrics_tx);
+        self
     }
 
     /// Check if then block is known to blockchain tree or database and return its status.
@@ -264,7 +274,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 .iter()
                 .filter(|&(key, _)| key < first_pending_block_number)
                 .collect::<Vec<_>>();
-            parent_block_hashed.extend(canonical_chain.into_iter());
+            parent_block_hashed.extend(canonical_chain);
 
             // get canonical fork.
             let canonical_fork = self.canonical_fork(chain_id)?;
@@ -592,7 +602,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     }
 
     /// Checks the block buffer for the given block.
-    pub fn get_buffered_block(&mut self, hash: &BlockHash) -> Option<&SealedBlockWithSenders> {
+    pub fn get_buffered_block(&self, hash: &BlockHash) -> Option<&SealedBlockWithSenders> {
         self.buffered_blocks.block_by_hash(hash)
     }
 
@@ -740,12 +750,21 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     ///
     /// This finalizes `last_finalized_block` prior to reading the canonical hashes (using
     /// [`BlockchainTree::finalize_block`]).
-    pub fn restore_canonical_hashes(
+    pub fn restore_canonical_hashes_and_finalize(
         &mut self,
         last_finalized_block: BlockNumber,
     ) -> Result<(), Error> {
         self.finalize_block(last_finalized_block);
 
+        self.restore_canonical_hashes()
+    }
+
+    /// Reads the last `N` canonical hashes from the database and updates the block indices of the
+    /// tree.
+    ///
+    /// `N` is the `max_reorg_depth` plus the number of block hashes needed to satisfy the
+    /// `BLOCKHASH` opcode in the EVM.
+    pub fn restore_canonical_hashes(&mut self) -> Result<(), Error> {
         let num_of_canonical_hashes =
             self.config.max_reorg_depth() + self.config.num_of_additional_canonical_block_hashes();
 
@@ -1074,10 +1093,19 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
     }
 
-    /// Update blockchain tree metrics
-    pub(crate) fn update_tree_metrics(&self) {
+    /// Update blockchain tree chains (canonical and sidechains) and sync metrics.
+    ///
+    /// NOTE: this method should not be called during the pipeline sync, because otherwise the sync
+    /// checkpoint metric will get overwritten. Buffered blocks metrics are updated in
+    /// [BlockBuffer] during the pipeline sync.
+    pub(crate) fn update_chains_metrics(&mut self) {
+        let height = self.canonical_chain().tip().number;
+
         self.metrics.sidechains.set(self.chains.len() as f64);
-        self.metrics.canonical_chain_height.set(self.canonical_chain().tip().number as f64);
+        self.metrics.canonical_chain_height.set(height as f64);
+        if let Some(metrics_tx) = self.sync_metrics_tx.as_mut() {
+            let _ = metrics_tx.send(MetricEvent::SyncHeight { height });
+        }
     }
 }
 
@@ -1087,7 +1115,7 @@ mod tests {
     use crate::block_buffer::BufferedBlocks;
     use assert_matches::assert_matches;
     use linked_hash_set::LinkedHashSet;
-    use reth_db::{mdbx::test_utils::create_test_rw_db, transaction::DbTxMut, DatabaseEnv};
+    use reth_db::{test_utils::create_test_rw_db, transaction::DbTxMut, DatabaseEnv};
     use reth_interfaces::test_utils::TestConsensus;
     use reth_primitives::{
         proofs::EMPTY_ROOT, stage::StageCheckpoint, ChainSpecBuilder, H256, MAINNET,
@@ -1559,7 +1587,7 @@ mod tests {
             .assert(&tree);
 
         // update canonical block to b2, this would make b2a be removed
-        assert_eq!(tree.restore_canonical_hashes(12), Ok(()));
+        assert_eq!(tree.restore_canonical_hashes_and_finalize(12), Ok(()));
 
         assert_eq!(tree.is_block_known(block2.num_hash()).unwrap(), Some(BlockStatus::Valid));
 

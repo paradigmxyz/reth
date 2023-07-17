@@ -1,9 +1,6 @@
 use super::TestTransaction;
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
-use reth_db::{
-    mdbx::{Env, WriteMap},
-    DatabaseEnv,
-};
+use reth_db::DatabaseEnv;
 use reth_primitives::MAINNET;
 use reth_provider::ProviderFactory;
 use std::{borrow::Borrow, sync::Arc};

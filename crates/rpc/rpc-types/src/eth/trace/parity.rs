@@ -10,23 +10,6 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-/// Result type for parity style transaction trace
-pub type TraceResult = crate::trace::common::TraceResult<TraceOutput, String>;
-
-// === impl TraceResult ===
-
-impl TraceResult {
-    /// Wraps the result type in a [TraceResult::Success] variant
-    pub fn parity_success(result: TraceOutput) -> Self {
-        TraceResult::Success { result }
-    }
-
-    /// Wraps the result type in a [TraceResult::Error] variant
-    pub fn parity_error(error: String) -> Self {
-        TraceResult::Error { error }
-    }
-}
-
 /// Different Trace diagnostic targets.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,12 +30,13 @@ pub enum TraceType {
 pub struct TraceResults {
     /// Output of the trace
     pub output: Bytes,
-    /// Enabled if [TraceType::Trace] is provided
-    pub trace: Option<Vec<TransactionTrace>>,
-    /// Enabled if [TraceType::VmTrace] is provided
-    pub vm_trace: Option<VmTrace>,
     /// Enabled if [TraceType::StateDiff] is provided
     pub state_diff: Option<StateDiff>,
+    /// Enabled if [TraceType::Trace] is provided, otherwise an empty vec
+    #[serde(default)]
+    pub trace: Vec<TransactionTrace>,
+    /// Enabled if [TraceType::VmTrace] is provided
+    pub vm_trace: Option<VmTrace>,
 }
 
 /// A `FullTrace` with an additional transaction hash
@@ -116,11 +100,38 @@ impl DerefMut for StateDiff {
 pub enum Action {
     Call(CallAction),
     Create(CreateAction),
+    /// Parity style traces never renamed suicide to selfdestruct: <https://eips.ethereum.org/EIPS/eip-6>
+    ///
+    /// For compatibility reasons, this is serialized as `suicide`: <https://github.com/paradigmxyz/reth/issues/3721>
+    #[serde(rename = "suicide", alias = "selfdestruct")]
     Selfdestruct(SelfdestructAction),
     Reward(RewardAction),
 }
 
+impl Action {
+    /// Returns true if this is a call action
+    pub fn is_call(&self) -> bool {
+        matches!(self, Action::Call(_))
+    }
+
+    /// Returns true if this is a create action
+    pub fn is_create(&self) -> bool {
+        matches!(self, Action::Call(_))
+    }
+
+    /// Returns true if this is a selfdestruct action
+    pub fn is_selfdestruct(&self) -> bool {
+        matches!(self, Action::Selfdestruct(_))
+    }
+    /// Returns true if this is a reward action
+    pub fn is_reward(&self) -> bool {
+        matches!(self, Action::Reward(_))
+    }
+}
+
 /// An external action type.
+///
+/// Used as enum identifier for [Action]
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ActionType {
@@ -129,6 +140,7 @@ pub enum ActionType {
     /// Contract creation.
     Create,
     /// Contract suicide/selfdestruct.
+    #[serde(rename = "suicide", alias = "selfdestruct")]
     Selfdestruct,
     /// A block reward.
     Reward,
@@ -157,16 +169,16 @@ pub enum CallType {
 pub struct CallAction {
     /// Address of the sending account.
     pub from: Address,
-    /// Address of the destination/target account.
-    pub to: Address,
-    /// Value transferred to the destination account.
-    pub value: U256,
+    /// The type of the call.
+    pub call_type: CallType,
     /// The gas available for executing the call.
     pub gas: U64,
     /// The input data provided to the call.
     pub input: Bytes,
-    /// The type of the call.
-    pub call_type: CallType,
+    /// Address of the destination/target account.
+    pub to: Address,
+    /// Value transferred to the destination account.
+    pub value: U256,
 }
 
 /// Represents a _create_ action, either a `CREATE` operation or a CREATE transaction.
@@ -238,12 +250,13 @@ pub enum TraceOutput {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionTrace {
-    pub trace_address: Vec<usize>,
-    pub subtraces: usize,
     #[serde(flatten)]
     pub action: Action,
-    #[serde(flatten)]
-    pub result: Option<TraceResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub result: Option<TraceOutput>,
+    pub subtraces: usize,
+    pub trace_address: Vec<usize>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -317,4 +330,65 @@ pub struct MemoryDelta {
 pub struct StorageDelta {
     pub key: U256,
     pub val: U256,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_transaction_trace() {
+        let s = r#"{
+            "action": {
+                "from": "0x66e29f0b6b1b07071f2fde4345d512386cb66f5f",
+                "callType": "call",
+                "gas": "0x10bfc",
+                "input": "0xf6cd1e8d0000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000011c37937e080000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000ec6952892271c8ee13f12e118484e03149281c9600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000010480862479000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000002000000000000000000000000160f5f00288e9e1cc8655b327e081566e580a71d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000011c37937e080000fffffffffffffffffffffffffffffffffffffffffffffffffee3c86c81f8000000000000000000000000000000000000000000000000000000000000",
+                "to": "0x160f5f00288e9e1cc8655b327e081566e580a71d",
+                "value": "0x244b"
+            },
+            "error": "Reverted",
+            "result": {
+                "gasUsed": "0x9daf",
+                "output": "0x000000000000000000000000000000000000000000000000011c37937e080000"
+            },
+            "subtraces": 3,
+            "traceAddress": [],
+            "type": "call"
+        }"#;
+        let val = serde_json::from_str::<TransactionTrace>(s).unwrap();
+        serde_json::to_value(val).unwrap();
+    }
+
+    #[test]
+    fn test_selfdestruct_suicide() {
+        let input = r#"{
+            "action": {
+                "address": "0x66e29f0b6b1b07071f2fde4345d512386cb66f5f",
+                "refundAddress": "0x66e29f0b6b1b07071f2fde4345d512386cb66f5f",
+                "balance": "0x244b"
+            },
+            "error": "Reverted",
+            "result": {
+                "gasUsed": "0x9daf",
+                "output": "0x000000000000000000000000000000000000000000000000011c37937e080000"
+            },
+            "subtraces": 3,
+            "traceAddress": [],
+            "type": "suicide"
+        }"#;
+        let val = serde_json::from_str::<TransactionTrace>(input).unwrap();
+        assert!(val.action.is_selfdestruct());
+
+        let json = serde_json::to_value(val.clone()).unwrap();
+        let expect = serde_json::from_str::<serde_json::Value>(input).unwrap();
+        similar_asserts::assert_eq!(json, expect);
+        let s = serde_json::to_string(&val).unwrap();
+        let json = serde_json::from_str::<serde_json::Value>(&s).unwrap();
+        similar_asserts::assert_eq!(json, expect);
+
+        let input = input.replace("suicide", "selfdestruct");
+        let val = serde_json::from_str::<TransactionTrace>(&input).unwrap();
+        assert!(val.action.is_selfdestruct());
+    }
 }

@@ -21,6 +21,7 @@ members = [
     "crates/net/downloaders",
     "crates/payload/basic",
     "crates/primitives",
+    "crates/prune",
     "crates/revm",
     "crates/revm/revm-primitives",
     "crates/revm/revm-inspectors",
@@ -33,7 +34,6 @@ members = [
     "crates/rpc/rpc-engine-api",
     "crates/rpc/rpc-types",
     "crates/rpc/rpc-testing-util",
-    "crates/staged-sync",
     "crates/stages",
     "crates/storage/codecs",
     "crates/storage/db",
@@ -45,6 +45,8 @@ members = [
     "crates/transaction-pool",
     "crates/trie",
     "testing/ef-tests",
+
+    "examples",
 ]
 default-members = ["bin/reth"]
 
@@ -53,12 +55,15 @@ default-members = ["bin/reth"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.3"
 edition = "2021"
 rust-version = "1.70" # Remember to update .clippy.toml and README.md
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
+exclude = [
+    ".github/",
+]
 
 # Like release, but with full debug symbols. Useful for e.g. `perf`.
 [profile.debug-fast]
@@ -85,12 +90,18 @@ revm-primitives = "1.1"
 reth-primitives = { path = "./crates/primitives" }
 reth-interfaces = { path = "./crates/interfaces" }
 reth-provider = { path = "./crates/storage/provider" }
+reth-db = { path = "./crates/storage/db" }
 reth-rlp = { path = "./crates/rlp" }
 reth-rpc-types = { path = "./crates/rpc/rpc-types" }
+reth-rpc-builder = { path = "./crates/rpc/rpc-builder" }
+reth-blockchain-tree = { path = "./crates/blockchain-tree" }
+reth-beacon-consensus = { path = "./crates/consensus/beacon" }
 reth-metrics = { path = "./crates/metrics" }
+reth-revm = { path = "./crates/revm" }
 reth-payload-builder = { path = "./crates/payload/builder" }
 reth-transaction-pool = { path = "./crates/transaction-pool" }
 reth-tasks = { path = "./crates/tasks" }
+reth-network = { path = "./crates/net/network" }
 reth-network-api = { path = "./crates/net/network-api" }
 
 ## eth
@@ -107,6 +118,9 @@ serde_json = "1.0.94"
 serde = { version = "1.0", default-features = false }
 rand = "0.8.5"
 
+### proc-macros
+proc-macro2 = "1.0"
+quote = "1.0"
 
 ## tokio
 tokio-stream = "0.1.11"

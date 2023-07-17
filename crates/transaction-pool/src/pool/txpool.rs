@@ -1,6 +1,6 @@
 //! The internal transaction pool implementation.
 use crate::{
-    config::MAX_ACCOUNT_SLOTS_PER_SENDER,
+    config::TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
     error::{InvalidPoolTransactionError, PoolError},
     identifier::{SenderId, TransactionId},
     metrics::TxPoolMetrics,
@@ -19,11 +19,11 @@ use crate::{
 use fnv::FnvHashMap;
 use reth_primitives::{
     constants::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE},
-    TxHash, H256,
+    Address, TxHash, H256,
 };
 use std::{
     cmp::Ordering,
-    collections::{btree_map::Entry, hash_map, BTreeMap, HashMap},
+    collections::{btree_map::Entry, hash_map, BTreeMap, HashMap, HashSet},
     fmt,
     ops::Bound::{Excluded, Unbounded},
     sync::Arc,
@@ -111,6 +111,11 @@ impl<T: TransactionOrdering> TxPool<T> {
         &self.all_transactions
     }
 
+    /// Returns all senders in the pool
+    pub(crate) fn unique_senders(&self) -> HashSet<Address> {
+        self.all_transactions.txs.values().map(|tx| tx.transaction.sender()).collect()
+    }
+
     /// Returns stats about the size of pool.
     pub(crate) fn size(&self) -> PoolSize {
         PoolSize {
@@ -120,6 +125,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             basefee_size: self.basefee_pool.size(),
             queued: self.queued_pool.len(),
             queued_size: self.queued_pool.size(),
+            total: self.all_transactions.len(),
         }
     }
 
@@ -185,6 +191,31 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.pending_pool.best()
     }
 
+    /// Returns an iterator that yields transactions that are ready to be included in the block with
+    /// the given base fee.
+    pub(crate) fn best_transactions_with_base_fee(
+        &self,
+        basefee: u128,
+    ) -> Box<dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T::Transaction>>>>
+    {
+        match basefee.cmp(&self.all_transactions.pending_basefee) {
+            Ordering::Equal => {
+                // fee unchanged, nothing to shift
+                Box::new(self.best_transactions())
+            }
+            Ordering::Greater => {
+                // base fee increased, we only need to enforces this on the pending pool
+                Box::new(self.pending_pool.best_with_basefee(basefee))
+            }
+            Ordering::Less => {
+                // base fee decreased, we need to move transactions from the basefee pool to the
+                // pending pool
+                let unlocked = self.basefee_pool.satisfy_base_fee_transactions(basefee);
+                Box::new(self.pending_pool.best_with_unlocked(unlocked))
+            }
+        }
+    }
+
     /// Returns all transactions from the pending sub-pool
     pub(crate) fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.pending_pool.all().collect()
@@ -226,6 +257,22 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.all_transactions.txs_iter(sender).map(|(_, tx)| Arc::clone(&tx.transaction)).collect()
     }
 
+    /// Updates the transactions for the changed senders.
+    pub(crate) fn update_accounts(
+        &mut self,
+        changed_senders: HashMap<SenderId, SenderInfo>,
+    ) -> UpdateOutcome {
+        // track changed accounts
+        self.sender_info.extend(changed_senders.clone());
+        // Apply the state changes to the total set of transactions which triggers sub-pool updates.
+        let updates = self.all_transactions.update(changed_senders);
+        // Process the sub-pool updates
+        let update = self.process_updates(updates);
+        // update the metrics after the update
+        self.update_size_metrics();
+        update
+    }
+
     /// Updates the entire pool after a new block was mined.
     ///
     /// This removes all mined transactions, updates according to the new base fee and rechecks
@@ -236,9 +283,6 @@ impl<T: TransactionOrdering> TxPool<T> {
         mined_transactions: Vec<TxHash>,
         changed_senders: HashMap<SenderId, SenderInfo>,
     ) -> OnNewCanonicalStateOutcome {
-        // track changed accounts
-        self.sender_info.extend(changed_senders.clone());
-
         // update block info
         let block_hash = block_info.last_seen_block_hash;
         self.all_transactions.set_block_info(block_info);
@@ -251,14 +295,9 @@ impl<T: TransactionOrdering> TxPool<T> {
             }
         }
 
-        // Apply the state changes to the total set of transactions which triggers sub-pool updates.
-        let updates = self.all_transactions.update(changed_senders);
+        let UpdateOutcome { promoted, discarded } = self.update_accounts(changed_senders);
 
-        // Process the sub-pool updates
-        let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
-
-        // update the metrics after the update
-        self.update_size_metrics();
+        self.metrics.performed_state_updates.increment(1);
 
         OnNewCanonicalStateOutcome { block_hash, mined: mined_transactions, promoted, discarded }
     }
@@ -272,6 +311,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.metrics.basefee_pool_size_bytes.set(stats.basefee_size as f64);
         self.metrics.queued_pool_transactions.set(stats.queued as f64);
         self.metrics.queued_pool_size_bytes.set(stats.queued_size as f64);
+        self.metrics.total_transactions.set(stats.total as f64);
     }
 
     /// Adds the transaction into the pool.
@@ -312,20 +352,22 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
             Ok(InsertOk { transaction, move_to, replaced_tx, updates, .. }) => {
-                self.add_new_transaction(transaction.clone(), replaced_tx, move_to);
+                self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
                 // Update inserted transactions metric
                 self.metrics.inserted_transactions.increment(1);
                 let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
 
                 // This transaction was moved to the pending pool.
+                let replaced = replaced_tx.map(|(tx, _)| tx);
                 let res = if move_to.is_pending() {
                     AddedTransaction::Pending(AddedPendingTransaction {
                         transaction,
                         promoted,
                         discarded,
+                        replaced,
                     })
                 } else {
-                    AddedTransaction::Parked { transaction, subpool: move_to }
+                    AddedTransaction::Parked { transaction, subpool: move_to, replaced }
                 };
 
                 Ok(res)
@@ -633,6 +675,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 
     /// Returns an iterator over all _unique_ hashes in the pool
+    #[allow(unused)]
     pub(crate) fn hashes_iter(&self) -> impl Iterator<Item = TxHash> + '_ {
         self.by_hash.keys().copied()
     }
@@ -1189,7 +1232,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 impl<T: PoolTransaction> Default for AllTransactions<T> {
     fn default() -> Self {
         Self {
-            max_account_slots: MAX_ACCOUNT_SLOTS_PER_SENDER,
+            max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             by_hash: Default::default(),
@@ -1274,11 +1317,11 @@ impl<T: PoolTransaction> PoolInternalTransaction<T> {
 
 /// Tracks the result after updating the pool
 #[derive(Default, Debug)]
-pub struct UpdateOutcome {
+pub(crate) struct UpdateOutcome {
     /// transactions promoted to the ready queue
-    promoted: Vec<TxHash>,
+    pub(crate) promoted: Vec<TxHash>,
     /// transaction that failed and became discarded
-    discarded: Vec<TxHash>,
+    pub(crate) discarded: Vec<TxHash>,
 }
 
 /// Represents the outcome of a prune

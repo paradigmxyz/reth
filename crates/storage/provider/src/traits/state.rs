@@ -220,5 +220,6 @@ pub trait PostStateDataProvider: Send + Sync {
 #[auto_impl[Box,&, Arc]]
 pub trait StateRootProvider: Send + Sync {
     /// Returns the state root of the PostState on top of the current state.
+    /// See [PostState::state_root_slow] for more info.
     fn state_root(&self, post_state: PostState) -> Result<H256>;
 }

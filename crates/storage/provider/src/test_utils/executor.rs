@@ -41,7 +41,7 @@ impl TestExecutorFactory {
 
     /// Extend the mocked execution results
     pub fn extend(&self, results: Vec<PostState>) {
-        self.exec_results.lock().extend(results.into_iter());
+        self.exec_results.lock().extend(results);
     }
 }
 

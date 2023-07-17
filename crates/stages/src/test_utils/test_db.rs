@@ -1,15 +1,12 @@
 use reth_db::{
     common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-    mdbx::{
-        test_utils::{create_test_db, create_test_db_with_path},
-        tx::Tx,
-        Env, EnvKind, WriteMap, RO, RW,
-    },
+    database::DatabaseGAT,
     models::{AccountBeforeTx, StoredBlockBodyIndices},
     table::Table,
     tables,
-    transaction::{DbTx, DbTxMut},
+    test_utils::{create_test_rw_db, create_test_rw_db_with_path},
+    transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
     DatabaseEnv, DatabaseError as DbError,
 };
 use reth_primitives::{
@@ -34,7 +31,7 @@ use std::{
 /// ```
 #[derive(Debug)]
 pub struct TestTransaction {
-    /// WriteMap DB
+    /// DB
     pub tx: Arc<DatabaseEnv>,
     pub path: Option<PathBuf>,
     pub factory: ProviderFactory<Arc<DatabaseEnv>>,
@@ -43,14 +40,14 @@ pub struct TestTransaction {
 impl Default for TestTransaction {
     /// Create a new instance of [TestTransaction]
     fn default() -> Self {
-        let tx = create_test_db::<WriteMap>(EnvKind::RW);
+        let tx = create_test_rw_db();
         Self { tx: tx.clone(), path: None, factory: ProviderFactory::new(tx, MAINNET.clone()) }
     }
 }
 
 impl TestTransaction {
     pub fn new(path: &Path) -> Self {
-        let tx = create_test_db::<WriteMap>(EnvKind::RW);
+        let tx = create_test_rw_db_with_path(path);
         Self {
             tx: tx.clone(),
             path: Some(path.to_path_buf()),
@@ -76,7 +73,7 @@ impl TestTransaction {
     /// Invoke a callback with transaction committing it afterwards
     pub fn commit<F>(&self, f: F) -> Result<(), DbError>
     where
-        F: FnOnce(&Tx<'_, RW, WriteMap>) -> Result<(), DbError>,
+        F: FnOnce(&<DatabaseEnv as DatabaseGAT<'_>>::TXMut) -> Result<(), DbError>,
     {
         let mut tx = self.inner_rw();
         f(tx.tx_ref())?;
@@ -87,7 +84,7 @@ impl TestTransaction {
     /// Invoke a callback with a read transaction
     pub fn query<F, R>(&self, f: F) -> Result<R, DbError>
     where
-        F: FnOnce(&Tx<'_, RO, WriteMap>) -> Result<R, DbError>,
+        F: FnOnce(&<DatabaseEnv as DatabaseGAT<'_>>::TX) -> Result<R, DbError>,
     {
         f(self.inner().tx_ref())
     }
@@ -200,7 +197,10 @@ impl TestTransaction {
     }
 
     /// Inserts a single [SealedHeader] into the corresponding tables of the headers stage.
-    fn insert_header(tx: &Tx<'_, RW, WriteMap>, header: &SealedHeader) -> Result<(), DbError> {
+    fn insert_header<'a, TX: DbTxMut<'a> + DbTx<'a>>(
+        tx: &'a TX,
+        header: &SealedHeader,
+    ) -> Result<(), DbError> {
         tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
         tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
         tx.put::<tables::Headers>(header.number, header.clone().unseal())
@@ -246,13 +246,19 @@ impl TestTransaction {
             blocks.into_iter().try_for_each(|block| {
                 Self::insert_header(tx, &block.header)?;
                 // Insert into body tables.
-                tx.put::<tables::BlockBodyIndices>(
-                    block.number,
-                    StoredBlockBodyIndices {
-                        first_tx_num: next_tx_num,
-                        tx_count: block.body.len() as u64,
-                    },
-                )?;
+                let block_body_indices = StoredBlockBodyIndices {
+                    first_tx_num: next_tx_num,
+                    tx_count: block.body.len() as u64,
+                };
+
+                if !block.body.is_empty() {
+                    tx.put::<tables::TransactionBlock>(
+                        block_body_indices.last_tx_num(),
+                        block.number,
+                    )?;
+                }
+                tx.put::<tables::BlockBodyIndices>(block.number, block_body_indices)?;
+
                 block.body.iter().try_for_each(|body_tx| {
                     tx.put::<tables::Transactions>(next_tx_num, body_tx.clone().into())?;
                     next_tx_num += 1;

@@ -30,6 +30,7 @@ pub mod config;
 pub mod db;
 pub mod debug_cmd;
 pub mod dirs;
+pub mod init;
 pub mod node;
 pub mod p2p;
 pub mod prometheus_exporter;
@@ -39,5 +40,5 @@ pub mod test_vectors;
 pub mod utils;
 pub mod version;
 
-#[cfg(feature = "jemalloc")]
+#[cfg(all(feature = "jemalloc", unix))]
 use jemallocator as _;

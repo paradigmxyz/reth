@@ -14,7 +14,7 @@ name: ci
 jobs:
   lint:
     name: code lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -35,12 +35,12 @@ jobs:
       - name: cargo clippy
         uses: actions-rs/clippy-check@v1
         with:
-          args: --all --all-features
+          args: --all --all-features -- -A clippy::incorrect_clone_impl_on_copy_type -A clippy::arc_with_non_send_sync
           token: ${{ secrets.GITHUB_TOKEN }}
 
   doc-lint:
     name: doc lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v3
       - name: Install toolchain
@@ -51,7 +51,7 @@ jobs:
 
   grafana-lint:
     name: grafana lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v3
       - name: Check dashboard JSON with jq
@@ -62,7 +62,7 @@ jobs:
   lint-success:
     if: always()
     name: lint success
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [lint, doc-lint, grafana-lint]
     steps:
       - name: Decide whether the needed jobs succeeded or failed

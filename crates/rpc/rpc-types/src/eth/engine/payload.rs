@@ -4,11 +4,11 @@ use reth_primitives::{
     Address, Block, Bloom, Bytes, Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawal,
     H256, H64, U256, U64,
 };
-use reth_rlp::{Decodable, Encodable};
+use reth_rlp::Decodable;
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 
 /// The execution payload body response that allows for `null` values.
-pub type ExecutionPayloadBodies = Vec<Option<ExecutionPayloadBody>>;
+pub type ExecutionPayloadBodiesV1 = Vec<Option<ExecutionPayloadBodyV1>>;
 
 /// And 8-byte identifier for an execution payload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
@@ -220,21 +220,25 @@ impl PayloadError {
 ///
 /// See also: <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#executionpayloadbodyv1>
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExecutionPayloadBody {
+pub struct ExecutionPayloadBodyV1 {
+    /// Enveloped encoded transactions.
     pub transactions: Vec<Bytes>,
-    pub withdrawals: Vec<Withdrawal>,
+    /// All withdrawals in the block.
+    ///
+    /// Will always be `None` if pre shanghai.
+    pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
-impl From<Block> for ExecutionPayloadBody {
+impl From<Block> for ExecutionPayloadBodyV1 {
     fn from(value: Block) -> Self {
         let transactions = value.body.into_iter().map(|tx| {
             let mut out = Vec::new();
-            tx.encode(&mut out);
+            tx.encode_enveloped(&mut out);
             out.into()
         });
-        ExecutionPayloadBody {
+        ExecutionPayloadBodyV1 {
             transactions: transactions.collect(),
-            withdrawals: value.withdrawals.unwrap_or_default(),
+            withdrawals: value.withdrawals,
         }
     }
 }
@@ -413,7 +417,7 @@ pub enum PayloadValidationError {
     #[error("invalid block number")]
     InvalidBlockNumber,
     /// Thrown when a new payload contains a wrong state root
-    #[error("invalid merkle root (remote: {remote:?} local: {local:?})")]
+    #[error("invalid merkle root: (remote: {remote:?} local: {local:?})")]
     InvalidStateRoot {
         /// The state root of the payload we received from remote (CL)
         remote: H256,
@@ -456,7 +460,7 @@ mod tests {
         let mut rng = generators::rng();
         for block in random_block_range(&mut rng, 0..=99, H256::default(), 0..2) {
             let unsealed = block.clone().unseal();
-            let payload_body: ExecutionPayloadBody = unsealed.into();
+            let payload_body: ExecutionPayloadBodyV1 = unsealed.into();
 
             assert_eq!(
                 Ok(block.body),
@@ -467,7 +471,7 @@ mod tests {
                     .collect::<Result<Vec<_>, _>>(),
             );
 
-            assert_eq!(block.withdrawals.unwrap_or_default(), payload_body.withdrawals);
+            assert_eq!(block.withdrawals, payload_body.withdrawals);
         }
     }
 
@@ -566,6 +570,54 @@ mod tests {
         assert!(status.latest_valid_hash.is_none());
         assert!(status.status.validation_error().is_none());
         assert_eq!(serde_json::to_string(&status).unwrap(), full);
+    }
+
+    #[test]
+    fn serde_payload_status_error_deserialize() {
+        let s = r#"{"status":"INVALID","latestValidHash":null,"validationError":"Failed to decode block"}"#;
+        let q = PayloadStatus {
+            latest_valid_hash: None,
+            status: PayloadStatusEnum::Invalid {
+                validation_error: "Failed to decode block".to_string(),
+            },
+        };
+        assert_eq!(q, serde_json::from_str(s).unwrap());
+
+        let s = r#"{"status":"INVALID","latestValidHash":null,"validationError":"links to previously rejected block"}"#;
+        let q = PayloadStatus {
+            latest_valid_hash: None,
+            status: PayloadStatusEnum::Invalid {
+                validation_error: PayloadValidationError::LinksToRejectedPayload.to_string(),
+            },
+        };
+        assert_eq!(q, serde_json::from_str(s).unwrap());
+
+        let s = r#"{"status":"INVALID","latestValidHash":null,"validationError":"invalid block number"}"#;
+        let q = PayloadStatus {
+            latest_valid_hash: None,
+            status: PayloadStatusEnum::Invalid {
+                validation_error: PayloadValidationError::InvalidBlockNumber.to_string(),
+            },
+        };
+        assert_eq!(q, serde_json::from_str(s).unwrap());
+
+        let s = r#"{"status":"INVALID","latestValidHash":null,"validationError":
+        "invalid merkle root: (remote: 0x3f77fb29ce67436532fee970e1add8f5cc80e8878c79b967af53b1fd92a0cab7 local: 0x603b9628dabdaadb442a3bb3d7e0360efc110e1948472909230909f1690fed17)"}"#;
+        let q = PayloadStatus {
+            latest_valid_hash: None,
+            status: PayloadStatusEnum::Invalid {
+                validation_error: PayloadValidationError::InvalidStateRoot {
+                    remote: "0x3f77fb29ce67436532fee970e1add8f5cc80e8878c79b967af53b1fd92a0cab7"
+                        .parse()
+                        .unwrap(),
+                    local: "0x603b9628dabdaadb442a3bb3d7e0360efc110e1948472909230909f1690fed17"
+                        .parse()
+                        .unwrap(),
+                }
+                .to_string(),
+            },
+        };
+        similar_asserts::assert_eq!(q, serde_json::from_str(s).unwrap());
     }
 
     #[test]

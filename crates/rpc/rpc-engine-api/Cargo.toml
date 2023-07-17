@@ -17,6 +17,7 @@ reth-rpc-types = { workspace = true }
 reth-rpc-api = { path = "../rpc-api" }
 reth-beacon-consensus = { path = "../../consensus/beacon" }
 reth-payload-builder = { workspace = true }
+reth-tasks = { workspace = true }
 
 # async
 tokio = { workspace = true, features = ["sync"] }

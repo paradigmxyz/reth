@@ -2,14 +2,17 @@ use crate::{
     basefee::calculate_next_block_base_fee,
     keccak256,
     proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
-    BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes, H160, H256, U256,
+    BlockBodyRoots, BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes, H160, H256, H64, U256,
 };
 use bytes::{Buf, BufMut, BytesMut};
-use ethers_core::types::{Block, H256 as EthersH256, H64};
+
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, Encodable, EMPTY_STRING_CODE};
 use serde::{Deserialize, Serialize};
-use std::ops::{Deref, DerefMut};
+use std::{
+    mem,
+    ops::{Deref, DerefMut},
+};
 
 /// Describes the current head block.
 ///
@@ -151,6 +154,15 @@ impl Header {
         self.transactions_root == EMPTY_ROOT
     }
 
+    /// Converts all roots in the header to a [BlockBodyRoots] struct.
+    pub fn body_roots(&self) -> BlockBodyRoots {
+        BlockBodyRoots {
+            tx_root: self.transactions_root,
+            ommers_hash: self.ommers_hash,
+            withdrawals_root: self.withdrawals_root,
+        }
+    }
+
     /// Calculate base fee for next block according to the EIP-1559 spec.
     ///
     /// Returns a `None` if no base fee is set, no EIP-1559 support
@@ -169,6 +181,28 @@ impl Header {
     pub fn seal_slow(self) -> SealedHeader {
         let hash = self.hash_slow();
         self.seal(hash)
+    }
+
+    /// Calculate a heuristic for the in-memory size of the [Header].
+    #[inline]
+    pub fn size(&self) -> usize {
+        mem::size_of::<H256>() + // parent hash
+        mem::size_of::<H256>() + // ommers hash
+        mem::size_of::<H160>() + // beneficiary
+        mem::size_of::<H256>() + // state root
+        mem::size_of::<H256>() + // transactions root
+        mem::size_of::<H256>() + // receipts root
+        mem::size_of::<Option<H256>>() + // withdrawals root
+        mem::size_of::<Bloom>() + // logs bloom
+        mem::size_of::<U256>() + // difficulty
+        mem::size_of::<BlockNumber>() + // number
+        mem::size_of::<u64>() + // gas limit
+        mem::size_of::<u64>() + // gas used
+        mem::size_of::<u64>() + // timestamp
+        mem::size_of::<H256>() + // mix hash
+        mem::size_of::<u64>() + // nonce
+        mem::size_of::<Option<u64>>() + // base fee per gas
+        self.extra_data.len() // extra data
     }
 
     fn header_payload_length(&self) -> usize {
@@ -322,6 +356,12 @@ impl SealedHeader {
     pub fn num_hash(&self) -> BlockNumHash {
         BlockNumHash::new(self.number, self.hash)
     }
+
+    /// Calculates a heuristic for the in-memory size of the [SealedHeader].
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.header.size() + mem::size_of::<BlockHash>()
+    }
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
@@ -340,40 +380,6 @@ impl proptest::arbitrary::Arbitrary for SealedHeader {
 impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         Ok(Header::arbitrary(u)?.seal_slow())
-    }
-}
-
-impl From<&Block<EthersH256>> for Header {
-    fn from(block: &Block<EthersH256>) -> Self {
-        Header {
-            parent_hash: block.parent_hash.0.into(),
-            number: block.number.unwrap().as_u64(),
-            gas_limit: block.gas_limit.as_u64(),
-            difficulty: block.difficulty.into(),
-            nonce: block.nonce.unwrap().to_low_u64_be(),
-            extra_data: block.extra_data.0.clone().into(),
-            state_root: block.state_root.0.into(),
-            transactions_root: block.transactions_root.0.into(),
-            receipts_root: block.receipts_root.0.into(),
-            timestamp: block.timestamp.as_u64(),
-            mix_hash: block.mix_hash.unwrap().0.into(),
-            beneficiary: block.author.unwrap().0.into(),
-            base_fee_per_gas: block.base_fee_per_gas.map(|fee| fee.as_u64()),
-            ommers_hash: block.uncles_hash.0.into(),
-            gas_used: block.gas_used.as_u64(),
-            withdrawals_root: None,
-            logs_bloom: block.logs_bloom.unwrap_or_default().0.into(),
-        }
-    }
-}
-
-impl From<&Block<EthersH256>> for SealedHeader {
-    fn from(block: &Block<EthersH256>) -> Self {
-        let header = Header::from(block);
-        match block.hash {
-            Some(hash) => header.seal(hash.0.into()),
-            None => header.seal_slow(),
-        }
     }
 }
 
@@ -502,6 +508,45 @@ impl From<HeadersDirection> for bool {
         match value {
             HeadersDirection::Rising => false,
             HeadersDirection::Falling => true,
+        }
+    }
+}
+
+mod ethers_compat {
+    use super::*;
+    use ethers_core::types::{Block, H256 as EthersH256};
+
+    impl From<&Block<EthersH256>> for Header {
+        fn from(block: &Block<EthersH256>) -> Self {
+            Header {
+                parent_hash: block.parent_hash.0.into(),
+                number: block.number.unwrap().as_u64(),
+                gas_limit: block.gas_limit.as_u64(),
+                difficulty: block.difficulty.into(),
+                nonce: block.nonce.unwrap().to_low_u64_be(),
+                extra_data: block.extra_data.0.clone().into(),
+                state_root: block.state_root.0.into(),
+                transactions_root: block.transactions_root.0.into(),
+                receipts_root: block.receipts_root.0.into(),
+                timestamp: block.timestamp.as_u64(),
+                mix_hash: block.mix_hash.unwrap().0.into(),
+                beneficiary: block.author.unwrap().0.into(),
+                base_fee_per_gas: block.base_fee_per_gas.map(|fee| fee.as_u64()),
+                ommers_hash: block.uncles_hash.0.into(),
+                gas_used: block.gas_used.as_u64(),
+                withdrawals_root: None,
+                logs_bloom: block.logs_bloom.unwrap_or_default().0.into(),
+            }
+        }
+    }
+
+    impl From<&Block<EthersH256>> for SealedHeader {
+        fn from(block: &Block<EthersH256>) -> Self {
+            let header = Header::from(block);
+            match block.hash {
+                Some(hash) => header.seal(hash.0.into()),
+                None => header.seal_slow(),
+            }
         }
     }
 }

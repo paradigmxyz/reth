@@ -48,7 +48,8 @@ impl_compression_for_compact!(
     AccountBeforeTx,
     TransactionSignedNoHash,
     CompactU256,
-    StageCheckpoint
+    StageCheckpoint,
+    PruneCheckpoint
 );
 
 macro_rules! impl_compression_fixed_compact {

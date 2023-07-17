@@ -86,7 +86,6 @@ These crates implement the main syncing drivers of reth.
 
 - [`blockchain-tree`](../../crates/blockchain-tree): A tree-like structure for handling multiple chains of unfinalized blocks. This is the main component during live sync (i.e. syncing at the tip)
 - [`stages`](../../crates/stages): A pipelined sync, including implementation of various stages. This is used during initial sync and is faster than the tree-like structure for longer sync ranges.
-- [`staged-sync`](../../crates/staged-sync): A catch-all for various things currently, to be removed
 
 ### RPC
 

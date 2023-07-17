@@ -1,9 +1,14 @@
+//! A network implementation that does nothing.
+//!
+//! This is useful for wiring components together that don't require network but still need to be
+//! generic over it.
+
 use crate::{
     NetworkError, NetworkInfo, PeerKind, Peers, PeersInfo, Reputation, ReputationChangeKind,
 };
 use async_trait::async_trait;
 use reth_eth_wire::{DisconnectReason, ProtocolVersion};
-use reth_primitives::{rpc::Chain::Mainnet, NodeRecord, PeerId};
+use reth_primitives::{Chain, NodeRecord, PeerId};
 use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
 use std::net::{IpAddr, SocketAddr};
 
@@ -11,6 +16,7 @@ use std::net::{IpAddr, SocketAddr};
 ///
 /// Intended for testing purposes where network is not used.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct NoopNetwork;
 
 #[async_trait]
@@ -33,7 +39,7 @@ impl NetworkInfo for NoopNetwork {
     }
 
     fn chain_id(&self) -> u64 {
-        Mainnet.into()
+        Chain::mainnet().into()
     }
 
     fn is_syncing(&self) -> bool {

@@ -1,5 +1,5 @@
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
-use reth_network_api::test_utils::NoopNetwork;
+use reth_network_api::noop::NoopNetwork;
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::MAINNET;
 use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
@@ -30,6 +30,7 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
         MAINNET.clone(),
         beacon_engine_handle,
         spawn_test_payload_service().into(),
+        Box::new(TokioTaskExecutor::default()),
     );
     let module = AuthRpcModule::new(engine_api);
     module.start_server(config).await.unwrap()
@@ -101,7 +102,7 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
     RpcModuleBuilder::default()
         .with_provider(NoopProvider::default())
         .with_pool(testing_pool())
-        .with_network(NoopNetwork)
+        .with_network(NoopNetwork::default())
         .with_executor(TokioTaskExecutor::default())
         .with_events(TestCanonStateSubscriptions::default())
 }

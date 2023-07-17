@@ -1,5 +1,5 @@
 // We use jemalloc for performance reasons
-#[cfg(feature = "jemalloc")]
+#[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 

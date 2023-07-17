@@ -5,6 +5,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_network::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
+use reth_primitives::PruneTargets;
 use secp256k1::SecretKey;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -16,6 +17,9 @@ pub struct Config {
     /// Configuration for each stage in the pipeline.
     // TODO(onbjerg): Can we make this easier to maintain when we add/remove stages?
     pub stages: StageConfig,
+    /// Configuration for pruning.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prune: Option<PruneConfig>,
     /// Configuration for the discovery service.
     pub peers: PeersConfig,
     /// Configuration for peer sessions.
@@ -142,13 +146,12 @@ pub struct BodiesConfig {
     pub downloader_request_limit: u64,
     /// The maximum number of block bodies returned at once from the stream
     ///
-    /// Default: 10_000
+    /// Default: 1_000
     pub downloader_stream_batch_size: usize,
-    /// Maximum amount of received bodies to buffer internally.
-    /// The response contains multiple bodies.
+    /// The size of the internal block buffer in bytes.
     ///
-    /// Default: ~43_000 or 4GB with block size of 100kb
-    pub downloader_max_buffered_blocks: usize,
+    /// Default: 2GB
+    pub downloader_max_buffered_blocks_size_bytes: usize,
     /// The minimum number of requests to send concurrently.
     ///
     /// Default: 5
@@ -164,9 +167,8 @@ impl Default for BodiesConfig {
     fn default() -> Self {
         Self {
             downloader_request_limit: 200,
-            downloader_stream_batch_size: 10_000,
-            // With high block sizes at around 100kb this will be ~4GB of buffered blocks: ~43k
-            downloader_max_buffered_blocks: 4 * 1024 * 1024 * 1024 / 100_000,
+            downloader_stream_batch_size: 1_000,
+            downloader_max_buffered_blocks_size_bytes: 2 * 1024 * 1024 * 1024, // ~2GB
             downloader_min_concurrent_requests: 5,
             downloader_max_concurrent_requests: 100,
         }
@@ -178,7 +180,7 @@ impl From<BodiesConfig> for BodiesDownloaderBuilder {
         BodiesDownloaderBuilder::default()
             .with_stream_batch_size(config.downloader_stream_batch_size)
             .with_request_limit(config.downloader_request_limit)
-            .with_max_buffered_blocks(config.downloader_max_buffered_blocks)
+            .with_max_buffered_blocks_size_bytes(config.downloader_max_buffered_blocks_size_bytes)
             .with_concurrent_requests_range(
                 config.downloader_min_concurrent_requests..=
                     config.downloader_max_concurrent_requests,
@@ -276,6 +278,22 @@ impl Default for IndexHistoryConfig {
     }
 }
 
+/// Pruning configuration.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct PruneConfig {
+    /// Minimum pruning interval measured in blocks.
+    pub block_interval: u64,
+    /// Pruning configuration for every part of the data that can be pruned.
+    pub parts: PruneTargets,
+}
+
+impl Default for PruneConfig {
+    fn default() -> Self {
+        Self { block_interval: 10, parts: PruneTargets::default() }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Config;
@@ -295,7 +313,7 @@ mod tests {
     fn test_store_config() {
         with_tempdir("config-store-test", |config_path| {
             let config = Config::default();
-            confy::store_path(config_path, config).unwrap();
+            confy::store_path(config_path, config).expect("Failed to store config");
         })
     }
 

@@ -81,7 +81,6 @@ use crate::{
     CanonicalStateUpdate, ChangedAccount, PoolConfig, TransactionOrdering, TransactionValidator,
 };
 use best::BestTransactions;
-pub use events::TransactionEvent;
 use parking_lot::{Mutex, RwLock};
 use reth_primitives::{Address, TxHash, H256};
 use std::{
@@ -91,18 +90,22 @@ use std::{
     time::Instant,
 };
 use tokio::sync::mpsc;
-use tracing::debug;
+use tracing::{debug, trace};
+
+mod events;
+pub use events::{FullTransactionEvent, TransactionEvent};
+
+mod listener;
+use crate::pool::txpool::UpdateOutcome;
+pub use listener::{AllTransactionsEvents, TransactionEvents};
 
 mod best;
-mod events;
-mod listener;
 mod parked;
 pub(crate) mod pending;
 pub(crate) mod size;
 pub(crate) mod state;
 pub mod txpool;
 mod update;
-pub use listener::TransactionEvents;
 
 /// Transaction pool internals.
 pub struct PoolInner<V: TransactionValidator, T: TransactionOrdering> {
@@ -115,7 +118,7 @@ pub struct PoolInner<V: TransactionValidator, T: TransactionOrdering> {
     /// Pool settings.
     config: PoolConfig,
     /// Manages listeners for transaction state change events.
-    event_listener: RwLock<PoolEventBroadcast>,
+    event_listener: RwLock<PoolEventBroadcast<T::Transaction>>,
     /// Listeners for new ready transactions.
     pending_transaction_listener: Mutex<Vec<mpsc::Sender<TxHash>>>,
     /// Listeners for new transactions added to the pool.
@@ -161,6 +164,11 @@ where
         self.identifiers.write().sender_id_or_create(addr)
     }
 
+    /// Returns all senders in the pool
+    pub(crate) fn unique_senders(&self) -> HashSet<Address> {
+        self.pool.read().unique_senders()
+    }
+
     /// Converts the changed accounts to a map of sender ids to sender info (internal identifier
     /// used for accounts)
     fn changed_senders(
@@ -197,27 +205,52 @@ where
     }
 
     /// Adds a new transaction listener to the pool that gets notified about every new transaction
-    pub fn add_transaction_listener(&self) -> mpsc::Receiver<NewTransactionEvent<T::Transaction>> {
+    pub fn add_new_transaction_listener(
+        &self,
+    ) -> mpsc::Receiver<NewTransactionEvent<T::Transaction>> {
         const TX_LISTENER_BUFFER_SIZE: usize = 1024;
         let (tx, rx) = mpsc::channel(TX_LISTENER_BUFFER_SIZE);
         self.transaction_listener.lock().push(tx);
         rx
     }
 
+    /// If the pool contains the transaction, this adds a new listener that gets notified about
+    /// transaction events.
+    pub(crate) fn add_transaction_event_listener(
+        &self,
+        tx_hash: TxHash,
+    ) -> Option<TransactionEvents> {
+        let pool = self.pool.read();
+        if pool.contains(&tx_hash) {
+            Some(self.event_listener.write().subscribe(tx_hash))
+        } else {
+            None
+        }
+    }
+
+    /// Adds a listener for all transaction events.
+    pub(crate) fn add_all_transactions_event_listener(
+        &self,
+    ) -> AllTransactionsEvents<T::Transaction> {
+        self.event_listener.write().subscribe_all()
+    }
+
     /// Returns hashes of _all_ transactions in the pool.
     pub(crate) fn pooled_transactions_hashes(&self) -> Vec<TxHash> {
         let pool = self.pool.read();
-        pool.all().hashes_iter().collect()
+        pool.all().transactions_iter().filter(|tx| tx.propagate).map(|tx| *tx.hash()).collect()
     }
 
     /// Returns _all_ transactions in the pool.
     pub(crate) fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let pool = self.pool.read();
-        pool.all().transactions_iter().collect()
+        pool.all().transactions_iter().filter(|tx| tx.propagate).collect()
     }
 
     /// Updates the entire pool after a new block was executed.
     pub(crate) fn on_canonical_state_change(&self, update: CanonicalStateUpdate) {
+        trace!(target: "txpool", %update, "updating pool on canonical state change");
+
         let CanonicalStateUpdate {
             hash,
             number,
@@ -239,6 +272,18 @@ where
         self.notify_on_new_state(outcome);
     }
 
+    /// Performs account updates on the pool.
+    ///
+    /// This will either promote or discard transactions based on the new account state.
+    pub(crate) fn update_accounts(&self, accounts: Vec<ChangedAccount>) {
+        let changed_senders = self.changed_senders(accounts.into_iter());
+        let UpdateOutcome { promoted, discarded } =
+            self.pool.write().update_accounts(changed_senders);
+        let mut listener = self.event_listener.write();
+        promoted.iter().for_each(|tx| listener.pending(tx, None));
+        discarded.iter().for_each(|tx| listener.discarded(tx));
+    }
+
     /// Add a single validated transaction into the pool.
     ///
     /// Note: this is only used internally by [`Self::add_transactions()`], all new transaction(s)
@@ -249,7 +294,12 @@ where
         tx: TransactionValidationOutcome<T::Transaction>,
     ) -> PoolResult<TxHash> {
         match tx {
-            TransactionValidationOutcome::Valid { balance, state_nonce, transaction } => {
+            TransactionValidationOutcome::Valid {
+                balance,
+                state_nonce,
+                transaction,
+                propagate,
+            } => {
                 let sender_id = self.get_sender_id(transaction.sender());
                 let transaction_id = TransactionId::new(sender_id, transaction.nonce());
                 let encoded_length = transaction.encoded_length();
@@ -257,7 +307,7 @@ where
                 let tx = ValidPoolTransaction {
                     transaction,
                     transaction_id,
-                    propagate: false,
+                    propagate,
                     timestamp: Instant::now(),
                     origin,
                     encoded_length,
@@ -392,14 +442,17 @@ where
 
         match tx {
             AddedTransaction::Pending(tx) => {
-                let AddedPendingTransaction { transaction, promoted, discarded, .. } = tx;
+                let AddedPendingTransaction { transaction, promoted, discarded, replaced } = tx;
 
-                listener.pending(transaction.hash(), None);
+                listener.pending(transaction.hash(), replaced.clone());
                 promoted.iter().for_each(|tx| listener.pending(tx, None));
                 discarded.iter().for_each(|tx| listener.discarded(tx));
             }
-            AddedTransaction::Parked { transaction, .. } => {
+            AddedTransaction::Parked { transaction, replaced, .. } => {
                 listener.queued(transaction.hash());
+                if let Some(replaced) = replaced {
+                    listener.replaced(replaced.clone(), *transaction.hash());
+                }
             }
         }
     }
@@ -407,6 +460,16 @@ where
     /// Returns an iterator that yields transactions that are ready to be included in the block.
     pub(crate) fn best_transactions(&self) -> BestTransactions<T> {
         self.pool.read().best_transactions()
+    }
+
+    /// Returns an iterator that yields transactions that are ready to be included in the block with
+    /// the given base fee.
+    pub(crate) fn best_transactions_with_base_fee(
+        &self,
+        base_fee: u128,
+    ) -> Box<dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T::Transaction>>>>
+    {
+        self.pool.read().best_transactions_with_base_fee(base_fee)
     }
 
     /// Returns all transactions from the pending sub-pool
@@ -509,6 +572,8 @@ impl<V: TransactionValidator, T: TransactionOrdering> fmt::Debug for PoolInner<V
 pub struct AddedPendingTransaction<T: PoolTransaction> {
     /// Inserted transaction.
     transaction: Arc<ValidPoolTransaction<T>>,
+    /// Replaced transaction.
+    replaced: Option<Arc<ValidPoolTransaction<T>>>,
     /// transactions promoted to the ready queue
     promoted: Vec<TxHash>,
     /// transaction that failed and became discarded
@@ -525,6 +590,8 @@ pub enum AddedTransaction<T: PoolTransaction> {
     Parked {
         /// Inserted transaction.
         transaction: Arc<ValidPoolTransaction<T>>,
+        /// Replaced transaction.
+        replaced: Option<Arc<ValidPoolTransaction<T>>>,
         /// The subpool it was moved to.
         subpool: SubPool,
     },
@@ -554,7 +621,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
             AddedTransaction::Pending(tx) => {
                 NewTransactionEvent { subpool: SubPool::Pending, transaction: tx.transaction }
             }
-            AddedTransaction::Parked { transaction, subpool } => {
+            AddedTransaction::Parked { transaction, subpool, .. } => {
                 NewTransactionEvent { transaction, subpool }
             }
         }

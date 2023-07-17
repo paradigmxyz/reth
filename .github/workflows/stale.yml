@@ -1,0 +1,26 @@
+name: stale issues
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "30 1 * * *"
+
+jobs:
+  close-issues:
+    runs-on: ubuntu-20.04
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/stale@v8
+        with:
+          days-before-stale: 14
+          days-before-close: 7
+          stale-issue-label: "S-stale"
+          stale-pr-label: "S-stale"
+          exempt-issue-labels: "M-prevent-stale"
+          exempt-pr-labels: "M-prevent-stale"
+          stale-issue-message: "This issue is stale because it has been open for 14 days with no activity."
+          close-issue-message: "This issue was closed because it has been inactive for 7 days since being marked as stale."
+          exempt-all-milestones: true
+          exempt-all-assignees: true
+          repo-token: ${{ secrets.GITHUB_TOKEN }}

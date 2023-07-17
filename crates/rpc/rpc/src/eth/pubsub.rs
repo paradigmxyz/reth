@@ -3,20 +3,22 @@ use crate::eth::logs_utils;
 use futures::StreamExt;
 use jsonrpsee::{server::SubscriptionMessage, PendingSubscriptionSink, SubscriptionSink};
 use reth_network_api::NetworkInfo;
-use reth_primitives::TxHash;
+use reth_primitives::{IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider};
 use reth_rpc_api::EthPubSubApiServer;
 use reth_rpc_types::FilteredParams;
+use std::sync::Arc;
 
+use crate::result::invalid_params_rpc_err;
 use reth_rpc_types::{
     pubsub::{
         Params, PubSubSyncStatus, SubscriptionKind, SubscriptionResult as EthSubscriptionResult,
         SyncStatusMetadata,
     },
-    Header, Log,
+    Header, Log, Transaction,
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
-use reth_transaction_pool::TransactionPool;
+use reth_transaction_pool::{NewTransactionEvent, TransactionPool};
 use serde::Serialize;
 use tokio_stream::{
     wrappers::{BroadcastStream, ReceiverStream},
@@ -29,7 +31,7 @@ use tokio_stream::{
 #[derive(Clone)]
 pub struct EthPubSub<Provider, Pool, Events, Network> {
     /// All nested fields bundled together.
-    inner: EthPubSubInner<Provider, Pool, Events, Network>,
+    inner: Arc<EthPubSubInner<Provider, Pool, Events, Network>>,
     /// The type that's used to spawn subscription tasks.
     subscription_task_spawner: Box<dyn TaskSpawner>,
 }
@@ -59,7 +61,7 @@ impl<Provider, Pool, Events, Network> EthPubSub<Provider, Pool, Events, Network>
         subscription_task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         let inner = EthPubSubInner { provider, pool, chain_events, network };
-        Self { inner, subscription_task_spawner }
+        Self { inner: Arc::new(inner), subscription_task_spawner }
     }
 }
 
@@ -91,7 +93,7 @@ where
 
 /// The actual handler for and accepted [`EthPubSub::subscribe`] call.
 async fn handle_accepted<Provider, Pool, Events, Network>(
-    pubsub: EthPubSubInner<Provider, Pool, Events, Network>,
+    pubsub: Arc<EthPubSubInner<Provider, Pool, Events, Network>>,
     accepted_sink: SubscriptionSink,
     kind: SubscriptionKind,
     params: Option<Params>,
@@ -105,7 +107,7 @@ where
     match kind {
         SubscriptionKind::NewHeads => {
             let stream = pubsub
-                .into_new_headers_stream()
+                .new_headers_stream()
                 .map(|block| EthSubscriptionResult::Header(Box::new(block.into())));
             pipe_from_stream(accepted_sink, stream).await
         }
@@ -113,15 +115,43 @@ where
             // if no params are provided, used default filter params
             let filter = match params {
                 Some(Params::Logs(filter)) => FilteredParams::new(Some(*filter)),
+                Some(Params::Bool(_)) => {
+                    return Err(invalid_params_rpc_err("Invalid params for logs").into())
+                }
                 _ => FilteredParams::default(),
             };
             let stream =
-                pubsub.into_log_stream(filter).map(|log| EthSubscriptionResult::Log(Box::new(log)));
+                pubsub.log_stream(filter).map(|log| EthSubscriptionResult::Log(Box::new(log)));
             pipe_from_stream(accepted_sink, stream).await
         }
         SubscriptionKind::NewPendingTransactions => {
+            if let Some(params) = params {
+                match params {
+                    Params::Bool(true) => {
+                        // full transaction objects requested
+                        let stream = pubsub.full_pending_transaction_stream().map(|tx| {
+                            EthSubscriptionResult::FullTransaction(Box::new(
+                                Transaction::from_recovered(
+                                    tx.transaction.to_recovered_transaction(),
+                                ),
+                            ))
+                        });
+                        return pipe_from_stream(accepted_sink, stream).await
+                    }
+                    Params::Bool(false) | Params::None => {
+                        // only hashes requested
+                    }
+                    Params::Logs(_) => {
+                        return Err(invalid_params_rpc_err(
+                            "Invalid params for newPendingTransactions",
+                        )
+                        .into())
+                    }
+                }
+            }
+
             let stream = pubsub
-                .into_pending_transaction_stream()
+                .pending_transaction_hashes_stream()
                 .map(EthSubscriptionResult::TransactionHash);
             pipe_from_stream(accepted_sink, stream).await
         }
@@ -241,8 +271,15 @@ where
     Pool: TransactionPool + 'static,
 {
     /// Returns a stream that yields all transactions emitted by the txpool.
-    fn into_pending_transaction_stream(self) -> impl Stream<Item = TxHash> {
+    fn pending_transaction_hashes_stream(&self) -> impl Stream<Item = TxHash> {
         ReceiverStream::new(self.pool.pending_transactions_listener())
+    }
+
+    /// Returns a stream that yields all transactions emitted by the txpool.
+    fn full_pending_transaction_stream(
+        &self,
+    ) -> impl Stream<Item = NewTransactionEvent<<Pool as TransactionPool>::Transaction>> {
+        self.pool.new_pending_pool_transactions_listener()
     }
 }
 
@@ -254,7 +291,7 @@ where
     Pool: 'static,
 {
     /// Returns a stream that yields all new RPC blocks.
-    fn into_new_headers_stream(self) -> impl Stream<Item = Header> {
+    fn new_headers_stream(&self) -> impl Stream<Item = Header> {
         BroadcastStream::new(self.chain_events.subscribe_to_canonical_state())
             .map(|new_block| {
                 let new_chain = new_block.expect("new block subscription never ends; qed");
@@ -274,7 +311,7 @@ where
     }
 
     /// Returns a stream that yields all logs that match the given filter.
-    fn into_log_stream(self, filter: FilteredParams) -> impl Stream<Item = Log> {
+    fn log_stream(&self, filter: FilteredParams) -> impl Stream<Item = Log> {
         BroadcastStream::new(self.chain_events.subscribe_to_canonical_state())
             .map(move |canon_state| {
                 canon_state.expect("new block subscription never ends; qed").block_receipts()
@@ -284,7 +321,7 @@ where
                 let all_logs = logs_utils::matching_block_logs(
                     &filter,
                     block_receipts.block,
-                    block_receipts.tx_receipts.into_iter(),
+                    block_receipts.tx_receipts,
                     removed,
                 );
                 futures::stream::iter(all_logs)
