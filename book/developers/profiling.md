@@ -9,7 +9,8 @@
    - [Understanding allocation with jeprof](#understanding-allocation-with-jeprof)
 
 
-NEED TO WRITE INTRO
+[TODO: intro that lays out the below prior knowledge requirements]()
+
 Audience:
  * Assuming knowledge of:
    * Linux command line maturity
