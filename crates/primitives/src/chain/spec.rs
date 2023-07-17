@@ -184,7 +184,7 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "c1fc15cd51159b1f1e5cbc4b82e85c1447ddfa33c52cf1d98d14fba0d6354be1"
         ))),
         fork_timestamps: ForkTimestamps::default(), // TODO(clabby): update this
-        paris_block_and_final_difficulty: None,     // TODO(clabby): update this
+        paris_block_and_final_difficulty: Some((0, U256::from(0))),
         hardforks: BTreeMap::from([
             (Hardfork::Byzantium, ForkCondition::Block(0)),
             (Hardfork::Constantinople, ForkCondition::Block(0)),
@@ -193,7 +193,10 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::MuirGlacier, ForkCondition::Block(0)),
             (Hardfork::Berlin, ForkCondition::Block(0)),
             (Hardfork::London, ForkCondition::Block(0)),
-            (Hardfork::Paris, ForkCondition::Block(0)),
+            (
+                Hardfork::Paris,
+                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
+            ),
             (Hardfork::Regolith, ForkCondition::Timestamp(1679079600)),
         ]),
         optimism: Some(OptimismConfig { eip_1559_elasticity: 10, eip_1559_denominator: 50 }),
