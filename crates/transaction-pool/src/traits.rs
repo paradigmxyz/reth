@@ -402,6 +402,8 @@ pub struct CanonicalStateUpdate {
     pub changed_accounts: Vec<ChangedAccount>,
     /// All mined transactions in the block range.
     pub mined_transactions: Vec<H256>,
+    /// Timestamp of the latest chain update
+    pub timestamp: u64,
 }
 
 impl fmt::Display for CanonicalStateUpdate {
