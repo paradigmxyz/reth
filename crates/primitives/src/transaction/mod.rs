@@ -291,7 +291,7 @@ impl TxEip4844 {
         mem::size_of::<u128>() + // value
         self.access_list.size() + // access_list
         self.input.len() +  // input
-        self.blob_hashes.len() * mem::size_of::<H256>() + // blob hashes size
+        self.blob_hashes.capacity() * mem::size_of::<H256>() + // blob hashes size
         mem::size_of::<u128>() // blob fee cap
     }
 }

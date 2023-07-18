@@ -88,7 +88,7 @@ pub use transaction::{
     AccessList, AccessListItem, AccessListWithGasUsed, FromRecoveredTransaction,
     IntoRecoveredTransaction, InvalidTransactionError, Signature, Transaction, TransactionKind,
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
-    TxEip1559, TxEip2930, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
+    TxEip1559, TxEip2930, TxEip4844, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID,
 };
 pub use withdrawal::Withdrawal;
