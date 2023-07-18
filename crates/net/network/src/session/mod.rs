@@ -1,7 +1,7 @@
 //! Support for handling peer sessions.
 use crate::{
     message::PeerMessage,
-    metrics::SesssionManagerMetrics,
+    metrics::SessionManagerMetrics,
     session::{active::ActiveSession, config::SessionCounter},
 };
 pub use crate::{message::PeerRequestSender, session::handle::PeerInfo};
@@ -100,7 +100,7 @@ pub struct SessionManager {
     /// Used to measure inbound & outbound bandwidth across all managed streams
     bandwidth_meter: BandwidthMeter,
     /// Metrics for the session manager.
-    metrics: SesssionManagerMetrics,
+    metrics: SessionManagerMetrics,
 }
 
 // === impl SessionManager ===

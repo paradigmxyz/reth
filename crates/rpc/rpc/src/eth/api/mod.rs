@@ -12,22 +12,27 @@ use crate::eth::{
 use async_trait::async_trait;
 use reth_interfaces::Result;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{Address, BlockId, BlockNumberOrTag, ChainInfo, H256, U256, U64};
+use reth_primitives::{
+    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, H256, U256, U64,
+};
 use reth_provider::{BlockReaderIdExt, EvmEnvProvider, StateProviderBox, StateProviderFactory};
 use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
-use std::{future::Future, sync::Arc};
-use tokio::sync::oneshot;
+use revm_primitives::{BlockEnv, CfgEnv};
+use std::{future::Future, sync::Arc, time::Instant};
+use tokio::sync::{oneshot, Mutex};
 
 mod block;
 mod call;
 mod fees;
+mod pending_block;
 mod server;
 mod sign;
 mod state;
 mod transactions;
 
+use crate::eth::api::pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
 pub use transactions::{EthTransactions, TransactionSource};
 
 /// `Eth` API trait.
@@ -78,6 +83,7 @@ where
         network: Network,
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Provider>,
+        gas_cap: u64,
     ) -> Self {
         Self::with_spawner(
             provider,
@@ -85,6 +91,7 @@ where
             network,
             eth_cache,
             gas_oracle,
+            gas_cap,
             Box::<TokioTaskExecutor>::default(),
         )
     }
@@ -96,6 +103,7 @@ where
         network: Network,
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Provider>,
+        gas_cap: u64,
         task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         // get the block number of the latest block
@@ -113,8 +121,10 @@ where
             signers: Default::default(),
             eth_cache,
             gas_oracle,
+            gas_cap,
             starting_block: U256::from(latest_block),
             task_spawner,
+            pending_block: Default::default(),
         };
         Self { inner: Arc::new(inner) }
     }
@@ -147,6 +157,11 @@ where
     /// Returns the gas oracle frontend
     pub(crate) fn gas_oracle(&self) -> &GasPriceOracle<Provider> {
         &self.inner.gas_oracle
+    }
+
+    /// Returns the configured gas limit cap for `eth_call` and tracing related calls
+    pub fn gas_cap(&self) -> u64 {
+        self.inner.gas_cap
     }
 
     /// Returns the inner `Provider`
@@ -198,6 +213,74 @@ where
     /// Returns the _latest_ state
     pub fn latest_state(&self) -> Result<StateProviderBox<'_>> {
         self.provider().latest()
+    }
+}
+
+impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
+where
+    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Pool: TransactionPool + Clone + 'static,
+    Network: Send + Sync + 'static,
+{
+    /// Configures the [CfgEnv] and [BlockEnv] for the pending block
+    ///
+    /// If no pending block is available, this will derive it from the `latest` block
+    pub(crate) fn pending_block_env_and_cfg(&self) -> EthResult<PendingBlockEnv> {
+        let origin = if let Some(pending) = self.provider().pending_block()? {
+            PendingBlockEnvOrigin::ActualPending(pending)
+        } else {
+            // no pending block from the CL yet, so we use the latest block and modify the env
+            // values that we can
+            let mut latest =
+                self.provider().latest_header()?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+
+            // child block
+            latest.number += 1;
+            // assumed child block is in the next slot
+            latest.timestamp += 12;
+            // base fee of the child block
+            latest.base_fee_per_gas = latest.next_block_base_fee();
+
+            PendingBlockEnvOrigin::DerivedFromLatest(latest)
+        };
+
+        let mut cfg = CfgEnv::default();
+        let mut block_env = BlockEnv::default();
+        self.provider().fill_block_env_with_header(&mut block_env, origin.header())?;
+        self.provider().fill_cfg_env_with_header(&mut cfg, origin.header())?;
+
+        Ok(PendingBlockEnv { cfg, block_env, origin })
+    }
+
+    /// Returns the locally built pending block
+    pub(crate) async fn local_pending_block(&self) -> EthResult<Option<SealedBlock>> {
+        let pending = self.pending_block_env_and_cfg()?;
+        if pending.origin.is_actual_pending() {
+            return Ok(pending.origin.into_actual_pending())
+        }
+
+        // no pending block from the CL yet, so we need to build it ourselves via txpool
+        self.on_blocking_task(|this| async move {
+            let PendingBlockEnv { cfg: _, block_env, origin } = pending;
+            let lock = this.inner.pending_block.lock().await;
+            let now = Instant::now();
+            // this is guaranteed to be the `latest` header
+            let parent_header = origin.into_header();
+
+            // check if the block is still good
+            if let Some(pending) = lock.as_ref() {
+                if block_env.number.to::<u64>() == pending.block.number &&
+                    pending.block.parent_hash == parent_header.parent_hash &&
+                    now <= pending.expires_at
+                {
+                    return Ok(Some(pending.block.clone()))
+                }
+            }
+
+            // TODO(mattsse): actually build the pending block
+            Ok(None)
+        })
+        .await
     }
 }
 
@@ -280,8 +363,12 @@ struct EthApiInner<Provider, Pool, Network> {
     eth_cache: EthStateCache,
     /// The async gas oracle frontend for gas price suggestions
     gas_oracle: GasPriceOracle<Provider>,
+    /// Maximum gas limit for `eth_call` and call tracing RPC methods.
+    gas_cap: u64,
     /// The block number at which the node started
     starting_block: U256,
     /// The type that can spawn tasks which would otherwise block.
     task_spawner: Box<dyn TaskSpawner>,
+    /// Cached pending block if any
+    pending_block: Mutex<Option<PendingBlock>>,
 }

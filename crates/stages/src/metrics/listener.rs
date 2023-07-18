@@ -59,8 +59,14 @@ impl MetricsListener {
         match event {
             MetricEvent::SyncHeight { height } => {
                 for stage_id in StageId::ALL {
-                    let stage_metrics = self.sync_metrics.get_stage_metrics(stage_id);
-                    stage_metrics.checkpoint.set(height as f64);
+                    self.handle_event(MetricEvent::StageCheckpoint {
+                        stage_id,
+                        checkpoint: StageCheckpoint {
+                            block_number: height,
+                            stage_checkpoint: None,
+                        },
+                        max_block_number: Some(height),
+                    });
                 }
             }
             MetricEvent::StageCheckpoint { stage_id, checkpoint, max_block_number } => {

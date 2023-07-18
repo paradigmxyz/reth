@@ -319,7 +319,14 @@ where
                     let state = self.inner.eth_api.state_at(at)?;
                     let mut db = SubState::new(State::new(state));
                     let has_state_overrides = overrides.has_state();
-                    let env = prepare_call_env(cfg, block_env, call, &mut db, overrides)?;
+                    let env = prepare_call_env(
+                        cfg,
+                        block_env,
+                        call,
+                        self.inner.eth_api.call_gas_limit(),
+                        &mut db,
+                        overrides,
+                    )?;
 
                     // If the caller provided state overrides we need to clone the DB so the js
                     // service has access these modifications

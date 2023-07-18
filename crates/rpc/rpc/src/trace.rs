@@ -191,6 +191,7 @@ where
         let (cfg, block_env, at) = self.inner.eth_api.evm_env_at(at).await?;
 
         self.on_blocking_task(|this| async move {
+            let gas_limit = this.inner.eth_api.call_gas_limit();
             // execute all transactions on top of each other and record the traces
             this.inner.eth_api.with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(calls.len());
@@ -203,6 +204,7 @@ where
                         cfg.clone(),
                         block_env.clone(),
                         call,
+                        gas_limit,
                         &mut db,
                         Default::default(),
                     )?;
