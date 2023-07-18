@@ -243,8 +243,7 @@ impl StorageInner {
         self.hash_to_number.insert(self.best_hash, self.best_block);
     }
 
-    /// Builds and executes a new block with the given transactions and chainspec, on the provided
-    /// [Executor].
+    /// Builds and executes a new block with the given transactions, on the provided [Executor].
     ///
     /// This returns the header of the executed block, as well as the poststate from execution.
     pub(crate) fn build_and_execute<DB: StateProvider>(
@@ -298,10 +297,6 @@ impl StorageInner {
         let post_state = executor.apply_post_block_changes(&block, U256::ZERO, post_state).unwrap();
 
         let Block { mut header, body, .. } = block;
-
-        // TODO: do in calling code if successful
-        // clear all transactions from pool
-        // pool.remove_transactions(body.iter().map(|tx| tx.hash()));
 
         let receipts = post_state.receipts(header.number);
         header.receipts_root = if receipts.is_empty() {
