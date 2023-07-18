@@ -2,7 +2,7 @@
 use crate::result::internal_rpc_err;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_primitives::{Address, BlockId, TxHash, H256, U256};
+use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, H256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_types::{
     BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
@@ -53,7 +53,10 @@ where
     }
 
     /// Handler for `ots_getBlockDetails`
-    async fn get_block_details(&self, block_number: U256) -> RpcResult<Option<BlockDetails>> {
+    async fn get_block_details(
+        &self,
+        block_number: BlockNumberOrTag,
+    ) -> RpcResult<Option<BlockDetails>> {
         Err(internal_rpc_err("unimplemented"))
     }
 
@@ -65,7 +68,7 @@ where
     /// Handler for `getBlockTransactions`
     async fn get_block_transactions(
         &self,
-        block_number: U256,
+        block_number: BlockNumberOrTag,
         page_number: usize,
         page_size: usize,
     ) -> RpcResult<OtsBlockTransactions> {
@@ -76,7 +79,7 @@ where
     async fn search_transactions_before(
         &self,
         address: Address,
-        block_number: U256,
+        block_number: BlockNumberOrTag,
         page_size: usize,
     ) -> RpcResult<TransactionsWithReceipts> {
         Err(internal_rpc_err("unimplemented"))
@@ -86,7 +89,7 @@ where
     async fn search_transactions_after(
         &self,
         address: Address,
-        block_number: U256,
+        block_number: BlockNumberOrTag,
         page_size: usize,
     ) -> RpcResult<TransactionsWithReceipts> {
         Err(internal_rpc_err("unimplemented"))
