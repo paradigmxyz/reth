@@ -164,8 +164,7 @@ where
     }
 
     /// Returns the configured gas limit cap for `eth_call` and tracing related calls
-    #[allow(unused)]
-    pub(crate) fn gas_cap(&self) -> u64 {
+    pub fn gas_cap(&self) -> u64 {
         self.inner.gas_cap
     }
 

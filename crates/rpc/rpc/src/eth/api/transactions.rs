@@ -43,6 +43,9 @@ pub(crate) type StateCacheDB<'r> = CacheDB<State<StateProviderBox<'r>>>;
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace
 #[async_trait::async_trait]
 pub trait EthTransactions: Send + Sync {
+    /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
+    fn call_gas_limit(&self) -> u64;
+
     /// Returns the state at the given [BlockId]
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox<'_>>;
 
@@ -226,6 +229,10 @@ where
     Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
+    fn call_gas_limit(&self) -> u64 {
+        self.inner.gas_cap
+    }
+
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox<'_>> {
         self.state_at_block_id(at)
     }
@@ -480,7 +487,8 @@ where
         let state = self.state_at(at)?;
         let mut db = SubState::new(State::new(state));
 
-        let env = prepare_call_env(cfg, block_env, request, &mut db, overrides)?;
+        let env =
+            prepare_call_env(cfg, block_env, request, self.call_gas_limit(), &mut db, overrides)?;
         f(db, env)
     }
 
@@ -520,7 +528,8 @@ where
         let state = self.state_at(at)?;
         let mut db = SubState::new(State::new(state));
 
-        let env = prepare_call_env(cfg, block_env, request, &mut db, overrides)?;
+        let env =
+            prepare_call_env(cfg, block_env, request, self.call_gas_limit(), &mut db, overrides)?;
         inspect_and_return_db(db, env, inspector)
     }
 
