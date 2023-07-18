@@ -35,7 +35,7 @@ pub(crate) async fn dump_execution_stage<DB: Database>(
 /// Imports all the tables that can be copied over a range.
 fn import_tables_with_range<DB: Database>(
     output_db: &DatabaseEnv,
-    db_tool: &mut DbTool<'_, DB>,
+    db_tool: &DbTool<'_, DB>,
     from: u64,
     to: u64,
 ) -> eyre::Result<()> {
