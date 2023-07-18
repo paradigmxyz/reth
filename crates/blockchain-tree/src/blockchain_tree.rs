@@ -201,7 +201,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         // check if block is disconnected
         if let Some(block) = self.buffered_blocks.block(block) {
-            return Ok(Some(BlockStatus::Disconnected { missing_parent: block.parent_num_hash() }))
+            return Ok(Some(BlockStatus::Disconnected { missing_ancestor: block.parent_num_hash() }))
         }
 
         Ok(None)
@@ -360,7 +360,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 )
             })?;
 
-        Ok(BlockStatus::Disconnected { missing_parent: lowest_ancestor.parent_num_hash() })
+        Ok(BlockStatus::Disconnected { missing_ancestor: lowest_ancestor.parent_num_hash() })
     }
 
     /// This tries to append the given block to the canonical chain.
@@ -1274,7 +1274,7 @@ mod tests {
         assert_eq!(
             tree.insert_block(block2.clone()).unwrap(),
             InsertPayloadOk::Inserted(BlockStatus::Disconnected {
-                missing_parent: block2.parent_num_hash()
+                missing_ancestor: block2.parent_num_hash()
             })
         );
 
@@ -1293,7 +1293,7 @@ mod tests {
 
         assert_eq!(
             tree.is_block_known(block2.num_hash()).unwrap(),
-            Some(BlockStatus::Disconnected { missing_parent: block2.parent_num_hash() })
+            Some(BlockStatus::Disconnected { missing_ancestor: block2.parent_num_hash() })
         );
 
         // check if random block is known
@@ -1575,7 +1575,7 @@ mod tests {
         assert_eq!(
             tree.insert_block(block2b.clone()).unwrap(),
             InsertPayloadOk::Inserted(BlockStatus::Disconnected {
-                missing_parent: block2b.parent_num_hash()
+                missing_ancestor: block2b.parent_num_hash()
             })
         );
 

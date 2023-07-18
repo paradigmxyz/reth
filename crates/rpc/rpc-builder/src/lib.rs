@@ -31,13 +31,13 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider};
+//! use reth_provider::{BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider, ChangeSetReader};
 //! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
 //! pub async fn launch<Provider, Pool, Network, Events>(provider: Provider, pool: Pool, network: Network, events: Events)
 //! where
-//!     Provider: BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+//!     Provider: BlockReaderIdExt + ChainSpecProvider + ChangeSetReader + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions +  Clone + 'static,
@@ -64,7 +64,7 @@
 //! ```
 //! use tokio::try_join;
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider};
+//! use reth_provider::{BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider, ChangeSetReader};
 //! use reth_rpc::JwtSecret;
 //! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig};
 //! use reth_tasks::TokioTaskExecutor;
@@ -73,7 +73,7 @@
 //! use reth_rpc_builder::auth::AuthServerConfig;
 //! pub async fn launch<Provider, Pool, Network, Events, EngineApi>(provider: Provider, pool: Pool, network: Network, events: Events, engine_api: EngineApi)
 //! where
-//!     Provider: BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+//!     Provider: BlockReaderIdExt + ChainSpecProvider + ChangeSetReader + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions +  Clone + 'static,
@@ -113,8 +113,8 @@ use jsonrpsee::{
 use reth_ipc::server::IpcServer;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider,
-    StateProviderFactory,
+    BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
+    EvmEnvProvider, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{
@@ -122,7 +122,7 @@ use reth_rpc::{
         gas_oracle::GasPriceOracle,
     },
     AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider,
-    NetApi, OtterscanApi, RPCApi, TraceApi, TracingCallGuard, TxPoolApi, Web3Api,
+    NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TracingCallGuard, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -176,6 +176,7 @@ where
         + StateProviderFactory
         + EvmEnvProvider
         + ChainSpecProvider
+        + ChangeSetReader
         + Clone
         + Unpin
         + 'static,
@@ -320,6 +321,7 @@ where
         + StateProviderFactory
         + EvmEnvProvider
         + ChainSpecProvider
+        + ChangeSetReader
         + Clone
         + Unpin
         + 'static,
@@ -543,6 +545,7 @@ impl RpcModuleSelection {
             + StateProviderFactory
             + EvmEnvProvider
             + ChainSpecProvider
+            + ChangeSetReader
             + Clone
             + Unpin
             + 'static,
@@ -604,7 +607,7 @@ impl FromStr for RpcModuleSelection {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut modules = s.split(',').peekable();
+        let mut modules = s.split(',').map(str::trim).peekable();
         let first = modules.peek().copied().ok_or(ParseError::VariantNotFound)?;
         match first {
             "all" | "All" => Ok(RpcModuleSelection::All),
@@ -646,6 +649,8 @@ pub enum RethRpcModule {
     Web3,
     /// `rpc_` module
     Rpc,
+    /// `reth_` module
+    Reth,
     /// `ots_` module
     Ots,
 }
@@ -760,6 +765,7 @@ where
         + StateProviderFactory
         + EvmEnvProvider
         + ChainSpecProvider
+        + ChangeSetReader
         + Clone
         + Unpin
         + 'static,
@@ -848,6 +854,15 @@ where
         self
     }
 
+    /// Register Reth namespace
+    pub fn register_reth(&mut self) -> &mut Self {
+        self.modules.insert(
+            RethRpcModule::Reth,
+            RethApi::new(self.provider.clone(), Box::new(self.executor.clone())).into_rpc().into(),
+        );
+        self
+    }
+
     /// Helper function to create a [RpcModule] if it's not `None`
     fn maybe_module(&mut self, config: Option<&RpcModuleSelection>) -> Option<RpcModule<()>> {
         let config = config?;
@@ -931,6 +946,11 @@ where
                         .into_rpc()
                         .into(),
                         RethRpcModule::Ots => OtterscanApi::new(eth_api.clone()).into_rpc().into(),
+                        RethRpcModule::Reth => {
+                            RethApi::new(self.provider.clone(), Box::new(self.executor.clone()))
+                                .into_rpc()
+                                .into()
+                        }
                     })
                     .clone()
             })
@@ -977,6 +997,7 @@ where
                 self.network.clone(),
                 cache.clone(),
                 gas_oracle,
+                self.config.eth.rpc_gas_cap,
                 executor.clone(),
             );
             let filter = EthFilter::new(
@@ -1764,6 +1785,7 @@ mod tests {
                 "web3" =>  RethRpcModule::Web3,
                 "rpc" => RethRpcModule::Rpc,
                 "ots" => RethRpcModule::Ots,
+                "reth" => RethRpcModule::Reth,
             );
     }
 

@@ -104,6 +104,7 @@ impl Command {
                     let mut tables =
                         Tables::ALL.iter().map(|table| table.name()).collect::<Vec<_>>();
                     tables.sort();
+                    let mut total_size = 0;
                     for table in tables {
                         let table_db =
                             tx.inner.open_db(Some(table)).wrap_err("Could not open db.")?;
@@ -123,6 +124,7 @@ impl Command {
                         let num_pages = leaf_pages + branch_pages + overflow_pages;
                         let table_size = page_size * num_pages;
 
+                        total_size += table_size;
                         let mut row = Row::new();
                         row.add_cell(Cell::new(table))
                             .add_cell(Cell::new(stats.entries()))
@@ -132,6 +134,24 @@ impl Command {
                             .add_cell(Cell::new(human_bytes(table_size as f64)));
                         stats_table.add_row(row);
                     }
+
+                    let max_widths = stats_table.column_max_content_widths();
+
+                    let mut seperator = Row::new();
+                    for width in max_widths {
+                        seperator.add_cell(Cell::new("-".repeat(width as usize)));
+                    }
+                    stats_table.add_row(seperator);
+
+                    let mut row = Row::new();
+                    row.add_cell(Cell::new("Total DB size"))
+                        .add_cell(Cell::new(""))
+                        .add_cell(Cell::new(""))
+                        .add_cell(Cell::new(""))
+                        .add_cell(Cell::new(""))
+                        .add_cell(Cell::new(human_bytes(total_size as f64)));
+                    stats_table.add_row(row);
+
                     Ok::<(), eyre::Report>(())
                 })??;
 

@@ -38,6 +38,7 @@ pub mod eth;
 mod layers;
 mod net;
 mod otterscan;
+mod reth;
 mod rpc;
 mod trace;
 mod txpool;
@@ -51,6 +52,7 @@ pub use eth::{EthApi, EthApiSpec, EthFilter, EthPubSub, EthSubscriptionIdProvide
 pub use layers::{AuthLayer, AuthValidator, Claims, JwtAuthValidator, JwtError, JwtSecret};
 pub use net::NetApi;
 pub use otterscan::OtterscanApi;
+pub use reth::RethApi;
 pub use rpc::RPCApi;
 pub use trace::TraceApi;
 pub use txpool::TxPoolApi;

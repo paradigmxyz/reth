@@ -40,5 +40,5 @@ pub mod test_vectors;
 pub mod utils;
 pub mod version;
 
-#[cfg(feature = "jemalloc")]
+#[cfg(all(feature = "jemalloc", unix))]
 use jemallocator as _;

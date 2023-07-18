@@ -1,3 +1,5 @@
+use std::mem;
+
 use crate::{Address, H256};
 use reth_codecs::{main_codec, Compact};
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
@@ -20,6 +22,14 @@ pub struct AccessListItem {
         )
     )]
     pub storage_keys: Vec<H256>,
+}
+
+impl AccessListItem {
+    /// Calculates a heuristic for the in-memory size of the [AccessListItem].
+    #[inline]
+    pub fn size(&self) -> usize {
+        mem::size_of::<Address>() + self.storage_keys.capacity() * mem::size_of::<H256>()
+    }
 }
 
 /// AccessList as defined in EIP-2930
@@ -47,6 +57,14 @@ impl AccessList {
                 )
             })
             .collect()
+    }
+
+    /// Calculates a heuristic for the in-memory size of the [AccessList].
+    #[inline]
+    pub fn size(&self) -> usize {
+        // take into account capacity
+        self.0.iter().map(AccessListItem::size).sum::<usize>() +
+            self.0.capacity() * mem::size_of::<AccessListItem>()
     }
 }
 

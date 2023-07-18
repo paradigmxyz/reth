@@ -398,8 +398,8 @@ mod tests {
     use reth_interfaces::test_utils::{generators, generators::Rng};
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{
-        basefee::calculate_next_block_base_fee, Block, BlockNumberOrTag, Header, TransactionSigned,
-        H256, U256,
+        basefee::calculate_next_block_base_fee, constants::ETHEREUM_BLOCK_GAS_LIMIT, Block,
+        BlockNumberOrTag, Header, TransactionSigned, H256, U256,
     };
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
@@ -427,6 +427,7 @@ mod tests {
             NoopNetwork::default(),
             cache.clone(),
             GasPriceOracle::new(provider, Default::default(), cache),
+            ETHEREUM_BLOCK_GAS_LIMIT,
         )
     }
 

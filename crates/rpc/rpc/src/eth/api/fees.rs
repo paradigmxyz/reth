@@ -67,9 +67,11 @@ where
             return Err(EthApiError::UnknownBlockNumber)
         };
 
-        // Check that we would not be querying outside of genesis
-        if end_block < block_count {
-            return Err(EthApiError::InvalidBlockRange)
+        // need to add 1 to the end block to get the correct (inclusive) range
+        let end_block_plus = end_block + 1;
+        // Ensure that we would not be querying outside of genesis
+        if end_block_plus < block_count {
+            block_count = end_block_plus;
         }
 
         // If reward percentiles were specified, we need to validate that they are monotonically
@@ -86,7 +88,8 @@ where
         //
         // Treat a request for 1 block as a request for `newest_block..=newest_block`,
         // otherwise `newest_block - 2
-        let start_block = end_block - block_count + 1;
+        // SAFETY: We ensured that block count is capped
+        let start_block = end_block_plus - block_count;
         let headers = self.provider().sealed_headers_range(start_block..=end_block)?;
         if headers.len() != block_count as usize {
             return Err(EthApiError::InvalidBlockRange)
