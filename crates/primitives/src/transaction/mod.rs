@@ -364,6 +364,23 @@ impl Transaction {
                 self.encode_fields(out);
                 signature.encode_with_eip155_chain_id(out, *chain_id);
             }
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(_) => {
+                let payload_length = self.fields_len() + signature.payload_len();
+                if with_header {
+                    Header {
+                        list: false,
+                        payload_length: 1 + length_of_length(payload_length) + payload_length,
+                    }
+                    .encode(out);
+                }
+                out.put_u8(self.tx_type() as u8);
+                out.put_u8(DEPOSIT_VERSION);
+                let header = Header { list: true, payload_length };
+                header.encode(out);
+                self.encode_fields(out);
+                signature.encode(out);
+            }
             _ => {
                 let payload_length = self.fields_len() + signature.payload_len();
                 if with_header {
@@ -467,6 +484,11 @@ impl Compact for Transaction {
             2 => {
                 let (tx, buf) = TxEip1559::from_compact(buf, buf.len());
                 (Transaction::Eip1559(tx), buf)
+            }
+            #[cfg(feature = "optimism")]
+            126 => {
+                let (tx, buf) = TxDeposit::from_compact(buf, buf.len());
+                (Transaction::Deposit(tx), buf)
             }
             _ => unreachable!("Junk data in database: unknown Transaction variant"),
         }
