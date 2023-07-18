@@ -8,6 +8,7 @@ pub(crate) enum TraceStyle {
     /// Parity style tracer
     Parity,
     /// Geth style tracer
+    #[allow(unused)]
     Geth,
 }
 
