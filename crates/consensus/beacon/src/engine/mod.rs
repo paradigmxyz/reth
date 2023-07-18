@@ -2661,6 +2661,9 @@ mod tests {
                 SealedBlock { header: chain_spec.sealed_genesis_header(), ..Default::default() };
             let block1 = random_block(&mut rng, 1, Some(chain_spec.genesis_hash()), None, Some(0));
 
+            // TODO: add transactions that transfer from the alloc accounts, generating the new
+            // block tx and state root
+
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
