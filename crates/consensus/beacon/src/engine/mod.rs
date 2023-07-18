@@ -2675,7 +2675,10 @@ mod tests {
             );
 
             let (consensus_engine, env) =
-                TestConsensusEngineBuilder::<NoopFullBlockClient>::new(chain_spec.clone()).with_real_pipeline().with_real_executor().build();
+                TestConsensusEngineBuilder::<NoopFullBlockClient>::new(chain_spec.clone())
+                    .with_real_pipeline()
+                    .with_real_executor()
+                    .build();
 
             let genesis =
                 SealedBlock { header: chain_spec.sealed_genesis_header(), ..Default::default() };
