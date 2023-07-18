@@ -26,6 +26,7 @@ mod eth;
 mod eth_filter;
 mod eth_pubsub;
 mod net;
+mod reth;
 mod rpc;
 mod trace;
 mod txpool;
@@ -44,6 +45,7 @@ pub mod servers {
         eth_filter::EthFilterApiServer,
         eth_pubsub::EthPubSubApiServer,
         net::NetApiServer,
+        reth::RethApiServer,
         rpc::RpcApiServer,
         trace::TraceApiServer,
         txpool::TxPoolApiServer,
