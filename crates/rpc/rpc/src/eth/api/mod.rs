@@ -370,13 +370,20 @@ where
     }
 }
 
+/// The default gas limit for eth_call and adjacent calls.
+///
+/// This is different from the default to regular 30M block gas limit
+/// [ETHEREUM_BLOCK_GAS_LIMIT](reth_primitives::constants::ETHEREUM_BLOCK_GAS_LIMIT) to allow for
+/// more complex calls.
+pub const RPC_DEFAULT_GAS_CAP: u64 = 50_000_000;
+
 /// The wrapper type for gas limit
 #[derive(Debug, Clone, Copy)]
 pub struct GasCap(u64);
 
 impl Default for GasCap {
     fn default() -> Self {
-        Self(50_000_000)
+        Self(RPC_DEFAULT_GAS_CAP)
     }
 }
 

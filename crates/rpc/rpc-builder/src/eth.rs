@@ -1,8 +1,7 @@
-use crate::constants::RPC_DEFAULT_GAS_CAP;
 use reth_rpc::{
     eth::{
         cache::{EthStateCache, EthStateCacheConfig},
-        gas_oracle::GasPriceOracleConfig,
+        gas_oracle::GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP,
     },
     EthApi, EthFilter, EthPubSub,
 };

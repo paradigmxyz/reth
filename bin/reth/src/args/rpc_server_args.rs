@@ -17,13 +17,13 @@ use reth_rpc::{
             DEFAULT_BLOCK_CACHE_MAX_LEN, DEFAULT_ENV_CACHE_MAX_LEN, DEFAULT_RECEIPT_CACHE_MAX_LEN,
         },
         gas_oracle::GasPriceOracleConfig,
+        RPC_DEFAULT_GAS_CAP
     },
     JwtError, JwtSecret,
 };
 use reth_rpc_builder::{
     auth::{AuthServerConfig, AuthServerHandle},
     constants,
-    constants::RPC_DEFAULT_GAS_CAP,
     error::RpcError,
     EthConfig, IpcServerBuilder, RethRpcModule, RpcModuleBuilder, RpcModuleConfig,
     RpcModuleSelection, RpcServerConfig, RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
