@@ -1,11 +1,11 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    ChainSpecProvider, EvmEnvProvider, HeaderProvider, PostState, ReceiptProviderIdExt,
-    StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory,
-    StateRootProvider, TransactionsProvider, WithdrawalsProvider,
+    ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider, PostState,
+    ReceiptProviderIdExt, StageCheckpointReader, StateProvider, StateProviderBox,
+    StateProviderFactory, StateRootProvider, TransactionsProvider, WithdrawalsProvider,
 };
-use reth_db::models::StoredBlockBodyIndices;
+use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_interfaces::Result;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
@@ -232,6 +232,12 @@ impl HeaderProvider for NoopProvider {
 impl AccountReader for NoopProvider {
     fn basic_account(&self, _address: Address) -> Result<Option<Account>> {
         Ok(None)
+    }
+}
+
+impl ChangeSetReader for NoopProvider {
+    fn account_block_changeset(&self, _block_number: BlockNumber) -> Result<Vec<AccountBeforeTx>> {
+        Ok(Vec::default())
     }
 }
 
