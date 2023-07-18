@@ -105,10 +105,10 @@ reth-network = { path = "./crates/net/network" }
 reth-network-api = { path = "./crates/net/network-api" }
 
 ## eth
-ethers-core = { version = "2.0.7", default-features = false }
-ethers-providers = { version = "2.0.7", default-features = false }
-ethers-signers = { version = "2.0.7", default-features = false }
-ethers-middleware = { version = "2.0.7", default-features = false }
+ethers-core = { version = "2.0.8", default-features = false }
+ethers-providers = { version = "2.0.8", default-features = false }
+ethers-signers = { version = "2.0.8", default-features = false }
+ethers-middleware = { version = "2.0.8", default-features = false }
 
 ## misc
 bytes = "1.4"
@@ -117,6 +117,7 @@ thiserror = "1.0.37"
 serde_json = "1.0.94"
 serde = { version = "1.0", default-features = false }
 rand = "0.8.5"
+strum = "0.25"
 
 ### proc-macros
 proc-macro2 = "1.0"

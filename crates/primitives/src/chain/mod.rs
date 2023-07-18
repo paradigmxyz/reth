@@ -248,8 +248,14 @@ mod tests {
     }
 
     #[test]
-    fn test_legacy_named_chain() {
+    fn test_optimism_chain() {
         let chain = Chain::Named(ethers_core::types::Chain::Optimism);
+        assert!(!chain.is_legacy());
+    }
+
+    #[test]
+    fn test_legacy_named_chain() {
+        let chain = Chain::Named(ethers_core::types::Chain::BinanceSmartChain);
         assert!(chain.is_legacy());
     }
 
