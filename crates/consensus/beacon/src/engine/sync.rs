@@ -325,7 +325,7 @@ struct OrderedSealedBlock(SealedBlock);
 
 impl PartialOrd for OrderedSealedBlock {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.0.number.partial_cmp(&other.0.number)
+        Some(self.cmp(other))
     }
 }
 

@@ -30,7 +30,7 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
         MAINNET.clone(),
         beacon_engine_handle,
         spawn_test_payload_service().into(),
-        Box::new(TokioTaskExecutor::default()),
+        Box::<TokioTaskExecutor>::default(),
     );
     let module = AuthRpcModule::new(engine_api);
     module.start_server(config).await.unwrap()
