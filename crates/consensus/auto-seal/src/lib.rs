@@ -27,8 +27,9 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
-    proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Header,
-    ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, EMPTY_OMMER_ROOT, H256, U256,
+    proofs, Address, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec,
+    Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, EMPTY_OMMER_ROOT, H256,
+    U256,
 };
 use reth_provider::{BlockReaderIdExt, CanonStateNotificationSender, PostState, StateProvider};
 use reth_revm::executor::Executor;
@@ -243,14 +244,9 @@ impl StorageInner {
         self.hash_to_number.insert(self.best_hash, self.best_block);
     }
 
-    /// Builds and executes a new block with the given transactions, on the provided [Executor].
-    ///
-    /// This returns the header of the executed block, as well as the poststate from execution.
-    pub(crate) fn build_and_execute<DB: StateProvider>(
-        &mut self,
-        transactions: Vec<TransactionSigned>,
-        executor: &mut Executor<DB>,
-    ) -> Result<(SealedHeader, PostState), BlockExecutionError> {
+    /// Fills in pre-execution header fields based on the current best block and given
+    /// transactions.
+    pub(crate) fn build_header_template(&self, transactions: &Vec<TransactionSigned>) -> Header {
         // check previous block for base fee
         let base_fee_per_gas =
             self.headers.get(&self.best_block).and_then(|parent| parent.next_block_base_fee());
@@ -278,26 +274,41 @@ impl StorageInner {
         header.transactions_root = if transactions.is_empty() {
             EMPTY_TRANSACTIONS
         } else {
-            proofs::calculate_transaction_root(&transactions)
+            proofs::calculate_transaction_root(transactions)
         };
 
-        let block = Block { header, body: transactions, ommers: vec![], withdrawals: None };
+        header
+    }
 
+    /// Executes the block with the given block and senders, on the provided [Executor].
+    ///
+    /// This returns the poststate from execution and post-block changes, as well as the gas used.
+    pub(crate) fn execute<DB: StateProvider>(
+        &mut self,
+        block: &Block,
+        executor: &mut Executor<DB>,
+        senders: Vec<Address>,
+    ) -> Result<(PostState, u64), BlockExecutionError> {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
-        let senders =
-            block.body.iter().map(|tx| tx.recover_signer()).collect::<Option<Vec<_>>>().ok_or(
-                BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError),
-            )?;
-
         let (post_state, gas_used) =
-            executor.execute_transactions(&block, U256::ZERO, Some(senders.clone()))?;
+            executor.execute_transactions(block, U256::ZERO, Some(senders.clone()))?;
 
         // apply post block changes
-        let post_state = executor.apply_post_block_changes(&block, U256::ZERO, post_state).unwrap();
+        let post_state = executor.apply_post_block_changes(block, U256::ZERO, post_state)?;
 
-        let Block { mut header, body, .. } = block;
+        Ok((post_state, gas_used))
+    }
 
+    /// Fills in the post-execution header fields based on the given PostState and gas used.
+    /// In doing this, the state root is calculated and the final header is returned.
+    pub(crate) fn complete_header<DB: StateProvider>(
+        &self,
+        mut header: Header,
+        post_state: &PostState,
+        executor: &mut Executor<DB>,
+        gas_used: u64,
+    ) -> Header {
         let receipts = post_state.receipts(header.number);
         header.receipts_root = if receipts.is_empty() {
             EMPTY_RECEIPTS
@@ -307,17 +318,47 @@ impl StorageInner {
             proofs::calculate_receipt_root(&receipts_with_bloom)
         };
 
-        let body = BlockBody { transactions: body, ommers: vec![], withdrawals: None };
         header.gas_used = gas_used;
-
-        trace!(target: "consensus::auto", ?post_state, ?header, ?body, "executed block, calculating root");
 
         // calculate the state root
         let state_root = executor.db().db.0.state_root(post_state.clone()).unwrap();
         header.state_root = state_root;
+        header
+    }
+
+    /// Builds and executes a new block with the given transactions, on the provided [Executor].
+    ///
+    /// This returns the header of the executed block, as well as the poststate from execution.
+    pub(crate) fn build_and_execute<DB: StateProvider>(
+        &mut self,
+        transactions: Vec<TransactionSigned>,
+        executor: &mut Executor<DB>,
+    ) -> Result<(SealedHeader, PostState), BlockExecutionError> {
+        let header = self.build_header_template(&transactions);
+
+        let block = Block { header, body: transactions, ommers: vec![], withdrawals: None };
+
+        let senders =
+            block.body.iter().map(|tx| tx.recover_signer()).collect::<Option<Vec<_>>>().ok_or(
+                BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError),
+            )?;
+
+        trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
+
+        // now execute the block
+        let (post_state, gas_used) = self.execute(&block, executor, senders)?;
+
+        let Block { header, body, .. } = block;
+        let body = BlockBody { transactions: body, ommers: vec![], withdrawals: None };
+
+        trace!(target: "consensus::auto", ?post_state, ?header, ?body, "executed block, calculating state root and completing header");
+
+        // fill in the rest of the fields
+        let header = self.complete_header(header, &post_state, executor, gas_used);
 
         trace!(target: "consensus::auto", root=?header.state_root, ?body, "calculated root");
 
+        // finally insert into storage
         self.insert_new_block(header.clone(), body);
 
         // set new header with hash that should have been updated by insert_new_block
