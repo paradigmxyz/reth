@@ -1,6 +1,8 @@
 use crate::{
     post_state::StorageChangeset,
-    traits::{AccountExtReader, BlockSource, ReceiptProvider, StageCheckpointWriter},
+    traits::{
+        AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
+    },
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
     EvmEnvProvider, HashingWriter, HeaderProvider, HistoryWriter, PostState, ProviderError,
     StageCheckpointReader, StorageReader, TransactionsProvider, WithdrawalsProvider,
@@ -723,6 +725,20 @@ impl<'this, TX: DbTx<'this>> AccountExtReader for DatabaseProvider<'this, TX> {
         )?;
 
         Ok(account_transitions)
+    }
+}
+
+impl<'this, TX: DbTx<'this>> ChangeSetReader for DatabaseProvider<'this, TX> {
+    fn account_block_changeset(&self, block_number: BlockNumber) -> Result<Vec<AccountBeforeTx>> {
+        let range = block_number..=block_number;
+        self.tx
+            .cursor_read::<tables::AccountChangeSet>()?
+            .walk_range(range)?
+            .map(|result| -> Result<_> {
+                let (_, account_before) = result?;
+                Ok(account_before)
+            })
+            .collect()
     }
 }
 

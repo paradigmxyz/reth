@@ -7,6 +7,7 @@ use crate::{
     },
     EthApi,
 };
+use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockId, BlockNumberOrTag, TransactionMeta};
 use reth_provider::{BlockReaderIdExt, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{Block, Index, RichBlock, TransactionReceipt};
@@ -16,7 +17,7 @@ impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
-    Network: Send + Sync + 'static,
+    Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Returns the uncle headers of the given block
     ///
