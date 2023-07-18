@@ -1262,7 +1262,9 @@ where
                         // block is connected to the canonical chain, but not the current head
                         self.try_make_sync_target_canonical(downloaded_num_hash);
                     }
-                    InsertPayloadOk::Inserted(BlockStatus::Disconnected { missing_parent }) => {
+                    InsertPayloadOk::Inserted(BlockStatus::Disconnected {
+                        missing_ancestor: missing_parent,
+                    }) => {
                         // block is not connected to the canonical head, we need to download its
                         // missing branch first
                         self.on_disconnected_block(downloaded_num_hash, missing_parent);
