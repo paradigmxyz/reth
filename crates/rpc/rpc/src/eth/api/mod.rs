@@ -374,6 +374,12 @@ where
 #[derive(Debug, Clone, Copy)]
 pub struct GasCap(u64);
 
+impl Default for GasCap {
+    fn default() -> Self {
+        Self(50_000_000)
+    }
+}
+
 impl From<u64> for GasCap {
     fn from(gas_cap: u64) -> Self {
         Self(gas_cap)
