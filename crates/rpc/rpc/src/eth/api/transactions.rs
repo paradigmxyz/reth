@@ -663,7 +663,7 @@ impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Pool: TransactionPool + 'static,
     Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: Send + Sync + 'static,
+    Network: NetworkInfo + Send + Sync + 'static,
 {
     pub(crate) fn sign_request(
         &self,

@@ -4,6 +4,7 @@
 //! files.
 
 use crate::eth::{
+    api::pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin},
     cache::EthStateCache,
     error::{EthApiError, EthResult},
     gas_oracle::GasPriceOracle,
@@ -20,7 +21,11 @@ use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
 use revm_primitives::{BlockEnv, CfgEnv};
-use std::{future::Future, sync::Arc, time::Instant};
+use std::{
+    future::Future,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::sync::{oneshot, Mutex};
 
 mod block;
@@ -32,7 +37,6 @@ mod sign;
 mod state;
 mod transactions;
 
-use crate::eth::api::pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
 pub use transactions::{EthTransactions, TransactionSource};
 
 /// `Eth` API trait.
@@ -220,7 +224,7 @@ impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
-    Network: Send + Sync + 'static,
+    Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Configures the [CfgEnv] and [BlockEnv] for the pending block
     ///
@@ -261,24 +265,41 @@ where
 
         // no pending block from the CL yet, so we need to build it ourselves via txpool
         self.on_blocking_task(|this| async move {
-            let PendingBlockEnv { cfg: _, block_env, origin } = pending;
-            let lock = this.inner.pending_block.lock().await;
+            let mut lock = this.inner.pending_block.lock().await;
             let now = Instant::now();
-            // this is guaranteed to be the `latest` header
-            let parent_header = origin.into_header();
 
             // check if the block is still good
-            if let Some(pending) = lock.as_ref() {
-                if block_env.number.to::<u64>() == pending.block.number &&
-                    pending.block.parent_hash == parent_header.parent_hash &&
-                    now <= pending.expires_at
+            if let Some(pending_block) = lock.as_ref() {
+                // this is guaranteed to be the `latest` header
+                if pending.block_env.number.to::<u64>() == pending_block.block.number &&
+                    pending.origin.header().hash == pending_block.block.parent_hash &&
+                    now <= pending_block.expires_at
                 {
-                    return Ok(Some(pending.block.clone()))
+                    return Ok(Some(pending_block.block.clone()))
                 }
             }
 
-            // TODO(mattsse): actually build the pending block
-            Ok(None)
+            // if we're currently syncing, we're unable to build a pending block
+            if this.network().is_syncing() {
+                return Ok(None)
+            }
+
+            // we rebuild the block
+            let pending_block = match pending.build_block(this.provider(), this.pool()) {
+                Ok(block) => block,
+                Err(err) => {
+                    tracing::debug!(target = "rpc", "Failed to build pending block: {:?}", err);
+                    return Ok(None)
+                }
+            };
+
+            let now = Instant::now();
+            *lock = Some(PendingBlock {
+                block: pending_block.clone(),
+                expires_at: now + Duration::from_secs(3),
+            });
+
+            Ok(Some(pending_block))
         })
         .await
     }
