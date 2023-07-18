@@ -266,6 +266,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     changed_accounts,
                     // all transactions mined in the new chain need to be removed from the pool
                     mined_transactions: new_mined_transactions.into_iter().collect(),
+                    timestamp: new_tip.timestamp,
                 };
                 pool.on_canonical_state_change(update);
 
@@ -331,6 +332,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     pending_block_base_fee,
                     changed_accounts,
                     mined_transactions,
+                    timestamp: tip.timestamp,
                 };
                 pool.on_canonical_state_change(update);
             }

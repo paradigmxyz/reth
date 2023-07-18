@@ -257,6 +257,7 @@ where
             pending_block_base_fee,
             changed_accounts,
             mined_transactions,
+            timestamp: _,
         } = update;
         let changed_senders = self.changed_senders(changed_accounts.into_iter());
         let block_info = BlockInfo {
