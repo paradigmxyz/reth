@@ -14,7 +14,7 @@ mod eth;
 mod task;
 
 /// A [TransactionValidator] implementation that validates ethereum transaction.
-pub use eth::EthTransactionValidator;
+pub use eth::{EthTransactionValidator, EthTransactionValidatorBuilder};
 
 /// A spawnable task that performs transaction validation.
 pub use task::ValidationTask;
