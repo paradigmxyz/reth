@@ -159,6 +159,11 @@ impl CallTrace {
         self.status as u8 >= InstructionResult::Revert as u8
     }
 
+    // Returns true if the status code is a revert
+    pub(crate) fn is_revert(&self) -> bool {
+        self.status == InstructionResult::Revert
+    }
+
     /// Returns the error message if it is an erroneous result.
     pub(crate) fn as_error(&self, kind: TraceStyle) -> Option<String> {
         // See also <https://github.com/ethereum/go-ethereum/blob/34d507215951fb3f4a5983b65e127577989a6db8/eth/tracers/native/call_flat.go#L39-L55>
@@ -340,15 +345,16 @@ impl CallTraceNode {
     /// Converts this node into a parity `TransactionTrace`
     pub(crate) fn parity_transaction_trace(&self, trace_address: Vec<usize>) -> TransactionTrace {
         let action = self.parity_action();
-        let output = self.parity_trace_output();
+        let result = if action.is_selfdestruct() ||
+            (self.trace.is_error() && !self.trace.is_revert())
+        {
+            // if the trace is a selfdestruct or an error that is not a revert, the result is None
+            None
+        } else {
+            Some(self.parity_trace_output())
+        };
         let error = self.trace.as_error(TraceStyle::Parity);
-        TransactionTrace {
-            action,
-            error,
-            result: Some(output),
-            trace_address,
-            subtraces: self.children.len(),
-        }
+        TransactionTrace { action, error, result, trace_address, subtraces: self.children.len() }
     }
 
     /// Returns the `Output` for a parity trace
