@@ -84,7 +84,7 @@ pub use revm_primitives::JumpMap;
 pub use serde_helper::JsonU256;
 pub use storage::StorageEntry;
 pub use transaction::{
-    util::secp256k1::{recover_signer, sign_message},
+    util::secp256k1::{public_key_to_address, recover_signer, sign_message},
     AccessList, AccessListItem, AccessListWithGasUsed, FromRecoveredTransaction,
     IntoRecoveredTransaction, InvalidTransactionError, Signature, Transaction, TransactionKind,
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,

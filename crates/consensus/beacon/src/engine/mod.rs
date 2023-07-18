@@ -2538,8 +2538,11 @@ mod tests {
 
     mod new_payload {
         use super::*;
-        use reth_interfaces::test_utils::{generators, generators::random_block};
-        use reth_primitives::{Hardfork, U256};
+        use reth_interfaces::test_utils::{
+            generators,
+            generators::{generate_keys, random_block},
+        };
+        use reth_primitives::{public_key_to_address, Genesis, GenesisAccount, Hardfork, U256};
         use reth_provider::test_utils::blocks::BlockChainTestData;
 
         #[tokio::test]
@@ -2626,6 +2629,56 @@ mod tests {
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Valid)
                 .with_latest_valid_hash(block2.hash);
             assert_eq!(result, expected_result);
+            assert_matches!(engine_rx.try_recv(), Err(TryRecvError::Empty));
+        }
+
+        #[tokio::test]
+        async fn simple_validate_block() {
+            let mut rng = generators::rng();
+            let genesis_keys = generate_keys(&mut rng, 16);
+            let amount = 1000000000000000000u64;
+            let alloc = genesis_keys.iter().map(|pair| {
+                (
+                    public_key_to_address(pair.public_key()),
+                    GenesisAccount::default().with_balance(U256::from(amount)),
+                )
+            });
+
+            let genesis = Genesis::default().extend_accounts(alloc);
+
+            let chain_spec = Arc::new(
+                ChainSpecBuilder::default()
+                    .chain(MAINNET.chain)
+                    .genesis(genesis)
+                    .shanghai_activated()
+                    .build(),
+            );
+
+            let (consensus_engine, env) =
+                TestConsensusEngineBuilder::<NoopFullBlockClient>::new(chain_spec.clone()).build();
+
+            let genesis =
+                SealedBlock { header: chain_spec.sealed_genesis_header(), ..Default::default() };
+            let block1 = random_block(&mut rng, 1, Some(chain_spec.genesis_hash()), None, Some(0));
+
+            // TODO: add transactions that transfer from the alloc accounts, generating the new
+            // block tx and state root
+
+            insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
+
+            let mut engine_rx = spawn_consensus_engine(consensus_engine);
+
+            // Send forkchoice
+            let res = env
+                .send_forkchoice_updated(ForkchoiceState {
+                    head_block_hash: block1.hash,
+                    finalized_block_hash: block1.hash,
+                    ..Default::default()
+                })
+                .await;
+            let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Valid)
+                .with_latest_valid_hash(block1.hash);
+            assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
             assert_matches!(engine_rx.try_recv(), Err(TryRecvError::Empty));
         }
 

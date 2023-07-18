@@ -104,6 +104,12 @@ pub fn sign_tx_with_key_pair(key_pair: KeyPair, tx: Transaction) -> TransactionS
     TransactionSigned::from_transaction_and_signature(tx, signature)
 }
 
+/// Generates a set of [KeyPair]s based on the desired count.
+pub fn generate_keys<R: Rng>(rng: &mut R, count: usize) -> Vec<KeyPair> {
+    let secp = Secp256k1::new();
+    (0..count).map(|_| KeyPair::new(&secp, rng)).collect()
+}
+
 /// Generate a random block filled with signed transactions (generated using
 /// [random_signed_tx]). If no transaction count is provided, the number of transactions
 /// will be random, otherwise the provided count will be used.
@@ -363,7 +369,9 @@ mod test {
 
     use super::*;
     use hex_literal::hex;
-    use reth_primitives::{keccak256, AccessList, Address, TransactionKind, TxEip1559};
+    use reth_primitives::{
+        keccak256, public_key_to_address, AccessList, Address, TransactionKind, TxEip1559,
+    };
     use secp256k1::KeyPair;
 
     #[test]
@@ -393,9 +401,7 @@ mod test {
             let signed = TransactionSigned::from_transaction_and_signature(tx.clone(), signature);
             let recovered = signed.recover_signer().unwrap();
 
-            let public_key_hash = keccak256(&key_pair.public_key().serialize_uncompressed()[1..]);
-            let expected = Address::from_slice(&public_key_hash[12..]);
-
+            let expected = public_key_to_address(key_pair.public_key());
             assert_eq!(recovered, expected);
         }
     }
