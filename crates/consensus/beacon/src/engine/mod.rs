@@ -1912,8 +1912,8 @@ mod tests {
     /// mocked executor results.
     struct TestConsensusEngineBuilder<Client> {
         chain_spec: Arc<ChainSpec>,
-        pipeline_exec_outputs: TestPipelineConfig,
-        executor_results: TestExecutorConfig,
+        pipeline_config: TestPipelineConfig,
+        executor_config: TestExecutorConfig,
         pipeline_run_threshold: Option<u64>,
         max_block: Option<BlockNumber>,
         client: Option<Client>,
@@ -1927,8 +1927,8 @@ mod tests {
         fn new(chain_spec: Arc<ChainSpec>) -> Self {
             Self {
                 chain_spec,
-                pipeline_exec_outputs: Default::default(),
-                executor_results: Default::default(),
+                pipeline_config: Default::default(),
+                executor_config: Default::default(),
                 pipeline_run_threshold: None,
                 client: None,
                 max_block: None,
@@ -1940,13 +1940,13 @@ mod tests {
             mut self,
             pipeline_exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
         ) -> Self {
-            self.pipeline_exec_outputs = TestPipelineConfig::Test(pipeline_exec_outputs);
+            self.pipeline_config = TestPipelineConfig::Test(pipeline_exec_outputs);
             self
         }
 
         /// Set the executor results to use for the test consensus engine.
         fn with_executor_results(mut self, executor_results: Vec<PostState>) -> Self {
-            self.executor_results = TestExecutorConfig::Test(executor_results);
+            self.executor_config = TestExecutorConfig::Test(executor_results);
             self
         }
 
@@ -1985,7 +1985,7 @@ mod tests {
             );
 
             // use either test executor or real executor
-            let executor_factory = match self.executor_results {
+            let executor_factory = match self.executor_config {
                 TestExecutorConfig::Test(results) => {
                     let executor_factory = TestExecutorFactory::new(self.chain_spec.clone());
                     executor_factory.extend(results);
@@ -1998,7 +1998,7 @@ mod tests {
 
             // Setup pipeline
             let (tip_tx, tip_rx) = watch::channel(H256::default());
-            let mut pipeline = match self.pipeline_exec_outputs {
+            let mut pipeline = match self.pipeline_config {
                 TestPipelineConfig::Test(outputs) => Pipeline::builder()
                     .add_stages(TestStages::new(outputs, Default::default()))
                     .with_tip_sender(tip_tx),
