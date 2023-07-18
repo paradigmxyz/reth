@@ -885,8 +885,7 @@ mod tests {
         let tx = db.tx().unwrap();
         let factory = HashedPostStateCursorFactory::new(&tx, &hashed_post_state);
         let expected =
-            [(address, db_storage.into_iter().chain(post_state_storage.into_iter()).collect())]
-                .into_iter();
+            [(address, db_storage.into_iter().chain(post_state_storage).collect())].into_iter();
         assert_storage_cursor_order(&factory, expected);
     }
 

@@ -131,7 +131,7 @@ pub(crate) fn setup<DB: Database>(
     from: u64,
     to: u64,
     output_db: &PathBuf,
-    db_tool: &mut DbTool<'_, DB>,
+    db_tool: &DbTool<'_, DB>,
 ) -> eyre::Result<(DatabaseEnv, u64)> {
     assert!(from < to, "FROM block should be bigger than TO block.");
 
