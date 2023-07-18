@@ -870,7 +870,7 @@ where
         // check if the new head was previously invalidated, if so then we deem this FCU
         // as invalid
         if let Some(invalid_ancestor) = self.check_invalid_ancestor(state.head_block_hash) {
-            debug!(target: "consensus::engine", head=?state.head_block_hash, "Head was previously marked as invalid");
+            debug!(target: "consensus::engine", head=?state.head_block_hash, current_error=?error, "Head was previously marked as invalid");
             return invalid_ancestor
         }
 
@@ -1170,6 +1170,8 @@ where
         let (block, error) = err.split();
 
         if error.is_invalid_block() {
+            warn!(target: "consensus::engine", invalid_hash=?block.hash, invalid_number=?block.number, ?error, "Invalid block error on new payload");
+
             // all of these occurred if the payload is invalid
             let parent_hash = block.parent_hash;
 
@@ -1260,7 +1262,9 @@ where
                         // block is connected to the canonical chain, but not the current head
                         self.try_make_sync_target_canonical(downloaded_num_hash);
                     }
-                    InsertPayloadOk::Inserted(BlockStatus::Disconnected { missing_parent }) => {
+                    InsertPayloadOk::Inserted(BlockStatus::Disconnected {
+                        missing_ancestor: missing_parent,
+                    }) => {
                         // block is not connected to the canonical head, we need to download its
                         // missing branch first
                         self.on_disconnected_block(downloaded_num_hash, missing_parent);
@@ -1271,7 +1275,10 @@ where
             Err(err) => {
                 warn!(target: "consensus::engine", ?err, "Failed to insert downloaded block");
                 if err.kind().is_invalid_block() {
-                    self.invalid_headers.insert(err.into_block().header);
+                    let (block, err) = err.split();
+                    warn!(target: "consensus::engine", invalid_number=?block.number, invalid_hash=?block.hash, ?err, "Marking block as invalid");
+
+                    self.invalid_headers.insert(block.header);
                 }
             }
         }
@@ -1429,7 +1436,7 @@ where
                 }
 
                 if let ControlFlow::Unwind { bad_block, .. } = ctrl {
-                    trace!(target: "consensus::engine", hash=?bad_block.hash, "Bad block detected in unwind");
+                    warn!(target: "consensus::engine", invalid_hash=?bad_block.hash, invalid_number=?bad_block.number, "Bad block detected in unwind");
 
                     // update the `invalid_headers` cache with the new invalid headers
                     self.invalid_headers.insert(bad_block);
