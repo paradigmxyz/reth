@@ -6,7 +6,7 @@ pub(crate) mod secp256k1 {
     pub(crate) use ::secp256k1::Error;
     use ::secp256k1::{
         ecdsa::{RecoverableSignature, RecoveryId},
-        Message, SecretKey, SECP256K1,
+        Message, PublicKey, SecretKey, SECP256K1,
     };
     use revm_primitives::{B256, U256};
 
@@ -18,11 +18,7 @@ pub(crate) mod secp256k1 {
             RecoverableSignature::from_compact(&sig[0..64], RecoveryId::from_i32(sig[64] as i32)?)?;
 
         let public = SECP256K1.recover_ecdsa(&Message::from_slice(&msg[..32])?, &sig)?;
-
-        // strip out the first byte because that should be the SECP256K1_TAG_PUBKEY_UNCOMPRESSED
-        // tag returned by libsecp's uncompressed pubkey serialization
-        let hash = keccak256(&public.serialize_uncompressed()[1..]);
-        Ok(Address::from_slice(&hash[12..]))
+        Ok(public_key_to_address(public))
     }
 
     /// Signs message with the given secret key.
@@ -38,6 +34,15 @@ pub(crate) mod secp256k1 {
             odd_y_parity: rec_id.to_i32() != 0,
         };
         Ok(signature)
+    }
+
+    /// Converts a public key into an ethereum address by hashing the encoded public key with
+    /// keccak256.
+    pub fn public_key_to_address(public: PublicKey) -> Address {
+        // strip out the first byte because that should be the SECP256K1_TAG_PUBKEY_UNCOMPRESSED
+        // tag returned by libsecp's uncompressed pubkey serialization
+        let hash = keccak256(&public.serialize_uncompressed()[1..]);
+        Address::from_slice(&hash[12..])
     }
 }
 #[cfg(test)]
