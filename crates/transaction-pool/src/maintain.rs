@@ -152,6 +152,7 @@ where
                     changed_accounts,
                     // all transactions mined in the new chain need to be removed from the pool
                     mined_transactions: new_mined_transactions.into_iter().collect(),
+                    timestamp: new_tip.timestamp,
                 };
                 pool.on_canonical_state_change(update);
 
@@ -192,6 +193,7 @@ where
                     changed_accounts,
                     // no tx to prune in the reverted chain
                     mined_transactions: vec![],
+                    timestamp: first_block.timestamp,
                 };
                 pool.on_canonical_state_change(update);
 
@@ -255,6 +257,7 @@ where
                     pending_block_base_fee,
                     changed_accounts,
                     mined_transactions,
+                    timestamp: tip.timestamp,
                 };
                 pool.on_canonical_state_change(update);
             }
