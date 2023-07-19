@@ -68,3 +68,6 @@ jsonrpsee = { workspace = true, features = ["client"] }
 assert_matches = "1.5.0"
 tempfile = "3.5.0"
 reth-interfaces = { workspace = true, features = ["test-utils"] }
+
+[features]
+optimism = ["reth-primitives/optimism"]
