@@ -422,6 +422,8 @@ impl Transaction {
             Transaction::Legacy(tx) => tx.size(),
             Transaction::Eip2930(tx) => tx.size(),
             Transaction::Eip1559(tx) => tx.size(),
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(tx) => tx.size(),
         }
     }
 }
