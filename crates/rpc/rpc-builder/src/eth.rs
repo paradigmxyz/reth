@@ -1,7 +1,8 @@
 use reth_rpc::{
     eth::{
         cache::{EthStateCache, EthStateCacheConfig},
-        gas_oracle::GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP,
+        gas_oracle::GasPriceOracleConfig,
+        RPC_DEFAULT_GAS_CAP,
     },
     EthApi, EthFilter, EthPubSub,
 };
