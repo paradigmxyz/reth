@@ -527,13 +527,8 @@ impl TransactionOrdering for MockOrdering {
     type Priority = U256;
     type Transaction = MockTransaction;
 
-    fn priority(&self, transaction: &Self::Transaction, base_fee: Option<u64>) -> Self::Priority {
-        let priority = if let Some(base_fee) = base_fee {
-            transaction.effective_tip_per_gas(base_fee).expect("tx has been validated")
-        } else {
-            transaction.priority_fee_or_price()
-        };
-        U256::from(priority)
+    fn priority(&self, transaction: &Self::Transaction, base_fee: u64) -> Self::Priority {
+        U256::from(transaction.effective_tip_per_gas(base_fee).expect("tx has been validated"))
     }
 }
 

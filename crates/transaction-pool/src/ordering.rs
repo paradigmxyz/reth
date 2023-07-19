@@ -17,7 +17,7 @@ pub trait TransactionOrdering: Send + Sync + 'static {
     type Transaction: PoolTransaction;
 
     /// Returns the priority score for the given transaction.
-    fn priority(&self, transaction: &Self::Transaction, base_fee: Option<u64>) -> Self::Priority;
+    fn priority(&self, transaction: &Self::Transaction, base_fee: u64) -> Self::Priority;
 }
 
 /// Default ordering for the pool.
@@ -38,13 +38,8 @@ where
     /// Source: <https://github.com/ethereum/go-ethereum/blob/7f756dc1185d7f1eeeacb1d12341606b7135f9ea/core/txpool/legacypool/list.go#L469-L482>.
     ///
     /// NOTE: The implementation is incomplete for missing base fee.
-    fn priority(&self, transaction: &Self::Transaction, base_fee: Option<u64>) -> Self::Priority {
-        let priority = if let Some(base_fee) = base_fee {
-            transaction.effective_tip_per_gas(base_fee).expect("tx has been validated")
-        } else {
-            transaction.priority_fee_or_price()
-        };
-        U256::from(priority)
+    fn priority(&self, transaction: &Self::Transaction, base_fee: u64) -> Self::Priority {
+        U256::from(transaction.effective_tip_per_gas(base_fee).expect("tx has been validated"))
     }
 }
 

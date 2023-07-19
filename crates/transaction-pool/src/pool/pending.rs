@@ -110,7 +110,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         for tx in unlocked {
             submission_id += 1;
             debug_assert!(!best.all.contains_key(tx.id()), "transaction already included");
-            let priority = self.ordering.priority(&tx.transaction, Some(base_fee));
+            let priority = self.ordering.priority(&tx.transaction, base_fee);
             let tx_id = *tx.id();
             let transaction = PendingTransactionRef { submission_id, transaction: tx, priority };
             if best.ancestor(&tx_id).is_none() {
@@ -193,7 +193,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let tx_id = *tx.id();
         let submission_id = self.next_id();
 
-        let priority = self.ordering.priority(&tx.transaction, Some(base_fee));
+        let priority = self.ordering.priority(&tx.transaction, base_fee);
 
         // keep track of size
         self.size_of += tx.size();
