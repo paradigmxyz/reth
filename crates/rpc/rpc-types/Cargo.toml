@@ -19,6 +19,7 @@ reth-rlp.workspace = true
 thiserror.workspace = true
 
 # misc
+itertools = "0.10"
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 jsonrpsee-types = { version = "0.18" }
