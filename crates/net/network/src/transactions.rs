@@ -12,7 +12,10 @@ use reth_eth_wire::{
     EthVersion, GetPooledTransactions, NewPooledTransactionHashes, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, PooledTransactions, Transactions,
 };
-use reth_interfaces::{p2p::error::RequestResult, sync::SyncStateProvider};
+use reth_interfaces::{
+    p2p::error::{RequestError, RequestResult},
+    sync::SyncStateProvider,
+};
 use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{Peers, ReputationChangeKind};
 use reth_primitives::{
@@ -472,10 +475,27 @@ where
         }
     }
 
-    fn report_bad_message(&self, peer_id: PeerId) {
-        trace!(target: "net::tx", ?peer_id, "Penalizing peer for bad transaction");
+    fn report_bad_message(&self, peer_id: PeerId, req_err: Option<RequestError>) {
+        let msg = match req_err {
+            Some(RequestError::UnsupportedCapability) => {
+                self.network.reputation_change(peer_id, ReputationChangeKind::BadProtocol);
+                "Penalizing peer for unsupported capability"
+            }
+            Some(RequestError::Timeout) => {
+                self.network.reputation_change(peer_id, ReputationChangeKind::Timeout);
+                "Penalizing peer for timeout"
+            }
+            Some(RequestError::ChannelClosed | RequestError::ConnectionDropped) => {
+                self.network.reputation_change(peer_id, ReputationChangeKind::Dropped);
+                "Penalizing peer for dropped connection"
+            }
+            Some(RequestError::BadResponse) | None => {
+                self.network.reputation_change(peer_id, ReputationChangeKind::BadTransactions);
+                "Penalizing peer for bad transaction"
+            }
+        };
+        trace!(target: "net::tx", ?peer_id, ?msg);
         self.metrics.reported_bad_transactions.increment(1);
-        self.network.reputation_change(peer_id, ReputationChangeKind::BadTransactions);
     }
 
     fn report_already_seen(&self, peer_id: PeerId) {
@@ -492,7 +512,7 @@ where
     fn on_bad_import(&mut self, hash: TxHash) {
         if let Some(peers) = self.transactions_by_peers.remove(&hash) {
             for peer_id in peers {
-                self.report_bad_message(peer_id);
+                self.report_bad_message(peer_id, None);
             }
         }
     }
@@ -537,11 +557,11 @@ where
                 Poll::Ready(Ok(Ok(txs))) => {
                     this.import_transactions(req.peer_id, txs.0, TransactionSource::Response);
                 }
-                Poll::Ready(Ok(Err(_))) => {
-                    this.report_bad_message(req.peer_id);
+                Poll::Ready(Ok(Err(err))) => {
+                    this.report_bad_message(req.peer_id, Some(err));
                 }
                 Poll::Ready(Err(_)) => {
-                    this.report_bad_message(req.peer_id);
+                    this.report_bad_message(req.peer_id, None);
                 }
             }
         }
