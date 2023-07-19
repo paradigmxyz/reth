@@ -1,8 +1,8 @@
-use crate::constants::RPC_DEFAULT_GAS_CAP;
 use reth_rpc::{
     eth::{
         cache::{EthStateCache, EthStateCacheConfig},
         gas_oracle::GasPriceOracleConfig,
+        RPC_DEFAULT_GAS_CAP,
     },
     EthApi, EthFilter, EthPubSub,
 };
@@ -51,7 +51,7 @@ impl Default for EthConfig {
             gas_oracle: GasPriceOracleConfig::default(),
             max_tracing_requests: DEFAULT_MAX_TRACING_REQUESTS,
             max_logs_per_response: DEFAULT_MAX_LOGS_PER_RESPONSE,
-            rpc_gas_cap: RPC_DEFAULT_GAS_CAP,
+            rpc_gas_cap: RPC_DEFAULT_GAS_CAP.into(),
         }
     }
 }
