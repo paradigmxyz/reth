@@ -139,7 +139,7 @@ pub struct RpcServerArgs {
         alias = "rpc.gascap",
         value_name = "GAS_CAP",
         value_parser = RangedU64ValueParser::<u64>::new().range(1..),
-        default_value_t = RPC_DEFAULT_GAS_CAP
+        default_value_t = RPC_DEFAULT_GAS_CAP.into()
     )]
     pub rpc_gas_cap: u64,
 
@@ -513,7 +513,7 @@ mod tests {
     fn test_rpc_gas_cap() {
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
         let config = args.eth_config();
-        assert_eq!(config.rpc_gas_cap, RPC_DEFAULT_GAS_CAP);
+        assert_eq!(config.rpc_gas_cap, Into::<u64>::into(RPC_DEFAULT_GAS_CAP));
 
         let args =
             CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.gascap", "1000"]).args;
