@@ -1821,23 +1821,31 @@ mod tests {
     }
 
     /// Represents either test pipeline outputs, or real pipeline configuration.
-    #[derive(Default)]
     enum TestPipelineConfig {
         /// Test pipeline outputs.
         Test(VecDeque<Result<ExecOutput, StageError>>),
         /// Real pipeline configuration.
-        #[default]
         Real,
     }
 
+    impl Default for TestPipelineConfig {
+        fn default() -> Self {
+            Self::Test(VecDeque::new())
+        }
+    }
+
     /// Represents either test executor results, or real executor configuration.
-    #[derive(Default)]
     enum TestExecutorConfig {
         /// Test executor results.
         Test(Vec<PostState>),
         /// Real executor configuration.
-        #[default]
         Real,
+    }
+
+    impl Default for TestExecutorConfig {
+        fn default() -> Self {
+            Self::Test(Vec::new())
+        }
     }
 
     /// A type that represents one of two possible executor factories.
@@ -1960,6 +1968,18 @@ mod tests {
         /// Sets the max block for the pipeline to run.
         fn with_max_block(mut self, max_block: BlockNumber) -> Self {
             self.max_block = Some(max_block);
+            self
+        }
+
+        /// Uses the real pipeline instead of a pipeline with empty exec outputs.
+        fn with_real_pipeline(mut self) -> Self {
+            self.pipeline_config = TestPipelineConfig::Real;
+            self
+        }
+
+        /// Uses the real executor instead of a executor with empty results.
+        fn with_real_executor(mut self) -> Self {
+            self.executor_config = TestExecutorConfig::Real;
             self
         }
 
@@ -2655,7 +2675,10 @@ mod tests {
             );
 
             let (consensus_engine, env) =
-                TestConsensusEngineBuilder::<NoopFullBlockClient>::new(chain_spec.clone()).build();
+                TestConsensusEngineBuilder::<NoopFullBlockClient>::new(chain_spec.clone())
+                    .with_real_pipeline()
+                    .with_real_executor()
+                    .build();
 
             let genesis =
                 SealedBlock { header: chain_spec.sealed_genesis_header(), ..Default::default() };
