@@ -8,8 +8,8 @@ use clap::{
 use futures::TryFutureExt;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider, HeaderProvider,
-    StateProviderFactory,
+    BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider,
+    HeaderProvider, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{
@@ -249,6 +249,7 @@ impl RpcServerArgs {
             + StateProviderFactory
             + EvmEnvProvider
             + ChainSpecProvider
+            + ChangeSetReader
             + Clone
             + Unpin
             + 'static,
@@ -310,6 +311,7 @@ impl RpcServerArgs {
             + StateProviderFactory
             + EvmEnvProvider
             + ChainSpecProvider
+            + ChangeSetReader
             + Clone
             + Unpin
             + 'static,

@@ -28,10 +28,18 @@ pub struct EthTransactionValidator<Client, T> {
 
 // === impl EthTransactionValidator ===
 
+impl EthTransactionValidator<(), ()> {
+    /// Convenience method to create a [EthTransactionValidatorBuilder]
+    pub fn builder(chain_spec: Arc<ChainSpec>) -> EthTransactionValidatorBuilder {
+        EthTransactionValidatorBuilder::new(chain_spec)
+    }
+}
+
 impl<Client, Tx> EthTransactionValidator<Client, Tx> {
     /// Creates a new instance for the given [ChainSpec]
     ///
-    ///  This will spawn a single validation tasks that performs the actual validation.
+    /// This will spawn a single validation tasks that performs the actual validation.
+    /// See [EthTransactionValidator::with_additional_tasks]
     pub fn new<T>(client: Client, chain_spec: Arc<ChainSpec>, tasks: T) -> Self
     where
         T: TaskSpawner,
@@ -40,6 +48,11 @@ impl<Client, Tx> EthTransactionValidator<Client, Tx> {
     }
 
     /// Creates a new instance for the given [ChainSpec]
+    ///
+    /// By default this will enable support for:
+    ///   - shanghai
+    ///   - eip1559
+    ///   - eip2930
     ///
     /// This will always spawn a validation task that performs the actual validation. It will spawn
     /// `num_additional_tasks` additional tasks.
@@ -52,37 +65,9 @@ impl<Client, Tx> EthTransactionValidator<Client, Tx> {
     where
         T: TaskSpawner,
     {
-        let inner = EthTransactionValidatorInner {
-            chain_spec,
-            client,
-            shanghai: true,
-            eip2718: true,
-            eip1559: true,
-            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
-            minimum_priority_fee: None,
-            _marker: Default::default(),
-        };
-
-        let (tx, task) = ValidationTask::new();
-
-        // Spawn validation tasks, they are blocking because they perform db lookups
-        for _ in 0..num_additional_tasks {
-            let task = task.clone();
-            tasks.spawn_blocking(Box::pin(async move {
-                task.run().await;
-            }));
-        }
-
-        tasks.spawn_critical_blocking(
-            "transaction-validation-service",
-            Box::pin(async move {
-                task.run().await;
-            }),
-        );
-
-        let to_validation_task = Arc::new(Mutex::new(tx));
-
-        Self { inner: Arc::new(inner), to_validation_task }
+        EthTransactionValidatorBuilder::new(chain_spec)
+            .with_additional_tasks(num_additional_tasks)
+            .build(client, tasks)
     }
 
     /// Returns the configured chain id
@@ -131,6 +116,142 @@ where
                 Box::new(TransactionValidatorError::ValidationServiceUnreachable),
             ),
         }
+    }
+}
+
+/// A builder for [EthTransactionValidator]
+#[derive(Debug, Clone)]
+pub struct EthTransactionValidatorBuilder {
+    chain_spec: Arc<ChainSpec>,
+    /// Fork indicator whether we are in the Shanghai stage.
+    shanghai: bool,
+    /// Fork indicator whether we are using EIP-2718 type transactions.
+    eip2718: bool,
+    /// Fork indicator whether we are using EIP-1559 type transactions.
+    eip1559: bool,
+    /// The current max gas limit
+    block_gas_limit: u64,
+    /// Minimum priority fee to enforce for acceptance into the pool.
+    minimum_priority_fee: Option<u128>,
+    /// Determines how many additional tasks to spawn
+    ///
+    /// Default is 1
+    additional_tasks: usize,
+}
+
+impl EthTransactionValidatorBuilder {
+    /// Creates a new builder for the given [ChainSpec]
+    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        Self {
+            chain_spec,
+            shanghai: true,
+            eip2718: true,
+            eip1559: true,
+            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+            minimum_priority_fee: None,
+            additional_tasks: 1,
+        }
+    }
+
+    /// Disables the Shanghai fork.
+    pub fn no_shanghai(self) -> Self {
+        self.set_shanghai(false)
+    }
+
+    /// Set the Shanghai fork.
+    pub fn set_shanghai(mut self, shanghai: bool) -> Self {
+        self.shanghai = shanghai;
+        self
+    }
+
+    /// Disables the eip2718 support.
+    pub fn no_eip2718(self) -> Self {
+        self.set_eip2718(false)
+    }
+
+    /// Set eip2718 support.
+    pub fn set_eip2718(mut self, eip2718: bool) -> Self {
+        self.eip2718 = eip2718;
+        self
+    }
+
+    /// Disables the eip1559 support.
+    pub fn no_eip1559(self) -> Self {
+        self.set_eip1559(false)
+    }
+
+    /// Set the eip1559 support.
+    pub fn set_eip1559(mut self, eip1559: bool) -> Self {
+        self.eip1559 = eip1559;
+        self
+    }
+
+    /// Sets a minimum priority fee that's enforced for acceptance into the pool.
+    pub fn with_minimum_priority_fee(mut self, minimum_priority_fee: u128) -> Self {
+        self.minimum_priority_fee = Some(minimum_priority_fee);
+        self
+    }
+
+    /// Sets the number of additional tasks to spawn.
+    pub fn with_additional_tasks(mut self, additional_tasks: usize) -> Self {
+        self.additional_tasks = additional_tasks;
+        self
+    }
+
+    /// Builds a [EthTransactionValidator]
+    ///
+    /// The validator will spawn `additional_tasks` additional tasks for validation.
+    ///
+    /// By default this will spawn 1 additional task.
+    pub fn build<Client, Tx, T>(
+        self,
+        client: Client,
+        tasks: T,
+    ) -> EthTransactionValidator<Client, Tx>
+    where
+        T: TaskSpawner,
+    {
+        let Self {
+            chain_spec,
+            shanghai,
+            eip2718,
+            eip1559,
+            block_gas_limit,
+            minimum_priority_fee,
+            additional_tasks,
+        } = self;
+
+        let inner = EthTransactionValidatorInner {
+            chain_spec,
+            client,
+            shanghai,
+            eip2718,
+            eip1559,
+            block_gas_limit,
+            minimum_priority_fee,
+            _marker: Default::default(),
+        };
+
+        let (tx, task) = ValidationTask::new();
+
+        // Spawn validation tasks, they are blocking because they perform db lookups
+        for _ in 0..additional_tasks {
+            let task = task.clone();
+            tasks.spawn_blocking(Box::pin(async move {
+                task.run().await;
+            }));
+        }
+
+        tasks.spawn_critical_blocking(
+            "transaction-validation-service",
+            Box::pin(async move {
+                task.run().await;
+            }),
+        );
+
+        let to_validation_task = Arc::new(Mutex::new(tx));
+
+        EthTransactionValidator { inner: Arc::new(inner), to_validation_task }
     }
 }
 
