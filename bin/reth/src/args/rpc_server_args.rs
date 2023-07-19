@@ -2,14 +2,14 @@
 
 use crate::args::GasPriceOracleArgs;
 use clap::{
-    builder::{PossibleValue, TypedValueParser},
+    builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
 };
 use futures::TryFutureExt;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider, HeaderProvider,
-    StateProviderFactory,
+    BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider,
+    HeaderProvider, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{
@@ -23,6 +23,7 @@ use reth_rpc::{
 use reth_rpc_builder::{
     auth::{AuthServerConfig, AuthServerHandle},
     constants,
+    constants::RPC_DEFAULT_GAS_CAP,
     error::RpcError,
     EthConfig, IpcServerBuilder, RethRpcModule, RpcModuleBuilder, RpcModuleConfig,
     RpcModuleSelection, RpcServerConfig, RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
@@ -132,6 +133,16 @@ pub struct RpcServerArgs {
     #[arg(long, value_name = "COUNT", default_value_t = RPC_DEFAULT_MAX_TRACING_REQUESTS)]
     pub rpc_max_tracing_requests: u32,
 
+    /// Maximum gas limit for `eth_call` and call tracing RPC methods.
+    #[arg(
+        long,
+        alias = "rpc.gascap",
+        value_name = "GAS_CAP",
+        value_parser = RangedU64ValueParser::<u64>::new().range(1..),
+        default_value_t = RPC_DEFAULT_GAS_CAP
+    )]
+    pub rpc_gas_cap: u64,
+
     /// Gas price oracle configuration.
     #[clap(flatten)]
     pub gas_price_oracle: GasPriceOracleArgs,
@@ -174,6 +185,7 @@ impl RpcServerArgs {
     pub fn eth_config(&self) -> EthConfig {
         EthConfig::default()
             .max_tracing_requests(self.rpc_max_tracing_requests)
+            .rpc_gas_cap(self.rpc_gas_cap)
             .gpo_config(self.gas_price_oracle_config())
     }
 
@@ -237,6 +249,7 @@ impl RpcServerArgs {
             + StateProviderFactory
             + EvmEnvProvider
             + ChainSpecProvider
+            + ChangeSetReader
             + Clone
             + Unpin
             + 'static,
@@ -298,6 +311,7 @@ impl RpcServerArgs {
             + StateProviderFactory
             + EvmEnvProvider
             + ChainSpecProvider
+            + ChangeSetReader
             + Clone
             + Unpin
             + 'static,
@@ -496,6 +510,21 @@ mod tests {
     }
 
     #[test]
+    fn test_rpc_gas_cap() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        let config = args.eth_config();
+        assert_eq!(config.rpc_gas_cap, RPC_DEFAULT_GAS_CAP);
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.gascap", "1000"]).args;
+        let config = args.eth_config();
+        assert_eq!(config.rpc_gas_cap, 1000);
+
+        let args = CommandParser::<RpcServerArgs>::try_parse_from(["reth", "--rpc.gascap", "0"]);
+        assert!(args.is_err());
+    }
+
+    #[test]
     fn test_rpc_server_args_parser() {
         let args =
             CommandParser::<RpcServerArgs>::parse_from(["reth", "--http.api", "eth,admin,debug"])
@@ -513,6 +542,25 @@ mod tests {
             "reth",
             "--http.api",
             "eth,admin,debug",
+            "--http",
+            "--ws",
+        ])
+        .args;
+        let config = args.transport_rpc_module_config();
+        let expected = vec![RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
+        assert_eq!(config.http().cloned().unwrap().into_selection(), expected);
+        assert_eq!(
+            config.ws().cloned().unwrap().into_selection(),
+            RpcModuleSelection::standard_modules()
+        );
+    }
+
+    #[test]
+    fn test_transport_rpc_module_trim_config() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http.api",
+            " eth, admin, debug",
             "--http",
             "--ws",
         ])

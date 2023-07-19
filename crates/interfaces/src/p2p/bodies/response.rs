@@ -18,13 +18,12 @@ impl BlockResponse {
         }
     }
 
-    /// Returns the total number of bytes of all transactions input data in the block
+    /// Calculates a heuristic for the in-memory size of the [BlockResponse].
+    #[inline]
     pub fn size(&self) -> usize {
         match self {
-            BlockResponse::Full(block) => {
-                block.body.iter().map(|tx| tx.transaction.input().len()).sum()
-            }
-            BlockResponse::Empty(_) => 0,
+            BlockResponse::Full(block) => SealedBlock::size(block),
+            BlockResponse::Empty(header) => SealedHeader::size(header),
         }
     }
 

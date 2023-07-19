@@ -1,6 +1,7 @@
 //! Contains RPC handler implementations specific to transactions
 use crate::{
     eth::{
+        api::pending_block::PendingBlockEnv,
         error::{EthApiError, EthResult, SignError},
         revm_utils::{
             inspect, inspect_and_return_db, prepare_call_env, replay_transactions_until, transact,
@@ -42,6 +43,9 @@ pub(crate) type StateCacheDB<'r> = CacheDB<State<StateProviderBox<'r>>>;
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace
 #[async_trait::async_trait]
 pub trait EthTransactions: Send + Sync {
+    /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
+    fn call_gas_limit(&self) -> u64;
+
     /// Returns the state at the given [BlockId]
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox<'_>>;
 
@@ -225,6 +229,10 @@ where
     Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
+    fn call_gas_limit(&self) -> u64 {
+        self.inner.gas_cap
+    }
+
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox<'_>> {
         self.state_at_block_id(at)
     }
@@ -239,31 +247,8 @@ where
 
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
         if at.is_pending() {
-            let header = if let Some(pending) = self.provider().pending_header()? {
-                pending
-            } else {
-                // no pending block from the CL yet, so we use the latest block and modify the env
-                // values that we can
-                let mut latest = self
-                    .provider()
-                    .latest_header()?
-                    .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-
-                // child block
-                latest.number += 1;
-                // assumed child block is in the next slot
-                latest.timestamp += 12;
-                // base fee of the child block
-                latest.base_fee_per_gas = latest.next_block_base_fee();
-
-                latest
-            };
-
-            let mut cfg = CfgEnv::default();
-            let mut block_env = BlockEnv::default();
-            self.provider().fill_block_env_with_header(&mut block_env, &header)?;
-            self.provider().fill_cfg_env_with_header(&mut cfg, &header)?;
-            return Ok((cfg, block_env, header.hash.into()))
+            let PendingBlockEnv { cfg, block_env, origin } = self.pending_block_env_and_cfg()?;
+            Ok((cfg, block_env, origin.header().hash.into()))
         } else {
             //  Use cached values if there is no pending block
             let block_hash = self
@@ -502,7 +487,8 @@ where
         let state = self.state_at(at)?;
         let mut db = SubState::new(State::new(state));
 
-        let env = prepare_call_env(cfg, block_env, request, &mut db, overrides)?;
+        let env =
+            prepare_call_env(cfg, block_env, request, self.call_gas_limit(), &mut db, overrides)?;
         f(db, env)
     }
 
@@ -542,7 +528,8 @@ where
         let state = self.state_at(at)?;
         let mut db = SubState::new(State::new(state));
 
-        let env = prepare_call_env(cfg, block_env, request, &mut db, overrides)?;
+        let env =
+            prepare_call_env(cfg, block_env, request, self.call_gas_limit(), &mut db, overrides)?;
         inspect_and_return_db(db, env, inspector)
     }
 
@@ -652,6 +639,7 @@ where
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Network: 'static,
 {
     /// Helper function for `eth_getTransactionReceipt`
     ///
@@ -675,7 +663,7 @@ impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Pool: TransactionPool + 'static,
     Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: 'static,
+    Network: NetworkInfo + Send + Sync + 'static,
 {
     pub(crate) fn sign_request(
         &self,
@@ -893,7 +881,7 @@ mod tests {
         EthApi,
     };
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives::{hex_literal::hex, Bytes};
+    use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, hex_literal::hex, Bytes};
     use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
 
@@ -911,6 +899,7 @@ mod tests {
             noop_network_provider,
             cache.clone(),
             GasPriceOracle::new(noop_provider, Default::default(), cache),
+            ETHEREUM_BLOCK_GAS_LIMIT,
         );
 
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d

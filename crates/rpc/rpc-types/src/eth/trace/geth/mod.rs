@@ -209,6 +209,9 @@ impl GethDebugTracerConfig {
 
     /// Returns the [CallConfig] if it is a call config.
     pub fn into_call_config(self) -> Result<CallConfig, serde_json::Error> {
+        if self.0.is_null() {
+            return Ok(Default::default())
+        }
         self.from_value()
     }
 
@@ -219,6 +222,9 @@ impl GethDebugTracerConfig {
 
     /// Returns the [PreStateConfig] if it is a call config.
     pub fn into_pre_state_config(self) -> Result<PreStateConfig, serde_json::Error> {
+        if self.0.is_null() {
+            return Ok(Default::default())
+        }
         self.from_value()
     }
 }
@@ -369,6 +375,18 @@ fn serialize_string_storage_map_opt<S: Serializer>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_tracer_config() {
+        let s = "{\"tracer\": \"callTracer\"}";
+        let opts = serde_json::from_str::<GethDebugTracingOptions>(s).unwrap();
+        assert_eq!(
+            opts.tracer,
+            Some(GethDebugTracerType::BuiltInTracer(GethDebugBuiltInTracerType::CallTracer))
+        );
+        let _call_config = opts.tracer_config.clone().into_call_config().unwrap();
+        let _prestate_config = opts.tracer_config.into_pre_state_config().unwrap();
+    }
 
     #[test]
     fn test_memory_capture() {

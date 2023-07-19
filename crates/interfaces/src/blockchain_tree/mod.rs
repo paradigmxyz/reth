@@ -144,8 +144,8 @@ pub enum BlockStatus {
     Accepted,
     /// If blocks is not connected to canonical chain.
     Disconnected {
-        /// The lowest parent block that is not connected to the canonical chain.
-        missing_parent: BlockNumHash,
+        /// The lowest ancestor block that is not connected to the canonical chain.
+        missing_ancestor: BlockNumHash,
     },
 }
 
