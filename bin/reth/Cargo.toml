@@ -96,6 +96,7 @@ jemalloc-ctl = { version = "0.5.0", optional = true }
 
 [features]
 default = ["jemalloc"]
+#default = ["jemalloc", "optimism"]
 jemalloc = ["dep:jemallocator", "dep:jemalloc-ctl"]
 jemalloc-prof = ["jemalloc", "jemallocator?/profiling"]
 min-error-logs = ["tracing/release_max_level_error"]
@@ -107,6 +108,7 @@ optimism = [
   "reth-primitives/optimism",
   "reth-revm/optimism",
   "reth-interfaces/optimism",
+  "reth-rpc/optimism",
   "reth-rpc-engine-api/optimism",
   "reth-transaction-pool/optimism",
   "reth-provider/optimism",
