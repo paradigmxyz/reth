@@ -80,24 +80,21 @@ mod tests {
         TestTransaction, UnwindStageTestRunner,
     };
     use itertools::Itertools;
-    use reth_db::{cursor::DbCursorRO, models::sharded_key, transaction::DbTx};
+    use reth_db::{
+        cursor::DbCursorRO,
+        models::{
+            sharded_key, sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx, ShardedKey,
+            StoredBlockBodyIndices,
+        },
+        tables,
+        transaction::{DbTx, DbTxMut},
+        BlockNumberList,
+    };
     use reth_interfaces::test_utils::{
         generators,
         generators::{random_block_range, random_contract_account_range, random_transition_range},
     };
-    use reth_primitives::{Address, BlockNumber, H256};
-
-    stage_test_suite_ext!(IndexAccountHistoryTestRunner, index_account_history);
-    use reth_db::{
-        models::{
-            sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx, ShardedKey,
-            StoredBlockBodyIndices,
-        },
-        tables,
-        transaction::DbTxMut,
-        BlockNumberList,
-    };
-    use reth_primitives::{hex_literal::hex, H160, MAINNET};
+    use reth_primitives::{hex_literal::hex, Address, BlockNumber, H160, H256, MAINNET};
 
     const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));
 
@@ -369,6 +366,8 @@ mod tests {
             ])
         );
     }
+
+    stage_test_suite_ext!(IndexAccountHistoryTestRunner, index_account_history);
 
     struct IndexAccountHistoryTestRunner {
         pub(crate) tx: TestTransaction,
