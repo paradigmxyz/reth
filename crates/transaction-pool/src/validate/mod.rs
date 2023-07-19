@@ -164,12 +164,18 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.cost()
     }
 
-    /// Returns the gas cost for this transaction.
+    /// Returns the effective tip for this transaction.
     ///
-    /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit`.
-    /// For legacy transactions: `gas_price * gas_limit`.
-    pub fn gas_cost(&self) -> U256 {
-        self.transaction.gas_cost()
+    /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
+    /// For legacy transactions: `gas_price - base_fee`.
+    pub fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
+        self.transaction.effective_tip_per_gas(base_fee)
+    }
+
+    /// Returns the max priority fee per gas if the transaction is an EIP-1559 transaction, and
+    /// otherwise returns the gas price.
+    pub fn priority_fee_or_price(&self) -> u128 {
+        self.transaction.priority_fee_or_price()
     }
 
     /// Returns the EIP-1559 Max base fee the caller is willing to pay.

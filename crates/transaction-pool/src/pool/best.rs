@@ -18,7 +18,7 @@ use tracing::debug;
 /// This iterator guarantees that all transaction it returns satisfy the base fee.
 pub(crate) struct BestTransactionsWithBasefee<T: TransactionOrdering> {
     pub(crate) best: BestTransactions<T>,
-    pub(crate) base_fee: u128,
+    pub(crate) base_fee: u64,
 }
 
 impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactionsWithBasefee<T> {
@@ -34,7 +34,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithBasefee<T> {
         // find the next transaction that satisfies the base fee
         loop {
             let best = self.best.next()?;
-            if best.transaction.max_fee_per_gas() < self.base_fee {
+            if best.transaction.max_fee_per_gas() < self.base_fee as u128 {
                 // tx violates base fee, mark it as invalid and continue
                 crate::traits::BestTransactions::mark_invalid(self, &best);
             } else {
@@ -133,7 +133,7 @@ mod tests {
         for nonce in 0..num_tx {
             let tx = tx.clone().rng_hash().with_nonce(nonce);
             let valid_tx = f.validated(tx);
-            pool.add_transaction(Arc::new(valid_tx));
+            pool.add_transaction(Arc::new(valid_tx), 0);
         }
 
         let mut best = pool.best();
@@ -159,7 +159,7 @@ mod tests {
         for nonce in 0..num_tx {
             let tx = tx.clone().rng_hash().with_nonce(nonce);
             let valid_tx = f.validated(tx);
-            pool.add_transaction(Arc::new(valid_tx));
+            pool.add_transaction(Arc::new(valid_tx), 0);
         }
 
         let mut best = pool.best();

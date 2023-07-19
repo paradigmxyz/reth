@@ -158,7 +158,7 @@ pub use crate::{
         TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
     },
     error::PoolResult,
-    ordering::{GasCostOrdering, TransactionOrdering},
+    ordering::{MinerTipOrdering, TransactionOrdering},
     pool::{
         state::SubPool, AllTransactionsEvents, FullTransactionEvent, TransactionEvent,
         TransactionEvents,
@@ -281,12 +281,12 @@ where
 }
 
 impl<Client>
-    Pool<EthTransactionValidator<Client, PooledTransaction>, GasCostOrdering<PooledTransaction>>
+    Pool<EthTransactionValidator<Client, PooledTransaction>, MinerTipOrdering<PooledTransaction>>
 where
     Client: StateProviderFactory + Clone + 'static,
 {
     /// Returns a new [Pool] that uses the default [EthTransactionValidator] when validating
-    /// [PooledTransaction]s and ords via [GasCostOrdering]
+    /// [PooledTransaction]s and ords via [MinerTipOrdering]
     ///
     /// # Example
     ///
@@ -306,7 +306,7 @@ where
         validator: EthTransactionValidator<Client, PooledTransaction>,
         config: PoolConfig,
     ) -> Self {
-        Self::new(validator, GasCostOrdering::default(), config)
+        Self::new(validator, MinerTipOrdering::default(), config)
     }
 }
 
@@ -399,7 +399,7 @@ where
 
     fn best_transactions_with_base_fee(
         &self,
-        base_fee: u128,
+        base_fee: u64,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
         self.pool.best_transactions_with_base_fee(base_fee)
     }
