@@ -16,9 +16,9 @@ pub(crate) struct EngineMetrics {
     /// The number of times the pruner was run.
     pub(crate) pruner_runs: Counter,
     /// Latency for making canonical already canonical block
-    pub(crate) make_canonical_already_canonical_latency: Histogram, 
+    pub(crate) make_canonical_already_canonical_latency: Histogram,
     /// Latency for making canonical a committed block
-    pub(crate) make_canonical_committed_latency: Histogram, 
+    pub(crate) make_canonical_committed_latency: Histogram,
     /// Latency for making canonical returns error
     pub(crate) make_canonical_error_latency: Histogram,
     /// Latency for all make canonical requests

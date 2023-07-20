@@ -1,4 +1,3 @@
-use std::time::Instant;
 use crate::{
     engine::{
         forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker},
@@ -40,6 +39,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Instant,
 };
 use tokio::sync::{
     mpsc,
