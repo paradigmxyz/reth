@@ -71,8 +71,11 @@ RUSTFLAGS="-C target-cpu=native" cargo build --features jemalloc-prof --profile 
 
 ### Limiting process memory
 
- * Why limit memory usage
- * What is `cgroups`
+Memory leaks that cause OOMs can be difficult to trigger sometimes, and highly depend on the testing hardware. A testing machine with 128GB of RAM is not going to encounter OOMs caused by
+memory spikes or leaks as often as a machine with only 8GB of RAM. Development machines are powerful for a reason, so artificially limiting memory usage is often the best way to replicate a
+user's hardware. This can help developers debug issues that only occur on devices with limited hardware. `cgroups` is a tool that allows developers to limit the memory usage of a process,
+making it extremely useful to developers in understanding how their application performs in low-memory environments.
+
  * How to use `cgroups` to limit memory usage
    * Enable cgroups on your system
      * grub var
