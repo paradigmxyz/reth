@@ -292,7 +292,7 @@ impl StorageInner {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
         let (post_state, gas_used) =
-            executor.execute_transactions(block, U256::ZERO, Some(senders.clone()))?;
+            executor.execute_transactions(block, U256::ZERO, Some(senders))?;
 
         // apply post block changes
         let post_state = executor.apply_post_block_changes(block, U256::ZERO, post_state)?;
