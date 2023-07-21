@@ -6,18 +6,21 @@ use humantime::parse_duration;
 
 /// Parameters for database configuration
 #[derive(Debug, Args, PartialEq, Default, Clone, Copy)]
-#[command(next_help_heading = "Dev")]
+#[command(next_help_heading = "Dev testnet")]
 pub struct DevArgs {
-    /// Start the node in ephemeral dev mode
+    /// Start the node in dev mode
     ///
-    /// This will
-    #[arg(long = "dev", help_heading = "Dev")]
+    /// This mode uses a local proof-of-authority consensus engine with either fixed block times 
+    /// or automatically mined blocks.
+    /// Disables network discovery and enables local http server.
+    /// Prefunds 20 accounts derived by mnemonic "test test test test test test test test test test test junk" with 10 000 ETH each.
+    #[arg(long = "dev", help_heading = "Dev testnet")]
     pub dev: bool,
 
     /// How many block_max_transactions to mine per block.
     #[arg(
         long = "dev.block_max_transactions",
-        help_heading = "Dev",
+        help_heading = "Dev testnet",
         conflicts_with = "block_time"
     )]
     pub block_max_transactions: Option<usize>,
@@ -25,7 +28,7 @@ pub struct DevArgs {
     /// Interval between blocks.
     #[arg(
         long = "dev.block_time",
-        help_heading = "Dev", 
+        help_heading = "Dev testnet", 
         conflicts_with = "block_max_transactions",
         value_parser = parse_duration
     )]

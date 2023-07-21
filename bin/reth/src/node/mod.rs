@@ -307,8 +307,7 @@ impl Command {
         // Configure the pipeline
         let (mut pipeline, client) = if self.dev.dev {
             info!(target: "reth::cli", "Starting Reth in dev mode");
-            info!(target: "reth::cli", "Dev args: {:?} chain args: {:?}", self.dev, self.chain);
-
+            
             let (_, client, mut task) = AutoSealBuilder::new(
                 Arc::clone(&self.chain),
                 blockchain_db.clone(),

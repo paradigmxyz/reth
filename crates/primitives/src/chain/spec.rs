@@ -130,14 +130,16 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     .into()
 });
 
-/// Dev testnet spec
+/// Dev testnet specification
+/// 
+/// Includes 20 prefunded accounts with 10_000 ETH each derived from mnemonic "test test test test test test test test test test test junk".
 pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::dev(),
         genesis: serde_json::from_str(include_str!("../../res/genesis/dev.json"))
             .expect("Can't deserialize Dev testnet genesis json"),
         genesis_hash: Some(H256(hex!(
-            "25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9"
+            "2f980576711e3617a5e4d83dd539548ec0f7792007d505a3d2e9674833af2d7c"
         ))),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         fork_timestamps: ForkTimestamps::default().shanghai(1677557088),
@@ -925,7 +927,7 @@ mod tests {
     use crate::{
         Address, AllGenesisFormats, Chain, ChainSpec, ChainSpecBuilder, DisplayHardforks,
         ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head, GOERLI, H256, MAINNET, SEPOLIA,
-        U256,
+        U256, DEV,
     };
     use bytes::BytesMut;
     use ethers_core::types as EtherType;
