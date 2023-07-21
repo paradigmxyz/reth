@@ -1,10 +1,10 @@
-//! clap [Args](clap::Args) for dev testnet configuration
+//! clap [Args](clap::Args) for Dev testnet configuration
 use std::time::Duration;
 
 use clap::Args;
 use humantime::parse_duration;
 
-/// Parameters for database configuration
+/// Parameters for Dev testnet configuration
 #[derive(Debug, Args, PartialEq, Default, Clone, Copy)]
 #[command(next_help_heading = "Dev testnet")]
 pub struct DevArgs {
@@ -15,10 +15,10 @@ pub struct DevArgs {
     /// Disables network discovery and enables local http server.
     /// Prefunds 20 accounts derived by mnemonic "test test test test test test test test test test
     /// test junk" with 10 000 ETH each.
-    #[arg(long = "dev", help_heading = "Dev testnet")]
+    #[arg(long = "dev", help_heading = "Dev testnet", verbatim_doc_comment)]
     pub dev: bool,
 
-    /// How many block_max_transactions to mine per block.
+    /// How many transactions to mine per block.
     #[arg(
         long = "dev.block_max_transactions",
         help_heading = "Dev testnet",
@@ -27,11 +27,15 @@ pub struct DevArgs {
     pub block_max_transactions: Option<usize>,
 
     /// Interval between blocks.
+    /// 
+    /// Parses strings using [humantime::parse_duration]
+    /// --dev.block_time 12s
     #[arg(
         long = "dev.block_time",
         help_heading = "Dev testnet", 
         conflicts_with = "block_max_transactions",
-        value_parser = parse_duration
+        value_parser = parse_duration,
+        verbatim_doc_comment
     )]
     pub block_time: Option<Duration>,
 }
