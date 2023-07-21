@@ -29,7 +29,7 @@ use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     proofs, Address, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec,
     Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, EMPTY_OMMER_ROOT, H256,
-    U256,
+    U256, Bloom,
 };
 use reth_provider::{BlockReaderIdExt, CanonStateNotificationSender, PostState, StateProvider};
 use reth_revm::executor::Executor;
@@ -315,6 +315,7 @@ impl StorageInner {
         } else {
             let receipts_with_bloom =
                 receipts.iter().map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
+            header.logs_bloom = receipts_with_bloom.iter().fold(Bloom::zero(), |bloom, r| bloom | r.bloom);
             proofs::calculate_receipt_root(&receipts_with_bloom)
         };
 
