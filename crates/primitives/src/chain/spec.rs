@@ -143,7 +143,7 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "2f980576711e3617a5e4d83dd539548ec0f7792007d505a3d2e9674833af2d7c"
         ))),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
-        fork_timestamps: ForkTimestamps::default().shanghai(1677557088),
+        fork_timestamps: ForkTimestamps::default().shanghai(0),
         hardforks: BTreeMap::from([
             (Hardfork::Frontier, ForkCondition::Block(0)),
             (Hardfork::Homestead, ForkCondition::Block(0)),
@@ -1223,6 +1223,17 @@ Post-merge hard forks (timestamp based):
                 ),
             ],
         );
+    }
+
+    #[test]
+    fn dev_forkids() {
+        test_fork_ids(
+            &DEV,
+            &[(
+                Head { number: 0, ..Default::default() },
+                ForkId { hash: ForkHash([0x45, 0xb8, 0x36, 0x12]), next: 0 },
+            )],
+        )
     }
 
     /// Checks that time-based forks work

@@ -27,7 +27,7 @@ pub struct DevArgs {
     pub block_max_transactions: Option<usize>,
 
     /// Interval between blocks.
-    /// 
+    ///
     /// Parses strings using [humantime::parse_duration]
     /// --dev.block_time 12s
     #[arg(
@@ -76,7 +76,7 @@ mod tests {
             DevArgs {
                 dev: true,
                 block_max_transactions: None,
-                block_time: Some(std::time::Duration::from_secs(1).into())
+                block_time: Some(std::time::Duration::from_secs(1))
             }
         );
     }
