@@ -34,7 +34,7 @@ pub struct HistoricalStateProviderRef<'a, 'b, TX: DbTx<'a>> {
 }
 
 pub enum HistoryInfo {
-    NotWritten,
+    NotYetWritten,
     InChangeset(u64),
     InPlainState,
 }
@@ -71,29 +71,36 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
     {
         let mut cursor = self.tx.cursor_read::<T>()?;
 
-        // Check if there's a value in history table greater than or equal to the provided key.
+        // Lookup the history chunk in the history index. If they key does not appear in the
+        // index, the first chunk for the next key will be returned so we filter out chunks that
+        // have a different key.
         if let Some(chunk) = cursor.seek(key)?.filter(|(key, _)| key_filter(key)).map(|x| x.1 .0) {
             let chunk = chunk.enable_rank();
+
+            // Get the rank of the first entry after our block.
             let rank = chunk.rank(self.block_number as usize);
+
+            // If our block is before the first entry in the index chunk, it might be before
+            // the first write ever. To check, we look at the previous entry and check if the
+            // key is the same.
+            // This check is worth it, the `cursor.prev()` check is rarely triggered (the if will
+            // short-circuit) and when it passes we save a full seek into the changeset/plain state
+            // table.
             if rank == 0 && !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key)) {
-                // If there are 0 elements in that entry AND there exists a previous entry in the
-                // table for that key, meaning it was previously written and now there was no
-                // change.
-                // We use this later for the optimization in the changeset read. In practice
-                // this is going to be rare as in most cases it will be `rank != 0` and
-                // the if statement will short circuit.
-                return Ok(HistoryInfo::NotWritten)
+                // The key is written to, but only after our block.
+                return Ok(HistoryInfo::NotYetWritten)
             }
             if rank < chunk.len() {
-                // If the number of items less than block number in that bucket is less than the
-                // items in the bucket, return the corresponding changeset key.
+                // The chunk contains an entry for a write after our block, return it.
                 Ok(HistoryInfo::InChangeset(chunk.select(rank) as u64))
             } else {
-                // If it's larger than the bucket len, then it means it's in the plain state
+                // The chunk does not contain an entry for a write after our block. This can only
+                // happen if this is the last chunk and so we need to look in the plain state.
                 Ok(HistoryInfo::InPlainState)
             }
         } else {
-            Ok(HistoryInfo::NotWritten)
+            // The key has not been written to at all.
+            Ok(HistoryInfo::NotYetWritten)
         }
     }
 }
@@ -102,7 +109,7 @@ impl<'a, 'b, TX: DbTx<'a>> AccountReader for HistoricalStateProviderRef<'a, 'b, 
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
         match self.account_history_lookup(address)? {
-            HistoryInfo::NotWritten => Ok(None),
+            HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => Ok(self
                 .tx
                 .cursor_dup_read::<tables::AccountChangeSet>()?
@@ -148,7 +155,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
     /// Get storage.
     fn storage(&self, address: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
         match self.storage_history_lookup(address, storage_key)? {
-            HistoryInfo::NotWritten => Ok(None),
+            HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => Ok(Some(
                 self.tx
                     .cursor_dup_read::<tables::StorageChangeSet>()?
