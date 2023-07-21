@@ -39,6 +39,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Instant,
 };
 use tokio::sync::{
     mpsc,
@@ -628,14 +629,19 @@ where
             return Ok(OnForkChoiceUpdated::syncing())
         }
 
+        let start = Instant::now();
         let status = match self.blockchain.make_canonical(&state.head_block_hash) {
             Ok(outcome) => {
+                let end = start.elapsed();
+                self.metrics.make_canonical_latency.record(end);
                 if !outcome.is_already_canonical() {
+                    self.metrics.make_canonical_committed_latency.record(end);
                     debug!(target: "consensus::engine", hash=?state.head_block_hash, number=outcome.header().number, "canonicalized new head");
 
                     // new VALID update that moved the canonical chain forward
                     let _ = self.update_head(outcome.header().clone());
                 } else {
+                    self.metrics.make_canonical_already_canonical_latency.record(end);
                     debug!(target: "consensus::engine", fcu_head_num=?outcome.header().number, current_head_num=?self.blockchain.canonical_tip().number, "Ignoring beacon update to old head");
                 }
 
@@ -662,6 +668,9 @@ where
                 PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash))
             }
             Err(error) => {
+                let end = start.elapsed();
+                self.metrics.make_canonical_latency.record(end);
+                self.metrics.make_canonical_error_latency.record(end);
                 if let Error::Execution(ref err) = error {
                     if err.is_fatal() {
                         tracing::error!(target: "consensus::engine", ?err, "Encountered fatal error");
