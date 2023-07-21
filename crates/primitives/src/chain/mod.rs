@@ -11,7 +11,7 @@ use std::{fmt, str::FromStr};
 mod spec;
 pub use spec::{
     AllGenesisFormats, ChainSpec, ChainSpecBuilder, DisplayHardforks, ForkCondition,
-    ForkTimestamps, GOERLI, MAINNET, SEPOLIA, DEV,
+    ForkTimestamps, DEV, GOERLI, MAINNET, SEPOLIA,
 };
 
 // The chain info module.

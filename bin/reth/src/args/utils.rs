@@ -1,7 +1,7 @@
 //! Clap parser utilities
 
 use reth_primitives::{
-    fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, GOERLI, MAINNET, SEPOLIA, DEV,
+    fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, DEV, GOERLI, MAINNET, SEPOLIA,
 };
 use reth_revm::primitives::B256 as H256;
 use std::{

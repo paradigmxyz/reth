@@ -2,7 +2,7 @@
 //!
 //! Starts the client
 use crate::{
-    args::{get_secret_key, DebugArgs, NetworkArgs, RpcServerArgs, TxPoolArgs, DevArgs},
+    args::{get_secret_key, DebugArgs, DevArgs, NetworkArgs, RpcServerArgs, TxPoolArgs},
     dirs::DataDirPath,
     init::init_genesis,
     prometheus_exporter,
@@ -307,7 +307,7 @@ impl Command {
         // Configure the pipeline
         let (mut pipeline, client) = if self.dev.dev {
             info!(target: "reth::cli", "Starting Reth in dev mode");
-            
+
             let (_, client, mut task) = AutoSealBuilder::new(
                 Arc::clone(&self.chain),
                 blockchain_db.clone(),
@@ -876,7 +876,10 @@ mod tests {
         let chain = DEV.clone();
         assert_eq!(cmd.chain.chain, chain.chain);
         assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
-        assert_eq!(cmd.chain.paris_block_and_final_difficulty, chain.paris_block_and_final_difficulty);
+        assert_eq!(
+            cmd.chain.paris_block_and_final_difficulty,
+            chain.paris_block_and_final_difficulty
+        );
         assert_eq!(cmd.chain.hardforks, chain.hardforks);
 
         assert!(cmd.rpc.http);

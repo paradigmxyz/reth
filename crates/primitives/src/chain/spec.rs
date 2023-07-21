@@ -131,8 +131,9 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 });
 
 /// Dev testnet specification
-/// 
-/// Includes 20 prefunded accounts with 10_000 ETH each derived from mnemonic "test test test test test test test test test test test junk".
+///
+/// Includes 20 prefunded accounts with 10_000 ETH each derived from mnemonic "test test test test
+/// test test test test test test test junk".
 pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::dev(),
@@ -158,10 +159,7 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::London, ForkCondition::Block(0)),
             (
                 Hardfork::Paris,
-                ForkCondition::TTD {
-                    fork_block: Some(0),
-                    total_difficulty: U256::from(0),
-                },
+                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
         ]),
@@ -926,8 +924,8 @@ where
 mod tests {
     use crate::{
         Address, AllGenesisFormats, Chain, ChainSpec, ChainSpecBuilder, DisplayHardforks,
-        ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head, GOERLI, H256, MAINNET, SEPOLIA,
-        U256, DEV,
+        ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head, DEV, GOERLI, H256, MAINNET,
+        SEPOLIA, U256,
     };
     use bytes::BytesMut;
     use ethers_core::types as EtherType;
