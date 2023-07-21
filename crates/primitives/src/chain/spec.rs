@@ -1320,17 +1320,20 @@ Post-merge hard forks (timestamp based):
     #[cfg(feature = "optimism")]
     #[test]
     fn optimism_goerli_forkids() {
-        // TODO
         test_fork_ids(
             &OP_GOERLI,
             &[
                 (
                     Head { number: 0, ..Default::default() },
-                    ForkId { hash: ForkHash([0x00, 0x00, 0x00, 0x00]), next: 4061224 },
+                    ForkId { hash: ForkHash([0x6d, 0x63, 0x76, 0xbe]), next: 1679079600 },
                 ),
                 (
-                    Head { number: 4061224, ..Default::default() },
-                    ForkId { hash: ForkHash([0x00, 0x00, 0x00, 0x00]), next: 0 },
+                    Head { number: 4061224, timestamp: 1679079599, ..Default::default() },
+                    ForkId { hash: ForkHash([0x6d, 0x63, 0x76, 0xbe]), next: 1679079600 },
+                ),
+                (
+                    Head { number: 4061224, timestamp: 1679079600, ..Default::default() },
+                    ForkId { hash: ForkHash([0x8e, 0x32, 0xcc, 0x21]), next: 0 },
                 ),
             ],
         );
