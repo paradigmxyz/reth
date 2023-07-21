@@ -130,6 +130,43 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     .into()
 });
 
+/// Dev testnet spec
+pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    ChainSpec {
+        chain: Chain::dev(),
+        genesis: serde_json::from_str(include_str!("../../res/genesis/dev.json"))
+            .expect("Can't deserialize Dev testnet genesis json"),
+        genesis_hash: Some(H256(hex!(
+            "25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9"
+        ))),
+        paris_block_and_final_difficulty: Some((0, U256::from(0))),
+        fork_timestamps: ForkTimestamps::default().shanghai(1677557088),
+        hardforks: BTreeMap::from([
+            (Hardfork::Frontier, ForkCondition::Block(0)),
+            (Hardfork::Homestead, ForkCondition::Block(0)),
+            (Hardfork::Dao, ForkCondition::Block(0)),
+            (Hardfork::Tangerine, ForkCondition::Block(0)),
+            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+            (Hardfork::Byzantium, ForkCondition::Block(0)),
+            (Hardfork::Constantinople, ForkCondition::Block(0)),
+            (Hardfork::Petersburg, ForkCondition::Block(0)),
+            (Hardfork::Istanbul, ForkCondition::Block(0)),
+            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
+            (Hardfork::Berlin, ForkCondition::Block(0)),
+            (Hardfork::London, ForkCondition::Block(0)),
+            (
+                Hardfork::Paris,
+                ForkCondition::TTD {
+                    fork_block: Some(0),
+                    total_difficulty: U256::from(0),
+                },
+            ),
+            (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
+        ]),
+    }
+    .into()
+});
+
 /// An Ethereum chain specification.
 ///
 /// A chain specification describes:
