@@ -1102,8 +1102,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     pub(crate) fn update_chains_metrics(&mut self) {
         let height = self.canonical_chain().tip().number;
 
-        let longest_sidechain_height =
-            self.chains.values().map(|chain| chain.tip().number).max();
+        let longest_sidechain_height = self.chains.values().map(|chain| chain.tip().number).max();
         if let Some(longest_sidechain_height) = longest_sidechain_height {
             self.metrics.longest_sidechain_height.set(longest_sidechain_height as f64);
         }
