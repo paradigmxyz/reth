@@ -570,5 +570,5 @@ fn test_mock_priority() {
     let o = MockOrdering;
     let lo = MockTransaction::eip1559().with_gas_limit(100_000);
     let hi = lo.next().inc_price();
-    assert!(o.priority(&hi, None) > o.priority(&lo, None));
+    assert!(o.priority(&hi, 0) > o.priority(&lo, 0));
 }
