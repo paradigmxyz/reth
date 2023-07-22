@@ -39,7 +39,7 @@ pub const ETHEREUM_BLOCK_GAS_LIMIT: u64 = 30_000_000;
 /// The `BASE_FEE_MAX_CHANGE_DENOMINATOR` <https://eips.ethereum.org/EIPS/eip-1559> is `8`, or 12.5%.
 /// Once the base fee has dropped to `7` WEI it cannot decrease further because 12.5% of 7 is less
 /// than 1.
-pub const MIN_PROTOCOL_BASE_FEE: u128 = 7;
+pub const MIN_PROTOCOL_BASE_FEE: u64 = 7;
 
 /// Same as [MIN_PROTOCOL_BASE_FEE] but as a U256.
 pub const MIN_PROTOCOL_BASE_FEE_U256: U256 = U256::from_limbs([7u64, 0, 0, 0]);
@@ -114,6 +114,6 @@ mod tests {
 
     #[test]
     fn min_protocol_sanity() {
-        assert_eq!(MIN_PROTOCOL_BASE_FEE_U256.to::<u128>(), MIN_PROTOCOL_BASE_FEE);
+        assert_eq!(MIN_PROTOCOL_BASE_FEE_U256.to::<u64>(), MIN_PROTOCOL_BASE_FEE);
     }
 }
