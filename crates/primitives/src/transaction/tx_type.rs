@@ -1,4 +1,5 @@
 use crate::U8;
+use bytes::Buf;
 use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
 
@@ -51,7 +52,10 @@ impl From<TxType> for U8 {
 }
 
 impl Compact for TxType {
-    fn to_compact<B>(self, _: &mut B) -> usize
+    // For backwards compatibility purposes, 2 bits are reserved for the transaction type in the
+    // `StructFlags`. In the case where the transaction type is at least 3, the full transaction
+    // type is encoded into the buffer as a single byte and a 3 is encoded into the flags.
+    fn to_compact<B>(self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -59,19 +63,30 @@ impl Compact for TxType {
             TxType::Legacy => LEGACY_TX_TYPE_ID as usize,
             TxType::EIP2930 => EIP2930_TX_TYPE_ID as usize,
             TxType::EIP1559 => EIP1559_TX_TYPE_ID as usize,
-            #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => DEPOSIT_TX_TYPE as usize,
+            _ => {
+                buf.put_u8(self as u8);
+                3
+            }
         }
     }
 
-    fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+    // For backwards compatibility purposesm only 2 bits of the type are encoded in the identifier
+    // parameter. In the case of a 3, the full transaction type is read from the buffer as a
+    // single byte.
+    fn from_compact(mut buf: &[u8], identifier: usize) -> (Self, &[u8]) {
         (
             match identifier {
                 0 => TxType::Legacy,
                 1 => TxType::EIP2930,
-                #[cfg(feature = "optimism")]
-                126 => TxType::DEPOSIT,
-                _ => TxType::EIP1559,
+                2 => TxType::EIP1559,
+                _ => {
+                    let identifier = buf.get_u8() as usize;
+                    match identifier {
+                        #[cfg(feature = "optimism")]
+                        126 => TxType::DEPOSIT,
+                        _ => TxType::EIP1559,
+                    }
+                }
             },
             buf,
         )
