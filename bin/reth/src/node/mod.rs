@@ -78,6 +78,7 @@ use reth_interfaces::p2p::headers::client::HeadersClient;
 use reth_payload_builder::PayloadBuilderService;
 use reth_primitives::DisplayHardforks;
 use reth_provider::providers::BlockchainProvider;
+use reth_prune::BatchSizes;
 use reth_stages::stages::{
     AccountHashingStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
     StorageHashingStage, TransactionLookupStage,
@@ -364,7 +365,14 @@ impl Command {
 
         let pruner = config.prune.map(|prune_config| {
             info!(target: "reth::cli", "Pruner initialized");
-            reth_prune::Pruner::new(prune_config.block_interval, tree_config.max_reorg_depth())
+            reth_prune::Pruner::new(
+                db.clone(),
+                self.chain.clone(),
+                prune_config.block_interval,
+                tree_config.max_reorg_depth(),
+                prune_config.parts,
+                BatchSizes::default(),
+            )
         });
 
         // Configure the consensus engine

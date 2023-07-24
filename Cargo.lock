@@ -5586,7 +5586,13 @@ dependencies = [
 name = "reth-prune"
 version = "0.1.0-alpha.4"
 dependencies = [
+ "assert_matches",
+ "itertools",
+ "reth-db",
+ "reth-interfaces",
  "reth-primitives",
+ "reth-provider",
+ "reth-stages",
  "thiserror",
  "tracing",
 ]

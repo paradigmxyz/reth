@@ -8,7 +8,7 @@ use reth_db::{
 };
 use reth_primitives::{
     bloom::logs_bloom, keccak256, proofs::calculate_receipt_root_ref, Account, Address,
-    BlockNumber, Bloom, Bytecode, Log, PruneMode, PruneTargets, Receipt, StorageEntry, H256, U256,
+    BlockNumber, Bloom, Bytecode, Log, PruneMode, PruneModes, Receipt, StorageEntry, H256, U256,
 };
 use reth_trie::{
     hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
@@ -79,7 +79,7 @@ pub struct PostState {
     /// The receipt(s) of the executed transaction(s).
     receipts: BTreeMap<BlockNumber, Vec<Receipt>>,
     /// Pruning configuration.
-    prune_targets: PruneTargets,
+    prune_targets: PruneModes,
 }
 
 impl PostState {
@@ -94,7 +94,7 @@ impl PostState {
     }
 
     /// Add a pruning configuration.
-    pub fn add_prune_targets(&mut self, prune_targets: PruneTargets) {
+    pub fn add_prune_targets(&mut self, prune_targets: PruneModes) {
         self.prune_targets = prune_targets;
     }
 
