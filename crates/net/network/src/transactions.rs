@@ -507,7 +507,7 @@ where
     fn on_bad_import(&mut self, hash: TxHash) {
         if let Some(peers) = self.transactions_by_peers.remove(&hash) {
             for peer_id in peers {
-                self.on_request_error(peer_id, RequestError::BadResponse);
+                self.report_peer(peer_id, ReputationChangeKind::BadTransactions);
             }
         }
     }
