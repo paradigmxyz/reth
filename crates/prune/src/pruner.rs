@@ -171,14 +171,14 @@ impl<DB: Database> Pruner<DB> {
             // Number of transactions retrieved from the database should match the tx range count
             let tx_count = tx_range.clone().count();
             if hashes.len() != tx_count {
-                return Err(PrunerError::InconsistentData)
+                return Err(PrunerError::InconsistentData(
+                    "Unexpected number of transaction hashes retrieved by transaction number range",
+                ))
             }
 
             // Pre-sort hashes to prune them in order
             hashes.sort();
 
-            // Prune transaction lookup table checking if `TxNumber` is in the tx range. The check
-            // is needed, because `TxHashNumber` table is sorted by hashes, and not
             provider.prune_table_in_batches::<tables::TxHashNumber, _>(
                 hashes,
                 self.batch_sizes.transaction_lookup,
