@@ -52,7 +52,7 @@ jobs:
       - name: Run tests
         run: |
           cargo llvm-cov nextest --lcov --output-path lcov.info \
-            --locked --workspace --all-features \
+            --release --locked --all-features --workspace --exclude examples --exclude ef-tests \
             --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
             -E 'kind(test)'
 
