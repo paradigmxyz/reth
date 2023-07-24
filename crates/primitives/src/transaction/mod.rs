@@ -462,7 +462,7 @@ impl Transaction {
     ///
     /// This is different than the `max_priority_fee_per_gas` method, which returns `None` for
     /// non-EIP-1559 transactions.
-    pub(crate) fn priority_fee_or_price(&self) -> u128 {
+    pub fn priority_fee_or_price(&self) -> u128 {
         match self {
             Transaction::Legacy(TxLegacy { gas_price, .. }) |
             Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,

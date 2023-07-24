@@ -581,7 +581,7 @@ fn build_payload<Pool, Client>(
         let base_fee = initialized_block_env.basefee.to::<u64>();
 
         let mut executed_txs = Vec::new();
-        let mut best_txs = pool.best_transactions_with_base_fee(base_fee as u128);
+        let mut best_txs = pool.best_transactions_with_base_fee(base_fee);
 
         let mut total_fees = U256::ZERO;
 

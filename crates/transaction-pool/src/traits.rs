@@ -181,7 +181,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Consumer: Block production
     fn best_transactions_with_base_fee(
         &self,
-        base_fee: u128,
+        base_fee: u64,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
 
     /// Returns all transactions that can be included in the next block.
@@ -397,7 +397,7 @@ pub struct CanonicalStateUpdate {
     /// EIP-1559 Base fee of the _next_ (pending) block
     ///
     /// The base fee of a block depends on the utilization of the last block and its base fee.
-    pub pending_block_base_fee: u128,
+    pub pending_block_base_fee: u64,
     /// A set of changed accounts across a range of blocks.
     pub changed_accounts: Vec<ChangedAccount>,
     /// All mined transactions in the block range.
@@ -677,7 +677,7 @@ pub struct BlockInfo {
     ///
     /// Note: this is the derived base fee of the _next_ block that builds on the clock the pool is
     /// currently tracking.
-    pub pending_basefee: u128,
+    pub pending_basefee: u64,
 }
 
 /// A Stream that yields full transactions the subpool
