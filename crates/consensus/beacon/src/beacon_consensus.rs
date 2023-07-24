@@ -61,7 +61,7 @@ impl Consensus for BeaconConsensus {
 
             // Post-merge, the consensus layer is expected to perform checks such that the block
             // timestamp is a function of the slot. This is different from pre-merge, where blocks
-            // are only allowed to be in the future (compared to the system's block) by a certain
+            // are only allowed to be in the future (compared to the system's clock) by a certain
             // threshold.
             //
             // Block validation with respect to the parent should ensure that the block timestamp
