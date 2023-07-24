@@ -23,16 +23,6 @@ pub fn validate_header_standalone(
         })
     }
 
-    // Check if timestamp is in future. Clock can drift but this can be consensus issue.
-    let present_timestamp =
-        SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
-    if header.timestamp > present_timestamp {
-        return Err(ConsensusError::TimestampIsInFuture {
-            timestamp: header.timestamp,
-            present_timestamp,
-        })
-    }
-
     // Check if base fee is set.
     if chain_spec.fork(Hardfork::London).active_at_block(header.number) &&
         header.base_fee_per_gas.is_none()
