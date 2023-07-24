@@ -467,7 +467,7 @@ where
     /// the given base fee.
     pub(crate) fn best_transactions_with_base_fee(
         &self,
-        base_fee: u128,
+        base_fee: u64,
     ) -> Box<dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T::Transaction>>>>
     {
         self.pool.read().best_transactions_with_base_fee(base_fee)
