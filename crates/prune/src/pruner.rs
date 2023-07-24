@@ -1,9 +1,12 @@
 //! Support for pruning.
 
 use crate::PrunerError;
+use rayon::prelude::*;
 use reth_db::{database::Database, tables};
 use reth_primitives::{BlockNumber, ChainSpec, PruneCheckpoint, PruneMode, PruneModes, PrunePart};
-use reth_provider::{BlockReader, DatabaseProviderRW, ProviderFactory, PruneCheckpointWriter};
+use reth_provider::{
+    BlockReader, DatabaseProviderRW, ProviderFactory, PruneCheckpointWriter, TransactionsProvider,
+};
 use std::sync::Arc;
 use tracing::{debug, instrument, trace};
 
@@ -15,11 +18,12 @@ pub type PrunerWithResult<DB> = (Pruner<DB>, PrunerResult);
 
 pub struct BatchSizes {
     receipts: usize,
+    transaction_lookup: usize,
 }
 
 impl Default for BatchSizes {
     fn default() -> Self {
-        Self { receipts: 10000 }
+        Self { receipts: 10000, transaction_lookup: 10000 }
     }
 }
 
@@ -68,6 +72,12 @@ impl<DB: Database> Pruner<DB> {
             self.prune_receipts(&provider, to_block, prune_mode)?;
         }
 
+        if let Some((to_block, prune_mode)) =
+            self.modes.prune_to_block_transaction_lookup(tip_block_number)
+        {
+            self.prune_transaction_lookup(&provider, to_block, prune_mode)?;
+        }
+
         provider.commit()?;
 
         self.last_pruned_block_number = Some(tip_block_number);
@@ -111,8 +121,8 @@ impl<DB: Database> Pruner<DB> {
             }
         };
 
-        provider.prune_table_in_batches::<tables::Receipts, _, _>(
-            ..=to_block_body.last_tx_num(),
+        provider.prune_table_in_batches::<tables::Receipts, _>(
+            0..=to_block_body.last_tx_num(),
             self.batch_sizes.receipts,
             |receipts| {
                 trace!(
@@ -125,6 +135,65 @@ impl<DB: Database> Pruner<DB> {
 
         provider.save_prune_checkpoint(
             PrunePart::Receipts,
+            PruneCheckpoint { block_number: to_block, prune_mode },
+        )?;
+
+        Ok(())
+    }
+
+    /// Prune transaction lookup entries up to the provided block, inclusive.
+    #[instrument(level = "trace", skip(self, provider), target = "pruner")]
+    fn prune_transaction_lookup(
+        &self,
+        provider: &DatabaseProviderRW<'_, DB>,
+        to_block: BlockNumber,
+        prune_mode: PruneMode,
+    ) -> PrunerResult {
+        let to_block_body = match provider.block_body_indices(to_block)? {
+            Some(body) => body,
+            None => {
+                trace!(target: "pruner", "No transaction lookup entries to prune");
+                return Ok(())
+            }
+        };
+
+        for i in (0..=to_block_body.last_tx_num()).step_by(self.batch_sizes.transaction_lookup) {
+            let tx_range = i..(i + self.batch_sizes.transaction_lookup as u64)
+                .min(to_block_body.last_tx_num() + 1);
+
+            // Retrieve transactions in the range and calculate their hashes in parallel
+            let mut hashes = provider
+                .transactions_by_tx_range(tx_range.clone())?
+                .into_par_iter()
+                .map(|transaction| transaction.hash())
+                .collect::<Vec<_>>();
+
+            // Number of transactions retrieved from the database should match the tx range count
+            let tx_count = tx_range.clone().count();
+            if hashes.len() != tx_count {
+                return Err(PrunerError::InconsistentData)
+            }
+
+            // Pre-sort hashes to prune them in order
+            hashes.sort();
+
+            // Prune transaction lookup table checking if `TxNumber` is in the tx range. The check
+            // is needed, because `TxHashNumber` table is sorted by hashes, and not
+            provider.prune_table_in_batches::<tables::TxHashNumber, _>(
+                hashes,
+                self.batch_sizes.transaction_lookup,
+                |entries| {
+                    trace!(
+                        target: "pruner",
+                        %entries,
+                        "Pruned receipts"
+                    );
+                },
+            )?;
+        }
+
+        provider.save_prune_checkpoint(
+            PrunePart::TransactionLookup,
             PruneCheckpoint { block_number: to_block, prune_mode },
         )?;
 
@@ -201,6 +270,7 @@ mod tests {
             BatchSizes {
                 // Less than total amount of blocks to prune to test the batching logic
                 receipts: 10,
+                ..Default::default()
             },
         );
 
@@ -217,6 +287,58 @@ mod tests {
         );
         assert_eq!(
             tx.inner().get_prune_checkpoint(PrunePart::Receipts).unwrap(),
+            Some(PruneCheckpoint { block_number: prune_to_block, prune_mode })
+        );
+    }
+
+    #[test]
+    fn prune_transaction_lookup() {
+        let tx = TestTransaction::default();
+        let mut rng = generators::rng();
+
+        let blocks = random_block_range(&mut rng, 0..=100, H256::zero(), 0..10);
+        tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
+
+        assert_eq!(
+            tx.table::<tables::Transactions>().unwrap().len(),
+            blocks.iter().map(|block| block.body.len()).sum::<usize>()
+        );
+        assert_eq!(
+            tx.table::<tables::Transactions>().unwrap().len(),
+            tx.table::<tables::TxHashNumber>().unwrap().len()
+        );
+
+        let prune_to_block = 10;
+        let prune_mode = PruneMode::Before(prune_to_block);
+        let pruner = Pruner::new(
+            tx.inner_raw(),
+            MAINNET.clone(),
+            5,
+            0,
+            PruneModes { transaction_lookup: Some(prune_mode), ..Default::default() },
+            BatchSizes {
+                // Less than total amount of blocks to prune to test the batching logic
+                transaction_lookup: 10,
+                ..Default::default()
+            },
+        );
+
+        let provider = tx.inner_rw();
+        assert_matches!(
+            pruner.prune_transaction_lookup(&provider, prune_to_block, prune_mode),
+            Ok(())
+        );
+        provider.commit().expect("commit");
+
+        assert_eq!(
+            tx.table::<tables::TxHashNumber>().unwrap().len(),
+            blocks[prune_to_block as usize + 1..]
+                .iter()
+                .map(|block| block.body.len())
+                .sum::<usize>()
+        );
+        assert_eq!(
+            tx.inner().get_prune_checkpoint(PrunePart::TransactionLookup).unwrap(),
             Some(PruneCheckpoint { block_number: prune_to_block, prune_mode })
         );
     }

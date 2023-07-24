@@ -261,6 +261,7 @@ impl TestTransaction {
 
                 block.body.iter().try_for_each(|body_tx| {
                     tx.put::<tables::Transactions>(next_tx_num, body_tx.clone().into())?;
+                    tx.put::<tables::TxHashNumber>(body_tx.hash, next_tx_num)?;
                     next_tx_num += 1;
                     Ok(())
                 })
