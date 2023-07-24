@@ -31,7 +31,7 @@ where
 {
     /// Handler for `ots_hasCode`
     async fn has_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<bool> {
-        Err(internal_rpc_err("unimplemented"))
+        self.eth.get_code(address, block_number).await.map(|code| !code.is_empty())
     }
 
     /// Handler for `ots_getApiLevel`
