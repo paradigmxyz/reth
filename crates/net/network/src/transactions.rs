@@ -475,21 +475,9 @@ where
         }
     }
 
-    fn report_message(&self, peer_id: PeerId, kind: ReputationChangeKind) {
-        let msg = match kind {
-            ReputationChangeKind::BadProtocol => "Penalizing peer for bad protocol rule",
-            ReputationChangeKind::Timeout => "Penalizing peer for timeout",
-            ReputationChangeKind::Dropped => "Penalizing peer for dropped connection",
-            ReputationChangeKind::BadTransactions => "Penalizing peer for bad transaction",
-            ReputationChangeKind::AlreadySeenTransaction => {
-                "Penalizing peer for already seen transaction"
-            }
-            ReputationChangeKind::BadBlock => "Penalizing peer for bad block",
-            ReputationChangeKind::BadMessage => "Penalizing peer for bad message",
-            ReputationChangeKind::FailedToConnect => "Penalizing peer for failing to connect",
-            _ => "Penalizing peer for unknown reason",
-        };
-        trace!(target: "net::tx", ?peer_id, ?msg);
+    fn report_peer(&self, peer_id: PeerId, kind: ReputationChangeKind) {
+        trace!(target: "net::tx", ?peer_id, ?kind);
+        self.network.reputation_change(peer_id, kind);
         self.metrics.reported_bad_transactions.increment(1);
     }
 
@@ -502,8 +490,7 @@ where
             }
             RequestError::BadResponse => ReputationChangeKind::BadTransactions,
         };
-        self.network.reputation_change(peer_id, kind);
-        self.report_message(peer_id, kind);
+        self.report_peer(peer_id, kind);
     }
 
     fn report_already_seen(&self, peer_id: PeerId) {
