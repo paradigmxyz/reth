@@ -5,10 +5,7 @@ use reth_primitives::{
     SealedHeader, Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy,
 };
 use reth_provider::{AccountReader, HeaderProvider, WithdrawalsProvider};
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    time::SystemTime,
-};
+use std::collections::{hash_map::Entry, HashMap};
 
 /// Validate header standalone
 pub fn validate_header_standalone(
@@ -20,16 +17,6 @@ pub fn validate_header_standalone(
         return Err(ConsensusError::HeaderGasUsedExceedsGasLimit {
             gas_used: header.gas_used,
             gas_limit: header.gas_limit,
-        })
-    }
-
-    // Check if timestamp is in future. Clock can drift but this can be consensus issue.
-    let present_timestamp =
-        SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
-    if header.timestamp > present_timestamp {
-        return Err(ConsensusError::TimestampIsInFuture {
-            timestamp: header.timestamp,
-            present_timestamp,
         })
     }
 

@@ -108,6 +108,15 @@ pub const EMPTY_WITHDRAWALS: H256 = EMPTY_SET_HASH;
 /// the database.
 pub const BEACON_CONSENSUS_REORG_UNWIND_DEPTH: u64 = 3;
 
+/// Max seconds from current time allowed for blocks, before they're considered future blocks.
+///
+/// This is only used when checking whether or not the timestamp for pre-merge blocks is in the
+/// future.
+///
+/// See:
+/// <https://github.com/ethereum/go-ethereum/blob/a196f3e8a22b6ad22ced5c2e3baf32bc3ebd4ec9/consensus/ethash/consensus.go#L227-L229>
+pub const ALLOWED_FUTURE_BLOCK_TIME_SECONDS: u64 = 15;
+
 #[cfg(test)]
 mod tests {
     use super::*;
