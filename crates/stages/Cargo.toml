@@ -70,7 +70,7 @@ criterion = { version = "0.5", features = ["async_futures"] }
 serde_json = { workspace = true }
 
 [features]
-test-utils = []
+test-utils = ["reth-interfaces/test-utils"]
 
 [[bench]]
 name = "criterion"

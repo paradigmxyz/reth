@@ -2,14 +2,14 @@
 
 use crate::args::GasPriceOracleArgs;
 use clap::{
-    builder::{PossibleValue, TypedValueParser},
+    builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
 };
 use futures::TryFutureExt;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider, HeaderProvider,
-    StateProviderFactory,
+    BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider,
+    HeaderProvider, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{
@@ -17,6 +17,7 @@ use reth_rpc::{
             DEFAULT_BLOCK_CACHE_MAX_LEN, DEFAULT_ENV_CACHE_MAX_LEN, DEFAULT_RECEIPT_CACHE_MAX_LEN,
         },
         gas_oracle::GasPriceOracleConfig,
+        RPC_DEFAULT_GAS_CAP,
     },
     JwtError, JwtSecret,
 };
@@ -42,7 +43,9 @@ pub(crate) const RPC_DEFAULT_MAX_SUBS_PER_CONN: u32 = 1024;
 /// Default max request size in MB.
 pub(crate) const RPC_DEFAULT_MAX_REQUEST_SIZE_MB: u32 = 15;
 /// Default max response size in MB.
-pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 100;
+///
+/// This is only relevant for very large trace responses.
+pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 115;
 /// Default number of incoming connections.
 pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 100;
 /// Default number of incoming connections.
@@ -132,6 +135,16 @@ pub struct RpcServerArgs {
     #[arg(long, value_name = "COUNT", default_value_t = RPC_DEFAULT_MAX_TRACING_REQUESTS)]
     pub rpc_max_tracing_requests: u32,
 
+    /// Maximum gas limit for `eth_call` and call tracing RPC methods.
+    #[arg(
+        long,
+        alias = "rpc.gascap",
+        value_name = "GAS_CAP",
+        value_parser = RangedU64ValueParser::<u64>::new().range(1..),
+        default_value_t = RPC_DEFAULT_GAS_CAP.into()
+    )]
+    pub rpc_gas_cap: u64,
+
     /// Gas price oracle configuration.
     #[clap(flatten)]
     pub gas_price_oracle: GasPriceOracleArgs,
@@ -174,6 +187,7 @@ impl RpcServerArgs {
     pub fn eth_config(&self) -> EthConfig {
         EthConfig::default()
             .max_tracing_requests(self.rpc_max_tracing_requests)
+            .rpc_gas_cap(self.rpc_gas_cap)
             .gpo_config(self.gas_price_oracle_config())
     }
 
@@ -237,6 +251,7 @@ impl RpcServerArgs {
             + StateProviderFactory
             + EvmEnvProvider
             + ChainSpecProvider
+            + ChangeSetReader
             + Clone
             + Unpin
             + 'static,
@@ -298,6 +313,7 @@ impl RpcServerArgs {
             + StateProviderFactory
             + EvmEnvProvider
             + ChainSpecProvider
+            + ChangeSetReader
             + Clone
             + Unpin
             + 'static,
@@ -493,6 +509,21 @@ mod tests {
     struct CommandParser<T: Args> {
         #[clap(flatten)]
         args: T,
+    }
+
+    #[test]
+    fn test_rpc_gas_cap() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        let config = args.eth_config();
+        assert_eq!(config.rpc_gas_cap, Into::<u64>::into(RPC_DEFAULT_GAS_CAP));
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.gascap", "1000"]).args;
+        let config = args.eth_config();
+        assert_eq!(config.rpc_gas_cap, 1000);
+
+        let args = CommandParser::<RpcServerArgs>::try_parse_from(["reth", "--rpc.gascap", "0"]);
+        assert!(args.is_err());
     }
 
     #[test]

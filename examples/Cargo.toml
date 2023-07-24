@@ -25,6 +25,7 @@ reth-tasks.workspace = true
 
 eyre = "0.6.8"
 futures.workspace = true
+async-trait.workspace = true
 tokio.workspace = true
 
 [[example]]
@@ -38,3 +39,7 @@ path = "db-access.rs"
 [[example]]
 name = "network"
 path = "network.rs"
+
+[[example]]
+name = "network-txpool"
+path = "network-txpool.rs"

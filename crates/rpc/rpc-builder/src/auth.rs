@@ -2,6 +2,7 @@ use crate::{
     constants,
     error::{RpcError, ServerKind},
     eth::DEFAULT_MAX_LOGS_PER_RESPONSE,
+    EthConfig,
 };
 use hyper::header::AUTHORIZATION;
 pub use jsonrpsee::server::ServerBuilder;
@@ -61,6 +62,7 @@ where
         network,
         eth_cache.clone(),
         gas_oracle,
+        EthConfig::default().rpc_gas_cap,
         Box::new(executor.clone()),
     );
     let eth_filter = EthFilter::new(

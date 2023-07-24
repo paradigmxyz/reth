@@ -1,7 +1,7 @@
 //! Collection of common provider traits.
 
 mod account;
-pub use account::{AccountExtReader, AccountReader};
+pub use account::{AccountExtReader, AccountReader, ChangeSetReader};
 
 mod storage;
 pub use storage::StorageReader;
@@ -59,3 +59,6 @@ pub use hashing::HashingWriter;
 
 mod history;
 pub use history::HistoryWriter;
+
+mod prune_checkpoint;
+pub use prune_checkpoint::{PruneCheckpointReader, PruneCheckpointWriter};

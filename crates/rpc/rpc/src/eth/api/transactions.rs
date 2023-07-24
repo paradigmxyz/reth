@@ -43,6 +43,9 @@ pub(crate) type StateCacheDB<'r> = CacheDB<State<StateProviderBox<'r>>>;
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace
 #[async_trait::async_trait]
 pub trait EthTransactions: Send + Sync {
+    /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
+    fn call_gas_limit(&self) -> u64;
+
     /// Returns the state at the given [BlockId]
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox<'_>>;
 
@@ -226,6 +229,10 @@ where
     Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
+    fn call_gas_limit(&self) -> u64 {
+        self.inner.gas_cap
+    }
+
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox<'_>> {
         self.state_at_block_id(at)
     }
@@ -480,7 +487,8 @@ where
         let state = self.state_at(at)?;
         let mut db = SubState::new(State::new(state));
 
-        let env = prepare_call_env(cfg, block_env, request, &mut db, overrides)?;
+        let env =
+            prepare_call_env(cfg, block_env, request, self.call_gas_limit(), &mut db, overrides)?;
         f(db, env)
     }
 
@@ -520,7 +528,8 @@ where
         let state = self.state_at(at)?;
         let mut db = SubState::new(State::new(state));
 
-        let env = prepare_call_env(cfg, block_env, request, &mut db, overrides)?;
+        let env =
+            prepare_call_env(cfg, block_env, request, self.call_gas_limit(), &mut db, overrides)?;
         inspect_and_return_db(db, env, inspector)
     }
 
@@ -654,7 +663,7 @@ impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Pool: TransactionPool + 'static,
     Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: Send + Sync + 'static,
+    Network: NetworkInfo + Send + Sync + 'static,
 {
     pub(crate) fn sign_request(
         &self,
@@ -872,7 +881,7 @@ mod tests {
         EthApi,
     };
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives::{hex_literal::hex, Bytes};
+    use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, hex_literal::hex, Bytes};
     use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
 
@@ -890,6 +899,7 @@ mod tests {
             noop_network_provider,
             cache.clone(),
             GasPriceOracle::new(noop_provider, Default::default(), cache),
+            ETHEREUM_BLOCK_GAS_LIMIT,
         );
 
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d

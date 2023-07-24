@@ -10,8 +10,8 @@ use reth_db::{
     DatabaseEnv, DatabaseError as DbError,
 };
 use reth_primitives::{
-    keccak256, Account, Address, BlockNumber, SealedBlock, SealedHeader, StorageEntry, H256,
-    MAINNET, U256,
+    keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader, StorageEntry,
+    TxNumber, H256, MAINNET, U256,
 };
 use reth_provider::{DatabaseProviderRO, DatabaseProviderRW, ProviderFactory};
 use std::{
@@ -264,6 +264,19 @@ impl TestTransaction {
                     next_tx_num += 1;
                     Ok(())
                 })
+            })
+        })
+    }
+
+    /// Insert collection of ([TxNumber], [Receipt]) into the corresponding table.
+    pub fn insert_receipts<I>(&self, receipts: I) -> Result<(), DbError>
+    where
+        I: IntoIterator<Item = (TxNumber, Receipt)>,
+    {
+        self.commit(|tx| {
+            receipts.into_iter().try_for_each(|(tx_num, receipt)| {
+                // Insert into receipts table.
+                tx.put::<tables::Receipts>(tx_num, receipt)
             })
         })
     }

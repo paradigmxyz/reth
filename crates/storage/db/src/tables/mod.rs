@@ -51,7 +51,7 @@ pub enum TableType {
 }
 
 /// Number of tables that should be present inside database.
-pub const NUM_TABLES: usize = 25;
+pub const NUM_TABLES: usize = 26;
 
 /// The general purpose of this is to use with a combination of Tables enum,
 /// by implementing a `TableViewer` trait you can operate on db tables in an abstract way.
@@ -183,7 +183,8 @@ tables!([
     (StoragesTrie, TableType::DupSort),
     (TxSenders, TableType::Table),
     (SyncStage, TableType::Table),
-    (SyncStageProgress, TableType::Table)
+    (SyncStageProgress, TableType::Table),
+    (PruneCheckpoints, TableType::Table)
 ]);
 
 #[macro_export]
@@ -417,7 +418,7 @@ table!(
 
 table!(
     /// Stores the highest pruned block number and prune mode of each prune part.
-    ( PruneParts ) PrunePart | PruneCheckpoint
+    ( PruneCheckpoints ) PrunePart | PruneCheckpoint
 );
 
 /// Alias Types
@@ -459,6 +460,7 @@ mod tests {
         (TableType::Table, TxSenders::const_name()),
         (TableType::Table, SyncStage::const_name()),
         (TableType::Table, SyncStageProgress::const_name()),
+        (TableType::Table, PruneCheckpoints::const_name()),
     ];
 
     #[test]

@@ -1,6 +1,8 @@
 on:
   pull_request:
   merge_group:
+  push:
+    branches: [main]
 
 env:
   RUSTFLAGS: -D warnings
@@ -16,7 +18,8 @@ jobs:
     # Skip the Fuzzing Jobs until we make them run fast and reliably. Currently they will
     # always recompile the codebase for each test and that takes way too long.
     if: false
-    runs-on: ubuntu-20.04
+    runs-on:
+      group: Reth
     strategy:
       matrix:
         target:

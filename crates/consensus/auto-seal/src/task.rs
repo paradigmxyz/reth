@@ -2,11 +2,7 @@ use crate::{mode::MiningMode, Storage};
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
 use reth_interfaces::consensus::ForkchoiceState;
-use reth_primitives::{
-    constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
-    proofs, Block, BlockBody, ChainSpec, Header, IntoRecoveredTransaction, ReceiptWithBloom,
-    SealedBlockWithSenders, EMPTY_OMMER_ROOT, U256,
-};
+use reth_primitives::{Block, ChainSpec, IntoRecoveredTransaction, SealedBlockWithSenders};
 use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
 use reth_revm::{
     database::{State, SubState},
@@ -20,11 +16,10 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, warn};
 
 /// A Future that listens for new ready transactions and puts new blocks into storage
 pub struct MiningTask<Client, Pool: TransactionPool> {
@@ -123,104 +118,28 @@ where
                 this.insert_task = Some(Box::pin(async move {
                     let mut storage = storage.write().await;
 
-                    // check previous block for base fee
-                    let base_fee_per_gas = storage
-                        .headers
-                        .get(&storage.best_block)
-                        .and_then(|parent| parent.next_block_base_fee());
-
-                    let mut header = Header {
-                        parent_hash: storage.best_hash,
-                        ommers_hash: EMPTY_OMMER_ROOT,
-                        beneficiary: Default::default(),
-                        state_root: Default::default(),
-                        transactions_root: Default::default(),
-                        receipts_root: Default::default(),
-                        withdrawals_root: None,
-                        logs_bloom: Default::default(),
-                        difficulty: U256::from(2),
-                        number: storage.best_block + 1,
-                        gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
-                        gas_used: 0,
-                        timestamp: SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs(),
-                        mix_hash: Default::default(),
-                        nonce: 0,
-                        base_fee_per_gas,
-                        extra_data: Default::default(),
-                    };
-
-                    let transactions = transactions
+                    let (transactions, senders): (Vec<_>, Vec<_>) = transactions
                         .into_iter()
-                        .map(|tx| tx.to_recovered_transaction().into_signed())
-                        .collect::<Vec<_>>();
-
-                    header.transactions_root = if transactions.is_empty() {
-                        EMPTY_TRANSACTIONS
-                    } else {
-                        proofs::calculate_transaction_root(&transactions)
-                    };
-
-                    let block =
-                        Block { header, body: transactions, ommers: vec![], withdrawals: None };
+                        .map(|tx| {
+                            let recovered = tx.to_recovered_transaction();
+                            let signer = recovered.signer();
+                            (recovered.into_signed(), signer)
+                        })
+                        .unzip();
 
                     // execute the new block
                     let substate = SubState::new(State::new(client.latest().unwrap()));
                     let mut executor = Executor::new(chain_spec, substate);
 
-                    trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
-
-                    let senders = block
-                        .body
-                        .iter()
-                        .map(|tx| tx.recover_signer())
-                        .collect::<Option<Vec<_>>>()?;
-
-                    match executor.execute_transactions(&block, U256::ZERO, Some(senders.clone())) {
-                        Ok((post_state, gas_used)) => {
-                            // apply post block changes
-                            let post_state = executor
-                                .apply_post_block_changes(&block, U256::ZERO, post_state)
-                                .unwrap();
-
-                            let Block { mut header, body, .. } = block;
-
+                    match storage.build_and_execute(transactions.clone(), &mut executor) {
+                        Ok((new_header, post_state)) => {
                             // clear all transactions from pool
-                            pool.remove_transactions(body.iter().map(|tx| tx.hash()));
+                            pool.remove_transactions(transactions.iter().map(|tx| tx.hash()));
 
-                            let receipts = post_state.receipts(header.number);
-                            header.receipts_root = if receipts.is_empty() {
-                                EMPTY_RECEIPTS
-                            } else {
-                                let receipts_with_bloom = receipts
-                                    .iter()
-                                    .map(|r| r.clone().into())
-                                    .collect::<Vec<ReceiptWithBloom>>();
-                                proofs::calculate_receipt_root(&receipts_with_bloom)
-                            };
-                            let transactions = body.clone();
-                            let body =
-                                BlockBody { transactions: body, ommers: vec![], withdrawals: None };
-                            header.gas_used = gas_used;
-
-                            trace!(target: "consensus::auto", ?post_state, ?header, ?body, "executed block, calculating root");
-
-                            // calculate the state root
-                            let state_root =
-                                executor.db().db.0.state_root(post_state.clone()).unwrap();
-                            header.state_root = state_root;
-
-                            trace!(target: "consensus::auto", root=?header.state_root, ?body, "calculated root");
-
-                            storage.insert_new_block(header.clone(), body);
-
-                            let new_hash = storage.best_hash;
                             let state = ForkchoiceState {
-                                head_block_hash: new_hash,
-                                finalized_block_hash: new_hash,
-                                safe_block_hash: new_hash,
+                                head_block_hash: new_header.hash,
+                                finalized_block_hash: new_header.hash,
+                                safe_block_hash: new_header.hash,
                             };
                             drop(storage);
 
@@ -261,7 +180,7 @@ where
 
                             // seal the block
                             let block = Block {
-                                header: header.clone(),
+                                header: new_header.clone().unseal(),
                                 body: transactions,
                                 ommers: vec![],
                                 withdrawals: None,
@@ -273,9 +192,9 @@ where
                                     .expect("senders are valid");
 
                             // update canon chain for rpc
-                            client.set_canonical_head(header.clone().seal(new_hash));
-                            client.set_safe(header.clone().seal(new_hash));
-                            client.set_finalized(header.clone().seal(new_hash));
+                            client.set_canonical_head(new_header.clone());
+                            client.set_safe(new_header.clone());
+                            client.set_finalized(new_header.clone());
 
                             debug!(target: "consensus::auto", header=?sealed_block_with_senders.hash(), "sending block notification");
 
