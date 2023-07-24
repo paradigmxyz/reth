@@ -1713,20 +1713,14 @@ where
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{spawn_consensus_engine, TestConsensusEngineBuilder}, BeaconForkChoiceUpdateError,
+        test_utils::{spawn_consensus_engine, TestConsensusEngineBuilder},
+        BeaconForkChoiceUpdateError,
     };
     use assert_matches::assert_matches;
     use reth_primitives::{stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, H256, MAINNET};
-    use reth_provider::{
-        BlockWriter, ProviderFactory,
-    };
-    use reth_rpc_types::engine::{
-        ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
-    };
-    use reth_stages::{
-        ExecOutput,
-        PipelineError, StageError,
-    };
+    use reth_provider::{BlockWriter, ProviderFactory};
+    use reth_rpc_types::engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
+    use reth_stages::{ExecOutput, PipelineError, StageError};
     use std::{collections::VecDeque, sync::Arc, time::Duration};
     use tokio::sync::oneshot::error::TryRecvError;
 
