@@ -87,7 +87,7 @@ where
         network: Network,
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Provider>,
-        gas_cap: u64,
+        gas_cap: impl Into<GasCap>,
     ) -> Self {
         Self::with_spawner(
             provider,
@@ -95,7 +95,7 @@ where
             network,
             eth_cache,
             gas_oracle,
-            gas_cap,
+            gas_cap.into().into(),
             Box::<TokioTaskExecutor>::default(),
         )
     }
@@ -367,6 +367,35 @@ where
             SyncStatus::None
         };
         Ok(status)
+    }
+}
+
+/// The default gas limit for eth_call and adjacent calls.
+///
+/// This is different from the default to regular 30M block gas limit
+/// [ETHEREUM_BLOCK_GAS_LIMIT](reth_primitives::constants::ETHEREUM_BLOCK_GAS_LIMIT) to allow for
+/// more complex calls.
+pub const RPC_DEFAULT_GAS_CAP: GasCap = GasCap(50_000_000);
+
+/// The wrapper type for gas limit
+#[derive(Debug, Clone, Copy)]
+pub struct GasCap(u64);
+
+impl Default for GasCap {
+    fn default() -> Self {
+        RPC_DEFAULT_GAS_CAP
+    }
+}
+
+impl From<u64> for GasCap {
+    fn from(gas_cap: u64) -> Self {
+        Self(gas_cap)
+    }
+}
+
+impl From<GasCap> for u64 {
+    fn from(gas_cap: GasCap) -> Self {
+        gas_cap.0
     }
 }
 

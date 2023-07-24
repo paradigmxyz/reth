@@ -1003,6 +1003,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 };
                 // insert old canon chain
                 self.insert_chain(AppendableChain::new(old_canon_chain));
+                self.metrics.reorgs.increment(1);
             } else {
                 // error here to confirm that we are reverting nothing from db.
                 error!(target: "blockchain_tree", "Reverting nothing from db on block: #{:?}", block_hash);

@@ -17,13 +17,13 @@ use reth_rpc::{
             DEFAULT_BLOCK_CACHE_MAX_LEN, DEFAULT_ENV_CACHE_MAX_LEN, DEFAULT_RECEIPT_CACHE_MAX_LEN,
         },
         gas_oracle::GasPriceOracleConfig,
+        RPC_DEFAULT_GAS_CAP,
     },
     JwtError, JwtSecret,
 };
 use reth_rpc_builder::{
     auth::{AuthServerConfig, AuthServerHandle},
     constants,
-    constants::RPC_DEFAULT_GAS_CAP,
     error::RpcError,
     EthConfig, IpcServerBuilder, RethRpcModule, RpcModuleBuilder, RpcModuleConfig,
     RpcModuleSelection, RpcServerConfig, RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
@@ -43,7 +43,9 @@ pub(crate) const RPC_DEFAULT_MAX_SUBS_PER_CONN: u32 = 1024;
 /// Default max request size in MB.
 pub(crate) const RPC_DEFAULT_MAX_REQUEST_SIZE_MB: u32 = 15;
 /// Default max response size in MB.
-pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 100;
+///
+/// This is only relevant for very large trace responses.
+pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 115;
 /// Default number of incoming connections.
 pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 100;
 /// Default number of incoming connections.
@@ -139,7 +141,7 @@ pub struct RpcServerArgs {
         alias = "rpc.gascap",
         value_name = "GAS_CAP",
         value_parser = RangedU64ValueParser::<u64>::new().range(1..),
-        default_value_t = RPC_DEFAULT_GAS_CAP
+        default_value_t = RPC_DEFAULT_GAS_CAP.into()
     )]
     pub rpc_gas_cap: u64,
 
@@ -513,7 +515,7 @@ mod tests {
     fn test_rpc_gas_cap() {
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
         let config = args.eth_config();
-        assert_eq!(config.rpc_gas_cap, RPC_DEFAULT_GAS_CAP);
+        assert_eq!(config.rpc_gas_cap, Into::<u64>::into(RPC_DEFAULT_GAS_CAP));
 
         let args =
             CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.gascap", "1000"]).args;
