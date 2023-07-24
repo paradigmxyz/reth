@@ -4,7 +4,7 @@ use crate::PostState;
 use reth_interfaces::{executor::BlockExecutionError, Error};
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock, SealedBlockWithSenders,
-    TransactionSigned, TxHash,
+    SealedHeader, TransactionSigned, TxHash,
 };
 use std::{borrow::Cow, collections::BTreeMap, fmt};
 
@@ -29,6 +29,16 @@ impl Chain {
     /// Get the blocks in this chain.
     pub fn blocks(&self) -> &BTreeMap<BlockNumber, SealedBlockWithSenders> {
         &self.blocks
+    }
+
+    /// Consumes the type and only returns the blocks in this chain.
+    pub fn into_blocks(self) -> BTreeMap<BlockNumber, SealedBlockWithSenders> {
+        self.blocks
+    }
+
+    /// Returns an iterator over all headers in the block with increasing block numbers.
+    pub fn headers(&self) -> impl Iterator<Item = SealedHeader> + '_ {
+        self.blocks.values().map(|block| block.header.clone())
     }
 
     /// Get post state of this chain
