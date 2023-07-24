@@ -102,4 +102,21 @@ pub trait DebugApi {
         block_number: Option<BlockId>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<GethTrace>;
+
+    /// The `debug_traceCallMany` method lets you run an `eth_callmany` within the context of the given
+    /// block execution using the final state of parent block as the base followed by n
+    /// transactions
+    ///
+    /// The first argument is a list of transactions. Optinally each transaction can overwrie block
+    /// and state
+    /// The block can optionally be specified either by hash or by number as
+    /// the second argument.
+    /// Third argument specifies at which position in the block should transactions be executed.
+    #[method(name = "traceCallMany")]
+    async fn debug_trace_call_many(
+        &self,
+        bundles: Vec<(CallRequest, Option<GethDebugTracingCallOptions>)>,
+        block_id: Option<BlockId>,
+        transaction_index: Option<isize>,
+    ) -> RpcResult<Vec<GethTrace>>;
 }

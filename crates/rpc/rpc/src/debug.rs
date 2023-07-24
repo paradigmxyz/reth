@@ -3,7 +3,7 @@ use crate::{
         error::{EthApiError, EthResult},
         revm_utils::{
             clone_into_empty_db, inspect, prepare_call_env, replay_transactions_until,
-            result_output, EvmOverrides,
+            result_output, transact, EvmOverrides,
         },
         EthTransactions, TransactionSource,
     },
@@ -360,6 +360,92 @@ where
         Ok(frame.into())
     }
 
+    //TODO: Add docs
+    pub async fn debug_trace_call_many(
+        &self,
+        bundles: Vec<(CallRequest, Option<GethDebugTracingCallOptions>)>,
+        block_id: Option<BlockId>,
+        transaction_index: Option<isize>,
+    ) -> EthResult<Vec<GethTrace>> {
+        if bundles.is_empty() {
+            return Err(EthApiError::InvalidParams(String::from("bundles are empty.")));
+        }
+
+        let transaction_index = transaction_index.unwrap_or(-1);
+        let state_at = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        //TODO: Figure out what to do with -1 properly
+
+        let block_hash = self
+            .inner
+            .provider
+            .block_hash_for_id(state_at)?
+            .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+
+        let ((cfg, block_env, _), block) = futures::try_join!(
+            self.inner.eth_api.evm_env_at(block_hash.into()),
+            self.inner.eth_api.block_by_id(state_at),
+        )?;
+
+        let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+
+        self.on_blocking_task(|this| async move {
+            this.inner.eth_api.with_state_at_block(state_at, |state| {
+                let gas_limit = this.inner.eth_api.call_gas_limit();
+                let mut results = Vec::with_capacity(bundles.len());
+                let mut db = SubState::new(State::new(state));
+
+                let mut transactions = if transaction_index == -1 {
+                    block.body.into_iter()
+                } else {
+                    block.body
+                        [0..usize::try_from(transaction_index).expect("Tx index outside bounds.")]
+                        .to_vec()
+                        .into_iter()
+                };
+
+                // Execute all transactions until index
+                while let Some(tx) = transactions.next() {
+                    let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
+                    let tx = tx_env_with_recovered(&tx);
+                    let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                    let (res, _) = transact(&mut db, env)?;
+                    db.commit(res.state);
+                }
+
+                // Trace all bundles
+                for (tx, opts) in bundles {
+                    //let mut result = Vec::with_capacity(bundle.len());
+                    let GethDebugTracingCallOptions {
+                        tracing_options,
+                        state_overrides,
+                        block_overrides,
+                    } = opts.unwrap_or_default();
+                    let overrides =
+                        EvmOverrides::new(state_overrides, block_overrides.map(Box::new));
+
+                    let env = prepare_call_env(
+                        cfg.clone(),
+                        block_env.clone(),
+                        tx,
+                        gas_limit,
+                        &mut db,
+                        overrides.clone(),
+                    )?;
+
+                    //let mut inspector = FourByteInspector::default();
+                    //let (res, _) = inspect(&mut db, env, &mut inspector)?;
+                    let (trace, state) =
+                        this.trace_transaction(tracing_options.clone(), env, state_at, &mut db)?;
+                    //let ResultAndState { result, state } = res;
+                    db.commit(state);
+                    results.push(trace);
+                }
+                Ok(results)
+            })
+        })
+        .await
+    }
+
     /// Executes the configured transaction with the environment on the given database.
     ///
     /// Returns the trace frame and the state that got updated after executing the transaction.
@@ -660,6 +746,18 @@ where
         let _permit = self.acquire_trace_permit().await;
         Ok(DebugApi::debug_trace_call(self, request, block_number, opts.unwrap_or_default())
             .await?)
+    }
+
+    async fn debug_trace_call_many(
+        &self,
+        bundles: Vec<(CallRequest, Option<GethDebugTracingCallOptions>)>,
+        block_number: Option<BlockId>,
+        transaction_index: Option<isize>,
+        //transaction_index: Option<isize>,
+        //opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<Vec<GethTrace>> {
+        let _permit = self.acquire_trace_permit().await;
+        Ok(DebugApi::debug_trace_call_many(self, bundles, block_number, transaction_index).await?)
     }
 }
 
