@@ -18,7 +18,7 @@ name: integration
 jobs:
   test:
     name: test (partition ${{ matrix.partition }}/${{ strategy.job-total }})
-    runs-on: [self-hosted, X64, ubuntu-20.04]
+    runs-on: [self-hosted, Linux, X64, ubuntu-22.04]
     strategy:
       matrix:
         partition: [1, 2, 3]
@@ -67,7 +67,7 @@ jobs:
     name: sync / 100k blocks
     # Only run sync tests in merge groups
     if: github.event_name == 'merge_group'
-    runs-on: [self-hosted, X64, ubuntu-20.04]
+    runs-on: [self-hosted, Linux, X64, ubuntu-22.04]
     env:
       RUST_LOG: info,sync=error
     steps:
