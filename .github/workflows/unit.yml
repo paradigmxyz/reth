@@ -17,7 +17,8 @@ name: unit
 jobs:
   test:
     name: test (partition ${{ matrix.partition }}/${{ strategy.job-total }})
-    runs-on: ubuntu-20.04
+    runs-on:
+      group: Reth
     strategy:
       matrix:
         partition: [1, 2, 3, 4, 5]
@@ -40,7 +41,7 @@ jobs:
       - name: Run tests
         run: |
           cargo llvm-cov nextest --lcov --output-path lcov.info \
-            --release --locked --all-features --workspace --exclude examples --exclude ef-tests  \
+            --locked --all-features --workspace --exclude examples --exclude ef-tests  \
             --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
             -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
 
@@ -53,7 +54,8 @@ jobs:
 
   eth-blockchain:
     name: ethereum / state tests (stable)
-    runs-on: ubuntu-20.04
+    runs-on:
+      group: Reth
     env:
       RUST_LOG: info,sync=error
     steps:
@@ -85,7 +87,8 @@ jobs:
 
   doc-test:
     name: rustdoc
-    runs-on: ubuntu-20.04
+    runs-on:
+      group: Reth
     steps:
       - uses: actions/checkout@v3
       - name: Install toolchain
