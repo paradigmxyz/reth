@@ -12,7 +12,7 @@ use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
         error::{InsertBlockError, InsertBlockErrorKind},
-        BlockStatus, BlockchainTreeEngine, InsertPayloadOk,
+        BlockStatus, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
     },
     consensus::ForkchoiceState,
     executor::{BlockExecutionError, BlockValidationError},
@@ -39,6 +39,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Instant,
 };
 use tokio::sync::{
     mpsc,
@@ -628,7 +629,10 @@ where
             return Ok(OnForkChoiceUpdated::syncing())
         }
 
-        let status = match self.blockchain.make_canonical(&state.head_block_hash) {
+        let start = Instant::now();
+        let make_canonical_result = self.blockchain.make_canonical(&state.head_block_hash);
+        self.record_make_canonical_latency(start, &make_canonical_result);
+        let status = match make_canonical_result {
             Ok(outcome) => {
                 if !outcome.is_already_canonical() {
                     debug!(target: "consensus::engine", hash=?state.head_block_hash, number=outcome.header().number, "canonicalized new head");
@@ -682,6 +686,28 @@ where
 
         trace!(target: "consensus::engine", ?status, ?state, "Returning forkchoice status");
         Ok(OnForkChoiceUpdated::valid(status))
+    }
+
+    /// Record latency metrics for one call to make a block canonical
+    /// Takes start time of the call and result of the make canonical call
+    ///
+    /// Handles cases for error, already canonical and commmitted blocks
+    fn record_make_canonical_latency(
+        &self,
+        start: Instant,
+        outcome: &Result<CanonicalOutcome, Error>,
+    ) {
+        let elapsed = start.elapsed();
+        self.metrics.make_canonical_latency.record(elapsed);
+        match outcome {
+            Ok(CanonicalOutcome::AlreadyCanonical { .. }) => {
+                self.metrics.make_canonical_already_canonical_latency.record(elapsed)
+            }
+            Ok(CanonicalOutcome::Committed { .. }) => {
+                self.metrics.make_canonical_committed_latency.record(elapsed)
+            }
+            Err(_) => self.metrics.make_canonical_error_latency.record(elapsed),
+        }
     }
 
     /// Ensures that the given forkchoice state is consistent, assuming the head block has been
