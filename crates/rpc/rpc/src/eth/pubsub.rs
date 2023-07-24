@@ -288,7 +288,7 @@ where
     Pool: 'static,
 {
     /// Returns a stream that yields all new RPC blocks.
-    fn new_headers_stream(&self) -> impl Stream<Item = Header> + Send + Unpin {
+    fn new_headers_stream(&self) -> impl Stream<Item = Header> {
         self.chain_events.canonical_state_stream().flat_map(|new_chain| {
             let headers = new_chain
                 .committed()
