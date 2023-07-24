@@ -5,7 +5,8 @@ use crate::{
     },
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
     EvmEnvProvider, HashingWriter, HeaderProvider, HistoryWriter, PostState, ProviderError,
-    StageCheckpointReader, StorageReader, TransactionsProvider, WithdrawalsProvider,
+    PruneCheckpointReader, PruneCheckpointWriter, StageCheckpointReader, StorageReader,
+    TransactionsProvider, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -16,7 +17,7 @@ use reth_db::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
         ShardedKey, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals,
     },
-    table::Table,
+    table::{Key, Table},
     tables,
     transaction::{DbTx, DbTxMut},
     BlockNumberList, DatabaseError,
@@ -26,9 +27,10 @@ use reth_primitives::{
     keccak256,
     stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainInfo, ChainSpec, Hardfork, Head, Header, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
-    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256, U256,
+    ChainInfo, ChainSpec, Hardfork, Head, Header, PruneCheckpoint, PrunePart, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta, TransactionSigned,
+    TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256,
+    U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
@@ -615,6 +617,54 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             self.tx.delete::<T2>(value, None)?;
         }
         Ok(())
+    }
+
+    /// Prune the table for the specified key range.
+    /// Returns number of rows pruned.
+    pub fn prune_table<T, K>(
+        &self,
+        range: impl RangeBounds<K>,
+    ) -> std::result::Result<usize, DatabaseError>
+    where
+        T: Table<Key = K>,
+        K: Key,
+    {
+        self.prune_table_in_batches::<T, K, _>(range, usize::MAX, |_| {})
+    }
+
+    /// Prune the table for the specified key range calling `chunk_callback` after every
+    /// `batch_size` pruned rows.
+    ///
+    /// Returns number of rows pruned.
+    pub fn prune_table_in_batches<T, K, F>(
+        &self,
+        range: impl RangeBounds<K>,
+        batch_size: usize,
+        batch_callback: F,
+    ) -> std::result::Result<usize, DatabaseError>
+    where
+        T: Table<Key = K>,
+        K: Key,
+        F: Fn(usize),
+    {
+        let mut cursor = self.tx.cursor_write::<T>()?;
+        let mut walker = cursor.walk_range(range)?;
+        let mut deleted = 0;
+
+        while let Some(Ok(_)) = walker.next() {
+            walker.delete_current()?;
+            deleted += 1;
+
+            if deleted % batch_size == 0 {
+                batch_callback(batch_size);
+            }
+        }
+
+        if deleted % batch_size != 0 {
+            batch_callback(deleted % batch_size);
+        }
+
+        Ok(deleted)
     }
 
     /// Load shard and remove it. If list is empty, last shard was full or
@@ -1814,5 +1864,17 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
         self.update_pipeline_stages(new_tip_number, false)?;
 
         Ok(())
+    }
+}
+
+impl<'this, TX: DbTx<'this>> PruneCheckpointReader for DatabaseProvider<'this, TX> {
+    fn get_prune_checkpoint(&self, part: PrunePart) -> Result<Option<PruneCheckpoint>> {
+        Ok(self.tx.get::<tables::PruneCheckpoints>(part)?)
+    }
+}
+
+impl<'this, TX: DbTxMut<'this>> PruneCheckpointWriter for DatabaseProvider<'this, TX> {
+    fn save_prune_checkpoint(&self, part: PrunePart, checkpoint: PruneCheckpoint) -> Result<()> {
+        Ok(self.tx.put::<tables::PruneCheckpoints>(part, checkpoint)?)
     }
 }

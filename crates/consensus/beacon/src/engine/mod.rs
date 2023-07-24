@@ -193,7 +193,7 @@ where
     /// be used to download and execute the missing blocks.
     pipeline_run_threshold: u64,
     /// Controls pruning triggered by engine updates.
-    prune: Option<EnginePruneController>,
+    prune: Option<EnginePruneController<DB>>,
 }
 
 impl<DB, BT, Client> BeaconConsensusEngine<DB, BT, Client>
@@ -220,7 +220,7 @@ where
         payload_builder: PayloadBuilderHandle,
         target: Option<H256>,
         pipeline_run_threshold: u64,
-        pruner: Option<Pruner>,
+        pruner: Option<Pruner<DB>>,
     ) -> Result<(Self, BeaconConsensusEngineHandle), Error> {
         let (to_engine, rx) = mpsc::unbounded_channel();
         Self::with_channel(
@@ -266,7 +266,7 @@ where
         pipeline_run_threshold: u64,
         to_engine: UnboundedSender<BeaconEngineMessage>,
         rx: UnboundedReceiver<BeaconEngineMessage>,
-        pruner: Option<Pruner>,
+        pruner: Option<Pruner<DB>>,
     ) -> Result<(Self, BeaconConsensusEngineHandle), Error> {
         let handle = BeaconConsensusEngineHandle { to_engine };
         let sync = EngineSyncController::new(
@@ -1727,11 +1727,14 @@ mod tests {
         test_utils::{NoopFullBlockClient, TestConsensus},
     };
     use reth_payload_builder::test_utils::spawn_test_payload_service;
-    use reth_primitives::{stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, H256, MAINNET};
+    use reth_primitives::{
+        stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, PruneModes, H256, MAINNET,
+    };
     use reth_provider::{
         providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockExecutor, BlockWriter,
         ExecutorFactory, ProviderFactory, StateProvider,
     };
+    use reth_prune::BatchSizes;
     use reth_revm::Factory;
     use reth_rpc_types::engine::{
         ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
@@ -2071,7 +2074,14 @@ mod tests {
             let latest = self.chain_spec.genesis_header().seal_slow();
             let blockchain_provider = BlockchainProvider::with_latest(shareable_db, tree, latest);
 
-            let pruner = Pruner::new(5, 0);
+            let pruner = Pruner::new(
+                db.clone(),
+                self.chain_spec.clone(),
+                5,
+                0,
+                PruneModes::default(),
+                BatchSizes::default(),
+            );
 
             let (mut engine, handle) = BeaconConsensusEngine::new(
                 client,
