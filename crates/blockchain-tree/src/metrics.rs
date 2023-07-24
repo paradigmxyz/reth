@@ -13,6 +13,8 @@ pub struct TreeMetrics {
     pub canonical_chain_height: Gauge,
     /// The number of reorgs
     pub reorgs: Counter,
+    /// Longest sidechain height
+    pub longest_sidechain_height: Gauge,
 }
 
 /// Metrics for the blockchain tree block buffer
