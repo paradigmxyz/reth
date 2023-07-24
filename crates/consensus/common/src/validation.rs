@@ -5,10 +5,7 @@ use reth_primitives::{
     SealedHeader, Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy,
 };
 use reth_provider::{AccountReader, HeaderProvider, WithdrawalsProvider};
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    time::SystemTime,
-};
+use std::collections::{hash_map::Entry, HashMap};
 
 /// Validate header standalone
 pub fn validate_header_standalone(
