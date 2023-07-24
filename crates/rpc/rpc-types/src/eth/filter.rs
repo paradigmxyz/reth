@@ -379,7 +379,13 @@ impl Filter {
                     ValueOrArray::Value(s) => {
                         vec![*s]
                     }
-                    ValueOrArray::Array(s) => s.clone(),
+                    ValueOrArray::Array(s) => {
+                        if s.is_empty() {
+                            vec![None]
+                        } else {
+                            s.clone()
+                        }
+                    }
                 }
             } else {
                 vec![None]
@@ -1005,6 +1011,49 @@ mod tests {
 
     fn serialize<T: serde::Serialize>(t: &T) -> serde_json::Value {
         serde_json::to_value(t).expect("Failed to serialize value")
+    }
+
+    #[test]
+    fn test_empty_filter_topics_list() {
+        let s = r#"{"fromBlock": "0xfc359e", "toBlock": "0xfc359e", "topics": [["0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"], [], ["0x0000000000000000000000000c17e776cd218252adfca8d4e761d3fe757e9778"]]}"#;
+        let filter = serde_json::from_str::<Filter>(s).unwrap();
+        similar_asserts::assert_eq!(
+            filter.topics,
+            [
+                Some(ValueOrArray::Array(vec![Some(
+                    "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"
+                        .parse()
+                        .unwrap()
+                ),])),
+                Some(ValueOrArray::Array(vec![])),
+                Some(ValueOrArray::Array(vec![Some(
+                    "0x0000000000000000000000000c17e776cd218252adfca8d4e761d3fe757e9778"
+                        .parse()
+                        .unwrap()
+                )])),
+                None
+            ]
+        );
+
+        let filtered_params = FilteredParams::new(Some(filter));
+        let topics = filtered_params.flat_topics;
+        assert_eq!(
+            topics,
+            vec![ValueOrArray::Array(vec![
+                Some(
+                    "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"
+                        .parse()
+                        .unwrap()
+                ),
+                None,
+                Some(
+                    "0x0000000000000000000000000c17e776cd218252adfca8d4e761d3fe757e9778"
+                        .parse()
+                        .unwrap()
+                ),
+                None
+            ])]
+        )
     }
 
     #[test]

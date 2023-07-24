@@ -86,7 +86,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     }
 
     /// Same as `best` but only returns transactions that satisfy the given basefee.
-    pub(crate) fn best_with_basefee(&self, base_fee: u128) -> BestTransactionsWithBasefee<T> {
+    pub(crate) fn best_with_basefee(&self, base_fee: u64) -> BestTransactionsWithBasefee<T> {
         BestTransactionsWithBasefee { best: self.best(), base_fee }
     }
 
@@ -135,14 +135,14 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Note: the transactions are not returned in a particular order.
     pub(crate) fn enforce_basefee(
         &mut self,
-        basefee: u128,
+        basefee: u64,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut to_remove = Vec::new();
 
         {
             let mut iter = self.by_id.iter().peekable();
             while let Some((id, tx)) = iter.next() {
-                if tx.transaction.transaction.max_fee_per_gas() < basefee {
+                if tx.transaction.transaction.max_fee_per_gas() < basefee as u128 {
                     // this transaction no longer satisfies the basefee: remove it and all its
                     // descendants
                     to_remove.push(*id);
@@ -346,7 +346,7 @@ mod tests {
         let removed = pool.enforce_basefee(0);
         assert!(removed.is_empty());
 
-        let removed = pool.enforce_basefee(tx.max_fee_per_gas() + 1);
+        let removed = pool.enforce_basefee((tx.max_fee_per_gas() + 1) as u64);
         assert_eq!(removed.len(), 1);
         assert!(pool.is_empty());
     }
@@ -375,7 +375,7 @@ mod tests {
 
         {
             let mut pool2 = pool.clone();
-            let removed = pool2.enforce_basefee(descendant_tx.max_fee_per_gas() + 1);
+            let removed = pool2.enforce_basefee((descendant_tx.max_fee_per_gas() + 1) as u64);
             assert_eq!(removed.len(), 1);
             assert_eq!(pool2.len(), 1);
             // descendant got popped
@@ -384,7 +384,7 @@ mod tests {
         }
 
         // remove root transaction via fee
-        let removed = pool.enforce_basefee(root_tx.max_fee_per_gas() + 1);
+        let removed = pool.enforce_basefee((root_tx.max_fee_per_gas() + 1) as u64);
         assert_eq!(removed.len(), 2);
         assert!(pool.is_empty());
     }

@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-20.04
     strategy:
       matrix:
-        partition: [1, 2]
+        partition: [1, 2, 3]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3

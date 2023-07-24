@@ -399,7 +399,7 @@ where
 
     fn best_transactions_with_base_fee(
         &self,
-        base_fee: u128,
+        base_fee: u64,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
         self.pool.best_transactions_with_base_fee(base_fee)
     }

@@ -1,6 +1,6 @@
 # Build from Source
 
-You can build Reth on Linux, macOS, and Windows WSL2.
+You can build Reth on Linux, macOS, Windows, and Windows WSL2.
 
 > **Note**
 >
@@ -28,6 +28,7 @@ operating system:
 
 - **Ubuntu**: `apt-get install libclang-dev pkg-config build-essential`
 - **macOS**: `brew install llvm pkg-config`
+- **Windows**: `choco install llvm` or `winget install LLVM.LLVM`
 
 These are needed to build bindings for Reth's database.
 
