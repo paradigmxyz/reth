@@ -83,7 +83,7 @@ jobs:
         uses: taiki-e/install-action@nextest
 
       - name: Run Ethereum tests
-        run: cargo nextest run -p ef-tests --features ef-tests
+        run: cargo nextest run --release -p ef-tests --features ef-tests
 
   doc-test:
     name: rustdoc
