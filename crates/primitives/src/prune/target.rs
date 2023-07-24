@@ -1,4 +1,4 @@
-use crate::{serde_helper::deserialize_opt_prune_mode_with_constraints, BlockNumber, PruneMode};
+use crate::{serde_helper::deserialize_opt_prune_mode_with_min_blocks, BlockNumber, PruneMode};
 use paste::paste;
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +15,7 @@ pub struct PruneModes {
     /// Receipts pruning configuration.
     #[serde(
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_opt_prune_mode_with_constraints::<64, false, _>"
+        deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<64, _>"
     )]
     pub receipts: Option<PruneMode>,
     /// Account History pruning configuration.
