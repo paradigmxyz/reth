@@ -27,7 +27,7 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
-    proofs, Address, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec,
+    proofs, Address, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Bloom, ChainSpec,
     Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, EMPTY_OMMER_ROOT, H256,
     U256,
 };
@@ -292,7 +292,7 @@ impl StorageInner {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
         let (post_state, gas_used) =
-            executor.execute_transactions(block, U256::ZERO, Some(senders.clone()))?;
+            executor.execute_transactions(block, U256::ZERO, Some(senders))?;
 
         // apply post block changes
         let post_state = executor.apply_post_block_changes(block, U256::ZERO, post_state)?;
@@ -315,6 +315,8 @@ impl StorageInner {
         } else {
             let receipts_with_bloom =
                 receipts.iter().map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
+            header.logs_bloom =
+                receipts_with_bloom.iter().fold(Bloom::zero(), |bloom, r| bloom | r.bloom);
             proofs::calculate_receipt_root(&receipts_with_bloom)
         };
 

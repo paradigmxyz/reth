@@ -9,6 +9,8 @@ use reth_rpc_types::{
     Transaction, TransactionsWithReceipts,
 };
 
+const API_LEVEL: u64 = 8;
+
 /// Otterscan Api
 #[derive(Debug)]
 pub struct OtterscanApi<Eth> {
@@ -29,12 +31,12 @@ where
 {
     /// Handler for `ots_hasCode`
     async fn has_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<bool> {
-        Err(internal_rpc_err("unimplemented"))
+        self.eth.get_code(address, block_number).await.map(|code| !code.is_empty())
     }
 
     /// Handler for `ots_getApiLevel`
     async fn get_api_level(&self) -> RpcResult<u64> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(API_LEVEL)
     }
 
     /// Handler for `ots_getInternalOperations`
