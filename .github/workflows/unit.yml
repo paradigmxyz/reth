@@ -21,7 +21,7 @@ jobs:
       group: Reth
     strategy:
       matrix:
-        partition: [1, 2, 3, 4, 5]
+        partition: [1, 2]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
