@@ -79,10 +79,9 @@ impl Consensus for BeaconConsensus {
 
             // Check if timestamp is in future. Clock can drift but this can be consensus issue.
             let present_timestamp =
-                SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() +
-                    ALLOWED_FUTURE_BLOCK_TIME_SECONDS;
+                SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
 
-            if header.timestamp > present_timestamp {
+            if header.timestamp > present_timestamp + ALLOWED_FUTURE_BLOCK_TIME_SECONDS {
                 return Err(ConsensusError::TimestampIsInFuture {
                     timestamp: header.timestamp,
                     present_timestamp,
