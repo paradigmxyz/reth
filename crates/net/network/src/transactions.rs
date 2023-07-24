@@ -475,27 +475,35 @@ where
         }
     }
 
-    fn report_bad_message(&self, peer_id: PeerId, req_err: Option<RequestError>) {
-        let msg = match req_err {
-            Some(RequestError::UnsupportedCapability) => {
-                self.network.reputation_change(peer_id, ReputationChangeKind::BadProtocol);
-                "Penalizing peer for unsupported capability"
+    fn report_message(&self, peer_id: PeerId, kind: ReputationChangeKind) {
+        let msg = match kind {
+            ReputationChangeKind::BadProtocol => "Penalizing peer for bad protocol rule",
+            ReputationChangeKind::Timeout => "Penalizing peer for timeout",
+            ReputationChangeKind::Dropped => "Penalizing peer for dropped connection",
+            ReputationChangeKind::BadTransactions => "Penalizing peer for bad transaction",
+            ReputationChangeKind::AlreadySeenTransaction => {
+                "Penalizing peer for already seen transaction"
             }
-            Some(RequestError::Timeout) => {
-                self.network.reputation_change(peer_id, ReputationChangeKind::Timeout);
-                "Penalizing peer for timeout"
-            }
-            Some(RequestError::ChannelClosed | RequestError::ConnectionDropped) => {
-                self.network.reputation_change(peer_id, ReputationChangeKind::Dropped);
-                "Penalizing peer for dropped connection"
-            }
-            Some(RequestError::BadResponse) | None => {
-                self.network.reputation_change(peer_id, ReputationChangeKind::BadTransactions);
-                "Penalizing peer for bad transaction"
-            }
+            ReputationChangeKind::BadBlock => "Penalizing peer for bad block",
+            ReputationChangeKind::BadMessage => "Penalizing peer for bad message",
+            ReputationChangeKind::FailedToConnect => "Penalizing peer for failing to connect",
+            _ => "Penalizing peer for unknown reason",
         };
         trace!(target: "net::tx", ?peer_id, ?msg);
         self.metrics.reported_bad_transactions.increment(1);
+    }
+
+    fn on_request_error(&self, peer_id: PeerId, req_err: RequestError) {
+        let kind = match req_err {
+            RequestError::UnsupportedCapability => ReputationChangeKind::BadProtocol,
+            RequestError::Timeout => ReputationChangeKind::Timeout,
+            RequestError::ChannelClosed | RequestError::ConnectionDropped => {
+                ReputationChangeKind::Dropped
+            }
+            RequestError::BadResponse => ReputationChangeKind::BadTransactions,
+        };
+        self.network.reputation_change(peer_id, kind);
+        self.report_message(peer_id, kind);
     }
 
     fn report_already_seen(&self, peer_id: PeerId) {
@@ -512,7 +520,7 @@ where
     fn on_bad_import(&mut self, hash: TxHash) {
         if let Some(peers) = self.transactions_by_peers.remove(&hash) {
             for peer_id in peers {
-                self.report_bad_message(peer_id, None);
+                self.on_request_error(peer_id, RequestError::BadResponse);
             }
         }
     }
@@ -557,11 +565,11 @@ where
                 Poll::Ready(Ok(Ok(txs))) => {
                     this.import_transactions(req.peer_id, txs.0, TransactionSource::Response);
                 }
-                Poll::Ready(Ok(Err(err))) => {
-                    this.report_bad_message(req.peer_id, Some(err));
+                Poll::Ready(Ok(Err(req_err))) => {
+                    this.on_request_error(req.peer_id, req_err);
                 }
                 Poll::Ready(Err(_)) => {
-                    this.report_bad_message(req.peer_id, None);
+                    this.on_request_error(req.peer_id, RequestError::ConnectionDropped)
                 }
             }
         }
