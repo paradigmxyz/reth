@@ -193,9 +193,7 @@ where
     let nonce = 1;
     let block_hash = H256::default();
 
-    assert!(is_unimplemented(
-        OtterscanClient::has_code(client, address, None).await.err().unwrap()
-    ));
+    OtterscanClient::has_code(client, address, None).await.unwrap();
 
     OtterscanClient::get_api_level(client).await.unwrap();
 
