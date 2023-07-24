@@ -1756,7 +1756,7 @@ mod tests {
             Arc<DatabaseEnv>,
             ShareableBlockchainTree<
                 Arc<DatabaseEnv>,
-                Arc<BeaconConsensus>,
+                Arc<dyn Consensus>,
                 EitherExecutorFactory<TestExecutorFactory, Factory>,
             >,
         >,
@@ -1821,6 +1821,18 @@ mod tests {
                 }
             }
         }
+    }
+
+    // TODO: add with_consensus in case we want to use the TestConsensus purposeful failure - this
+    // would require similar patterns to how we use with_client and the EitherDownloader
+    /// Represents either a real consensus engine, or a test consensus engine.
+    #[derive(Default)]
+    enum TestConsensusConfig {
+        /// Test consensus engine
+        #[default]
+        Test,
+        /// Real consensus engine
+        Real,
     }
 
     /// Represents either test pipeline outputs, or real pipeline configuration.
@@ -1934,6 +1946,7 @@ mod tests {
         executor_config: TestExecutorConfig,
         pipeline_run_threshold: Option<u64>,
         max_block: Option<BlockNumber>,
+        consensus: TestConsensusConfig,
     }
 
     impl TestConsensusEngineBuilder {
@@ -1945,6 +1958,7 @@ mod tests {
                 executor_config: Default::default(),
                 pipeline_run_threshold: None,
                 max_block: None,
+                consensus: Default::default(),
             }
         }
 
@@ -1981,6 +1995,12 @@ mod tests {
             self
         }
 
+        /// Uses a real consensus engine instead of a test consensus engine.
+        fn with_real_consensus(mut self) -> Self {
+            self.consensus = TestConsensusConfig::Real;
+            self
+        }
+
         /// Disables blockchain tree driven sync. This is the same as setting the pipeline run
         /// threshold to 0.
         fn disable_blockchain_tree_sync(mut self) -> Self {
@@ -2010,7 +2030,7 @@ mod tests {
     /// A builder for `TestConsensusEngine`, allows configuration of mocked pipeline outputs and
     /// mocked executor results.
     ///
-    /// This includes a client
+    /// This optionally includes a client for network operations.
     struct NetworkedTestConsensusEngineBuilder<Client> {
         base_config: TestConsensusEngineBuilder,
         client: Option<Client>,
@@ -2096,8 +2116,13 @@ mod tests {
         fn build(self) -> (TestBeaconConsensusEngine<Client>, TestEnv<Arc<DatabaseEnv>>) {
             reth_tracing::init_test_tracing();
             let db = create_test_rw_db();
-            let consensus =
-                Arc::new(BeaconConsensus::new(Arc::clone(&self.base_config.chain_spec)));
+
+            let consensus: Arc<dyn Consensus> = match self.base_config.consensus {
+                TestConsensusConfig::Real => {
+                    Arc::new(BeaconConsensus::new(Arc::clone(&self.base_config.chain_spec)))
+                }
+                TestConsensusConfig::Test => Arc::new(TestConsensus::default()),
+            };
             let payload_builder = spawn_test_payload_service();
 
             // use either noop client or a user provided client (for example TestFullBlockClient)
@@ -2770,6 +2795,7 @@ mod tests {
             let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
                 .with_real_pipeline()
                 .with_real_executor()
+                .with_real_consensus()
                 .build();
 
             let genesis =
