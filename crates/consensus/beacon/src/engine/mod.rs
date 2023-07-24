@@ -1709,7 +1709,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
+    use crate::{BeaconConsensus, BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
     use assert_matches::assert_matches;
     use reth_blockchain_tree::{
         config::BlockchainTreeConfig, externals::TreeExternals, post_state::PostState,
@@ -1756,7 +1756,7 @@ mod tests {
             Arc<DatabaseEnv>,
             ShareableBlockchainTree<
                 Arc<DatabaseEnv>,
-                Arc<TestConsensus>,
+                Arc<BeaconConsensus>,
                 EitherExecutorFactory<TestExecutorFactory, Factory>,
             >,
         >,
@@ -2096,7 +2096,8 @@ mod tests {
         fn build(self) -> (TestBeaconConsensusEngine<Client>, TestEnv<Arc<DatabaseEnv>>) {
             reth_tracing::init_test_tracing();
             let db = create_test_rw_db();
-            let consensus = Arc::new(TestConsensus::default());
+            let consensus =
+                Arc::new(BeaconConsensus::new(Arc::clone(&self.base_config.chain_spec)));
             let payload_builder = spawn_test_payload_service();
 
             // use either noop client or a user provided client (for example TestFullBlockClient)
