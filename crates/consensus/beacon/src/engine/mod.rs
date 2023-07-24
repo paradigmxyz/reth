@@ -12,7 +12,7 @@ use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
         error::{InsertBlockError, InsertBlockErrorKind},
-        BlockStatus, BlockchainTreeEngine, InsertPayloadOk, CanonicalOutcome,
+        BlockStatus, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
     },
     consensus::ForkchoiceState,
     executor::{BlockExecutionError, BlockValidationError},
@@ -692,12 +692,20 @@ where
     /// Takes start time of the call and result of the make canonical call
     ///
     /// Handles cases for error, already canonical and commmitted blocks
-    fn record_make_canonical_latency(&self, start: Instant, outcome: &Result<CanonicalOutcome, Error>) {
+    fn record_make_canonical_latency(
+        &self,
+        start: Instant,
+        outcome: &Result<CanonicalOutcome, Error>,
+    ) {
         let elapsed = start.elapsed();
         self.metrics.make_canonical_latency.record(elapsed);
         match outcome {
-            Ok(CanonicalOutcome::AlreadyCanonical { .. }) => self.metrics.make_canonical_already_canonical_latency.record(elapsed),
-            Ok(CanonicalOutcome::Committed { .. }) => self.metrics.make_canonical_committed_latency.record(elapsed),
+            Ok(CanonicalOutcome::AlreadyCanonical { .. }) => {
+                self.metrics.make_canonical_already_canonical_latency.record(elapsed)
+            }
+            Ok(CanonicalOutcome::Committed { .. }) => {
+                self.metrics.make_canonical_committed_latency.record(elapsed)
+            }
             Err(_) => self.metrics.make_canonical_error_latency.record(elapsed),
         }
     }
