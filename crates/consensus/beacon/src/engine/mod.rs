@@ -12,7 +12,7 @@ use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
         error::{InsertBlockError, InsertBlockErrorKind},
-        BlockStatus, BlockchainTreeEngine, InsertPayloadOk,
+        BlockStatus, BlockchainTreeEngine, InsertPayloadOk, CanonicalOutcome,
     },
     consensus::ForkchoiceState,
     executor::{BlockExecutionError, BlockValidationError},
@@ -630,18 +630,16 @@ where
         }
 
         let start = Instant::now();
-        let status = match self.blockchain.make_canonical(&state.head_block_hash) {
+        let make_canonical_result = self.blockchain.make_canonical(&state.head_block_hash);
+        self.record_make_canonical_latency(start, &make_canonical_result);
+        let status = match make_canonical_result {
             Ok(outcome) => {
-                let end = start.elapsed();
-                self.metrics.make_canonical_latency.record(end);
                 if !outcome.is_already_canonical() {
-                    self.metrics.make_canonical_committed_latency.record(end);
                     debug!(target: "consensus::engine", hash=?state.head_block_hash, number=outcome.header().number, "canonicalized new head");
 
                     // new VALID update that moved the canonical chain forward
                     let _ = self.update_head(outcome.header().clone());
                 } else {
-                    self.metrics.make_canonical_already_canonical_latency.record(end);
                     debug!(target: "consensus::engine", fcu_head_num=?outcome.header().number, current_head_num=?self.blockchain.canonical_tip().number, "Ignoring beacon update to old head");
                 }
 
@@ -668,9 +666,6 @@ where
                 PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash))
             }
             Err(error) => {
-                let end = start.elapsed();
-                self.metrics.make_canonical_latency.record(end);
-                self.metrics.make_canonical_error_latency.record(end);
                 if let Error::Execution(ref err) = error {
                     if err.is_fatal() {
                         tracing::error!(target: "consensus::engine", ?err, "Encountered fatal error");
@@ -691,6 +686,20 @@ where
 
         trace!(target: "consensus::engine", ?status, ?state, "Returning forkchoice status");
         Ok(OnForkChoiceUpdated::valid(status))
+    }
+
+    /// Record latency metrics for one call to make a block canonical
+    /// Takes start time of the call and result of the make canonical call
+    ///
+    /// Handles cases for error, already canonical and commmitted blocks
+    fn record_make_canonical_latency(&self, start: Instant, outcome: &Result<CanonicalOutcome, Error>) {
+        let elapsed = start.elapsed();
+        self.metrics.make_canonical_latency.record(elapsed);
+        match outcome {
+            Ok(CanonicalOutcome::AlreadyCanonical { .. }) => self.metrics.make_canonical_already_canonical_latency.record(elapsed),
+            Ok(CanonicalOutcome::Committed { .. }) => self.metrics.make_canonical_committed_latency.record(elapsed),
+            Err(_) => self.metrics.make_canonical_error_latency.record(elapsed),
+        }
     }
 
     /// Ensures that the given forkchoice state is consistent, assuming the head block has been
