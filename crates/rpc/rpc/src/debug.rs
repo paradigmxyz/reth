@@ -413,7 +413,8 @@ where
                 }
 
                 // Trace all bundles
-                for (tx, opts) in bundles {
+                let mut bundles = bundles.into_iter().peekable();
+                while let Some((tx, opts)) = bundles.next() {
                     //let mut result = Vec::with_capacity(bundle.len());
                     let GethDebugTracingCallOptions {
                         tracing_options,
@@ -432,12 +433,12 @@ where
                         overrides.clone(),
                     )?;
 
-                    //let mut inspector = FourByteInspector::default();
-                    //let (res, _) = inspect(&mut db, env, &mut inspector)?;
                     let (trace, state) =
                         this.trace_transaction(tracing_options.clone(), env, state_at, &mut db)?;
-                    //let ResultAndState { result, state } = res;
-                    db.commit(state);
+
+                    if bundles.peek().is_some(){
+                        db.commit(state);
+                    }
                     results.push(trace);
                 }
                 Ok(results)
