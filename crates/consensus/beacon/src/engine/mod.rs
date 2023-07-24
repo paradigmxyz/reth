@@ -1780,8 +1780,8 @@ mod tests {
         BeaconForkChoiceUpdateError,
     };
     use assert_matches::assert_matches;
-    use reth_primitives::{stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, H256, MAINNET};
-    use reth_provider::{BlockWriter, ProviderFactory};
+    use reth_primitives::{stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, H256, MAINNET, SealedBlockWithSenders};
+    use reth_provider::{BlockWriter, ProviderFactory, PostState};
     use reth_rpc_types::engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use reth_stages::{ExecOutput, PipelineError, StageError};
     use std::{collections::VecDeque, sync::Arc, time::Duration};
@@ -2253,7 +2253,7 @@ mod tests {
             generators::{generate_keys, random_block},
         };
         use reth_primitives::{public_key_to_address, Genesis, GenesisAccount, Hardfork, U256};
-        use reth_provider::test_utils::blocks::BlockChainTestData;
+        use reth_provider::{test_utils::blocks::BlockChainTestData, PostState};
 
         #[tokio::test]
         async fn new_payload_before_forkchoice() {
