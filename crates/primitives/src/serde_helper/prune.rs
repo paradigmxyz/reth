@@ -46,7 +46,7 @@ mod test {
         #[derive(Debug, Deserialize, PartialEq, Eq)]
         struct V(
             #[serde(
-                deserialize_with = "super::deserialize_opt_prune_mode_with_constraints::<10, _>"
+                deserialize_with = "super::deserialize_opt_prune_mode_with_constraints::<10, false, _>"
             )]
             Option<PruneMode>,
         );
@@ -59,7 +59,7 @@ mod test {
 
         assert_matches!(
             serde_json::from_str::<V>(r#""full""#),
-            Err(err) if err.to_string() == "invalid value: string \"full\", expected prune mode distance not less than 10 blocks"
+            Err(err) if err.to_string() == "invalid value: string \"full\", expected prune mode to be supported"
         );
     }
 }
