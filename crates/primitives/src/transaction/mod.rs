@@ -302,11 +302,32 @@ impl TxEip4844 {
 #[derive_arbitrary(compact)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Transaction {
-    /// Legacy transaction.
+    /// Legacy transaction (type `0x0`).
+    ///
+    /// Traditional Ethereum transactions, containing parameters `nonce`, `gasPrice`, `gasLimit`,
+    /// `to`, `value`, `data`, `v`, `r`, and `s`.
+    ///
+    /// These transactions do not utilize access lists nor do they incorporate EIP-1559 fee market
+    /// changes.
     Legacy(TxLegacy),
-    /// Transaction with an [`AccessList`] ([EIP-2930](https://eips.ethereum.org/EIPS/eip-2930)).
+    /// Transaction with an [`AccessList`] ([EIP-2930](https://eips.ethereum.org/EIPS/eip-2930)), type `0x1`.
+    ///
+    /// The `accessList` specifies an array of addresses and storage keys that the transaction
+    /// plans to access, enabling gas savings on cross-contract calls by pre-declaring the accessed
+    /// contract and storage slots.
     Eip2930(TxEip2930),
-    /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
+    /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)), type `0x2`.
+    ///
+    /// Unlike traditional transactions, EIP-1559 transactions use an in-protocol, dynamically
+    /// changing base fee per gas, adjusted at each block to manage network congestion.
+    ///
+    /// - `maxPriorityFeePerGas`, specifying the maximum fee above the base fee the sender is
+    ///   willing to pay
+    /// - `maxFeePerGas`, setting the maximum total fee the sender is willing to pay.
+    ///
+    /// The base fee is burned, while the priority fee is paid to the miner who includes the
+    /// transaction, incentivizing miners to include transactions with higher priority fees per
+    /// gas.
     Eip1559(TxEip1559),
 }
 
