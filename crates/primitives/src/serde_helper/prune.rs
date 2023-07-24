@@ -22,15 +22,17 @@ pub fn deserialize_opt_prune_mode_with_min_blocks<
         Some(PruneMode::Full) if MIN_BLOCKS > 0 => {
             Err(serde::de::Error::invalid_value(
                 serde::de::Unexpected::Str("full"),
-                // This message should have "expected" wording, so we say "to be supported"
-                &format!("prune mode distance not less than {MIN_BLOCKS} blocks").as_str(),
+                // This message should have "expected" wording
+                &format!("prune mode that leaves at least {MIN_BLOCKS} blocks in the database")
+                    .as_str(),
             ))
         }
         Some(PruneMode::Distance(distance)) if distance < MIN_BLOCKS => {
             Err(serde::de::Error::invalid_value(
                 serde::de::Unexpected::Unsigned(distance),
-                // This message should have "expected" wording, so we say "not less than"
-                &format!("prune mode distance not less than {MIN_BLOCKS} blocks").as_str(),
+                // This message should have "expected" wording
+                &format!("prune mode that leaves at least {MIN_BLOCKS} blocks in the database")
+                    .as_str(),
             ))
         }
         _ => Ok(prune_mode),
@@ -56,12 +58,12 @@ mod test {
         assert!(serde_json::from_str::<V>(r#"{"distance": 10}"#).is_ok());
         assert_matches!(
             serde_json::from_str::<V>(r#"{"distance": 9}"#),
-            Err(err) if err.to_string() == "invalid value: integer `9`, expected prune mode distance not less than 10 blocks"
+            Err(err) if err.to_string() == "invalid value: integer `9`, expected prune mode that leaves at least 10 blocks in the database"
         );
 
         assert_matches!(
             serde_json::from_str::<V>(r#""full""#),
-            Err(err) if err.to_string() == "invalid value: string \"full\", expected prune mode distance not less than 10 blocks"
+            Err(err) if err.to_string() == "invalid value: string \"full\", expected prune mode that leaves at least 10 blocks in the database"
         );
     }
 }
