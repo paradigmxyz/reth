@@ -18,7 +18,8 @@ name: integration
 jobs:
   test:
     name: test (partition ${{ matrix.partition }}/${{ strategy.job-total }})
-    runs-on: ubuntu-20.04
+    runs-on:
+      group: Reth
     strategy:
       matrix:
         partition: [1, 2, 3]
@@ -52,7 +53,7 @@ jobs:
       - name: Run tests
         run: |
           cargo llvm-cov nextest --lcov --output-path lcov.info \
-            --release --locked --all-features --workspace --exclude examples --exclude ef-tests \
+            --locked --all-features --workspace --exclude examples --exclude ef-tests \
             --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
             -E 'kind(test)'
 
@@ -67,7 +68,8 @@ jobs:
     name: sync / 100k blocks
     # Only run sync tests in merge groups
     if: github.event_name == 'merge_group'
-    runs-on: ubuntu-20.04
+    runs-on:
+      group: Reth
     env:
       RUST_LOG: info,sync=error
     steps:
@@ -95,7 +97,8 @@ jobs:
   integration-success:
     if: always()
     name: integration success
-    runs-on: ubuntu-20.04
+    runs-on:
+      group: Reth
     needs: [test]
     steps:
       - name: Decide whether the needed jobs succeeded or failed
