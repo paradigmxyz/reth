@@ -1,4 +1,4 @@
-use crate::{serde_helper::deserialize_opt_prune_mode_with_min_distance, BlockNumber, PruneMode};
+use crate::{serde_helper::deserialize_opt_prune_mode_with_min_blocks, BlockNumber, PruneMode};
 use paste::paste;
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +15,7 @@ pub struct PruneModes {
     /// Receipts pruning configuration.
     #[serde(
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_opt_prune_mode_with_min_distance::<64, _>"
+        deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<64, _>"
     )]
     pub receipts: Option<PruneMode>,
     /// Account History pruning configuration.
@@ -27,7 +27,7 @@ pub struct PruneModes {
 }
 
 macro_rules! impl_prune_parts {
-    ($(($part:ident, $human_part:expr)),+) => {
+    ($(($part:ident, $human_part:expr, $min_blocks:expr)),+) => {
         $(
             paste! {
                 #[doc = concat!(
@@ -51,8 +51,12 @@ macro_rules! impl_prune_parts {
                     $human_part,
                     " pruning needs to be done, inclusive, according to the provided tip."
                 )]
-                pub fn [<prune_to_block_ $part>](&self, tip: BlockNumber) -> Option<(BlockNumber, PruneMode)> {
-                    self.$part.as_ref().map(|mode| (self.prune_to_block(mode, tip), *mode))
+                pub fn [<prune_target_block_ $part>](&self, tip: BlockNumber) -> Option<(BlockNumber, PruneMode)> {
+                    self.$part.as_ref().and_then(|mode| {
+                        self.prune_target_block(mode, tip, $min_blocks).map(|block| {
+                            (block, *mode)
+                        })
+                    })
                 }
             }
         )+
@@ -90,20 +94,30 @@ impl PruneModes {
     }
 
     /// Returns block up to which pruning needs to be done, inclusive, according to the provided
-    /// prune mode and tip.
-    pub fn prune_to_block(&self, mode: &PruneMode, tip: BlockNumber) -> BlockNumber {
+    /// prune mode, tip block number and minimum number of blocks allowed to be pruned.
+    pub fn prune_target_block(
+        &self,
+        mode: &PruneMode,
+        tip: BlockNumber,
+        min_blocks: Option<u64>,
+    ) -> Option<BlockNumber> {
         match mode {
-            PruneMode::Full => tip,
-            PruneMode::Distance(distance) => tip.saturating_sub(*distance),
-            PruneMode::Before(n) => *n,
+            PruneMode::Full if min_blocks.unwrap_or_default() == 0 => Some(tip),
+            PruneMode::Distance(distance) if *distance >= min_blocks.unwrap_or_default() => {
+                Some(tip.saturating_sub(*distance))
+            }
+            PruneMode::Before(n) if tip.saturating_sub(*n) >= min_blocks.unwrap_or_default() => {
+                Some(*n)
+            }
+            _ => None,
         }
     }
 
     impl_prune_parts!(
-        (sender_recovery, "Sender Recovery"),
-        (transaction_lookup, "Transaction Lookup"),
-        (receipts, "Receipts"),
-        (account_history, "Account History"),
-        (storage_history, "Storage History")
+        (sender_recovery, "Sender Recovery", None),
+        (transaction_lookup, "Transaction Lookup", None),
+        (receipts, "Receipts", Some(64)),
+        (account_history, "Account History", None),
+        (storage_history, "Storage History", None)
     );
 }
