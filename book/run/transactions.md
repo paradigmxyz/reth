@@ -25,11 +25,11 @@ These transactions do not utilize access lists, which specify the addresses and 
 
 ## EIP-2930 Transactions
 
-Introduced in EIP-2930, transactions with type `0x1` incorporate an `accessList` parameter alongside legacy parameters. This `accessList` specifies an array of addresses and storage keys that the transaction plans to access, enabling gas savings on cross-contract calls by pre-declaring the accessed contract and storage slots. They do not include EIP-1559 fee market changes.
+Introduced in [EIP-2930](https://eips.ethereum.org/EIPS/eip-2930), transactions with type `0x1` incorporate an `accessList` parameter alongside legacy parameters. This `accessList` specifies an array of addresses and storage keys that the transaction plans to access, enabling gas savings on cross-contract calls by pre-declaring the accessed contract and storage slots. They do not include EIP-1559 fee market changes.
 
 ## EIP-1559 Transactions
 
-EIP-1559 transactions (type `0x2`) were introduced in Ethereum's London fork to address network congestion and transaction fee overpricing caused by the historical fee market. Unlike traditional transactions, EIP-1559 transactions don't specify a gas price (`gasPrice`). Instead, they use an in-protocol, dynamically changing base fee per gas, adjusted at each block to manage network congestion.
+[EIP-1559](https://eips.ethereum.org/EIPS/eip-1559) transactions (type `0x2`) were introduced in Ethereum's London fork to address network congestion and transaction fee overpricing caused by the historical fee market. Unlike traditional transactions, EIP-1559 transactions don't specify a gas price (`gasPrice`). Instead, they use an in-protocol, dynamically changing base fee per gas, adjusted at each block to manage network congestion.
 
 Alongside the `accessList` parameter and legacy parameters (except `gasPrice`), EIP-1559 transactions include:
 - `maxPriorityFeePerGas`, specifying the maximum fee above the base fee the sender is willing to pay,
