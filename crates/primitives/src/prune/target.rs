@@ -113,7 +113,7 @@ impl PruneModes {
                 Some(tip.saturating_sub(*distance))
             }
             PruneMode::Before(n) if tip.saturating_sub(*n) >= min_blocks.unwrap_or_default() => {
-                Some(*n)
+                Some(n.saturating_sub(1))
             }
             _ => None,
         }
