@@ -250,22 +250,19 @@ where
         trace_types: HashSet<TraceType>,
     ) -> EthResult<TraceResults> {
         let config = tracing_config(&trace_types);
-        self.on_blocking_task(|this| async move {
-            this.inner
-                .eth_api
-                .trace_transaction_in_block(hash, config, |_, inspector, res, db| {
-                    let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
-                        res,
-                        &trace_types,
-                        &db,
-                    )?;
-                    Ok(trace_res)
-                })
-                .await
-                .transpose()
-                .ok_or_else(|| EthApiError::TransactionNotFound)?
-        })
-        .await
+        self.inner
+            .eth_api
+            .trace_transaction_in_block(hash, config, move |_, inspector, res, db| {
+                let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
+                    res,
+                    &trace_types,
+                    &db,
+                )?;
+                Ok(trace_res)
+            })
+            .await
+            .transpose()
+            .ok_or_else(|| EthApiError::TransactionNotFound)?
     }
 
     /// Returns transaction trace objects at the given index
@@ -308,22 +305,18 @@ where
         &self,
         hash: H256,
     ) -> EthResult<Option<Vec<LocalizedTransactionTrace>>> {
-        self.on_blocking_task(|this| async move {
-            this.inner
-                .eth_api
-                .trace_transaction_in_block(
-                    hash,
-                    TracingInspectorConfig::default_parity(),
-                    |tx_info, inspector, _, _| {
-                        let traces = inspector
-                            .into_parity_builder()
-                            .into_localized_transaction_traces(tx_info);
-                        Ok(traces)
-                    },
-                )
-                .await
-        })
-        .await
+        self.inner
+            .eth_api
+            .trace_transaction_in_block(
+                hash,
+                TracingInspectorConfig::default_parity(),
+                move |tx_info, inspector, _, _| {
+                    let traces =
+                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+                    Ok(traces)
+                },
+            )
+            .await
     }
 
     /// Executes all transactions of a block and returns a list of callback results.

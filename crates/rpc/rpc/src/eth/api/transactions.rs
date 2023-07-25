@@ -212,6 +212,9 @@ pub trait EthTransactions: Send + Sync {
     /// state by executing them first.
     /// The callback `f` is invoked with the [ResultAndState] after the transaction was executed and
     /// the database that points to the beginning of the transaction.
+    ///
+    /// Note: this is expected to be be executed on a threadpool where blocking is allowed, such as
+    /// [TracingCallPool](crate::tracing_call::TracingCallPool).
     async fn trace_transaction_in_block<F, R>(
         &self,
         hash: H256,
@@ -225,7 +228,9 @@ pub trait EthTransactions: Send + Sync {
                 ResultAndState,
                 StateCacheDB<'a>,
             ) -> EthResult<R>
-            + Send;
+            + Send
+            + 'static,
+        R: Send + 'static;
 }
 
 #[async_trait]
@@ -625,7 +630,9 @@ where
                 ResultAndState,
                 StateCacheDB<'a>,
             ) -> EthResult<R>
-            + Send,
+            + Send
+            + 'static,
+        R: Send + 'static,
     {
         let (transaction, block) = match self.transaction_and_block(hash).await? {
             None => return Ok(None),
@@ -640,7 +647,7 @@ where
         let parent_block = block.parent_hash;
         let block_txs = block.body;
 
-        self.with_state_at_block(parent_block.into(), |state| {
+        self.spawn_with_state_at_block(parent_block.into(), move |state| {
             let mut db = SubState::new(State::new(state));
 
             // replay all transactions prior to the targeted transaction
@@ -652,6 +659,7 @@ where
             let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
             f(tx_info, inspector, res, db)
         })
+        .await
         .map(Some)
     }
 }
