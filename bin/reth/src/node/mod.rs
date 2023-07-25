@@ -311,7 +311,10 @@ impl Command {
             let mining_mode = if let Some(interval) = self.dev.block_time {
                 MiningMode::interval(interval)
             } else if let Some(max_transactions) = self.dev.block_max_transactions {
-                MiningMode::instant(max_transactions, transaction_pool.pending_transactions_listener())
+                MiningMode::instant(
+                    max_transactions,
+                    transaction_pool.pending_transactions_listener(),
+                )
             } else {
                 info!(target: "reth::cli", "No mining mode specified, defaulting to ReadyTransaction");
                 MiningMode::instant(1, transaction_pool.pending_transactions_listener())
@@ -323,7 +326,7 @@ impl Command {
                 transaction_pool.clone(),
                 consensus_engine_tx.clone(),
                 canon_state_notification_sender,
-                mining_mode
+                mining_mode,
             )
             .build();
 
