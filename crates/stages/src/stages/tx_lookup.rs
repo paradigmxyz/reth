@@ -184,19 +184,18 @@ fn calculate_hash(
 fn stage_checkpoint<DB: Database>(
     provider: &DatabaseProviderRW<'_, &DB>,
 ) -> Result<EntitiesCheckpoint, StageError> {
-    // Get last pruned transaction number for `TransactionLookup` prune part
-    let last_pruned_tx_num = provider
+    let pruned_entries = provider
         .get_prune_checkpoint(PrunePart::TransactionLookup)?
         .map(|checkpoint| provider.block_body_indices(checkpoint.block_number))
         .transpose()?
         .flatten()
-        .map(|body| body.last_tx_num())
+        .map(|body| body.last_tx_num() + 1)
         .unwrap_or_default();
     Ok(EntitiesCheckpoint {
         // If `TxHashNumber` table was pruned, we will have a number of entries in it not matching
         // the actual number of processed transactions. To fix that, we add the number of pruned
         // `TxHashNumber` entries.
-        processed: provider.tx_ref().entries::<tables::TxHashNumber>()? as u64 + last_pruned_tx_num,
+        processed: provider.tx_ref().entries::<tables::TxHashNumber>()? as u64 + pruned_entries,
         total: provider.tx_ref().entries::<tables::Transactions>()? as u64,
     })
 }
@@ -349,9 +348,13 @@ mod tests {
         let max_processed_block = 70;
 
         let mut tx_hash_numbers = Vec::new();
-        for block in &blocks[max_pruned_block..max_processed_block] {
+        let mut tx_hash_number = 0;
+        for block in &blocks[..=max_processed_block] {
             for transaction in &block.body {
-                tx_hash_numbers.push((transaction.hash, tx_hash_numbers.len() as u64));
+                if block.number > max_pruned_block {
+                    tx_hash_numbers.push((transaction.hash, tx_hash_number));
+                }
+                tx_hash_number += 1;
             }
         }
         tx.insert_tx_hash_numbers(tx_hash_numbers).expect("insert tx hash numbers");
@@ -375,7 +378,7 @@ mod tests {
         assert_eq!(
             stage_checkpoint(&provider).expect("stage checkpoint"),
             EntitiesCheckpoint {
-                processed: blocks[..max_processed_block]
+                processed: blocks[..=max_processed_block]
                     .iter()
                     .map(|block| block.body.len() as u64)
                     .sum::<u64>(),
