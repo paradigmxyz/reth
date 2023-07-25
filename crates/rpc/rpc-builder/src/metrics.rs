@@ -1,10 +1,8 @@
-use jsonrpsee::server::logger::Logger;
-use jsonrpsee::server::logger::{HttpRequest, MethodKind, Params, TransportProtocol};
-use std::format;
-use std::net::SocketAddr;
+use jsonrpsee::server::logger::{HttpRequest, Logger, MethodKind, Params, TransportProtocol};
+use std::{format, net::SocketAddr};
 
 use reth_metrics::{
-    metrics::{self, counter, histogram, Gauge, Histogram},
+    metrics::{self, counter, histogram, Counter, Gauge, Histogram},
     Metrics,
 };
 use std::time::Instant;
@@ -18,16 +16,24 @@ const CALL_ERROR_METRIC: &str = "call_error";
 #[derive(Metrics, Clone)]
 #[metrics(scope = "rpc_server")]
 pub(crate) struct RpcServerMetrics {
-    /// The number of ws requests currently being served
-    ws_req_count: Gauge,
-    /// The number of http requests currently being served
-    http_req_count: Gauge,
-    /// The number of ws sessions currently active
-    ws_session_count: Gauge,
-    /// The number of http connections currently active
-    http_session_count: Gauge,
+    /// The number of calls started
+    calls_started: Counter,
+    /// The number of successful calls
+    successful_calls: Counter,
+    /// The number of failed calls
+    failed_calls: Counter,
+    /// The number of requests started
+    requests_started: Counter,
+    /// The number of requests finished
+    requests_finished: Counter,
+    /// The number of ws sessions opened
+    ws_session_opened: Counter,
+    /// The number of ws sessions closed
+    ws_session_closed: Counter,
     /// Latency for a single request/response pair
     request_latency: Histogram,
+    /// Latency for a single call
+    call_latency: Histogram,
 }
 
 impl Logger for RpcServerMetrics {
@@ -39,15 +45,12 @@ impl Logger for RpcServerMetrics {
         transport: TransportProtocol,
     ) {
         match transport {
-            TransportProtocol::Http => self.http_session_count.increment(1 as f64),
-            TransportProtocol::WebSocket => self.ws_session_count.increment(1 as f64),
+            TransportProtocol::Http => {}
+            TransportProtocol::WebSocket => self.ws_session_opened.increment(1),
         }
     }
     fn on_request(&self, transport: TransportProtocol) -> Self::Instant {
-        match transport {
-            TransportProtocol::Http => self.http_req_count.increment(1 as f64),
-            TransportProtocol::WebSocket => self.ws_req_count.increment(1 as f64),
-        }
+        self.requests_started.increment(1);
         Instant::now()
     }
     fn on_call(
@@ -57,11 +60,12 @@ impl Logger for RpcServerMetrics {
         _kind: MethodKind,
         _transport: TransportProtocol,
     ) {
-        // note that on_call will be called multiple times in case of a batch request
-        // increment method call count, use macro because derive(Metrics) doesnt seem to support dynamically configuring metric name (?)
+        self.calls_started.increment(1);
+        // increment call count per method, use macro because derive(Metrics) doesnt seem to support
+        // dynamically configuring metric name (?)
         let metric_call_count_name =
             format!("{}{}{}{}{}", METRICS_SCOPE, "_", CALL_COUNT_METRIC, "_", method_name);
-        counter!(metric_call_count_name, 1); // this could be a gauge since one call here should map to one "result" in on_result
+        counter!(metric_call_count_name, 1);
     }
     fn on_result(
         &self,
@@ -70,29 +74,30 @@ impl Logger for RpcServerMetrics {
         started_at: Self::Instant,
         _transport: TransportProtocol,
     ) {
-        // capture method call latency, use macro because of the same reason stated in on_call
+        // capture general call duration (for all calls not per method)
+        self.call_latency.record(started_at.elapsed().as_millis());
+        // capture per method call latency
         let metric_name_call_latency =
             format!("{}{}{}{}{}", METRICS_SCOPE, "_", CALL_LATENCY_METRIC, "_", method_name);
-        histogram!(metric_name_call_latency, started_at.elapsed());
+        histogram!(metric_name_call_latency, started_at.elapsed().as_millis());
         if !success {
-            // capture error count for method call, use macro because of the same reason stated in on_call
+            self.failed_calls.increment(1);
+            // capture error count per method call
             let metric_name_call_error_count =
                 format!("{}{}{}{}{}", METRICS_SCOPE, "_", CALL_ERROR_METRIC, "_", method_name);
             counter!(metric_name_call_error_count, 1);
+        } else {
+            self.successful_calls.increment(1);
         }
     }
     fn on_response(&self, _result: &str, started_at: Self::Instant, transport: TransportProtocol) {
-        match transport {
-            TransportProtocol::Http => self.http_req_count.decrement(1 as f64),
-            TransportProtocol::WebSocket => self.ws_req_count.decrement(1 as f64),
-        }
         // capture request latency for this request/response pair
-        self.request_latency.record(started_at.elapsed());
+        self.request_latency.record(started_at.elapsed().as_millis());
     }
     fn on_disconnect(&self, _remote_addr: SocketAddr, transport: TransportProtocol) {
         match transport {
-            TransportProtocol::Http => self.http_session_count.decrement(1 as f64),
-            TransportProtocol::WebSocket => self.ws_session_count.decrement(1 as f64),
+            TransportProtocol::Http => {}
+            TransportProtocol::WebSocket => self.ws_session_closed.increment(1),
         }
     }
 }
