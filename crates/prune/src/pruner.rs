@@ -198,7 +198,7 @@ impl<DB: Database> Pruner<DB> {
                 return Ok(())
             }
         };
-        let last_tx_num = range.end().clone();
+        let last_tx_num = *range.end();
 
         for i in range.step_by(self.batch_sizes.transaction_lookup) {
             let tx_range = i..(i + self.batch_sizes.transaction_lookup as u64).min(last_tx_num + 1);
