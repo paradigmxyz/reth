@@ -54,19 +54,12 @@ mod test {
 
     #[derive(Debug, Deserialize, PartialEq, Eq)]
     struct V(
-        #[serde(deserialize_with = "super::deserialize_opt_prune_mode_with_min_distance::<10, _>")]
+        #[serde(deserialize_with = "super::deserialize_opt_prune_mode_with_min_blocks::<10, _>")]
         Option<PruneMode>,
     );
 
     #[test]
     fn deserialize_opt_prune_mode_with_min_blocks() {
-        #[derive(Debug, Deserialize, PartialEq, Eq)]
-        struct V(
-            #[serde(
-                deserialize_with = "super::deserialize_opt_prune_mode_with_min_blocks::<10, _>"
-            )]
-            Option<PruneMode>,
-        );
         assert!(serde_json::from_str::<V>(r#"{"distance": 10}"#).is_ok());
         assert_matches!(
             serde_json::from_str::<V>(r#"{"distance": 9}"#),
