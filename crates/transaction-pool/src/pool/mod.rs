@@ -90,12 +90,13 @@ use std::{
     time::Instant,
 };
 use tokio::sync::mpsc;
-use tracing::debug;
+use tracing::{debug, trace};
 
 mod events;
 pub use events::{FullTransactionEvent, TransactionEvent};
 
 mod listener;
+use crate::pool::txpool::UpdateOutcome;
 pub use listener::{AllTransactionsEvents, TransactionEvents};
 
 mod best;
@@ -161,6 +162,11 @@ where
     /// Returns the internal `SenderId` for this address
     pub(crate) fn get_sender_id(&self, addr: Address) -> SenderId {
         self.identifiers.write().sender_id_or_create(addr)
+    }
+
+    /// Returns all senders in the pool
+    pub(crate) fn unique_senders(&self) -> HashSet<Address> {
+        self.pool.read().unique_senders()
     }
 
     /// Converts the changed accounts to a map of sender ids to sender info (internal identifier
@@ -243,12 +249,15 @@ where
 
     /// Updates the entire pool after a new block was executed.
     pub(crate) fn on_canonical_state_change(&self, update: CanonicalStateUpdate) {
+        trace!(target: "txpool", %update, "updating pool on canonical state change");
+
         let CanonicalStateUpdate {
             hash,
             number,
             pending_block_base_fee,
             changed_accounts,
             mined_transactions,
+            timestamp: _,
         } = update;
         let changed_senders = self.changed_senders(changed_accounts.into_iter());
         let block_info = BlockInfo {
@@ -262,6 +271,18 @@ where
             changed_senders,
         );
         self.notify_on_new_state(outcome);
+    }
+
+    /// Performs account updates on the pool.
+    ///
+    /// This will either promote or discard transactions based on the new account state.
+    pub(crate) fn update_accounts(&self, accounts: Vec<ChangedAccount>) {
+        let changed_senders = self.changed_senders(accounts.into_iter());
+        let UpdateOutcome { promoted, discarded } =
+            self.pool.write().update_accounts(changed_senders);
+        let mut listener = self.event_listener.write();
+        promoted.iter().for_each(|tx| listener.pending(tx, None));
+        discarded.iter().for_each(|tx| listener.discarded(tx));
     }
 
     /// Add a single validated transaction into the pool.
@@ -440,6 +461,16 @@ where
     /// Returns an iterator that yields transactions that are ready to be included in the block.
     pub(crate) fn best_transactions(&self) -> BestTransactions<T> {
         self.pool.read().best_transactions()
+    }
+
+    /// Returns an iterator that yields transactions that are ready to be included in the block with
+    /// the given base fee.
+    pub(crate) fn best_transactions_with_base_fee(
+        &self,
+        base_fee: u64,
+    ) -> Box<dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T::Transaction>>>>
+    {
+        self.pool.read().best_transactions_with_base_fee(base_fee)
     }
 
     /// Returns all transactions from the pending sub-pool

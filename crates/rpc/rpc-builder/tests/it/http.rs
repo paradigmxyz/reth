@@ -14,7 +14,7 @@ use reth_primitives::{
 };
 use reth_rpc_api::{
     clients::{AdminApiClient, EthApiClient},
-    DebugApiClient, NetApiClient, TraceApiClient, Web3ApiClient,
+    DebugApiClient, NetApiClient, OtterscanClient, TraceApiClient, Web3ApiClient,
 };
 use reth_rpc_builder::RethRpcModule;
 use reth_rpc_types::{trace::filter::TraceFilter, CallRequest, Index, TransactionRequest};
@@ -180,6 +180,67 @@ where
     Web3ApiClient::sha3(client, Bytes::default()).await.unwrap();
 }
 
+async fn test_basic_otterscan_calls<C>(client: &C)
+where
+    C: ClientT + SubscriptionClientT + Sync,
+{
+    let address = Address::default();
+    let sender = Address::default();
+    let tx_hash = TxHash::default();
+    let block_number = BlockNumberOrTag::default();
+    let page_number = 1;
+    let page_size = 10;
+    let nonce = 1;
+    let block_hash = H256::default();
+
+    OtterscanClient::has_code(client, address, None).await.unwrap();
+
+    OtterscanClient::get_api_level(client).await.unwrap();
+
+    assert!(is_unimplemented(
+        OtterscanClient::get_internal_operations(client, tx_hash).await.err().unwrap()
+    ));
+    assert!(is_unimplemented(
+        OtterscanClient::get_transaction_error(client, tx_hash).await.err().unwrap()
+    ));
+    assert!(is_unimplemented(
+        OtterscanClient::trace_transaction(client, tx_hash).await.err().unwrap()
+    ));
+    assert!(is_unimplemented(
+        OtterscanClient::get_block_details(client, block_number,).await.err().unwrap()
+    ));
+    assert!(is_unimplemented(
+        OtterscanClient::get_block_details_by_hash(client, block_hash).await.err().unwrap()
+    ));
+    assert!(is_unimplemented(
+        OtterscanClient::get_block_transactions(client, block_number, page_number, page_size,)
+            .await
+            .err()
+            .unwrap()
+    ));
+    assert!(is_unimplemented(
+        OtterscanClient::search_transactions_before(client, address, block_number, page_size,)
+            .await
+            .err()
+            .unwrap()
+    ));
+    assert!(is_unimplemented(
+        OtterscanClient::search_transactions_after(client, address, block_number, page_size,)
+            .await
+            .err()
+            .unwrap()
+    ));
+    assert!(is_unimplemented(
+        OtterscanClient::get_transaction_by_sender_and_nonce(client, sender, nonce,)
+            .await
+            .err()
+            .unwrap()
+    ));
+    assert!(is_unimplemented(
+        OtterscanClient::get_contract_creator(client, address).await.err().unwrap()
+    ));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_admin_functions_http() {
     reth_tracing::init_test_tracing();
@@ -340,4 +401,31 @@ async fn test_call_web3_functions_http_and_ws() {
     let handle = launch_http_ws(vec![RethRpcModule::Web3]).await;
     let client = handle.http_client().unwrap();
     test_basic_web3_calls(&client).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_call_otterscan_functions_http() {
+    reth_tracing::init_test_tracing();
+
+    let handle = launch_http(vec![RethRpcModule::Ots]).await;
+    let client = handle.http_client().unwrap();
+    test_basic_otterscan_calls(&client).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_call_otterscan_functions_ws() {
+    reth_tracing::init_test_tracing();
+
+    let handle = launch_ws(vec![RethRpcModule::Ots]).await;
+    let client = handle.ws_client().await.unwrap();
+    test_basic_otterscan_calls(&client).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_call_otterscan_functions_http_and_ws() {
+    reth_tracing::init_test_tracing();
+
+    let handle = launch_http_ws(vec![RethRpcModule::Ots]).await;
+    let client = handle.http_client().unwrap();
+    test_basic_otterscan_calls(&client).await;
 }

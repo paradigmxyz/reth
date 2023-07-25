@@ -1,7 +1,7 @@
 use crate::{
     identifier::TransactionId,
     pool::pending::{PendingTransaction, PendingTransactionRef},
-    TransactionOrdering, ValidPoolTransaction,
+    PoolTransaction, TransactionOrdering, ValidPoolTransaction,
 };
 use reth_primitives::H256 as TxHash;
 use std::{
@@ -9,6 +9,40 @@ use std::{
     sync::Arc,
 };
 use tracing::debug;
+
+/// An iterator that returns transactions that can be executed on the current state (*best*
+/// transactions).
+///
+/// This is a wrapper around [`BestTransactions`] that also enforces a specific basefee.
+///
+/// This iterator guarantees that all transaction it returns satisfy the base fee.
+pub(crate) struct BestTransactionsWithBasefee<T: TransactionOrdering> {
+    pub(crate) best: BestTransactions<T>,
+    pub(crate) base_fee: u64,
+}
+
+impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactionsWithBasefee<T> {
+    fn mark_invalid(&mut self, tx: &Self::Item) {
+        BestTransactions::mark_invalid(&mut self.best, tx)
+    }
+}
+
+impl<T: TransactionOrdering> Iterator for BestTransactionsWithBasefee<T> {
+    type Item = Arc<ValidPoolTransaction<T::Transaction>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // find the next transaction that satisfies the base fee
+        loop {
+            let best = self.best.next()?;
+            if best.transaction.max_fee_per_gas() < self.base_fee as u128 {
+                // tx violates base fee, mark it as invalid and continue
+                crate::traits::BestTransactions::mark_invalid(self, &best);
+            } else {
+                return Some(best)
+            }
+        }
+    }
+}
 
 /// An iterator that returns transactions that can be executed on the current state (*best*
 /// transactions).
@@ -34,6 +68,14 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     /// Mark the transaction and it's descendants as invalid.
     pub(crate) fn mark_invalid(&mut self, tx: &Arc<ValidPoolTransaction<T::Transaction>>) {
         self.invalid.insert(*tx.hash());
+    }
+
+    /// Returns the ancestor the given transaction, the transaction with `nonce - 1`.
+    ///
+    /// Note: for a transaction with nonce higher than the current on chain nonce this will always
+    /// return an ancestor since all transaction in this pool are gapless.
+    pub(crate) fn ancestor(&self, id: &TransactionId) -> Option<&Arc<PendingTransaction<T>>> {
+        self.all.get(&id.unchecked_ancestor()?)
     }
 }
 

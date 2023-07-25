@@ -11,7 +11,7 @@ use reth_primitives::{
 };
 use reth_rlp::Encodable;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt,
     pin::Pin,
     sync::Arc,
@@ -175,6 +175,15 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
 
+    /// Returns an iterator that yields transactions that are ready for block production with the
+    /// given base fee.
+    ///
+    /// Consumer: Block production
+    fn best_transactions_with_base_fee(
+        &self,
+        base_fee: u64,
+    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
+
     /// Returns all transactions that can be included in the next block.
     ///
     /// This is primarily used for the `txpool_` RPC namespace: <https://geth.ethereum.org/docs/interacting-with-geth/rpc/ns-txpool> which distinguishes between `pending` and `queued` transactions, where `pending` are transactions ready for inclusion in the next block and `queued` are transactions that are ready for inclusion in future blocks.
@@ -242,6 +251,9 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns a set of all senders of transactions in the pool
+    fn unique_senders(&self) -> HashSet<Address>;
 }
 
 /// Extension for [TransactionPool] trait that allows to set the current block info.
@@ -256,6 +268,9 @@ pub trait TransactionPoolExt: TransactionPool {
     /// For example the base fee of the pending block is determined after a block is mined which
     /// affects the dynamic fee requirement of pending transactions in the pool.
     fn on_canonical_state_change(&self, update: CanonicalStateUpdate);
+
+    /// Updates the accounts in the pool
+    fn update_accounts(&self, accounts: Vec<ChangedAccount>);
 }
 
 /// A Helper type that bundles all transactions in the pool.
@@ -382,11 +397,20 @@ pub struct CanonicalStateUpdate {
     /// EIP-1559 Base fee of the _next_ (pending) block
     ///
     /// The base fee of a block depends on the utilization of the last block and its base fee.
-    pub pending_block_base_fee: u128,
+    pub pending_block_base_fee: u64,
     /// A set of changed accounts across a range of blocks.
     pub changed_accounts: Vec<ChangedAccount>,
     /// All mined transactions in the block range.
     pub mined_transactions: Vec<H256>,
+    /// Timestamp of the latest chain update
+    pub timestamp: u64,
+}
+
+impl fmt::Display for CanonicalStateUpdate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{{ hash: {}, number: {}, pending_block_base_fee: {}, changed_accounts: {}, mined_transactions: {} }}",
+            self.hash, self.number, self.pending_block_base_fee, self.changed_accounts.len(), self.mined_transactions.len())
+    }
 }
 
 /// Represents a changed account
@@ -653,7 +677,7 @@ pub struct BlockInfo {
     ///
     /// Note: this is the derived base fee of the _next_ block that builds on the clock the pool is
     /// currently tracking.
-    pub pending_basefee: u128,
+    pub pending_basefee: u64,
 }
 
 /// A Stream that yields full transactions the subpool

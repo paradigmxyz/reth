@@ -52,7 +52,7 @@ mod tests {
         DatabaseEnv,
     };
     use reth_primitives::{
-        hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, PruneMode, PruneTargets,
+        hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, PruneMode, PruneModes,
         SealedBlock, H160, MAINNET, U256,
     };
     use reth_provider::{
@@ -111,7 +111,7 @@ mod tests {
         provider.commit().unwrap();
 
         let check_pruning = |factory: Arc<ProviderFactory<_>>,
-                             prune_targets: PruneTargets,
+                             prune_targets: PruneModes,
                              expect_num_receipts: usize,
                              expect_num_acc_changesets: usize,
                              expect_num_storage_changesets: usize| async move {
@@ -147,6 +147,7 @@ mod tests {
                 // Full is not supported
                 assert!(acc_indexing_stage.execute(&provider, input).await.is_err());
             } else {
+                dbg!(prune_targets);
                 acc_indexing_stage.execute(&provider, input).await.unwrap();
                 let mut account_history =
                     provider.tx_ref().cursor_read::<tables::AccountHistory>().unwrap();
@@ -172,7 +173,7 @@ mod tests {
             }
         };
 
-        let mut prune = PruneTargets::none();
+        let mut prune = PruneModes::none();
 
         check_pruning(factory.clone(), prune, 1, 2, 1).await;
 

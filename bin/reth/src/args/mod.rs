@@ -35,4 +35,8 @@ pub use gas_price_oracle_args::GasPriceOracleArgs;
 mod txpool_args;
 pub use txpool_args::TxPoolArgs;
 
+/// DevArgs for configuring the dev testnet
+mod dev_args;
+pub use dev_args::DevArgs;
+
 pub mod utils;

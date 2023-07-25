@@ -60,11 +60,11 @@ pub use block::{
 pub use bloom::Bloom;
 pub use chain::{
     AllGenesisFormats, Chain, ChainInfo, ChainSpec, ChainSpecBuilder, DisplayHardforks,
-    ForkCondition, ForkTimestamps, GOERLI, MAINNET, SEPOLIA,
+    ForkCondition, ForkTimestamps, DEV, GOERLI, MAINNET, SEPOLIA,
 };
 pub use compression::*;
 pub use constants::{
-    EMPTY_OMMER_ROOT, GOERLI_GENESIS, KECCAK_EMPTY, MAINNET_GENESIS, SEPOLIA_GENESIS,
+    DEV_GENESIS, EMPTY_OMMER_ROOT, GOERLI_GENESIS, KECCAK_EMPTY, MAINNET_GENESIS, SEPOLIA_GENESIS,
 };
 pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
 pub use genesis::{Genesis, GenesisAccount};
@@ -78,17 +78,17 @@ pub use net::{
     SEPOLIA_BOOTNODES,
 };
 pub use peer::{PeerId, WithPeerId};
-pub use prune::{PruneCheckpoint, PruneMode, PrunePart, PruneTargets};
+pub use prune::{PruneCheckpoint, PruneMode, PruneModes, PrunePart};
 pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef};
 pub use revm_primitives::JumpMap;
 pub use serde_helper::JsonU256;
 pub use storage::StorageEntry;
 pub use transaction::{
-    util::secp256k1::{recover_signer, sign_message},
+    util::secp256k1::{public_key_to_address, recover_signer, sign_message},
     AccessList, AccessListItem, AccessListWithGasUsed, FromRecoveredTransaction,
     IntoRecoveredTransaction, InvalidTransactionError, Signature, Transaction, TransactionKind,
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
-    TxEip1559, TxEip2930, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
+    TxEip1559, TxEip2930, TxEip4844, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID,
 };
 pub use withdrawal::Withdrawal;

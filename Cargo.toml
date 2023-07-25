@@ -55,7 +55,7 @@ default-members = ["bin/reth"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 edition = "2021"
 rust-version = "1.70" # Remember to update .clippy.toml and README.md
 license = "MIT OR Apache-2.0"
@@ -77,9 +77,6 @@ codegen-units = 1
 incremental = false
 
 [patch.crates-io]
-# patched for quantity U256 responses <https://github.com/recmo/uint/issues/224>
-ruint = { git = "https://github.com/paradigmxyz/uint" }
-
 revm = { git = "https://github.com/bluealloy/revm/", branch = "release/v25" }
 revm-primitives = { git = "https://github.com/bluealloy/revm/", branch = "release/v25" }
 
@@ -105,10 +102,10 @@ reth-network = { path = "./crates/net/network" }
 reth-network-api = { path = "./crates/net/network-api" }
 
 ## eth
-ethers-core = { version = "2.0.7", default-features = false }
-ethers-providers = { version = "2.0.7", default-features = false }
-ethers-signers = { version = "2.0.7", default-features = false }
-ethers-middleware = { version = "2.0.7", default-features = false }
+ethers-core = { version = "2.0.8", default-features = false }
+ethers-providers = { version = "2.0.8", default-features = false }
+ethers-signers = { version = "2.0.8", default-features = false }
+ethers-middleware = { version = "2.0.8", default-features = false }
 
 ## misc
 bytes = "1.4"
@@ -117,6 +114,8 @@ thiserror = "1.0.37"
 serde_json = "1.0.94"
 serde = { version = "1.0", default-features = false }
 rand = "0.8.5"
+strum = "0.25"
+rayon = "1.7"
 
 ### proc-macros
 proc-macro2 = "1.0"

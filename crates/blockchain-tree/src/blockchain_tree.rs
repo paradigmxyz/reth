@@ -201,7 +201,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         // check if block is disconnected
         if let Some(block) = self.buffered_blocks.block(block) {
-            return Ok(Some(BlockStatus::Disconnected { missing_parent: block.parent_num_hash() }))
+            return Ok(Some(BlockStatus::Disconnected { missing_ancestor: block.parent_num_hash() }))
         }
 
         Ok(None)
@@ -360,7 +360,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 )
             })?;
 
-        Ok(BlockStatus::Disconnected { missing_parent: lowest_ancestor.parent_num_hash() })
+        Ok(BlockStatus::Disconnected { missing_ancestor: lowest_ancestor.parent_num_hash() })
     }
 
     /// This tries to append the given block to the canonical chain.
@@ -1003,6 +1003,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 };
                 // insert old canon chain
                 self.insert_chain(AppendableChain::new(old_canon_chain));
+                self.metrics.reorgs.increment(1);
             } else {
                 // error here to confirm that we are reverting nothing from db.
                 error!(target: "blockchain_tree", "Reverting nothing from db on block: #{:?}", block_hash);
@@ -1100,6 +1101,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// [BlockBuffer] during the pipeline sync.
     pub(crate) fn update_chains_metrics(&mut self) {
         let height = self.canonical_chain().tip().number;
+
+        let longest_sidechain_height = self.chains.values().map(|chain| chain.tip().number).max();
+        if let Some(longest_sidechain_height) = longest_sidechain_height {
+            self.metrics.longest_sidechain_height.set(longest_sidechain_height as f64);
+        }
 
         self.metrics.sidechains.set(self.chains.len() as f64);
         self.metrics.canonical_chain_height.set(height as f64);
@@ -1274,7 +1280,7 @@ mod tests {
         assert_eq!(
             tree.insert_block(block2.clone()).unwrap(),
             InsertPayloadOk::Inserted(BlockStatus::Disconnected {
-                missing_parent: block2.parent_num_hash()
+                missing_ancestor: block2.parent_num_hash()
             })
         );
 
@@ -1293,7 +1299,7 @@ mod tests {
 
         assert_eq!(
             tree.is_block_known(block2.num_hash()).unwrap(),
-            Some(BlockStatus::Disconnected { missing_parent: block2.parent_num_hash() })
+            Some(BlockStatus::Disconnected { missing_ancestor: block2.parent_num_hash() })
         );
 
         // check if random block is known
@@ -1575,7 +1581,7 @@ mod tests {
         assert_eq!(
             tree.insert_block(block2b.clone()).unwrap(),
             InsertPayloadOk::Inserted(BlockStatus::Disconnected {
-                missing_parent: block2b.parent_num_hash()
+                missing_ancestor: block2b.parent_num_hash()
             })
         );
 

@@ -132,7 +132,7 @@
 //!     );
 //!
 //!   // spawn a task that listens for new blocks and updates the pool's transactions, mined transactions etc..
-//!   tokio::task::spawn(  maintain_transaction_pool_future(client, pool, stream));
+//!   tokio::task::spawn(  maintain_transaction_pool_future(client, pool, stream, TokioTaskExecutor::default(), Default::default()));
 //!
 //! # }
 //! ```
@@ -145,7 +145,10 @@ use crate::pool::PoolInner;
 use aquamarine as _;
 use reth_primitives::{Address, TxHash, U256};
 use reth_provider::StateProviderFactory;
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
 
@@ -394,6 +397,13 @@ where
         Box::new(self.pool.best_transactions())
     }
 
+    fn best_transactions_with_base_fee(
+        &self,
+        base_fee: u64,
+    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
+        self.pool.best_transactions_with_base_fee(base_fee)
+    }
+
     fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.pending_transactions()
     }
@@ -438,6 +448,10 @@ where
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.get_transactions_by_sender(sender)
     }
+
+    fn unique_senders(&self) -> HashSet<Address> {
+        self.pool.unique_senders()
+    }
 }
 
 impl<V: TransactionValidator, T: TransactionOrdering> TransactionPoolExt for Pool<V, T>
@@ -453,6 +467,10 @@ where
 
     fn on_canonical_state_change(&self, update: CanonicalStateUpdate) {
         self.pool.on_canonical_state_change(update);
+    }
+
+    fn update_accounts(&self, accounts: Vec<ChangedAccount>) {
+        self.pool.update_accounts(accounts);
     }
 }
 

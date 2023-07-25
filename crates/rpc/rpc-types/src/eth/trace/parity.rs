@@ -264,18 +264,18 @@ pub struct TransactionTrace {
 pub struct LocalizedTransactionTrace {
     #[serde(flatten)]
     pub trace: TransactionTrace,
-    /// Transaction index within the block, None if pending.
-    pub transaction_position: Option<u64>,
-    /// Hash of the transaction
-    pub transaction_hash: Option<H256>,
-    /// Block number the transaction is included in, None if pending.
-    ///
-    /// Note: this deviates from <https://openethereum.github.io/JSONRPC-trace-module#trace_transaction> which always returns a block number
-    pub block_number: Option<u64>,
     /// Hash of the block, if not pending
     ///
     /// Note: this deviates from <https://openethereum.github.io/JSONRPC-trace-module#trace_transaction> which always returns a block number
     pub block_hash: Option<H256>,
+    /// Block number the transaction is included in, None if pending.
+    ///
+    /// Note: this deviates from <https://openethereum.github.io/JSONRPC-trace-module#trace_transaction> which always returns a block number
+    pub block_number: Option<u64>,
+    /// Hash of the transaction
+    pub transaction_hash: Option<H256>,
+    /// Transaction index within the block, None if pending.
+    pub transaction_position: Option<u64>,
 }
 
 /// A record of a full VM trace for a CALL/CREATE.

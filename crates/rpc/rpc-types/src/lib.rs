@@ -17,8 +17,10 @@
 
 mod admin;
 mod eth;
+mod otterscan;
 mod rpc;
 
 pub use admin::*;
 pub use eth::*;
+pub use otterscan::*;
 pub use rpc::*;

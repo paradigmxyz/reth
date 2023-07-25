@@ -328,7 +328,7 @@ mod tests {
         assert_eq!(b, vec[..]);
         assert_eq!(vec[..], b);
 
-        let wrong_vec = vec![1, 3, 52, 137];
+        let wrong_vec = [1, 3, 52, 137];
         assert_ne!(b, wrong_vec[..]);
         assert_ne!(wrong_vec[..], b);
     }

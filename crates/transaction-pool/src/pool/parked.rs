@@ -110,18 +110,29 @@ impl<T: ParkedOrd> ParkedPool<T> {
 }
 
 impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
-    /// Removes all transactions and their dependent transaction from the subpool that no longer
-    /// satisfy the given basefee.
+    /// Returns all transactions that satisfy the given basefee.
     ///
-    /// Note: the transactions are not returned in a particular order.
-    pub(crate) fn enforce_basefee(&mut self, basefee: u128) -> Vec<Arc<ValidPoolTransaction<T>>> {
-        let mut to_remove = Vec::new();
+    /// Note: this does _not_ remove the transactions
+    pub(crate) fn satisfy_base_fee_transactions(
+        &self,
+        basefee: u64,
+    ) -> Vec<Arc<ValidPoolTransaction<T>>> {
+        let ids = self.satisfy_base_fee_ids(basefee);
+        let mut txs = Vec::with_capacity(ids.len());
+        for id in ids {
+            txs.push(self.by_id.get(&id).expect("transaction exists").transaction.clone().into());
+        }
+        txs
+    }
 
+    /// Returns all transactions that satisfy the given basefee.
+    fn satisfy_base_fee_ids(&self, basefee: u64) -> Vec<TransactionId> {
+        let mut transactions = Vec::new();
         {
             let mut iter = self.by_id.iter().peekable();
 
             while let Some((id, tx)) = iter.next() {
-                if tx.transaction.transaction.max_fee_per_gas() < basefee {
+                if tx.transaction.transaction.max_fee_per_gas() < basefee as u128 {
                     // still parked -> skip descendant transactions
                     'this: while let Some((peek, _)) = iter.peek() {
                         if peek.sender != id.sender {
@@ -130,10 +141,19 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
                         iter.next();
                     }
                 } else {
-                    to_remove.push(*id);
+                    transactions.push(*id);
                 }
             }
         }
+        transactions
+    }
+
+    /// Removes all transactions and their dependent transaction from the subpool that no longer
+    /// satisfy the given basefee.
+    ///
+    /// Note: the transactions are not returned in a particular order.
+    pub(crate) fn enforce_basefee(&mut self, basefee: u64) -> Vec<Arc<ValidPoolTransaction<T>>> {
+        let to_remove = self.satisfy_base_fee_ids(basefee);
 
         let mut removed = Vec::with_capacity(to_remove.len());
         for id in to_remove {
@@ -310,10 +330,10 @@ mod tests {
         assert!(pool.by_id.contains_key(tx.id()));
         assert_eq!(pool.len(), 1);
 
-        let removed = pool.enforce_basefee(u128::MAX);
+        let removed = pool.enforce_basefee(u64::MAX);
         assert!(removed.is_empty());
 
-        let removed = pool.enforce_basefee(tx.max_fee_per_gas() - 1);
+        let removed = pool.enforce_basefee((tx.max_fee_per_gas() - 1) as u64);
         assert_eq!(removed.len(), 1);
         assert!(pool.is_empty());
     }
@@ -333,14 +353,14 @@ mod tests {
         assert!(pool.by_id.contains_key(descendant_tx.id()));
         assert_eq!(pool.len(), 2);
 
-        let removed = pool.enforce_basefee(u128::MAX);
+        let removed = pool.enforce_basefee(u64::MAX);
         assert!(removed.is_empty());
 
         // two dependent tx in the pool with decreasing fee
 
         {
             let mut pool2 = pool.clone();
-            let removed = pool2.enforce_basefee(descendant_tx.max_fee_per_gas());
+            let removed = pool2.enforce_basefee(descendant_tx.max_fee_per_gas() as u64);
             assert_eq!(removed.len(), 1);
             assert_eq!(pool2.len(), 1);
             // descendant got popped
@@ -349,7 +369,7 @@ mod tests {
         }
 
         // remove root transaction via root tx fee
-        let removed = pool.enforce_basefee(root_tx.max_fee_per_gas());
+        let removed = pool.enforce_basefee(root_tx.max_fee_per_gas() as u64);
         assert_eq!(removed.len(), 2);
         assert!(pool.is_empty());
     }

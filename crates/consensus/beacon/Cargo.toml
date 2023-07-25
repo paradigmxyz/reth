@@ -40,5 +40,7 @@ reth-blockchain-tree = { path = "../../blockchain-tree", features = ["test-utils
 reth-db = { path = "../../storage/db", features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing = { path = "../../tracing" }
+reth-revm = { path = "../../revm" }
+reth-downloaders = { path = "../../net/downloaders" }
 
 assert_matches = "1.5"

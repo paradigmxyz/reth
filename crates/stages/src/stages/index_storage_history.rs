@@ -2,7 +2,7 @@ use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput}
 use reth_db::{database::Database, models::BlockNumberAddress};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
-    PruneTargets,
+    PruneModes,
 };
 use reth_provider::{DatabaseProviderRW, HistoryWriter, StorageReader};
 use std::fmt::Debug;
@@ -16,19 +16,19 @@ pub struct IndexStorageHistoryStage {
     /// flow will be returned to the pipeline for commit.
     pub commit_threshold: u64,
     /// Pruning configuration.
-    pub prune_targets: PruneTargets,
+    pub prune_targets: PruneModes,
 }
 
 impl IndexStorageHistoryStage {
     /// Create new instance of [IndexStorageHistoryStage].
     pub fn new(commit_threshold: u64) -> Self {
-        Self { commit_threshold, prune_targets: PruneTargets::default() }
+        Self { commit_threshold, prune_targets: PruneModes::default() }
     }
 }
 
 impl Default for IndexStorageHistoryStage {
     fn default() -> Self {
-        Self { commit_threshold: 100_000, prune_targets: PruneTargets::default() }
+        Self { commit_threshold: 100_000, prune_targets: PruneModes::default() }
     }
 }
 
@@ -49,13 +49,13 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
 
-        let unprunable_block_start = self
+        let (target_prunable_block, _) = self
             .prune_targets
-            .stop_prune_storage_history(input.target())
+            .prune_target_block_storage_history(input.target())
             .ok_or(StageError::PruningConfiguration)?;
 
-        if unprunable_block_start > input.checkpoint().block_number {
-            input.checkpoint = Some(StageCheckpoint::new(unprunable_block_start - 1));
+        if target_prunable_block > input.checkpoint().block_number {
+            input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
         }
 
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);

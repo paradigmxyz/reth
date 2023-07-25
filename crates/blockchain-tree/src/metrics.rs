@@ -1,5 +1,5 @@
 use reth_metrics::{
-    metrics::{self, Gauge},
+    metrics::{self, Counter, Gauge},
     Metrics,
 };
 
@@ -11,6 +11,10 @@ pub struct TreeMetrics {
     pub sidechains: Gauge,
     /// The highest block number in the canonical chain
     pub canonical_chain_height: Gauge,
+    /// The number of reorgs
+    pub reorgs: Counter,
+    /// Longest sidechain height
+    pub longest_sidechain_height: Gauge,
 }
 
 /// Metrics for the blockchain tree block buffer

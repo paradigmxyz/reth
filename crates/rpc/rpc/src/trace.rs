@@ -191,6 +191,7 @@ where
         let (cfg, block_env, at) = self.inner.eth_api.evm_env_at(at).await?;
 
         self.on_blocking_task(|this| async move {
+            let gas_limit = this.inner.eth_api.call_gas_limit();
             // execute all transactions on top of each other and record the traces
             this.inner.eth_api.with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(calls.len());
@@ -203,6 +204,7 @@ where
                         cfg.clone(),
                         block_env.clone(),
                         call,
+                        gas_limit,
                         &mut db,
                         Default::default(),
                     )?;
@@ -266,17 +268,36 @@ where
         .await
     }
 
-    /// Returns transaction trace with the given address.
+    /// Returns transaction trace objects at the given index
+    ///
+    /// Note: For compatibility reasons this only supports 1 single index, since this method is
+    /// supposed to return a single trace. See also: <https://github.com/ledgerwatch/erigon/blob/862faf054b8a0fa15962a9c73839b619886101eb/turbo/jsonrpc/trace_filtering.go#L114-L133>
+    ///
+    /// This returns `None` if `indices` is empty
     pub async fn trace_get(
         &self,
         hash: H256,
-        trace_address: Vec<usize>,
+        indices: Vec<usize>,
+    ) -> EthResult<Option<LocalizedTransactionTrace>> {
+        if indices.len() != 1 {
+            // The OG impl failed if it gets more than a single index
+            return Ok(None)
+        }
+        self.trace_get_index(hash, indices[0]).await
+    }
+
+    /// Returns transaction trace object at the given index.
+    ///
+    /// Returns `None` if the trace object at that index does not exist
+    pub async fn trace_get_index(
+        &self,
+        hash: H256,
+        index: usize,
     ) -> EthResult<Option<LocalizedTransactionTrace>> {
         match self.trace_transaction(hash).await? {
             None => Ok(None),
             Some(traces) => {
-                let trace =
-                    traces.into_iter().find(|trace| trace.trace.trace_address == trace_address);
+                let trace = traces.into_iter().nth(index);
                 Ok(trace)
             }
         }
