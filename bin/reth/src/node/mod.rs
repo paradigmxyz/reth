@@ -14,7 +14,7 @@ use clap::Parser;
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{future::Either, pin_mut, stream, stream_select, StreamExt};
-use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus};
+use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine, MIN_BLOCKS_FOR_PIPELINE_RUN};
 use reth_blockchain_tree::{
@@ -308,14 +308,22 @@ impl Command {
         let (mut pipeline, client) = if self.dev.dev {
             info!(target: "reth::cli", "Starting Reth in dev mode");
 
+            let mining_mode = if let Some(interval) = self.dev.block_time {
+                MiningMode::interval(interval)
+            } else if let Some(max_transactions) = self.dev.block_max_transactions {
+                MiningMode::instant(max_transactions, transaction_pool.pending_transactions_listener())
+            } else {
+                info!(target: "reth::cli", "No mining mode specified, defaulting to ReadyTransaction");
+                MiningMode::instant(1, transaction_pool.pending_transactions_listener())
+            };
+
             let (_, client, mut task) = AutoSealBuilder::new(
                 Arc::clone(&self.chain),
                 blockchain_db.clone(),
                 transaction_pool.clone(),
                 consensus_engine_tx.clone(),
                 canon_state_notification_sender,
-                self.dev.block_max_transactions,
-                self.dev.block_time,
+                mining_mode
             )
             .build();
 

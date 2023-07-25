@@ -115,23 +115,13 @@ where
         pool: Pool,
         to_engine: UnboundedSender<BeaconEngineMessage>,
         canon_state_notification: CanonStateNotificationSender,
-        block_max_transactions: Option<usize>,
-        block_time: Option<Duration>,
+        mode: MiningMode,
     ) -> Self {
         let latest_header = client
             .latest_header()
             .ok()
             .flatten()
             .unwrap_or_else(|| chain_spec.sealed_genesis_header());
-
-        let mode = if let Some(interval) = block_time {
-            MiningMode::interval(interval)
-        } else if let Some(max_transactions) = block_max_transactions {
-            MiningMode::instant(max_transactions, pool.pending_transactions_listener())
-        } else {
-            warn!("No mining mode specified, defaulting to ReadyTransaction");
-            MiningMode::instant(1, pool.pending_transactions_listener())
-        };
 
         Self {
             storage: Storage::new(latest_header),
