@@ -423,7 +423,7 @@ where
                     gas_price: Some(U256::from(gas_price)),
                     max_fee_per_gas: Some(U256::from(max_fee_per_gas)),
                     value: request.value,
-                    data: request.data.clone(),
+                    input: request.data.clone().into(),
                     nonce: request.nonce,
                     chain_id: Some(chain_id),
                     access_list: request.access_list.clone(),
