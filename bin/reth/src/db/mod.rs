@@ -18,6 +18,7 @@ use reth_primitives::ChainSpec;
 use std::sync::Arc;
 
 mod clear;
+mod diff;
 mod get;
 mod list;
 /// DB List TUI
@@ -68,6 +69,8 @@ pub enum Subcommands {
     Stats,
     /// Lists the contents of a table
     List(list::Command),
+    /// Create a diff between two database tables or two entire databases.
+    Diff(diff::Command),
     /// Gets the content of a table for the given key
     Get(get::Command),
     /// Deletes all database entries
@@ -161,6 +164,11 @@ impl Command {
                 println!("{stats_table}");
             }
             Subcommands::List(command) => {
+                let db = open_db_read_only(&db_path, self.db.log_level)?;
+                let tool = DbTool::new(&db, self.chain.clone())?;
+                command.execute(&tool)?;
+            }
+            Subcommands::Diff(command) => {
                 let db = open_db_read_only(&db_path, self.db.log_level)?;
                 let tool = DbTool::new(&db, self.chain.clone())?;
                 command.execute(&tool)?;
