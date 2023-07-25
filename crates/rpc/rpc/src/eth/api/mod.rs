@@ -104,6 +104,7 @@ where
     }
 
     /// Creates a new, shareable instance.
+    #[allow(clippy::too_many_arguments)]
     pub fn with_spawner(
         provider: Provider,
         pool: Pool,
