@@ -41,7 +41,7 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 aquamarine = "0.3.0"
 itertools = "0.10.5"
-rayon = "1.6.0"
+rayon = { workspace = true }
 num-traits = "0.2.15"
 
 [dev-dependencies]
