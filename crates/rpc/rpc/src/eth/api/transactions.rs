@@ -54,6 +54,12 @@ pub trait EthTransactions: Send + Sync {
     where
         F: FnOnce(StateProviderBox<'_>) -> EthResult<T>;
 
+    /// Executes the closure with the state that corresponds to the given [BlockId] on a new task
+    async fn spawn_with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
+    where
+        F: FnOnce(StateProviderBox<'_>) -> EthResult<T> + Send + 'static,
+        T: Send + 'static;
+
     /// Returns the revm evm env for the requested [BlockId]
     ///
     /// If the [BlockId] this will return the [BlockId::Hash] of the block the env was configured
@@ -243,6 +249,22 @@ where
     {
         let state = self.state_at(at)?;
         f(state)
+    }
+
+    async fn spawn_with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
+    where
+        F: FnOnce(StateProviderBox<'_>) -> EthResult<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let this = self.clone();
+        self.inner
+            .tracing_call_pool
+            .spawn(move || {
+                let state = this.state_at(at)?;
+                f(state)
+            })
+            .await
+            .map_err(|_| EthApiError::InternalTracingError)?
     }
 
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
@@ -878,7 +900,7 @@ mod tests {
     use super::*;
     use crate::{
         eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
-        EthApi,
+        EthApi, TracingCallPool,
     };
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, hex_literal::hex, Bytes};
@@ -900,6 +922,7 @@ mod tests {
             cache.clone(),
             GasPriceOracle::new(noop_provider, Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
+            TracingCallPool::build().expect("failed to build tracing pool"),
         );
 
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d

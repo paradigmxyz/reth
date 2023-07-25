@@ -14,11 +14,7 @@ use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
     BlockReaderIdExt, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt, StateProviderFactory,
 };
-use reth_rpc::{
-    eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
-    AuthLayer, Claims, EngineEthApi, EthApi, EthFilter, EthSubscriptionIdProvider,
-    JwtAuthValidator, JwtSecret,
-};
+use reth_rpc::{eth::{cache::EthStateCache, gas_oracle::GasPriceOracle}, AuthLayer, Claims, EngineEthApi, EthApi, EthFilter, EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret, TracingCallPool};
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
@@ -64,6 +60,7 @@ where
         gas_oracle,
         EthConfig::default().rpc_gas_cap,
         Box::new(executor.clone()),
+        TracingCallPool::build().expect("failed to build tracing pool")
     );
     let eth_filter = EthFilter::new(
         provider,

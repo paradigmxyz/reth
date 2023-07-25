@@ -116,14 +116,10 @@ use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, StateProviderFactory,
 };
-use reth_rpc::{
-    eth::{
-        cache::{cache_new_blocks_task, EthStateCache},
-        gas_oracle::GasPriceOracle,
-    },
-    AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider,
-    NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TracingCallGuard, TxPoolApi, Web3Api,
-};
+use reth_rpc::{eth::{
+    cache::{cache_new_blocks_task, EthStateCache},
+    gas_oracle::GasPriceOracle,
+}, AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TracingCallGuard, TxPoolApi, Web3Api, TracingCallPool};
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
@@ -153,9 +149,6 @@ mod eth;
 
 /// Common RPC constants.
 pub mod constants;
-
-/// Additional support for tracing related rpc calls
-pub mod tracing_pool;
 
 // re-export for convenience
 pub use crate::eth::{EthConfig, EthHandlers};
@@ -892,7 +885,7 @@ where
         &mut self,
         namespaces: impl Iterator<Item = RethRpcModule>,
     ) -> Vec<Methods> {
-        let EthHandlers { api: eth_api, cache: eth_cache, filter: eth_filter, pubsub: eth_pubsub } =
+        let EthHandlers { api: eth_api, cache: eth_cache, filter: eth_filter, pubsub: eth_pubsub, tracing_call_pool } =
             self.with_eth(|eth| eth.clone());
 
         // Create a copy, so we can list out all the methods for rpc_ api
@@ -994,6 +987,7 @@ where
             );
 
             let executor = Box::new(self.executor.clone());
+            let tracing_call_pool = TracingCallPool::build().expect("failed to build tracing pool");
             let api = EthApi::with_spawner(
                 self.provider.clone(),
                 self.pool.clone(),
@@ -1002,6 +996,7 @@ where
                 gas_oracle,
                 self.config.eth.rpc_gas_cap,
                 executor.clone(),
+                tracing_call_pool.clone(),
             );
             let filter = EthFilter::new(
                 self.provider.clone(),
@@ -1019,7 +1014,7 @@ where
                 executor,
             );
 
-            let eth = EthHandlers { api, cache, filter, pubsub };
+            let eth = EthHandlers { api, cache, filter, pubsub, tracing_call_pool };
             self.eth = Some(eth);
         }
         f(self.eth.as_ref().expect("exists; qed"))

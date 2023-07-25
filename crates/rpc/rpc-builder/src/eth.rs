@@ -1,11 +1,8 @@
-use reth_rpc::{
-    eth::{
-        cache::{EthStateCache, EthStateCacheConfig},
-        gas_oracle::GasPriceOracleConfig,
-        RPC_DEFAULT_GAS_CAP,
-    },
-    EthApi, EthFilter, EthPubSub,
-};
+use reth_rpc::{eth::{
+    cache::{EthStateCache, EthStateCacheConfig},
+    gas_oracle::GasPriceOracleConfig,
+    RPC_DEFAULT_GAS_CAP,
+}, EthApi, EthFilter, EthPubSub, TracingCallPool};
 use serde::{Deserialize, Serialize};
 
 /// The default maximum of logs in a single response.
@@ -25,6 +22,8 @@ pub struct EthHandlers<Provider, Pool, Network, Events> {
     pub filter: EthFilter<Provider, Pool>,
     /// Handler for subscriptions only available for transports that support it (ws, ipc)
     pub pubsub: EthPubSub<Provider, Pool, Events, Network>,
+    /// The configured tracing call pool
+    pub tracing_call_pool: TracingCallPool,
 }
 
 /// Additional config values for the eth namespace
