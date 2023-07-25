@@ -78,7 +78,7 @@ impl<DB: Database> Pruner<DB> {
         }
 
         if let Some((to_block, prune_mode)) =
-            self.modes.prune_to_block_transaction_lookup(tip_block_number)
+            self.modes.prune_target_block_transaction_lookup(tip_block_number)
         {
             self.prune_transaction_lookup(&provider, to_block, prune_mode)?;
         }
