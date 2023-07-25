@@ -184,16 +184,15 @@ mod tests {
             }
         };
 
-        let mut prune = PruneModes::none();
-
         // In an unpruned configuration there is 1 receipt, 3 changed accounts and 1 changed
         // storage.
-
+        let mut prune = PruneModes::none();
         check_pruning(factory.clone(), prune, 1, 3, 1).await;
 
         prune.receipts = Some(PruneMode::Full);
         prune.account_history = Some(PruneMode::Full);
         prune.storage_history = Some(PruneMode::Full);
+        // This will result in error for account_history and storage_history, which is caught.
         check_pruning(factory.clone(), prune, 0, 0, 0).await;
 
         prune.receipts = Some(PruneMode::Before(1));
