@@ -10,7 +10,7 @@ use reth_provider::{
     BlockReader, DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
     TransactionsProvider,
 };
-use std::sync::Arc;
+use std::{ops::RangeInclusive, sync::Arc};
 use tracing::{debug, instrument, trace};
 
 /// Result of [Pruner::run] execution
@@ -108,21 +108,35 @@ impl<DB: Database> Pruner<DB> {
         }
     }
 
-    /// Get next tx number to prune according to the checkpoint:
+    /// Get next inclusive tx number range to prune according to the checkpoint and `to_block` block
+    /// number.
+    ///
+    /// To get the range start:
     /// 1. If checkpoint exists, get next block body and return its first tx number.
     /// 2. If checkpoint doesn't exist, return 0.
-    fn next_tx_num_from_checkpoint(
+    ///
+    /// To get the range end: get last tx number for the provided `to_block`.
+    fn get_next_tx_num_range_from_checkpoint(
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
         prune_part: PrunePart,
-    ) -> reth_interfaces::Result<TxNumber> {
-        Ok(provider
+        to_block: BlockNumber,
+    ) -> reth_interfaces::Result<Option<RangeInclusive<TxNumber>>> {
+        let from_tx_num = provider
             .get_prune_checkpoint(prune_part)?
             .map(|checkpoint| provider.block_body_indices(checkpoint.block_number + 1))
             .transpose()?
             .flatten()
             .map(|body| body.first_tx_num)
-            .unwrap_or_default())
+            .unwrap_or_default();
+
+        let to_tx_num = match provider.block_body_indices(to_block)? {
+            Some(body) => body,
+            None => return Ok(None),
+        }
+        .last_tx_num();
+
+        Ok(Some(from_tx_num..=to_tx_num))
     }
 
     /// Prune receipts up to the provided block, inclusive.
@@ -133,18 +147,20 @@ impl<DB: Database> Pruner<DB> {
         to_block: BlockNumber,
         prune_mode: PruneMode,
     ) -> PrunerResult {
-        let to_block_body = match provider.block_body_indices(to_block)? {
-            Some(body) => body,
+        let range = match self.get_next_tx_num_range_from_checkpoint(
+            provider,
+            PrunePart::Receipts,
+            to_block,
+        )? {
+            Some(range) => range,
             None => {
                 trace!(target: "pruner", "No receipts to prune");
                 return Ok(())
             }
         };
 
-        let from_tx_num = self.next_tx_num_from_checkpoint(provider, PrunePart::Receipts)?;
-
         provider.prune_table_in_batches::<tables::Receipts, _>(
-            from_tx_num..=to_block_body.last_tx_num(),
+            range,
             self.batch_sizes.receipts,
             |receipts| {
                 trace!(
@@ -171,22 +187,21 @@ impl<DB: Database> Pruner<DB> {
         to_block: BlockNumber,
         prune_mode: PruneMode,
     ) -> PrunerResult {
-        let to_block_body = match provider.block_body_indices(to_block)? {
-            Some(body) => body,
+        let range = match self.get_next_tx_num_range_from_checkpoint(
+            provider,
+            PrunePart::TransactionLookup,
+            to_block,
+        )? {
+            Some(range) => range,
             None => {
-                trace!(target: "pruner", "No transaction lookup entries to prune");
+                trace!(target: "pruner", "No receipts to prune");
                 return Ok(())
             }
         };
+        let last_tx_num = range.end().clone();
 
-        let from_tx_num =
-            self.next_tx_num_from_checkpoint(provider, PrunePart::TransactionLookup)?;
-
-        for i in
-            (from_tx_num..=to_block_body.last_tx_num()).step_by(self.batch_sizes.transaction_lookup)
-        {
-            let tx_range = i..(i + self.batch_sizes.transaction_lookup as u64)
-                .min(to_block_body.last_tx_num() + 1);
+        for i in range.step_by(self.batch_sizes.transaction_lookup) {
+            let tx_range = i..(i + self.batch_sizes.transaction_lookup as u64).min(last_tx_num + 1);
 
             // Retrieve transactions in the range and calculate their hashes in parallel
             let mut hashes = provider
