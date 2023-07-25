@@ -64,7 +64,9 @@ impl<DB: Database> Pruner<DB> {
     pub fn run(&mut self, tip_block_number: BlockNumber) -> PrunerResult {
         let provider = self.provider_factory.provider_rw()?;
 
-        if let Some((to_block, prune_mode)) = self.modes.prune_to_block_receipts(tip_block_number) {
+        if let Some((to_block, prune_mode)) =
+            self.modes.prune_target_block_receipts(tip_block_number)
+        {
             self.prune_receipts(&provider, to_block, prune_mode)?;
         }
 
