@@ -228,7 +228,7 @@ impl<DB: Database> Pruner<DB> {
                     trace!(
                         target: "pruner",
                         %entries,
-                        "Pruned receipts"
+                        "Pruned transaction lookup"
                     );
                 },
             )?;
