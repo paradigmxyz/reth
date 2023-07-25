@@ -51,9 +51,9 @@ macro_rules! impl_prune_parts {
                     $human_part,
                     " pruning needs to be done, inclusive, according to the provided tip."
                 )]
-                pub fn [<prune_to_block_ $part>](&self, tip: BlockNumber) -> Option<(BlockNumber, PruneMode)> {
+                pub fn [<prune_target_block_ $part>](&self, tip: BlockNumber) -> Option<(BlockNumber, PruneMode)> {
                     self.$part.as_ref().and_then(|mode| {
-                        self.prune_to_block(mode, tip, $min_blocks).map(|block| {
+                        self.prune_target_block(mode, tip, $min_blocks).map(|block| {
                             (block, *mode)
                         })
                     })
@@ -95,7 +95,7 @@ impl PruneModes {
 
     /// Returns block up to which pruning needs to be done, inclusive, according to the provided
     /// prune mode, tip block number and minimum number of blocks allowed to be pruned.
-    pub fn prune_to_block(
+    pub fn prune_target_block(
         &self,
         mode: &PruneMode,
         tip: BlockNumber,
