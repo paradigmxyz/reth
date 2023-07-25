@@ -201,6 +201,8 @@ impl<DB: Database> Pruner<DB> {
         let last_tx_num = *range.end();
 
         for i in range.step_by(self.batch_sizes.transaction_lookup) {
+            // The `min` ensures that the transaction range doesn't exceed the last transaction
+            // number. `last_tx_num + 1` is used to include the last transaction in the range.
             let tx_range = i..(i + self.batch_sizes.transaction_lookup as u64).min(last_tx_num + 1);
 
             // Retrieve transactions in the range and calculate their hashes in parallel
