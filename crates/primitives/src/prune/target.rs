@@ -27,7 +27,7 @@ pub struct PruneModes {
 }
 
 macro_rules! impl_prune_parts {
-    ($(($part:ident, $human_part:expr, $min_distance:expr)),+) => {
+    ($(($part:ident, $human_part:expr, $min_blocks:expr)),+) => {
         $(
             paste! {
                 #[doc = concat!(
@@ -53,7 +53,7 @@ macro_rules! impl_prune_parts {
                 )]
                 pub fn [<prune_to_block_ $part>](&self, tip: BlockNumber) -> Option<(BlockNumber, PruneMode)> {
                     self.$part.as_ref().and_then(|mode| {
-                        self.prune_to_block(mode, tip, $min_distance).map(|block| {
+                        self.prune_to_block(mode, tip, $min_blocks).map(|block| {
                             (block, *mode)
                         })
                     })
@@ -94,19 +94,19 @@ impl PruneModes {
     }
 
     /// Returns block up to which pruning needs to be done, inclusive, according to the provided
-    /// prune mode and tip.
+    /// prune mode, tip block number and minimum number of blocks allowed to be pruned.
     pub fn prune_to_block(
         &self,
         mode: &PruneMode,
         tip: BlockNumber,
-        min_distance: Option<u64>,
+        min_blocks: Option<u64>,
     ) -> Option<BlockNumber> {
         match mode {
-            PruneMode::Full if min_distance.unwrap_or_default() == 0 => Some(tip),
-            PruneMode::Distance(distance) if *distance >= min_distance.unwrap_or_default() => {
+            PruneMode::Full if min_blocks.unwrap_or_default() == 0 => Some(tip),
+            PruneMode::Distance(distance) if *distance >= min_blocks.unwrap_or_default() => {
                 Some(tip.saturating_sub(*distance))
             }
-            PruneMode::Before(n) if tip.saturating_sub(*n) >= min_distance.unwrap_or_default() => {
+            PruneMode::Before(n) if tip.saturating_sub(*n) >= min_blocks.unwrap_or_default() => {
                 Some(*n)
             }
             _ => None,
