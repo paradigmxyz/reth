@@ -119,7 +119,7 @@ impl PruneModes {
     }
 
     impl_prune_parts!(
-        (sender_recovery, "Sender Recovery", None),
+        (sender_recovery, "Sender Recovery", Some(64)),
         (transaction_lookup, "Transaction Lookup", None),
         (receipts, "Receipts", Some(64)),
         (account_history, "Account History", None),
