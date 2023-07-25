@@ -3,9 +3,12 @@
 use crate::PrunerError;
 use rayon::prelude::*;
 use reth_db::{database::Database, tables};
-use reth_primitives::{BlockNumber, ChainSpec, PruneCheckpoint, PruneMode, PruneModes, PrunePart};
+use reth_primitives::{
+    BlockNumber, ChainSpec, PruneCheckpoint, PruneMode, PruneModes, PrunePart, TxNumber,
+};
 use reth_provider::{
-    BlockReader, DatabaseProviderRW, ProviderFactory, PruneCheckpointWriter, TransactionsProvider,
+    BlockReader, DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
+    TransactionsProvider,
 };
 use std::sync::Arc;
 use tracing::{debug, instrument, trace};
@@ -105,6 +108,23 @@ impl<DB: Database> Pruner<DB> {
         }
     }
 
+    /// Get next tx number to prune according to the checkpoint:
+    /// 1. If checkpoint exists, get next block body and return its first tx number.
+    /// 2. If checkpoint doesn't exist, return 0.
+    fn next_tx_num_from_checkpoint(
+        &self,
+        provider: &DatabaseProviderRW<'_, DB>,
+        prune_part: PrunePart,
+    ) -> reth_interfaces::Result<TxNumber> {
+        Ok(provider
+            .get_prune_checkpoint(prune_part)?
+            .map(|checkpoint| provider.block_body_indices(checkpoint.block_number + 1))
+            .transpose()?
+            .flatten()
+            .map(|body| body.first_tx_num)
+            .unwrap_or_default())
+    }
+
     /// Prune receipts up to the provided block, inclusive.
     #[instrument(level = "trace", skip(self, provider), target = "pruner")]
     fn prune_receipts(
@@ -121,8 +141,10 @@ impl<DB: Database> Pruner<DB> {
             }
         };
 
+        let from_tx_num = self.next_tx_num_from_checkpoint(provider, PrunePart::Receipts)?;
+
         provider.prune_table_in_batches::<tables::Receipts, _>(
-            0..=to_block_body.last_tx_num(),
+            from_tx_num..=to_block_body.last_tx_num(),
             self.batch_sizes.receipts,
             |receipts| {
                 trace!(
@@ -157,7 +179,12 @@ impl<DB: Database> Pruner<DB> {
             }
         };
 
-        for i in (0..=to_block_body.last_tx_num()).step_by(self.batch_sizes.transaction_lookup) {
+        let from_tx_num =
+            self.next_tx_num_from_checkpoint(provider, PrunePart::TransactionLookup)?;
+
+        for i in
+            (from_tx_num..=to_block_body.last_tx_num()).step_by(self.batch_sizes.transaction_lookup)
+        {
             let tx_range = i..(i + self.batch_sizes.transaction_lookup as u64)
                 .min(to_block_body.last_tx_num() + 1);
 
@@ -210,7 +237,9 @@ mod tests {
         generators,
         generators::{random_block_range, random_receipt},
     };
-    use reth_primitives::{PruneCheckpoint, PruneMode, PruneModes, PrunePart, H256, MAINNET};
+    use reth_primitives::{
+        BlockNumber, PruneCheckpoint, PruneMode, PruneModes, PrunePart, H256, MAINNET,
+    };
     use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::TestTransaction;
 
@@ -259,36 +288,40 @@ mod tests {
             tx.table::<tables::Receipts>().unwrap().len()
         );
 
-        let prune_to_block = 10;
-        let prune_mode = PruneMode::Before(prune_to_block);
-        let pruner = Pruner::new(
-            tx.inner_raw(),
-            MAINNET.clone(),
-            5,
-            0,
-            PruneModes { receipts: Some(prune_mode), ..Default::default() },
-            BatchSizes {
-                // Less than total amount of blocks to prune to test the batching logic
-                receipts: 10,
-                ..Default::default()
-            },
-        );
+        let test_prune = |to_block: BlockNumber| {
+            let prune_mode = PruneMode::Before(to_block);
+            let pruner = Pruner::new(
+                tx.inner_raw(),
+                MAINNET.clone(),
+                5,
+                0,
+                PruneModes { receipts: Some(prune_mode), ..Default::default() },
+                BatchSizes {
+                    // Less than total amount of blocks to prune to test the batching logic
+                    receipts: 10,
+                    ..Default::default()
+                },
+            );
 
-        let provider = tx.inner_rw();
-        assert_matches!(pruner.prune_receipts(&provider, prune_to_block, prune_mode), Ok(()));
-        provider.commit().expect("commit");
+            let provider = tx.inner_rw();
+            assert_matches!(pruner.prune_receipts(&provider, to_block, prune_mode), Ok(()));
+            provider.commit().expect("commit");
 
-        assert_eq!(
-            tx.table::<tables::Receipts>().unwrap().len(),
-            blocks[prune_to_block as usize + 1..]
-                .iter()
-                .map(|block| block.body.len())
-                .sum::<usize>()
-        );
-        assert_eq!(
-            tx.inner().get_prune_checkpoint(PrunePart::Receipts).unwrap(),
-            Some(PruneCheckpoint { block_number: prune_to_block, prune_mode })
-        );
+            assert_eq!(
+                tx.table::<tables::Receipts>().unwrap().len(),
+                blocks[to_block as usize + 1..].iter().map(|block| block.body.len()).sum::<usize>()
+            );
+            assert_eq!(
+                tx.inner().get_prune_checkpoint(PrunePart::Receipts).unwrap(),
+                Some(PruneCheckpoint { block_number: to_block, prune_mode })
+            );
+        };
+
+        // Pruning first time ever, no previous checkpoint is present
+        test_prune(10);
+        // Prune second time, previous checkpoint is present, should continue pruning from where
+        // ended last time
+        test_prune(20);
     }
 
     #[test]
@@ -316,38 +349,42 @@ mod tests {
             tx.table::<tables::TxHashNumber>().unwrap().len()
         );
 
-        let prune_to_block = 10;
-        let prune_mode = PruneMode::Before(prune_to_block);
-        let pruner = Pruner::new(
-            tx.inner_raw(),
-            MAINNET.clone(),
-            5,
-            0,
-            PruneModes { transaction_lookup: Some(prune_mode), ..Default::default() },
-            BatchSizes {
-                // Less than total amount of blocks to prune to test the batching logic
-                transaction_lookup: 10,
-                ..Default::default()
-            },
-        );
+        let test_prune = |to_block: BlockNumber| {
+            let prune_mode = PruneMode::Before(to_block);
+            let pruner = Pruner::new(
+                tx.inner_raw(),
+                MAINNET.clone(),
+                5,
+                0,
+                PruneModes { transaction_lookup: Some(prune_mode), ..Default::default() },
+                BatchSizes {
+                    // Less than total amount of blocks to prune to test the batching logic
+                    transaction_lookup: 10,
+                    ..Default::default()
+                },
+            );
 
-        let provider = tx.inner_rw();
-        assert_matches!(
-            pruner.prune_transaction_lookup(&provider, prune_to_block, prune_mode),
-            Ok(())
-        );
-        provider.commit().expect("commit");
+            let provider = tx.inner_rw();
+            assert_matches!(
+                pruner.prune_transaction_lookup(&provider, to_block, prune_mode),
+                Ok(())
+            );
+            provider.commit().expect("commit");
 
-        assert_eq!(
-            tx.table::<tables::TxHashNumber>().unwrap().len(),
-            blocks[prune_to_block as usize + 1..]
-                .iter()
-                .map(|block| block.body.len())
-                .sum::<usize>()
-        );
-        assert_eq!(
-            tx.inner().get_prune_checkpoint(PrunePart::TransactionLookup).unwrap(),
-            Some(PruneCheckpoint { block_number: prune_to_block, prune_mode })
-        );
+            assert_eq!(
+                tx.table::<tables::TxHashNumber>().unwrap().len(),
+                blocks[to_block as usize + 1..].iter().map(|block| block.body.len()).sum::<usize>()
+            );
+            assert_eq!(
+                tx.inner().get_prune_checkpoint(PrunePart::TransactionLookup).unwrap(),
+                Some(PruneCheckpoint { block_number: to_block, prune_mode })
+            );
+        };
+
+        // Pruning first time ever, no previous checkpoint is present
+        test_prune(10);
+        // Prune second time, previous checkpoint is present, should continue pruning from where
+        // ended last time
+        test_prune(20);
     }
 }
