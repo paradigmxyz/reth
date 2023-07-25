@@ -103,8 +103,7 @@
 //! }
 //! ```
 
-use crate::metrics::RpcServerMetrics;
-use crate::{auth::AuthRpcModule, error::WsHttpSamePortError};
+use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics};
 use constants::*;
 use error::{RpcError, ServerKind};
 use jsonrpsee::{
@@ -1196,9 +1195,9 @@ impl RpcServerConfig {
     ///
     /// If no server is configured, no server will be be launched on [RpcServerConfig::start].
     pub fn has_server(&self) -> bool {
-        self.http_server_config.is_some()
-            || self.ws_server_config.is_some()
-            || self.ipc_server_config.is_some()
+        self.http_server_config.is_some() ||
+            self.ws_server_config.is_some() ||
+            self.ipc_server_config.is_some()
     }
 
     /// Returns the [SocketAddr] of the http server
@@ -1238,9 +1237,9 @@ impl RpcServerConfig {
             .unwrap_or(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, DEFAULT_WS_RPC_PORT)));
         let metrics = RpcServerMetrics::default();
         // If both are configured on the same port, we combine them into one server.
-        if self.http_addr == self.ws_addr
-            && self.http_server_config.is_some()
-            && self.ws_server_config.is_some()
+        if self.http_addr == self.ws_addr &&
+            self.http_server_config.is_some() &&
+            self.ws_server_config.is_some()
         {
             let cors = match (self.ws_cors_domains.as_ref(), self.http_cors_domains.as_ref()) {
                 (Some(ws_cors), Some(http_cors)) => {
@@ -1249,7 +1248,7 @@ impl RpcServerConfig {
                             http_cors_domains: Some(http_cors.clone()),
                             ws_cors_domains: Some(ws_cors.clone()),
                         }
-                        .into());
+                        .into())
                     }
                     Some(ws_cors)
                 }
@@ -1275,7 +1274,7 @@ impl RpcServerConfig {
                 http_local_addr: Some(addr),
                 ws_local_addr: Some(addr),
                 server: WsHttpServers::SamePort(server),
-            });
+            })
         }
 
         let mut http_local_addr = None;
