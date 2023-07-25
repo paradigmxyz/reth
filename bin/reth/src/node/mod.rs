@@ -2,7 +2,7 @@
 //!
 //! Starts the client
 use crate::{
-    args::{get_secret_key, DebugArgs, NetworkArgs, RpcServerArgs, TxPoolArgs},
+    args::{get_secret_key, DebugArgs, DevArgs, NetworkArgs, RpcServerArgs, TxPoolArgs},
     dirs::DataDirPath,
     init::init_genesis,
     prometheus_exporter,
@@ -14,7 +14,7 @@ use clap::Parser;
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{future::Either, pin_mut, stream, stream_select, StreamExt};
-use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus};
+use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine, MIN_BLOCKS_FOR_PIPELINE_RUN};
 use reth_blockchain_tree::{
@@ -112,12 +112,15 @@ pub struct Command {
     /// - mainnet
     /// - goerli
     /// - sepolia
+    /// - dev
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
         verbatim_doc_comment,
         default_value = "mainnet",
-        value_parser = genesis_value_parser
+        default_value_if("dev", "true", "dev"),
+        value_parser = genesis_value_parser,
+        required = false,
     )]
     chain: Arc<ChainSpec>,
 
@@ -145,9 +148,8 @@ pub struct Command {
     #[clap(flatten)]
     db: DatabaseArgs,
 
-    /// Automatically mine blocks for new transactions
-    #[arg(long)]
-    auto_mine: bool,
+    #[clap(flatten)]
+    dev: DevArgs,
 }
 
 impl Command {
@@ -181,7 +183,7 @@ impl Command {
 
         info!(target: "reth::cli", "{}", DisplayHardforks::from(self.chain.hardforks().clone()));
 
-        let consensus: Arc<dyn Consensus> = if self.auto_mine {
+        let consensus: Arc<dyn Consensus> = if self.dev.dev {
             debug!(target: "reth::cli", "Using auto seal");
             Arc::new(AutoSealConsensus::new(Arc::clone(&self.chain)))
         } else {
@@ -304,13 +306,28 @@ impl Command {
         };
 
         // Configure the pipeline
-        let (mut pipeline, client) = if self.auto_mine {
+        let (mut pipeline, client) = if self.dev.dev {
+            info!(target: "reth::cli", "Starting Reth in dev mode");
+
+            let mining_mode = if let Some(interval) = self.dev.block_time {
+                MiningMode::interval(interval)
+            } else if let Some(max_transactions) = self.dev.block_max_transactions {
+                MiningMode::instant(
+                    max_transactions,
+                    transaction_pool.pending_transactions_listener(),
+                )
+            } else {
+                info!(target: "reth::cli", "No mining mode specified, defaulting to ReadyTransaction");
+                MiningMode::instant(1, transaction_pool.pending_transactions_listener())
+            };
+
             let (_, client, mut task) = AutoSealBuilder::new(
                 Arc::clone(&self.chain),
                 blockchain_db.clone(),
                 transaction_pool.clone(),
                 consensus_engine_tx.clone(),
                 canon_state_notification_sender,
+                mining_mode,
             )
             .build();
 
@@ -798,6 +815,8 @@ async fn run_network_until_shutdown<C>(
 
 #[cfg(test)]
 mod tests {
+    use reth_primitives::DEV;
+
     use super::*;
     use std::{net::IpAddr, path::Path};
 
@@ -868,5 +887,23 @@ mod tests {
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
         let db_path = data_dir.db_path();
         assert_eq!(db_path, Path::new("my/custom/path/db"));
+    }
+
+    #[test]
+    fn parse_dev() {
+        let cmd = Command::parse_from(["reth", "--dev"]);
+        let chain = DEV.clone();
+        assert_eq!(cmd.chain.chain, chain.chain);
+        assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
+        assert_eq!(
+            cmd.chain.paris_block_and_final_difficulty,
+            chain.paris_block_and_final_difficulty
+        );
+        assert_eq!(cmd.chain.hardforks, chain.hardforks);
+
+        assert!(cmd.rpc.http);
+        assert!(cmd.network.discovery.disable_discovery);
+
+        assert!(cmd.dev.dev);
     }
 }

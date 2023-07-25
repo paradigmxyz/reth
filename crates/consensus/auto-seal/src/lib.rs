@@ -115,13 +115,13 @@ where
         pool: Pool,
         to_engine: UnboundedSender<BeaconEngineMessage>,
         canon_state_notification: CanonStateNotificationSender,
+        mode: MiningMode,
     ) -> Self {
         let latest_header = client
             .latest_header()
             .ok()
             .flatten()
             .unwrap_or_else(|| chain_spec.sealed_genesis_header());
-        let mode = MiningMode::interval(std::time::Duration::from_secs(1));
 
         Self {
             storage: Storage::new(latest_header),
