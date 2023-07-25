@@ -20,6 +20,9 @@ pub enum Error {
     #[error(transparent)]
     Network(#[from] reth_network_api::NetworkError),
 
+    #[error(transparent)]
+    Canonical(#[from] crate::blockchain_tree::error::CanonicalError),
+
     #[error("{0}")]
     Custom(std::string::String),
 }

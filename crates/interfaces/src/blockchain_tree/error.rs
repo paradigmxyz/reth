@@ -33,6 +33,19 @@ pub enum BlockchainTreeError {
     BlockBufferingFailed { block_hash: BlockHash },
 }
 
+/// Result alias for `CanonicalError`
+pub type CanonicalResult<T> = std::result::Result<T, CanonicalError>;
+
+/// Canonical Errors
+#[allow(missing_docs)]
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+pub enum CanonicalError {
+    #[error(transparent)]
+    Validation(#[from] BlockValidationError),
+    #[error(transparent)]
+    BlockchainTree(#[from] BlockchainTreeError),
+}
+
 /// Error thrown when inserting a block failed because the block is considered invalid.
 #[derive(thiserror::Error)]
 #[error(transparent)]
@@ -161,6 +174,9 @@ pub enum InsertBlockErrorKind {
     /// An internal error occurred, like interacting with the database.
     #[error("Internal error")]
     Internal(Box<dyn std::error::Error + Send + Sync>),
+    /// Canonical error.
+    #[error(transparent)]
+    Canonical(CanonicalError),
 }
 
 impl InsertBlockErrorKind {
@@ -213,6 +229,10 @@ impl InsertBlockErrorKind {
                 // any other error, such as database errors, are considered internal errors
                 false
             }
+            InsertBlockErrorKind::Canonical(err) => match err {
+                CanonicalError::BlockchainTree(_) => false,
+                CanonicalError::Validation(_) => true,
+            },
         }
     }
 
@@ -273,6 +293,7 @@ impl From<crate::Error> for InsertBlockErrorKind {
             Error::Provider(err) => InsertBlockErrorKind::Internal(Box::new(err)),
             Error::Network(err) => InsertBlockErrorKind::Internal(Box::new(err)),
             Error::Custom(err) => InsertBlockErrorKind::Internal(err.into()),
+            Error::Canonical(err) => InsertBlockErrorKind::Canonical(err.into()),
         }
     }
 }
