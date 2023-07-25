@@ -189,6 +189,7 @@ fn stage_checkpoint<DB: Database>(
         .map(|checkpoint| provider.block_body_indices(checkpoint.block_number))
         .transpose()?
         .flatten()
+        // +1 is needed because TxNumber is 0-indexed
         .map(|body| body.last_tx_num() + 1)
         .unwrap_or_default();
     Ok(EntitiesCheckpoint {
