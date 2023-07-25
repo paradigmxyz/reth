@@ -5588,6 +5588,7 @@ version = "0.1.0-alpha.4"
 dependencies = [
  "assert_matches",
  "itertools 0.10.5",
+ "rayon",
  "reth-db",
  "reth-interfaces",
  "reth-primitives",
