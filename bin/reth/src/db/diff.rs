@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::Hash, path::PathBuf};
+use std::{collections::HashMap, hash::Hash, path::PathBuf, fmt::Debug};
 
 use crate::{
     args::DatabaseArgs,
@@ -132,11 +132,21 @@ where
         error!("Found {} extra elements in table {}", extra_elements, T::NAME);
     }
 
+    for discrepancy in result.discrepancies {
+        error!("Discrepancy: {:?}", discrepancy);
+    }
+
+    for extra_element in result.extra_elements {
+        error!("Extra element: {:?}", extra_element);
+    }
+
     Ok(())
 }
 
 /// Find diffs for a specific table. This will walk the first table, checking the second table
 /// for each element. If the element is not found, it will be added to the extra elements set.
+// TODO: remove this?
+#[allow(dead_code)]
 fn find_diffs_simple<T: Table>(
     primary_tx: Tx<'_, RO, NoWriteMap>,
     secondary_tx: Tx<'_, RO, NoWriteMap>,
@@ -229,6 +239,7 @@ where
 }
 
 /// Includes a table element between two databases with the same key, but different values
+#[derive(Debug)]
 struct TableDiffElement<T: Table> {
     /// The key for the element
     key: T::Key,
@@ -318,6 +329,7 @@ where
 }
 
 /// A single extra element from a table
+#[derive(Debug)]
 enum ExtraTableElement<T: Table> {
     /// The extra element is in the first table
     First { key: T::Key, value: T::Value },
