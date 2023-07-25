@@ -299,6 +299,14 @@ mod tests {
         let blocks = random_block_range(&mut rng, 0..=100, H256::zero(), 0..10);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
+        let mut tx_hash_numbers = Vec::new();
+        for block in &blocks {
+            for transaction in &block.body {
+                tx_hash_numbers.push((transaction.hash, tx_hash_numbers.len() as u64));
+            }
+        }
+        tx.insert_tx_hash_numbers(tx_hash_numbers).expect("insert tx hash numbers");
+
         assert_eq!(
             tx.table::<tables::Transactions>().unwrap().len(),
             blocks.iter().map(|block| block.body.len()).sum::<usize>()

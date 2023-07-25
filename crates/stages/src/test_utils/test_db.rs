@@ -11,7 +11,7 @@ use reth_db::{
 };
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader, StorageEntry,
-    TxNumber, H256, MAINNET, U256,
+    TxHash, TxNumber, H256, MAINNET, U256,
 };
 use reth_provider::{DatabaseProviderRO, DatabaseProviderRW, ProviderFactory};
 use std::{
@@ -261,10 +261,21 @@ impl TestTransaction {
 
                 block.body.iter().try_for_each(|body_tx| {
                     tx.put::<tables::Transactions>(next_tx_num, body_tx.clone().into())?;
-                    tx.put::<tables::TxHashNumber>(body_tx.hash, next_tx_num)?;
                     next_tx_num += 1;
                     Ok(())
                 })
+            })
+        })
+    }
+
+    pub fn insert_tx_hash_numbers<I>(&self, tx_hash_numbers: I) -> Result<(), DbError>
+    where
+        I: IntoIterator<Item = (TxHash, TxNumber)>,
+    {
+        self.commit(|tx| {
+            tx_hash_numbers.into_iter().try_for_each(|(tx_hash, tx_num)| {
+                // Insert into tx hash numbers table.
+                tx.put::<tables::TxHashNumber>(tx_hash, tx_num)
             })
         })
     }
