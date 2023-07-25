@@ -293,7 +293,7 @@ impl From<crate::Error> for InsertBlockErrorKind {
             Error::Provider(err) => InsertBlockErrorKind::Internal(Box::new(err)),
             Error::Network(err) => InsertBlockErrorKind::Internal(Box::new(err)),
             Error::Custom(err) => InsertBlockErrorKind::Internal(err.into()),
-            Error::Canonical(err) => InsertBlockErrorKind::Canonical(err.into()),
+            Error::Canonical(err) => InsertBlockErrorKind::Canonical(err),
         }
     }
 }
