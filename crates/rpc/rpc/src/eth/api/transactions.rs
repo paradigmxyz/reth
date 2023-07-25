@@ -42,7 +42,8 @@ pub(crate) type StateCacheDB<'r> = CacheDB<State<StateProviderBox<'r>>>;
 
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace.
 ///
-/// Async functions that are spawned onto the [TracingCallPool] begin with `spawn_`
+/// Async functions that are spawned onto the
+/// [TracingCallPool](crate::tracing_call::TracingCallPool) begin with `spawn_`
 #[async_trait::async_trait]
 pub trait EthTransactions: Send + Sync {
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.

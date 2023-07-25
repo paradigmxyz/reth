@@ -886,9 +886,9 @@ where
     ) -> Vec<Methods> {
         let EthHandlers {
             api: eth_api,
-            cache: eth_cache,
             filter: eth_filter,
             pubsub: eth_pubsub,
+            cache: _,
             tracing_call_pool: _,
         } = self.with_eth(|eth| eth.clone());
 
