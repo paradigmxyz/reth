@@ -42,7 +42,7 @@ pub struct Command {
 impl Command {
     /// Execute `db diff` command
     pub fn execute(self, tool: &DbTool<'_, DatabaseEnvRO>) -> eyre::Result<()> {
-        // open first db
+        // open second db
         let second_db_path: PathBuf = self.secondary_datadir.join("db").into();
         let second_db = open_db_read_only(&second_db_path, self.second_db.log_level)?;
 
