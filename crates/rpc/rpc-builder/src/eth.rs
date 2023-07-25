@@ -1,8 +1,11 @@
-use reth_rpc::{eth::{
-    cache::{EthStateCache, EthStateCacheConfig},
-    gas_oracle::GasPriceOracleConfig,
-    RPC_DEFAULT_GAS_CAP,
-}, EthApi, EthFilter, EthPubSub, TracingCallPool};
+use reth_rpc::{
+    eth::{
+        cache::{EthStateCache, EthStateCacheConfig},
+        gas_oracle::GasPriceOracleConfig,
+        RPC_DEFAULT_GAS_CAP,
+    },
+    EthApi, EthFilter, EthPubSub, TracingCallPool,
+};
 use serde::{Deserialize, Serialize};
 
 /// The default maximum of logs in a single response.
