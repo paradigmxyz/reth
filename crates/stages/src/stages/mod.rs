@@ -47,10 +47,12 @@ mod tests {
     };
     use reth_db::{
         cursor::DbCursorRO,
+        mdbx::{cursor::Cursor, RW},
         tables,
         transaction::{DbTx, DbTxMut},
-        DatabaseEnv,
+        AccountHistory, DatabaseEnv,
     };
+    use reth_interfaces::test_utils::generators::{self, random_block};
     use reth_primitives::{
         hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, PruneMode, PruneModes,
         SealedBlock, H160, MAINNET, U256,
@@ -69,8 +71,9 @@ mod tests {
         let factory = Arc::new(ProviderFactory::new(test_tx.tx.as_ref(), MAINNET.clone()));
 
         let provider = factory.provider_rw().unwrap();
+        let tip = 66;
         let input = ExecInput {
-            target: Some(1),
+            target: Some(tip),
             /// The progress of this stage the last time it was executed.
             checkpoint: None,
         };
@@ -80,6 +83,15 @@ mod tests {
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
         provider.insert_block(genesis, None).unwrap();
         provider.insert_block(block.clone(), None).unwrap();
+
+        // Fill with bogus blocks to respect PruneMode distance.
+        let mut head = block.hash;
+        let mut rng = generators::rng();
+        for block_number in 2..=tip {
+            let nblock = random_block(&mut rng, block_number, Some(head), Some(0), Some(0));
+            head = nblock.hash;
+            provider.insert_block(nblock, None).unwrap();
+        }
         provider.commit().unwrap();
 
         // insert pre state
@@ -147,9 +159,8 @@ mod tests {
                 // Full is not supported
                 assert!(acc_indexing_stage.execute(&provider, input).await.is_err());
             } else {
-                dbg!(prune_targets);
                 acc_indexing_stage.execute(&provider, input).await.unwrap();
-                let mut account_history =
+                let mut account_history: Cursor<'_, RW, AccountHistory> =
                     provider.tx_ref().cursor_read::<tables::AccountHistory>().unwrap();
                 assert_eq!(account_history.walk(None).unwrap().count(), expect_num_acc_changesets);
             }
@@ -175,7 +186,10 @@ mod tests {
 
         let mut prune = PruneModes::none();
 
-        check_pruning(factory.clone(), prune, 1, 2, 1).await;
+        // In an unpruned configuration there is 1 receipt, 3 changed accounts and 1 changed
+        // storage.
+
+        check_pruning(factory.clone(), prune, 1, 3, 1).await;
 
         prune.receipts = Some(PruneMode::Full);
         prune.account_history = Some(PruneMode::Full);
@@ -185,16 +199,23 @@ mod tests {
         prune.receipts = Some(PruneMode::Before(1));
         prune.account_history = Some(PruneMode::Before(1));
         prune.storage_history = Some(PruneMode::Before(1));
-        check_pruning(factory.clone(), prune, 1, 2, 1).await;
+        check_pruning(factory.clone(), prune, 1, 3, 1).await;
 
         prune.receipts = Some(PruneMode::Before(2));
         prune.account_history = Some(PruneMode::Before(2));
         prune.storage_history = Some(PruneMode::Before(2));
-        check_pruning(factory.clone(), prune, 0, 0, 0).await;
+        // The one account is the miner
+        check_pruning(factory.clone(), prune, 0, 1, 0).await;
 
-        prune.receipts = Some(PruneMode::Distance(0));
-        prune.account_history = Some(PruneMode::Distance(0));
-        prune.storage_history = Some(PruneMode::Distance(0));
-        check_pruning(factory.clone(), prune, 1, 2, 1).await;
+        prune.receipts = Some(PruneMode::Distance(66));
+        prune.account_history = Some(PruneMode::Distance(66));
+        prune.storage_history = Some(PruneMode::Distance(66));
+        check_pruning(factory.clone(), prune, 1, 3, 1).await;
+
+        prune.receipts = Some(PruneMode::Distance(64));
+        prune.account_history = Some(PruneMode::Distance(64));
+        prune.storage_history = Some(PruneMode::Distance(64));
+        // The one account is the miner
+        check_pruning(factory.clone(), prune, 0, 1, 0).await;
     }
 }
