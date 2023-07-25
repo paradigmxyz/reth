@@ -46,8 +46,6 @@ impl TracingCallPool {
     /// function's return value.
     ///
     /// If the function panics, the future will resolve to an error.
-    ///
-    /// ## Panics
     pub fn spawn<F, R>(&self, func: F) -> TracingCallHandle<R>
     where
         F: FnOnce() -> R + Send + 'static,
