@@ -7,7 +7,12 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct PruneModes {
     /// Sender Recovery pruning configuration.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    // TODO(alexey): removing min blocks restriction is possible if we start calculating the senders
+    // dynamically on blockchain tree unwind.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_opt_prune_mode_with_min_distance::<64, _>"
+    )]
     pub sender_recovery: Option<PruneMode>,
     /// Transaction Lookup pruning configuration.
     #[serde(skip_serializing_if = "Option::is_none")]

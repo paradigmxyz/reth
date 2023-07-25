@@ -293,6 +293,18 @@ impl TestTransaction {
         })
     }
 
+    pub fn insert_transaction_senders<I>(&self, transaction_senders: I) -> Result<(), DbError>
+    where
+        I: IntoIterator<Item = (TxNumber, Address)>,
+    {
+        self.commit(|tx| {
+            transaction_senders.into_iter().try_for_each(|(tx_num, sender)| {
+                // Insert into receipts table.
+                tx.put::<tables::TxSenders>(tx_num, sender)
+            })
+        })
+    }
+
     /// Insert collection of ([Address], [Account]) into corresponding tables.
     pub fn insert_accounts_and_storages<I, S>(&self, accounts: I) -> Result<(), DbError>
     where
