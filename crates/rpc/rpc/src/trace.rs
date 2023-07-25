@@ -166,16 +166,16 @@ where
 
         let config = tracing_config(&trace_types);
 
-        self.on_blocking_task(|this| async move {
-            this.inner.eth_api.trace_at_with_state(env, config, at, |inspector, res, db| {
+        self.inner
+            .eth_api
+            .trace_at_with_state(env, config, at, move |inspector, res, db| {
                 Ok(inspector.into_parity_builder().into_trace_results_with_state(
                     res,
                     &trace_types,
                     &db,
                 )?)
             })
-        })
-        .await
+            .await
     }
 
     /// Performs multiple call traces on top of the same block. i.e. transaction n will be executed
@@ -252,7 +252,7 @@ where
         let config = tracing_config(&trace_types);
         self.inner
             .eth_api
-            .trace_transaction_in_block(hash, config, move |_, inspector, res, db| {
+            .spawn_trace_transaction_in_block(hash, config, move |_, inspector, res, db| {
                 let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
                     res,
                     &trace_types,
@@ -307,7 +307,7 @@ where
     ) -> EthResult<Option<Vec<LocalizedTransactionTrace>>> {
         self.inner
             .eth_api
-            .trace_transaction_in_block(
+            .spawn_trace_transaction_in_block(
                 hash,
                 TracingInspectorConfig::default_parity(),
                 move |tx_info, inspector, _, _| {

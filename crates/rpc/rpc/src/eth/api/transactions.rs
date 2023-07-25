@@ -173,6 +173,8 @@ pub trait EthTransactions: Send + Sync {
     ///
     /// The callback is then called with the [TracingInspector] and the [ResultAndState] after the
     /// configured [Env] was inspected.
+    ///
+    /// Caution: this is blocking
     fn trace_at<F, R>(
         &self,
         env: Env,
@@ -190,7 +192,7 @@ pub trait EthTransactions: Send + Sync {
     ///
     /// The callback is then called with the [TracingInspector] and the [ResultAndState] after the
     /// configured [Env] was inspected.
-    fn trace_at_with_state<F, R>(
+    async fn trace_at_with_state<F, R>(
         &self,
         env: Env,
         config: TracingInspectorConfig,
@@ -198,7 +200,10 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<R>
     where
-        F: for<'a> FnOnce(TracingInspector, ResultAndState, StateCacheDB<'a>) -> EthResult<R>;
+        F: for<'a> FnOnce(TracingInspector, ResultAndState, StateCacheDB<'a>) -> EthResult<R>
+            + Send
+            + 'static,
+        R: Send + 'static;
 
     /// Fetches the transaction and the transaction's block
     async fn transaction_and_block(
@@ -213,9 +218,9 @@ pub trait EthTransactions: Send + Sync {
     /// The callback `f` is invoked with the [ResultAndState] after the transaction was executed and
     /// the database that points to the beginning of the transaction.
     ///
-    /// Note: this is expected to be be executed on a threadpool where blocking is allowed, such as
+    /// Note: Implementers should use a threadpool where blocking is allowed, such as
     /// [TracingCallPool](crate::tracing_call::TracingCallPool).
-    async fn trace_transaction_in_block<F, R>(
+    async fn spawn_trace_transaction_in_block<F, R>(
         &self,
         hash: H256,
         config: TracingInspectorConfig,
@@ -580,7 +585,7 @@ where
         })
     }
 
-    fn trace_at_with_state<F, R>(
+    async fn trace_at_with_state<F, R>(
         &self,
         env: Env,
         config: TracingInspectorConfig,
@@ -588,15 +593,19 @@ where
         f: F,
     ) -> EthResult<R>
     where
-        F: for<'a> FnOnce(TracingInspector, ResultAndState, StateCacheDB<'a>) -> EthResult<R>,
+        F: for<'a> FnOnce(TracingInspector, ResultAndState, StateCacheDB<'a>) -> EthResult<R>
+            + Send
+            + 'static,
+        R: Send + 'static,
     {
-        self.with_state_at_block(at, |state| {
+        self.spawn_with_state_at_block(at, move |state| {
             let db = SubState::new(State::new(state));
             let mut inspector = TracingInspector::new(config);
             let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
 
             f(inspector, res, db)
         })
+        .await
     }
 
     async fn transaction_and_block(
@@ -617,7 +626,7 @@ where
         Ok(block.map(|block| (transaction, block.seal(block_hash))))
     }
 
-    async fn trace_transaction_in_block<F, R>(
+    async fn spawn_trace_transaction_in_block<F, R>(
         &self,
         hash: H256,
         config: TracingInspectorConfig,
