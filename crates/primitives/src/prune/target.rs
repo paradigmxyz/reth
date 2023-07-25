@@ -58,11 +58,12 @@ macro_rules! impl_prune_parts {
                     " pruning needs to be done, inclusive, according to the provided tip."
                 )]
                 pub fn [<prune_target_block_ $part>](&self, tip: BlockNumber) -> Option<(BlockNumber, PruneMode)> {
-                    self.$part.as_ref().and_then(|mode| {
-                        self.prune_target_block(mode, tip, $min_blocks).map(|block| {
+                    if let Some(mode) = &self.$part {
+                        return self.prune_target_block(mode, tip, $min_blocks).map(|block| {
                             (block, *mode)
                         })
-                    })
+                    }
+                    Some((0, PruneMode::Before(0)))
                 }
             }
         )+
