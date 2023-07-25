@@ -154,6 +154,9 @@ mod eth;
 /// Common RPC constants.
 pub mod constants;
 
+/// Additional support for tracing related rpc calls
+pub mod tracing_pool;
+
 // re-export for convenience
 pub use crate::eth::{EthConfig, EthHandlers};
 pub use jsonrpsee::server::ServerBuilder;

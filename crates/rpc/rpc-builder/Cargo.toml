@@ -33,6 +33,9 @@ strum = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+rayon = { workspace = true }
+pin-project = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
 reth-tracing = { path = "../../tracing" }

@@ -5740,6 +5740,8 @@ version = "0.1.0-alpha.4"
 dependencies = [
  "hyper",
  "jsonrpsee",
+ "pin-project",
+ "rayon",
  "reth-beacon-consensus",
  "reth-interfaces",
  "reth-ipc",
