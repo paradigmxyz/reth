@@ -11,7 +11,6 @@ use std::{
 use tokio::sync::oneshot;
 
 /// Used to execute tracing calls on a rayon threadpool from within a tokio runtime.
-///
 #[derive(Clone, Debug)]
 pub struct TracingCallPool {
     pool: Arc<rayon::ThreadPool>,
