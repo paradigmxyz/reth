@@ -282,7 +282,7 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         max_priority_fee_per_gas,
         gas,
         value,
-        data,
+        input,
         nonce,
         access_list,
         chain_id,
@@ -308,7 +308,7 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         gas_priority_fee: max_priority_fee_per_gas,
         transact_to: to.map(TransactTo::Call).unwrap_or_else(TransactTo::create),
         value: value.unwrap_or_default(),
-        data: data.map(|data| data.0).unwrap_or_default(),
+        data: input.try_into_unique_input()?.map(|data| data.0).unwrap_or_default(),
         chain_id: chain_id.map(|c| c.as_u64()),
         access_list: access_list.map(AccessList::flattened).unwrap_or_default(),
     };
