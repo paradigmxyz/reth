@@ -16,19 +16,19 @@ pub struct IndexStorageHistoryStage {
     /// flow will be returned to the pipeline for commit.
     pub commit_threshold: u64,
     /// Pruning configuration.
-    pub prune_targets: PruneModes,
+    pub prune_modes: PruneModes,
 }
 
 impl IndexStorageHistoryStage {
     /// Create new instance of [IndexStorageHistoryStage].
     pub fn new(commit_threshold: u64) -> Self {
-        Self { commit_threshold, prune_targets: PruneModes::default() }
+        Self { commit_threshold, prune_modes: PruneModes::default() }
     }
 }
 
 impl Default for IndexStorageHistoryStage {
     fn default() -> Self {
-        Self { commit_threshold: 100_000, prune_targets: PruneModes::default() }
+        Self { commit_threshold: 100_000, prune_modes: PruneModes::default() }
     }
 }
 
@@ -50,7 +50,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         }
 
         if let Some((target_prunable_block, _)) =
-            self.prune_targets.prune_target_block_storage_history(input.target())?
+            self.prune_modes.prune_target_block_storage_history(input.target())?
         {
             if target_prunable_block > input.checkpoint().block_number {
                 input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));

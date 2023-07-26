@@ -123,7 +123,7 @@ mod tests {
         provider.commit().unwrap();
 
         let check_pruning = |factory: Arc<ProviderFactory<_>>,
-                             prune_targets: PruneModes,
+                             prune_modes: PruneModes,
                              expect_num_receipts: usize,
                              expect_num_acc_changesets: usize,
                              expect_num_storage_changesets: usize| async move {
@@ -132,7 +132,7 @@ mod tests {
             let mut execution_stage = ExecutionStage::new(
                 Factory::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build())),
                 ExecutionStageThresholds { max_blocks: Some(100), max_changes: None },
-                prune_targets,
+                prune_modes,
             );
 
             execution_stage.execute(&provider, input).await.unwrap();
@@ -153,9 +153,9 @@ mod tests {
 
             // Check AccountHistory
             let mut acc_indexing_stage =
-                IndexAccountHistoryStage { prune_targets, ..Default::default() };
+                IndexAccountHistoryStage { prune_modes, ..Default::default() };
 
-            if let Some(PruneMode::Full) = prune_targets.account_history {
+            if let Some(PruneMode::Full) = prune_modes.account_history {
                 // Full is not supported
                 assert!(acc_indexing_stage.execute(&provider, input).await.is_err());
             } else {
@@ -167,9 +167,9 @@ mod tests {
 
             // Check StorageHistory
             let mut storage_indexing_stage =
-                IndexStorageHistoryStage { prune_targets, ..Default::default() };
+                IndexStorageHistoryStage { prune_modes, ..Default::default() };
 
-            if let Some(PruneMode::Full) = prune_targets.storage_history {
+            if let Some(PruneMode::Full) = prune_modes.storage_history {
                 // Full is not supported
                 assert!(acc_indexing_stage.execute(&provider, input).await.is_err());
             } else {

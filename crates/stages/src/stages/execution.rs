@@ -60,7 +60,7 @@ pub struct ExecutionStage<EF: ExecutorFactory> {
     /// The commit thresholds of the execution stage.
     thresholds: ExecutionStageThresholds,
     /// Pruning configuration.
-    prune_targets: PruneModes,
+    prune_modes: PruneModes,
 }
 
 impl<EF: ExecutorFactory> ExecutionStage<EF> {
@@ -68,9 +68,9 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     pub fn new(
         executor_factory: EF,
         thresholds: ExecutionStageThresholds,
-        prune_targets: PruneModes,
+        prune_modes: PruneModes,
     ) -> Self {
-        Self { metrics_tx: None, executor_factory, thresholds, prune_targets }
+        Self { metrics_tx: None, executor_factory, thresholds, prune_modes }
     }
 
     /// Create an execution stage with the provided  executor factory.
@@ -110,7 +110,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // Execute block range
         let mut state = PostState::default();
-        state.add_prune_targets(self.prune_targets);
+        state.add_prune_modes(self.prune_modes);
 
         for block_number in start_block..=max_block {
             let td = provider
