@@ -459,7 +459,7 @@ impl CallTraceNode {
             } else {
                 match had_value {
                     Some(had_value) => H256::from(had_value),
-                    None => continue,  // if had_value is None, we skip this iteration
+                    None => continue,
                 }
             };
             storage_map.insert(key.into(), value_to_insert);
