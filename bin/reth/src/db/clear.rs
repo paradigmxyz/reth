@@ -1,6 +1,11 @@
 use clap::Parser;
 
-use reth_db::{database::Database, table::Table, transaction::DbTxMut, TableViewer, Tables};
+use reth_db::{
+    database::Database,
+    table::Table,
+    transaction::{DbTx, DbTxMut},
+    TableViewer, Tables,
+};
 
 /// The arguments for the `reth db clear` command
 #[derive(Parser, Debug)]
@@ -29,6 +34,7 @@ impl<DB: Database> TableViewer<()> for ClearViewer<'_, DB> {
     fn view<T: Table>(&self) -> Result<(), Self::Error> {
         let tx = self.db.tx_mut()?;
         tx.clear::<T>()?;
+        tx.commit()?;
 
         Ok(())
     }
