@@ -21,7 +21,6 @@ normal = [
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-interfaces.workspace = true
-reth-rlp.workspace = true
 reth-metrics.workspace = true
 reth-tasks.workspace = true
 
@@ -33,6 +32,7 @@ tokio = { workspace = true, default-features = false, features = ["sync"] }
 tokio-stream.workspace = true
 
 # misc
+alloy-rlp.workspace = true
 aquamarine = "0.3.0"
 thiserror.workspace = true
 tracing.workspace = true

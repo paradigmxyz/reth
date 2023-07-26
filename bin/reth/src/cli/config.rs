@@ -1,7 +1,7 @@
 //! Config traits for various node components.
 
+use alloy_rlp::Encodable;
 use reth_revm::primitives::bytes::BytesMut;
-use reth_rlp::Encodable;
 use reth_rpc_builder::EthConfig;
 use std::{borrow::Cow, time::Duration};
 

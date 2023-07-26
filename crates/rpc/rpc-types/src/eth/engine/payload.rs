@@ -1,10 +1,10 @@
+use alloy_rlp::Decodable;
 use reth_primitives::{
     constants::{MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
     proofs::{self, EMPTY_LIST_HASH},
     Address, Block, Bloom, Bytes, Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawal,
     H256, H64, U256, U64,
 };
-use reth_rlp::Decodable;
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 
 /// The execution payload body response that allows for `null` values.
@@ -232,7 +232,7 @@ pub enum PayloadError {
     },
     /// Encountered decoding error.
     #[error(transparent)]
-    Decode(#[from] reth_rlp::DecodeError),
+    Decode(#[from] alloy_rlp::Error),
 }
 
 impl PayloadError {

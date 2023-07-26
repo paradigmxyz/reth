@@ -1,9 +1,9 @@
 use crate::{
     Address, BlockHash, BlockNumber, Header, SealedHeader, TransactionSigned, Withdrawal, H256, U64,
 };
+use alloy_rlp::{Decodable, Encodable, Error, RlpDecodable, RlpEncodable};
 use fixed_hash::rustc_hex::FromHexError;
 use reth_codecs::derive_arbitrary;
-use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{
     de::{MapAccess, Visitor},
     ser::SerializeStruct,
@@ -308,16 +308,15 @@ impl Encodable for BlockHashOrNumber {
 
 /// Allows for RLP decoding of a block hash or block number
 impl Decodable for BlockHashOrNumber {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        let header: u8 = *buf.first().ok_or(DecodeError::InputTooShort)?;
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let header: u8 = *buf.first().ok_or(Error::InputTooShort)?;
         // if the byte string is exactly 32 bytes, decode it into a Hash
         // 0xa0 = 0x80 (start of string) + 0x20 (32, length of string)
         if header == 0xa0 {
             // strip the first byte, parsing the rest of the string.
             // If the rest of the string fails to decode into 32 bytes, we'll bubble up the
             // decoding error.
-            let hash = H256::decode(buf)?;
-            Ok(Self::Hash(hash))
+            Ok(Self::Hash(H256(Decodable::decode(buf)?)))
         } else {
             // a block number when encoded as bytes ranges from 0 to any number of bytes - we're
             // going to accept numbers which fit in less than 64 bytes.

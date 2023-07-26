@@ -3,6 +3,7 @@
 //! Adapted from <https://github.com/paritytech/parity-common/blob/2fb72eea96b6de4a085144ce239feb49da0cd39e/ethbloom/src/lib.rs>
 #![allow(missing_docs)]
 use crate::{impl_fixed_hash_type, keccak256, Log};
+use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper, RlpMaxEncodedLen};
 use bytes::Buf;
 use core::{mem, ops};
 use crunchy::unroll;
@@ -10,7 +11,6 @@ use derive_more::{AsRef, Deref};
 use fixed_hash::*;
 use impl_serde::impl_fixed_hash_serde;
 use reth_codecs::{impl_hash_compact, Compact};
-use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper, RlpMaxEncodedLen};
 
 /// Length of bloom filter used for Ethereum.
 pub const BLOOM_BITS: u32 = 3;

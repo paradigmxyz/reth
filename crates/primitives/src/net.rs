@@ -1,6 +1,5 @@
 use crate::PeerId;
-use reth_rlp::RlpDecodable;
-use reth_rlp_derive::RlpEncodable;
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 use secp256k1::{SecretKey, SECP256K1};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::{
@@ -221,9 +220,9 @@ impl FromStr for NodeRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_rlp::{Decodable, Encodable};
     use bytes::BytesMut;
     use rand::{thread_rng, Rng, RngCore};
-    use reth_rlp::{Decodable, Encodable};
 
     #[test]
     fn test_mapped_ipv6() {

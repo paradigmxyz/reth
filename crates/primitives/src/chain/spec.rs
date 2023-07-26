@@ -1042,9 +1042,9 @@ mod tests {
         ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head, DEV, GOERLI, H256, MAINNET,
         SEPOLIA, U256,
     };
+    use alloy_rlp::Encodable;
     use bytes::BytesMut;
     use ethers_core::types as EtherType;
-    use reth_rlp::Encodable;
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
         for (block, expected_id) in cases {
             let computed_id = spec.fork_id(block);

@@ -8,8 +8,8 @@ use crate::{
 };
 use bytes::{Buf, BufMut, BytesMut};
 
+use alloy_rlp::{length_of_length, Decodable, Encodable, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
-use reth_rlp::{length_of_length, Decodable, Encodable, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
 use serde::{Deserialize, Serialize};
 use std::{
     mem,
@@ -240,13 +240,13 @@ impl Header {
         length += self.receipts_root.length();
         length += self.logs_bloom.length();
         length += self.difficulty.length();
-        length += U256::from(self.number).length();
-        length += U256::from(self.gas_limit).length();
-        length += U256::from(self.gas_used).length();
+        length += self.number.length();
+        length += self.gas_limit.length();
+        length += self.gas_used.length();
         length += self.timestamp.length();
         length += self.extra_data.length();
         length += self.mix_hash.length();
-        length += H64::from_low_u64_be(self.nonce).length();
+        length += self.nonce.to_be_bytes().length();
 
         if let Some(base_fee) = self.base_fee_per_gas {
             length += U256::from(base_fee).length();
@@ -287,7 +287,7 @@ impl Header {
 impl Encodable for Header {
     fn encode(&self, out: &mut dyn BufMut) {
         let list_header =
-            reth_rlp::Header { list: true, payload_length: self.header_payload_length() };
+            alloy_rlp::Header { list: true, payload_length: self.header_payload_length() };
         list_header.encode(out);
         self.parent_hash.encode(out);
         self.ommers_hash.encode(out);
@@ -297,18 +297,18 @@ impl Encodable for Header {
         self.receipts_root.encode(out);
         self.logs_bloom.encode(out);
         self.difficulty.encode(out);
-        U256::from(self.number).encode(out);
-        U256::from(self.gas_limit).encode(out);
-        U256::from(self.gas_used).encode(out);
+        self.number.encode(out);
+        self.gas_limit.encode(out);
+        self.gas_used.encode(out);
         self.timestamp.encode(out);
         self.extra_data.encode(out);
         self.mix_hash.encode(out);
-        H64::from_low_u64_be(self.nonce).encode(out);
+        self.nonce.to_be_bytes().encode(out);
 
         // Encode base fee. Put empty string if base fee is missing,
         // but withdrawals root is present.
-        if let Some(ref base_fee) = self.base_fee_per_gas {
-            U256::from(*base_fee).encode(out);
+        if let Some(base_fee) = self.base_fee_per_gas {
+            U256::from(base_fee).encode(out);
         } else if self.withdrawals_root.is_some() ||
             self.blob_gas_used.is_some() ||
             self.excess_blob_gas.is_some()
@@ -345,27 +345,25 @@ impl Encodable for Header {
     }
 
     fn length(&self) -> usize {
-        let mut length = 0;
-        length += self.header_payload_length();
-        length += length_of_length(length);
-        length
+        let length = self.header_payload_length();
+        length + length_of_length(length)
     }
 }
 
 impl Decodable for Header {
-    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
-        let rlp_head = reth_rlp::Header::decode(buf)?;
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let rlp_head = alloy_rlp::Header::decode(buf)?;
         if !rlp_head.list {
-            return Err(reth_rlp::DecodeError::UnexpectedString)
+            return Err(alloy_rlp::Error::UnexpectedString)
         }
         let started_len = buf.len();
         let mut this = Self {
-            parent_hash: Decodable::decode(buf)?,
-            ommers_hash: Decodable::decode(buf)?,
-            beneficiary: Decodable::decode(buf)?,
-            state_root: Decodable::decode(buf)?,
-            transactions_root: Decodable::decode(buf)?,
-            receipts_root: Decodable::decode(buf)?,
+            parent_hash: H256(Decodable::decode(buf)?),
+            ommers_hash: H256(Decodable::decode(buf)?),
+            beneficiary: H160(Decodable::decode(buf)?),
+            state_root: H256(Decodable::decode(buf)?),
+            transactions_root: H256(Decodable::decode(buf)?),
+            receipts_root: H256(Decodable::decode(buf)?),
             logs_bloom: Decodable::decode(buf)?,
             difficulty: Decodable::decode(buf)?,
             number: U256::decode(buf)?.to::<u64>(),
@@ -373,8 +371,8 @@ impl Decodable for Header {
             gas_used: U256::decode(buf)?.to::<u64>(),
             timestamp: Decodable::decode(buf)?,
             extra_data: Decodable::decode(buf)?,
-            mix_hash: Decodable::decode(buf)?,
-            nonce: H64::decode(buf)?.to_low_u64_be(),
+            mix_hash: H256(Decodable::decode(buf)?),
+            nonce: u64::from_be_bytes(Decodable::decode(buf)?),
             base_fee_per_gas: None,
             withdrawals_root: None,
             blob_gas_used: None,
@@ -382,28 +380,28 @@ impl Decodable for Header {
         };
 
         if started_len - buf.len() < rlp_head.payload_length {
-            if buf.first().map(|b| *b == EMPTY_STRING_CODE).unwrap_or_default() {
+            if buf.first().map_or(false, |b| *b == EMPTY_STRING_CODE) {
                 buf.advance(1)
             } else {
-                this.base_fee_per_gas = Some(U256::decode(buf)?.to::<u64>());
+                this.base_fee_per_gas = Some(u64::decode(buf)?);
             }
         }
 
         // Withdrawals root for post-shanghai headers
         if started_len - buf.len() < rlp_head.payload_length {
-            if buf.first().map(|b| *b == EMPTY_STRING_CODE).unwrap_or_default() {
+            if buf.first().map_or(false, |b| *b == EMPTY_STRING_CODE) {
                 buf.advance(1)
             } else {
-                this.withdrawals_root = Some(Decodable::decode(buf)?);
+                this.withdrawals_root = Some(H256(Decodable::decode(buf)?));
             }
         }
 
         // Blob gas used and excess blob gas for post-cancun headers
         if started_len - buf.len() < rlp_head.payload_length {
-            if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
+            if buf.first().map_or(false, |b| *b == EMPTY_LIST_CODE) {
                 buf.advance(1)
             } else {
-                this.blob_gas_used = Some(U256::decode(buf)?.to::<u64>());
+                this.blob_gas_used = Some(u64::decode(buf)?);
             }
         }
 
@@ -415,12 +413,12 @@ impl Decodable for Header {
         //    post-London, so this is technically not valid. However, a tool like proptest would
         //    generate a block like this.
         if started_len - buf.len() < rlp_head.payload_length {
-            this.excess_blob_gas = Some(U256::decode(buf)?.to::<u64>());
+            this.excess_blob_gas = Some(u64::decode(buf)?);
         }
 
         let consumed = started_len - buf.len();
         if consumed != rlp_head.payload_length {
-            return Err(reth_rlp::DecodeError::ListLengthMismatch {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
             })
@@ -500,7 +498,7 @@ impl Encodable for SealedHeader {
 }
 
 impl Decodable for SealedHeader {
-    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let b = &mut &**buf;
         let started_len = buf.len();
 
@@ -595,7 +593,7 @@ impl Encodable for HeadersDirection {
 }
 
 impl Decodable for HeadersDirection {
-    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let value: bool = Decodable::decode(buf)?;
         Ok(value.into())
     }

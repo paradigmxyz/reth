@@ -1,8 +1,8 @@
 //! Contains types required for building a payload.
 
+use alloy_rlp::Encodable;
 use reth_primitives::{Address, ChainSpec, Header, SealedBlock, Withdrawal, H256, U256};
 use reth_revm_primitives::config::revm_spec_by_timestamp_after_merge;
-use reth_rlp::Encodable;
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadEnvelope, PayloadAttributes, PayloadId,
 };

@@ -26,8 +26,6 @@ reth-discv4 = { path = "../discv4" }
 reth-dns-discovery = { path = "../dns" }
 reth-eth-wire = { path = "../eth-wire" }
 reth-ecies = { path = "../ecies" }
-reth-rlp.workspace = true
-reth-rlp-derive = { path = "../../rlp/rlp-derive" }
 reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
 reth-provider.workspace = true
@@ -47,6 +45,7 @@ humantime-serde = { version = "1.1", optional = true }
 serde_json = { workspace = true, optional = true }
 
 # misc
+alloy-rlp = { workspace = true, features = ["derive"] }
 auto_impl = "1"
 aquamarine = "0.3.0"
 tracing.workspace = true

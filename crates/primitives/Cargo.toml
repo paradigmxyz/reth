@@ -10,16 +10,15 @@ description = "Commonly used types in reth."
 
 [dependencies]
 # reth
-reth-rlp = { workspace = true, features = ["std", "derive", "ethereum-types"] }
-reth-rlp-derive = { path = "../rlp/rlp-derive" }
 reth-codecs = { path = "../storage/codecs" }
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # ethereum
+alloy-rlp = { workspace = true, features = ["std", "derive", "arrayvec"] }
 ethers-core = { workspace = true, default-features = false }
 tiny-keccak = { version = "2.0", features = ["keccak"] }
 crunchy = { version = "0.2.2", default-features = false, features = ["limit_256"] }
-ruint = { version = "1.9.0", features = ["primitive-types", "rlp"] }
+ruint = { version = "1.9.0", features = ["primitive-types", "rlp", "alloy-rlp"] }
 
 # Bloom
 fixed-hash = { version = "0.8", default-features = false, features = ["rustc-hex"] }

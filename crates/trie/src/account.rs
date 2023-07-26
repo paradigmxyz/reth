@@ -1,5 +1,5 @@
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_primitives::{proofs::EMPTY_ROOT, Account, H256, KECCAK_EMPTY, U256};
-use reth_rlp::{RlpDecodable, RlpEncodable};
 
 /// An Ethereum account as represented in the trie.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]

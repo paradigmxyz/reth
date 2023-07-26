@@ -1,7 +1,7 @@
 use crate::serde_helper::hex_bytes;
+use alloy_rlp::{Decodable, Encodable};
 use bytes::Buf;
 use reth_codecs::Compact;
-use reth_rlp::{Decodable, DecodeError, Encodable};
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::Borrow,
@@ -160,7 +160,7 @@ impl Encodable for Bytes {
 }
 
 impl Decodable for Bytes {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         Ok(Self(bytes::Bytes::decode(buf)?))
     }
 }

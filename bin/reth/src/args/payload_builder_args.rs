@@ -2,6 +2,7 @@ use crate::{
     args::utils::parse_duration_from_secs, cli::config::PayloadBuilderConfig,
     version::default_extradata,
 };
+use alloy_rlp::Encodable;
 use clap::{
     builder::{RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,

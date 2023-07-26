@@ -253,6 +253,7 @@ pub fn rng_ipv4_record(rng: &mut impl RngCore) -> NodeRecord {
 pub fn rng_message(rng: &mut impl RngCore) -> Message {
     match rng.gen_range(1..=4) {
         1 => Message::Ping(Ping {
+            version: 4,
             from: rng_endpoint(rng),
             to: rng_endpoint(rng),
             expire: rng.gen(),

@@ -31,15 +31,15 @@ derive_more = "0.99"
 parking_lot = "0.12"
 
 # test-utils
-reth-rlp = { workspace = true, optional = true }
+alloy-rlp = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-db = { path = "../db", features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
-reth-rlp.workspace = true
 reth-trie = { path = "../../trie", features = ["test-utils"] }
+alloy-rlp.workspace = true
 parking_lot = "0.12"
 tempfile = "3.3"
 
 [features]
-test-utils = ["reth-rlp"]
+test-utils = ["dep:alloy-rlp"]

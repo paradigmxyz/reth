@@ -439,7 +439,7 @@ mod tests {
         K: AsRef<[u8]> + Ord,
     {
         let hashed = iter
-            .map(|(k, v)| (keccak256(k.as_ref()), reth_rlp::encode_fixed_size(v).to_vec()))
+            .map(|(k, v)| (keccak256(k.as_ref()), alloy_rlp::encode_fixed_size(v).to_vec()))
             // Collect into a btree map to sort the data
             .collect::<BTreeMap<_, _>>();
 
@@ -590,7 +590,8 @@ mod tests {
         // Skip the 0th element given in this example they have a common prefix and will
         // collapse to a Branch node.
         use crate::bytes::BytesMut;
-        use reth_rlp::Encodable;
+        use alloy_rlp::Encodable;
+
         let leaf1 = LeafNode::new(&Nibbles::unpack(&raw_input[0].0[1..]), input[0].1);
         let leaf2 = LeafNode::new(&Nibbles::unpack(&raw_input[1].0[1..]), input[1].1);
         let mut branch: [&dyn Encodable; 17] = [b""; 17];
@@ -599,7 +600,7 @@ mod tests {
         branch[4] = &leaf1;
         branch[7] = &leaf2;
         let mut branch_node_rlp = BytesMut::new();
-        reth_rlp::encode_list::<dyn Encodable, _>(&branch, &mut branch_node_rlp);
+        alloy_rlp::encode_list::<_, dyn Encodable>(&branch, &mut branch_node_rlp);
         let branch_node_hash = keccak256(branch_node_rlp);
 
         let mut hb2 = HashBuilder::default();

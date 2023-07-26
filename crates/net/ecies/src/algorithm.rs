@@ -6,6 +6,7 @@ use crate::{
     ECIESError,
 };
 use aes::{cipher::StreamCipher, Aes128, Aes256};
+use alloy_rlp::{Encodable, Rlp, RlpEncodable, RlpMaxEncodedLen};
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use ctr::Ctr64BE;
 use digest::{crypto_common::KeyIvInit, Digest};
@@ -13,9 +14,8 @@ use educe::Educe;
 use rand::{thread_rng, Rng};
 use reth_primitives::{
     bytes::{BufMut, Bytes, BytesMut},
-    H128, H256, H512 as PeerId,
+    H128, H256, H512 as PeerId, H512,
 };
-use reth_rlp::{Encodable, Rlp, RlpEncodable, RlpMaxEncodedLen};
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
     PublicKey, SecretKey, SECP256K1,
@@ -264,7 +264,7 @@ impl ECIES {
         struct S<'a> {
             sig_bytes: &'a [u8; 65],
             id: &'a PeerId,
-            nonce: &'a H256,
+            nonce: &'a [u8; 32],
             protocol_version: u8,
         }
 
@@ -272,7 +272,7 @@ impl ECIES {
         S {
             sig_bytes: &sig_bytes,
             id: &id,
-            nonce: &self.nonce,
+            nonce: &self.nonce.0,
             protocol_version: PROTOCOL_VERSION as u8,
         }
         .encode(&mut out);
@@ -316,10 +316,10 @@ impl ECIES {
             &sigdata[..64],
             RecoveryId::from_i32(sigdata[64] as i32)?,
         )?;
-        let remote_id = data.get_next()?.ok_or(ECIESErrorImpl::InvalidAuthData)?;
+        let remote_id = H512(data.get_next()?.ok_or(ECIESErrorImpl::InvalidAuthData)?);
         self.remote_id = Some(remote_id);
         self.remote_public_key = Some(id2pk(remote_id)?);
-        self.remote_nonce = Some(data.get_next()?.ok_or(ECIESErrorImpl::InvalidAuthData)?);
+        self.remote_nonce = Some(H256(data.get_next()?.ok_or(ECIESErrorImpl::InvalidAuthData)?));
 
         let x = ecdh_x(&self.remote_public_key.unwrap(), &self.secret_key);
         self.remote_ephemeral_public_key = Some(SECP256K1.recover_ecdsa(
@@ -346,13 +346,13 @@ impl ECIES {
         #[derive(RlpEncodable, RlpMaxEncodedLen)]
         struct S {
             id: PeerId,
-            nonce: H256,
+            nonce: [u8; 32],
             protocol_version: u8,
         }
 
-        reth_rlp::encode_fixed_size(&S {
+        alloy_rlp::encode_fixed_size(&S {
             id: pk2id(&self.ephemeral_public_key),
-            nonce: self.nonce,
+            nonce: self.nonce.0,
             protocol_version: PROTOCOL_VERSION as u8,
         })
     }
@@ -399,7 +399,7 @@ impl ECIES {
         let mut data = Rlp::new(data)?;
         self.remote_ephemeral_public_key =
             Some(id2pk(data.get_next()?.ok_or(ECIESErrorImpl::InvalidAckData)?)?);
-        self.remote_nonce = Some(data.get_next()?.ok_or(ECIESErrorImpl::InvalidAckData)?);
+        self.remote_nonce = Some(H256(data.get_next()?.ok_or(ECIESErrorImpl::InvalidAckData)?));
 
         self.ephemeral_shared_secret =
             Some(ecdh_x(&self.remote_ephemeral_public_key.unwrap(), &self.ephemeral_secret_key));

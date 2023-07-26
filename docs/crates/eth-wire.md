@@ -65,7 +65,7 @@ These traits are defined as follows:
 [Crate: crates/common/rlp](https://github.com/paradigmxyz/reth/blob/main/crates/common/rlp)
 ```rust, ignore
 pub trait Decodable: Sized {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError>;
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self>;
 }
 pub trait Encodable {
     fn encode(&self, out: &mut dyn BufMut);
@@ -73,7 +73,7 @@ pub trait Encodable {
 }
 ```
 These traits describe how the `Ethmessage` should be serialized/deserialized into raw bytes using the RLP format.
-In reth all [RLP](https://ethereum.org/en/developers/docs/data-structures-and-encoding/rlp/) encode/decode operations are handled by the `common/rlp` and `common/rlp-derive` crates.
+In reth all [RLP](https://ethereum.org/en/developers/docs/data-structures-and-encoding/rlp/) encode/decode operations are handled by the [`alloy-rlp`](https://github.com/alloy-rs/rlp) crate.
 
 Note that the `ProtocolMessage` itself implements these traits, so any stream of bytes can be converted into it by calling `ProtocolMessage::decode()` and vice versa with `ProtocolMessage::encode()`. The message type is determined by the first byte of the byte stream.
 
@@ -127,11 +127,11 @@ impl Encodable for TransactionSigned {
 }
 
 impl Decodable for TransactionSigned {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         // Implementation omitted for brevity
         //...
     }
-
+}
 ```
 Now that we know how the types work, let's take a look at how these are utilized in the network.
 

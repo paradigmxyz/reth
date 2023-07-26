@@ -45,6 +45,7 @@ mod tests {
         test_utils::TestTransaction,
         ExecInput,
     };
+    use alloy_rlp::Decodable;
     use reth_db::{
         cursor::DbCursorRO,
         mdbx::{cursor::Cursor, RW},
@@ -62,7 +63,6 @@ mod tests {
         StorageReader,
     };
     use reth_revm::Factory;
-    use reth_rlp::Decodable;
     use std::sync::Arc;
 
     #[tokio::test]

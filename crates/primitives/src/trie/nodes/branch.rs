@@ -1,8 +1,8 @@
 use super::{super::TrieMask, rlp_node, CHILD_INDEX_RANGE};
 use crate::H256;
+use alloy_rlp::{BufMut, EMPTY_STRING_CODE};
 use bytes::Buf;
 use reth_codecs::Compact;
-use reth_rlp::{BufMut, EMPTY_STRING_CODE};
 use serde::{Deserialize, Serialize};
 
 /// A Branch node is only a pointer to the stack of nodes and is used to
@@ -47,7 +47,7 @@ impl<'a> BranchNode<'a> {
         // Create the RLP header from the mask elements present.
         let mut i = first_child_idx;
         let header = CHILD_INDEX_RANGE.fold(
-            reth_rlp::Header { list: true, payload_length: 1 },
+            alloy_rlp::Header { list: true, payload_length: 1 },
             |mut header, digit| {
                 if state_mask.is_bit_set(digit) {
                     header.payload_length += self.stack[i].len();

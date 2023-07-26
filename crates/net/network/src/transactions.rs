@@ -7,6 +7,7 @@ use crate::{
     metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
     NetworkHandle,
 };
+use alloy_rlp::Encodable;
 use futures::{stream::FuturesUnordered, Future, FutureExt, StreamExt};
 use reth_eth_wire::{
     EthVersion, GetPooledTransactions, NewPooledTransactionHashes, NewPooledTransactionHashes66,
@@ -22,7 +23,6 @@ use reth_primitives::{
     FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, TransactionSigned, TxHash, TxType,
     H256,
 };
-use reth_rlp::Encodable;
 use reth_transaction_pool::{
     error::PoolResult, PoolTransaction, PropagateKind, PropagatedTransactions, TransactionPool,
     ValidPoolTransaction,
@@ -789,10 +789,10 @@ pub enum NetworkTransactionEvent {
 mod tests {
     use super::*;
     use crate::{test_utils::Testnet, NetworkConfigBuilder, NetworkManager};
+    use alloy_rlp::Decodable;
     use reth_interfaces::sync::{NetworkSyncUpdater, SyncState};
     use reth_network_api::NetworkInfo;
     use reth_provider::test_utils::NoopProvider;
-    use reth_rlp::Decodable;
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};
     use secp256k1::SecretKey;
     use std::future::poll_fn;

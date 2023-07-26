@@ -1,5 +1,6 @@
 //! Contains types that represent ethereum types in [reth_primitives] when used in RPC
 use crate::Transaction;
+use alloy_rlp::Encodable;
 use reth_primitives::{
     Address, Bloom, Bytes, Header as PrimitiveHeader, SealedHeader, Withdrawal, H256, H64, U256,
     U64,
@@ -56,7 +57,7 @@ pub enum BlockError {
     InvalidSignature,
     /// A raw block failed to decode
     #[error("failed to decode raw block {0}")]
-    RlpDecodeRawBlock(reth_rlp::DecodeError),
+    RlpDecodeRawBlock(alloy_rlp::Error),
 }
 
 /// Block representation

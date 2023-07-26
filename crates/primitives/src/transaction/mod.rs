@@ -1,25 +1,26 @@
 use crate::{
     compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR},
-    keccak256, Address, Bytes, TxHash, H256,
+    keccak256, Address, Bytes, TxHash, H160, H256,
 };
-pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
+use alloy_rlp::{
+    length_of_length, Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE,
+    EMPTY_STRING_CODE,
+};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
-pub use error::InvalidTransactionError;
-pub use meta::TransactionMeta;
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
-use reth_rlp::{
-    length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
-};
 use serde::{Deserialize, Serialize};
-pub use signature::Signature;
 use std::mem;
-pub use tx_type::{TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID};
 
+pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
 pub use eip1559::TxEip1559;
 pub use eip2930::TxEip2930;
 pub use eip4844::TxEip4844;
+pub use error::InvalidTransactionError;
 pub use legacy::TxLegacy;
+pub use meta::TransactionMeta;
+pub use signature::Signature;
+pub use tx_type::{TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID};
 
 mod access_list;
 mod eip1559;
@@ -730,7 +731,7 @@ impl Compact for TransactionKind {
 }
 
 impl Encodable for TransactionKind {
-    fn encode(&self, out: &mut dyn reth_rlp::BufMut) {
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         match self {
             TransactionKind::Call(to) => to.encode(out),
             TransactionKind::Create => out.put_u8(EMPTY_STRING_CODE),
@@ -745,17 +746,16 @@ impl Encodable for TransactionKind {
 }
 
 impl Decodable for TransactionKind {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    fn decode(buf: &mut &[u8]) -> Result<Self, RlpError> {
         if let Some(&first) = buf.first() {
             if first == EMPTY_STRING_CODE {
                 buf.advance(1);
                 Ok(TransactionKind::Create)
             } else {
-                let addr = <Address as Decodable>::decode(buf)?;
-                Ok(TransactionKind::Call(addr))
+                Ok(TransactionKind::Call(H160(Decodable::decode(buf)?)))
             }
         } else {
-            Err(DecodeError::InputTooShort)
+            Err(RlpError::InputTooShort)
         }
     }
 }
@@ -1023,7 +1023,7 @@ impl TransactionSigned {
     /// Decodes legacy transaction from the data buffer.
     ///
     /// This expects `rlp(legacy_tx)`
-    fn decode_rlp_legacy_transaction(data: &mut &[u8]) -> Result<TransactionSigned, DecodeError> {
+    fn decode_rlp_legacy_transaction(data: &mut &[u8]) -> Result<TransactionSigned, RlpError> {
         // keep this around, so we can use it to calculate the hash
         let original_encoding = *data;
 
@@ -1052,18 +1052,16 @@ impl TransactionSigned {
     /// Decodes en enveloped EIP-2718 typed transaction.
     ///
     /// CAUTION: this expects that `data` is `[id, rlp(tx)]`
-    fn decode_enveloped_typed_transaction(
-        data: &mut &[u8],
-    ) -> Result<TransactionSigned, DecodeError> {
+    fn decode_enveloped_typed_transaction(data: &mut &[u8]) -> Result<TransactionSigned, RlpError> {
         // keep this around so we can use it to calculate the hash
         let original_encoding = *data;
 
-        let tx_type = *data.first().ok_or(DecodeError::InputTooShort)?;
+        let tx_type = *data.first().ok_or(RlpError::InputTooShort)?;
         data.advance(1);
         // decode the list header for the rest of the transaction
         let header = Header::decode(data)?;
         if !header.list {
-            return Err(DecodeError::Custom("typed tx fields must be encoded as a list"))
+            return Err(RlpError::Custom("typed tx fields must be encoded as a list"))
         }
 
         // length of tx encoding = tx type byte (size = 1) + length of header + payload length
@@ -1105,7 +1103,7 @@ impl TransactionSigned {
                 max_fee_per_blob_gas: Decodable::decode(data)?,
                 blob_versioned_hashes: Decodable::decode(data)?,
             }),
-            _ => return Err(DecodeError::Custom("unsupported typed transaction type")),
+            _ => return Err(RlpError::Custom("unsupported typed transaction type")),
         };
 
         let signature = Signature::decode(data)?;
@@ -1121,11 +1119,11 @@ impl TransactionSigned {
     /// For legacy transactions, the format is encoded as: `rlp(tx)`
     /// For EIP-2718 typed transaction, the format is encoded as the type of the transaction
     /// followed by the rlp of the transaction: `type` + `rlp(tx)`
-    pub fn decode_enveloped(tx: Bytes) -> Result<Self, DecodeError> {
+    pub fn decode_enveloped(tx: Bytes) -> Result<Self, RlpError> {
         let mut data = tx.as_ref();
 
         if data.is_empty() {
-            return Err(DecodeError::InputTooShort)
+            return Err(RlpError::InputTooShort)
         }
 
         // Check if the tx is a list
@@ -1159,7 +1157,7 @@ impl Encodable for TransactionSigned {
 ///
 /// CAUTION: this expects that the given buf contains rlp
 impl Decodable for TransactionSigned {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    fn decode(buf: &mut &[u8]) -> Result<Self, RlpError> {
         // decode header
         let mut original_encoding = *buf;
         let header = Header::decode(buf)?;
@@ -1268,11 +1266,11 @@ impl Encodable for TransactionSignedEcRecovered {
 }
 
 impl Decodable for TransactionSignedEcRecovered {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    fn decode(buf: &mut &[u8]) -> Result<Self, RlpError> {
         let signed_transaction = TransactionSigned::decode(buf)?;
         let signer = signed_transaction
             .recover_signer()
-            .ok_or(DecodeError::Custom("Unable to recover decoded transaction signer."))?;
+            .ok_or(RlpError::Custom("Unable to recover decoded transaction signer."))?;
         Ok(TransactionSignedEcRecovered { signer, signed_transaction })
     }
 }
@@ -1316,16 +1314,16 @@ mod tests {
         transaction::{signature::Signature, TransactionKind, TxEip1559, TxLegacy},
         Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered, H256, U256,
     };
+    use alloy_rlp::{Decodable, Encodable};
     use bytes::BytesMut;
     use ethers_core::utils::hex;
-    use reth_rlp::{Decodable, DecodeError, Encodable};
     use std::str::FromStr;
 
     #[test]
     fn test_decode_empty_typed_tx() {
         let input = [0x80u8];
-        let res = TransactionSigned::decode(&mut &input[..]).unwrap_err();
-        assert_eq!(DecodeError::InputTooShort, res);
+        let res = TransactionSigned::decode(&mut &input[..]);
+        assert_eq!(res.unwrap_err(), alloy_rlp::Error::InputTooShort);
     }
 
     #[test]

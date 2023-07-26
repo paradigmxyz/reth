@@ -1,8 +1,8 @@
 //! Implements the `GetBlockHeaders`, `GetBlockBodies`, `BlockHeaders`, and `BlockBodies` message
 //! types.
+use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, H256};
-use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -53,7 +53,7 @@ impl From<Vec<Header>> for BlockHeaders {
 
 /// A request for a peer to return block bodies for the given block hashes.
 #[derive_arbitrary(rlp)]
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GetBlockBodies(
     /// The block hashes to request bodies for.
@@ -93,12 +93,12 @@ mod test {
     use crate::types::{
         message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
     };
+    use alloy_rlp::{Decodable, Encodable};
     use hex_literal::hex;
     use reth_primitives::{
         BlockHashOrNumber, Header, HeadersDirection, Signature, Transaction, TransactionKind,
         TransactionSigned, TxLegacy, U256,
     };
-    use reth_rlp::{Decodable, Encodable};
     use std::str::FromStr;
 
     use super::BlockBody;

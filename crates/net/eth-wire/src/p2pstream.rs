@@ -6,6 +6,7 @@ use crate::{
     pinger::{Pinger, PingerEvent},
     DisconnectReason, HelloMessage,
 };
+use alloy_rlp::{length_of_length, Decodable, Encodable, Error as RlpError, EMPTY_LIST_CODE};
 use futures::{Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_codecs::derive_arbitrary;
@@ -14,7 +15,6 @@ use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
     hex,
 };
-use reth_rlp::{Decodable, DecodeError, Encodable, EMPTY_LIST_CODE};
 use std::{
     collections::{BTreeSet, HashMap, HashSet, VecDeque},
     io,
@@ -663,7 +663,8 @@ pub enum P2PMessage {
 }
 
 impl P2PMessage {
-    /// Gets the [`P2PMessageID`] for the given message.
+    /// Returns the [`P2PMessageID`] for this message.
+    #[inline]
     pub fn message_id(&self) -> P2PMessageID {
         match self {
             P2PMessage::Hello(_) => P2PMessageID::Hello,
@@ -674,82 +675,63 @@ impl P2PMessage {
     }
 }
 
-/// The [`Encodable`](reth_rlp::Encodable) implementation for [`P2PMessage::Ping`] and
+/// The [`Encodable`](alloy_rlp::Encodable) implementation for [`P2PMessage::Ping`] and
 /// [`P2PMessage::Pong`] encodes the message as RLP, and prepends a snappy header to the RLP bytes
 /// for all variants except the [`P2PMessage::Hello`] variant, because the hello message is never
 /// compressed in the `p2p` subprotocol.
 impl Encodable for P2PMessage {
+    #[inline]
     fn encode(&self, out: &mut dyn BufMut) {
-        (self.message_id() as u8).encode(out);
+        self.message_id().encode(out);
         match self {
             P2PMessage::Hello(msg) => msg.encode(out),
             P2PMessage::Disconnect(msg) => msg.encode(out),
-            P2PMessage::Ping => {
-                // Ping payload is _always_ snappy encoded
-                out.put_u8(0x01);
-                out.put_u8(0x00);
-                out.put_u8(EMPTY_LIST_CODE);
-            }
-            P2PMessage::Pong => {
-                // Pong payload is _always_ snappy encoded
-                out.put_u8(0x01);
-                out.put_u8(0x00);
-                out.put_u8(EMPTY_LIST_CODE);
-            }
+            // Ping/Pong payload is _always_ snappy encoded
+            P2PMessage::Ping | P2PMessage::Pong => out.put_slice(&[0x01, 0x00, EMPTY_LIST_CODE]),
         }
     }
 
+    #[inline]
     fn length(&self) -> usize {
-        let payload_len = match self {
+        let payload_length = match self {
             P2PMessage::Hello(msg) => msg.length(),
             P2PMessage::Disconnect(msg) => msg.length(),
-            // id + snappy encoded payload
-            P2PMessage::Ping => 3, // len([0x01, 0x00, 0xc0]) = 3
-            P2PMessage::Pong => 3, // len([0x01, 0x00, 0xc0]) = 3
+            P2PMessage::Ping | P2PMessage::Pong => 3, // len([0x01, 0x00, 0xc0]) = 3
         };
-        payload_len + 1 // (1 for length of p2p message id)
+        payload_length + length_of_length(payload_length)
     }
 }
 
-/// The [`Decodable`](reth_rlp::Decodable) implementation for [`P2PMessage`] assumes that each of
+/// The [`Decodable`](alloy_rlp::Decodable) implementation for [`P2PMessage`] assumes that each of
 /// the message variants are snappy compressed, except for the [`P2PMessage::Hello`] variant since
 /// the hello message is never compressed in the `p2p` subprotocol.
 /// The [`Decodable`] implementation for [`P2PMessage::Ping`] and
 /// [`P2PMessage::Pong`] expects a snappy encoded payload, see [`Encodable`] implementation.
 impl Decodable for P2PMessage {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        /// Removes the snappy prefix from the Ping/Pong buffer
-        fn advance_snappy_ping_pong_payload(buf: &mut &[u8]) -> Result<(), DecodeError> {
-            if buf.len() < 3 {
-                return Err(DecodeError::InputTooShort)
-            }
-            if buf[..3] != [0x01, 0x00, EMPTY_LIST_CODE] {
-                return Err(DecodeError::Custom("expected snappy payload"))
-            }
-            buf.advance(3);
-            Ok(())
-        }
-
-        let message_id = u8::decode(&mut &buf[..])?;
-        let id = P2PMessageID::try_from(message_id)
-            .or(Err(DecodeError::Custom("unknown p2p message id")))?;
-        buf.advance(1);
-        match id {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        match P2PMessageID::decode(buf)? {
             P2PMessageID::Hello => Ok(P2PMessage::Hello(HelloMessage::decode(buf)?)),
             P2PMessageID::Disconnect => Ok(P2PMessage::Disconnect(DisconnectReason::decode(buf)?)),
-            P2PMessageID::Ping => {
-                advance_snappy_ping_pong_payload(buf)?;
-                Ok(P2PMessage::Ping)
-            }
-            P2PMessageID::Pong => {
-                advance_snappy_ping_pong_payload(buf)?;
-                Ok(P2PMessage::Pong)
+            id @ (P2PMessageID::Ping | P2PMessageID::Pong) => {
+                if buf.len() < 3 {
+                    return Err(RlpError::InputTooShort)
+                }
+                if buf[..3] != [0x01, 0x00, EMPTY_LIST_CODE] {
+                    return Err(RlpError::Custom("expected snappy payload"))
+                }
+                buf.advance(3);
+                match id {
+                    P2PMessageID::Ping => Ok(P2PMessage::Ping),
+                    P2PMessageID::Pong => Ok(P2PMessage::Pong),
+                    _ => unreachable!(),
+                }
             }
         }
     }
 }
 
 /// Message IDs for `p2p` subprotocol messages.
+#[repr(u8)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum P2PMessageID {
     /// Message ID for the [`P2PMessage::Hello`] message.
@@ -790,6 +772,26 @@ impl TryFrom<u8> for P2PMessageID {
     }
 }
 
+impl Encodable for P2PMessageID {
+    #[inline]
+    fn encode(&self, out: &mut dyn BufMut) {
+        (*self as u8).encode(out)
+    }
+
+    #[inline]
+    fn length(&self) -> usize {
+        (*self as u8).length()
+    }
+}
+
+impl Decodable for P2PMessageID {
+    #[inline]
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let id = u8::decode(buf)?;
+        P2PMessageID::try_from(id).map_err(|_| RlpError::Custom("unknown p2p message id"))
+    }
+}
+
 /// RLPx `p2p` protocol version
 #[derive_arbitrary(rlp)]
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
@@ -803,22 +805,23 @@ pub enum ProtocolVersion {
 }
 
 impl Encodable for ProtocolVersion {
+    #[inline]
     fn encode(&self, out: &mut dyn BufMut) {
         (*self as u8).encode(out)
     }
+
+    #[inline]
     fn length(&self) -> usize {
-        // the version should be a single byte
         (*self as u8).length()
     }
 }
 
 impl Decodable for ProtocolVersion {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        let version = u8::decode(buf)?;
-        match version {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        match u8::decode(buf)? {
             4 => Ok(ProtocolVersion::V4),
             5 => Ok(ProtocolVersion::V5),
-            _ => Err(DecodeError::Custom("unknown p2p protocol version")),
+            _ => Err(RlpError::Custom("unknown p2p protocol version")),
         }
     }
 }

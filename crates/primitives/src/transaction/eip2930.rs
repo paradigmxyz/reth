@@ -73,8 +73,8 @@ mod tests {
         transaction::{signature::Signature, TransactionKind},
         Address, Bytes, Transaction, TransactionSigned, U256,
     };
+    use alloy_rlp::{Decodable, Encodable};
     use bytes::BytesMut;
-    use reth_rlp::{Decodable, Encodable};
 
     #[test]
     fn test_decode_create() {

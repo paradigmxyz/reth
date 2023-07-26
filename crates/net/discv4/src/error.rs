@@ -7,7 +7,7 @@ use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 #[allow(missing_docs)]
 pub enum DecodePacketError {
     #[error("Failed to rlp decode: {0:?}")]
-    Rlp(#[from] reth_rlp::DecodeError),
+    Rlp(#[from] alloy_rlp::Error),
     #[error("Received packet len too short.")]
     PacketTooShort,
     #[error("Hash of the header not equals to the hash of the data.")]

@@ -5,7 +5,7 @@ use crate::{
     utils::serde_helpers::{deserialize_stringified_u64, deserialize_stringified_u64_opt},
     Account, Address, Bytes, H256, KECCAK_EMPTY, U256,
 };
-use reth_rlp::{encode_fixed_size, length_of_length, Encodable, Header as RlpHeader};
+use alloy_rlp::{encode_fixed_size, length_of_length, Encodable, Header as RlpHeader};
 use revm_primitives::B160;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

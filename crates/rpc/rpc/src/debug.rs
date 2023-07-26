@@ -10,6 +10,7 @@ use crate::{
     result::{internal_rpc_err, ToRpcResult},
     EthApiSpec, TracingCallGuard,
 };
+use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{Account, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H256};
@@ -22,7 +23,6 @@ use reth_revm::{
         FourByteInspector, TracingInspector, TracingInspectorConfig,
     },
 };
-use reth_rlp::{Decodable, Encodable};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::{
     state::StateOverride,

@@ -50,8 +50,8 @@ impl From<io::Error> for EthStreamError {
     }
 }
 
-impl From<reth_rlp::DecodeError> for EthStreamError {
-    fn from(err: reth_rlp::DecodeError) -> Self {
+impl From<alloy_rlp::Error> for EthStreamError {
+    fn from(err: alloy_rlp::Error) -> Self {
         P2PStreamError::from(err).into()
     }
 }

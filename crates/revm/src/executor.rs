@@ -646,6 +646,7 @@ pub fn insert_post_block_withdrawals_balance_increments(
 mod tests {
     use super::*;
     use crate::database::State;
+    use alloy_rlp::Decodable;
     use once_cell::sync::Lazy;
     use reth_consensus_common::calc;
     use reth_primitives::{
@@ -656,7 +657,6 @@ mod tests {
         post_state::{AccountChanges, Storage, StorageTransition, StorageWipe},
         AccountReader, BlockHashReader, StateProvider, StateRootProvider,
     };
-    use reth_rlp::Decodable;
     use std::{collections::HashMap, str::FromStr};
 
     static DEFAULT_REVM_ACCOUNT: Lazy<RevmAccount> = Lazy::new(|| RevmAccount {

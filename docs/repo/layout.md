@@ -128,11 +128,9 @@ Crates related to building and validating payloads (blocks).
 
 ### Primitives
 
-These crates define primitive types or algorithms such as RLP.
+These crates define primitive types or data structures such as the Merkle Patricia Tree.
 
 - [`primitives`](../../crates/primitives): Commonly used types in Reth.
-- [`rlp`](../../crates/rlp): An implementation of RLP, forked from an earlier Apache-licensed version of [`fastrlp`][fastrlp]
-- [`rlp/rlp-derive`](../../crates/rlp/rlp-derive): Forked from an earlier Apache licenced version of the [`fastrlp-derive`][fastrlp-derive] crate, before it changed licence to GPL.
 - [`trie`](../../crates/trie): An implementation of a Merkle Patricia Trie used for various roots (e.g. the state root) in Ethereum.
 
 ### Misc
@@ -146,7 +144,6 @@ Small utility crates.
 - [`tracing`](../../crates/tracing): A small utility crate to install a uniform [`tracing`][tracing] subscriber
 
 [fastrlp]: https://crates.io/crates/fastrlp
-[fastrlp-derive]: https://crates.io/crates/fastrlp-derive
 [libmdbx-rs]: https://crates.io/crates/libmdbx
 [discv4]: https://github.com/ethereum/devp2p/blob/master/discv4.md
 [jsonrpsee]: https://github.com/paritytech/jsonrpsee/

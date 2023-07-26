@@ -1,10 +1,10 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
+use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary};
 use reth_primitives::{
     kzg::{self, Blob, Bytes48, KzgProof, KzgSettings},
     TransactionSigned, H256,
 };
-use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -24,7 +24,7 @@ use reth_primitives::{
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
 #[derive_arbitrary(rlp)]
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GetPooledTransactions(
     /// The transaction hashes to request transaction bodies for.
@@ -185,11 +185,11 @@ fn generate_blob_transaction(blobs: Vec<Blob>, transaction: TransactionSigned) -
 #[cfg(test)]
 mod test {
     use crate::{message::RequestPair, GetPooledTransactions, PooledTransactions};
+    use alloy_rlp::{Decodable, Encodable};
     use hex_literal::hex;
     use reth_primitives::{
         hex, Signature, Transaction, TransactionKind, TransactionSigned, TxEip1559, TxLegacy, U256,
     };
-    use reth_rlp::{Decodable, Encodable};
     use std::str::FromStr;
 
     #[test]

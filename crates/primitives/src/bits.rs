@@ -1,10 +1,10 @@
 //! Fixed hash types
+use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper, RlpMaxEncodedLen};
 use bytes::Buf;
 use derive_more::{AsRef, Deref};
 use fixed_hash::construct_fixed_hash;
 use impl_serde::impl_fixed_hash_serde;
 use reth_codecs::{impl_hash_compact, Compact};
-use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper, RlpMaxEncodedLen};
 
 /// Implements a fixed hash type (eg. H512) with `serde`, `Arbitrary`, `proptest::Arbitrary` and
 /// `Compact` support.

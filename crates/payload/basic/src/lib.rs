@@ -14,6 +14,7 @@
 //! reth basic payload job generator
 
 use crate::metrics::PayloadBuilderMetrics;
+use alloy_rlp::Encodable;
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_payload_builder::{
@@ -38,7 +39,6 @@ use reth_revm::{
     },
     into_reth_log,
 };
-use reth_rlp::Encodable;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::{

@@ -30,7 +30,7 @@ rayon.workspace = true
 thiserror.workspace = true
 
 # optional deps for the test-utils feature
-reth-rlp = { workspace = true, optional = true }
+alloy-rlp = { workspace = true, optional = true }
 tempfile = { version = "3.3", optional = true }
 itertools = { workspace = true, optional = true }
 
@@ -39,12 +39,12 @@ reth-db = { path = "../../storage/db", features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-tracing = { path = "../../tracing" }
 
+alloy-rlp.workspace = true
 assert_matches = "1.5.0"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-reth-rlp.workspace = true
 itertools.workspace = true
 
 tempfile = "3.3"
 
 [features]
-test-utils = ["dep:reth-rlp", "dep:tempfile", "dep:itertools"]
+test-utils = ["dep:alloy-rlp", "dep:tempfile", "dep:itertools"]

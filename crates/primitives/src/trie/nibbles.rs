@@ -1,7 +1,7 @@
 use crate::Bytes;
+use alloy_rlp::RlpEncodableWrapper;
 use derive_more::{Deref, DerefMut, From, Index};
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::RlpEncodableWrapper;
 use serde::{Deserialize, Serialize};
 
 /// The nibbles are the keys for the AccountsTrie and the subkeys for the StorageTrie.

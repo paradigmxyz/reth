@@ -1,15 +1,14 @@
-use std::mem;
-
 use crate::{Address, H256};
+use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use revm_primitives::U256;
 use serde::{Deserialize, Serialize};
+use std::mem;
 
 /// A list of addresses and storage keys that the transaction plans to access.
 /// Accesses outside the list are possible, but become more expensive.
 #[main_codec(rlp)]
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Default, RlpDecodable, RlpEncodable)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable)]
 #[serde(rename_all = "camelCase")]
 pub struct AccessListItem {
     /// Account addresses that would be loaded at the start of execution

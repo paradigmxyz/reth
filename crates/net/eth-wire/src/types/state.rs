@@ -1,7 +1,7 @@
 //! Implements the `GetNodeData` and `NodeData` message types.
+use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{Bytes, H256};
-use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 /// This message was removed in `eth/67`, only clients running `eth/66` or earlier will respond to
 /// this message.
 #[derive_arbitrary(rlp)]
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GetNodeData(pub Vec<H256>);
 
@@ -29,7 +29,7 @@ mod test {
     use hex_literal::hex;
 
     use crate::{message::RequestPair, GetNodeData, NodeData};
-    use reth_rlp::{Decodable, Encodable};
+    use alloy_rlp::{Decodable, Encodable};
 
     #[test]
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481

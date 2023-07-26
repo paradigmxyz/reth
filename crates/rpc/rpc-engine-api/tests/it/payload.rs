@@ -1,5 +1,6 @@
 //! Some payload tests
 
+use alloy_rlp::{Decodable, Error};
 use assert_matches::assert_matches;
 use reth_interfaces::test_utils::generators::{
     self, random_block, random_block_range, random_header,
@@ -9,7 +10,6 @@ use reth_primitives::{
     proofs::{self},
     Block, SealedBlock, TransactionSigned, H256, U256,
 };
-use reth_rlp::{Decodable, DecodeError};
 use reth_rpc_types::engine::{ExecutionPayload, ExecutionPayloadBodyV1, PayloadError};
 
 fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> ExecutionPayload {
@@ -87,7 +87,7 @@ fn payload_validation() {
     });
     assert_matches!(
         TryInto::<SealedBlock>::try_into(payload_with_invalid_txs),
-        Err(PayloadError::Decode(DecodeError::InputTooShort))
+        Err(PayloadError::Decode(Error::InputTooShort))
     );
 
     // Non empty ommers

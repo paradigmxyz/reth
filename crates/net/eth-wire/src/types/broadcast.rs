@@ -1,11 +1,11 @@
 //! Types for broadcasting new data.
 use crate::{EthMessage, EthVersion};
+use alloy_rlp::{
+    Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
+};
 use bytes::Bytes;
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{Block, TransactionSigned, H256, U128};
-use reth_rlp::{
-    Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
-};
 use std::sync::Arc;
 
 #[cfg(feature = "serde")]
@@ -37,7 +37,7 @@ impl NewBlockHashes {
 
 /// A block hash _and_ a block number.
 #[derive_arbitrary(rlp)]
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BlockHashNumber {
     /// The block hash
@@ -207,7 +207,7 @@ impl From<NewPooledTransactionHashes68> for NewPooledTransactionHashes {
 /// This informs peers of transaction hashes for transactions that have appeared on the network,
 /// but have not been included in a block.
 #[derive_arbitrary(rlp)]
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NewPooledTransactionHashes66(
     /// Transaction hashes for new transactions that have appeared on the network.
@@ -236,8 +236,8 @@ pub struct NewPooledTransactionHashes68 {
     /// the following way:
     ///  * `[type_0: B_1, type_1: B_1, ...]`
     ///
-    /// This would make it seem like the [`Encodable`](reth_rlp::Encodable) and
-    /// [`Decodable`](reth_rlp::Decodable) implementations should directly use a `Vec<u8>` for
+    /// This would make it seem like the [`Encodable`](alloy_rlp::Encodable) and
+    /// [`Decodable`](alloy_rlp::Decodable) implementations should directly use a `Vec<u8>` for
     /// encoding and decoding, because it looks like this field should be encoded as a _list_ of
     /// bytes.
     ///
@@ -248,7 +248,7 @@ pub struct NewPooledTransactionHashes68 {
     /// **not** a RLP list.
     ///
     /// Because of this, we do not directly use the `Vec<u8>` when encoding and decoding, and
-    /// instead use the [`Encodable`](reth_rlp::Encodable) and [`Decodable`](reth_rlp::Decodable)
+    /// instead use the [`Encodable`](alloy_rlp::Encodable) and [`Decodable`](alloy_rlp::Decodable)
     /// implementations for `&[u8]` instead, which encodes into a RLP string, and expects an RLP
     /// string when decoding.
     pub types: Vec<u8>,
@@ -258,43 +258,35 @@ pub struct NewPooledTransactionHashes68 {
     pub hashes: Vec<H256>,
 }
 
+#[derive(RlpEncodable)]
+#[allow(unused)]
+struct EncodableNewPooledTransactionHashes68<'a> {
+    types: &'a [u8],
+    sizes: &'a Vec<usize>,
+    hashes: &'a Vec<H256>,
+}
+
 impl Encodable for NewPooledTransactionHashes68 {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
-        #[derive(RlpEncodable)]
-        struct EncodableNewPooledTransactionHashes68<'a> {
-            types: &'a [u8],
-            sizes: &'a Vec<usize>,
-            hashes: &'a Vec<H256>,
-        }
-
-        let encodable = EncodableNewPooledTransactionHashes68 {
+        EncodableNewPooledTransactionHashes68 {
             types: &self.types[..],
             sizes: &self.sizes,
             hashes: &self.hashes,
-        };
-
-        encodable.encode(out);
+        }
+        .encode(out);
     }
     fn length(&self) -> usize {
-        #[derive(RlpEncodable)]
-        struct EncodableNewPooledTransactionHashes68<'a> {
-            types: &'a [u8],
-            sizes: &'a Vec<usize>,
-            hashes: &'a Vec<H256>,
-        }
-
-        let encodable = EncodableNewPooledTransactionHashes68 {
+        EncodableNewPooledTransactionHashes68 {
             types: &self.types[..],
             sizes: &self.sizes,
             hashes: &self.hashes,
-        };
-
-        encodable.length()
+        }
+        .length()
     }
 }
 
 impl Decodable for NewPooledTransactionHashes68 {
-    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         #[derive(RlpDecodable)]
         struct EncodableNewPooledTransactionHashes68 {
             types: Bytes,
@@ -311,9 +303,9 @@ impl Decodable for NewPooledTransactionHashes68 {
 mod tests {
     use std::str::FromStr;
 
+    use alloy_rlp::{Decodable, Encodable};
     use bytes::BytesMut;
     use hex_literal::hex;
-    use reth_rlp::{Decodable, Encodable};
 
     use super::*;
 
