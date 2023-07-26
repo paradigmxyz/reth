@@ -45,16 +45,16 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         provider: &DatabaseProviderRW<'_, &DB>,
         mut input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
-        }
-
         if let Some((target_prunable_block, _)) =
             self.prune_modes.prune_target_block_storage_history(input.target())?
         {
             if target_prunable_block > input.checkpoint().block_number {
                 input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
             }
+        }
+
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
 
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
