@@ -12,6 +12,10 @@ pub const EIP2930_TX_TYPE_ID: u8 = 1;
 /// Identifier for [TxEip1559](crate::TxEip1559) transaction.
 pub const EIP1559_TX_TYPE_ID: u8 = 2;
 
+/// Identifier for [TxEip4844](crate::TxEip4844) transaction.
+#[allow(unused)]
+pub(crate) const EIP4844_TX_TYPE_ID: u8 = 3;
+
 /// Transaction Type
 #[derive_arbitrary(compact)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
