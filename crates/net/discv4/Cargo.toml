@@ -12,8 +12,8 @@ Ethereum network discovery
 
 [dependencies]
 # reth
-reth-primitives = { workspace = true }
-reth-rlp = { workspace = true }
+reth-primitives.workspace = true
+reth-rlp.workspace = true
 reth-rlp-derive = { path = "../../rlp/rlp-derive" }
 reth-net-common = { path = "../common" }
 reth-net-nat = { path = "../nat" }
@@ -25,18 +25,18 @@ enr = { version = "0.8.1", default-features = false, features = ["rust-secp256k1
 
 # async/futures
 tokio = { workspace = true, features = ["io-util", "net", "time"] }
-tokio-stream = { workspace = true }
+tokio-stream.workspace = true
 
 # misc
-tracing = { workspace = true }
-thiserror = { workspace = true }
+tracing.workspace = true
+thiserror.workspace = true
 hex = "0.4"
 rand = { workspace = true, optional = true }
 generic-array = "0.14"
 serde = { workspace = true, optional = true }
 
 [dev-dependencies]
-rand = { workspace = true }
+rand.workspace = true
 tokio = { workspace = true, features = ["macros"] }
 reth-tracing = { path = "../../tracing" }
 
