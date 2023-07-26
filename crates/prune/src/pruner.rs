@@ -131,13 +131,16 @@ impl<DB: Database> Pruner<DB> {
         prune_part: PrunePart,
         to_block: BlockNumber,
     ) -> reth_interfaces::Result<Option<RangeInclusive<TxNumber>>> {
-        let from_tx_num = provider
-            .get_prune_checkpoint(prune_part)?
-            .map(|checkpoint| provider.block_body_indices(checkpoint.block_number + 1))
-            .transpose()?
-            .flatten()
-            .map(|body| body.first_tx_num)
-            .unwrap_or_default();
+        let checkpoint = provider.get_prune_checkpoint(prune_part)?.unwrap_or(PruneCheckpoint {
+            block_number: 0,             // No checkpoint, fresh pruning
+            prune_mode: PruneMode::Full, // Doesn't matter in this case, can be anything
+        });
+        // Get first transaction of the next block after the highest pruned one
+        let from_tx_num =
+            provider.block_body_indices(checkpoint.block_number + 1)?.map(|body| body.first_tx_num);
+        // If no block body index is found, the DB is either corrupted or we've already pruned up to
+        // the latest block, so there's no thing to prune now.
+        let Some(from_tx_num) = from_tx_num else { return Ok(None) };
 
         let to_tx_num = match provider.block_body_indices(to_block)? {
             Some(body) => body,
@@ -145,8 +148,7 @@ impl<DB: Database> Pruner<DB> {
         }
         .last_tx_num();
 
-        let range = from_tx_num..=to_tx_num;
-        Ok(if range.is_empty() { None } else { Some(range) })
+        Ok(Some(from_tx_num..=to_tx_num))
     }
 
     /// Prune receipts up to the provided block, inclusive.
