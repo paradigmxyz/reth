@@ -268,8 +268,8 @@ where
                             .inspect_call_at_and_return_state(call, at, overrides, &mut inspector)
                             .await?;
 
-                        let frame = inspector.into_geth_builder().geth_prestate_traces(&res, prestate_config, &db);
-                        return Ok(frame.unwrap().into())
+                        let frame = inspector.into_geth_builder().geth_prestate_traces(&res, prestate_config, &db)?;
+                        return Ok(frame.into())
                     }
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
                 },
@@ -377,11 +377,11 @@ where
                         let mut inspector = TracingInspector::new(
                             TracingInspectorConfig::from_geth_config(&config)
                         );
-                        let (res, _) = inspect(db, env, &mut inspector)?;
-                        let frame = inspector.into_geth_builder().geth_prestate_traces(&res, prestate_config, db);
+                        let (res, _) = inspect(&mut *db, env, &mut inspector)?;
 
-                        let state = res.state.clone();
-                        return Ok((frame.unwrap().into(), state))
+                        let frame = inspector.into_geth_builder().geth_prestate_traces(&res, prestate_config, &*db)?;
+
+                        return Ok((frame.into(), res.state))
                     }
                     GethDebugBuiltInTracerType::NoopTracer => {
                         Ok((NoopFrame::default().into(), Default::default()))

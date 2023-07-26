@@ -150,6 +150,14 @@ impl GethTraceBuilder {
         }
     }
 
+    ///  Returns the accounts necessary for transaction execution.
+    ///
+    /// The prestate mode returns the accounts necessary to execute a given transaction.
+    /// diff_mode returns the differences between the transaction's pre and post-state.
+    ///
+    /// * `state` - The state post-transaction execution.
+    /// * `diff_mode` - if prestate is in diff or prestate mode.
+    /// * `db` - The database to fetch state pre-transaction execution.
     pub fn geth_prestate_traces<DB>(
         &self,
         ResultAndState { state, .. }: &ResultAndState,
@@ -157,50 +165,48 @@ impl GethTraceBuilder {
         db: DB,
     ) -> Result<PreStateFrame, DB::Error>
         where DB: DatabaseRef {
-        match diff_mode {
-            Some(_) => {
-                let account_diffs = state.into_iter().map(|(addr, acc)| (*addr, &acc.info));
-                let mut prestate_result = account_diffs.into_iter().try_fold(PreStateMode::default(), |mut prestate, (addr, _)| {
-                    let db_acc = db.basic(addr)?.unwrap_or_default();
-                    prestate.0.insert(addr.clone(), AccountState {
-                        balance: Some(db_acc.balance),
-                        nonce: Some(U256::from(db_acc.nonce)),
-                        code: db_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
-                        storage: None,
-                    });
-                    Ok(prestate)
-                })?;
-                self.get_storage_from_state(&mut  prestate_result.0, false);
-                Ok(PreStateFrame::Default(prestate_result))
+
+        let account_diffs: Vec<_> = state.into_iter().map(|(addr, acc)| (*addr, &acc.info)).collect();
+
+        if diff_mode.unwrap_or_default() {
+            let mut prestate = PreStateMode::default();
+            for (addr, _) in account_diffs {
+                let db_acc = db.basic(addr)?.unwrap_or_default();
+                prestate.0.insert(addr, AccountState {
+                    balance: Some(db_acc.balance),
+                    nonce: Some(U256::from(db_acc.nonce)),
+                    code: db_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
+                    storage: None,
+                });
             }
-            None => {
-                let account_diffs = state.into_iter().map(|(addr, acc)| (*addr, &acc.info));
-                let mut state_diff_result = account_diffs.into_iter().try_fold(DiffMode::default(), |mut state_diff, (addr, changed_acc)| {
-                    let db_acc = db.basic(addr)?.unwrap_or_default();
-                    let pre_state = AccountState {
-                        balance: Some(db_acc.balance),
-                        nonce: Some(U256::from(db_acc.nonce)),
-                        code: db_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
-                        storage: None,
-                    };
-                    let post_state = AccountState {
-                        balance: Some(changed_acc.balance),
-                        nonce: Some(U256::from(changed_acc.nonce)),
-                        code: changed_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
-                        storage: None,
-                    };
-                    state_diff.pre.insert(addr.clone(), pre_state);
-                    state_diff.post.insert(addr.clone(), post_state);
-                    Ok(state_diff)
-                })?;
-                self.get_storage_from_state(&mut  state_diff_result.pre, false);
-                self.get_storage_from_state(&mut  state_diff_result.post, true);
-                Ok(PreStateFrame::Diff(state_diff_result))
+            self.update_storage_from_trace(&mut prestate.0, false);
+            Ok(PreStateFrame::Default(prestate))
+        } else {
+            let mut state_diff = DiffMode::default();
+            for (addr, changed_acc) in account_diffs {
+                let db_acc = db.basic(addr)?.unwrap_or_default();
+                let pre_state = AccountState {
+                    balance: Some(db_acc.balance),
+                    nonce: Some(U256::from(db_acc.nonce)),
+                    code: db_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
+                    storage: None,
+                };
+                let post_state = AccountState {
+                    balance: Some(changed_acc.balance),
+                    nonce: Some(U256::from(changed_acc.nonce)),
+                    code: changed_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
+                    storage: None,
+                };
+                state_diff.pre.insert(addr, pre_state);
+                state_diff.post.insert(addr, post_state);
             }
+            self.update_storage_from_trace(&mut state_diff.pre, false);
+            self.update_storage_from_trace(&mut state_diff.post, true);
+            Ok(PreStateFrame::Diff(state_diff))
         }
     }
 
-    fn get_storage_from_state(
+    fn update_storage_from_trace(
         &self,
         account_states: &mut BTreeMap<Address, AccountState>,
         post_value: bool
@@ -208,7 +214,6 @@ impl GethTraceBuilder {
         for node in self.iter_traceable_nodes() {
             node.geth_update_account_storage(account_states, post_value);
         }
-
     }
 
     fn iter_traceable_nodes(&self) -> impl Iterator<Item = &CallTraceNode> {

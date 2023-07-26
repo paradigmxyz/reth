@@ -445,15 +445,16 @@ impl CallTraceNode {
         call_frame
     }
 
+    /// Adds storage in-place to account state for all accounts that were touched in the trace [CallTrace] execution.
+    ///
+    /// * `account_states` - the account map updated in place.
+    /// * `post_value` - if true, it adds storage values after trace transaction execution, if false, returns the storage values before trace execution.
     pub(crate) fn geth_update_account_storage(&self, account_states: &mut BTreeMap<Address, AccountState>, post_value: bool) {
         let addr = self.trace.address;
         let acc_state = account_states.entry(addr).or_insert_with(AccountState::default);
         for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
             let StorageChange { key, value, had_value } = change;
-            if acc_state.storage.is_none() {
-                acc_state.storage = Some(BTreeMap::new());
-            }
-            let storage_map = acc_state.storage.as_mut().unwrap();
+            let storage_map = acc_state.storage.get_or_insert_with(BTreeMap::new);
             let value_to_insert = if post_value {
                 H256::from(value)
             } else {
