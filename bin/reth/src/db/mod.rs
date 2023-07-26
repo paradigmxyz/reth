@@ -17,6 +17,7 @@ use reth_db::{
 use reth_primitives::ChainSpec;
 use std::sync::Arc;
 
+mod clear;
 mod get;
 mod list;
 /// DB List TUI
@@ -71,6 +72,8 @@ pub enum Subcommands {
     Get(get::Command),
     /// Deletes all database entries
     Drop,
+    /// Deletes all table entries
+    Clear(clear::Command),
     /// Lists current and local database versions
     Version,
     /// Returns the full database path
@@ -171,6 +174,10 @@ impl Command {
                 let db = open_db(&db_path, self.db.log_level)?;
                 let mut tool = DbTool::new(&db, self.chain.clone())?;
                 tool.drop(db_path)?;
+            }
+            Subcommands::Clear(command) => {
+                let db = open_db(&db_path, self.db.log_level)?;
+                command.execute(&db)?;
             }
             Subcommands::Version => {
                 let local_db_version = match get_db_version(&db_path) {
