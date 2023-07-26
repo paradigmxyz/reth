@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::Hash, path::PathBuf, fmt::Debug};
+use std::{collections::HashMap, fmt::Debug, hash::Hash, path::PathBuf};
 
 use crate::{
     args::DatabaseArgs,
@@ -8,12 +8,7 @@ use crate::{
 use clap::Parser;
 
 use reth_db::{
-    cursor::DbCursorRO,
-    database::Database,
-    mdbx::{tx::Tx, NoWriteMap, RO},
-    open_db_read_only,
-    table::Table,
-    transaction::DbTx,
+    cursor::DbCursorRO, database::Database, open_db_read_only, table::Table, transaction::DbTx,
     AccountChangeSet, AccountHistory, AccountsTrie, BlockBodyIndices, BlockOmmers,
     BlockWithdrawals, Bytecodes, CanonicalHeaders, DatabaseEnvRO, HashedAccount, HashedStorage,
     HeaderNumbers, HeaderTD, Headers, PlainAccountState, PlainStorageState, PruneCheckpoints,
@@ -110,9 +105,9 @@ impl Command {
 }
 
 /// Find diffs for a table, then analyzing the result
-fn find_diffs<T: Table>(
-    primary_tx: Tx<'_, RO, NoWriteMap>,
-    secondary_tx: Tx<'_, RO, NoWriteMap>,
+fn find_diffs<'a, T: Table>(
+    primary_tx: impl DbTx<'a>,
+    secondary_tx: impl DbTx<'a>,
 ) -> eyre::Result<()>
 where
     T::Key: Hash,
@@ -147,9 +142,9 @@ where
 /// for each element. If the element is not found, it will be added to the extra elements set.
 // TODO: remove this?
 #[allow(dead_code)]
-fn find_diffs_simple<T: Table>(
-    primary_tx: Tx<'_, RO, NoWriteMap>,
-    secondary_tx: Tx<'_, RO, NoWriteMap>,
+fn find_diffs_simple<'a, T: Table>(
+    primary_tx: impl DbTx<'a>,
+    secondary_tx: impl DbTx<'a>,
 ) -> eyre::Result<TableDiffResult<T>>
 where
     T::Key: Hash,
@@ -176,9 +171,9 @@ where
 
 /// This diff algorithm is slightly different, it will walk _each_ table, cross-checking for the
 /// element in the other table.
-fn find_diffs_advanced<T: Table>(
-    primary_tx: &Tx<'_, RO, NoWriteMap>,
-    secondary_tx: &Tx<'_, RO, NoWriteMap>,
+fn find_diffs_advanced<'a, T: Table>(
+    primary_tx: &impl DbTx<'a>,
+    secondary_tx: &impl DbTx<'a>,
 ) -> eyre::Result<TableDiffResult<T>>
 where
     T::Value: PartialEq,
