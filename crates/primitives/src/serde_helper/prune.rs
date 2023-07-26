@@ -35,13 +35,6 @@ pub fn deserialize_opt_prune_mode_with_min_blocks<
                     .as_str(),
             ))
         }
-        Some(PruneMode::Full) => {
-            Err(serde::de::Error::invalid_value(
-                serde::de::Unexpected::Other("full prune mode"),
-                // This message should have "expected" wording, so we say "not less than"
-                &format!("prune mode to be a distance not less than {MIN_BLOCKS} blocks or from a specific block number").as_str(),
-            ))
-        }
         _ => Ok(prune_mode),
     }
 }
@@ -52,14 +45,16 @@ mod test {
     use assert_matches::assert_matches;
     use serde::Deserialize;
 
-    #[derive(Debug, Deserialize, PartialEq, Eq)]
-    struct V(
-        #[serde(deserialize_with = "super::deserialize_opt_prune_mode_with_min_blocks::<10, _>")]
-        Option<PruneMode>,
-    );
-
     #[test]
     fn deserialize_opt_prune_mode_with_min_blocks() {
+        #[derive(Debug, Deserialize, PartialEq, Eq)]
+        struct V(
+            #[serde(
+                deserialize_with = "super::deserialize_opt_prune_mode_with_min_blocks::<10, _>"
+            )]
+            Option<PruneMode>,
+        );
+
         assert!(serde_json::from_str::<V>(r#"{"distance": 10}"#).is_ok());
         assert_matches!(
             serde_json::from_str::<V>(r#"{"distance": 9}"#),
