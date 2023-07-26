@@ -640,7 +640,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         &self,
         keys: impl IntoIterator<Item = K>,
         batch_size: usize,
-        batch_callback: impl Fn(usize),
+        mut batch_callback: impl FnMut(usize),
     ) -> std::result::Result<usize, DatabaseError>
     where
         T: Table<Key = K>,
