@@ -122,7 +122,7 @@ mod tests {
             "grayglacier",
             "PARIS",
             "ShAnGhAI",
-            "CaNcUnc",
+            "CaNcUn",
         ];
         let expected_hardforks = [
             Hardfork::Frontier,
