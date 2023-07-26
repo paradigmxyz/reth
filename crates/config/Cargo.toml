@@ -17,8 +17,8 @@ reth-stages = { path = "../../crates/stages" }
 reth-primitives = { path = "../primitives" }
 
 # io
-serde = { workspace = true }
-serde_json = { workspace = true }
+serde.workspace = true
+serde_json.workspace = true
 
 # crypto
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
