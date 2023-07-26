@@ -306,6 +306,15 @@ impl ChainSpec {
             .unwrap_or_else(|| self.is_fork_active_at_timestamp(Hardfork::Shanghai, timestamp))
     }
 
+    /// Convenience method to check if [Hardfork::Cancun] is active at a given timestamp.
+    #[inline]
+    pub fn is_cancun_activated_at_timestamp(&self, timestamp: u64) -> bool {
+        self.fork_timestamps
+            .cancun
+            .map(|cancun| timestamp >= cancun)
+            .unwrap_or_else(|| self.is_fork_active_at_timestamp(Hardfork::Cancun, timestamp))
+    }
+
     /// Creates a [`ForkFilter`](crate::ForkFilter) for the block described by [Head].
     pub fn fork_filter(&self, head: Head) -> ForkFilter {
         let forks = self.forks_iter().filter_map(|(_, condition)| {
@@ -433,6 +442,8 @@ impl From<Genesis> for ChainSpec {
 pub struct ForkTimestamps {
     /// The timestamp of the shanghai fork
     pub shanghai: Option<u64>,
+    /// The timestamp of the cancun fork
+    pub cancun: Option<u64>,
 }
 
 impl ForkTimestamps {
@@ -442,12 +453,21 @@ impl ForkTimestamps {
         if let Some(shanghai) = forks.get(&Hardfork::Shanghai).and_then(|f| f.as_timestamp()) {
             timestamps = timestamps.shanghai(shanghai);
         }
+        if let Some(cancun) = forks.get(&Hardfork::Cancun).and_then(|f| f.as_timestamp()) {
+            timestamps = timestamps.cancun(cancun);
+        }
         timestamps
     }
 
     /// Sets the given shanghai timestamp
     pub fn shanghai(mut self, shanghai: u64) -> Self {
         self.shanghai = Some(shanghai);
+        self
+    }
+
+    /// Sets the given cancun timestamp
+    pub fn cancun(mut self, cancun: u64) -> Self {
+        self.cancun = Some(cancun);
         self
     }
 }
@@ -611,6 +631,13 @@ impl ChainSpecBuilder {
     pub fn shanghai_activated(mut self) -> Self {
         self = self.paris_activated();
         self.hardforks.insert(Hardfork::Shanghai, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Enable Cancun at genesis.
+    pub fn cancun_activated(mut self) -> Self {
+        self = self.paris_activated();
+        self.hardforks.insert(Hardfork::Cancun, ForkCondition::Timestamp(0));
         self
     }
 
