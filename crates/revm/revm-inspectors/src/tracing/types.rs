@@ -376,6 +376,9 @@ impl CallTraceNode {
 
     /// Returns the `Action` for a parity trace
     pub(crate) fn parity_action(&self) -> Action {
+        // TODO: this might not be accurate because this is the result of the call, which could lead
+        // to missing origin call action so this function should return two actions if it's
+        // a selfdestruct (Action, Option<SelfdestructAction>)
         if self.status() == InstructionResult::SelfDestruct {
             return Action::Selfdestruct(SelfdestructAction {
                 address: self.trace.address,
