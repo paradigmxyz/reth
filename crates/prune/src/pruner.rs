@@ -272,14 +272,18 @@ impl<DB: Database> Pruner<DB> {
                 return Ok(())
             }
         };
+        let total = range.clone().count();
 
+        let mut processed = 0;
         provider.prune_table_in_batches::<tables::TxSenders, _>(
             range,
             self.batch_sizes.transaction_senders,
-            |senders| {
+            |entries| {
+                processed += entries;
                 trace!(
                     target: "pruner",
-                    %senders,
+                    %entries,
+                    progress = format!("{:.1}%", 100.0 * processed as f64 / total as f64),
                     "Pruned transaction senders"
                 );
             },
