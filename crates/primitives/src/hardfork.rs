@@ -39,7 +39,7 @@ pub enum Hardfork {
     Paris,
     /// Shanghai.
     Shanghai,
-    /// Shanghai.
+    /// Cancun.
     Cancun,
 }
 
