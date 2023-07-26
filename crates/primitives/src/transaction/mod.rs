@@ -1124,29 +1124,20 @@ impl Compact for TransactionSignedNoHash {
         // The first byte uses 4 bits as flags: IsCompressed[1bit], TxType[2bits], Signature[1bit]
         buf.put_u8(0);
 
+        let sig_bit = self.signature.to_compact(buf) as u8;
         let zstd_bit = self.transaction.input().len() >= 32;
 
-        let mut tmp = bytes::BytesMut::with_capacity(200);
-        let mut tx_bits = self.transaction.to_compact(&mut tmp) as u8;
-
-        if tx_bits > 2 {
-            // If the transaction type exceeds the initially allocated 2 bits, we need to
-            // write a sentinel 3 to denote that the actual value is held in the next byte
-            // of the buffer.
-            buf.put_u8(tx_bits);
-            tx_bits = 3
-        };
-
-        let sig_bit = self.signature.to_compact(buf) as u8;
-
-        if zstd_bit {
+        let tx_bits = if zstd_bit {
             TRANSACTION_COMPRESSOR.with(|compressor| {
                 let mut compressor = compressor.borrow_mut();
+                let mut tmp = bytes::BytesMut::with_capacity(200);
+                let tx_bits = self.transaction.to_compact(&mut tmp);
 
                 buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
+                tx_bits as u8
             })
         } else {
-            buf.put_slice(&tmp);
+            self.transaction.to_compact(buf) as u8
         };
 
         // Replace bitflags with the actual values
@@ -1160,18 +1151,9 @@ impl Compact for TransactionSignedNoHash {
         let bitflags = buf.get_u8() as usize;
 
         let sig_bit = bitflags & 1;
-        let zstd_bit = bitflags >> 3;
-
-        let transaction_type_bits = (bitflags & 0b110) >> 1;
-        let transaction_type = if transaction_type_bits == 3 {
-            // A bitmask of 3 means that the actual value is held in the next byte of the buffer.
-            buf.get_u8() as usize
-        } else {
-            transaction_type_bits
-        };
-
         let (signature, buf) = Signature::from_compact(buf, sig_bit);
 
+        let zstd_bit = bitflags >> 3;
         let (transaction, buf) = if zstd_bit != 0 {
             TRANSACTION_DECOMPRESSOR.with(|decompressor| {
                 let mut decompressor = decompressor.borrow_mut();
@@ -1191,11 +1173,13 @@ impl Compact for TransactionSignedNoHash {
 
                 // TODO: enforce that zstd is only present at a "top" level type
 
+                let transaction_type = (bitflags & 0b110) >> 1;
                 let (transaction, _) = Transaction::from_compact(tmp.as_slice(), transaction_type);
 
                 (transaction, buf)
             })
         } else {
+            let transaction_type = bitflags >> 1;
             Transaction::from_compact(buf, transaction_type)
         };
 
