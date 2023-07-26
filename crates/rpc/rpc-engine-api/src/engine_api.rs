@@ -4,7 +4,7 @@ use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_payload_builder::PayloadStore;
-use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, U64};
+use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, H256, U64};
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
@@ -355,6 +355,15 @@ where
         Ok(EngineApi::new_payload_v2(self, payload).await?)
     }
 
+    async fn new_payload_v3(
+        &self,
+        _payload: ExecutionPayload,
+        _versioned_hashes: Vec<H256>,
+        _parent_beacon_block_root: H256,
+    ) -> RpcResult<PayloadStatus> {
+        Err(jsonrpsee_types::error::ErrorCode::MethodNotFound.into())
+    }
+
     /// Handler for `engine_forkchoiceUpdatedV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
@@ -407,6 +416,10 @@ where
     async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelope> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV2");
         Ok(EngineApi::get_payload_v2(self, payload_id).await?)
+    }
+
+    async fn get_payload_v3(&self, _payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelope> {
+        Err(jsonrpsee_types::error::ErrorCode::MethodNotFound.into())
     }
 
     /// Handler for `engine_getPayloadBodiesByHashV1`
