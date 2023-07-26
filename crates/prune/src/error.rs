@@ -4,6 +4,9 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum PrunerError {
+    #[error("Inconsistent data: {0}")]
+    InconsistentData(&'static str),
+
     #[error("An interface error occurred.")]
     Interface(#[from] reth_interfaces::Error),
 

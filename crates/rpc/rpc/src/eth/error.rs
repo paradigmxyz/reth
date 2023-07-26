@@ -7,7 +7,7 @@ use jsonrpsee::{
 };
 use reth_primitives::{abi::decode_revert_reason, Address, Bytes, U256};
 use reth_revm::tracing::js::JsInspectorError;
-use reth_rpc_types::{error::EthRpcErrorCode, BlockError};
+use reth_rpc_types::{error::EthRpcErrorCode, BlockError, CallInputError};
 use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolError};
 use revm::primitives::{EVMError, ExecutionResult, Halt, OutOfGasError};
 use std::time::Duration;
@@ -90,6 +90,8 @@ pub enum EthApiError {
     /// Internal Error thrown by the javascript tracer
     #[error("{0}")]
     InternalJsTracerError(String),
+    #[error(transparent)]
+    CallInputError(#[from] CallInputError),
 }
 
 impl From<EthApiError> for ErrorObject<'static> {
@@ -124,6 +126,7 @@ impl From<EthApiError> for ErrorObject<'static> {
             }
             err @ EthApiError::InternalTracingError => internal_rpc_err(err.to_string()),
             err @ EthApiError::InternalEthError => internal_rpc_err(err.to_string()),
+            err @ EthApiError::CallInputError(_) => invalid_params_rpc_err(err.to_string()),
         }
     }
 }

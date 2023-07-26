@@ -619,40 +619,39 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         Ok(())
     }
 
-    /// Prune the table for the specified key range.
+    /// Prune the table for the specified pre-sorted key iterator.
     /// Returns number of rows pruned.
     pub fn prune_table<T, K>(
         &self,
-        range: impl RangeBounds<K>,
+        keys: impl IntoIterator<Item = K>,
     ) -> std::result::Result<usize, DatabaseError>
     where
         T: Table<Key = K>,
         K: Key,
     {
-        self.prune_table_in_batches::<T, K, _>(range, usize::MAX, |_| {})
+        self.prune_table_in_batches::<T, K>(keys, usize::MAX, |_| {})
     }
 
-    /// Prune the table for the specified key range calling `chunk_callback` after every
-    /// `batch_size` pruned rows.
+    /// Prune the table for the specified pre-sorted key iterator, calling `chunk_callback` after
+    /// every `batch_size` pruned rows.
     ///
     /// Returns number of rows pruned.
-    pub fn prune_table_in_batches<T, K, F>(
+    pub fn prune_table_in_batches<T, K>(
         &self,
-        range: impl RangeBounds<K>,
+        keys: impl IntoIterator<Item = K>,
         batch_size: usize,
-        batch_callback: F,
+        batch_callback: impl Fn(usize),
     ) -> std::result::Result<usize, DatabaseError>
     where
         T: Table<Key = K>,
         K: Key,
-        F: Fn(usize),
     {
         let mut cursor = self.tx.cursor_write::<T>()?;
-        let mut walker = cursor.walk_range(range)?;
         let mut deleted = 0;
 
-        while let Some(Ok(_)) = walker.next() {
-            walker.delete_current()?;
+        for key in keys {
+            cursor.seek_exact(key)?;
+            cursor.delete_current()?;
             deleted += 1;
 
             if deleted % batch_size == 0 {
