@@ -206,6 +206,7 @@ impl<DB: Database> Pruner<DB> {
         };
         let last_tx_num = *range.end();
         let total = range.clone().count();
+        let mut processed = 0;
 
         for i in range.step_by(self.batch_sizes.transaction_lookup) {
             // The `min` ensures that the transaction range doesn't exceed the last transaction
@@ -230,7 +231,6 @@ impl<DB: Database> Pruner<DB> {
             // Pre-sort hashes to prune them in order
             hashes.sort();
 
-            let mut processed = 0;
             provider.prune_table_in_batches::<tables::TxHashNumber, _>(
                 hashes,
                 self.batch_sizes.transaction_lookup,
