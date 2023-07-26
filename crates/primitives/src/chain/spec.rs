@@ -1306,7 +1306,6 @@ Post-merge hard forks (timestamp based):
         );
     }
 
-<<<<<<< HEAD
     #[test]
     fn dev_forkids() {
         test_fork_ids(
@@ -1316,7 +1315,8 @@ Post-merge hard forks (timestamp based):
                 ForkId { hash: ForkHash([0x45, 0xb8, 0x36, 0x12]), next: 0 },
             )],
         )
-=======
+    }
+
     #[cfg(feature = "optimism")]
     #[test]
     fn optimism_goerli_forkids() {
@@ -1337,7 +1337,6 @@ Post-merge hard forks (timestamp based):
                 ),
             ],
         );
->>>>>>> ce41d797 (WIP: OP Goerli genesis)
     }
 
     /// Checks that time-based forks work
