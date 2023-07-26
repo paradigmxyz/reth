@@ -145,7 +145,8 @@ impl<DB: Database> Pruner<DB> {
         }
         .last_tx_num();
 
-        Ok(Some(from_tx_num..=to_tx_num))
+        let range = from_tx_num..=to_tx_num;
+        Ok(if range.is_empty() { None } else { Some(range) })
     }
 
     /// Prune receipts up to the provided block, inclusive.
