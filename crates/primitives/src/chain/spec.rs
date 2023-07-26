@@ -169,6 +169,8 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
         ]),
+        #[cfg(feature = "optimism")]
+        optimism: None,
     }
     .into()
 });
