@@ -267,9 +267,12 @@ impl CallTraceNode {
                 opcode::CALL |
                 opcode::STATICCALL |
                 opcode::CALLCODE => {
-                    let call_id = self.children[child_id];
-                    item.call_child_id = Some(call_id);
-                    child_id += 1;
+                    // the opcode is a call but it could it's result could be a revert or out of gas
+                    // in which case there's no actual child call executed and recorded
+                    if let Some(call_id) = self.children.get(child_id).copied() {
+                        item.call_child_id = Some(call_id);
+                        child_id += 1;
+                    }
                 }
                 _ => {}
             }
@@ -504,7 +507,9 @@ pub(crate) struct CallTraceStep {
     pub(crate) gas_cost: u64,
     /// Change of the contract state after step execution (effect of the SLOAD/SSTORE instructions)
     pub(crate) storage_change: Option<StorageChange>,
-    /// Final status of the call
+    /// Final status of the step
+    ///
+    /// This is set after the step was executed.
     pub(crate) status: InstructionResult,
 }
 
