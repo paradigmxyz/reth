@@ -12,15 +12,15 @@ Reth RPC types
 
 [dependencies]
 # reth
-reth-primitives = { workspace = true }
-reth-rlp = { workspace = true }
+reth-primitives.workspace = true
+reth-rlp.workspace = true
 
 # errors
-thiserror = { workspace = true }
+thiserror.workspace = true
 
 # misc
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
+serde_json.workspace = true
 jsonrpsee-types = { version = "0.18" }
 
 [dev-dependencies]
@@ -28,6 +28,6 @@ jsonrpsee-types = { version = "0.18" }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 
 # misc
-rand = { workspace = true }
+rand.workspace = true
 assert_matches = "1.5"
 similar-asserts = "1.4"

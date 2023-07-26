@@ -12,8 +12,8 @@ Types shared across network code
 
 [dependencies]
 # reth
-reth-primitives = { workspace = true }
+reth-primitives.workspace = true
 
 # async
-pin-project = { workspace = true }
+pin-project.workspace = true
 tokio = { workspace = true, features = ["full"] }
