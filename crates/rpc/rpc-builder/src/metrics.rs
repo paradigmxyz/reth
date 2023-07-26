@@ -7,11 +7,6 @@ use reth_metrics::{
 };
 use std::time::Instant;
 
-const METRICS_SCOPE: &str = "rpc_server";
-const CALL_LATENCY_METRIC: &str = "call_latency";
-const CALL_COUNT_METRIC: &str = "call_count";
-const CALL_ERROR_METRIC: &str = "call_error";
-
 /// Metrics for the rpc server
 #[derive(Metrics, Clone)]
 #[metrics(scope = "rpc_server")]
@@ -61,11 +56,6 @@ impl Logger for RpcServerMetrics {
         _transport: TransportProtocol,
     ) {
         self.calls_started.increment(1);
-        // increment call count per method, use macro because derive(Metrics) doesnt seem to support
-        // dynamically configuring metric name (?)
-        let metric_call_count_name =
-            format!("{}{}{}{}{}", METRICS_SCOPE, "_", CALL_COUNT_METRIC, "_", method_name);
-        counter!(metric_call_count_name, 1);
     }
     fn on_result(
         &self,
@@ -74,18 +64,10 @@ impl Logger for RpcServerMetrics {
         started_at: Self::Instant,
         _transport: TransportProtocol,
     ) {
-        // capture general call duration (for all calls not per method)
+        // capture call duration
         self.call_latency.record(started_at.elapsed().as_millis());
-        // capture per method call latency
-        let metric_name_call_latency =
-            format!("{}{}{}{}{}", METRICS_SCOPE, "_", CALL_LATENCY_METRIC, "_", method_name);
-        histogram!(metric_name_call_latency, started_at.elapsed().as_millis());
         if !success {
             self.failed_calls.increment(1);
-            // capture error count per method call
-            let metric_name_call_error_count =
-                format!("{}{}{}{}{}", METRICS_SCOPE, "_", CALL_ERROR_METRIC, "_", method_name);
-            counter!(metric_name_call_error_count, 1);
         } else {
             self.successful_calls.increment(1);
         }
