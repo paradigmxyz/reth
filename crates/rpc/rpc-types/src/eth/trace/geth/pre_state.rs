@@ -1,4 +1,4 @@
-use reth_primitives::{serde_helper::num::from_int_or_hex_opt, Address, H256, U256};
+use reth_primitives::{serde_helper::num::from_int_or_hex_opt, Address, H256, U256, Bytes};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -29,7 +29,7 @@ pub struct AccountState {
     )]
     pub balance: Option<U256>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub code: Option<String>,
+    pub code: Option<Bytes>,
     #[serde(
         default,
         deserialize_with = "from_int_or_hex_opt",

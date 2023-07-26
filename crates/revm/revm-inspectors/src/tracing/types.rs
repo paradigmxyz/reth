@@ -13,7 +13,8 @@ use revm::interpreter::{
     opcode, CallContext, CallScheme, CreateScheme, InstructionResult, Memory, OpCode, Stack,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{btree_map::Entry, VecDeque};
+use std::collections::{btree_map::Entry, BTreeMap, VecDeque};
+use reth_rpc_types::trace::geth::AccountState;
 
 /// A unified representation of a call
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -442,6 +443,27 @@ impl CallTraceNode {
         }
 
         call_frame
+    }
+
+    pub(crate) fn geth_update_account_storage(&self, account_states: &mut BTreeMap<Address, AccountState>, post_value: bool) {
+        let addr = self.trace.address;
+        let acc_state = account_states.entry(addr).or_insert_with(AccountState::default);
+        for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
+            let StorageChange { key, value, had_value } = change;
+            if acc_state.storage.is_none() {
+                acc_state.storage = Some(BTreeMap::new());
+            }
+            let storage_map = acc_state.storage.as_mut().unwrap();
+            let value_to_insert = if post_value {
+                H256::from(value)
+            } else {
+                match had_value {
+                    Some(had_value) => H256::from(had_value),
+                    None => continue,  // if had_value is None, we skip this iteration
+                }
+            };
+            storage_map.insert(key.into(), value_to_insert);
+        }
     }
 }
 

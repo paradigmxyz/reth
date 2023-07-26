@@ -4,9 +4,11 @@ use crate::tracing::{
     types::{CallTraceNode, CallTraceStepStackItem},
     TracingInspectorConfig,
 };
-use reth_primitives::{Address, Bytes, H256};
-use reth_rpc_types::trace::geth::*;
+use reth_primitives::{Address, Bytes, H256, U256};
+use reth_rpc_types::trace::geth::{DefaultFrame, CallFrame, CallConfig, GethDefaultTracingOptions, StructLog, PreStateConfig, PreStateFrame, DiffMode, PreStateMode, AccountState};
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use revm::db::{DatabaseRef};
+use revm::primitives::{ResultAndState};
 
 /// A type for creating geth style traces
 #[derive(Clone, Debug)]
@@ -147,4 +149,70 @@ impl GethTraceBuilder {
             }
         }
     }
+
+    pub fn geth_prestate_traces<DB>(
+        &self,
+        ResultAndState { state, .. }: &ResultAndState,
+        PreStateConfig { diff_mode }: PreStateConfig,
+        db: DB,
+    ) -> Result<PreStateFrame, DB::Error>
+        where DB: DatabaseRef {
+        match diff_mode {
+            Some(_) => {
+                let account_diffs = state.into_iter().map(|(addr, acc)| (*addr, &acc.info));
+                let mut prestate_result = account_diffs.into_iter().try_fold(PreStateMode::default(), |mut prestate, (addr, _)| {
+                    let db_acc = db.basic(addr)?.unwrap_or_default();
+                    prestate.0.insert(addr.clone(), AccountState {
+                        balance: Some(db_acc.balance),
+                        nonce: Some(U256::from(db_acc.nonce)),
+                        code: db_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
+                        storage: None,
+                    });
+                    Ok(prestate)
+                })?;
+                self.get_storage_from_state(&mut  prestate_result.0, false);
+                Ok(PreStateFrame::Default(prestate_result))
+            }
+            None => {
+                let account_diffs = state.into_iter().map(|(addr, acc)| (*addr, &acc.info));
+                let mut state_diff_result = account_diffs.into_iter().try_fold(DiffMode::default(), |mut state_diff, (addr, changed_acc)| {
+                    let db_acc = db.basic(addr)?.unwrap_or_default();
+                    let pre_state = AccountState {
+                        balance: Some(db_acc.balance),
+                        nonce: Some(U256::from(db_acc.nonce)),
+                        code: db_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
+                        storage: None,
+                    };
+                    let post_state = AccountState {
+                        balance: Some(changed_acc.balance),
+                        nonce: Some(U256::from(changed_acc.nonce)),
+                        code: changed_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
+                        storage: None,
+                    };
+                    state_diff.pre.insert(addr.clone(), pre_state);
+                    state_diff.post.insert(addr.clone(), post_state);
+                    Ok(state_diff)
+                })?;
+                self.get_storage_from_state(&mut  state_diff_result.pre, false);
+                self.get_storage_from_state(&mut  state_diff_result.post, true);
+                Ok(PreStateFrame::Diff(state_diff_result))
+            }
+        }
+    }
+
+    fn get_storage_from_state(
+        &self,
+        account_states: &mut BTreeMap<Address, AccountState>,
+        post_value: bool
+    ) {
+        for node in self.iter_traceable_nodes() {
+            node.geth_update_account_storage(account_states, post_value);
+        }
+
+    }
+
+    fn iter_traceable_nodes(&self) -> impl Iterator<Item = &CallTraceNode> {
+        self.nodes.iter().filter(|node| !node.is_precompile())
+    }
 }
+

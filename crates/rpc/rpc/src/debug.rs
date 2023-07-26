@@ -257,7 +257,19 @@ where
                         return Ok(frame.into())
                     }
                     GethDebugBuiltInTracerType::PreStateTracer => {
-                        Err(EthApiError::Unsupported("pre state tracer currently unsupported."))
+                        let prestate_config = tracer_config
+                            .into_pre_state_config()
+                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
+                        let mut inspector = TracingInspector::new(TracingInspectorConfig::from_geth_config(&config));
+
+                        let (res, _, db) = self
+                            .inner
+                            .eth_api
+                            .inspect_call_at_and_return_state(call, at, overrides, &mut inspector)
+                            .await?;
+
+                        let frame = inspector.into_geth_builder().geth_prestate_traces(&res, prestate_config, &db);
+                        return Ok(frame.unwrap().into())
                     }
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
                 },
@@ -358,7 +370,18 @@ where
                         return Ok((frame.into(), res.state))
                     }
                     GethDebugBuiltInTracerType::PreStateTracer => {
-                        Err(EthApiError::Unsupported("prestate tracer is unimplemented yet."))
+                        let prestate_config = tracer_config
+                            .into_pre_state_config()
+                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
+
+                        let mut inspector = TracingInspector::new(
+                            TracingInspectorConfig::from_geth_config(&config)
+                        );
+                        let (res, _) = inspect(db, env, &mut inspector)?;
+                        let frame = inspector.into_geth_builder().geth_prestate_traces(&res, prestate_config, db);
+
+                        let state = res.state.clone();
+                        return Ok((frame.unwrap().into(), state))
                     }
                     GethDebugBuiltInTracerType::NoopTracer => {
                         Ok((NoopFrame::default().into(), Default::default()))
