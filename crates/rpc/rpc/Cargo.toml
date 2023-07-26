@@ -48,6 +48,7 @@ tower = "0.4"
 tokio-stream = { workspace = true, features = ["sync"] }
 tokio-util = "0.7"
 pin-project.workspace = true
+rayon.workspace = true
 
 bytes.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }

@@ -146,7 +146,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::eth::{cache::EthStateCache, gas_oracle::GasPriceOracle};
+    use crate::{
+        eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
+        TracingCallPool,
+    };
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, StorageKey, StorageValue};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
     use reth_transaction_pool::test_utils::testing_pool;
@@ -165,6 +168,7 @@ mod tests {
             cache.clone(),
             GasPriceOracle::new(NoopProvider::default(), Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
+            TracingCallPool::build().expect("failed to build tracing pool"),
         );
         let address = Address::random();
         let storage = eth_api.storage_at(address, U256::ZERO.into(), None).unwrap();
@@ -186,6 +190,7 @@ mod tests {
             cache.clone(),
             GasPriceOracle::new(mock_provider, Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
+            TracingCallPool::build().expect("failed to build tracing pool"),
         );
 
         let storage_key: U256 = storage_key.into();
