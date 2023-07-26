@@ -207,7 +207,7 @@ impl<DB: Database> Pruner<DB> {
         )? {
             Some(range) => range,
             None => {
-                trace!(target: "pruner", "No receipts to prune");
+                trace!(target: "pruner", "No transaction lookup entries to prune");
                 return Ok(())
             }
         };
