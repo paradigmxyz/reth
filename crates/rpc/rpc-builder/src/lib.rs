@@ -103,7 +103,7 @@
 //! }
 //! ```
 
-use crate::{auth::AuthRpcModule, error::WsHttpSamePortError};
+use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics};
 use constants::*;
 use error::{RpcError, ServerKind};
 use jsonrpsee::{
@@ -156,6 +156,9 @@ pub mod constants;
 
 /// Additional support for tracing related rpc calls
 pub mod tracing_pool;
+
+// Rpc server metrics
+mod metrics;
 
 // re-export for convenience
 pub use crate::eth::{EthConfig, EthHandlers};
@@ -1232,7 +1235,7 @@ impl RpcServerConfig {
         let ws_socket_addr = self
             .ws_addr
             .unwrap_or(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, DEFAULT_WS_RPC_PORT)));
-
+        let metrics = RpcServerMetrics::default();
         // If both are configured on the same port, we combine them into one server.
         if self.http_addr == self.ws_addr &&
             self.http_server_config.is_some() &&
@@ -1264,6 +1267,7 @@ impl RpcServerConfig {
                 http_socket_addr,
                 cors,
                 ServerKind::WsHttp(http_socket_addr),
+                metrics.clone(),
             )
             .await?;
             return Ok(WsHttpServer {
@@ -1285,6 +1289,7 @@ impl RpcServerConfig {
                 ws_socket_addr,
                 self.ws_cors_domains.take(),
                 ServerKind::WS(ws_socket_addr),
+                metrics.clone(),
             )
             .await?;
             ws_local_addr = Some(addr);
@@ -1298,6 +1303,7 @@ impl RpcServerConfig {
                 http_socket_addr,
                 self.http_cors_domains.take(),
                 ServerKind::Http(http_socket_addr),
+                metrics.clone(),
             )
             .await?;
             http_local_addr = Some(addr);
@@ -1529,9 +1535,9 @@ impl Default for WsHttpServers {
 /// Http Servers Enum
 enum WsHttpServerKind {
     /// Http server
-    Plain(Server),
+    Plain(Server<Identity, RpcServerMetrics>),
     /// Http server with cors
-    WithCors(Server<Stack<CorsLayer, Identity>>),
+    WithCors(Server<Stack<CorsLayer, Identity>, RpcServerMetrics>),
 }
 
 // === impl WsHttpServerKind ===
@@ -1551,12 +1557,14 @@ impl WsHttpServerKind {
         socket_addr: SocketAddr,
         cors_domains: Option<String>,
         server_kind: ServerKind,
+        metrics: RpcServerMetrics,
     ) -> Result<(Self, SocketAddr), RpcError> {
         if let Some(cors) = cors_domains.as_deref().map(cors::create_cors_layer) {
             let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
             let middleware = tower::ServiceBuilder::new().layer(cors);
             let server = builder
                 .set_middleware(middleware)
+                .set_logger(metrics)
                 .build(socket_addr)
                 .await
                 .map_err(|err| RpcError::from_jsonrpsee_error(err, server_kind))?;
@@ -1565,6 +1573,7 @@ impl WsHttpServerKind {
             Ok((server, local_addr))
         } else {
             let server = builder
+                .set_logger(metrics)
                 .build(socket_addr)
                 .await
                 .map_err(|err| RpcError::from_jsonrpsee_error(err, server_kind))?;
