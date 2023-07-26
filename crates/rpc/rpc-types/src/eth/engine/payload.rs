@@ -46,6 +46,10 @@ pub struct ExecutionPayloadEnvelope {
     /// The expected value to be received by the feeRecipient in wei
     #[serde(rename = "blockValue")]
     pub block_value: U256,
+    //
+    // // TODO(mattsse): for V3
+    // #[serde(rename = "blobsBundle", skip_serializing_if = "Option::is_none")]
+    // pub blobs_bundle: Option<BlobsBundleV1>,
 }
 
 impl ExecutionPayloadEnvelope {
@@ -185,6 +189,14 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
             ommers: Default::default(),
         })
     }
+}
+
+/// This includes all bundled blob related data of an executed payload.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlobsBundleV1 {
+    pub commitments: Vec<Bytes>,
+    pub proofs: Vec<Bytes>,
+    pub blobs: Vec<Bytes>,
 }
 
 /// Error that can occur when handling payloads.
