@@ -359,6 +359,7 @@ where
         &self,
         _payload: ExecutionPayload,
         _versioned_hashes: Vec<H256>,
+        _parent_beacon_block_root: H256,
     ) -> RpcResult<PayloadStatus> {
         Err(jsonrpsee_types::error::ErrorCode::MethodNotFound.into())
     }

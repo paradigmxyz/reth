@@ -22,11 +22,14 @@ pub trait EngineApi {
     async fn new_payload_v2(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus>;
 
     /// Post Cancun payload handler
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_newpayloadv3>
     #[method(name = "newPayloadV3")]
     async fn new_payload_v3(
         &self,
         payload: ExecutionPayload,
         versioned_hashes: Vec<H256>,
+        parent_beacon_block_root: H256,
     ) -> RpcResult<PayloadStatus>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>
