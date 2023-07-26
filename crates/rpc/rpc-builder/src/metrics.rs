@@ -1,11 +1,9 @@
 use jsonrpsee::server::logger::{HttpRequest, Logger, MethodKind, Params, TransportProtocol};
-use std::{format, net::SocketAddr};
-
 use reth_metrics::{
-    metrics::{self, counter, histogram, Counter, Gauge, Histogram},
+    metrics::{self, Counter, Histogram},
     Metrics,
 };
-use std::time::Instant;
+use std::{net::SocketAddr, time::Instant};
 
 /// Metrics for the rpc server
 #[derive(Metrics, Clone)]
@@ -44,13 +42,13 @@ impl Logger for RpcServerMetrics {
             TransportProtocol::WebSocket => self.ws_session_opened.increment(1),
         }
     }
-    fn on_request(&self, transport: TransportProtocol) -> Self::Instant {
+    fn on_request(&self, _transport: TransportProtocol) -> Self::Instant {
         self.requests_started.increment(1);
         Instant::now()
     }
     fn on_call(
         &self,
-        method_name: &str,
+        _method_name: &str,
         _params: Params<'_>,
         _kind: MethodKind,
         _transport: TransportProtocol,
@@ -59,22 +57,23 @@ impl Logger for RpcServerMetrics {
     }
     fn on_result(
         &self,
-        method_name: &str,
+        _method_name: &str,
         success: bool,
         started_at: Self::Instant,
         _transport: TransportProtocol,
     ) {
         // capture call duration
-        self.call_latency.record(started_at.elapsed().as_millis());
+        self.call_latency.record(started_at.elapsed().as_millis() as f64);
         if !success {
             self.failed_calls.increment(1);
         } else {
             self.successful_calls.increment(1);
         }
     }
-    fn on_response(&self, _result: &str, started_at: Self::Instant, transport: TransportProtocol) {
+    fn on_response(&self, _result: &str, started_at: Self::Instant, _transport: TransportProtocol) {
         // capture request latency for this request/response pair
-        self.request_latency.record(started_at.elapsed().as_millis());
+        self.request_latency.record(started_at.elapsed().as_millis() as f64);
+        self.requests_finished.increment(1);
     }
     fn on_disconnect(&self, _remote_addr: SocketAddr, transport: TransportProtocol) {
         match transport {
