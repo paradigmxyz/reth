@@ -13,7 +13,7 @@ pub struct Command {
 impl Command {
     /// Execute `db clear` command
     pub fn execute<DB: Database>(self, db: &DB) -> eyre::Result<()> {
-        self.table.view(&ClearViewer { db, args: &self })?;
+        self.table.view(&ClearViewer { db })?;
 
         Ok(())
     }
@@ -21,7 +21,6 @@ impl Command {
 
 struct ClearViewer<'a, DB: Database> {
     db: &'a DB,
-    args: &'a Command,
 }
 
 impl<DB: Database> TableViewer<()> for ClearViewer<'_, DB> {
