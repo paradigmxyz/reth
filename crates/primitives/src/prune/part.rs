@@ -18,8 +18,10 @@ pub enum PrunePart {
     StorageHistory,
 }
 
+/// PrunePart error type.
 #[derive(Debug, Error)]
 pub enum PrunePartError {
+    /// Invalid configuration of a prune part.
     #[error("The configuration provided for {0} is invalid.")]
     Configuration(PrunePart),
 }
