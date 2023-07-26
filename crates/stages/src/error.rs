@@ -50,8 +50,8 @@ pub enum StageError {
         error: executor::BlockExecutionError,
     },
     /// Invalid pruning configuration
-    #[error("Stage encountered an invalid pruning configuration.")]
-    PruningConfiguration,
+    #[error(transparent)]
+    PruningConfiguration(#[from] reth_primitives::PrunePartError),
     /// Invalid checkpoint passed to the stage
     #[error("Invalid stage checkpoint: {0}")]
     StageCheckpoint(u64),

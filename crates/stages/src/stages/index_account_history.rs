@@ -49,13 +49,12 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
 
-        let (target_prunable_block, _) = self
-            .prune_targets
-            .prune_target_block_account_history(input.target())
-            .ok_or(StageError::PruningConfiguration)?;
-
-        if target_prunable_block > input.checkpoint().block_number {
-            input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
+        if let Some((target_prunable_block, _)) =
+            self.prune_targets.prune_target_block_account_history(input.target())?
+        {
+            if target_prunable_block > input.checkpoint().block_number {
+                input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
+            }
         }
 
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);

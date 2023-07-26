@@ -1,4 +1,7 @@
-use crate::{serde_helper::deserialize_opt_prune_mode_with_min_blocks, BlockNumber, PruneMode};
+use crate::{
+    prune::PrunePartError, serde_helper::deserialize_opt_prune_mode_with_min_blocks, BlockNumber,
+    PruneMode, PrunePart,
+};
 use paste::paste;
 use serde::{Deserialize, Serialize};
 
@@ -57,13 +60,15 @@ macro_rules! impl_prune_parts {
                     $human_part,
                     " pruning needs to be done, inclusive, according to the provided tip."
                 )]
-                pub fn [<prune_target_block_ $part>](&self, tip: BlockNumber) -> Option<(BlockNumber, PruneMode)> {
-                    if let Some(mode) = &self.$part {
-                        return self.prune_target_block(mode, tip, $min_blocks).map(|block| {
-                            (block, *mode)
-                        })
+                pub fn [<prune_target_block_ $part>](&self, tip: BlockNumber) -> Result<Option<(BlockNumber, PruneMode)>, PrunePartError> {
+                    match &self.$part {
+                        Some(mode) =>
+                            match self.prune_target_block(mode, tip, $min_blocks) {
+                                Some(block) => Ok(Some((block, *mode))),
+                                None => Err(PrunePartError::Configuration(PrunePart::[<$human_part>]))
+                            }
+                        None => Ok(None)
                     }
-                    Some((0, PruneMode::Before(0)))
                 }
             }
         )+
@@ -121,10 +126,10 @@ impl PruneModes {
     }
 
     impl_prune_parts!(
-        (sender_recovery, "Sender Recovery", None),
-        (transaction_lookup, "Transaction Lookup", None),
+        (sender_recovery, "SenderRecovery", None),
+        (transaction_lookup, "TransactionLookup", None),
         (receipts, "Receipts", Some(64)),
-        (account_history, "Account History", Some(64)),
-        (storage_history, "Storage History", Some(64))
+        (account_history, "AccountHistory", Some(64)),
+        (storage_history, "StorageHistory", Some(64))
     );
 }
