@@ -157,7 +157,7 @@ mod tests {
 
     #[test]
     fn test_payload_len_with_eip155_chain_id() {
-        let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
+        let signature = Signature { r: U256::from(1), s: U256::from(1), odd_y_parity: false };
 
         assert_eq!(3, signature.payload_len_with_eip155_chain_id(None));
         assert_eq!(3, signature.payload_len_with_eip155_chain_id(Some(1)));
@@ -166,18 +166,28 @@ mod tests {
 
     #[test]
     fn test_v() {
-        let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
+        let signature = Signature { r: U256::from(1), s: U256::from(1), odd_y_parity: false };
         assert_eq!(27, signature.v(None));
         assert_eq!(37, signature.v(Some(1)));
 
-        let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: true };
+        let signature = Signature { r: U256::from(1), s: U256::from(1), odd_y_parity: true };
         assert_eq!(28, signature.v(None));
         assert_eq!(38, signature.v(Some(1)));
     }
 
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn test_zero_signature_v() {
+        let signature = Signature { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false };
+        assert_eq!(0, signature.v(None));
+
+        let signature = Signature { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false };
+        assert_eq!(0, signature.v(Some(1)));
+    }
+
     #[test]
     fn test_encode_and_decode_with_eip155_chain_id() {
-        let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
+        let signature = Signature { r: U256::from(1), s: U256::from(1), odd_y_parity: false };
 
         let mut encoded = BytesMut::new();
         signature.encode_with_eip155_chain_id(&mut encoded, None);
