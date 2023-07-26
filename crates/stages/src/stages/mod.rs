@@ -129,6 +129,8 @@ mod tests {
                              expect_num_storage_changesets: usize| async move {
             let provider: DatabaseProviderRW<'_, &DatabaseEnv> = factory.provider_rw().unwrap();
 
+            // Check execution and create receipts and changesets according to the pruning
+            // configuration
             let mut execution_stage = ExecutionStage::new(
                 Factory::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build())),
                 ExecutionStageThresholds { max_blocks: Some(100), max_changes: None },
