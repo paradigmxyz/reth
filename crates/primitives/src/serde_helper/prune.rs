@@ -71,12 +71,4 @@ mod test {
             Err(err) if err.to_string() == "invalid value: string \"full\", expected prune mode that leaves at least 10 blocks in the database"
         );
     }
-
-    #[test]
-    fn deserialize_opt_prune_mode_unsupported_full() {
-        assert_matches!(
-            serde_json::from_str::<V>(r#""full""#),
-            Err(err) if err.to_string() == "invalid value: full prune mode, expected prune mode to be a distance not less than 10 blocks or from a specific block number"
-        );
-    }
 }
