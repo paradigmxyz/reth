@@ -229,21 +229,16 @@ impl<DB: Database> Pruner<DB> {
             }
 
             // Pre-sort hashes to prune them in order
-            hashes.sort();
+            hashes.sort_unstable();
 
-            provider.prune_table_in_batches::<tables::TxHashNumber, _>(
-                hashes,
-                self.batch_sizes.transaction_lookup,
-                |entries| {
-                    processed += entries;
-                    trace!(
-                        target: "pruner",
-                        %entries,
-                        progress = format!("{:.1}%", 100.0 * processed as f64 / total as f64),
-                        "Pruned transaction lookup"
-                    );
-                },
-            )?;
+            let entries = provider.prune_table::<tables::TxHashNumber, _>(hashes)?;
+            processed += entries;
+            trace!(
+                target: "pruner",
+                %entries,
+                progress = format!("{:.1}%", 100.0 * processed as f64 / total as f64),
+                "Pruned transaction lookup"
+            );
         }
 
         provider.save_prune_checkpoint(
