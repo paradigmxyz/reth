@@ -1,5 +1,6 @@
 use crate::{
     basefee::calculate_next_block_base_fee,
+    blobfee::calculate_excess_blob_gas,
     keccak256,
     proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
     BlockBodyRoots, BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes, H160, H256, H64, U256,
@@ -179,6 +180,13 @@ impl Header {
         Some(calculate_next_block_base_fee(self.gas_used, self.gas_limit, self.base_fee_per_gas?))
     }
 
+    /// Calculate excess blob gas for the next block according to the EIP-4844 spec.
+    ///
+    /// Returns a `None` if no excess blob gas is set, no EIP-4844 support
+    pub fn next_block_excess_blob_gas(&self) -> Option<u64> {
+        Some(calculate_excess_blob_gas(self.excess_blob_gas?, self.blob_gas_used?))
+    }
+
     /// Seal the header with a known hash.
     ///
     /// WARNING: This method does not perform validation whether the hash is correct.
@@ -236,19 +244,34 @@ impl Header {
 
         if let Some(base_fee) = self.base_fee_per_gas {
             length += U256::from(base_fee).length();
-        } else if self.withdrawals_root.is_some() {
-            length += 1; // EMTY STRING CODE
+        } else if self.withdrawals_root.is_some() ||
+            self.blob_gas_used.is_some() ||
+            self.excess_blob_gas.is_some()
+        {
+            length += 1; // EMPTY STRING CODE
         }
+
         if let Some(root) = self.withdrawals_root {
             length += root.length();
+        } else if self.blob_gas_used.is_some() || self.excess_blob_gas.is_some() {
+            length += 1; // EMPTY STRING CODE
         }
 
         if let Some(blob_gas_used) = self.blob_gas_used {
-            length += blob_gas_used.length();
+            length += U256::from(blob_gas_used).length();
+        } else if self.excess_blob_gas.is_some() {
+            length += 1; // EMPTY STRING CODE
         }
 
+        // Encode excess blob gas length. If new fields are added, the above pattern will need to
+        // be repeated and placeholder length added. Otherwise, it's impossible to tell _which_
+        // fields are missing. This is mainly relevant for contrived cases where a header is
+        // created at random, for example:
+        //  * A header is created with a withdrawals root, but no base fee. Shanghai blocks are
+        //    post-London, so this is technically not valid. However, a tool like proptest would
+        //    generate a block like this.
         if let Some(excess_blob_gas) = self.excess_blob_gas {
-            length += excess_blob_gas.length();
+            length += U256::from(excess_blob_gas).length();
         }
 
         length
@@ -280,20 +303,38 @@ impl Encodable for Header {
         // but withdrawals root is present.
         if let Some(ref base_fee) = self.base_fee_per_gas {
             U256::from(*base_fee).encode(out);
-        } else if self.withdrawals_root.is_some() {
+        } else if self.withdrawals_root.is_some() ||
+            self.blob_gas_used.is_some() ||
+            self.excess_blob_gas.is_some()
+        {
             out.put_u8(EMPTY_STRING_CODE);
         }
 
+        // Encode withdrawals root. Put empty string if withdrawals root is missing,
+        // but blob gas used is present.
         if let Some(ref root) = self.withdrawals_root {
             root.encode(out);
+        } else if self.blob_gas_used.is_some() || self.excess_blob_gas.is_some() {
+            out.put_u8(EMPTY_STRING_CODE);
         }
 
+        // Encode blob gas used. Put empty string if blob gas used is missing,
+        // but excess blob gas is present.
         if let Some(ref blob_gas_used) = self.blob_gas_used {
-            blob_gas_used.encode(out);
+            U256::from(*blob_gas_used).encode(out);
+        } else if self.excess_blob_gas.is_some() {
+            out.put_u8(EMPTY_STRING_CODE);
         }
 
+        // Encode excess blob gas. If new fields are added, the above pattern will need to be
+        // repeated and placeholders added. Otherwise, it's impossible to tell _which_ fields
+        // are missing. This is mainly relevant for contrived cases where a header is created
+        // at random, for example:
+        //  * A header is created with a withdrawals root, but no base fee. Shanghai blocks are
+        //    post-London, so this is technically not valid. However, a tool like proptest would
+        //    generate a block like this.
         if let Some(ref excess_blob_gas) = self.excess_blob_gas {
-            excess_blob_gas.encode(out);
+            U256::from(*excess_blob_gas).encode(out);
         }
     }
 
@@ -333,6 +374,7 @@ impl Decodable for Header {
             blob_gas_used: None,
             excess_blob_gas: None,
         };
+
         if started_len - buf.len() < rlp_head.payload_length {
             if buf.first().map(|b| *b == EMPTY_STRING_CODE).unwrap_or_default() {
                 buf.advance(1)
@@ -343,16 +385,31 @@ impl Decodable for Header {
 
         // Withdrawals root for post-shanghai headers
         if started_len - buf.len() < rlp_head.payload_length {
-            this.withdrawals_root = Some(Decodable::decode(buf)?);
+            if buf.first().map(|b| *b == EMPTY_STRING_CODE).unwrap_or_default() {
+                buf.advance(1)
+            } else {
+                this.withdrawals_root = Some(Decodable::decode(buf)?);
+            }
         }
 
         // Blob gas used and excess blob gas for post-cancun headers
         if started_len - buf.len() < rlp_head.payload_length {
-            this.blob_gas_used = Some(Decodable::decode(buf)?);
+            if buf.first().map(|b| *b == EMPTY_STRING_CODE).unwrap_or_default() {
+                buf.advance(1)
+            } else {
+                this.blob_gas_used = Some(U256::decode(buf)?.to::<u64>());
+            }
         }
 
+        // Decode excess blob gas. If new fields are added, the above pattern will need to be
+        // repeated and placeholders decoded. Otherwise, it's impossible to tell _which_ fields are
+        // missing. This is mainly relevant for contrived cases where a header is created at
+        // random, for example:
+        //  * A header is created with a withdrawals root, but no base fee. Shanghai blocks are
+        //    post-London, so this is technically not valid. However, a tool like proptest would
+        //    generate a block like this.
         if started_len - buf.len() < rlp_head.payload_length {
-            this.excess_blob_gas = Some(Decodable::decode(buf)?);
+            this.excess_blob_gas = Some(U256::decode(buf)?.to::<u64>());
         }
 
         let consumed = started_len - buf.len();
