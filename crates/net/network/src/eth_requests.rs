@@ -198,13 +198,12 @@ where
             if let Some(receipts_by_block) =
                 self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
             {
-                let mut transformed_receipts = Vec::new();
-
-                for receipt in receipts_by_block {
-                    transformed_receipts.push(receipt.with_bloom().into());
-                }
-
-                receipts.push(transformed_receipts);
+                receipts.push(
+                    receipts_by_block
+                        .into_iter()
+                        .map(|receipt| receipt.with_bloom().into())
+                        .collect::<Vec<_>>(),
+                );
             } else {
                 break
             }
