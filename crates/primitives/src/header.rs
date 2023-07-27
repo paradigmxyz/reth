@@ -91,6 +91,13 @@ pub struct Header {
     /// above the gas target, and decreasing when blocks are below the gas target. The base fee per
     /// gas is burned.
     pub base_fee_per_gas: Option<u64>,
+    /// The total amount of blob gas consumed by the transactions within the block, added in
+    /// EIP-4844.
+    pub blob_gas_used: Option<u64>,
+    /// A running total of blob gas consumed in excess of the target, prior to the block. Blocks
+    /// with above-target blob gas consumption increase this value, blocks with below-target blob
+    /// gas consumption decrease it (bounded at 0). This was added in EIP-4844.
+    pub excess_blob_gas: Option<u64>,
     /// An arbitrary byte array containing data relevant to this block. This must be 32 bytes or
     /// fewer; formally Hx.
     pub extra_data: Bytes,
@@ -116,6 +123,8 @@ impl Default for Header {
             nonce: 0,
             base_fee_per_gas: None,
             withdrawals_root: None,
+            blob_gas_used: None,
+            excess_blob_gas: None,
         }
     }
 }
@@ -232,6 +241,14 @@ impl Header {
             length += root.length();
         }
 
+        if let Some(blob_gas_used) = self.blob_gas_used {
+            length += blob_gas_used.length();
+        }
+
+        if let Some(excess_blob_gas) = self.excess_blob_gas {
+            length += excess_blob_gas.length();
+        }
+
         length
     }
 }
@@ -268,6 +285,14 @@ impl Encodable for Header {
         if let Some(ref root) = self.withdrawals_root {
             root.encode(out);
         }
+
+        if let Some(ref blob_gas_used) = self.blob_gas_used {
+            blob_gas_used.encode(out);
+        }
+
+        if let Some(ref excess_blob_gas) = self.excess_blob_gas {
+            excess_blob_gas.encode(out);
+        }
     }
 
     fn length(&self) -> usize {
@@ -303,6 +328,8 @@ impl Decodable for Header {
             nonce: H64::decode(buf)?.to_low_u64_be(),
             base_fee_per_gas: None,
             withdrawals_root: None,
+            blob_gas_used: None,
+            excess_blob_gas: None,
         };
         if started_len - buf.len() < rlp_head.payload_length {
             if buf.first().map(|b| *b == EMPTY_STRING_CODE).unwrap_or_default() {
@@ -311,9 +338,18 @@ impl Decodable for Header {
                 this.base_fee_per_gas = Some(U256::decode(buf)?.to::<u64>());
             }
         }
+
+        // Withdrawals root for post-shanghai headers
         if started_len - buf.len() < rlp_head.payload_length {
             this.withdrawals_root = Some(Decodable::decode(buf)?);
         }
+
+        // Blob gas used and excess blob gas for post-cancun headers
+        if started_len - buf.len() < rlp_head.payload_length {
+            this.blob_gas_used = Some(Decodable::decode(buf)?);
+            this.excess_blob_gas = Some(Decodable::decode(buf)?);
+        }
+
         let consumed = started_len - buf.len();
         if consumed != rlp_head.payload_length {
             return Err(reth_rlp::DecodeError::ListLengthMismatch {
@@ -536,6 +572,8 @@ mod ethers_compat {
                 gas_used: block.gas_used.as_u64(),
                 withdrawals_root: None,
                 logs_bloom: block.logs_bloom.unwrap_or_default().0.into(),
+                blob_gas_used: None,
+                excess_blob_gas: None,
             }
         }
     }
@@ -605,6 +643,8 @@ mod tests {
             nonce: 0,
             base_fee_per_gas: Some(0x036b_u64),
             withdrawals_root: None,
+            blob_gas_used: None,
+            excess_blob_gas: None,
         };
         assert_eq!(header.hash_slow(), expected_hash);
     }
