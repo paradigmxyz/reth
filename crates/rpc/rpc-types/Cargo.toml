@@ -24,10 +24,6 @@ serde_json.workspace = true
 jsonrpsee-types = { version = "0.18" }
 
 [dev-dependencies]
-# reth
-reth-interfaces = { workspace = true, features = ["test-utils"] }
-
 # misc
 rand.workspace = true
-assert_matches = "1.5"
 similar-asserts = "1.4"
