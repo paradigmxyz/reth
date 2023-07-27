@@ -147,6 +147,9 @@ impl Decodable for ReceiptWithBloom {
                 } else if receipt_type == 0x02 {
                     buf.advance(1);
                     Self::decode_receipt(buf, TxType::EIP1559)
+                } else if receipt_type == 0x03 {
+                    buf.advance(1);
+                    Self::decode_receipt(buf, TxType::EIP4844)
                 } else {
                     Err(reth_rlp::DecodeError::Custom("invalid receipt type"))
                 }
@@ -250,6 +253,9 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
             }
             TxType::EIP1559 => {
                 out.put_u8(0x02);
+            }
+            TxType::EIP4844 => {
+                out.put_u8(0x03);
             }
             _ => unreachable!("legacy handled; qed."),
         }
