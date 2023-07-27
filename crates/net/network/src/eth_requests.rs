@@ -21,6 +21,11 @@ use tokio_stream::wrappers::ReceiverStream;
 
 // Limits: <https://github.com/ethereum/go-ethereum/blob/b0d44338bbcefee044f1f635a84487cbbd8f0538/eth/protocols/eth/handler.go#L34-L56>
 
+/// Maximum number of receipts to serve.
+///
+/// Used to limit lookups.
+const MAX_RECEIPTS_SERVE: usize = 1024;
+
 /// Maximum number of block headers to serve.
 ///
 /// Used to limit lookups.
@@ -31,6 +36,9 @@ const MAX_HEADERS_SERVE: usize = 1024;
 /// Used to limit lookups. With 24KB block sizes nowadays, the practical limit will always be
 /// SOFT_RESPONSE_LIMIT.
 const MAX_BODIES_SERVE: usize = 1024;
+
+/// Estimated size in bytes of an RLP encoded receipt.
+const APPROX_RECEIPT_SIZE: usize = 24 * 1024;
 
 /// Estimated size in bytes of an RLP encoded body.
 // TODO: check 24kb blocksize assumption
@@ -194,6 +202,8 @@ where
     ) {
         let mut receipts = Vec::new();
 
+        let mut total_bytes = APPROX_RECEIPT_SIZE;
+
         for hash in request.0 {
             if let Some(receipts_by_block) =
                 self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
@@ -204,6 +214,16 @@ where
                         .map(|receipt| receipt.with_bloom())
                         .collect::<Vec<_>>(),
                 );
+
+                total_bytes += APPROX_RECEIPT_SIZE;
+
+                if total_bytes > SOFT_RESPONSE_LIMIT {
+                    break
+                }
+
+                if receipts.len() >= MAX_RECEIPTS_SERVE {
+                    break
+                }
             } else {
                 break
             }
