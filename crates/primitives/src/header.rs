@@ -349,6 +349,9 @@ impl Decodable for Header {
         // Blob gas used and excess blob gas for post-cancun headers
         if started_len - buf.len() < rlp_head.payload_length {
             this.blob_gas_used = Some(Decodable::decode(buf)?);
+        }
+
+        if started_len - buf.len() < rlp_head.payload_length {
             this.excess_blob_gas = Some(Decodable::decode(buf)?);
         }
 
