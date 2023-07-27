@@ -242,18 +242,17 @@ where
                                 .set_record_logs(call_config.with_log.unwrap_or_default()),
                         );
 
-                        let inspector = self
+                        let frame = self
                             .inner
                             .eth_api
                             .spawn_with_call_at(call, at, overrides, move |db, env| {
                                 inspect(db, env, &mut inspector)?;
-                                Ok(inspector)
+                                let frame =
+                                    inspector.into_geth_builder().geth_call_traces(call_config);
+                                Ok(frame.into())
                             })
                             .await?;
-
-                        let frame = inspector.into_geth_builder().geth_call_traces(call_config);
-
-                        return Ok(frame.into())
+                        return Ok(frame)
                     }
                     GethDebugBuiltInTracerType::PreStateTracer => {
                         Err(EthApiError::Unsupported("pre state tracer currently unsupported."))
