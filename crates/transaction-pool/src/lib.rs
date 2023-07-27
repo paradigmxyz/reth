@@ -10,8 +10,7 @@
     rust_2018_idioms,
     unreachable_pub,
     missing_debug_implementations,
-    rustdoc::broken_intra_doc_links,
-    unused_crate_dependencies
+    rustdoc::broken_intra_doc_links
 )]
 #![doc(test(
     no_crate_inject,
