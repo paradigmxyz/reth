@@ -195,11 +195,16 @@ where
         let mut receipts = Vec::new();
 
         for hash in request.0 {
-            if let Some(mut receipt) =
+            if let Some(receipts_by_block) =
                 self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
             {
-                receipt.with_bloom(); // Appeler la méthode with_bloom() pour chaque Receipt individuel
-                receipts.push(receipt);
+                let mut transformed_receipts = Vec::new();
+
+                for receipt in receipts_by_block {
+                    transformed_receipts.push(receipt.with_bloom().into());
+                }
+
+                receipts.push(transformed_receipts);
             } else {
                 break
             }
@@ -233,7 +238,9 @@ where
                         this.on_bodies_request(peer_id, request, response)
                     }
                     IncomingEthRequest::GetNodeData { .. } => {}
-                    IncomingEthRequest::GetReceipts { .. } => {}
+                    IncomingEthRequest::GetReceipts { peer_id, request, response } => {
+                        this.on_receipts_request(peer_id, request, response)
+                    }
                 },
             }
         }
