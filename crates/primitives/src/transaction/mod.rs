@@ -264,12 +264,12 @@ pub struct TxEip4844 {
     pub access_list: AccessList,
 
     /// It contains a vector of fixed size hash(32 bytes)
-    pub blob_hashes: Vec<H256>,
+    pub blob_versioned_hashes: Vec<H256>,
 
     /// Max fee per data gas
     ///
     /// aka BlobFeeCap
-    pub max_fee_per_data_gas: u128,
+    pub max_fee_per_blob_gas: u128,
 
     /// Input has two uses depending if transaction is Create or Call (if `to` field is None or
     /// Some). pub init: An unlimited size byte array specifying the
@@ -292,7 +292,7 @@ impl TxEip4844 {
         mem::size_of::<u128>() + // value
         self.access_list.size() + // access_list
         self.input.len() +  // input
-        self.blob_hashes.capacity() * mem::size_of::<H256>() + // blob hashes size
+        self.blob_versioned_hashes.capacity() * mem::size_of::<H256>() + // blob hashes size
         mem::size_of::<u128>() // max_fee_per_data_gas
     }
 }
