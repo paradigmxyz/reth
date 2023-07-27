@@ -50,7 +50,6 @@ pub fn validate_header_standalone(
     //
     if chain_spec.fork(Hardfork::Cancun).active_at_timestamp(header.timestamp) {
         let blob_gas_used = header.blob_gas_used.ok_or(ConsensusError::BlobGasUsedMissing)?;
-        let excess_blob_gas = header.excess_blob_gas.ok_or(ConsensusError::ExcessBlobGasMissing)?;
 
         if blob_gas_used > MAX_DATA_GAS_PER_BLOCK {
             return Err(ConsensusError::BlobGasUsedExceedsMaxBlobGasPerBlock {
@@ -65,12 +64,10 @@ pub fn validate_header_standalone(
                 blob_gas_per_blob: DATA_GAS_PER_BLOB,
             })
         }
-    } else {
-        if header.blob_gas_used.is_some() {
-            return Err(ConsensusError::BlobGasUsedUnexpected)
-        } else if header.excess_blob_gas.is_some() {
-            return Err(ConsensusError::ExcessBlobGasUnexpected)
-        }
+    } else if header.blob_gas_used.is_some() {
+        return Err(ConsensusError::BlobGasUsedUnexpected)
+    } else if header.excess_blob_gas.is_some() {
+        return Err(ConsensusError::ExcessBlobGasUnexpected)
     }
 
     Ok(())
@@ -337,7 +334,9 @@ pub fn validate_header_regarding_parent(
         let parent_blob_gas_used = parent.blob_gas_used.unwrap_or(0);
         let parent_excess_blob_gas = parent.excess_blob_gas.unwrap_or(0);
 
-        let blob_gas_used = child.blob_gas_used.ok_or(ConsensusError::BlobGasUsedMissing)?;
+        if child.blob_gas_used.is_none() {
+            return Err(ConsensusError::BlobGasUsedMissing)
+        }
         let excess_blob_gas = child.excess_blob_gas.ok_or(ConsensusError::ExcessBlobGasMissing)?;
 
         let expected_excess_blob_gas =

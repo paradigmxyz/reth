@@ -127,7 +127,7 @@ pub enum ConsensusError {
         "Blob gas used {blob_gas_used} is not a multiple of blob gas per blob {blob_gas_per_blob}"
     )]
     BlobGasUsedNotMultipleOfBlobGasPerBlob { blob_gas_used: u64, blob_gas_per_blob: u64 },
-    #[error("Invalid excess blob gas {excess_blob_gas}. Expected: {expected}, got: {got}. Parent excess blob gas: {parent_excess_blob_gas}, parent blob gas used: {parent_blob_gas_used}.")]
+    #[error("Invalid excess blob gas. Expected: {expected}, got: {got}. Parent excess blob gas: {parent_excess_blob_gas}, parent blob gas used: {parent_blob_gas_used}.")]
     ExcessBlobGasDiff {
         expected: u64,
         got: u64,
