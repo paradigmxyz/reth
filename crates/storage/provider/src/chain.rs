@@ -136,6 +136,11 @@ impl Chain {
         Self { state, blocks: block_num_hash }
     }
 
+    /// Returns length of the chain.
+    pub fn len(&self) -> usize {
+        self.blocks.len()
+    }
+
     /// Get all receipts for the given block.
     pub fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<&[Receipt]> {
         let num = self.block_number(block_hash)?;
