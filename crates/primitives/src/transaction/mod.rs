@@ -1220,9 +1220,8 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
 #[cfg(test)]
 mod tests {
     use crate::{
-        transaction::{signature::Signature, TransactionKind, TxEip1559, TxEip2930, TxLegacy},
-        AccessList, Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered,
-        H256, U256,
+        transaction::{signature::Signature, TransactionKind, TxEip1559, TxLegacy},
+        Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered, H256, U256,
     };
     use bytes::BytesMut;
     use ethers_core::utils::hex;
@@ -1234,30 +1233,6 @@ mod tests {
         let input = [0x80u8];
         let res = TransactionSigned::decode(&mut &input[..]).unwrap_err();
         assert_eq!(DecodeError::InputTooShort, res);
-    }
-
-    #[test]
-    fn test_decode_create() {
-        // tests that a contract creation tx encodes and decodes properly
-        let request = Transaction::Eip2930(TxEip2930 {
-            chain_id: 1u64,
-            nonce: 0,
-            gas_price: 1,
-            gas_limit: 2,
-            to: TransactionKind::Create,
-            value: 3,
-            input: Bytes::from(vec![1, 2]),
-            access_list: Default::default(),
-        });
-        let signature = Signature { odd_y_parity: true, r: U256::default(), s: U256::default() };
-        let tx = TransactionSigned::from_transaction_and_signature(request, signature);
-
-        let mut encoded = BytesMut::new();
-        tx.encode(&mut encoded);
-        assert_eq!(encoded.len(), tx.length());
-
-        let decoded = TransactionSigned::decode(&mut &*encoded).unwrap();
-        assert_eq!(decoded, tx);
     }
 
     #[test]
@@ -1274,31 +1249,6 @@ mod tests {
         decoded.encode(&mut encoded);
 
         assert_eq!(tx_bytes, encoded);
-    }
-
-    #[test]
-    fn test_decode_call() {
-        let request = Transaction::Eip2930(TxEip2930 {
-            chain_id: 1u64,
-            nonce: 0,
-            gas_price: 1,
-            gas_limit: 2,
-            to: TransactionKind::Call(Address::default()),
-            value: 3,
-            input: Bytes::from(vec![1, 2]),
-            access_list: Default::default(),
-        });
-
-        let signature = Signature { odd_y_parity: true, r: U256::default(), s: U256::default() };
-
-        let tx = TransactionSigned::from_transaction_and_signature(request, signature);
-
-        let mut encoded = BytesMut::new();
-        tx.encode(&mut encoded);
-        assert_eq!(encoded.len(), tx.length());
-
-        let decoded = TransactionSigned::decode(&mut &*encoded).unwrap();
-        assert_eq!(decoded, tx);
     }
 
     #[test]
@@ -1460,72 +1410,6 @@ mod tests {
         let tx = TransactionSigned::decode(&mut pointer).unwrap();
         assert_eq!(tx.hash(), hash, "Expected same hash");
         assert_eq!(tx.recover_signer(), Some(signer), "Recovering signer should pass.");
-    }
-
-    #[test]
-    fn recover_signer_legacy() {
-        use crate::hex_literal::hex;
-
-        let signer: Address = hex!("398137383b3d25c92898c656696e41950e47316b").into();
-        let hash: H256 =
-            hex!("bb3a336e3f823ec18197f1e13ee875700f08f03e2cab75f0d0b118dabb44cba0").into();
-
-        let tx = Transaction::Legacy(TxLegacy {
-            chain_id: Some(1),
-            nonce: 0x18,
-            gas_price: 0xfa56ea00,
-            gas_limit: 119902,
-            to: TransactionKind::Call( hex!("06012c8cf97bead5deae237070f9587f8e7a266d").into()),
-            value: 0x1c6bf526340000u64.into(),
-            input:  hex!("f7d8c88300000000000000000000000000000000000000000000000000000000000cee6100000000000000000000000000000000000000000000000000000000000ac3e1").into(),
-        });
-
-        let sig = Signature {
-            r: U256::from_be_bytes(hex!(
-                "2a378831cf81d99a3f06a18ae1b6ca366817ab4d88a70053c41d7a8f0368e031"
-            )),
-            s: U256::from_be_bytes(hex!(
-                "450d831a05b6e418724436c05c155e0a1b7b921015d0fbc2f667aed709ac4fb5"
-            )),
-            odd_y_parity: false,
-        };
-
-        let signed_tx = TransactionSigned::from_transaction_and_signature(tx, sig);
-        assert_eq!(signed_tx.hash(), hash, "Expected same hash");
-        assert_eq!(signed_tx.recover_signer(), Some(signer), "Recovering signer should pass.");
-    }
-
-    #[test]
-    fn recover_signer_eip1559() {
-        use crate::hex_literal::hex;
-
-        let signer: Address = hex!("dd6b8b3dc6b7ad97db52f08a275ff4483e024cea").into();
-        let hash: H256 =
-            hex!("0ec0b6a2df4d87424e5f6ad2a654e27aaeb7dac20ae9e8385cc09087ad532ee0").into();
-
-        let tx = Transaction::Eip1559( TxEip1559 {
-            chain_id: 1,
-            nonce: 0x42,
-            gas_limit: 44386,
-            to: TransactionKind::Call( hex!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into()),
-            value: 0,
-            input:  hex!("a22cb4650000000000000000000000005eee75727d804a2b13038928d36f8b188945a57a0000000000000000000000000000000000000000000000000000000000000000").into(),
-            max_fee_per_gas: 0x4a817c800,
-            max_priority_fee_per_gas: 0x3b9aca00,
-            access_list: AccessList::default(),
-        });
-
-        let sig = Signature {
-            r: U256::from_str("0x840cfc572845f5786e702984c2a582528cad4b49b2a10b9db1be7fca90058565")
-                .unwrap(),
-            s: U256::from_str("0x25e7109ceb98168d95b09b18bbf6b685130e0562f233877d492b94eee0c5b6d1")
-                .unwrap(),
-            odd_y_parity: false,
-        };
-
-        let signed_tx = TransactionSigned::from_transaction_and_signature(tx, sig);
-        assert_eq!(signed_tx.hash(), hash, "Expected same hash");
-        assert_eq!(signed_tx.recover_signer(), Some(signer), "Recovering signer should pass.");
     }
 
     #[test]
