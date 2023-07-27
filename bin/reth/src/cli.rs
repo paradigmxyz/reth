@@ -14,31 +14,62 @@ use reth_tracing::{
     BoxedLayer, FileWorkerGuard,
 };
 
-/// Parse CLI options, set up logging and run the chosen command.
-pub fn run() -> eyre::Result<()> {
-    let opt = Cli::parse();
+/// The main reth cli interface.
+///
+/// This is the entrypoint to the executable.
+#[derive(Debug, Parser)]
+#[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
+pub struct Cli {
+    /// The command to run
+    #[clap(subcommand)]
+    command: Commands,
 
-    let mut layers = vec![reth_tracing::stdout(opt.verbosity.directive())];
-    let _guard = opt.logs.layer()?.map(|(layer, guard)| {
-        layers.push(layer);
-        guard
-    });
+    #[clap(flatten)]
+    logs: Logs,
 
-    reth_tracing::init(layers);
+    #[clap(flatten)]
+    verbosity: Verbosity,
+}
 
-    let runner = CliRunner::default();
+impl Cli {
+    /// Execute the configured cli command.
+    pub fn run(self) -> eyre::Result<()> {
+        let _guard = self.init_tracing()?;
 
-    match opt.command {
-        Commands::Node(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
-        Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-        Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-        Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-        Commands::Stage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-        Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::Debug(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
+        let runner = CliRunner::default();
+        match self.command {
+            Commands::Node(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
+            Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Stage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::Debug(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
+        }
     }
+
+    /// Initializes tracing with the configured options.
+    ///
+    /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
+    /// that all logs are flushed to disk.
+    pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
+        let mut layers = vec![reth_tracing::stdout(self.verbosity.directive())];
+        let guard = self.logs.layer()?.map(|(layer, guard)| {
+            layers.push(layer);
+            guard
+        });
+
+        reth_tracing::init(layers);
+        Ok(guard.flatten())
+    }
+}
+
+/// Convenience function for parsing CLI options, set up logging and run the chosen command.
+#[inline]
+pub fn run() -> eyre::Result<()> {
+    Cli::parse().run()
 }
 
 /// Commands to be executed
@@ -71,20 +102,6 @@ pub enum Commands {
     /// Various debug routines
     #[command(name = "debug")]
     Debug(debug_cmd::Command),
-}
-
-#[derive(Debug, Parser)]
-#[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
-struct Cli {
-    /// The command to run
-    #[clap(subcommand)]
-    command: Commands,
-
-    #[clap(flatten)]
-    logs: Logs,
-
-    #[clap(flatten)]
-    verbosity: Verbosity,
 }
 
 /// The log configuration.
