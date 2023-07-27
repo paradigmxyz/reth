@@ -1,4 +1,11 @@
-use std::{collections::HashMap, fmt::Debug, hash::Hash, path::PathBuf};
+use std::{
+    collections::HashMap,
+    fmt::Debug,
+    fs::{self, File},
+    hash::Hash,
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 use crate::{
     args::DatabaseArgs,
@@ -15,14 +22,14 @@ use reth_db::{
     Receipts, StorageChangeSet, StorageHistory, StoragesTrie, SyncStage, SyncStageProgress, Tables,
     TransactionBlock, Transactions, TxHashNumber, TxSenders,
 };
-use tracing::error;
+use tracing::info;
 
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db diff` command
 pub struct Command {
     // THE SECOND DATABASE
     /// The path to the data dir for all reth files and subdirectories.
-    #[arg(long, verbatim_doc_comment, global = true)]
+    #[arg(long, verbatim_doc_comment)]
     secondary_datadir: PlatformPath<DataDirPath>,
 
     /// Arguments for the second database
@@ -32,6 +39,10 @@ pub struct Command {
     /// The table name to diff. If not specified, all tables are diffed.
     #[arg(long, verbatim_doc_comment)]
     table: Option<Tables>,
+
+    /// The output directory for the diff report.
+    #[arg(long, verbatim_doc_comment)]
+    output: PlatformPath<PathBuf>,
 }
 
 impl Command {
@@ -50,52 +61,73 @@ impl Command {
             let primary_tx = tool.db.tx()?;
             let secondary_tx = second_db.tx()?;
 
+            let output_dir = self.output.clone();
             match table {
                 Tables::CanonicalHeaders => {
-                    find_diffs::<CanonicalHeaders>(primary_tx, secondary_tx)?
+                    find_diffs::<CanonicalHeaders>(primary_tx, secondary_tx, output_dir)?
                 }
-                Tables::HeaderTD => find_diffs::<HeaderTD>(primary_tx, secondary_tx)?,
-                Tables::HeaderNumbers => find_diffs::<HeaderNumbers>(primary_tx, secondary_tx)?,
-                Tables::Headers => find_diffs::<Headers>(primary_tx, secondary_tx)?,
+                Tables::HeaderTD => find_diffs::<HeaderTD>(primary_tx, secondary_tx, output_dir)?,
+                Tables::HeaderNumbers => {
+                    find_diffs::<HeaderNumbers>(primary_tx, secondary_tx, output_dir)?
+                }
+                Tables::Headers => find_diffs::<Headers>(primary_tx, secondary_tx, output_dir)?,
                 Tables::BlockBodyIndices => {
-                    find_diffs::<BlockBodyIndices>(primary_tx, secondary_tx)?
+                    find_diffs::<BlockBodyIndices>(primary_tx, secondary_tx, output_dir)?
                 }
-                Tables::BlockOmmers => find_diffs::<BlockOmmers>(primary_tx, secondary_tx)?,
+                Tables::BlockOmmers => {
+                    find_diffs::<BlockOmmers>(primary_tx, secondary_tx, output_dir)?
+                }
                 Tables::BlockWithdrawals => {
-                    find_diffs::<BlockWithdrawals>(primary_tx, secondary_tx)?
+                    find_diffs::<BlockWithdrawals>(primary_tx, secondary_tx, output_dir)?
                 }
                 Tables::TransactionBlock => {
-                    find_diffs::<TransactionBlock>(primary_tx, secondary_tx)?
+                    find_diffs::<TransactionBlock>(primary_tx, secondary_tx, output_dir)?
                 }
-                Tables::Transactions => find_diffs::<Transactions>(primary_tx, secondary_tx)?,
-                Tables::TxHashNumber => find_diffs::<TxHashNumber>(primary_tx, secondary_tx)?,
-                Tables::Receipts => find_diffs::<Receipts>(primary_tx, secondary_tx)?,
+                Tables::Transactions => {
+                    find_diffs::<Transactions>(primary_tx, secondary_tx, output_dir)?
+                }
+                Tables::TxHashNumber => {
+                    find_diffs::<TxHashNumber>(primary_tx, secondary_tx, output_dir)?
+                }
+                Tables::Receipts => find_diffs::<Receipts>(primary_tx, secondary_tx, output_dir)?,
                 Tables::PlainAccountState => {
-                    find_diffs::<PlainAccountState>(primary_tx, secondary_tx)?
+                    find_diffs::<PlainAccountState>(primary_tx, secondary_tx, output_dir)?
                 }
                 Tables::PlainStorageState => {
-                    find_diffs::<PlainStorageState>(primary_tx, secondary_tx)?
+                    find_diffs::<PlainStorageState>(primary_tx, secondary_tx, output_dir)?
                 }
-                Tables::Bytecodes => find_diffs::<Bytecodes>(primary_tx, secondary_tx)?,
-                Tables::AccountHistory => find_diffs::<AccountHistory>(primary_tx, secondary_tx)?,
-                Tables::StorageHistory => find_diffs::<StorageHistory>(primary_tx, secondary_tx)?,
+                Tables::Bytecodes => find_diffs::<Bytecodes>(primary_tx, secondary_tx, output_dir)?,
+                Tables::AccountHistory => {
+                    find_diffs::<AccountHistory>(primary_tx, secondary_tx, output_dir)?
+                }
+                Tables::StorageHistory => {
+                    find_diffs::<StorageHistory>(primary_tx, secondary_tx, output_dir)?
+                }
                 Tables::AccountChangeSet => {
-                    find_diffs::<AccountChangeSet>(primary_tx, secondary_tx)?
+                    find_diffs::<AccountChangeSet>(primary_tx, secondary_tx, output_dir)?
                 }
                 Tables::StorageChangeSet => {
-                    find_diffs::<StorageChangeSet>(primary_tx, secondary_tx)?
+                    find_diffs::<StorageChangeSet>(primary_tx, secondary_tx, output_dir)?
                 }
-                Tables::HashedAccount => find_diffs::<HashedAccount>(primary_tx, secondary_tx)?,
-                Tables::HashedStorage => find_diffs::<HashedStorage>(primary_tx, secondary_tx)?,
-                Tables::AccountsTrie => find_diffs::<AccountsTrie>(primary_tx, secondary_tx)?,
-                Tables::StoragesTrie => find_diffs::<StoragesTrie>(primary_tx, secondary_tx)?,
-                Tables::TxSenders => find_diffs::<TxSenders>(primary_tx, secondary_tx)?,
-                Tables::SyncStage => find_diffs::<SyncStage>(primary_tx, secondary_tx)?,
+                Tables::HashedAccount => {
+                    find_diffs::<HashedAccount>(primary_tx, secondary_tx, output_dir)?
+                }
+                Tables::HashedStorage => {
+                    find_diffs::<HashedStorage>(primary_tx, secondary_tx, output_dir)?
+                }
+                Tables::AccountsTrie => {
+                    find_diffs::<AccountsTrie>(primary_tx, secondary_tx, output_dir)?
+                }
+                Tables::StoragesTrie => {
+                    find_diffs::<StoragesTrie>(primary_tx, secondary_tx, output_dir)?
+                }
+                Tables::TxSenders => find_diffs::<TxSenders>(primary_tx, secondary_tx, output_dir)?,
+                Tables::SyncStage => find_diffs::<SyncStage>(primary_tx, secondary_tx, output_dir)?,
                 Tables::SyncStageProgress => {
-                    find_diffs::<SyncStageProgress>(primary_tx, secondary_tx)?
+                    find_diffs::<SyncStageProgress>(primary_tx, secondary_tx, output_dir)?
                 }
                 Tables::PruneCheckpoints => {
-                    find_diffs::<PruneCheckpoints>(primary_tx, secondary_tx)?
+                    find_diffs::<PruneCheckpoints>(primary_tx, secondary_tx, output_dir)?
                 }
             };
         }
@@ -108,65 +140,82 @@ impl Command {
 fn find_diffs<'a, T: Table>(
     primary_tx: impl DbTx<'a>,
     secondary_tx: impl DbTx<'a>,
+    output_dir: impl AsRef<Path>,
 ) -> eyre::Result<()>
 where
     T::Key: Hash,
     T::Value: PartialEq,
 {
+    let table_name = T::NAME;
+
+    info!("Analyzing table {table_name}...");
     let result = find_diffs_advanced::<T>(&primary_tx, &secondary_tx)?;
+    info!("Done analyzing table {table_name}!");
+
+    // Pretty info summary header: newline then header
+    info!("");
+    info!("Diff results for {table_name}:");
+
+    // create directory and open file
+    fs::create_dir_all(output_dir.as_ref())?;
+    let file_name = format!("{table_name}.txt");
+    let mut file = File::create(output_dir.as_ref().join(file_name.clone()))?;
 
     // analyze the result and print some stats
     let discrepancies = result.discrepancies.len();
     let extra_elements = result.extra_elements.len();
 
+    // Make a pretty summary header for the table
+    writeln!(file, "Diff results for {table_name}")?;
+
     if discrepancies > 0 {
-        error!("Found {} discrepancies in table {}", discrepancies, T::NAME);
+        // write to file
+        writeln!(file, "Found {discrepancies} discrepancies in table {table_name}")?;
+
+        // also print to info
+        info!("Found {discrepancies} discrepancies in table {table_name}");
+    } else {
+        // write to file
+        writeln!(file, "No discrepancies found in table {table_name}")?;
+
+        // also print to info
+        info!("No discrepancies found in table {table_name}");
     }
 
     if extra_elements > 0 {
-        error!("Found {} extra elements in table {}", extra_elements, T::NAME);
+        // write to file
+        writeln!(file, "Found {extra_elements} extra elements in table {table_name}")?;
+
+        // also print to info
+        info!("Found {extra_elements} extra elements in table {table_name}");
+    } else {
+        writeln!(file, "No extra elements found in table {table_name}")?;
+
+        // also print to info
+        info!("No extra elements found in table {table_name}");
     }
 
-    for discrepancy in result.discrepancies {
-        error!("Discrepancy: {:?}", discrepancy);
+    info!("Writing diff results for {table_name} to {file_name}...");
+
+    if discrepancies > 0 {
+        writeln!(file, "Discrepancies:")?;
     }
 
-    for extra_element in result.extra_elements {
-        error!("Extra element: {:?}", extra_element);
+    for discrepancy in result.discrepancies.values() {
+        writeln!(file, "{discrepancy:?}")?;
     }
 
+    if extra_elements > 0 {
+        writeln!(file, "Extra elements:")?;
+    }
+
+    for extra_element in result.extra_elements.values() {
+        writeln!(file, "{extra_element:?}")?;
+    }
+
+    let full_file_name = output_dir.as_ref().join(file_name);
+    info!("Done writing diff results for {table_name} to {}", full_file_name.display());
     Ok(())
-}
-
-/// Find diffs for a specific table. This will walk the first table, checking the second table
-/// for each element. If the element is not found, it will be added to the extra elements set.
-// TODO: remove this?
-#[allow(dead_code)]
-fn find_diffs_simple<'a, T: Table>(
-    primary_tx: impl DbTx<'a>,
-    secondary_tx: impl DbTx<'a>,
-) -> eyre::Result<TableDiffResult<T>>
-where
-    T::Key: Hash,
-    T::Value: PartialEq,
-{
-    // initialize the walker for the first table
-    let mut primary_cursor =
-        primary_tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
-    let primary_walker = primary_cursor.walk(None)?;
-
-    let mut secondary_cursor =
-        secondary_tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
-    let mut result = TableDiffResult::<T>::default();
-
-    for entry in primary_walker {
-        let (key, value) = entry?;
-        let secondary_value = secondary_cursor.seek_exact(key.clone())?.map(|(_, value)| value);
-
-        result.try_push_discrepancy(key, Some(value), secondary_value);
-    }
-
-    Ok(result)
 }
 
 /// This diff algorithm is slightly different, it will walk _each_ table, cross-checking for the
@@ -238,10 +287,14 @@ where
 struct TableDiffElement<T: Table> {
     /// The key for the element
     key: T::Key,
-    /// The element in the first table
-    expected: T::Value,
-    /// The element in the second table
-    got: T::Value,
+
+    /// The element from the first table
+    #[allow(dead_code)]
+    first: T::Value,
+
+    /// The element from the second table
+    #[allow(dead_code)]
+    second: T::Value,
 }
 
 /// The diff result for an entire table. If the tables had the same number of elements, there will
@@ -309,14 +362,14 @@ where
         match (first, second) {
             (Some(first), Some(second)) => {
                 if first != second {
-                    self.push_discrepancy(TableDiffElement { key, expected: first, got: second });
+                    self.push_discrepancy(TableDiffElement { key, first, second });
                 }
             }
             (Some(first), None) => {
-                self.push_extra_element(ExtraTableElement::first(key, first));
+                self.push_extra_element(ExtraTableElement::First { key, value: first });
             }
             (None, Some(second)) => {
-                self.push_extra_element(ExtraTableElement::second(key, second));
+                self.push_extra_element(ExtraTableElement::Second { key, value: second });
             }
             (None, None) => {}
         }
@@ -326,23 +379,16 @@ where
 /// A single extra element from a table
 #[derive(Debug)]
 enum ExtraTableElement<T: Table> {
-    /// The extra element is in the first table
+    /// The extra element that is in the first table
+    #[allow(dead_code)]
     First { key: T::Key, value: T::Value },
-    /// The extra element is in the second table
+
+    /// The extra element that is in the second table
+    #[allow(dead_code)]
     Second { key: T::Key, value: T::Value },
 }
 
 impl<T: Table> ExtraTableElement<T> {
-    /// Create a new extra element from the first table
-    fn first(key: T::Key, value: T::Value) -> Self {
-        Self::First { key, value }
-    }
-
-    /// Create a new extra element from the second table
-    fn second(key: T::Key, value: T::Value) -> Self {
-        Self::Second { key, value }
-    }
-
     /// Return the key for the extra element
     fn key(&self) -> &T::Key {
         match self {
