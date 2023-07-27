@@ -315,7 +315,7 @@ impl TxEip4844 {
     #[inline]
     pub fn blob_gas(&self) -> u64 {
         // SAFETY: we don't expect u64::MAX / DATA_GAS_PER_BLOB hashes in a single transaction
-        self.blob_hashes.len() as u64 * DATA_GAS_PER_BLOB
+        self.blob_versioned_hashes.len() as u64 * DATA_GAS_PER_BLOB
     }
 
     /// Calculates a heuristic for the in-memory size of the [TxEip4844] transaction.
