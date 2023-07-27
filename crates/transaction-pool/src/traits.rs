@@ -491,6 +491,12 @@ pub trait PoolTransaction:
     /// This will return `None` for non-EIP1559 transactions
     fn max_priority_fee_per_gas(&self) -> Option<u128>;
 
+    /// Returns the effective tip for this transaction.
+    ///
+    /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
+    /// For legacy transactions: `gas_price - base_fee`.
+    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128>;
+
     /// Returns the transaction's [`TransactionKind`], which is the address of the recipient or
     /// [`TransactionKind::Create`] if the transaction is a contract creation.
     fn kind(&self) -> &TransactionKind;
@@ -597,6 +603,14 @@ impl PoolTransaction for PooledTransaction {
             Transaction::Eip2930(_) => None,
             Transaction::Eip1559(tx) => Some(tx.max_priority_fee_per_gas),
         }
+    }
+
+    /// Returns the effective tip for this transaction.
+    ///
+    /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
+    /// For legacy transactions: `gas_price - base_fee`.
+    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
+        self.transaction.effective_tip_per_gas(base_fee)
     }
 
     /// Returns the transaction's [`TransactionKind`], which is the address of the recipient or
