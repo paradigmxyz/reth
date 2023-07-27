@@ -201,7 +201,7 @@ where
                 receipts.push(
                     receipts_by_block
                         .into_iter()
-                        .map(|receipt| receipt.with_bloom().into())
+                        .map(|receipt| receipt.with_bloom())
                         .collect::<Vec<_>>(),
                 );
             } else {
