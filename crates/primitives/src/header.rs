@@ -211,6 +211,8 @@ impl Header {
         mem::size_of::<H256>() + // mix hash
         mem::size_of::<u64>() + // nonce
         mem::size_of::<Option<u64>>() + // base fee per gas
+        mem::size_of::<Option<u64>>() + // blob gas used
+        mem::size_of::<Option<u64>>() + // excess blob gas
         self.extra_data.len() // extra data
     }
 
