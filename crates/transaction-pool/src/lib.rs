@@ -157,7 +157,7 @@ pub use crate::{
         TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
     },
     error::PoolResult,
-    ordering::{CoinbaseTipOrdering, TransactionOrdering},
+    ordering::{CoinbaseTipOrdering, Priority, TransactionOrdering},
     pool::{
         state::SubPool, AllTransactionsEvents, FullTransactionEvent, TransactionEvent,
         TransactionEvents,

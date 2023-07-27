@@ -4,7 +4,7 @@ use crate::{
     identifier::{SenderIdentifiers, TransactionId},
     pool::txpool::TxPool,
     traits::TransactionOrigin,
-    PoolTransaction, TransactionOrdering, ValidPoolTransaction,
+    PoolTransaction, Priority, TransactionOrdering, ValidPoolTransaction,
 };
 use paste::paste;
 use rand::{
@@ -599,11 +599,15 @@ impl MockTransactionFactory {
 pub struct MockOrdering;
 
 impl TransactionOrdering for MockOrdering {
-    type Priority = U256;
+    type PriorityValue = U256;
     type Transaction = MockTransaction;
 
-    fn priority(&self, transaction: &Self::Transaction, base_fee: u64) -> Self::Priority {
-        U256::from(transaction.effective_tip_per_gas(base_fee).expect("tx has been validated"))
+    fn priority(
+        &self,
+        transaction: &Self::Transaction,
+        base_fee: u64,
+    ) -> Priority<Self::PriorityValue> {
+        transaction.effective_tip_per_gas(base_fee).map(U256::from).into()
     }
 }
 

@@ -1,7 +1,7 @@
 use crate::{
     identifier::TransactionId,
     pool::{best::BestTransactions, size::SizeTracker},
-    TransactionOrdering, ValidPoolTransaction,
+    Priority, TransactionOrdering, ValidPoolTransaction,
 };
 
 use crate::pool::best::BestTransactionsWithBasefee;
@@ -290,7 +290,7 @@ pub(crate) struct PendingTransaction<T: TransactionOrdering> {
     /// Actual transaction.
     pub(crate) transaction: Arc<ValidPoolTransaction<T::Transaction>>,
     /// The priority value assigned by the used `Ordering` function.
-    pub(crate) priority: T::Priority,
+    pub(crate) priority: Priority<T::PriorityValue>,
 }
 
 impl<T: TransactionOrdering> PendingTransaction<T> {
