@@ -2,8 +2,7 @@ use crate::{
     eth::{
         error::{EthApiError, EthResult},
         revm_utils::{
-            clone_into_empty_db, inspect, prepare_call_env, replay_transactions_until,
-            result_output, EvmOverrides,
+            clone_into_empty_db, inspect, replay_transactions_until, result_output, EvmOverrides,
         },
         EthTransactions, TransactionSource,
     },
@@ -266,18 +265,10 @@ where
 
                     // for JS tracing we need to setup all async work before we can start tracing
                     // because JSTracer and all JS types are not Send
-                    let (cfg, block_env, at) = self.inner.eth_api.evm_env_at(at).await?;
+                    let (_, _, at) = self.inner.eth_api.evm_env_at(at).await?;
                     let state = self.inner.eth_api.state_at(at)?;
-                    let mut db = SubState::new(State::new(state));
+                    let db = SubState::new(State::new(state));
                     let has_state_overrides = overrides.has_state();
-                    let env = prepare_call_env(
-                        cfg,
-                        block_env,
-                        call,
-                        self.inner.eth_api.call_gas_limit(),
-                        &mut db,
-                        overrides,
-                    )?;
 
                     // If the caller provided state overrides we need to clone the DB so the js
                     // service has access these modifications
@@ -288,11 +279,17 @@ where
 
                     let to_db_service = self.spawn_js_trace_service(at, maybe_override_db)?;
 
-                    let mut inspector = JsInspector::new(code, config, to_db_service)?;
-                    let (res, env) = inspect(db, env, &mut inspector)?;
+                    let res = self
+                        .inner
+                        .eth_api
+                        .spawn_with_call_at(call, at, overrides, move |db, env| {
+                            let mut inspector = JsInspector::new(code, config, to_db_service)?;
+                            let (res, _) = inspect(db, env.clone(), &mut inspector)?;
+                            Ok(inspector.json_result(res, &env)?)
+                        })
+                        .await?;
 
-                    let result = inspector.json_result(res, &env)?;
-                    Ok(GethTrace::JS(result))
+                    Ok(GethTrace::JS(res))
                 }
             }
         }
