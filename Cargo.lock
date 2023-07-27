@@ -1742,7 +1742,6 @@ dependencies = [
  "reth-rlp",
  "reth-stages",
  "serde",
- "serde_bytes",
  "serde_json",
  "thiserror",
  "tokio",
@@ -5586,7 +5585,14 @@ dependencies = [
 name = "reth-prune"
 version = "0.1.0-alpha.4"
 dependencies = [
+ "assert_matches",
+ "itertools 0.10.5",
+ "rayon",
+ "reth-db",
+ "reth-interfaces",
  "reth-primitives",
+ "reth-provider",
+ "reth-stages",
  "thiserror",
  "tracing",
 ]
@@ -5675,6 +5681,7 @@ dependencies = [
  "jsonwebtoken",
  "pin-project",
  "rand 0.8.5",
+ "rayon",
  "reth-consensus-common",
  "reth-interfaces",
  "reth-metrics",
@@ -5737,6 +5744,7 @@ dependencies = [
  "reth-beacon-consensus",
  "reth-interfaces",
  "reth-ipc",
+ "reth-metrics",
  "reth-network-api",
  "reth-payload-builder",
  "reth-primitives",
@@ -6037,24 +6045,24 @@ dependencies = [
 
 [[package]]
 name = "ruint"
-version = "1.8.0"
-source = "git+https://github.com/paradigmxyz/uint#38f565ff907ccaf2a2c57d395ed7c2b8905ae1ab"
+version = "1.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77e1574d439643c8962edf612a888e7cc5581bcdf36cb64e6bc88466b03b2daa"
 dependencies = [
  "arbitrary",
- "derive_more",
  "primitive-types",
  "proptest",
  "rlp",
  "ruint-macro",
- "rustc_version",
  "serde",
  "thiserror",
 ]
 
 [[package]]
 name = "ruint-macro"
-version = "1.0.2"
-source = "git+https://github.com/paradigmxyz/uint#38f565ff907ccaf2a2c57d395ed7c2b8905ae1ab"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e666a5496a0b2186dbcd0ff6106e29e093c15591bde62c20d3842007c6978a09"
 
 [[package]]
 name = "rustc-demangle"
@@ -6365,15 +6373,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "30e27d1e4fd7659406c492fd6cfaf2066ba8773de45ca75e855590f856dc34a9"
 dependencies = [
  "serde_derive",
-]
-
-[[package]]
-name = "serde_bytes"
-version = "0.11.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "416bda436f9aab92e02c8e10d49a15ddd339cea90b6e340fe51ed97abb548294"
-dependencies = [
- "serde",
 ]
 
 [[package]]
