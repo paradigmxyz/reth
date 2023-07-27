@@ -8,7 +8,7 @@ use reth_eth_wire::{
 };
 use reth_interfaces::p2p::error::RequestResult;
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, PeerId};
-use reth_provider::{BlockReader, HeaderProvider};
+use reth_provider::{BlockReader, HeaderProvider, ReceiptProvider};
 use std::{
     borrow::Borrow,
     future::Future,
@@ -70,7 +70,7 @@ impl<C> EthRequestHandler<C> {
 
 impl<C> EthRequestHandler<C>
 where
-    C: BlockReader + HeaderProvider,
+    C: BlockReader + HeaderProvider + ReceiptProvider,
 {
     /// Returns the list of requested headers
     fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
@@ -184,6 +184,28 @@ where
         }
 
         let _ = response.send(Ok(BlockBodies(bodies)));
+    }
+
+    fn on_receipts_request(
+        &mut self,
+        _peer_id: PeerId,
+        request: GetReceipts,
+        response: oneshot::Sender<RequestResult<Receipts>>,
+    ) {
+        let mut receipts = Vec::new();
+
+        for hash in request.0 {
+            if let Some(mut receipt) =
+                self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
+            {
+                receipt.with_bloom(); // Appeler la méthode with_bloom() pour chaque Receipt individuel
+                receipts.push(receipt);
+            } else {
+                break
+            }
+        }
+
+        let _ = response.send(Ok(Receipts(receipts)));
     }
 }
 
