@@ -285,7 +285,7 @@ where
     Client: StateProviderFactory + Clone + 'static,
 {
     /// Returns a new [Pool] that uses the default [EthTransactionValidator] when validating
-    /// [PooledTransaction]s and ords via [GasCostOrdering]
+    /// [PooledTransaction]s and ords via [CoinbaseTipOrdering]
     ///
     /// # Example
     ///
