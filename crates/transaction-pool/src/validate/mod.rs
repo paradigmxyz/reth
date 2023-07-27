@@ -179,6 +179,14 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.max_fee_per_gas()
     }
 
+    /// Returns the effective tip for this transaction.
+    ///
+    /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
+    /// For legacy transactions: `gas_price - base_fee`.
+    pub fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
+        self.transaction.effective_tip_per_gas(base_fee)
+    }
+
     /// Maximum amount of gas that the transaction is allowed to consume.
     pub fn gas_limit(&self) -> u64 {
         self.transaction.gas_limit()
