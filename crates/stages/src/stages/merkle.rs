@@ -472,11 +472,16 @@ mod tests {
     struct MerkleTestRunner {
         tx: TestTransaction,
         clean_threshold: u64,
+        prune_modes: PruneModes,
     }
 
     impl Default for MerkleTestRunner {
         fn default() -> Self {
-            Self { tx: TestTransaction::default(), clean_threshold: 10000 }
+            Self {
+                tx: TestTransaction::default(),
+                clean_threshold: 10000,
+                prune_modes: PruneModes::default(),
+            }
         }
     }
 
@@ -488,7 +493,7 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            Self::S::Both { clean_threshold: self.clean_threshold }
+            Self::S::Both { clean_threshold: self.clean_threshold, prune_modes: self.prune_modes }
         }
     }
 

@@ -471,11 +471,17 @@ mod tests {
         tx: TestTransaction,
         commit_threshold: u64,
         clean_threshold: u64,
+        prune_modes: PruneModes,
     }
 
     impl Default for StorageHashingTestRunner {
         fn default() -> Self {
-            Self { tx: TestTransaction::default(), commit_threshold: 1000, clean_threshold: 1000 }
+            Self {
+                tx: TestTransaction::default(),
+                commit_threshold: 1000,
+                clean_threshold: 1000,
+                prune_modes: PruneModes::default(),
+            }
         }
     }
 
@@ -490,6 +496,7 @@ mod tests {
             Self::S {
                 commit_threshold: self.commit_threshold,
                 clean_threshold: self.clean_threshold,
+                prune_modes: self.prune_modes,
             }
         }
     }
