@@ -5779,6 +5779,7 @@ dependencies = [
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
+ "reth-rlp",
  "reth-rpc-api",
  "reth-rpc-types",
  "reth-tasks",
@@ -5791,10 +5792,8 @@ dependencies = [
 name = "reth-rpc-types"
 version = "0.1.0-alpha.4"
 dependencies = [
- "assert_matches",
  "jsonrpsee-types",
  "rand 0.8.5",
- "reth-interfaces",
  "reth-primitives",
  "reth-rlp",
  "serde",
