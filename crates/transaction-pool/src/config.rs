@@ -7,6 +7,12 @@ pub const TXPOOL_SUBPOOL_MAX_TXS_DEFAULT: usize = 10_000;
 /// The default maximum allowed size of the given subpool.
 pub const TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT: usize = 20;
 
+// Default price bump (in %) for the transaction pool underpriced check.
+pub(crate) const DEFAULT_PRICE_BUMP: u128 = 10;
+
+// Replace blob price bump (in %) for the transaction pool underpriced check.
+pub(crate) const REPLACE_BLOB_PRICE_BUMP: u128 = 100;
+
 /// Configuration options for the Transaction pool.
 #[derive(Debug, Clone)]
 pub struct PoolConfig {
@@ -55,5 +61,38 @@ impl Default for SubPoolLimit {
             max_txs: TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
             max_size: TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT * 1024 * 1024,
         }
+    }
+}
+
+/// Price bump config (in %) for the transaction pool underpriced check.
+#[derive(Debug, Clone)]
+pub struct PriceBumpConfig {
+    /// Default price bump (in %) for the transaction pool underpriced check.
+    pub default_price_bump: PriceBump,
+    /// Replace blob price bump (in %) for the transaction pool underpriced check.
+    pub replace_blob_tx_price_bump: PriceBump,
+}
+
+impl Default for PriceBumpConfig {
+    fn default() -> Self {
+        Self {
+            default_price_bump: Default::default(),
+            replace_blob_tx_price_bump: PriceBump(REPLACE_BLOB_PRICE_BUMP),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PriceBump(u128);
+
+impl Default for PriceBump {
+    fn default() -> Self {
+        Self(DEFAULT_PRICE_BUMP)
+    }
+}
+
+impl From<PriceBump> for u128 {
+    fn from(value: PriceBump) -> Self {
+        value.0
     }
 }
