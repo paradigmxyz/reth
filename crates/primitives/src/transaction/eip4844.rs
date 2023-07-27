@@ -76,8 +76,6 @@ pub struct TxEip4844 {
 
 impl TxEip4844 {
     /// Returns the effective gas price for the given `base_fee`.
-    ///
-    /// Note: this is the same as [TxEip1559::effective_gas_price].
     pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
         match base_fee {
             None => self.max_fee_per_gas,
