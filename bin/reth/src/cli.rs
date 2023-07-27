@@ -1,5 +1,6 @@
 //! CLI definition and entrypoint to executable
 use crate::{
+    args::utils::genesis_value_parser,
     chain, config, db, debug_cmd,
     dirs::{LogsDir, PlatformPath},
     node, p2p,
@@ -14,9 +15,15 @@ use reth_tracing::{
     BoxedLayer, FileWorkerGuard,
 };
 
+use reth_primitives::ChainSpec;
+use std::sync::Arc;
+
 /// Parse CLI options, set up logging and run the chosen command.
 pub fn run() -> eyre::Result<()> {
-    let opt = Cli::parse();
+    let mut opt = Cli::parse();
+
+    // add network name to logs dir
+    opt.logs.log_directory = opt.logs.log_directory.join(opt.chain.chain.to_string());
 
     let mut layers = vec![reth_tracing::stdout(opt.verbosity.directive())];
     let _guard = opt.logs.layer()?.map(|(layer, guard)| {
@@ -79,6 +86,25 @@ struct Cli {
     /// The command to run
     #[clap(subcommand)]
     command: Commands,
+
+    /// The chain this node is running.
+    ///
+    /// Possible values are either a built-in chain or the path to a chain specification file.
+    ///
+    /// Built-in chains:
+    /// - mainnet
+    /// - goerli
+    /// - sepolia
+    #[arg(
+        long,
+        value_name = "CHAIN_OR_PATH",
+        global = true,
+        verbatim_doc_comment,
+        default_value = "mainnet",
+        value_parser = genesis_value_parser,
+        global = true,
+    )]
+    chain: Arc<ChainSpec>,
 
     #[clap(flatten)]
     logs: Logs,
