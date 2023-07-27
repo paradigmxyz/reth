@@ -2,6 +2,7 @@ use super::access_list::AccessList;
 use crate::{Bytes, ChainId, TransactionKind};
 use reth_codecs::{main_codec, Compact};
 use std::mem;
+
 /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
 #[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
