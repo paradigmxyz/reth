@@ -329,28 +329,6 @@ impl PoolTransaction for MockTransaction {
         }
     }
 
-    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
-        let base_fee = base_fee as u128;
-        let max_fee_per_gas = self.max_fee_per_gas();
-        if max_fee_per_gas < base_fee {
-            return None
-        }
-
-        let fee = max_fee_per_gas - base_fee;
-        if let Some(priority_fee) = self.max_priority_fee_per_gas() {
-            return Some(fee.min(priority_fee))
-        }
-
-        Some(fee)
-    }
-
-    fn priority_fee_or_price(&self) -> u128 {
-        match self {
-            MockTransaction::Legacy { gas_price, .. } => *gas_price,
-            MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } => *max_priority_fee_per_gas,
-        }
-    }
-
     fn gas_limit(&self) -> u64 {
         self.get_gas_limit()
     }
@@ -384,6 +362,13 @@ impl PoolTransaction for MockTransaction {
         }
 
         Some(fee)
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        match self {
+            MockTransaction::Legacy { gas_price, .. } => *gas_price,
+            MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } => *max_priority_fee_per_gas,
+        }
     }
 
     fn kind(&self) -> &TransactionKind {
