@@ -276,7 +276,7 @@ impl<'a> Encodable for ReceiptWithBloomEncoder<'a> {
     fn length(&self) -> usize {
         let mut payload_len = self.receipt_length();
         // account for eip-2718 type prefix and set the list
-        if matches!(self.receipt.tx_type, TxType::EIP1559 | TxType::EIP2930) {
+        if matches!(self.receipt.tx_type, TxType::EIP1559 | TxType::EIP2930 | TxType::EIP4844) {
             payload_len += 1;
             // we include a string header for typed receipts, so include the length here
             payload_len += length_of_length(payload_len);
