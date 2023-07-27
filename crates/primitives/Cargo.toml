@@ -22,7 +22,8 @@ crunchy = { version = "0.2.2", default-features = false, features = ["limit_256"
 ruint = { version = "1.9.0", features = ["primitive-types", "rlp"] }
 
 # Bloom
-fixed-hash = { version = "0.8", default-features = false, features = ["rustc-hex"] }
+# fixed-hash = { version = "0.8", default-features = false, features = ["rustc-hex"] }
+fixed-hash = { git = "https://github.com/paritytech/parity-common.git", rev = "d3a9327124a66e52ca1114bb8640c02c18c134b8", default-features = false, features = ["rustc-hex", "byteorder", "rand"] }
 
 # crypto
 secp256k1 = { workspace = true, default-features = false, features = [
