@@ -1,5 +1,3 @@
-use std::mem;
-
 use crate::{
     compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR},
     keccak256, Address, Bytes, ChainId, TxHash, H256,
@@ -15,6 +13,7 @@ use reth_rlp::{
 };
 use serde::{Deserialize, Serialize};
 pub use signature::Signature;
+use std::mem;
 pub use tx_type::{TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID};
 
 mod access_list;
@@ -265,10 +264,12 @@ pub struct TxEip4844 {
     pub access_list: AccessList,
 
     /// It contains a vector of fixed size hash(32 bytes)
-    pub blob_hashes: Vec<H256>,
+    pub blob_versioned_hashes: Vec<H256>,
 
     /// Max fee per data gas
-    pub max_fee_per_blob: u128,
+    ///
+    /// aka BlobFeeCap
+    pub max_fee_per_blob_gas: u128,
 
     /// Input has two uses depending if transaction is Create or Call (if `to` field is None or
     /// Some). pub init: An unlimited size byte array specifying the
@@ -291,8 +292,8 @@ impl TxEip4844 {
         mem::size_of::<u128>() + // value
         self.access_list.size() + // access_list
         self.input.len() +  // input
-        self.blob_hashes.capacity() * mem::size_of::<H256>() + // blob hashes size
-        mem::size_of::<u128>() // blob fee cap
+        self.blob_versioned_hashes.capacity() * mem::size_of::<H256>() + // blob hashes size
+        mem::size_of::<u128>() // max_fee_per_data_gas
     }
 }
 
