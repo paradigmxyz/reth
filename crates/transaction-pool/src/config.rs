@@ -7,11 +7,11 @@ pub const TXPOOL_SUBPOOL_MAX_TXS_DEFAULT: usize = 10_000;
 /// The default maximum allowed size of the given subpool.
 pub const TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT: usize = 20;
 
-// Default price bump (in %) for the transaction pool underpriced check.
-pub(crate) const DEFAULT_PRICE_BUMP: u128 = 10;
+/// Default price bump (in %) for the transaction pool underpriced check.
+pub const DEFAULT_PRICE_BUMP: u128 = 10;
 
-// Replace blob price bump (in %) for the transaction pool underpriced check.
-pub(crate) const REPLACE_BLOB_PRICE_BUMP: u128 = 100;
+/// Replace blob price bump (in %) for the transaction pool underpriced check.
+pub const REPLACE_BLOB_PRICE_BUMP: u128 = 100;
 
 /// Configuration options for the Transaction pool.
 #[derive(Debug, Clone)]
@@ -24,6 +24,8 @@ pub struct PoolConfig {
     pub queued_limit: SubPoolLimit,
     /// Max number of executable transaction slots guaranteed per account
     pub max_account_slots: usize,
+    /// Price bump (in %) for the transaction pool underpriced check.
+    pub price_bump: u128,
 }
 
 impl Default for PoolConfig {
@@ -33,6 +35,7 @@ impl Default for PoolConfig {
             basefee_limit: Default::default(),
             queued_limit: Default::default(),
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
+            price_bump: PriceBumpConfig::default().default_price_bump,
         }
     }
 }
@@ -68,31 +71,16 @@ impl Default for SubPoolLimit {
 #[derive(Debug, Clone)]
 pub struct PriceBumpConfig {
     /// Default price bump (in %) for the transaction pool underpriced check.
-    pub default_price_bump: PriceBump,
+    pub default_price_bump: u128,
     /// Replace blob price bump (in %) for the transaction pool underpriced check.
-    pub replace_blob_tx_price_bump: PriceBump,
+    pub replace_blob_tx_price_bump: u128,
 }
 
 impl Default for PriceBumpConfig {
     fn default() -> Self {
         Self {
-            default_price_bump: Default::default(),
-            replace_blob_tx_price_bump: PriceBump(REPLACE_BLOB_PRICE_BUMP),
+            default_price_bump: DEFAULT_PRICE_BUMP,
+            replace_blob_tx_price_bump: REPLACE_BLOB_PRICE_BUMP,
         }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct PriceBump(u128);
-
-impl Default for PriceBump {
-    fn default() -> Self {
-        Self(DEFAULT_PRICE_BUMP)
-    }
-}
-
-impl From<PriceBump> for u128 {
-    fn from(value: PriceBump) -> Self {
-        value.0
     }
 }
