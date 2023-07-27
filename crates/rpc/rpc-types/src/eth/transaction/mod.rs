@@ -123,6 +123,7 @@ impl Transaction {
 
                 (Some(U128::from(gas_price)), Some(U128::from(signed_tx.max_fee_per_gas())))
             }
+            TxType::EIP4844 => todo!(),
         };
 
         let chain_id = signed_tx.chain_id().map(U64::from);
