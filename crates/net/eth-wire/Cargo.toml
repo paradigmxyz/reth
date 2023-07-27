@@ -10,12 +10,12 @@ repository.workspace = true
 
 [dependencies]
 bytes.workspace = true
-thiserror = { workspace = true }
+thiserror.workspace = true
 serde = { workspace = true, optional = true }
 
 # reth
 reth-codecs = { path = "../../storage/codecs" }
-reth-primitives = { workspace = true }
+reth-primitives.workspace = true
 reth-ecies = { path = "../ecies" }
 reth-rlp = { workspace = true, features = [
     "alloc",
@@ -24,20 +24,20 @@ reth-rlp = { workspace = true, features = [
     "ethereum-types",
     "smol_str",
 ] }
-reth-metrics = { workspace = true }
+reth-metrics.workspace = true
 
 # used for Chain and builders
 ethers-core = { workspace = true, default-features = false }
 
 tokio = { workspace = true, features = ["full"] }
 tokio-util = { workspace = true, features = ["io", "codec"] }
-futures = { workspace = true }
-tokio-stream = { workspace = true }
-pin-project = { workspace = true }
-tracing = { workspace = true }
+futures.workspace = true
+tokio-stream.workspace = true
+pin-project.workspace = true
+tracing.workspace = true
 snap = "1.0.5"
 smol_str = "0.2"
-async-trait = { workspace = true }
+async-trait.workspace = true
 
 # arbitrary utils
 arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
@@ -53,7 +53,7 @@ test-fuzz = "4"
 tokio-util = { workspace = true, features = ["io", "codec"] }
 hex-literal = "0.3"
 hex = "0.4"
-rand = { workspace = true }
+rand.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
 arbitrary = { version = "1.1.7", features = ["derive"] }

@@ -110,7 +110,7 @@ impl NetworkArgs {
 #[derive(Debug, Args)]
 pub struct DiscoveryArgs {
     /// Disable the discovery service.
-    #[arg(short, long)]
+    #[arg(short, long, default_value_if("dev", "true", "true"))]
     pub disable_discovery: bool,
 
     /// Disable the DNS discovery.

@@ -77,9 +77,6 @@ codegen-units = 1
 incremental = false
 
 [patch.crates-io]
-# patched for quantity U256 responses <https://github.com/recmo/uint/issues/224>
-ruint = { git = "https://github.com/paradigmxyz/uint" }
-
 revm = { git = "https://github.com/bluealloy/revm/", branch = "release/v25" }
 revm-primitives = { git = "https://github.com/bluealloy/revm/", branch = "release/v25" }
 
@@ -118,6 +115,7 @@ serde_json = "1.0.94"
 serde = { version = "1.0", default-features = false }
 rand = "0.8.5"
 strum = "0.25"
+rayon = "1.7"
 
 ### proc-macros
 proc-macro2 = "1.0"

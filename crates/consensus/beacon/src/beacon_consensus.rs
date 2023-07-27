@@ -2,10 +2,10 @@
 use reth_consensus_common::validation;
 use reth_interfaces::consensus::{Consensus, ConsensusError};
 use reth_primitives::{
-    constants::MAXIMUM_EXTRA_DATA_SIZE, Chain, ChainSpec, Hardfork, Header, SealedBlock,
-    SealedHeader, EMPTY_OMMER_ROOT, U256,
+    constants::{ALLOWED_FUTURE_BLOCK_TIME_SECONDS, MAXIMUM_EXTRA_DATA_SIZE},
+    Chain, ChainSpec, Hardfork, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT, U256,
 };
-use std::sync::Arc;
+use std::{sync::Arc, time::SystemTime};
 
 /// Ethereum beacon consensus
 ///
@@ -59,6 +59,14 @@ impl Consensus for BeaconConsensus {
                 return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty)
             }
 
+            // Post-merge, the consensus layer is expected to perform checks such that the block
+            // timestamp is a function of the slot. This is different from pre-merge, where blocks
+            // are only allowed to be in the future (compared to the system's clock) by a certain
+            // threshold.
+            //
+            // Block validation with respect to the parent should ensure that the block timestamp
+            // is greater than its parent timestamp.
+
             // validate header extradata for all networks post merge
             validate_header_extradata(header)?;
 
@@ -68,6 +76,17 @@ impl Consensus for BeaconConsensus {
             // TODO Consensus checks for old blocks:
             //  * difficulty, mix_hash & nonce aka PoW stuff
             // low priority as syncing is done in reverse order
+
+            // Check if timestamp is in future. Clock can drift but this can be consensus issue.
+            let present_timestamp =
+                SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+
+            if header.timestamp > present_timestamp + ALLOWED_FUTURE_BLOCK_TIME_SECONDS {
+                return Err(ConsensusError::TimestampIsInFuture {
+                    timestamp: header.timestamp,
+                    present_timestamp,
+                })
+            }
 
             // Goerli exception:
             //  * If the network is goerli pre-merge, ignore the extradata check, since we do not

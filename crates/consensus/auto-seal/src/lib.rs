@@ -27,7 +27,7 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
-    proofs, Address, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec,
+    proofs, Address, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Bloom, ChainSpec,
     Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, EMPTY_OMMER_ROOT, H256,
     U256,
 };
@@ -115,13 +115,13 @@ where
         pool: Pool,
         to_engine: UnboundedSender<BeaconEngineMessage>,
         canon_state_notification: CanonStateNotificationSender,
+        mode: MiningMode,
     ) -> Self {
         let latest_header = client
             .latest_header()
             .ok()
             .flatten()
             .unwrap_or_else(|| chain_spec.sealed_genesis_header());
-        let mode = MiningMode::interval(std::time::Duration::from_secs(1));
 
         Self {
             storage: Storage::new(latest_header),
@@ -292,7 +292,7 @@ impl StorageInner {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
         let (post_state, gas_used) =
-            executor.execute_transactions(block, U256::ZERO, Some(senders.clone()))?;
+            executor.execute_transactions(block, U256::ZERO, Some(senders))?;
 
         // apply post block changes
         let post_state = executor.apply_post_block_changes(block, U256::ZERO, post_state)?;
@@ -315,6 +315,8 @@ impl StorageInner {
         } else {
             let receipts_with_bloom =
                 receipts.iter().map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
+            header.logs_bloom =
+                receipts_with_bloom.iter().fold(Bloom::zero(), |bloom, r| bloom | r.bloom);
             proofs::calculate_receipt_root(&receipts_with_bloom)
         };
 

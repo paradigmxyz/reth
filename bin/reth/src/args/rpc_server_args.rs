@@ -56,7 +56,7 @@ pub(crate) const RPC_DEFAULT_MAX_TRACING_REQUESTS: u32 = 25;
 #[command(next_help_heading = "RPC")]
 pub struct RpcServerArgs {
     /// Enable the HTTP-RPC server
-    #[arg(long)]
+    #[arg(long, default_value_if("dev", "true", "true"))]
     pub http: bool,
 
     /// Http server address to listen on
@@ -120,7 +120,7 @@ pub struct RpcServerArgs {
     pub rpc_max_request_size: u32,
 
     /// Set the maximum RPC response payload size for both HTTP and WS in megabytes.
-    #[arg(long, default_value_t = RPC_DEFAULT_MAX_RESPONSE_SIZE_MB)]
+    #[arg(long, visible_alias = "--rpc.returndata.limit", default_value_t = RPC_DEFAULT_MAX_RESPONSE_SIZE_MB)]
     pub rpc_max_response_size: u32,
 
     /// Set the the maximum concurrent subscriptions per connection.

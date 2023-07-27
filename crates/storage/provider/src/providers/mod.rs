@@ -2,9 +2,9 @@ use crate::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider,
-    PostStateDataProvider, ProviderError, ReceiptProvider, ReceiptProviderIdExt,
-    StageCheckpointReader, StateProviderBox, StateProviderFactory, TransactionsProvider,
-    WithdrawalsProvider,
+    PostStateDataProvider, ProviderError, PruneCheckpointReader, ReceiptProvider,
+    ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox, StateProviderFactory,
+    TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, models::StoredBlockBodyIndices};
 use reth_interfaces::{
@@ -15,8 +15,8 @@ use reth_interfaces::{
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
-    BlockNumberOrTag, BlockWithSenders, ChainInfo, ChainSpec, Header, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
+    BlockNumberOrTag, BlockWithSenders, ChainInfo, ChainSpec, Header, PruneCheckpoint, PrunePart,
+    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
@@ -435,6 +435,16 @@ where
 
     fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &Header) -> Result<()> {
         self.database.provider()?.fill_cfg_env_with_header(cfg, header)
+    }
+}
+
+impl<DB, Tree> PruneCheckpointReader for BlockchainProvider<DB, Tree>
+where
+    DB: Database,
+    Tree: Send + Sync,
+{
+    fn get_prune_checkpoint(&self, part: PrunePart) -> Result<Option<PruneCheckpoint>> {
+        self.database.provider()?.get_prune_checkpoint(part)
     }
 }
 

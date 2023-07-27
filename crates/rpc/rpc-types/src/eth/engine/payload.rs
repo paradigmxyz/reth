@@ -46,6 +46,10 @@ pub struct ExecutionPayloadEnvelope {
     /// The expected value to be received by the feeRecipient in wei
     #[serde(rename = "blockValue")]
     pub block_value: U256,
+    //
+    // // TODO(mattsse): for V3
+    // #[serde(rename = "blobsBundle", skip_serializing_if = "Option::is_none")]
+    // pub blobs_bundle: Option<BlobsBundleV1>,
 }
 
 impl ExecutionPayloadEnvelope {
@@ -187,6 +191,14 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
     }
 }
 
+/// This includes all bundled blob related data of an executed payload.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlobsBundleV1 {
+    pub commitments: Vec<Bytes>,
+    pub proofs: Vec<Bytes>,
+    pub blobs: Vec<Bytes>,
+}
+
 /// Error that can occur when handling payloads.
 #[derive(thiserror::Error, Debug)]
 pub enum PayloadError {
@@ -255,6 +267,11 @@ pub struct PayloadAttributes {
     /// See <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#payloadattributesv2>
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub withdrawals: Option<Vec<Withdrawal>>,
+    /// Root of the parent beacon block enabled with V3.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#payloadattributesv3>
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_beacon_block_root: Option<H256>,
 }
 
 /// This structure contains the result of processing a payload or fork choice update.
@@ -335,25 +352,25 @@ impl From<PayloadError> for PayloadStatusEnum {
 #[serde(tag = "status", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PayloadStatusEnum {
     /// VALID is returned by the engine API in the following calls:
-    ///   - newPayloadV1:       if the payload was already known or was just validated and executed
-    ///   - forkchoiceUpdateV1: if the chain accepted the reorg (might ignore if it's stale)
+    ///   - newPayload:       if the payload was already known or was just validated and executed
+    ///   - forkchoiceUpdate: if the chain accepted the reorg (might ignore if it's stale)
     Valid,
 
     /// INVALID is returned by the engine API in the following calls:
-    ///   - newPayloadV1:       if the payload failed to execute on top of the local chain
-    ///   - forkchoiceUpdateV1: if the new head is unknown, pre-merge, or reorg to it fails
+    ///   - newPayload:       if the payload failed to execute on top of the local chain
+    ///   - forkchoiceUpdate: if the new head is unknown, pre-merge, or reorg to it fails
     Invalid {
         #[serde(rename = "validationError")]
         validation_error: String,
     },
 
     /// SYNCING is returned by the engine API in the following calls:
-    ///   - newPayloadV1:       if the payload was accepted on top of an active sync
-    ///   - forkchoiceUpdateV1: if the new head was seen before, but not part of the chain
+    ///   - newPayload:       if the payload was accepted on top of an active sync
+    ///   - forkchoiceUpdate: if the new head was seen before, but not part of the chain
     Syncing,
 
     /// ACCEPTED is returned by the engine API in the following calls:
-    ///   - newPayloadV1: if the payload was accepted, but not processed (side chain)
+    ///   - newPayload: if the payload was accepted, but not processed (side chain)
     Accepted,
 }
 

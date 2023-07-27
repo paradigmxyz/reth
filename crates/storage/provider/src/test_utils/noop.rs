@@ -2,17 +2,18 @@ use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider, PostState,
-    ReceiptProviderIdExt, StageCheckpointReader, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRootProvider, TransactionsProvider, WithdrawalsProvider,
+    PruneCheckpointReader, ReceiptProviderIdExt, StageCheckpointReader, StateProvider,
+    StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_interfaces::Result;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, Bytecode, Bytes,
-    ChainInfo, ChainSpec, Header, Receipt, SealedBlock, SealedHeader, StorageKey, StorageValue,
-    TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, H256,
-    KECCAK_EMPTY, MAINNET, U256,
+    ChainInfo, ChainSpec, Header, PruneCheckpoint, PrunePart, Receipt, SealedBlock, SealedHeader,
+    StorageKey, StorageValue, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash,
+    TxNumber, H256, KECCAK_EMPTY, MAINNET, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::{ops::RangeBounds, sync::Arc};
@@ -357,6 +358,12 @@ impl WithdrawalsProvider for NoopProvider {
         _id: BlockHashOrNumber,
         _timestamp: u64,
     ) -> Result<Option<Vec<reth_primitives::Withdrawal>>> {
+        Ok(None)
+    }
+}
+
+impl PruneCheckpointReader for NoopProvider {
+    fn get_prune_checkpoint(&self, _part: PrunePart) -> Result<Option<PruneCheckpoint>> {
         Ok(None)
     }
 }

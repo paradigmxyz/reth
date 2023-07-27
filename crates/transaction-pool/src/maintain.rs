@@ -83,7 +83,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         let info = BlockInfo {
             last_seen_block_hash: latest.hash,
             last_seen_block_number: latest.number,
-            pending_basefee: latest.next_block_base_fee().unwrap_or_default() as u128,
+            pending_basefee: latest.next_block_base_fee().unwrap_or_default(),
         };
         pool.set_block_info(info);
     }
@@ -205,8 +205,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 }
 
                 // base fee for the next block: `new_tip+1`
-                let pending_block_base_fee =
-                    new_tip.next_block_base_fee().unwrap_or_default() as u128;
+                let pending_block_base_fee = new_tip.next_block_base_fee().unwrap_or_default();
 
                 // we know all changed account in the new chain
                 let new_changed_accounts: HashSet<_> =
@@ -282,7 +281,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 let tip = blocks.tip();
 
                 // base fee for the next block: `tip+1`
-                let pending_block_base_fee = tip.next_block_base_fee().unwrap_or_default() as u128;
+                let pending_block_base_fee = tip.next_block_base_fee().unwrap_or_default();
 
                 let first_block = blocks.first();
                 trace!(
