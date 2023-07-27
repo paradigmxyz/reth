@@ -279,16 +279,17 @@ where
 
                     let to_db_service = self.spawn_js_trace_service(at, maybe_override_db)?;
 
-                    Ok(GethTrace::JS(
-                        self.inner
-                            .eth_api
-                            .spawn_with_call_at(call, at, overrides, move |db, env| {
-                                let mut inspector = JsInspector::new(code, config, to_db_service)?;
-                                let (res, _) = inspect(db, env.clone(), &mut inspector)?;
-                                Ok(inspector.json_result(res, &env)?)
-                            })
-                            .await?,
-                    ))
+                    let res = self
+                        .inner
+                        .eth_api
+                        .spawn_with_call_at(call, at, overrides, move |db, env| {
+                            let mut inspector = JsInspector::new(code, config, to_db_service)?;
+                            let (res, _) = inspect(db, env.clone(), &mut inspector)?;
+                            Ok(inspector.json_result(res, &env)?)
+                        })
+                        .await?;
+
+                    Ok(GethTrace::JS(res))
                 }
             }
         }
