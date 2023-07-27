@@ -4,6 +4,7 @@
 //! files.
 
 use crate::eth::{
+    api::pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin},
     cache::EthStateCache,
     error::{EthApiError, EthResult},
     gas_oracle::GasPriceOracle,
@@ -20,7 +21,11 @@ use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
 use revm_primitives::{BlockEnv, CfgEnv};
-use std::{future::Future, sync::Arc, time::Instant};
+use std::{
+    future::Future,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::sync::{oneshot, Mutex};
 
 mod block;
@@ -32,7 +37,7 @@ mod sign;
 mod state;
 mod transactions;
 
-use crate::eth::api::pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
+use crate::TracingCallPool;
 pub use transactions::{EthTransactions, TransactionSource};
 
 /// `Eth` API trait.
@@ -83,6 +88,8 @@ where
         network: Network,
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Provider>,
+        gas_cap: impl Into<GasCap>,
+        tracing_call_pool: TracingCallPool,
     ) -> Self {
         Self::with_spawner(
             provider,
@@ -90,18 +97,23 @@ where
             network,
             eth_cache,
             gas_oracle,
+            gas_cap.into().into(),
             Box::<TokioTaskExecutor>::default(),
+            tracing_call_pool,
         )
     }
 
     /// Creates a new, shareable instance.
+    #[allow(clippy::too_many_arguments)]
     pub fn with_spawner(
         provider: Provider,
         pool: Pool,
         network: Network,
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Provider>,
+        gas_cap: u64,
         task_spawner: Box<dyn TaskSpawner>,
+        tracing_call_pool: TracingCallPool,
     ) -> Self {
         // get the block number of the latest block
         let latest_block = provider
@@ -118,9 +130,11 @@ where
             signers: Default::default(),
             eth_cache,
             gas_oracle,
+            gas_cap,
             starting_block: U256::from(latest_block),
             task_spawner,
             pending_block: Default::default(),
+            tracing_call_pool,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -153,6 +167,11 @@ where
     /// Returns the gas oracle frontend
     pub(crate) fn gas_oracle(&self) -> &GasPriceOracle<Provider> {
         &self.inner.gas_oracle
+    }
+
+    /// Returns the configured gas limit cap for `eth_call` and tracing related calls
+    pub fn gas_cap(&self) -> u64 {
+        self.inner.gas_cap
     }
 
     /// Returns the inner `Provider`
@@ -211,7 +230,7 @@ impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
-    Network: Send + Sync + 'static,
+    Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Configures the [CfgEnv] and [BlockEnv] for the pending block
     ///
@@ -252,24 +271,41 @@ where
 
         // no pending block from the CL yet, so we need to build it ourselves via txpool
         self.on_blocking_task(|this| async move {
-            let PendingBlockEnv { cfg: _, block_env, origin } = pending;
-            let lock = this.inner.pending_block.lock().await;
+            let mut lock = this.inner.pending_block.lock().await;
             let now = Instant::now();
-            // this is guaranteed to be the `latest` header
-            let parent_header = origin.into_header();
 
             // check if the block is still good
-            if let Some(pending) = lock.as_ref() {
-                if block_env.number.to::<u64>() == pending.block.number &&
-                    pending.block.parent_hash == parent_header.parent_hash &&
-                    now <= pending.expires_at
+            if let Some(pending_block) = lock.as_ref() {
+                // this is guaranteed to be the `latest` header
+                if pending.block_env.number.to::<u64>() == pending_block.block.number &&
+                    pending.origin.header().hash == pending_block.block.parent_hash &&
+                    now <= pending_block.expires_at
                 {
-                    return Ok(Some(pending.block.clone()))
+                    return Ok(Some(pending_block.block.clone()))
                 }
             }
 
-            // TODO(mattsse): actually build the pending block
-            Ok(None)
+            // if we're currently syncing, we're unable to build a pending block
+            if this.network().is_syncing() {
+                return Ok(None)
+            }
+
+            // we rebuild the block
+            let pending_block = match pending.build_block(this.provider(), this.pool()) {
+                Ok(block) => block,
+                Err(err) => {
+                    tracing::debug!(target = "rpc", "Failed to build pending block: {:?}", err);
+                    return Ok(None)
+                }
+            };
+
+            let now = Instant::now();
+            *lock = Some(PendingBlock {
+                block: pending_block.clone(),
+                expires_at: now + Duration::from_secs(3),
+            });
+
+            Ok(Some(pending_block))
         })
         .await
     }
@@ -340,6 +376,35 @@ where
     }
 }
 
+/// The default gas limit for eth_call and adjacent calls.
+///
+/// This is different from the default to regular 30M block gas limit
+/// [ETHEREUM_BLOCK_GAS_LIMIT](reth_primitives::constants::ETHEREUM_BLOCK_GAS_LIMIT) to allow for
+/// more complex calls.
+pub const RPC_DEFAULT_GAS_CAP: GasCap = GasCap(50_000_000);
+
+/// The wrapper type for gas limit
+#[derive(Debug, Clone, Copy)]
+pub struct GasCap(u64);
+
+impl Default for GasCap {
+    fn default() -> Self {
+        RPC_DEFAULT_GAS_CAP
+    }
+}
+
+impl From<u64> for GasCap {
+    fn from(gas_cap: u64) -> Self {
+        Self(gas_cap)
+    }
+}
+
+impl From<GasCap> for u64 {
+    fn from(gas_cap: GasCap) -> Self {
+        gas_cap.0
+    }
+}
+
 /// Container type `EthApi`
 struct EthApiInner<Provider, Pool, Network> {
     /// The transaction pool.
@@ -354,10 +419,14 @@ struct EthApiInner<Provider, Pool, Network> {
     eth_cache: EthStateCache,
     /// The async gas oracle frontend for gas price suggestions
     gas_oracle: GasPriceOracle<Provider>,
+    /// Maximum gas limit for `eth_call` and call tracing RPC methods.
+    gas_cap: u64,
     /// The block number at which the node started
     starting_block: U256,
     /// The type that can spawn tasks which would otherwise block.
     task_spawner: Box<dyn TaskSpawner>,
     /// Cached pending block if any
     pending_block: Mutex<Option<PendingBlock>>,
+    /// A pool dedicated to tracing calls
+    tracing_call_pool: TracingCallPool,
 }

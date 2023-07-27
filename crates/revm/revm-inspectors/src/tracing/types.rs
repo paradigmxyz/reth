@@ -1,6 +1,6 @@
 //! Types for representing call trace items.
 
-use crate::tracing::utils::convert_memory;
+use crate::tracing::{config::TraceStyle, utils::convert_memory};
 use reth_primitives::{abi::decode_revert_reason, bytes::Bytes, Address, H256, U256};
 use reth_rpc_types::trace::{
     geth::{CallFrame, CallLogFrame, GethDefaultTracingOptions, StructLog},
@@ -159,10 +159,32 @@ impl CallTrace {
         self.status as u8 >= InstructionResult::Revert as u8
     }
 
+    // Returns true if the status code is a revert
+    pub(crate) fn is_revert(&self) -> bool {
+        self.status == InstructionResult::Revert
+    }
+
     /// Returns the error message if it is an erroneous result.
-    pub(crate) fn as_error(&self) -> Option<String> {
+    pub(crate) fn as_error(&self, kind: TraceStyle) -> Option<String> {
+        // See also <https://github.com/ethereum/go-ethereum/blob/34d507215951fb3f4a5983b65e127577989a6db8/eth/tracers/native/call_flat.go#L39-L55>
         self.is_error().then(|| match self.status {
-            InstructionResult::Revert => "Reverted".to_string(),
+            InstructionResult::Revert => {
+                if kind.is_parity() { "Reverted" } else { "execution reverted" }.to_string()
+            }
+            InstructionResult::OutOfGas | InstructionResult::MemoryOOG => {
+                if kind.is_parity() { "Out of gas" } else { "out of gas" }.to_string()
+            }
+            InstructionResult::OpcodeNotFound => {
+                if kind.is_parity() { "Bad instruction" } else { "invalid opcode" }.to_string()
+            }
+            InstructionResult::StackOverflow => "Out of stack".to_string(),
+            InstructionResult::InvalidJump => {
+                if kind.is_parity() { "Bad jump destination" } else { "invalid jump destination" }
+                    .to_string()
+            }
+            InstructionResult::PrecompileError => {
+                if kind.is_parity() { "Built-in failed" } else { "precompiled failed" }.to_string()
+            }
             status => format!("{:?}", status),
         })
     }
@@ -323,15 +345,16 @@ impl CallTraceNode {
     /// Converts this node into a parity `TransactionTrace`
     pub(crate) fn parity_transaction_trace(&self, trace_address: Vec<usize>) -> TransactionTrace {
         let action = self.parity_action();
-        let output = self.parity_trace_output();
-        let error = self.trace.as_error();
-        TransactionTrace {
-            action,
-            error,
-            result: Some(output),
-            trace_address,
-            subtraces: self.children.len(),
-        }
+        let result = if action.is_selfdestruct() ||
+            (self.trace.is_error() && !self.trace.is_revert())
+        {
+            // if the trace is a selfdestruct or an error that is not a revert, the result is None
+            None
+        } else {
+            Some(self.parity_trace_output())
+        };
+        let error = self.trace.as_error(TraceStyle::Parity);
+        TransactionTrace { action, error, result, trace_address, subtraces: self.children.len() }
     }
 
     /// Returns the `Output` for a parity trace
@@ -402,7 +425,8 @@ impl CallTraceNode {
         // we need to populate error and revert reason
         if !self.trace.success {
             call_frame.revert_reason = decode_revert_reason(self.trace.output.clone());
-            call_frame.error = self.trace.as_error();
+            // Note: the call tracer mimics parity's trace transaction and geth maps errors to parity style error messages, <https://github.com/ethereum/go-ethereum/blob/34d507215951fb3f4a5983b65e127577989a6db8/eth/tracers/native/call_flat.go#L39-L55>
+            call_frame.error = self.trace.as_error(TraceStyle::Parity);
         }
 
         if include_logs && !self.logs.is_empty() {

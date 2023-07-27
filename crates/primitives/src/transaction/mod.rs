@@ -1,7 +1,6 @@
-use std::mem;
-
 use crate::{
     compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR},
+    constants::eip4844::DATA_GAS_PER_BLOB,
     keccak256, Address, Bytes, ChainId, TxHash, H256,
 };
 pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
@@ -15,6 +14,7 @@ use reth_rlp::{
 };
 use serde::{Deserialize, Serialize};
 pub use signature::Signature;
+use std::mem;
 pub use tx_type::{TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID};
 
 mod access_list;
@@ -166,12 +166,16 @@ pub struct TxEip1559 {
     /// As ethereum circulation is around 120mil eth as of 2022 that is around
     /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
     /// 340282366920938463463374607431768211455
+    ///
+    /// This is also known as `GasFeeCap`
     pub max_fee_per_gas: u128,
     /// Max Priority fee that transaction is paying
     ///
     /// As ethereum circulation is around 120mil eth as of 2022 that is around
     /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
     /// 340282366920938463463374607431768211455
+    ///
+    /// This is also known as `GasTipCap`
     pub max_priority_fee_per_gas: u128,
     /// The 160-bit address of the message call’s recipient or, for a contract creation
     /// transaction, ∅, used here to denote the only member of B0 ; formally Tt.
@@ -215,17 +219,154 @@ impl TxEip1559 {
     }
 }
 
+/// [EIP-4844 Blob Transaction](https://eips.ethereum.org/EIPS/eip-4844#blob-transaction)
+///
+/// A transaction with blob hashes and max blob fee
+#[main_codec]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct TxEip4844 {
+    /// Added as EIP-pub 155: Simple replay attack protection
+    pub chain_id: u64,
+    /// A scalar value equal to the number of transactions sent by the sender; formally Tn.
+    pub nonce: u64,
+    /// A scalar value equal to the maximum
+    /// amount of gas that should be used in executing
+    /// this transaction. This is paid up-front, before any
+    /// computation is done and may not be increased
+    /// later; formally Tg.
+    pub gas_limit: u64,
+    /// A scalar value equal to the maximum
+    /// amount of gas that should be used in executing
+    /// this transaction. This is paid up-front, before any
+    /// computation is done and may not be increased
+    /// later; formally Tg.
+    ///
+    /// As ethereum circulation is around 120mil eth as of 2022 that is around
+    /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
+    /// 340282366920938463463374607431768211455
+    ///
+    /// This is also known as `GasFeeCap`
+    pub max_fee_per_gas: u128,
+    /// Max Priority fee that transaction is paying
+    ///
+    /// As ethereum circulation is around 120mil eth as of 2022 that is around
+    /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
+    /// 340282366920938463463374607431768211455
+    ///
+    /// This is also known as `GasTipCap`
+    pub max_priority_fee_per_gas: u128,
+    /// The 160-bit address of the message call’s recipient or, for a contract creation
+    /// transaction, ∅, used here to denote the only member of B0 ; formally Tt.
+    pub to: TransactionKind,
+    /// A scalar value equal to the number of Wei to
+    /// be transferred to the message call’s recipient or,
+    /// in the case of contract creation, as an endowment
+    /// to the newly created account; formally Tv.
+    ///
+    /// As ethereum circulation is around 120mil eth as of 2022 that is around
+    /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
+    /// 340282366920938463463374607431768211455
+    pub value: u128,
+    /// The accessList specifies a list of addresses and storage keys;
+    /// these addresses and storage keys are added into the `accessed_addresses`
+    /// and `accessed_storage_keys` global sets (introduced in EIP-2929).
+    /// A gas cost is charged, though at a discount relative to the cost of
+    /// accessing outside the list.
+    pub access_list: AccessList,
+
+    /// It contains a vector of fixed size hash(32 bytes)
+    pub blob_versioned_hashes: Vec<H256>,
+
+    /// Max fee per data gas
+    ///
+    /// aka BlobFeeCap
+    pub max_fee_per_blob_gas: u128,
+
+    /// Input has two uses depending if transaction is Create or Call (if `to` field is None or
+    /// Some). pub init: An unlimited size byte array specifying the
+    /// EVM-code for the account initialisation procedure CREATE,
+    /// data: An unlimited size byte array specifying the
+    /// input data of the message call, formally Td.
+    pub input: Bytes,
+}
+
+impl TxEip4844 {
+    /// Returns the effective gas price for the given `base_fee`.
+    ///
+    /// Note: this is the same as [TxEip1559::effective_gas_price].
+    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        match base_fee {
+            None => self.max_fee_per_gas,
+            Some(base_fee) => {
+                // if the tip is greater than the max priority fee per gas, set it to the max
+                // priority fee per gas + base fee
+                let tip = self.max_fee_per_gas.saturating_sub(base_fee as u128);
+                if tip > self.max_priority_fee_per_gas {
+                    self.max_priority_fee_per_gas + base_fee as u128
+                } else {
+                    // otherwise return the max fee per gas
+                    self.max_fee_per_gas
+                }
+            }
+        }
+    }
+
+    /// Returns the total gas for all blobs in this transaction.
+    #[inline]
+    pub fn blob_gas(&self) -> u64 {
+        // SAFETY: we don't expect u64::MAX / DATA_GAS_PER_BLOB hashes in a single transaction
+        self.blob_versioned_hashes.len() as u64 * DATA_GAS_PER_BLOB
+    }
+
+    /// Calculates a heuristic for the in-memory size of the [TxEip4844] transaction.
+    #[inline]
+    pub fn size(&self) -> usize {
+        mem::size_of::<ChainId>() + // chain_id
+        mem::size_of::<u64>() + // nonce
+        mem::size_of::<u64>() + // gas_limit
+        mem::size_of::<u128>() + // max_fee_per_gas
+        mem::size_of::<u128>() + // max_priority_fee_per_gas
+        self.to.size() + // to
+        mem::size_of::<u128>() + // value
+        self.access_list.size() + // access_list
+        self.input.len() +  // input
+        self.blob_versioned_hashes.capacity() * mem::size_of::<H256>() + // blob hashes size
+        mem::size_of::<u128>() // max_fee_per_data_gas
+    }
+}
+
 /// A raw transaction.
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
 #[derive_arbitrary(compact)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Transaction {
-    /// Legacy transaction.
+    /// Legacy transaction (type `0x0`).
+    ///
+    /// Traditional Ethereum transactions, containing parameters `nonce`, `gasPrice`, `gasLimit`,
+    /// `to`, `value`, `data`, `v`, `r`, and `s`.
+    ///
+    /// These transactions do not utilize access lists nor do they incorporate EIP-1559 fee market
+    /// changes.
     Legacy(TxLegacy),
-    /// Transaction with an [`AccessList`] ([EIP-2930](https://eips.ethereum.org/EIPS/eip-2930)).
+    /// Transaction with an [`AccessList`] ([EIP-2930](https://eips.ethereum.org/EIPS/eip-2930)), type `0x1`.
+    ///
+    /// The `accessList` specifies an array of addresses and storage keys that the transaction
+    /// plans to access, enabling gas savings on cross-contract calls by pre-declaring the accessed
+    /// contract and storage slots.
     Eip2930(TxEip2930),
-    /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
+    /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)), type `0x2`.
+    ///
+    /// Unlike traditional transactions, EIP-1559 transactions use an in-protocol, dynamically
+    /// changing base fee per gas, adjusted at each block to manage network congestion.
+    ///
+    /// - `maxPriorityFeePerGas`, specifying the maximum fee above the base fee the sender is
+    ///   willing to pay
+    /// - `maxFeePerGas`, setting the maximum total fee the sender is willing to pay.
+    ///
+    /// The base fee is burned, while the priority fee is paid to the miner who includes the
+    /// transaction, incentivizing miners to include transactions with higher priority fees per
+    /// gas.
     Eip1559(TxEip1559),
 }
 
@@ -462,7 +603,7 @@ impl Transaction {
     ///
     /// This is different than the `max_priority_fee_per_gas` method, which returns `None` for
     /// non-EIP-1559 transactions.
-    pub(crate) fn priority_fee_or_price(&self) -> u128 {
+    pub fn priority_fee_or_price(&self) -> u128 {
         match self {
             Transaction::Legacy(TxLegacy { gas_price, .. }) |
             Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
@@ -746,7 +887,7 @@ impl TxEip1559 {
             Some(base_fee) => {
                 // if the tip is greater than the max priority fee per gas, set it to the max
                 // priority fee per gas + base fee
-                let tip = self.max_fee_per_gas - base_fee as u128;
+                let tip = self.max_fee_per_gas.saturating_sub(base_fee as u128);
                 if tip > self.max_priority_fee_per_gas {
                     self.max_priority_fee_per_gas + base_fee as u128
                 } else {

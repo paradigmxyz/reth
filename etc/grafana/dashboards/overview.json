@@ -27,7 +27,7 @@
       "type": "grafana",
       "id": "grafana",
       "name": "Grafana",
-      "version": "9.5.3"
+      "version": "10.0.2"
     },
     {
       "type": "panel",
@@ -100,7 +100,7 @@
       "panels": [],
       "repeat": "instance",
       "repeatDirection": "h",
-      "title": "Overview ($instance)",
+      "title": "Overview",
       "type": "row"
     },
     {
@@ -159,7 +159,7 @@
         "showThresholdLabels": false,
         "showThresholdMarkers": true
       },
-      "pluginVersion": "9.5.3",
+      "pluginVersion": "10.0.2",
       "targets": [
         {
           "datasource": {
@@ -226,7 +226,7 @@
         "showUnfilled": true,
         "valueMode": "color"
       },
-      "pluginVersion": "9.5.3",
+      "pluginVersion": "10.0.2",
       "targets": [
         {
           "datasource": {
@@ -441,7 +441,7 @@
       "panels": [],
       "repeat": "instance",
       "repeatDirection": "h",
-      "title": "Database ($instance)",
+      "title": "Database",
       "type": "row"
     },
     {
@@ -609,7 +609,7 @@
           "unit": "percentunit"
         }
       },
-      "pluginVersion": "9.5.3",
+      "pluginVersion": "10.0.2",
       "targets": [
         {
           "datasource": {
@@ -1006,7 +1006,7 @@
         },
         "showHeader": true
       },
-      "pluginVersion": "9.5.3",
+      "pluginVersion": "10.0.2",
       "targets": [
         {
           "datasource": {
@@ -1038,7 +1038,7 @@
       "panels": [],
       "repeat": "instance",
       "repeatDirection": "h",
-      "title": "Stage: Execution ($instance)",
+      "title": "Stage: Execution",
       "type": "row"
     },
     {
@@ -1179,7 +1179,7 @@
       "panels": [],
       "repeat": "instance",
       "repeatDirection": "h",
-      "title": "Networking ($instance)",
+      "title": "Networking",
       "type": "row"
     },
     {
@@ -1694,6 +1694,99 @@
       "type": "piechart"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Number of dials that resulted in a peer being added to the peerset",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 14,
+        "x": 8,
+        "y": 60
+      },
+      "id": 103,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_network_total_dial_successes{instance=~\"$instance\"}",
+          "legendFormat": "Total Dial Successes",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Total Dial Success",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1705,7 +1798,7 @@
       "panels": [],
       "repeat": "instance",
       "repeatDirection": "h",
-      "title": "Downloader: Headers ($instance)",
+      "title": "Downloader: Headers",
       "type": "row"
     },
     {
@@ -2097,7 +2190,7 @@
       "panels": [],
       "repeat": "instance",
       "repeatDirection": "h",
-      "title": "Downloader: Bodies ($instance)",
+      "title": "Downloader: Bodies",
       "type": "row"
     },
     {
@@ -2792,7 +2885,7 @@
       "panels": [],
       "repeat": "instance",
       "repeatDirection": "h",
-      "title": "Transaction Pool ($instance)",
+      "title": "Transaction Pool",
       "type": "row"
     },
     {
@@ -3428,7 +3521,7 @@
       "panels": [],
       "repeat": "instance",
       "repeatDirection": "h",
-      "title": "Blockchain Tree ($instance)",
+      "title": "Blockchain Tree",
       "type": "row"
     },
     {
@@ -3725,7 +3818,7 @@
       "panels": [],
       "repeat": "instance",
       "repeatDirection": "h",
-      "title": "Engine API ($instance)",
+      "title": "Engine API",
       "type": "row"
     },
     {
@@ -4031,7 +4124,7 @@
       "panels": [],
       "repeat": "instance",
       "repeatDirection": "h",
-      "title": "Payload Builder ($instance)",
+      "title": "Payload Builder",
       "type": "row"
     },
     {
@@ -4786,8 +4879,8 @@
         },
         "definition": "query_result(up)",
         "hide": 0,
-        "includeAll": true,
-        "multi": true,
+        "includeAll": false,
+        "multi": false,
         "name": "instance",
         "options": [],
         "query": {
@@ -4810,6 +4903,6 @@
   "timezone": "",
   "title": "reth",
   "uid": "2k8BXz24x",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }

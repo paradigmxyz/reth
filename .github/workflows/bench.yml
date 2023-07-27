@@ -1,6 +1,8 @@
 on:
   pull_request:
   merge_group:
+  push:
+    branches: [main]
 
 env:
   RUSTFLAGS: -D warnings
@@ -13,7 +15,8 @@ concurrency:
 name: bench
 jobs:
   iai:
-    runs-on: ubuntu-20.04
+    runs-on:
+      group: Reth
     # Only run benchmarks in merge groups
     if: github.event_name != 'pull_request'
     steps:
@@ -60,15 +63,15 @@ jobs:
   # Checks that benchmarks not run in CI compile
   bench-check:
     name: check
-    runs-on: ubuntu-20.04
+    runs-on:
+      group: Reth
     steps:
       - uses: actions/checkout@v3
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Check if benchmarks build
-        run: cargo bench --all --all-features --all-targets --no-run
-
+        run: cargo check --workspace --benches --all-features
 
   bench-success:
     if: always()

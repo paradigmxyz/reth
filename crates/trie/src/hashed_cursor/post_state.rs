@@ -261,12 +261,7 @@ where
         // Take the next account from the post state with the key greater than or equal to the
         // sought key.
         let mut post_state_entry = self.post_state.accounts.get(self.post_state_account_index);
-        while let Some((k, _)) = post_state_entry {
-            if k >= &key {
-                // Found the next entry that is equal or greater than the key.
-                break
-            }
-
+        while post_state_entry.map(|(k, _)| k < &key).unwrap_or_default() {
             self.post_state_account_index += 1;
             post_state_entry = self.post_state.accounts.get(self.post_state_account_index);
         }
@@ -322,15 +317,9 @@ where
             db_entry = self.cursor.next()?;
         }
 
-        // Take the next account from the post state with the key greater than or equal to the
-        // sought key.
+        // Take the next account from the post state with the key greater than the last sought key.
         let mut post_state_entry = self.post_state.accounts.get(self.post_state_account_index);
-        while let Some((k, _)) = post_state_entry {
-            if k > last_account {
-                // Found the next entry in the post state.
-                break
-            }
-
+        while post_state_entry.map(|(k, _)| k <= last_account).unwrap_or_default() {
             self.post_state_account_index += 1;
             post_state_entry = self.post_state.accounts.get(self.post_state_account_index);
         }
@@ -389,7 +378,6 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
     /// Given the next post state and database entries, return the smallest of the two.
     /// If the storage keys are the same, the post state entry is given precedence.
     fn next_slot(
-        &self,
         post_state_item: Option<&(H256, U256)>,
         db_item: Option<StorageEntry>,
     ) -> Option<StorageEntry> {
@@ -451,16 +439,11 @@ where
         // Attempt to find the account's storage in post state.
         let mut post_state_entry = None;
         if let Some(storage) = self.post_state.storages.get(&account) {
-            debug_assert!(storage.sorted, "`HashStorage` must be pre-sorted");
+            debug_assert!(storage.sorted, "`HashedStorage` must be pre-sorted");
 
             post_state_entry = storage.non_zero_valued_storage.get(self.post_state_storage_index);
 
-            while let Some((slot, _)) = post_state_entry {
-                if slot >= &subkey {
-                    // Found the next entry that is equal or greater than the key.
-                    break
-                }
-
+            while post_state_entry.map(|(slot, _)| slot < &subkey).unwrap_or_default() {
                 self.post_state_storage_index += 1;
                 post_state_entry =
                     storage.non_zero_valued_storage.get(self.post_state_storage_index);
@@ -494,7 +477,7 @@ where
         };
 
         // Compare two entries and return the lowest.
-        let result = self.next_slot(post_state_entry, db_entry);
+        let result = Self::next_slot(post_state_entry, db_entry);
         self.last_slot = result.as_ref().map(|entry| entry.key);
         Ok(result)
     }
@@ -509,7 +492,7 @@ where
         let account = self.account.expect("`seek` must be called first");
 
         let last_slot = match self.last_slot.as_ref() {
-            Some(account) => account,
+            Some(slot) => slot,
             None => return Ok(None), // no previous entry was found
         };
 
@@ -519,14 +502,12 @@ where
             // If post state was given precedence, move the cursor forward.
             let mut db_entry = self.cursor.seek_by_key_subkey(account, *last_slot)?;
 
-            // If the entry was already returned, move to the next.
-            if db_entry.as_ref().map(|entry| &entry.key == last_slot).unwrap_or_default() {
-                db_entry = self.cursor.next_dup_val()?;
-            }
-
+            // If the entry was already returned or is zero-values, move to the next.
             while db_entry
                 .as_ref()
-                .map(|entry| self.is_slot_zero_valued(&account, &entry.key))
+                .map(|entry| {
+                    &entry.key == last_slot || self.is_slot_zero_valued(&account, &entry.key)
+                })
                 .unwrap_or_default()
             {
                 db_entry = self.cursor.next_dup_val()?;
@@ -538,16 +519,10 @@ where
         // Attempt to find the account's storage in post state.
         let mut post_state_entry = None;
         if let Some(storage) = self.post_state.storages.get(&account) {
-            debug_assert!(storage.sorted, "`HashStorage` must be pre-sorted");
+            debug_assert!(storage.sorted, "`HashedStorage` must be pre-sorted");
 
             post_state_entry = storage.non_zero_valued_storage.get(self.post_state_storage_index);
-
-            while let Some((k, _)) = post_state_entry {
-                if k > last_slot {
-                    // Found the next entry.
-                    break
-                }
-
+            while post_state_entry.map(|(slot, _)| slot <= last_slot).unwrap_or_default() {
                 self.post_state_storage_index += 1;
                 post_state_entry =
                     storage.non_zero_valued_storage.get(self.post_state_storage_index);
@@ -555,7 +530,7 @@ where
         }
 
         // Compare two entries and return the lowest.
-        let result = self.next_slot(post_state_entry, db_entry);
+        let result = Self::next_slot(post_state_entry, db_entry);
         self.last_slot = result.as_ref().map(|entry| entry.key);
         Ok(result)
     }
@@ -885,8 +860,7 @@ mod tests {
         let tx = db.tx().unwrap();
         let factory = HashedPostStateCursorFactory::new(&tx, &hashed_post_state);
         let expected =
-            [(address, db_storage.into_iter().chain(post_state_storage.into_iter()).collect())]
-                .into_iter();
+            [(address, db_storage.into_iter().chain(post_state_storage).collect())].into_iter();
         assert_storage_cursor_order(&factory, expected);
     }
 

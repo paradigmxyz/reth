@@ -190,6 +190,7 @@ mod tests {
     };
     use std::collections::HashMap;
 
+    #[allow(clippy::type_complexity)]
     fn collect_table_entries<DB, T>(
         tx: &<DB as DatabaseGAT<'_>>::TX,
     ) -> Result<Vec<(T::Key, T::Value)>, InitDatabaseError>
@@ -268,7 +269,7 @@ mod tests {
                 ..Default::default()
             },
             hardforks: BTreeMap::default(),
-            fork_timestamps: ForkTimestamps { shanghai: None },
+            fork_timestamps: ForkTimestamps::default(),
             genesis_hash: None,
             paris_block_and_final_difficulty: None,
         });

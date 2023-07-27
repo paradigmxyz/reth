@@ -10,24 +10,24 @@ description = "Implementations of various block downloaders"
 
 [dependencies]
 # reth
-reth-interfaces = { workspace = true }
-reth-primitives = { workspace = true }
+reth-interfaces.workspace = true
+reth-primitives.workspace = true
 reth-db = { path = "../../storage/db" }
-reth-tasks = { workspace = true }
-reth-metrics = { workspace = true }
+reth-tasks.workspace = true
+reth-metrics.workspace = true
 
 # async
-futures = { workspace = true }
-futures-util = { workspace = true }
-pin-project = { workspace = true }
+futures.workspace = true
+futures-util.workspace = true
+pin-project.workspace = true
 tokio = { workspace = true, features = ["sync"] }
-tokio-stream = { workspace = true }
+tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["codec"] }
 
 # misc
-tracing = { workspace = true }
-rayon = "1.6.0"
-thiserror = { workspace = true }
+tracing.workspace = true
+rayon.workspace = true
+thiserror.workspace = true
 
 # optional deps for the test-utils feature
 reth-rlp = { workspace = true, optional = true }
@@ -41,7 +41,7 @@ reth-tracing = { path = "../../tracing" }
 
 assert_matches = "1.5.0"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-reth-rlp = { workspace = true }
+reth-rlp.workspace = true
 itertools = "0.10"
 
 tempfile = "3.3"
