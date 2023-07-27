@@ -43,6 +43,7 @@ use revm_primitives::{
 use std::sync::Arc;
 use tokio::sync::{mpsc, AcquireError, OwnedSemaphorePermit};
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+use crate::eth::revm_utils::inspect_and_return_db;
 
 /// `debug` API implementation.
 ///
@@ -262,13 +263,15 @@ where
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
                         let mut inspector = TracingInspector::new(TracingInspectorConfig::from_geth_config(&config));
 
-                        let (res, _, db) = self
+                        let frame = self
                             .inner
                             .eth_api
-                            .inspect_call_at_and_return_state(call, at, overrides, &mut inspector)
+                            .spawn_with_call_at(call, at, overrides, move |db, env| {
+                                let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
+                                let frame = inspector.into_geth_builder().geth_prestate_traces(&res, prestate_config, &db)?;
+                                Ok(frame)
+                            })
                             .await?;
-
-                        let frame = inspector.into_geth_builder().geth_prestate_traces(&res, prestate_config, &db)?;
                         return Ok(frame.into())
                     }
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),

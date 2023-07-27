@@ -161,14 +161,14 @@ impl GethTraceBuilder {
     pub fn geth_prestate_traces<DB>(
         &self,
         ResultAndState { state, .. }: &ResultAndState,
-        PreStateConfig { diff_mode }: PreStateConfig,
+        prestate_config: PreStateConfig,
         db: DB,
     ) -> Result<PreStateFrame, DB::Error>
         where DB: DatabaseRef {
 
         let account_diffs: Vec<_> = state.into_iter().map(|(addr, acc)| (*addr, &acc.info)).collect();
 
-        if diff_mode.unwrap_or_default() {
+        if prestate_config.is_diff_mode(){
             let mut prestate = PreStateMode::default();
             for (addr, _) in account_diffs {
                 let db_acc = db.basic(addr)?.unwrap_or_default();
@@ -209,15 +209,11 @@ impl GethTraceBuilder {
     fn update_storage_from_trace(
         &self,
         account_states: &mut BTreeMap<Address, AccountState>,
-        post_value: bool
+        post_value: bool,
     ) {
-        for node in self.iter_traceable_nodes() {
+        for node in self.nodes.iter() {
             node.geth_update_account_storage(account_states, post_value);
         }
-    }
-
-    fn iter_traceable_nodes(&self) -> impl Iterator<Item = &CallTraceNode> {
-        self.nodes.iter().filter(|node| !node.is_precompile())
     }
 }
 

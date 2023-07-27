@@ -47,6 +47,10 @@ pub struct PreStateConfig {
     pub diff_mode: Option<bool>,
 }
 
+impl PreStateConfig {
+    pub fn is_diff_mode(&self) -> bool { self.diff_mode.unwrap_or_default() }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,5 +89,12 @@ mod tests {
             PreStateFrame::Diff(DiffMode { pre: _pre, post: _post }) => {}
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn test_is_diff_mode() {
+        assert!(PreStateConfig { diff_mode: Some(true) }.is_diff_mode());
+        assert!(!PreStateConfig { diff_mode: Some(false) }.is_diff_mode());
+        assert!(!PreStateConfig { diff_mode: None }.is_diff_mode());
     }
 }
