@@ -24,7 +24,9 @@ impl PruningArgs {
                 parts: PruneModes {
                     sender_recovery: Some(PruneMode::Distance(128)),
                     transaction_lookup: None,
-                    receipts: Some(PruneMode::Distance(128)),
+                    // Beacon Deposit Contract deployment block
+                    // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
+                    receipts: Some(PruneMode::Before(11052984)),
                     account_history: Some(PruneMode::Distance(128)),
                     storage_history: Some(PruneMode::Distance(128)),
                 },
