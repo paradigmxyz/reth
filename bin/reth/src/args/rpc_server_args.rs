@@ -108,8 +108,8 @@ pub struct RpcServerArgs {
     pub auth_addr: Option<IpAddr>,
 
     /// Auth server port to listen on
-    #[arg(long = "authrpc.port")]
-    pub auth_port: Option<u16>,
+    #[arg(long = "authrpc.port", default_value_t = constants::DEFAULT_AUTH_PORT)]
+    pub auth_port: u16,
 
     /// Path to a JWT secret to use for authenticated RPC endpoints
     #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false)]
@@ -358,7 +358,7 @@ impl RpcServerArgs {
     {
         let socket_address = SocketAddr::new(
             self.auth_addr.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)),
-            self.auth_port.unwrap_or(constants::DEFAULT_AUTH_PORT),
+            self.auth_port,
         );
 
         reth_rpc_builder::auth::launch(
@@ -459,7 +459,7 @@ impl RpcServerArgs {
     fn auth_server_config(&self, jwt_secret: JwtSecret) -> Result<AuthServerConfig, RpcError> {
         let address = SocketAddr::new(
             self.auth_addr.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)),
-            self.auth_port.unwrap_or(constants::DEFAULT_AUTH_PORT),
+            self.auth_port,
         );
 
         Ok(AuthServerConfig::builder(jwt_secret).socket_addr(address).build())
