@@ -8,7 +8,7 @@ use reth_primitives::{PruneMode, PruneModes};
 #[derive(Debug, Args, PartialEq, Default)]
 #[command(next_help_heading = "Pruning")]
 pub struct PruningArgs {
-    /// Enable full node. Only the most recent 128 block states are stored. This flag takes
+    /// Run full node. Only the most recent 128 block states are stored. This flag takes
     /// priority over pruning configuration in reth.toml.
     // TODO(alexey): unhide when pruning is ready for production use
     #[arg(long, hide = true, default_value_t = false)]
