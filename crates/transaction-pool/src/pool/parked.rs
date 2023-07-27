@@ -310,7 +310,7 @@ impl_ord_wrapper!(QueuedOrd);
 impl<T: PoolTransaction> Ord for QueuedOrd<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         // Higher price is better
-        self.priority_fee_or_price().cmp(&self.priority_fee_or_price()).then_with(||
+        self.max_fee_per_gas().cmp(&self.max_fee_per_gas()).then_with(||
             // Lower timestamp is better
             other.timestamp.cmp(&self.timestamp))
     }
