@@ -1,5 +1,6 @@
 use crate::{
     compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR},
+    constants::eip4844::DATA_GAS_PER_BLOB,
     keccak256, Address, Bytes, ChainId, TxHash, H256,
 };
 pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
@@ -165,12 +166,16 @@ pub struct TxEip1559 {
     /// As ethereum circulation is around 120mil eth as of 2022 that is around
     /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
     /// 340282366920938463463374607431768211455
+    ///
+    /// This is also known as `GasFeeCap`
     pub max_fee_per_gas: u128,
     /// Max Priority fee that transaction is paying
     ///
     /// As ethereum circulation is around 120mil eth as of 2022 that is around
     /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
     /// 340282366920938463463374607431768211455
+    ///
+    /// This is also known as `GasTipCap`
     pub max_priority_fee_per_gas: u128,
     /// The 160-bit address of the message call’s recipient or, for a contract creation
     /// transaction, ∅, used here to denote the only member of B0 ; formally Tt.
@@ -214,6 +219,8 @@ impl TxEip1559 {
     }
 }
 
+/// [EIP-4844 Blob Transaction](https://eips.ethereum.org/EIPS/eip-4844#blob-transaction)
+///
 /// A transaction with blob hashes and max blob fee
 #[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -237,12 +244,16 @@ pub struct TxEip4844 {
     /// As ethereum circulation is around 120mil eth as of 2022 that is around
     /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
     /// 340282366920938463463374607431768211455
+    ///
+    /// This is also known as `GasFeeCap`
     pub max_fee_per_gas: u128,
     /// Max Priority fee that transaction is paying
     ///
     /// As ethereum circulation is around 120mil eth as of 2022 that is around
     /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
     /// 340282366920938463463374607431768211455
+    ///
+    /// This is also known as `GasTipCap`
     pub max_priority_fee_per_gas: u128,
     /// The 160-bit address of the message call’s recipient or, for a contract creation
     /// transaction, ∅, used here to denote the only member of B0 ; formally Tt.
@@ -280,6 +291,33 @@ pub struct TxEip4844 {
 }
 
 impl TxEip4844 {
+    /// Returns the effective gas price for the given `base_fee`.
+    ///
+    /// Note: this is the same as [TxEip1559::effective_gas_price].
+    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        match base_fee {
+            None => self.max_fee_per_gas,
+            Some(base_fee) => {
+                // if the tip is greater than the max priority fee per gas, set it to the max
+                // priority fee per gas + base fee
+                let tip = self.max_fee_per_gas.saturating_sub(base_fee as u128);
+                if tip > self.max_priority_fee_per_gas {
+                    self.max_priority_fee_per_gas + base_fee as u128
+                } else {
+                    // otherwise return the max fee per gas
+                    self.max_fee_per_gas
+                }
+            }
+        }
+    }
+
+    /// Returns the total gas for all blobs in this transaction.
+    #[inline]
+    pub fn blob_gas(&self) -> u64 {
+        // SAFETY: we don't expect u64::MAX / DATA_GAS_PER_BLOB hashes in a single transaction
+        self.blob_versioned_hashes.len() as u64 * DATA_GAS_PER_BLOB
+    }
+
     /// Calculates a heuristic for the in-memory size of the [TxEip4844] transaction.
     #[inline]
     pub fn size(&self) -> usize {
@@ -849,7 +887,7 @@ impl TxEip1559 {
             Some(base_fee) => {
                 // if the tip is greater than the max priority fee per gas, set it to the max
                 // priority fee per gas + base fee
-                let tip = self.max_fee_per_gas - base_fee as u128;
+                let tip = self.max_fee_per_gas.saturating_sub(base_fee as u128);
                 if tip > self.max_priority_fee_per_gas {
                     self.max_priority_fee_per_gas + base_fee as u128
                 } else {
