@@ -329,14 +329,25 @@ impl PoolTransaction for MockTransaction {
         }
     }
 
-    fn gas_cost(&self) -> U256 {
+    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
+        let base_fee = base_fee as u128;
+        let max_fee_per_gas = self.max_fee_per_gas();
+        if max_fee_per_gas < base_fee {
+            return None
+        }
+
+        let fee = max_fee_per_gas - base_fee;
+        if let Some(priority_fee) = self.max_priority_fee_per_gas() {
+            return Some(fee.min(priority_fee))
+        }
+
+        Some(fee)
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
         match self {
-            MockTransaction::Legacy { gas_price, gas_limit, .. } => {
-                U256::from(*gas_limit) * U256::from(*gas_price)
-            }
-            MockTransaction::Eip1559 { max_fee_per_gas, gas_limit, .. } => {
-                U256::from(*gas_limit) * U256::from(*max_fee_per_gas)
-            }
+            MockTransaction::Legacy { gas_price, .. } => *gas_price,
+            MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } => *max_priority_fee_per_gas,
         }
     }
 
@@ -591,8 +602,8 @@ impl TransactionOrdering for MockOrdering {
     type Priority = U256;
     type Transaction = MockTransaction;
 
-    fn priority(&self, transaction: &Self::Transaction) -> Self::Priority {
-        transaction.gas_cost()
+    fn priority(&self, transaction: &Self::Transaction, base_fee: u64) -> Self::Priority {
+        U256::from(transaction.effective_tip_per_gas(base_fee).expect("tx has been validated"))
     }
 }
 
@@ -634,5 +645,5 @@ fn test_mock_priority() {
     let o = MockOrdering;
     let lo = MockTransaction::eip1559().with_gas_limit(100_000);
     let hi = lo.next().inc_price();
-    assert!(o.priority(&hi) > o.priority(&lo));
+    assert!(o.priority(&hi, 0) > o.priority(&lo, 0));
 }

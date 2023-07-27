@@ -157,7 +157,7 @@ pub use crate::{
         TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
     },
     error::PoolResult,
-    ordering::{GasCostOrdering, TransactionOrdering},
+    ordering::{CoinbaseTipOrdering, TransactionOrdering},
     pool::{
         state::SubPool, AllTransactionsEvents, FullTransactionEvent, TransactionEvent,
         TransactionEvents,
@@ -280,7 +280,7 @@ where
 }
 
 impl<Client>
-    Pool<EthTransactionValidator<Client, PooledTransaction>, GasCostOrdering<PooledTransaction>>
+    Pool<EthTransactionValidator<Client, PooledTransaction>, CoinbaseTipOrdering<PooledTransaction>>
 where
     Client: StateProviderFactory + Clone + 'static,
 {
@@ -305,7 +305,7 @@ where
         validator: EthTransactionValidator<Client, PooledTransaction>,
         config: PoolConfig,
     ) -> Self {
-        Self::new(validator, GasCostOrdering::default(), config)
+        Self::new(validator, CoinbaseTipOrdering::default(), config)
     }
 }
 

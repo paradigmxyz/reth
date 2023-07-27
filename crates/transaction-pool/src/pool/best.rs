@@ -133,7 +133,7 @@ mod tests {
         for nonce in 0..num_tx {
             let tx = tx.clone().rng_hash().with_nonce(nonce);
             let valid_tx = f.validated(tx);
-            pool.add_transaction(Arc::new(valid_tx));
+            pool.add_transaction(Arc::new(valid_tx), 0);
         }
 
         let mut best = pool.best();
@@ -159,7 +159,7 @@ mod tests {
         for nonce in 0..num_tx {
             let tx = tx.clone().rng_hash().with_nonce(nonce);
             let valid_tx = f.validated(tx);
-            pool.add_transaction(Arc::new(valid_tx));
+            pool.add_transaction(Arc::new(valid_tx), 0);
         }
 
         let mut best = pool.best();

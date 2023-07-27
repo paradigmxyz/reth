@@ -17,36 +17,39 @@ pub trait TransactionOrdering: Send + Sync + 'static {
     type Transaction: PoolTransaction;
 
     /// Returns the priority score for the given transaction.
-    fn priority(&self, transaction: &Self::Transaction) -> Self::Priority;
+    fn priority(&self, transaction: &Self::Transaction, base_fee: u64) -> Self::Priority;
 }
 
 /// Default ordering for the pool.
 ///
-/// The transactions are ordered by their gas cost. The higher the gas cost,
-/// the higher the priority of this transaction is.
+/// The transactions are ordered by their coinbase tip.
+/// The higher the coinbase tip is, the higher the priority of the transaction.
 #[derive(Debug)]
 #[non_exhaustive]
-pub struct GasCostOrdering<T>(PhantomData<T>);
+pub struct CoinbaseTipOrdering<T>(PhantomData<T>);
 
-impl<T> TransactionOrdering for GasCostOrdering<T>
+impl<T> TransactionOrdering for CoinbaseTipOrdering<T>
 where
     T: PoolTransaction + 'static,
 {
     type Priority = U256;
     type Transaction = T;
 
-    fn priority(&self, transaction: &Self::Transaction) -> Self::Priority {
-        transaction.gas_cost()
+    /// Source: <https://github.com/ethereum/go-ethereum/blob/7f756dc1185d7f1eeeacb1d12341606b7135f9ea/core/txpool/legacypool/list.go#L469-L482>.
+    ///
+    /// NOTE: The implementation is incomplete for missing base fee.
+    fn priority(&self, transaction: &Self::Transaction, base_fee: u64) -> Self::Priority {
+        U256::from(transaction.effective_tip_per_gas(base_fee).expect("tx has been validated"))
     }
 }
 
-impl<T> Default for GasCostOrdering<T> {
+impl<T> Default for CoinbaseTipOrdering<T> {
     fn default() -> Self {
         Self(Default::default())
     }
 }
 
-impl<T> Clone for GasCostOrdering<T> {
+impl<T> Clone for CoinbaseTipOrdering<T> {
     fn clone(&self) -> Self {
         Self::default()
     }

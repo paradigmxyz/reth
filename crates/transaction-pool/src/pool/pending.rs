@@ -59,6 +59,18 @@ impl<T: TransactionOrdering> PendingPool<T> {
         }
     }
 
+    /// Clear all transactions from the pool without resetting other values.
+    /// Used for atomic reordering during basefee update.
+    ///
+    /// # Returns
+    ///
+    /// Returns all transactions by id.
+    fn clear_transactions(&mut self) -> BTreeMap<TransactionId, Arc<PendingTransaction<T>>> {
+        self.independent_transactions.clear();
+        self.all.clear();
+        std::mem::take(&mut self.by_id)
+    }
+
     /// Returns an iterator over all transactions that are _currently_ ready.
     ///
     /// 1. The iterator _always_ returns transaction in order: It never returns a transaction with
@@ -103,13 +115,14 @@ impl<T: TransactionOrdering> PendingPool<T> {
     pub(crate) fn best_with_unlocked(
         &self,
         unlocked: Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
+        base_fee: u64,
     ) -> BestTransactions<T> {
         let mut best = self.best();
         let mut submission_id = self.submission_id;
         for tx in unlocked {
             submission_id += 1;
             debug_assert!(!best.all.contains_key(tx.id()), "transaction already included");
-            let priority = self.ordering.priority(&tx.transaction);
+            let priority = self.ordering.priority(&tx.transaction, base_fee);
             let tx_id = *tx.id();
             let transaction = PendingTransactionRef { submission_id, transaction: tx, priority };
             if best.ancestor(&tx_id).is_none() {
@@ -129,37 +142,50 @@ impl<T: TransactionOrdering> PendingPool<T> {
         self.by_id.values().map(|tx| tx.transaction.transaction.clone())
     }
 
-    /// Removes all transactions and their dependent transaction from the subpool that no longer
-    /// satisfy the given basefee (`tx.fee < basefee`)
+    /// Updates the pool with the new base fee. Reorders transactions by new priorities. Removes
+    /// from the subpool all transactions and their dependents that no longer satisfy the given
+    /// base fee (`tx.fee < base_fee`).
     ///
     /// Note: the transactions are not returned in a particular order.
-    pub(crate) fn enforce_basefee(
+    ///
+    /// # Returns
+    ///
+    /// Removed transactions that no longer satisfy the base fee.
+    pub(crate) fn update_base_fee(
         &mut self,
-        basefee: u64,
+        base_fee: u64,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let mut to_remove = Vec::new();
+        // Create a collection for removed txs.
+        let mut removed = Vec::new();
 
-        {
-            let mut iter = self.by_id.iter().peekable();
-            while let Some((id, tx)) = iter.next() {
-                if tx.transaction.transaction.max_fee_per_gas() < basefee as u128 {
-                    // this transaction no longer satisfies the basefee: remove it and all its
-                    // descendants
-                    to_remove.push(*id);
-                    'this: while let Some((peek, _)) = iter.peek() {
-                        if peek.sender != id.sender {
-                            break 'this
-                        }
-                        to_remove.push(**peek);
-                        iter.next();
+        // Drain and iterate over all transactions.
+        let mut transactions_iter = self.clear_transactions().into_iter().peekable();
+        while let Some((id, tx)) = transactions_iter.next() {
+            if tx.transaction.transaction.max_fee_per_gas() < base_fee as u128 {
+                // Add this tx to the removed collection since it no longer satisfies the base fee
+                // condition. Decrease the total pool size.
+                self.size_of -= tx.transaction.transaction.size();
+                removed.push(Arc::clone(&tx.transaction.transaction));
+
+                // Remove all dependent transactions.
+                'this: while let Some((next_id, next_tx)) = transactions_iter.peek() {
+                    if next_id.sender != id.sender {
+                        break 'this
                     }
+                    self.size_of -= tx.transaction.transaction.size();
+                    removed.push(Arc::clone(&next_tx.transaction.transaction));
+                    transactions_iter.next();
                 }
+            } else {
+                // Re-insert the transaction with new priority.
+                let new_priority =
+                    self.ordering.priority(&tx.transaction.transaction.transaction, base_fee);
+                self.insert_transaction(PendingTransactionRef {
+                    submission_id: tx.transaction.submission_id,
+                    transaction: Arc::clone(&tx.transaction.transaction),
+                    priority: new_priority,
+                });
             }
-        }
-
-        let mut removed = Vec::with_capacity(to_remove.len());
-        for id in to_remove {
-            removed.push(self.remove_transaction(&id).expect("transaction exists"));
         }
 
         removed
@@ -178,31 +204,37 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// # Panics
     ///
     /// if the transaction is already included
-    pub(crate) fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T::Transaction>>) {
+    pub(crate) fn add_transaction(
+        &mut self,
+        tx: Arc<ValidPoolTransaction<T::Transaction>>,
+        base_fee: u64,
+    ) {
         assert!(
             !self.by_id.contains_key(tx.id()),
             "transaction already included {:?}",
             self.by_id.contains_key(tx.id())
         );
 
-        let tx_id = *tx.id();
-        let submission_id = self.next_id();
-
-        let priority = self.ordering.priority(&tx.transaction);
-
         // keep track of size
         self.size_of += tx.size();
 
-        let transaction = PendingTransactionRef { submission_id, transaction: tx, priority };
+        let submission_id = self.next_id();
+        let priority = self.ordering.priority(&tx.transaction, base_fee);
+        self.insert_transaction(PendingTransactionRef { submission_id, transaction: tx, priority });
+    }
+
+    /// Internal method for inserting transaction into pool's underlying collections.
+    fn insert_transaction(&mut self, tx: PendingTransactionRef<T>) {
+        let tx_id = *tx.transaction.id();
 
         // If there's __no__ ancestor in the pool, then this transaction is independent, this is
         // guaranteed because this pool is gapless.
         if self.ancestor(&tx_id).is_none() {
-            self.independent_transactions.insert(transaction.clone());
+            self.independent_transactions.insert(tx.clone());
         }
-        self.all.insert(transaction.clone());
+        self.all.insert(tx.clone());
 
-        let transaction = Arc::new(PendingTransaction { transaction });
+        let transaction = Arc::new(PendingTransaction { transaction: tx });
 
         self.by_id.insert(tx_id, transaction);
     }
@@ -338,15 +370,15 @@ mod tests {
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
         let tx = f.validated_arc(MockTransaction::eip1559().inc_price());
-        pool.add_transaction(tx.clone());
+        pool.add_transaction(tx.clone(), 0);
 
         assert!(pool.by_id.contains_key(tx.id()));
         assert_eq!(pool.len(), 1);
 
-        let removed = pool.enforce_basefee(0);
+        let removed = pool.update_base_fee(0);
         assert!(removed.is_empty());
 
-        let removed = pool.enforce_basefee((tx.max_fee_per_gas() + 1) as u64);
+        let removed = pool.update_base_fee((tx.max_fee_per_gas() + 1) as u64);
         assert_eq!(removed.len(), 1);
         assert!(pool.is_empty());
     }
@@ -357,10 +389,10 @@ mod tests {
         let mut pool = PendingPool::new(MockOrdering::default());
         let t = MockTransaction::eip1559().inc_price_by(10);
         let root_tx = f.validated_arc(t.clone());
-        pool.add_transaction(root_tx.clone());
+        pool.add_transaction(root_tx.clone(), 0);
 
         let descendant_tx = f.validated_arc(t.inc_nonce().decr_price());
-        pool.add_transaction(descendant_tx.clone());
+        pool.add_transaction(descendant_tx.clone(), 0);
 
         assert!(pool.by_id.contains_key(root_tx.id()));
         assert!(pool.by_id.contains_key(descendant_tx.id()));
@@ -368,14 +400,14 @@ mod tests {
 
         assert_eq!(pool.independent_transactions.len(), 1);
 
-        let removed = pool.enforce_basefee(0);
+        let removed = pool.update_base_fee(0);
         assert!(removed.is_empty());
 
         // two dependent tx in the pool with decreasing fee
 
         {
             let mut pool2 = pool.clone();
-            let removed = pool2.enforce_basefee((descendant_tx.max_fee_per_gas() + 1) as u64);
+            let removed = pool2.update_base_fee((descendant_tx.max_fee_per_gas() + 1) as u64);
             assert_eq!(removed.len(), 1);
             assert_eq!(pool2.len(), 1);
             // descendant got popped
@@ -384,7 +416,7 @@ mod tests {
         }
 
         // remove root transaction via fee
-        let removed = pool.enforce_basefee((root_tx.max_fee_per_gas() + 1) as u64);
+        let removed = pool.update_base_fee((root_tx.max_fee_per_gas() + 1) as u64);
         assert_eq!(removed.len(), 2);
         assert!(pool.is_empty());
     }
