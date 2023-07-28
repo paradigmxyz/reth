@@ -464,6 +464,10 @@ mod tests {
     /// Handler for: `eth_test_fee_history`
     // TODO: Split this into multiple tests, and add tests for percentiles.
     #[tokio::test]
+    // TODO(op-reth): fix this for optimism. currently the MockEthProvider uses
+    // a chain_spec for mainnet, but this test needs the Optimism config values
+    // to be specified.
+    #[cfg(not(feature = "optimism"))]
     async fn test_fee_history() {
         let mut rng = generators::rng();
 
@@ -475,7 +479,7 @@ mod tests {
         let mut gas_used_ratios = Vec::new();
         let mut base_fees_per_gas = Vec::new();
         let mut last_header = None;
-        let mock_provider = MockEthProvider::default();
+        let mock_provider = reth_provider::test_utils::MockEthProvider::default();
 
         for i in (0..block_count).rev() {
             let hash = H256::random();
