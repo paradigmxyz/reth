@@ -530,6 +530,8 @@ mod tests {
             nonce: 0x0000000000000000,
             base_fee_per_gas: 0x28f0001df.into(),
             withdrawals_root: None,
+            blob_gas_used: None,
+            excess_blob_gas: None
         };
         // size: 0x9b5
 

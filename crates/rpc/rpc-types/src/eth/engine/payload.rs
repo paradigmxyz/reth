@@ -79,6 +79,8 @@ pub struct ExecutionPayload {
     pub timestamp: U64,
     pub extra_data: Bytes,
     pub base_fee_per_gas: U256,
+    pub blob_gas_used: U256,
+    pub excess_blob_gas: U256,
     pub block_hash: H256,
     pub transactions: Vec<Bytes>,
     /// Array of [`Withdrawal`] enabled with V2
@@ -111,6 +113,8 @@ impl From<SealedBlock> for ExecutionPayload {
             timestamp: value.timestamp.into(),
             extra_data: value.extra_data.clone(),
             base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
+            blob_gas_used: U256::from(value.blob_gas_used.unwrap_or_default()),
+            excess_blob_gas: U256::from(value.excess_blob_gas.unwrap_or_default()),
             block_hash: value.hash(),
             transactions,
             withdrawals: value.withdrawals,
@@ -167,6 +171,18 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
                     .uint_try_to()
                     .map_err(|_| PayloadError::BaseFee(payload.base_fee_per_gas))?,
             ),
+            blob_gas_used: Some(
+                payload
+                    .blob_gas_used
+                    .uint_try_to()
+                    .map_err(|_| PayloadError::BlobGasUsed(payload.blob_gas_used))?,
+            ),
+            excess_blob_gas: Some(
+                payload
+                    .excess_blob_gas
+                    .uint_try_to()
+                    .map_err(|_| PayloadError::ExcessBlobGas(payload.excess_blob_gas))?,
+            ),
             extra_data: payload.extra_data,
             // Defaults
             ommers_hash: EMPTY_LIST_HASH,
@@ -208,6 +224,12 @@ pub enum PayloadError {
     /// Invalid payload base fee.
     #[error("Invalid payload base fee: {0}")]
     BaseFee(U256),
+    /// Invalid payload base fee.
+    #[error("Invalid payload blob gas used: {0}")]
+    BlobGasUsed(U256),
+    /// Invalid payload base fee.
+    #[error("Invalid payload excess blob gas: {0}")]
+    ExcessBlobGas(U256),
     /// Invalid payload block hash.
     #[error("blockhash mismatch, want {consensus}, got {execution}")]
     BlockHash {

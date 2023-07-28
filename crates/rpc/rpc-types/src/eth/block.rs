@@ -238,6 +238,12 @@ pub struct Header {
     /// Withdrawals root hash added by EIP-4895 and is ignored in legacy headers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub withdrawals_root: Option<H256>,
+    /// Blob gas used
+    #[serde(rename = "blobGasUsed", skip_serializing_if = "Option::is_none")]
+    pub blob_gas_used: Option<U256>,
+    /// Excess blob gas
+    #[serde(rename = "excessBlobGas", skip_serializing_if = "Option::is_none")]
+    pub excess_blob_gas: Option<U256>,
 }
 
 // === impl Header ===
@@ -267,6 +273,8 @@ impl Header {
                     base_fee_per_gas,
                     extra_data,
                     withdrawals_root,
+                    blob_gas_used,
+                    excess_blob_gas,
                 },
             hash,
         } = primitive_header;
@@ -290,6 +298,8 @@ impl Header {
             mix_hash,
             nonce: Some(nonce.to_be_bytes().into()),
             base_fee_per_gas: base_fee_per_gas.map(U256::from),
+            blob_gas_used: blob_gas_used.map(U256::from),
+            excess_blob_gas: excess_blob_gas.map(U256::from),
         }
     }
 }
@@ -418,6 +428,8 @@ mod tests {
                 mix_hash: H256::from_low_u64_be(14),
                 nonce: Some(H64::from_low_u64_be(15)),
                 base_fee_per_gas: Some(U256::from(20)),
+                blob_gas_used: None,
+                excess_blob_gas: None,
             },
             total_difficulty: Some(U256::from(100000)),
             uncles: vec![H256::from_low_u64_be(17)],
@@ -456,6 +468,8 @@ mod tests {
                 mix_hash: H256::from_low_u64_be(14),
                 nonce: Some(H64::from_low_u64_be(15)),
                 base_fee_per_gas: Some(U256::from(20)),
+                blob_gas_used: None,
+                excess_blob_gas: None,
             },
             total_difficulty: Some(U256::from(100000)),
             uncles: vec![H256::from_low_u64_be(17)],

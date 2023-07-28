@@ -91,6 +91,12 @@ pub struct Header {
     /// above the gas target, and decreasing when blocks are below the gas target. The base fee per
     /// gas is burned.
     pub base_fee_per_gas: Option<u64>,
+    /// The total amount of blob gas consumed by the transactions within the block.
+    pub blob_gas_used: Option<u64>,
+    /// A running total of blob gas consumed in excess of the target, prior to the block. Blocks
+    /// with above-target blob gas consumption increase this value, blocks with below-target blob
+    /// gas consumption decrease it (bounded at 0).
+    pub excess_blob_gas: Option<u64>,
     /// An arbitrary byte array containing data relevant to this block. This must be 32 bytes or
     /// fewer; formally Hx.
     pub extra_data: Bytes,
@@ -116,6 +122,8 @@ impl Default for Header {
             nonce: 0,
             base_fee_per_gas: None,
             withdrawals_root: None,
+            blob_gas_used: None,
+            excess_blob_gas: None,
         }
     }
 }
@@ -303,6 +311,8 @@ impl Decodable for Header {
             nonce: H64::decode(buf)?.to_low_u64_be(),
             base_fee_per_gas: None,
             withdrawals_root: None,
+            blob_gas_used: None,
+            excess_blob_gas: None,
         };
         if started_len - buf.len() < rlp_head.payload_length {
             if buf.first().map(|b| *b == EMPTY_STRING_CODE).unwrap_or_default() {
@@ -536,6 +546,8 @@ mod ethers_compat {
                 gas_used: block.gas_used.as_u64(),
                 withdrawals_root: None,
                 logs_bloom: block.logs_bloom.unwrap_or_default().0.into(),
+                blob_gas_used: None,
+                excess_blob_gas: None,
             }
         }
     }
@@ -605,6 +617,8 @@ mod tests {
             nonce: 0,
             base_fee_per_gas: Some(0x036b_u64),
             withdrawals_root: None,
+            blob_gas_used: None,
+            excess_blob_gas: None,
         };
         assert_eq!(header.hash_slow(), expected_hash);
     }
