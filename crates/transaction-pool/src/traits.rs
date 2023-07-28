@@ -532,6 +532,18 @@ pub struct PooledTransaction {
 }
 
 impl PooledTransaction {
+    /// Create new instance of [Self].
+    pub fn new(transaction: TransactionSignedEcRecovered) -> Self {
+        let gas_cost = match &transaction.transaction {
+            Transaction::Legacy(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
+            Transaction::Eip2930(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
+            Transaction::Eip1559(t) => U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit),
+        };
+        let cost = gas_cost + U256::from(transaction.value());
+
+        Self { transaction, cost }
+    }
+
     /// Return the reference to the underlying transaction.
     pub fn transaction(&self) -> &TransactionSignedEcRecovered {
         &self.transaction
@@ -634,14 +646,7 @@ impl PoolTransaction for PooledTransaction {
 
 impl FromRecoveredTransaction for PooledTransaction {
     fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
-        let gas_cost = match &tx.transaction {
-            Transaction::Legacy(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
-            Transaction::Eip2930(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
-            Transaction::Eip1559(t) => U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit),
-        };
-        let cost = gas_cost + U256::from(tx.value());
-
-        PooledTransaction { transaction: tx, cost }
+        PooledTransaction::new(tx)
     }
 }
 
