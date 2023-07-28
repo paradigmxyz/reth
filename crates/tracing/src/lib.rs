@@ -68,6 +68,7 @@ where
 ///
 /// The boxed layer and a guard is returned. When the guard is dropped the buffer for the log
 /// file is immediately flushed to disk. Any events after the guard is dropped may be missed.
+#[must_use = "tracing guard must be kept alive to flush events to disk"]
 pub fn file<S>(
     filter: EnvFilter,
     dir: impl AsRef<Path>,

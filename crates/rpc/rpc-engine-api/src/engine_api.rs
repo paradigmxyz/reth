@@ -130,6 +130,26 @@ where
         Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
     }
 
+    /// Sends a message to the beacon consensus engine to update the fork choice _with_ withdrawals,
+    /// but only _after_ cancun.
+    ///
+    /// See also  <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
+    pub async fn fork_choice_updated_v3(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        if let Some(ref attrs) = payload_attrs {
+            self.validate_withdrawals_presence(
+                EngineApiMessageVersion::V3,
+                attrs.timestamp.as_u64(),
+                attrs.withdrawals.is_some(),
+            )?;
+        }
+
+        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
+    }
+
     /// Returns the most recent version of the payload that is available in the corresponding
     /// payload build process at the time of receiving this call.
     ///
@@ -321,7 +341,7 @@ where
                     return Err(EngineApiError::NoWithdrawalsPostShanghai)
                 }
             }
-            EngineApiMessageVersion::V2 => {
+            EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 => {
                 if is_shanghai && !has_withdrawals {
                     return Err(EngineApiError::NoWithdrawalsPostShanghai)
                 }
@@ -386,6 +406,17 @@ where
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV2");
         Ok(EngineApi::fork_choice_updated_v2(self, fork_choice_state, payload_attributes).await?)
+    }
+
+    /// Handler for `engine_forkchoiceUpdatedV2`
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
+    async fn fork_choice_updated_v3(
+        &self,
+        _fork_choice_state: ForkchoiceState,
+        _payload_attributes: Option<PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated> {
+        Err(jsonrpsee_types::error::ErrorCode::MethodNotFound.into())
     }
 
     /// Handler for `engine_getPayloadV1`
