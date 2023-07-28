@@ -13,8 +13,7 @@ use crate::{
         AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
     },
     traits::{BlockInfo, PoolSize},
-    PoolConfig, PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, PRICE_BUMP,
-    U256,
+    PoolConfig, PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
 use reth_primitives::{
@@ -1111,7 +1110,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 if Self::is_underpriced(
                     transaction.as_ref(),
                     entry.get().transaction.as_ref(),
-                    PRICE_BUMP,
+                    PoolConfig::default().price_bump,
                 ) {
                     return Err(InsertErr::Underpriced {
                         transaction: pool_tx.transaction,
