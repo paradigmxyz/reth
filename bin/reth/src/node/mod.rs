@@ -808,8 +808,8 @@ async fn run_network_until_shutdown<C>(
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::DEV;
     use super::*;
+    use reth_primitives::DEV;
     use std::{net::IpAddr, path::Path};
 
     #[test]
@@ -835,7 +835,8 @@ mod tests {
     #[test]
     fn parse_port() {
         let cmd =
-            Command::<()>::try_parse_from(["reth", "--discovery.port", "300", "--port", "99"]).unwrap();
+            Command::<()>::try_parse_from(["reth", "--discovery.port", "300", "--port", "99"])
+                .unwrap();
         assert_eq!(cmd.network.discovery.port, Some(300));
         assert_eq!(cmd.network.port, Some(99));
     }
@@ -854,7 +855,8 @@ mod tests {
 
     #[test]
     fn parse_config_path() {
-        let cmd = Command::<()>::try_parse_from(["reth", "--config", "my/path/to/reth.toml"]).unwrap();
+        let cmd =
+            Command::<()>::try_parse_from(["reth", "--config", "my/path/to/reth.toml"]).unwrap();
         // always store reth.toml in the data dir, not the chain specific data dir
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
         let config_path = cmd.config.unwrap_or(data_dir.config_path());

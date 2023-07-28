@@ -267,7 +267,7 @@ impl<Ext: RethRpcServerArgsExt> RpcServerArgs<Ext> {
             .build_with_auth_server(module_config, engine_api);
 
         // apply configured customization
-        self.ext.extend_rpc_modules(self, &mut registry, &mut rpc_modules, )?;
+        self.ext.extend_rpc_modules(self, &mut registry, &mut rpc_modules)?;
 
         let server_config = self.rpc_server_config();
         let launch_rpc = rpc_modules.start_server(server_config).map_ok(|handle| {
