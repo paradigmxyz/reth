@@ -5,10 +5,12 @@ use crate::tracing::{
     TracingInspectorConfig,
 };
 use reth_primitives::{Address, Bytes, H256, U256};
-use reth_rpc_types::trace::geth::{DefaultFrame, CallFrame, CallConfig, GethDefaultTracingOptions, StructLog, PreStateConfig, PreStateFrame, DiffMode, PreStateMode, AccountState};
+use reth_rpc_types::trace::geth::{
+    AccountState, CallConfig, CallFrame, DefaultFrame, DiffMode, GethDefaultTracingOptions,
+    PreStateConfig, PreStateFrame, PreStateMode, StructLog,
+};
+use revm::{db::DatabaseRef, primitives::ResultAndState};
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use revm::db::{DatabaseRef};
-use revm::primitives::{ResultAndState};
 
 /// A type for creating geth style traces
 #[derive(Clone, Debug)]
@@ -164,20 +166,25 @@ impl GethTraceBuilder {
         prestate_config: PreStateConfig,
         db: DB,
     ) -> Result<PreStateFrame, DB::Error>
-        where DB: DatabaseRef {
+    where
+        DB: DatabaseRef,
+    {
+        let account_diffs: Vec<_> =
+            state.into_iter().map(|(addr, acc)| (*addr, &acc.info)).collect();
 
-        let account_diffs: Vec<_> = state.into_iter().map(|(addr, acc)| (*addr, &acc.info)).collect();
-
-        if prestate_config.is_diff_mode(){
+        if prestate_config.is_diff_mode() {
             let mut prestate = PreStateMode::default();
             for (addr, _) in account_diffs {
                 let db_acc = db.basic(addr)?.unwrap_or_default();
-                prestate.0.insert(addr, AccountState {
-                    balance: Some(db_acc.balance),
-                    nonce: Some(U256::from(db_acc.nonce)),
-                    code: db_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
-                    storage: None,
-                });
+                prestate.0.insert(
+                    addr,
+                    AccountState {
+                        balance: Some(db_acc.balance),
+                        nonce: Some(U256::from(db_acc.nonce)),
+                        code: db_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
+                        storage: None,
+                    },
+                );
             }
             self.update_storage_from_trace(&mut prestate.0, false);
             Ok(PreStateFrame::Default(prestate))
@@ -216,4 +223,3 @@ impl GethTraceBuilder {
         }
     }
 }
-

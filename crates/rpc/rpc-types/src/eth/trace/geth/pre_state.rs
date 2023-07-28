@@ -1,4 +1,4 @@
-use reth_primitives::{serde_helper::num::from_int_or_hex_opt, Address, H256, U256, Bytes};
+use reth_primitives::{serde_helper::num::from_int_or_hex_opt, Address, Bytes, H256, U256};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -48,7 +48,9 @@ pub struct PreStateConfig {
 }
 
 impl PreStateConfig {
-    pub fn is_diff_mode(&self) -> bool { self.diff_mode.unwrap_or_default() }
+    pub fn is_diff_mode(&self) -> bool {
+        self.diff_mode.unwrap_or_default()
+    }
 }
 
 #[cfg(test)]

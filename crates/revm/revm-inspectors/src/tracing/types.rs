@@ -3,7 +3,7 @@
 use crate::tracing::{config::TraceStyle, utils::convert_memory};
 use reth_primitives::{abi::decode_revert_reason, bytes::Bytes, Address, H256, U256};
 use reth_rpc_types::trace::{
-    geth::{CallFrame, CallLogFrame, GethDefaultTracingOptions, StructLog},
+    geth::{AccountState, CallFrame, CallLogFrame, GethDefaultTracingOptions, StructLog},
     parity::{
         Action, ActionType, CallAction, CallOutput, CallType, ChangedType, CreateAction,
         CreateOutput, Delta, SelfdestructAction, StateDiff, TraceOutput, TransactionTrace,
@@ -14,7 +14,6 @@ use revm::interpreter::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_map::Entry, BTreeMap, VecDeque};
-use reth_rpc_types::trace::geth::AccountState;
 
 /// A unified representation of a call
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -445,11 +444,17 @@ impl CallTraceNode {
         call_frame
     }
 
-    /// Adds storage in-place to account state for all accounts that were touched in the trace [CallTrace] execution.
+    /// Adds storage in-place to account state for all accounts that were touched in the trace
+    /// [CallTrace] execution.
     ///
     /// * `account_states` - the account map updated in place.
-    /// * `post_value` - if true, it adds storage values after trace transaction execution, if false, returns the storage values before trace execution.
-    pub(crate) fn geth_update_account_storage(&self, account_states: &mut BTreeMap<Address, AccountState>, post_value: bool) {
+    /// * `post_value` - if true, it adds storage values after trace transaction execution, if
+    ///   false, returns the storage values before trace execution.
+    pub(crate) fn geth_update_account_storage(
+        &self,
+        account_states: &mut BTreeMap<Address, AccountState>,
+        post_value: bool,
+    ) {
         let addr = self.trace.address;
         let acc_state = account_states.entry(addr).or_insert_with(AccountState::default);
         for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
