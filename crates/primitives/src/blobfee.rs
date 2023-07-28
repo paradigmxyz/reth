@@ -8,9 +8,5 @@ use crate::constants::eip4844::TARGET_DATA_GAS_PER_BLOCK;
 /// Specified in [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#header-extension)
 pub fn calculate_excess_blob_gas(parent_excess_blob_gas: u64, parent_blob_gas_used: u64) -> u64 {
     let excess_blob_gas = parent_excess_blob_gas + parent_blob_gas_used;
-    if excess_blob_gas < TARGET_DATA_GAS_PER_BLOCK {
-        return 0
-    }
-
-    excess_blob_gas - TARGET_DATA_GAS_PER_BLOCK
+    excess_blob_gas.saturating_sub(TARGET_DATA_GAS_PER_BLOCK)
 }

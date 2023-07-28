@@ -43,27 +43,9 @@ pub fn validate_header_standalone(
         return Err(ConsensusError::WithdrawalsRootUnexpected)
     }
 
-    // Ensures that EIP-4844 fields exist once cancun is active, and have the following properties:
-    //
-    //  * blob_gas_used is less than or equal to MAX_DATA_GAS_PER_BLOCK
-    //  * blob_gas_used is a multiple of DATA_GAS_PER_BLOB
-    //
+    // Ensures that EIP-4844 fields are valid once cancun is active.
     if chain_spec.fork(Hardfork::Cancun).active_at_timestamp(header.timestamp) {
-        let blob_gas_used = header.blob_gas_used.ok_or(ConsensusError::BlobGasUsedMissing)?;
-
-        if blob_gas_used > MAX_DATA_GAS_PER_BLOCK {
-            return Err(ConsensusError::BlobGasUsedExceedsMaxBlobGasPerBlock {
-                blob_gas_used,
-                max_blob_gas_per_block: MAX_DATA_GAS_PER_BLOCK,
-            })
-        }
-
-        if blob_gas_used % DATA_GAS_PER_BLOB != 0 {
-            return Err(ConsensusError::BlobGasUsedNotMultipleOfBlobGasPerBlob {
-                blob_gas_used,
-                blob_gas_per_blob: DATA_GAS_PER_BLOB,
-            })
-        }
+        validate_4844_header_standalone(header)?;
     } else if header.blob_gas_used.is_some() {
         return Err(ConsensusError::BlobGasUsedUnexpected)
     } else if header.excess_blob_gas.is_some() {
@@ -325,30 +307,7 @@ pub fn validate_header_regarding_parent(
 
     // ensure that the blob gas fields for this block
     if chain_spec.fork(Hardfork::Cancun).active_at_timestamp(child.timestamp) {
-        // From [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#header-extension):
-        //
-        // > For the first post-fork block, both parent.blob_gas_used and parent.excess_blob_gas
-        // > are evaluated as 0.
-        //
-        // This means in the first post-fork block, calculate_excess_blob_gas will return 0.
-        let parent_blob_gas_used = parent.blob_gas_used.unwrap_or(0);
-        let parent_excess_blob_gas = parent.excess_blob_gas.unwrap_or(0);
-
-        if child.blob_gas_used.is_none() {
-            return Err(ConsensusError::BlobGasUsedMissing)
-        }
-        let excess_blob_gas = child.excess_blob_gas.ok_or(ConsensusError::ExcessBlobGasMissing)?;
-
-        let expected_excess_blob_gas =
-            calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used);
-        if expected_excess_blob_gas != excess_blob_gas {
-            return Err(ConsensusError::ExcessBlobGasDiff {
-                expected: expected_excess_blob_gas,
-                got: excess_blob_gas,
-                parent_excess_blob_gas,
-                parent_blob_gas_used,
-            })
-        }
+        validate_4844_header_with_parent(parent, child)?;
     }
 
     Ok(())
@@ -433,6 +392,72 @@ pub fn full_validation<Provider: HeaderProvider + AccountReader + WithdrawalsPro
         provider,
         chain_spec,
     )?;
+    Ok(())
+}
+
+/// Validates that the EIP-4844 header fields are correct with respect to the parent block. This
+/// ensures that the `blob_gas_used` and `excess_blob_gas` fields exist in the child header, and
+/// that the `excess_blob_gas` field matches the expected `excess_blob_gas` calculated from the
+/// parent header fields.
+pub fn validate_4844_header_with_parent(
+    parent: &SealedHeader,
+    child: &SealedHeader,
+) -> Result<(), ConsensusError> {
+    // From [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#header-extension):
+    //
+    // > For the first post-fork block, both parent.blob_gas_used and parent.excess_blob_gas
+    // > are evaluated as 0.
+    //
+    // This means in the first post-fork block, calculate_excess_blob_gas will return 0.
+    let parent_blob_gas_used = parent.blob_gas_used.unwrap_or(0);
+    let parent_excess_blob_gas = parent.excess_blob_gas.unwrap_or(0);
+
+    if child.blob_gas_used.is_none() {
+        return Err(ConsensusError::BlobGasUsedMissing)
+    }
+    let excess_blob_gas = child.excess_blob_gas.ok_or(ConsensusError::ExcessBlobGasMissing)?;
+
+    let expected_excess_blob_gas =
+        calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used);
+    if expected_excess_blob_gas != excess_blob_gas {
+        return Err(ConsensusError::ExcessBlobGasDiff {
+            expected: expected_excess_blob_gas,
+            got: excess_blob_gas,
+            parent_excess_blob_gas,
+            parent_blob_gas_used,
+        })
+    }
+
+    Ok(())
+}
+
+/// Validates that the EIP-4844 header fields exist and conform to the spec. This ensures that:
+///
+///  * `blob_gas_used` exists as a header field
+///  * `excess_blob_gas` exists as a header field
+///  * `blob_gas_used` is less than or equal to `MAX_DATA_GAS_PER_BLOCK`
+///  * `blob_gas_used` is a multiple of `DATA_GAS_PER_BLOB`
+pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), ConsensusError> {
+    let blob_gas_used = header.blob_gas_used.ok_or(ConsensusError::BlobGasUsedMissing)?;
+
+    if header.excess_blob_gas.is_none() {
+        return Err(ConsensusError::ExcessBlobGasMissing)
+    }
+
+    if blob_gas_used > MAX_DATA_GAS_PER_BLOCK {
+        return Err(ConsensusError::BlobGasUsedExceedsMaxBlobGasPerBlock {
+            blob_gas_used,
+            max_blob_gas_per_block: MAX_DATA_GAS_PER_BLOCK,
+        })
+    }
+
+    if blob_gas_used % DATA_GAS_PER_BLOB != 0 {
+        return Err(ConsensusError::BlobGasUsedNotMultipleOfBlobGasPerBlob {
+            blob_gas_used,
+            blob_gas_per_blob: DATA_GAS_PER_BLOB,
+        })
+    }
+
     Ok(())
 }
 
