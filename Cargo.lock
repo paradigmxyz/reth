@@ -4942,7 +4942,6 @@ dependencies = [
 name = "reth"
 version = "0.1.0-alpha.4"
 dependencies = [
- "async-trait",
  "backon",
  "clap",
  "comfy-table",

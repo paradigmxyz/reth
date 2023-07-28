@@ -89,7 +89,7 @@
 //!     let builder = RpcModuleBuilder::new(provider, pool, network, TokioTaskExecutor::default(), events);
 //!
 //!   // configure the server modules
-//!    let (modules, auth_module) = builder.build_with_auth_server(transports, engine_api);
+//!    let (modules, auth_module, _registry) = builder.build_with_auth_server(transports, engine_api);
 //!
 //!   // start the servers
 //!   let auth_config = AuthServerConfig::builder(JwtSecret::random()).build();
@@ -343,7 +343,11 @@ where
         self,
         module_config: TransportRpcModuleConfig,
         engine: EngineApi,
-    ) -> (TransportRpcModules<()>, AuthRpcModule)
+    ) -> (
+        TransportRpcModules<()>,
+        AuthRpcModule,
+        RethModuleRegistry<Provider, Pool, Network, Tasks, Events>,
+    )
     where
         EngineApi: EngineApiServer,
     {
@@ -369,7 +373,7 @@ where
 
         let auth_module = registry.create_auth_module(engine);
 
-        (modules, auth_module)
+        (modules, auth_module, registry)
     }
 
     /// Configures all [RpcModule]s specific to the given [TransportRpcModuleConfig] which can be
@@ -1026,12 +1030,12 @@ where
     }
 
     /// Returns the configured [EthHandlers] or creates it if it does not exist yet
-    fn eth_handlers(&mut self) -> EthHandlers<Provider, Pool, Network, Events> {
+    pub fn eth_handlers(&mut self) -> EthHandlers<Provider, Pool, Network, Events> {
         self.with_eth(|handlers| handlers.clone())
     }
 
     /// Returns the configured [EthApi] or creates it if it does not exist yet
-    fn eth_api(&mut self) -> EthApi<Provider, Pool, Network> {
+    pub fn eth_api(&mut self) -> EthApi<Provider, Pool, Network> {
         self.with_eth(|handlers| handlers.api.clone())
     }
 }
