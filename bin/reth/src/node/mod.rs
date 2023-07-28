@@ -65,7 +65,6 @@ use std::{
 };
 use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
-
 use crate::{
     args::{
         utils::{genesis_value_parser, parse_socket_address},

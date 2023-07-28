@@ -70,6 +70,7 @@ tui = "0.19.0"
 human_bytes = "0.4.1"
 
 # async
+async-trait.workspace = true
 tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
 futures.workspace = true
 pin-project.workspace = true

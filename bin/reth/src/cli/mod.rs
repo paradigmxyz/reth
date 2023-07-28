@@ -14,6 +14,8 @@ use reth_tracing::{
     BoxedLayer, FileWorkerGuard,
 };
 
+pub mod builder;
+
 /// The main reth cli interface.
 ///
 /// This is the entrypoint to the executable.
