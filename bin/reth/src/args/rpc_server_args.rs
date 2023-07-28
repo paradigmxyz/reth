@@ -192,9 +192,8 @@ impl RpcServerArgs {
     }
 
     /// Convenience function that returns whether ipc is enabled
-    ///
-    /// By default IPC is enabled therefor it is enabled if the `ipcdisable` is false.
     fn is_ipc_enabled(&self) -> bool {
+        // By default IPC is enabled therefor it is enabled if the `ipcdisable` is false.
         !self.ipcdisable
     }
 

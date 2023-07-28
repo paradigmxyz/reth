@@ -2,9 +2,15 @@
 //!
 //! Starts the client
 use crate::{
-    args::{get_secret_key, DebugArgs, DevArgs, NetworkArgs, RpcServerArgs, TxPoolArgs},
-    dirs::DataDirPath,
+    args::{
+        get_secret_key,
+        utils::{genesis_value_parser, parse_socket_address},
+        DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, RpcServerArgs,
+        TxPoolArgs,
+    },
+    dirs::{DataDirPath, MaybePlatformPath},
     init::init_genesis,
+    node::cl_events::ConsensusLayerHealthEvents,
     prometheus_exporter,
     runner::CliContext,
     utils::get_single_header,
@@ -32,26 +38,30 @@ use reth_interfaces::{
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
         either::EitherDownloader,
-        headers::downloader::HeaderDownloader,
+        headers::{client::HeadersClient, downloader::HeaderDownloader},
     },
 };
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
+use reth_payload_builder::PayloadBuilderService;
 use reth_primitives::{
-    stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, H256,
+    stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head,
+    SealedHeader, H256,
 };
 use reth_provider::{
-    BlockHashReader, BlockReader, CanonStateSubscriptions, HeaderProvider, ProviderFactory,
-    StageCheckpointReader,
+    providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
+    HeaderProvider, ProviderFactory, StageCheckpointReader,
 };
+use reth_prune::BatchSizes;
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
 use reth_stages::{
     prelude::*,
     stages::{
-        ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
-        TotalDifficultyStage,
+        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, HeaderSyncMode,
+        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
+        StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
     },
     MetricEventsSender, MetricsListener,
 };
@@ -65,23 +75,6 @@ use std::{
 };
 use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
-use crate::{
-    args::{
-        utils::{genesis_value_parser, parse_socket_address},
-        DatabaseArgs, PayloadBuilderArgs,
-    },
-    dirs::MaybePlatformPath,
-    node::cl_events::ConsensusLayerHealthEvents,
-};
-use reth_interfaces::p2p::headers::client::HeadersClient;
-use reth_payload_builder::PayloadBuilderService;
-use reth_primitives::DisplayHardforks;
-use reth_provider::providers::BlockchainProvider;
-use reth_prune::BatchSizes;
-use reth_stages::stages::{
-    AccountHashingStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
-    StorageHashingStage, TransactionLookupStage,
-};
 
 pub mod cl_events;
 pub mod events;

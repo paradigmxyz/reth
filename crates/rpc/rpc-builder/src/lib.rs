@@ -1456,6 +1456,65 @@ impl TransportRpcModules<()> {
         &self.config
     }
 
+    /// Merge the given Methods in the configured http methods.
+    ///
+    /// Fails if any of the methods in other is present already.
+    ///
+    /// Returns Ok(false) if no http transport is configured.
+    pub fn merge_http(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<bool, jsonrpsee::core::error::Error> {
+        if let Some(ref mut http) = self.http {
+            return http.merge(other.into()).map(|_| true)
+        }
+        Ok(false)
+    }
+
+    /// Merge the given Methods in the configured ws methods.
+    ///
+    /// Fails if any of the methods in other is present already.
+    ///
+    /// Returns Ok(false) if no http transport is configured.
+    pub fn merge_ws(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<bool, jsonrpsee::core::error::Error> {
+        if let Some(ref mut ws) = self.ws {
+            return ws.merge(other.into()).map(|_| true)
+        }
+        Ok(false)
+    }
+
+    /// Merge the given Methods in the configured ipc methods.
+    ///
+    /// Fails if any of the methods in other is present already.
+    ///
+    /// Returns Ok(false) if no ipc transport is configured.
+    pub fn merge_ipc(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<bool, jsonrpsee::core::error::Error> {
+        if let Some(ref mut http) = self.http {
+            return http.merge(other.into()).map(|_| true)
+        }
+        Ok(false)
+    }
+
+    /// Merge the given Methods in all configured methods.
+    ///
+    /// Fails if any of the methods in other is present already.
+    pub fn merge_configured(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<(), jsonrpsee::core::error::Error> {
+        let other = other.into();
+        self.merge_http(other.clone())?;
+        self.merge_ws(other.clone())?;
+        self.merge_ipc(other.clone())?;
+        Ok(())
+    }
+
     /// Convenience function for starting a server
     pub async fn start_server(self, builder: RpcServerConfig) -> Result<RpcServerHandle, RpcError> {
         builder.start(self).await
