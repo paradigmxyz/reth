@@ -399,11 +399,16 @@ mod tests {
     struct IndexStorageHistoryTestRunner {
         pub(crate) tx: TestTransaction,
         commit_threshold: u64,
+        prune_modes: PruneModes,
     }
 
     impl Default for IndexStorageHistoryTestRunner {
         fn default() -> Self {
-            Self { tx: TestTransaction::default(), commit_threshold: 1000 }
+            Self {
+                tx: TestTransaction::default(),
+                commit_threshold: 1000,
+                prune_modes: PruneModes::default(),
+            }
         }
     }
 
@@ -415,7 +420,7 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            Self::S { commit_threshold: self.commit_threshold }
+            Self::S { commit_threshold: self.commit_threshold, prune_modes: self.prune_modes }
         }
     }
 
