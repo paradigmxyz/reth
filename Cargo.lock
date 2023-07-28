@@ -1947,7 +1947,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c22d4b5885b6aa2fe5e8b9329fb8d232bf739e434e6b87347c63bdd00c120f60"
 dependencies = [
  "crunchy",
- "fixed-hash 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "fixed-hash",
  "impl-codec",
  "impl-rlp",
  "impl-serde",
@@ -1962,7 +1962,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02d215cbf040552efcbe99a38372fe80ab9d00268e20012b79fcd0f073edd8ee"
 dependencies = [
  "ethbloom",
- "fixed-hash 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "fixed-hash",
  "impl-codec",
  "impl-rlp",
  "impl-serde",
@@ -2258,17 +2258,6 @@ name = "fixed-hash"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "835c052cb0c08c1acf6ffd71c022172e18723949c8282f2b9f27efbc51e64534"
-dependencies = [
- "byteorder",
- "rand 0.8.5",
- "rustc-hex",
- "static_assertions",
-]
-
-[[package]]
-name = "fixed-hash"
-version = "0.8.0"
-source = "git+https://github.com/paritytech/parity-common.git?rev=d3a9327124a66e52ca1114bb8640c02c18c134b8#d3a9327124a66e52ca1114bb8640c02c18c134b8"
 dependencies = [
  "byteorder",
  "rand 0.8.5",
@@ -4520,7 +4509,7 @@ version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f3486ccba82358b11a77516035647c34ba167dfa53312630de83b12bd4f3d66"
 dependencies = [
- "fixed-hash 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "fixed-hash",
  "impl-codec",
  "impl-rlp",
  "impl-serde",
@@ -5535,7 +5524,7 @@ dependencies = [
  "crunchy",
  "derive_more",
  "ethers-core",
- "fixed-hash 0.8.0 (git+https://github.com/paritytech/parity-common.git?rev=d3a9327124a66e52ca1114bb8640c02c18c134b8)",
+ "fixed-hash",
  "hash-db",
  "hex",
  "hex-literal 0.3.4",
@@ -5969,7 +5958,7 @@ dependencies = [
  "bytes",
  "derive_more",
  "enumn",
- "fixed-hash 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "fixed-hash",
  "hashbrown 0.13.2",
  "hex",
  "hex-literal 0.4.1",

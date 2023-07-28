@@ -978,7 +978,7 @@ mod tests {
         let t2 = H256::from([0; 32]);
         let t3 = U256::from(123);
 
-        let t1_padded = H256::from(t1);
+        let t1_padded = t1;
         let t3_padded = H256::from({
             let mut x = [0; 32];
             x[31] = 123;
