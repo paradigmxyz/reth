@@ -5,7 +5,7 @@ use reth_rpc_types::{
         BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
         TraceResult,
     },
-    CallRequest, RichBlock,
+    CallRequest, RichBlock, Bundle, StateContext, state::StateOverride
 };
 
 /// Debug rpc interface.
@@ -115,8 +115,9 @@ pub trait DebugApi {
     #[method(name = "traceCallMany")]
     async fn debug_trace_call_many(
         &self,
-        bundles: Vec<(CallRequest, Option<GethDebugTracingCallOptions>)>,
-        block_id: Option<BlockId>,
-        transaction_index: Option<isize>,
+        bundles: Vec<Bundle>,
+        state_context: Option<StateContext>,
+        opts: Option<GethDebugTracingOptions>,
+        state_override: Option<StateOverride>,
     ) -> RpcResult<Vec<GethTrace>>;
 }

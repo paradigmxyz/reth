@@ -1,5 +1,27 @@
-use reth_primitives::{AccessList, Address, Bytes, U256, U64, U8};
+use reth_primitives::{AccessList, Address, BlockId, Bytes, U256, U64, U8};
 use serde::{Deserialize, Serialize};
+
+use crate::BlockOverrides;
+
+/// Bundle of transactions
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Bundle {
+    /// Transactions
+    pub transactions: Vec<CallRequest>,
+    /// Block overides
+    pub block_override: Option<BlockOverrides>,
+}
+
+/// State context for callMany
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct StateContext {
+    /// Block Number
+    pub block_number: Option<BlockId>,
+    /// Inclusive number of tx to replay in block. -1 means replay all
+    pub transaction_index: Option<isize>,
+}
 
 /// Call request
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
