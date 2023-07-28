@@ -107,11 +107,13 @@ pub trait DebugApi {
     /// block execution using the final state of parent block as the base followed by n
     /// transactions
     ///
-    /// The first argument is a list of transactions. Optinally each transaction can overwrie block
-    /// and state
-    /// The block can optionally be specified either by hash or by number as
-    /// the second argument.
-    /// Third argument specifies at which position in the block should transactions be executed.
+    /// The first argument is a list of bundles. Each bundle can overwrite the block headers. This
+    /// will affect all transaction in that bundle.
+    /// BlockNumber and transaction_index are optinal. Transaction_index
+    /// specifys the number of tx in the block to replay and -1 means all transactions should be
+    /// replayed.
+    /// The trace can be configured similar to `debug_traceTransaction`.
+    /// State override apply to all bundles.
     #[method(name = "traceCallMany")]
     async fn debug_trace_call_many(
         &self,
