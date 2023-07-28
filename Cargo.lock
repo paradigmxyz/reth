@@ -5792,6 +5792,7 @@ dependencies = [
 name = "reth-rpc-types"
 version = "0.1.0-alpha.4"
 dependencies = [
+ "itertools 0.10.5",
  "jsonrpsee-types",
  "rand 0.8.5",
  "reth-primitives",
