@@ -10,6 +10,7 @@ use reth_primitives::{
 };
 use std::{fmt, time::Instant};
 
+mod constants;
 mod eth;
 mod task;
 
@@ -18,6 +19,9 @@ pub use eth::{EthTransactionValidator, EthTransactionValidatorBuilder};
 
 /// A spawnable task that performs transaction validation.
 pub use task::ValidationTask;
+
+/// Validation constants.
+pub use constants::{MAX_CODE_SIZE, MAX_INIT_CODE_SIZE, TX_MAX_SIZE, TX_SLOT_SIZE};
 
 /// A Result type returned after checking a transaction's validity.
 #[derive(Debug)]
