@@ -155,7 +155,6 @@ impl EthTransactionValidatorBuilder {
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             minimum_priority_fee: None,
             additional_tasks: 1,
-            // default to true, can potentially take this as a param in the future
             propagate_local_transactions: true,
         }
     }
@@ -193,16 +192,17 @@ impl EthTransactionValidatorBuilder {
         self
     }
     /// Sets toggle to propagate transactions received locally by this client (e.g
-    /// transactions from eth_Sendtransaction to this nodes' RPC server)
+    /// transactions from `eth_sendRawTransaction` to this nodes' RPC server)
     ///
-    ///  If set to false, only transactions received by network peers (via
+    /// If set to false, only transactions received by network peers (via
     /// p2p) will be marked as propagated in the local transaction pool and returned on a
-    /// GetPooledTransactions p2p request
+    /// GetPooledTransactions p2p request or broadcasted to peers.
     pub fn set_propagate_local_transactions(mut self, propagate_local_txs: bool) -> Self {
         self.propagate_local_transactions = propagate_local_txs;
         self
     }
-    /// Disables propagating transactions recieved locally by this client
+
+    /// Disables propagating transactions received locally by this client
     ///
     /// For more information, check docs for set_propagate_local_transactions
     pub fn no_local_transaction_propagation(mut self) -> Self {
