@@ -52,7 +52,7 @@ pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 100;
 pub(crate) const RPC_DEFAULT_MAX_TRACING_REQUESTS: u32 = 25;
 
 /// Parameters for configuring the rpc more granularity via CLI
-#[derive(Debug, Args, PartialEq, Eq, Default)]
+#[derive(Debug, Args, PartialEq, Eq)]
 #[command(next_help_heading = "RPC")]
 pub struct RpcServerArgs {
     /// Enable the HTTP-RPC server
