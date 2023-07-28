@@ -434,6 +434,7 @@ where
                         // When handling errors, we do not commit the database transaction. This
                         // leads to the Merkle stage not clearing its
                         // checkpoint, and restarting from an invalid place.
+                        drop(provider_rw);
                         provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
                         provider_rw
                             .save_stage_checkpoint_progress(StageId::MerkleExecute, vec![])?;
