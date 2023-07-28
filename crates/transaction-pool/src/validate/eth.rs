@@ -3,8 +3,11 @@
 use crate::{
     error::InvalidPoolTransactionError,
     traits::{PoolTransaction, TransactionOrigin},
-    validate::{task::ValidationJobSender, TransactionValidatorError, ValidationTask},
-    TransactionValidationOutcome, TransactionValidator, MAX_INIT_CODE_SIZE, TX_MAX_SIZE,
+    validate::{
+        task::ValidationJobSender, TransactionValidatorError, ValidationTask, MAX_INIT_CODE_SIZE,
+        TX_MAX_SIZE,
+    },
+    TransactionValidationOutcome, TransactionValidator,
 };
 use reth_primitives::{
     constants::ETHEREUM_BLOCK_GAS_LIMIT, ChainSpec, InvalidTransactionError, EIP1559_TX_TYPE_ID,
