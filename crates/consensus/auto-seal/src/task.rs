@@ -109,6 +109,7 @@ where
                 let to_engine = this.to_engine.clone();
                 let client = this.client.clone();
                 let chain_spec = Arc::clone(&this.chain_spec);
+                let chain_spec2 = Arc::clone(&this.chain_spec);
                 let pool = this.pool.clone();
                 let events = this.pipe_line_events.take();
                 let canon_state_notification = this.canon_state_notification.clone();
@@ -131,7 +132,11 @@ where
                     let substate = SubState::new(State::new(client.latest().unwrap()));
                     let mut executor = Executor::new(chain_spec, substate);
 
-                    match storage.build_and_execute(transactions.clone(), &mut executor) {
+                    match storage.build_and_execute(
+                        transactions.clone(),
+                        &mut executor,
+                        chain_spec2,
+                    ) {
                         Ok((new_header, post_state)) => {
                             // clear all transactions from pool
                             pool.remove_transactions(transactions.iter().map(|tx| tx.hash()));

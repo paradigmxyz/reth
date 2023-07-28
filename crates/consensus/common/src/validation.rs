@@ -294,7 +294,12 @@ pub fn validate_header_regarding_parent(
                 constants::EIP1559_INITIAL_BASE_FEE
             } else {
                 // This BaseFeeMissing will not happen as previous blocks are checked to have them.
-                parent.next_block_base_fee().ok_or(ConsensusError::BaseFeeMissing)?
+                parent
+                    .next_block_base_fee(
+                        chain_spec.base_fee_change_denominator(),
+                        chain_spec.elasticity_multiplier(),
+                    )
+                    .ok_or(ConsensusError::BaseFeeMissing)?
             };
         if expected_base_fee != base_fee {
             return Err(ConsensusError::BaseFeeDiff { expected: expected_base_fee, got: base_fee })

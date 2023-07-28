@@ -166,8 +166,14 @@ impl Header {
     /// Calculate base fee for next block according to the EIP-1559 spec.
     ///
     /// Returns a `None` if no base fee is set, no EIP-1559 support
-    pub fn next_block_base_fee(&self) -> Option<u64> {
-        Some(calculate_next_block_base_fee(self.gas_used, self.gas_limit, self.base_fee_per_gas?))
+    pub fn next_block_base_fee(&self, elasticity: u64, change_denominator: u64) -> Option<u64> {
+        Some(calculate_next_block_base_fee(
+            self.gas_used,
+            self.gas_limit,
+            self.base_fee_per_gas?,
+            elasticity,
+            change_denominator,
+        ))
     }
 
     /// Seal the header with a known hash.
