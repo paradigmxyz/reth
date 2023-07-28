@@ -10,8 +10,7 @@
     rust_2018_idioms,
     unreachable_pub,
     missing_debug_implementations,
-    rustdoc::broken_intra_doc_links,
-    unused_crate_dependencies
+    rustdoc::broken_intra_doc_links
 )]
 #![doc(test(
     no_crate_inject,
@@ -154,11 +153,12 @@ use tracing::{instrument, trace};
 
 pub use crate::{
     config::{
-        PoolConfig, SubPoolLimit, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
-        TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
+        PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP, REPLACE_BLOB_PRICE_BUMP,
+        TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER, TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
+        TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
     },
     error::PoolResult,
-    ordering::{GasCostOrdering, TransactionOrdering},
+    ordering::{CoinbaseTipOrdering, Priority, TransactionOrdering},
     pool::{
         state::SubPool, AllTransactionsEvents, FullTransactionEvent, TransactionEvent,
         TransactionEvents,
@@ -207,9 +207,6 @@ pub(crate) const MAX_CODE_SIZE: usize = 24576;
 
 // Maximum initcode to permit in a creation transaction and create instructions
 pub(crate) const MAX_INIT_CODE_SIZE: usize = 2 * MAX_CODE_SIZE;
-
-// Price bump (in %) for the transaction pool underpriced check
-pub(crate) const PRICE_BUMP: u128 = 10;
 
 /// A shareable, generic, customizable `TransactionPool` implementation.
 #[derive(Debug)]
@@ -281,12 +278,12 @@ where
 }
 
 impl<Client>
-    Pool<EthTransactionValidator<Client, PooledTransaction>, GasCostOrdering<PooledTransaction>>
+    Pool<EthTransactionValidator<Client, PooledTransaction>, CoinbaseTipOrdering<PooledTransaction>>
 where
     Client: StateProviderFactory + Clone + 'static,
 {
     /// Returns a new [Pool] that uses the default [EthTransactionValidator] when validating
-    /// [PooledTransaction]s and ords via [GasCostOrdering]
+    /// [PooledTransaction]s and ords via [CoinbaseTipOrdering]
     ///
     /// # Example
     ///
@@ -306,7 +303,7 @@ where
         validator: EthTransactionValidator<Client, PooledTransaction>,
         config: PoolConfig,
     ) -> Self {
-        Self::new(validator, GasCostOrdering::default(), config)
+        Self::new(validator, CoinbaseTipOrdering::default(), config)
     }
 }
 
