@@ -2,7 +2,8 @@ use crate::{
     eth::{
         error::{EthApiError, EthResult},
         revm_utils::{
-            clone_into_empty_db, inspect, replay_transactions_until, result_output, EvmOverrides,
+            clone_into_empty_db, inspect, inspect_and_return_db, replay_transactions_until,
+            result_output, EvmOverrides,
         },
         EthTransactions, TransactionSource,
     },
@@ -255,7 +256,26 @@ where
                         return Ok(frame)
                     }
                     GethDebugBuiltInTracerType::PreStateTracer => {
-                        Err(EthApiError::Unsupported("pre state tracer currently unsupported."))
+                        let prestate_config = tracer_config
+                            .into_pre_state_config()
+                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
+                        let mut inspector = TracingInspector::new(
+                            TracingInspectorConfig::from_geth_config(&config),
+                        );
+
+                        let frame =
+                            self.inner
+                                .eth_api
+                                .spawn_with_call_at(call, at, overrides, move |db, env| {
+                                    let (res, _, db) =
+                                        inspect_and_return_db(db, env, &mut inspector)?;
+                                    let frame = inspector
+                                        .into_geth_builder()
+                                        .geth_prestate_traces(&res, prestate_config, &db)?;
+                                    Ok(frame)
+                                })
+                                .await?;
+                        return Ok(frame.into())
                     }
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
                 },
@@ -354,7 +374,22 @@ where
                         return Ok((frame.into(), res.state))
                     }
                     GethDebugBuiltInTracerType::PreStateTracer => {
-                        Err(EthApiError::Unsupported("prestate tracer is unimplemented yet."))
+                        let prestate_config = tracer_config
+                            .into_pre_state_config()
+                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
+
+                        let mut inspector = TracingInspector::new(
+                            TracingInspectorConfig::from_geth_config(&config),
+                        );
+                        let (res, _) = inspect(&mut *db, env, &mut inspector)?;
+
+                        let frame = inspector.into_geth_builder().geth_prestate_traces(
+                            &res,
+                            prestate_config,
+                            &*db,
+                        )?;
+
+                        return Ok((frame.into(), res.state))
                     }
                     GethDebugBuiltInTracerType::NoopTracer => {
                         Ok((NoopFrame::default().into(), Default::default()))
