@@ -27,7 +27,6 @@ use tracing::info;
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db diff` command
 pub struct Command {
-    // THE SECOND DATABASE
     /// The path to the data dir for all reth files and subdirectories.
     #[arg(long, verbatim_doc_comment)]
     secondary_datadir: PlatformPath<DataDirPath>,
@@ -46,7 +45,19 @@ pub struct Command {
 }
 
 impl Command {
-    /// Execute `db diff` command
+    /// Execute the `db diff` command.
+    ///
+    /// This first opens the `db/` folder from the secondary datadir, where the second database is
+    /// opened read-only.
+    ///
+    /// The tool will then iterate through all key-value pairs for the primary and secondary
+    /// databases. The value for each key will be compared with its corresponding value in the
+    /// other database. If the values are different, a discrepancy will be recorded in-memory. If
+    /// one key is present in one database but not the other, this will be recorded as an "extra
+    /// element" for that database.
+    ///
+    /// The discrepancies and extra elements, along with a brief summary of the diff results are
+    /// then written to a file in the output directory.
     pub fn execute(self, tool: &DbTool<'_, DatabaseEnvRO>) -> eyre::Result<()> {
         // open second db
         let second_db_path: PathBuf = self.secondary_datadir.join("db").into();
