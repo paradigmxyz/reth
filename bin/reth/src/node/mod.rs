@@ -156,6 +156,10 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     /// Additional cli arguments
     #[clap(flatten)]
     pub ext: Ext::Node,
+
+    #[cfg(feature = "optimism")]
+    #[clap(flatten)]
+    rollup: crate::args::RollupArgs,
 }
 
 impl<Ext: RethCliExt> NodeCommand<Ext> {
@@ -678,7 +682,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // try to look up the header in the database
         if let Some(header) = header {
             info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.seal_slow())
+            return Ok(header.seal_slow());
         }
 
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
@@ -686,7 +690,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
-                    return Ok(tip_header)
+                    return Ok(tip_header);
                 }
                 Err(error) => {
                     error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
