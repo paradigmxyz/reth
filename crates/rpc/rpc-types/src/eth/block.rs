@@ -267,6 +267,9 @@ impl Header {
                     base_fee_per_gas,
                     extra_data,
                     withdrawals_root,
+                    // TODO: add header fields to the rpc header
+                    blob_gas_used: _,
+                    excess_blob_gas: _,
                 },
             hash,
         } = primitive_header;
