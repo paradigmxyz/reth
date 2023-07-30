@@ -2,7 +2,7 @@
 use crate::{
     args::utils::genesis_value_parser,
     chain, config, db, debug_cmd,
-    dirs::{DataDirPath, LogsDir, MaybePlatformPath, PlatformPath},
+    dirs::{LogsDir, PlatformPath},
     node, p2p,
     runner::CliRunner,
     stage, test_vectors,
@@ -22,13 +22,8 @@ use std::sync::Arc;
 pub fn run() -> eyre::Result<()> {
     let mut opt = Cli::parse();
 
-    if opt.datadir.is_some() {
-        // move logs to the already-chain-specific --datadir
-        opt.logs.log_directory = opt.datadir.unwrap_or_default().map_to::<LogsDir>();
-    } else {
-        // add network name to logs dir
-        opt.logs.log_directory = opt.logs.log_directory.join(opt.chain.chain.to_string());
-    }
+    // add network name to logs dir
+    opt.logs.log_directory = opt.logs.log_directory.join(opt.chain.chain.to_string());
 
     let mut layers = vec![reth_tracing::stdout(opt.verbosity.directive())];
     let _guard = opt.logs.layer()?.map(|(layer, guard)| {
@@ -110,16 +105,6 @@ struct Cli {
         global = true,
     )]
     chain: Arc<ChainSpec>,
-
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", global = true, verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
 
     #[clap(flatten)]
     logs: Logs,
@@ -236,5 +221,20 @@ mod tests {
             // > Not a true "error" as it means --help or similar was used. The help message will be sent to stdout.
             assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
         }
+    }
+
+    #[test]
+    fn parse_logs_path() {
+        let mut reth = Cli::try_parse_from(["reth", "node", "--log.persistent"]).unwrap();
+        reth.logs.log_directory = reth.logs.log_directory.join(reth.chain.chain.to_string());
+        let log_dir = reth.logs.log_directory;
+        assert!(log_dir.as_ref().ends_with("reth/logs/mainnet"), "{:?}", log_dir);
+
+        let mut reth =
+            Cli::try_parse_from(["reth", "node", "--chain", "sepolia", "--log.persistent"])
+                .unwrap();
+        reth.logs.log_directory = reth.logs.log_directory.join(reth.chain.chain.to_string());
+        let log_dir = reth.logs.log_directory;
+        assert!(log_dir.as_ref().ends_with("reth/logs/sepolia"), "{:?}", log_dir);
     }
 }
