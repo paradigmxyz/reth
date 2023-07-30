@@ -1,18 +1,18 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    EvmEnvProvider, HeaderProvider, PostState, PostStateDataProvider, ReceiptProviderIdExt,
-    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
-    WithdrawalsProvider,
+    ChainSpecProvider, EvmEnvProvider, HeaderProvider, PostState, PostStateDataProvider,
+    ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider,
+    TransactionsProvider, WithdrawalsProvider,
 };
 use parking_lot::Mutex;
 use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber,
-    BlockWithSenders, Bytecode, Bytes, ChainInfo, Header, Receipt, SealedBlock, SealedHeader,
-    StorageKey, StorageValue, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash,
-    TxNumber, H256, U256,
+    BlockWithSenders, Bytecode, Bytes, ChainInfo, ChainSpec, Header, Receipt, SealedBlock,
+    SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
+    TransactionSignedNoHash, TxHash, TxNumber, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::{
@@ -22,7 +22,7 @@ use std::{
 };
 
 /// A mock implementation for Provider interfaces.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct MockEthProvider {
     /// Local block store
     pub blocks: Arc<Mutex<HashMap<H256, Block>>>,
@@ -30,6 +30,19 @@ pub struct MockEthProvider {
     pub headers: Arc<Mutex<HashMap<H256, Header>>>,
     /// Local account store
     pub accounts: Arc<Mutex<HashMap<Address, ExtendedAccount>>>,
+    /// Local chain spec
+    pub chain_spec: Arc<ChainSpec>,
+}
+
+impl Default for MockEthProvider {
+    fn default() -> MockEthProvider {
+        MockEthProvider {
+            blocks: Default::default(),
+            headers: Default::default(),
+            accounts: Default::default(),
+            chain_spec: Arc::new(reth_primitives::ChainSpecBuilder::mainnet().build()),
+        }
+    }
 }
 
 /// An extended account for local store
@@ -157,6 +170,12 @@ impl HeaderProvider for MockEthProvider {
 
     fn sealed_header(&self, number: BlockNumber) -> Result<Option<SealedHeader>> {
         Ok(self.header_by_number(number)?.map(|h| h.seal_slow()))
+    }
+}
+
+impl ChainSpecProvider for MockEthProvider {
+    fn chain_spec(&self) -> Arc<ChainSpec> {
+        self.chain_spec.clone()
     }
 }
 

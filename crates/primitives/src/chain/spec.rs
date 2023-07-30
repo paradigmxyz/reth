@@ -1,5 +1,8 @@
 use crate::{
-    constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_WITHDRAWALS},
+    constants::{
+        EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR, EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
+        EIP1559_INITIAL_BASE_FEE, EMPTY_WITHDRAWALS,
+    },
     forkid::ForkFilterKey,
     header::Head,
     proofs::genesis_state_root,
@@ -60,6 +63,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             11052984,
             H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
         )),
+        ..Default::default()
     }
     .into()
 });
@@ -100,6 +104,7 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             4367322,
             H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
         )),
+        ..Default::default()
     }
     .into()
 });
@@ -144,6 +149,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             1273020,
             H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
         )),
+        ..Default::default()
     }
     .into()
 });
@@ -182,9 +188,29 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
         ]),
         deposit_contract: None, // TODO: do we even have?
+        ..Default::default()
     }
     .into()
 });
+
+/// BaseFeeParams contains the config parameters that control block base fee computation
+#[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq)]
+pub struct BaseFeeParams {
+    /// The base_fee_max_change_denominator from EIP-1559
+    pub max_change_denominator: u64,
+    /// The elasticity multiplier from EIP-1559
+    pub elasticity_multiplier: u64,
+}
+
+impl BaseFeeParams {
+    /// Get the base fee parameters for ethereum mainnet
+    pub const fn ethereum() -> BaseFeeParams {
+        BaseFeeParams {
+            max_change_denominator: EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
+            elasticity_multiplier: EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
+        }
+    }
+}
 
 /// An Ethereum chain specification.
 ///
@@ -224,6 +250,24 @@ pub struct ChainSpec {
     /// The deposit contract deployed for PoS.
     #[serde(skip, default)]
     pub deposit_contract: Option<DepositContract>,
+
+    /// The parameters that configure how a block's base fee is computed
+    pub base_fee_params: BaseFeeParams,
+}
+
+impl Default for ChainSpec {
+    fn default() -> ChainSpec {
+        ChainSpec {
+            chain: Default::default(),
+            genesis_hash: Default::default(),
+            genesis: Default::default(),
+            paris_block_and_final_difficulty: Default::default(),
+            fork_timestamps: Default::default(),
+            hardforks: Default::default(),
+            deposit_contract: Default::default(),
+            base_fee_params: BaseFeeParams::ethereum(),
+        }
+    }
 }
 
 impl ChainSpec {
@@ -457,6 +501,7 @@ impl From<Genesis> for ChainSpec {
             hardforks,
             paris_block_and_final_difficulty: None,
             deposit_contract: None,
+            ..Default::default()
         }
     }
 }
@@ -680,6 +725,7 @@ impl ChainSpecBuilder {
             hardforks: self.hardforks,
             paris_block_and_final_difficulty: None,
             deposit_contract: None,
+            ..Default::default()
         }
     }
 }

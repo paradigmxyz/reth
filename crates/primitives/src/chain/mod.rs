@@ -10,7 +10,7 @@ use std::{fmt, str::FromStr};
 // The chain spec module.
 mod spec;
 pub use spec::{
-    AllGenesisFormats, ChainSpec, ChainSpecBuilder, DisplayHardforks, ForkCondition,
+    AllGenesisFormats, BaseFeeParams, ChainSpec, ChainSpecBuilder, DisplayHardforks, ForkCondition,
     ForkTimestamps, DEV, GOERLI, MAINNET, SEPOLIA,
 };
 
