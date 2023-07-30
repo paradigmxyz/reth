@@ -14,38 +14,87 @@ use reth_tracing::{
     tracing_subscriber::{filter::Directive, registry::LookupSpan, EnvFilter},
     BoxedLayer, FileWorkerGuard,
 };
-
 use reth_primitives::ChainSpec;
 use std::sync::Arc;
 
-/// Parse CLI options, set up logging and run the chosen command.
-pub fn run() -> eyre::Result<()> {
-    let mut opt = Cli::parse();
+/// The main reth cli interface.
+///
+/// This is the entrypoint to the executable.
+#[derive(Debug, Parser)]
+#[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
+pub struct Cli {
+    /// The command to run
+    #[clap(subcommand)]
+    command: Commands,
 
-    // add network name to logs dir
-    opt.logs.log_directory = opt.logs.log_directory.join(opt.chain.chain.to_string());
+    /// The chain this node is running.
+    ///
+    /// Possible values are either a built-in chain or the path to a chain specification file.
+    ///
+    /// Built-in chains:
+    /// - mainnet
+    /// - goerli
+    /// - sepolia
+    #[arg(
+        long,
+        value_name = "CHAIN_OR_PATH",
+        global = true,
+        verbatim_doc_comment,
+        default_value = "mainnet",
+        value_parser = genesis_value_parser,
+        global = true,
+    )]
+    chain: Arc<ChainSpec>,
 
-    let mut layers = vec![reth_tracing::stdout(opt.verbosity.directive())];
-    let _guard = opt.logs.layer()?.map(|(layer, guard)| {
-        layers.push(layer);
-        guard
-    });
+    #[clap(flatten)]
+    logs: Logs,
 
-    reth_tracing::init(layers);
+    #[clap(flatten)]
+    verbosity: Verbosity,
+}
 
-    let runner = CliRunner::default();
+impl Cli {
+    /// Execute the configured cli command.
+    pub fn run(mut self) -> eyre::Result<()> {
+        // add network name to logs dir
+        self.logs.log_directory = self.logs.log_directory.join(self.chain.chain.to_string());
 
-    match opt.command {
-        Commands::Node(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
-        Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-        Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-        Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-        Commands::Stage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-        Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::Debug(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
+        let _guard = self.init_tracing()?;
+
+        let runner = CliRunner::default();
+        match self.command {
+            Commands::Node(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
+            Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Stage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::Debug(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
+        }
     }
+
+    /// Initializes tracing with the configured options.
+    ///
+    /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
+    /// that all logs are flushed to disk.
+    pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
+        let mut layers = vec![reth_tracing::stdout(self.verbosity.directive())];
+        let guard = self.logs.layer()?.map(|(layer, guard)| {
+            layers.push(layer);
+            guard
+        });
+
+        reth_tracing::init(layers);
+        Ok(guard.flatten())
+    }
+}
+
+/// Convenience function for parsing CLI options, set up logging and run the chosen command.
+#[inline]
+pub fn run() -> eyre::Result<()> {
+    Cli::parse().run()
 }
 
 /// Commands to be executed
@@ -78,39 +127,6 @@ pub enum Commands {
     /// Various debug routines
     #[command(name = "debug")]
     Debug(debug_cmd::Command),
-}
-
-#[derive(Debug, Parser)]
-#[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
-struct Cli {
-    /// The command to run
-    #[clap(subcommand)]
-    command: Commands,
-
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    ///
-    /// Built-in chains:
-    /// - mainnet
-    /// - goerli
-    /// - sepolia
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        global = true,
-        verbatim_doc_comment,
-        default_value = "mainnet",
-        value_parser = genesis_value_parser,
-        global = true,
-    )]
-    chain: Arc<ChainSpec>,
-
-    #[clap(flatten)]
-    logs: Logs,
-
-    #[clap(flatten)]
-    verbosity: Verbosity,
 }
 
 /// The log configuration.
@@ -223,6 +239,7 @@ mod tests {
         }
     }
 
+    /// Tests that the log directory is parsed correctly. It's always tied to the specific chain's name
     #[test]
     fn parse_logs_path() {
         let mut reth = Cli::try_parse_from(["reth", "node", "--log.persistent"]).unwrap();
