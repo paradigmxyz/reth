@@ -224,6 +224,7 @@ impl ParityTraceBuilder {
                     // the call trace and are added as additional `TransactionTrace` objects in the
                     // trace array
                     if let Some(trace) = node.parity_selfdestruct_trace() {
+                        traces.last_mut().expect("exists").subtraces += 1;
                         traces.push(trace);
                     }
                 }
@@ -242,11 +243,15 @@ impl ParityTraceBuilder {
     /// Returns an iterator over all recorded traces  for `trace_transaction`
     pub fn into_transaction_traces_iter(self) -> impl Iterator<Item = TransactionTrace> {
         let trace_addresses = self.trace_addresses();
-        self.nodes
-            .into_iter()
-            .zip(trace_addresses)
-            .filter(|(node, _)| !node.is_precompile())
-            .map(|(node, trace_address)| node.parity_transaction_trace(trace_address))
+        TransactionTraceIter {
+            next_selfdestruct: None,
+            iter: self
+                .nodes
+                .into_iter()
+                .zip(trace_addresses)
+                .filter(|(node, _)| !node.is_precompile())
+                .map(|(node, trace_address)| (node.parity_transaction_trace(trace_address), node)),
+        }
     }
 
     /// Returns the raw traces of the transaction
@@ -351,6 +356,34 @@ impl ParityTraceBuilder {
             ex: maybe_execution,
             sub: maybe_sub,
         }
+    }
+}
+
+/// An iterator for [TransactionTrace]s
+///
+/// This iterator handles additional selfdestruct actions based on the last emitted [TransactionTrace], since selfdestructs are not recorded as individual call traces but are derived from recorded call
+struct TransactionTraceIter<Iter> {
+    iter: Iter,
+    next_selfdestruct: Option<TransactionTrace>,
+}
+
+impl<Iter> Iterator for TransactionTraceIter<Iter>
+where
+    Iter: Iterator<Item = (TransactionTrace, CallTraceNode)>,
+{
+    type Item = TransactionTrace;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(selfdestruct) = self.next_selfdestruct.take() {
+            return Some(selfdestruct)
+        }
+        let (mut trace, node) = self.iter.next()?;
+        if node.is_selfdestruct() {
+            // since selfdestructs are emitted as additional trace, increase the trace count
+            trace.subtraces += 1;
+            self.next_selfdestruct = node.parity_selfdestruct_trace();
+        }
+        Some(trace)
     }
 }
 
