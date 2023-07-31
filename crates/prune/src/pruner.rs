@@ -359,7 +359,7 @@ impl<DB: Database> Pruner<DB> {
         Ok(())
     }
 
-    /// Prune account history up to the provided block, inclusive.
+    /// Prune storage history up to the provided block, inclusive.
     #[instrument(level = "trace", skip(self, provider), target = "pruner")]
     fn prune_storage_history(
         &self,
