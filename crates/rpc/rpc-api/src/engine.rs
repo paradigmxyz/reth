@@ -50,6 +50,16 @@ pub trait EngineApi {
         payload_attributes: Option<PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated>;
 
+    /// Same as `forkchoiceUpdatedV2` but supports additional [PayloadAttributes] field.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
+    #[method(name = "forkchoiceUpdatedV3")]
+    async fn fork_choice_updated_v3(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated>;
+
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1>
     ///
     /// Returns the most recent version of the payload that is available in the corresponding
@@ -71,6 +81,8 @@ pub trait EngineApi {
     async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelope>;
 
     /// Post Cancun payload handler which also returns a blobs bundle.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_getpayloadv3>
     ///
     /// Returns the most recent version of the payload that is available in the corresponding
     /// payload build process at the time of receiving this call. Note:
@@ -105,6 +117,12 @@ pub trait EngineApi {
     ) -> RpcResult<ExecutionPayloadBodiesV1>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_exchangetransitionconfigurationv1>
+    ///
+    /// Note: This method will be deprecated after the cancun hardfork:
+    ///
+    /// > Consensus and execution layer clients MAY remove support of this method after Cancun. If
+    /// > no longer supported, this method MUST be removed from the engine_exchangeCapabilities
+    /// > request or response list depending on whether it is consensus or execution layer client.
     #[method(name = "exchangeTransitionConfigurationV1")]
     async fn exchange_transition_configuration(
         &self,

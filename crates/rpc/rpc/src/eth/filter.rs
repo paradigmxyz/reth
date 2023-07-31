@@ -363,11 +363,9 @@ where
         let mut all_logs = Vec::new();
         let filter_params = FilteredParams::new(Some(filter.clone()));
 
-        let topics = filter.has_topics().then(|| filter_params.flat_topics.clone());
-
         // derive bloom filters from filter input
         let address_filter = FilteredParams::address_filter(&filter.address);
-        let topics_filter = FilteredParams::topics_filter(&topics);
+        let topics_filter = FilteredParams::topics_filter(&filter.topics);
 
         let is_multi_block_range = from_block != to_block;
 

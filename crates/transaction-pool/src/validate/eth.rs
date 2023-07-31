@@ -3,8 +3,11 @@
 use crate::{
     error::InvalidPoolTransactionError,
     traits::{PoolTransaction, TransactionOrigin},
-    validate::{task::ValidationJobSender, TransactionValidatorError, ValidationTask},
-    TransactionValidationOutcome, TransactionValidator, MAX_INIT_CODE_SIZE, TX_MAX_SIZE,
+    validate::{
+        task::ValidationJobSender, TransactionValidatorError, ValidationTask, MAX_INIT_CODE_SIZE,
+        TX_MAX_SIZE,
+    },
+    TransactionValidationOutcome, TransactionValidator,
 };
 use reth_primitives::{
     constants::ETHEREUM_BLOCK_GAS_LIMIT, ChainSpec, InvalidTransactionError, EIP1559_TX_TYPE_ID,
@@ -137,6 +140,8 @@ pub struct EthTransactionValidatorBuilder {
     ///
     /// Default is 1
     additional_tasks: usize,
+    /// Toggle to determine if a local transaction should be propagated
+    propagate_local_transactions: bool,
 }
 
 impl EthTransactionValidatorBuilder {
@@ -150,6 +155,8 @@ impl EthTransactionValidatorBuilder {
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             minimum_priority_fee: None,
             additional_tasks: 1,
+            // default to true, can potentially take this as a param in the future
+            propagate_local_transactions: true,
         }
     }
 
@@ -183,6 +190,23 @@ impl EthTransactionValidatorBuilder {
     /// Set the eip1559 support.
     pub fn set_eip1559(mut self, eip1559: bool) -> Self {
         self.eip1559 = eip1559;
+        self
+    }
+    /// Sets toggle to propagate transactions received locally by this client (e.g
+    /// transactions from eth_Sendtransaction to this nodes' RPC server)
+    ///
+    ///  If set to false, only transactions received by network peers (via
+    /// p2p) will be marked as propagated in the local transaction pool and returned on a
+    /// GetPooledTransactions p2p request
+    pub fn set_propagate_local_transactions(mut self, propagate_local_txs: bool) -> Self {
+        self.propagate_local_transactions = propagate_local_txs;
+        self
+    }
+    /// Disables propagating transactions recieved locally by this client
+    ///
+    /// For more information, check docs for set_propagate_local_transactions
+    pub fn no_local_transaction_propagation(mut self) -> Self {
+        self.propagate_local_transactions = false;
         self
     }
 
@@ -219,6 +243,7 @@ impl EthTransactionValidatorBuilder {
             block_gas_limit,
             minimum_priority_fee,
             additional_tasks,
+            propagate_local_transactions,
         } = self;
 
         let inner = EthTransactionValidatorInner {
@@ -229,6 +254,7 @@ impl EthTransactionValidatorBuilder {
             eip1559,
             block_gas_limit,
             minimum_priority_fee,
+            propagate_local_transactions,
             _marker: Default::default(),
         };
 
@@ -274,6 +300,8 @@ struct EthTransactionValidatorInner<Client, T> {
     minimum_priority_fee: Option<u128>,
     /// Marker for the transaction type
     _marker: PhantomData<T>,
+    /// Toggle to determine if a local transaction should be propagated
+    propagate_local_transactions: bool,
 }
 
 // === impl EthTransactionValidatorInner ===
@@ -432,7 +460,9 @@ where
             balance: account.balance,
             state_nonce: account.nonce,
             transaction,
-            propagate: true,
+            // by this point assume all external transactions should be propagated
+            propagate: matches!(origin, TransactionOrigin::External) ||
+                self.propagate_local_transactions,
         }
     }
 }

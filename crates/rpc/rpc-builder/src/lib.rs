@@ -1500,7 +1500,7 @@ impl WsHttpServers {
                 config.ensure_ws_http_identical()?;
 
                 if let Some(module) = http_module.or(ws_module) {
-                    let handle = both.start(module).await?;
+                    let handle = both.start(module).await;
                     http_handle = Some(handle.clone());
                     ws_handle = Some(handle);
                 }
@@ -1509,12 +1509,12 @@ impl WsHttpServers {
                 if let Some((server, module)) =
                     http.and_then(|server| http_module.map(|module| (server, module)))
                 {
-                    http_handle = Some(server.start(module).await?);
+                    http_handle = Some(server.start(module).await);
                 }
                 if let Some((server, module)) =
                     ws.and_then(|server| ws_module.map(|module| (server, module)))
                 {
-                    ws_handle = Some(server.start(module).await?);
+                    ws_handle = Some(server.start(module).await);
                 }
             }
         }
@@ -1541,10 +1541,10 @@ enum WsHttpServerKind {
 
 impl WsHttpServerKind {
     /// Starts the server and returns the handle
-    async fn start(self, module: RpcModule<()>) -> Result<ServerHandle, RpcError> {
+    async fn start(self, module: RpcModule<()>) -> ServerHandle {
         match self {
-            WsHttpServerKind::Plain(server) => Ok(server.start(module)?),
-            WsHttpServerKind::WithCors(server) => Ok(server.start(module)?),
+            WsHttpServerKind::Plain(server) => server.start(module),
+            WsHttpServerKind::WithCors(server) => server.start(module),
         }
     }
 
