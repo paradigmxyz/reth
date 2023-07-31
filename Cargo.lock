@@ -5272,7 +5272,7 @@ dependencies = [
  "assert_matches",
  "futures",
  "futures-util",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "pin-project",
  "rayon",
  "reth-db",
@@ -5613,7 +5613,7 @@ version = "0.1.0-alpha.4"
 dependencies = [
  "auto_impl",
  "derive_more",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "parking_lot 0.12.1",
  "pin-project",
  "reth-db",
@@ -5633,7 +5633,7 @@ name = "reth-prune"
 version = "0.1.0-alpha.4"
 dependencies = [
  "assert_matches",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "rayon",
  "reth-db",
  "reth-interfaces",
@@ -5839,7 +5839,7 @@ dependencies = [
 name = "reth-rpc-types"
 version = "0.1.0-alpha.4"
 dependencies = [
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "jsonrpsee-types",
  "rand 0.8.5",
  "reth-primitives",
@@ -5859,7 +5859,7 @@ dependencies = [
  "async-trait",
  "criterion",
  "futures-util",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "num-traits",
  "paste",
  "pin-project",
