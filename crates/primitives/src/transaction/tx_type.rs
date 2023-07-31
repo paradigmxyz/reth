@@ -19,8 +19,8 @@ pub(crate) const EIP4844_TX_TYPE_ID: u8 = 3;
 /// Transaction Type
 ///
 /// Currently being used as 2-bit type when encoding it to [`Compact`] on
-/// [`TransactionSignedNoHash`]. Adding more transaction types will break the codec and database
-/// format.
+/// [`crate::TransactionSignedNoHash`]. Adding more transaction types will break the codec and
+/// database format.
 ///
 /// Other required changes when adding a new type can be seen on [PR#3953](https://github.com/paradigmxyz/reth/pull/3953/files).
 #[derive_arbitrary(compact)]
