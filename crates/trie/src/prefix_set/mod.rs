@@ -9,8 +9,15 @@ pub use loader::PrefixSetLoader;
 /// This data structure stores a set of `Nibbles` and provides methods to insert
 /// new elements and check whether any existing element has a given prefix.
 ///
-/// Internally, this implementation uses a `BTreeSet` to store the `Nibbles`, which
-/// ensures that they are always sorted and deduplicated.
+/// Internally, this implementation uses a `Vec` and aims to act like a `BTreeSet` in being both
+/// sorted and deduplicated. It does this by keeping a `sorted` flag. The `sorted` flag represents
+/// whether or not the `Vec` is definitely sorted. When a new element is added, it is set to
+/// `false.`. The `Vec` is sorted and deduplicated when `sorted` is `false` and:
+///  * An element is being checked for inclusion (`contains`), or
+///  * The set is being converted into an immutable `PrefixSet` (`freeze`)
+///
+/// This means that a `PrefixSet` will always be sorted and deduplicated when constructed from a
+/// `PrefixSetMut`.
 ///
 /// # Examples
 ///
