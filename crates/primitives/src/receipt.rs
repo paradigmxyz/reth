@@ -4,12 +4,16 @@ use crate::{
     Bloom, Log, TxType,
 };
 use bytes::{Buf, BufMut, BytesMut};
-use reth_codecs::{main_codec, Compact, CompactZstd};
+use reth_codecs::{add_arbitrary_tests, main_codec, Compact, CompactZstd};
 use reth_rlp::{length_of_length, Decodable, Encodable};
 use std::cmp::Ordering;
 
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest::strategy::Strategy;
+
 /// Receipt containing result of transaction execution.
-#[main_codec(zstd)]
+#[main_codec(no_arbitrary, zstd)]
+#[add_arbitrary_tests]
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Receipt {
     /// Receipt type.
@@ -21,12 +25,6 @@ pub struct Receipt {
     /// Gas used
     pub cumulative_gas_used: u64,
     /// Log send from contracts.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<Log>(), 0..=20)"
-        )
-    )]
     pub logs: Vec<Log>,
     /// Deposit nonce for Optimism deposited transactions
     #[cfg(feature = "optimism")]
@@ -109,14 +107,12 @@ impl ReceiptWithBloom {
         let receipt = match tx_type {
             #[cfg(feature = "optimism")]
             TxType::DEPOSIT => {
-                let deposit_nonce = reth_rlp::Decodable::decode(b)?;
-                Receipt {
-                    tx_type,
-                    success,
-                    cumulative_gas_used,
-                    logs,
-                    deposit_nonce: Some(deposit_nonce),
-                }
+                let consumed = started_len - b.len();
+                let has_nonce = rlp_head.payload_length - consumed > 0;
+                let deposit_nonce =
+                    if has_nonce { Some(reth_rlp::Decodable::decode(b)?) } else { None };
+
+                Receipt { tx_type, success, cumulative_gas_used, logs, deposit_nonce }
             }
             _ => Receipt {
                 tx_type,
@@ -191,6 +187,67 @@ impl Decodable for ReceiptWithBloom {
     }
 }
 
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::arbitrary::Arbitrary for Receipt {
+    type Parameters = ();
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::{any, prop_compose};
+
+        prop_compose! {
+            fn arbitrary_receipt()(tx_type in any::<TxType>(),
+                        success in any::<bool>(),
+                        cumulative_gas_used in any::<u64>(),
+                        logs in proptest::collection::vec(proptest::arbitrary::any::<Log>(), 0..=20),
+                        deposit_nonce in any::<Option<u64>>()) -> Receipt
+            {
+
+                // Only reecipts for deposit transactions may contain a deposit nonce
+                #[cfg(feature = "optimism")]
+                let deposit_nonce = if tx_type == TxType::DEPOSIT {
+                    deposit_nonce
+                } else {
+                    None
+                };
+
+                Receipt { tx_type,
+                    success,
+                    cumulative_gas_used,
+                    logs,
+                    #[cfg(feature = "optimism")]
+                    deposit_nonce
+                }
+            }
+        };
+        arbitrary_receipt().boxed()
+    }
+
+    type Strategy = proptest::strategy::BoxedStrategy<Receipt>;
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for Receipt {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let tx_type = TxType::arbitrary(u)?;
+        let success = bool::arbitrary(u)?;
+        let cumulative_gas_used = u64::arbitrary(u)?;
+        let logs = Vec::<Log>::arbitrary(u)?;
+
+        #[cfg(feature = "optimism")]
+        let deposit_nonce =
+            if tx_type == TxType::DEPOSIT { Option::<u64>::arbitrary(u)? } else { None };
+
+        Ok(Self {
+            tx_type,
+            success,
+            cumulative_gas_used,
+            logs,
+            #[cfg(feature = "optimism")]
+            deposit_nonce,
+        })
+    }
+}
+
 /// [`Receipt`] reference type with calculated bloom filter.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReceiptWithBloomRef<'a> {
@@ -248,6 +305,13 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
         rlp_head.payload_length += self.bloom.length();
         rlp_head.payload_length += self.receipt.logs.length();
 
+        #[cfg(feature = "optimism")]
+        if self.receipt.tx_type == TxType::DEPOSIT {
+            if let Some(deposit_nonce) = self.receipt.deposit_nonce {
+                rlp_head.payload_length += deposit_nonce.length();
+            }
+        }
+
         rlp_head
     }
 
@@ -258,6 +322,10 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
         self.receipt.cumulative_gas_used.encode(out);
         self.bloom.encode(out);
         self.receipt.logs.encode(out);
+        #[cfg(feature = "optimism")]
+        if self.receipt.tx_type == TxType::DEPOSIT {
+            self.receipt.deposit_nonce.map(|deposit_nonce| deposit_nonce.encode(out));
+        }
     }
 
     /// Encode receipt with or without the header data.
@@ -283,6 +351,10 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
             TxType::EIP1559 => {
                 out.put_u8(0x02);
             }
+            #[cfg(feature = "optimism")]
+            TxType::DEPOSIT => {
+                out.put_u8(0x7E);
+            }
             _ => unreachable!("legacy handled; qed."),
         }
         out.put_slice(payload.as_ref());
@@ -302,7 +374,7 @@ impl<'a> Encodable for ReceiptWithBloomEncoder<'a> {
     fn length(&self) -> usize {
         let mut payload_len = self.receipt_length();
         // account for eip-2718 type prefix and set the list
-        if matches!(self.receipt.tx_type, TxType::EIP1559 | TxType::EIP2930) {
+        if !matches!(self.receipt.tx_type, TxType::Legacy) {
             payload_len += 1;
             // we include a string header for typed receipts, so include the length here
             payload_len += length_of_length(payload_len);
