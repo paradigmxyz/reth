@@ -177,7 +177,7 @@ impl<DB: Database> Pruner<DB> {
         let total = range.clone().count();
 
         let mut processed = 0;
-        provider.prune_table_with_iterator_in_batches::<tables::Receipts, _>(
+        provider.prune_table_with_iterator_in_batches::<tables::Receipts>(
             range,
             self.batch_sizes.receipts,
             |entries| {
@@ -245,7 +245,7 @@ impl<DB: Database> Pruner<DB> {
             // Pre-sort hashes to prune them in order
             hashes.sort_unstable();
 
-            let entries = provider.prune_table_with_iterator::<tables::TxHashNumber, _>(hashes)?;
+            let entries = provider.prune_table_with_iterator::<tables::TxHashNumber>(hashes)?;
             processed += entries;
             trace!(
                 target: "pruner",
@@ -279,7 +279,7 @@ impl<DB: Database> Pruner<DB> {
         let total = range.clone().count();
 
         let mut processed = 0;
-        provider.prune_table_with_range_in_batches::<tables::AccountChangeSet, _>(
+        provider.prune_table_with_range_in_batches::<tables::AccountChangeSet>(
             range,
             self.batch_sizes.account_history,
             |entries| {
