@@ -24,7 +24,7 @@ reth-transaction-pool.workspace = true
 reth-metrics = { workspace = true, features = ["common"] }
 
 # rpc/net
-jsonrpsee = { version = "0.18", features = ["server"] }
+jsonrpsee = { workspace = true, features = ["server"] }
 tower-http = { version = "0.4", features = ["full"] }
 tower = { version = "0.4", features = ["full"] }
 hyper = "0.14"
@@ -34,9 +34,6 @@ strum = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 tracing.workspace = true
-rayon.workspace = true
-pin-project.workspace = true
-tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
 reth-tracing = { path = "../../tracing" }

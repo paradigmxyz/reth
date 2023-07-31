@@ -95,7 +95,7 @@ fn merkle(c: &mut Criterion) {
     // don't need to run each stage for that many times
     group.sample_size(10);
 
-    let stage = MerkleStage::Both { clean_threshold: u64::MAX };
+    let stage = MerkleStage::Both { clean_threshold: u64::MAX, prune_modes: Default::default() };
     measure_stage(
         &mut group,
         setup::unwind_hashes,
@@ -104,7 +104,7 @@ fn merkle(c: &mut Criterion) {
         "Merkle-incremental".to_string(),
     );
 
-    let stage = MerkleStage::Both { clean_threshold: 0 };
+    let stage = MerkleStage::Both { clean_threshold: 0, prune_modes: Default::default() };
     measure_stage(
         &mut group,
         setup::unwind_hashes,
