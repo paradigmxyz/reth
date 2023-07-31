@@ -760,12 +760,17 @@ impl Command {
                 .set(AccountHashingStage::new(
                     stage_config.account_hashing.clean_threshold,
                     stage_config.account_hashing.commit_threshold,
+                    config.prune.map(|prune| prune.parts).unwrap_or_default(),
                 ))
                 .set(StorageHashingStage::new(
                     stage_config.storage_hashing.clean_threshold,
                     stage_config.storage_hashing.commit_threshold,
+                    config.prune.map(|prune| prune.parts).unwrap_or_default(),
                 ))
-                .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
+                .set(MerkleStage::new_execution(
+                    stage_config.merkle.clean_threshold,
+                    config.prune.map(|prune| prune.parts).unwrap_or_default(),
+                ))
                 .set(TransactionLookupStage::new(stage_config.transaction_lookup.commit_threshold))
                 .set(IndexAccountHistoryStage::new(
                     stage_config.index_account_history.commit_threshold,
