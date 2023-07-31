@@ -91,6 +91,12 @@ impl<DB: Database> Pruner<DB> {
             self.prune_transaction_lookup(&provider, to_block, prune_mode)?;
         }
 
+        if let Some((to_block, prune_mode)) =
+            self.modes.prune_target_block_account_history(tip_block_number)
+        {
+            self.prune_account_history(&provider, to_block, prune_mode)?;
+        }
+
         provider.commit()?;
 
         self.last_pruned_block_number = Some(tip_block_number);
