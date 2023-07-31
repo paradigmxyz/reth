@@ -1,6 +1,9 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
-use reth_primitives::stage::{StageCheckpoint, StageId};
+use reth_primitives::{
+    stage::{StageCheckpoint, StageId},
+    PruneModes,
+};
 use reth_provider::{AccountExtReader, DatabaseProviderRW, HistoryWriter};
 use std::fmt::Debug;
 
@@ -12,18 +15,20 @@ pub struct IndexAccountHistoryStage {
     /// Number of blocks after which the control
     /// flow will be returned to the pipeline for commit.
     pub commit_threshold: u64,
+    /// Pruning configuration.
+    pub prune_modes: PruneModes,
 }
 
 impl IndexAccountHistoryStage {
     /// Create new instance of [IndexAccountHistoryStage].
     pub fn new(commit_threshold: u64) -> Self {
-        Self { commit_threshold }
+        Self { commit_threshold, prune_modes: PruneModes::default() }
     }
 }
 
 impl Default for IndexAccountHistoryStage {
     fn default() -> Self {
-        Self { commit_threshold: 100_000 }
+        Self { commit_threshold: 100_000, prune_modes: PruneModes::default() }
     }
 }
 
@@ -38,8 +43,16 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
     async fn execute(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
-        input: ExecInput,
+        mut input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        if let Some((target_prunable_block, _)) =
+            self.prune_modes.prune_target_block_account_history(input.target())?
+        {
+            if target_prunable_block > input.checkpoint().block_number {
+                input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
+            }
+        }
+
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
@@ -372,11 +385,16 @@ mod tests {
     struct IndexAccountHistoryTestRunner {
         pub(crate) tx: TestTransaction,
         commit_threshold: u64,
+        prune_modes: PruneModes,
     }
 
     impl Default for IndexAccountHistoryTestRunner {
         fn default() -> Self {
-            Self { tx: TestTransaction::default(), commit_threshold: 1000 }
+            Self {
+                tx: TestTransaction::default(),
+                commit_threshold: 1000,
+                prune_modes: PruneModes::default(),
+            }
         }
     }
 
@@ -388,7 +406,7 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            Self::S { commit_threshold: self.commit_threshold }
+            Self::S { commit_threshold: self.commit_threshold, prune_modes: self.prune_modes }
         }
     }
 
