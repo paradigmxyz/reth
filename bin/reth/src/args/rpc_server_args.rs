@@ -1,6 +1,9 @@
 //! clap [Args](clap::Args) for RPC related arguments.
 
-use crate::args::GasPriceOracleArgs;
+use crate::{
+    args::GasPriceOracleArgs,
+    cli::ext::{NoopArgsExt, RethRpcConfig, RethRpcServerArgsExt},
+};
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
@@ -52,9 +55,9 @@ pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 100;
 pub(crate) const RPC_DEFAULT_MAX_TRACING_REQUESTS: u32 = 25;
 
 /// Parameters for configuring the rpc more granularity via CLI
-#[derive(Debug, Args, PartialEq, Eq)]
+#[derive(Debug, Args)]
 #[command(next_help_heading = "RPC")]
-pub struct RpcServerArgs {
+pub struct RpcServerArgs<Ext: RethRpcServerArgsExt = NoopArgsExt> {
     /// Enable the HTTP-RPC server
     #[arg(long, default_value_if("dev", "true", "true"))]
     pub http: bool,
@@ -160,9 +163,13 @@ pub struct RpcServerArgs {
     /// Maximum number of env cache entries.
     #[arg(long, default_value_t = DEFAULT_ENV_CACHE_MAX_LEN)]
     pub env_cache_len: u32,
+
+    /// Additional arguments for rpc.
+    #[clap(flatten)]
+    pub ext: Ext,
 }
 
-impl RpcServerArgs {
+impl<Ext: RethRpcServerArgsExt> RpcServerArgs<Ext> {
     /// Returns the max request size in bytes.
     pub fn rpc_max_request_size_bytes(&self) -> u32 {
         self.rpc_max_request_size * 1024 * 1024
@@ -181,21 +188,6 @@ impl RpcServerArgs {
             self.gas_price_oracle.max_price,
             self.gas_price_oracle.percentile,
         )
-    }
-
-    /// Extracts the [EthConfig] from the args.
-    pub fn eth_config(&self) -> EthConfig {
-        EthConfig::default()
-            .max_tracing_requests(self.rpc_max_tracing_requests)
-            .rpc_gas_cap(self.rpc_gas_cap)
-            .gpo_config(self.gas_price_oracle_config())
-    }
-
-    /// Convenience function that returns whether ipc is enabled
-    ///
-    /// By default IPC is enabled therefor it is enabled if the `ipcdisable` is false.
-    fn is_ipc_enabled(&self) -> bool {
-        !self.ipcdisable
     }
 
     /// The execution layer and consensus layer clients SHOULD accept a configuration parameter:
@@ -244,7 +236,7 @@ impl RpcServerArgs {
         events: Events,
         engine_api: Engine,
         jwt_secret: JwtSecret,
-    ) -> Result<(RpcServerHandle, AuthServerHandle), RpcError>
+    ) -> eyre::Result<(RpcServerHandle, AuthServerHandle)>
     where
         Provider: BlockReaderIdExt
             + HeaderProvider
@@ -266,13 +258,16 @@ impl RpcServerArgs {
         let module_config = self.transport_rpc_module_config();
         debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
 
-        let (rpc_modules, auth_module) = RpcModuleBuilder::default()
+        let (mut rpc_modules, auth_module, mut registry) = RpcModuleBuilder::default()
             .with_provider(provider)
             .with_pool(pool)
             .with_network(network)
             .with_events(events)
             .with_executor(executor)
             .build_with_auth_server(module_config, engine_api);
+
+        // apply configured customization
+        self.ext.extend_rpc_modules(self, &mut registry, &mut rpc_modules)?;
 
         let server_config = self.rpc_server_config();
         let launch_rpc = rpc_modules.start_server(server_config).map_ok(|handle| {
@@ -295,7 +290,7 @@ impl RpcServerArgs {
         });
 
         // launch servers concurrently
-        futures::future::try_join(launch_rpc, launch_auth).await
+        Ok(futures::future::try_join(launch_rpc, launch_auth).await?)
     }
 
     /// Convenience function for starting a rpc server with configs which extracted from cli args.
@@ -451,6 +446,20 @@ impl RpcServerArgs {
         let address = SocketAddr::new(self.auth_addr, self.auth_port);
 
         Ok(AuthServerConfig::builder(jwt_secret).socket_addr(address).build())
+    }
+}
+
+impl<Ext: RethRpcServerArgsExt> RethRpcConfig for RpcServerArgs<Ext> {
+    fn is_ipc_enabled(&self) -> bool {
+        // By default IPC is enabled therefor it is enabled if the `ipcdisable` is false.
+        !self.ipcdisable
+    }
+
+    fn eth_config(&self) -> EthConfig {
+        EthConfig::default()
+            .max_tracing_requests(self.rpc_max_tracing_requests)
+            .rpc_gas_cap(self.rpc_gas_cap)
+            .gpo_config(self.gas_price_oracle_config())
     }
 }
 

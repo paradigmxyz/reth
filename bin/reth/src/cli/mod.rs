@@ -1,7 +1,9 @@
 //! CLI definition and entrypoint to executable
 use crate::{
     args::utils::genesis_value_parser,
-    chain, config, db, debug_cmd,
+    chain,
+    cli::ext::RethCliExt,
+    config, db, debug_cmd,
     dirs::{LogsDir, PlatformPath},
     node, p2p,
     runner::CliRunner,
@@ -17,15 +19,17 @@ use reth_tracing::{
 };
 use std::sync::Arc;
 
+pub mod ext;
+
 /// The main reth cli interface.
 ///
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
-pub struct Cli {
+pub struct Cli<Ext: RethCliExt = ()> {
     /// The command to run
     #[clap(subcommand)]
-    command: Commands,
+    command: Commands<Ext>,
 
     /// The chain this node is running.
     ///
@@ -99,10 +103,10 @@ pub fn run() -> eyre::Result<()> {
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
-pub enum Commands {
+pub enum Commands<Ext: RethCliExt = ()> {
     /// Start the node
     #[command(name = "node")]
-    Node(node::Command),
+    Node(node::Command<Ext>),
     /// Initialize the database from a genesis file.
     #[command(name = "init")]
     Init(chain::InitCommand),
@@ -225,9 +229,9 @@ mod tests {
     /// runtime
     #[test]
     fn test_parse_help_all_subcommands() {
-        let reth = Cli::command();
+        let reth = Cli::<()>::command();
         for sub_command in reth.get_subcommands() {
-            let err = Cli::try_parse_from(["reth", sub_command.get_name(), "--help"])
+            let err = Cli::<()>::try_parse_from(["reth", sub_command.get_name(), "--help"])
                 .err()
                 .unwrap_or_else(|| {
                     panic!("Failed to parse help message {}", sub_command.get_name())
@@ -243,13 +247,13 @@ mod tests {
     /// name
     #[test]
     fn parse_logs_path() {
-        let mut reth = Cli::try_parse_from(["reth", "node", "--log.persistent"]).unwrap();
+        let mut reth = Cli::<()>::try_parse_from(["reth", "node", "--log.persistent"]).unwrap();
         reth.logs.log_directory = reth.logs.log_directory.join(reth.chain.chain.to_string());
         let log_dir = reth.logs.log_directory;
         assert!(log_dir.as_ref().ends_with("reth/logs/mainnet"), "{:?}", log_dir);
 
         let mut reth =
-            Cli::try_parse_from(["reth", "node", "--chain", "sepolia", "--log.persistent"])
+            Cli::<()>::try_parse_from(["reth", "node", "--chain", "sepolia", "--log.persistent"])
                 .unwrap();
         reth.logs.log_directory = reth.logs.log_directory.join(reth.chain.chain.to_string());
         let log_dir = reth.logs.log_directory;
