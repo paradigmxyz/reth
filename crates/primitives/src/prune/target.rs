@@ -1,4 +1,7 @@
-use crate::{serde_helper::deserialize_opt_prune_mode_with_min_blocks, BlockNumber, PruneMode};
+use crate::{
+    prune::PrunePartError, serde_helper::deserialize_opt_prune_mode_with_min_blocks, BlockNumber,
+    PruneMode, PrunePart,
+};
 use paste::paste;
 use serde::{Deserialize, Serialize};
 
@@ -19,10 +22,16 @@ pub struct PruneModes {
     )]
     pub receipts: Option<PruneMode>,
     /// Account History pruning configuration.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<64, _>"
+    )]
     pub account_history: Option<PruneMode>,
     /// Storage History pruning configuration.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<64, _>"
+    )]
     pub storage_history: Option<PruneMode>,
 }
 
@@ -51,12 +60,15 @@ macro_rules! impl_prune_parts {
                     $human_part,
                     " pruning needs to be done, inclusive, according to the provided tip."
                 )]
-                pub fn [<prune_target_block_ $part>](&self, tip: BlockNumber) -> Option<(BlockNumber, PruneMode)> {
-                    self.$part.as_ref().and_then(|mode| {
-                        self.prune_target_block(mode, tip, $min_blocks).map(|block| {
-                            (block, *mode)
-                        })
-                    })
+                pub fn [<prune_target_block_ $part>](&self, tip: BlockNumber) -> Result<Option<(BlockNumber, PruneMode)>, PrunePartError> {
+                    match &self.$part {
+                        Some(mode) =>
+                            match self.prune_target_block(mode, tip, $min_blocks) {
+                                Some(block) => Ok(Some((block, *mode))),
+                                None => Err(PrunePartError::Configuration(PrunePart::[<$human_part>]))
+                            }
+                        None => Ok(None)
+                    }
                 }
             }
         )+
@@ -107,17 +119,17 @@ impl PruneModes {
                 Some(tip.saturating_sub(*distance))
             }
             PruneMode::Before(n) if tip.saturating_sub(*n) >= min_blocks.unwrap_or_default() => {
-                Some(*n)
+                Some(n.saturating_sub(1))
             }
             _ => None,
         }
     }
 
     impl_prune_parts!(
-        (sender_recovery, "Sender Recovery", None),
-        (transaction_lookup, "Transaction Lookup", None),
+        (sender_recovery, "SenderRecovery", None),
+        (transaction_lookup, "TransactionLookup", None),
         (receipts, "Receipts", Some(64)),
-        (account_history, "Account History", None),
-        (storage_history, "Storage History", None)
+        (account_history, "AccountHistory", Some(64)),
+        (storage_history, "StorageHistory", Some(64))
     );
 }

@@ -100,6 +100,8 @@ impl From<Header> for SealedHeader {
             parent_hash: value.parent_hash,
             logs_bloom: value.bloom,
             withdrawals_root: value.withdrawals_root,
+            blob_gas_used: None,
+            excess_blob_gas: None,
         };
         header.seal(value.hash)
     }

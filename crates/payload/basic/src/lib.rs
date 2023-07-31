@@ -714,6 +714,8 @@ fn build_payload<Pool, Client>(
             difficulty: U256::ZERO,
             gas_used: cumulative_gas_used,
             extra_data: extra_data.into(),
+            blob_gas_used: None,
+            excess_blob_gas: None,
         };
 
         // seal the block
@@ -785,6 +787,8 @@ where
         difficulty: U256::ZERO,
         gas_used: 0,
         extra_data: extra_data.into(),
+        blob_gas_used: None,
+        excess_blob_gas: None,
     };
 
     let block = Block { header, body: vec![], ommers: vec![], withdrawals };

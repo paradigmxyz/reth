@@ -22,7 +22,7 @@ pub enum TrieKey {
 }
 
 /// The operation to perform on the trie.
-#[derive(Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum TrieOp {
     /// Delete the node entry.
     Delete,

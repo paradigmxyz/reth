@@ -431,6 +431,19 @@ where
                             "Stage encountered a validation error: {error}"
                         );
 
+                        // FIXME: When handling errors, we do not commit the database transaction.
+                        // This leads to the Merkle stage not clearing its
+                        // checkpoint, and restarting from an invalid place.
+                        drop(provider_rw);
+                        provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+                        provider_rw
+                            .save_stage_checkpoint_progress(StageId::MerkleExecute, vec![])?;
+                        provider_rw.save_stage_checkpoint(
+                            StageId::MerkleExecute,
+                            prev_checkpoint.unwrap_or_default(),
+                        )?;
+                        provider_rw.commit()?;
+
                         // We unwind because of a validation error. If the unwind itself fails,
                         // we bail entirely, otherwise we restart the execution loop from the
                         // beginning.
