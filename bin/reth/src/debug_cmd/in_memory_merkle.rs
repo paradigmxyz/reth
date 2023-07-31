@@ -187,7 +187,10 @@ impl Command {
 
         if in_memory_state_root == block.state_root {
             info!(target: "reth::cli", state_root = ?in_memory_state_root, "Computed in-memory state root matches");
-            return Ok(())
+        } else {
+            error!(
+                target: "reth::cli",
+                "Computed in-memory state root mismatch. Expected: {:?}. Got: {:?}", block.state_root, in_memory_state_root);
         }
 
         let provider_rw = factory.provider_rw()?;
@@ -195,16 +198,18 @@ impl Command {
         // Insert block, state and hashes
         provider_rw.insert_block(block.clone(), None)?;
         block_state.write_to_db(provider_rw.tx_ref(), block.number)?;
-        let storage_lists = provider_rw.changed_storages_with_range(block.number..=block.number)?;
+        let storage_lists =
+            provider_rw.changed_storages_with_range(block.number - 1..=block.number)?;
         let storages = provider_rw.plainstate_storages(storage_lists)?;
         provider_rw.insert_storage_for_hashing(storages)?;
-        let account_lists = provider_rw.changed_accounts_with_range(block.number..=block.number)?;
+        let account_lists =
+            provider_rw.changed_accounts_with_range(block.number - 1..=block.number)?;
         let accounts = provider_rw.basic_accounts(account_lists)?;
         provider_rw.insert_account_for_hashing(accounts)?;
 
         let (state_root, incremental_trie_updates) = StateRoot::incremental_root_with_updates(
             provider_rw.tx_ref(),
-            block.number..=block.number,
+            block.number - 1..=block.number,
         )?;
         if state_root != block.state_root {
             eyre::bail!(
