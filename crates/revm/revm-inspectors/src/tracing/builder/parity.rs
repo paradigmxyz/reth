@@ -217,6 +217,16 @@ impl ParityTraceBuilder {
             if with_traces {
                 let trace = node.parity_transaction_trace(trace_address);
                 traces.push(trace);
+
+                // check if the trace node is a selfdestruct
+                if node.is_selfdestruct() {
+                    // selfdestructs are not recorded as individual call traces but are derived from
+                    // the call trace and are added as additional `TransactionTrace` objects in the
+                    // trace array
+                    if let Some(trace) = node.parity_selfdestruct_trace() {
+                        traces.push(trace);
+                    }
+                }
             }
             if with_diff {
                 node.parity_update_state_diff(&mut diff);

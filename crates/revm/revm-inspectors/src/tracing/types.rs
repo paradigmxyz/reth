@@ -294,6 +294,12 @@ impl CallTraceNode {
         self.trace.status
     }
 
+    /// Returns true if the call was a selfdestruct
+    #[inline]
+    pub(crate) fn is_selfdestruct(&self) -> bool {
+        self.status() == InstructionResult::SelfDestruct
+    }
+
     /// Updates the values of the state diff
     pub(crate) fn parity_update_state_diff(&self, diff: &mut StateDiff) {
         let addr = self.trace.address;
@@ -345,9 +351,7 @@ impl CallTraceNode {
     /// Converts this node into a parity `TransactionTrace`
     pub(crate) fn parity_transaction_trace(&self, trace_address: Vec<usize>) -> TransactionTrace {
         let action = self.parity_action();
-        let result = if action.is_selfdestruct() ||
-            (self.trace.is_error() && !self.trace.is_revert())
-        {
+        let result = if self.trace.is_error() && !self.trace.is_revert() {
             // if the trace is a selfdestruct or an error that is not a revert, the result is None
             None
         } else {
@@ -374,18 +378,37 @@ impl CallTraceNode {
         }
     }
 
-    /// Returns the `Action` for a parity trace
-    pub(crate) fn parity_action(&self) -> Action {
-        // TODO: this might not be accurate because this is the result of the call, which could lead
-        // to missing origin call action so this function should return two actions if it's
-        // a selfdestruct (Action, Option<SelfdestructAction>)
-        if self.status() == InstructionResult::SelfDestruct {
-            return Action::Selfdestruct(SelfdestructAction {
+    /// If the trace is a selfdestruct, returns the `Action` for a parity trace.
+    pub(crate) fn parity_selfdestruct_action(&self) -> Option<Action> {
+        if self.is_selfdestruct() {
+            Some(Action::Selfdestruct(SelfdestructAction {
                 address: self.trace.address,
                 refund_address: self.trace.selfdestruct_refund_target.unwrap_or_default(),
                 balance: self.trace.value,
-            })
+            }))
+        } else {
+            None
         }
+    }
+
+    /// If the trace is a selfdestruct, returns the `TransactionTrace` for a parity trace.
+    pub(crate) fn parity_selfdestruct_trace(&self) -> Option<TransactionTrace> {
+        let trace = self.parity_selfdestruct_action()?;
+        Some(TransactionTrace {
+            action: trace,
+            error: None,
+            result: None,
+            // this trace belongs under the parent call trace
+            trace_address: vec![0],
+            subtraces: 0,
+        })
+    }
+
+    /// Returns the `Action` for a parity trace.
+    ///
+    /// Caution: This does not include the selfdestruct action, if the trace is a selfdestruct,
+    /// since those are handled in addition to the call action.
+    pub(crate) fn parity_action(&self) -> Action {
         match self.kind() {
             CallKind::Call | CallKind::StaticCall | CallKind::CallCode | CallKind::DelegateCall => {
                 Action::Call(CallAction {
