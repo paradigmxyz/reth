@@ -35,7 +35,7 @@ ethers-core = { workspace = true, features = ["eip712"] }
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # rpc
-jsonrpsee = { version = "0.18" }
+jsonrpsee.workspace = true
 http = "0.2.8"
 http-body = "0.4.5"
 hyper = "0.14.24"
@@ -63,7 +63,7 @@ schnellru = "0.2"
 futures.workspace = true
 
 [dev-dependencies]
-jsonrpsee = { version = "0.18", features = ["client"] }
+jsonrpsee = { workspace = true, features = ["client"] }
 assert_matches = "1.5.0"
 tempfile = "3.5.0"
 reth-interfaces = { workspace = true, features = ["test-utils"] }
