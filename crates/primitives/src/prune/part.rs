@@ -2,7 +2,7 @@ use reth_codecs::{main_codec, Compact};
 
 /// Part of the data that can be pruned.
 #[main_codec]
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum PrunePart {
     /// Prune part responsible for the `TxSenders` table.
     SenderRecovery,

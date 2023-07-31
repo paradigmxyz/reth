@@ -1,6 +1,5 @@
 use crate::Log as RpcLog;
 use itertools::{EitherOrBoth::*, Itertools};
-use jsonrpsee_types::SubscriptionId;
 use reth_primitives::{
     bloom::{Bloom, Input},
     keccak256, Address, BlockNumberOrTag, Log, H160, H256, U256, U64,
@@ -874,7 +873,7 @@ impl<'de> Deserialize<'de> for FilterChanges {
     }
 }
 
-/// Owned equivalent of [SubscriptionId]
+/// Owned equivalent of a `SubscriptionId`
 #[derive(Debug, PartialEq, Clone, Hash, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[serde(untagged)]
@@ -885,20 +884,22 @@ pub enum FilterId {
     Str(String),
 }
 
-impl From<FilterId> for SubscriptionId<'_> {
+#[cfg(feature = "jsonrpsee-types")]
+impl From<FilterId> for jsonrpsee_types::SubscriptionId<'_> {
     fn from(value: FilterId) -> Self {
         match value {
-            FilterId::Num(n) => SubscriptionId::Num(n),
-            FilterId::Str(s) => SubscriptionId::Str(s.into()),
+            FilterId::Num(n) => jsonrpsee_types::SubscriptionId::Num(n),
+            FilterId::Str(s) => jsonrpsee_types::SubscriptionId::Str(s.into()),
         }
     }
 }
 
-impl From<SubscriptionId<'_>> for FilterId {
-    fn from(value: SubscriptionId<'_>) -> Self {
+#[cfg(feature = "jsonrpsee-types")]
+impl From<jsonrpsee_types::SubscriptionId<'_>> for FilterId {
+    fn from(value: jsonrpsee_types::SubscriptionId<'_>) -> Self {
         match value {
-            SubscriptionId::Num(n) => FilterId::Num(n),
-            SubscriptionId::Str(s) => FilterId::Str(s.into_owned()),
+            jsonrpsee_types::SubscriptionId::Num(n) => FilterId::Num(n),
+            jsonrpsee_types::SubscriptionId::Str(s) => FilterId::Str(s.into_owned()),
         }
     }
 }
