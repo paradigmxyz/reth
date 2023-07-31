@@ -2,9 +2,16 @@
 
 use crate::PrunerError;
 use rayon::prelude::*;
-use reth_db::{database::Database, tables};
+use reth_db::{
+    abstraction::cursor::{DbCursorRO, DbCursorRW},
+    database::Database,
+    models::ShardedKey,
+    tables,
+    transaction::DbTxMut,
+    BlockNumberList,
+};
 use reth_primitives::{
-    BlockNumber, ChainSpec, PruneCheckpoint, PruneMode, PruneModes, PrunePart, TxNumber,
+    Address, BlockNumber, ChainSpec, PruneCheckpoint, PruneMode, PruneModes, PrunePart, TxNumber,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
@@ -22,11 +29,12 @@ pub type PrunerWithResult<DB> = (Pruner<DB>, PrunerResult);
 pub struct BatchSizes {
     receipts: usize,
     transaction_lookup: usize,
+    account_history: usize,
 }
 
 impl Default for BatchSizes {
     fn default() -> Self {
-        Self { receipts: 10000, transaction_lookup: 10000 }
+        Self { receipts: 10000, transaction_lookup: 10000, account_history: 10000 }
     }
 }
 
@@ -248,22 +256,109 @@ impl<DB: Database> Pruner<DB> {
 
         Ok(())
     }
+
+    /// Prune account history up to the provided block, inclusive.
+    #[instrument(level = "trace", skip(self, provider), target = "pruner")]
+    fn prune_account_history(
+        &self,
+        provider: &DatabaseProviderRW<'_, DB>,
+        to_block: BlockNumber,
+        prune_mode: PruneMode,
+    ) -> PrunerResult {
+        let from_block = provider
+            .get_prune_checkpoint(PrunePart::AccountHistory)?
+            .map(|checkpoint| checkpoint.block_number + 1)
+            .unwrap_or_default();
+        let range = from_block..=to_block;
+        let total = range.clone().count();
+
+        let mut processed = 0;
+        provider.prune_dupsort_table_in_batches::<tables::AccountChangeSet, _>(
+            range,
+            self.batch_sizes.account_history,
+            |entries| {
+                processed += entries;
+                trace!(
+                    target: "pruner",
+                    %entries,
+                    progress = format!("{:.1}%", 100.0 * processed as f64 / total as f64),
+                    "Pruned account history (changesets)"
+                );
+            },
+        )?;
+
+        let mut cursor = provider.tx_ref().cursor_write::<tables::AccountHistory>()?;
+        while let Some(result) = cursor.next()? {
+            let (key, blocks): (ShardedKey<Address>, BlockNumberList) = result;
+
+            if key.highest_block_number <= to_block {
+                // If shard consists only of block numbers less than the target one, delete shard
+                // completely.
+                cursor.delete_current()?;
+                if key.highest_block_number == to_block {
+                    // Shard contains only block numbers up to the target one, so we can skip to the
+                    // next address. It is guaranteed that further shards for this address will not
+                    // contain the target block number, as it's in this shard.
+                    cursor.seek_exact(ShardedKey::last(key.key))?;
+                }
+            } else {
+                // Shard contains block numbers that are higher than the target one, so we need to
+                // filter it. It is guaranteed that further shards for this address will not contain
+                // the target block number, as it's in this shard.
+                let blocks = blocks
+                    .iter(0)
+                    .skip_while(|block| *block <= to_block as usize)
+                    .collect::<Vec<_>>();
+                cursor.upsert(key.clone(), BlockNumberList::new_pre_sorted(blocks))?;
+
+                // Jump to the next address
+                cursor.seek_exact(ShardedKey::last(key.key))?;
+            }
+
+            processed += 1;
+            if processed % self.batch_sizes.account_history == 0 {
+                trace!(
+                    target: "pruner",
+                    entries = self.batch_sizes.account_history,
+                    "Pruned account history (indices)"
+                );
+            }
+        }
+
+        if processed % self.batch_sizes.account_history != 0 {
+            trace!(
+                target: "pruner",
+                entries = processed % self.batch_sizes.account_history,
+                "Pruned account history (indices)"
+            );
+        }
+
+        provider.save_prune_checkpoint(
+            PrunePart::AccountHistory,
+            PruneCheckpoint { block_number: to_block, prune_mode },
+        )?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{pruner::BatchSizes, Pruner};
     use assert_matches::assert_matches;
-    use reth_db::{tables, test_utils::create_test_rw_db};
+    use reth_db::{tables, test_utils::create_test_rw_db, BlockNumberList};
     use reth_interfaces::test_utils::{
         generators,
-        generators::{random_block_range, random_receipt},
+        generators::{
+            random_block_range, random_changeset_range, random_eoa_account_range, random_receipt,
+        },
     };
     use reth_primitives::{
-        BlockNumber, PruneCheckpoint, PruneMode, PruneModes, PrunePart, H256, MAINNET,
+        Address, BlockNumber, PruneCheckpoint, PruneMode, PruneModes, PrunePart, H256, MAINNET,
     };
     use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::TestTransaction;
+    use std::{collections::BTreeMap, ops::AddAssign};
 
     #[test]
     fn is_pruning_needed() {
@@ -408,5 +503,98 @@ mod tests {
         // Prune second time, previous checkpoint is present, should continue pruning from where
         // ended last time
         test_prune(20);
+    }
+
+    #[test]
+    fn prune_account_history() {
+        let tx = TestTransaction::default();
+        let mut rng = generators::rng();
+
+        let block_num = 7000;
+        let blocks = random_block_range(&mut rng, 0..=block_num, H256::zero(), 0..1);
+        tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
+
+        let accounts =
+            random_eoa_account_range(&mut rng, 0..3).into_iter().collect::<BTreeMap<_, _>>();
+
+        let (changesets, _) = random_changeset_range(
+            &mut rng,
+            blocks.iter(),
+            accounts.clone().into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+            0..0,
+            0..0,
+        );
+        tx.insert_changesets(changesets.clone(), None).expect("insert changesets");
+        tx.insert_history(changesets.clone(), None).expect("insert history");
+
+        let account_occurrences = tx.table::<tables::AccountHistory>().unwrap().into_iter().fold(
+            BTreeMap::<Address, usize>::new(),
+            |mut map, (key, _)| {
+                map.entry(key.key).or_default().add_assign(1);
+                map
+            },
+        );
+        assert!(account_occurrences.into_iter().any(|(_, occurrences)| occurrences > 1));
+
+        assert_eq!(
+            tx.table::<tables::AccountChangeSet>().unwrap().len(),
+            changesets.iter().flatten().count()
+        );
+
+        let original_shards = tx.table::<tables::AccountHistory>().unwrap();
+
+        let test_prune = |to_block: BlockNumber| {
+            let prune_mode = PruneMode::Before(to_block);
+            let pruner = Pruner::new(
+                tx.inner_raw(),
+                MAINNET.clone(),
+                5,
+                0,
+                PruneModes { account_history: Some(prune_mode), ..Default::default() },
+                BatchSizes {
+                    // Less than total amount of blocks to prune to test the batching logic
+                    account_history: 10,
+                    ..Default::default()
+                },
+            );
+
+            let provider = tx.inner_rw();
+            assert_matches!(pruner.prune_account_history(&provider, to_block, prune_mode), Ok(()));
+            provider.commit().expect("commit");
+
+            assert_eq!(
+                tx.table::<tables::AccountChangeSet>().unwrap().len(),
+                changesets[to_block as usize + 1..].iter().flatten().count()
+            );
+
+            let actual_shards = tx.table::<tables::AccountHistory>().unwrap();
+
+            let expected_shards = original_shards
+                .iter()
+                .filter(|(key, _)| key.highest_block_number > to_block)
+                .map(|(key, blocks)| {
+                    let new_blocks = blocks
+                        .iter(0)
+                        .skip_while(|block| *block <= to_block as usize)
+                        .collect::<Vec<_>>();
+                    (key.clone(), BlockNumberList::new_pre_sorted(new_blocks))
+                })
+                .collect::<Vec<_>>();
+
+            assert_eq!(actual_shards, expected_shards);
+
+            assert_eq!(
+                tx.inner().get_prune_checkpoint(PrunePart::AccountHistory).unwrap(),
+                Some(PruneCheckpoint { block_number: to_block, prune_mode })
+            );
+        };
+
+        // Prune first time: no previous checkpoint is present
+        test_prune(2000);
+        // Prune second time: previous checkpoint is present, should continue pruning from where
+        // ended last time
+        test_prune(3000);
+        // Prune third time: same as second + this time partial shard is not deleted
+        test_prune(4500);
     }
 }
