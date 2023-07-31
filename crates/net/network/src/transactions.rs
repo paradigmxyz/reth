@@ -253,7 +253,6 @@ where
                 }
             }
             let mut new_pooled_hashes = hashes.build();
-            let new_full_transactions = full_transactions.build();
 
             if !new_pooled_hashes.is_empty() {
                 // determine whether to send full tx objects or hashes.
@@ -268,6 +267,8 @@ where
                     // send hashes of transactions
                     self.network.send_transactions_hashes(*peer_id, new_pooled_hashes);
                 } else {
+                    let new_full_transactions = full_transactions.build();
+
                     for tx in new_full_transactions.iter() {
                         propagated
                             .0
