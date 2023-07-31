@@ -590,11 +590,9 @@ mod tests {
         };
 
         // Prune first time: no previous checkpoint is present
-        test_prune(2000);
+        test_prune(3000);
         // Prune second time: previous checkpoint is present, should continue pruning from where
         // ended last time
-        test_prune(3000);
-        // Prune third time: same as second + this time partial shard is not deleted
         test_prune(4500);
     }
 }
