@@ -150,6 +150,10 @@ pub struct Command {
 
     #[clap(flatten)]
     dev: DevArgs,
+
+    #[cfg(feature = "optimism")]
+    #[clap(flatten)]
+    rollup: crate::args::RollupArgs,
 }
 
 impl Command {
