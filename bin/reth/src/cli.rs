@@ -9,12 +9,12 @@ use crate::{
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{ArgAction, Args, Parser, Subcommand};
+use reth_primitives::ChainSpec;
 use reth_tracing::{
     tracing::{metadata::LevelFilter, Level, Subscriber},
     tracing_subscriber::{filter::Directive, registry::LookupSpan, EnvFilter},
     BoxedLayer, FileWorkerGuard,
 };
-use reth_primitives::ChainSpec;
 use std::sync::Arc;
 
 /// The main reth cli interface.
@@ -239,7 +239,8 @@ mod tests {
         }
     }
 
-    /// Tests that the log directory is parsed correctly. It's always tied to the specific chain's name
+    /// Tests that the log directory is parsed correctly. It's always tied to the specific chain's
+    /// name
     #[test]
     fn parse_logs_path() {
         let mut reth = Cli::try_parse_from(["reth", "node", "--log.persistent"]).unwrap();
