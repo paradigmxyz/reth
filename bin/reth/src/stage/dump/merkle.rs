@@ -86,14 +86,22 @@ async fn unwind_and_copy<DB: Database>(
 
     // Bring hashes to TO
 
-    AccountHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX }
-        .execute(&provider, execute_input)
-        .await
-        .unwrap();
-    StorageHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX }
-        .execute(&provider, execute_input)
-        .await
-        .unwrap();
+    AccountHashingStage {
+        clean_threshold: u64::MAX,
+        commit_threshold: u64::MAX,
+        prune_modes: PruneModes::none(),
+    }
+    .execute(&provider, execute_input)
+    .await
+    .unwrap();
+    StorageHashingStage {
+        clean_threshold: u64::MAX,
+        commit_threshold: u64::MAX,
+        prune_modes: PruneModes::none(),
+    }
+    .execute(&provider, execute_input)
+    .await
+    .unwrap();
 
     let unwind_inner_tx = provider.into_tx();
 
@@ -124,6 +132,7 @@ async fn dry_run<DB: Database>(
             clean_threshold: u64::MAX, /* Forces updating the root instead of calculating
                                         * from
                                         * scratch */
+            prune_modes: Default::default(),
         }
         .execute(
             &provider,
