@@ -444,6 +444,7 @@ impl From<Genesis> for ChainSpec {
             fork_timestamps: ForkTimestamps::from_hardforks(&hardforks),
             hardforks,
             paris_block_and_final_difficulty: None,
+            deposit_contract_deployment_block: None,
         }
     }
 }
@@ -666,6 +667,7 @@ impl ChainSpecBuilder {
             fork_timestamps: ForkTimestamps::from_hardforks(&self.hardforks),
             hardforks: self.hardforks,
             paris_block_and_final_difficulty: None,
+            deposit_contract_deployment_block: None,
         }
     }
 }
