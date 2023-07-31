@@ -667,13 +667,13 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         Ok(deleted)
     }
 
-    /// Prune the dupsort table for the specified pre-sorted key iterator, calling `chunk_callback`
+    /// Prune the dupsort table for the specified key range, calling `chunk_callback`
     /// after every `batch_size` pruned rows (subkeys).
     ///
     /// Returns number of rows (subkeys) pruned.
     pub fn prune_dupsort_table_in_batches<T, K>(
         &self,
-        keys: impl IntoIterator<Item = K>,
+        keys: impl RangeBounds<K>,
         batch_size: usize,
         mut batch_callback: impl FnMut(usize),
     ) -> std::result::Result<usize, DatabaseError>
@@ -682,25 +682,15 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         K: Key,
     {
         let mut cursor = self.tx.cursor_dup_write::<T>()?;
+        let mut walker = cursor.walk_range(keys)?;
         let mut deleted = 0;
 
-        for key in keys {
-            if cursor.seek_exact(key)?.is_some() {
-                cursor.delete_current()?;
-                deleted += 1;
+        while walker.next().transpose()?.is_some() {
+            walker.delete_current()?;
+            deleted += 1;
 
-                if deleted % batch_size == 0 {
-                    batch_callback(batch_size);
-                }
-
-                while cursor.next_dup()?.is_some() {
-                    cursor.delete_current()?;
-                    deleted += 1;
-
-                    if deleted % batch_size == 0 {
-                        batch_callback(batch_size);
-                    }
-                }
+            if deleted % batch_size == 0 {
+                batch_callback(batch_size);
             }
         }
 

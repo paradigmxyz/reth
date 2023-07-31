@@ -72,7 +72,7 @@ pub struct BlockNumberAddress(pub (BlockNumber, Address));
 impl BlockNumberAddress {
     /// Create a new Range from `start` to `end`
     ///
-    /// Note: End is inclusive
+    /// Note: End is exclusive
     pub fn range(range: RangeInclusive<BlockNumber>) -> Range<Self> {
         (*range.start(), Address::zero()).into()..(*range.end() + 1, Address::zero()).into()
     }

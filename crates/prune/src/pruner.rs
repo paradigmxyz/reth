@@ -5,7 +5,7 @@ use rayon::prelude::*;
 use reth_db::{
     abstraction::cursor::{DbCursorRO, DbCursorRW},
     database::Database,
-    models::ShardedKey,
+    models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress, ShardedKey},
     tables,
     transaction::DbTxMut,
     BlockNumberList,
@@ -30,11 +30,17 @@ pub struct BatchSizes {
     receipts: usize,
     transaction_lookup: usize,
     account_history: usize,
+    storage_history: usize,
 }
 
 impl Default for BatchSizes {
     fn default() -> Self {
-        Self { receipts: 10000, transaction_lookup: 10000, account_history: 10000 }
+        Self {
+            receipts: 10000,
+            transaction_lookup: 10000,
+            account_history: 10000,
+            storage_history: 10000,
+        }
     }
 }
 
@@ -95,6 +101,12 @@ impl<DB: Database> Pruner<DB> {
             self.modes.prune_target_block_account_history(tip_block_number)?
         {
             self.prune_account_history(&provider, to_block, prune_mode)?;
+        }
+
+        if let Some((to_block, prune_mode)) =
+            self.modes.prune_target_block_storage_history(tip_block_number)?
+        {
+            self.prune_storage_history(&provider, to_block, prune_mode)?;
         }
 
         provider.commit()?;
@@ -341,6 +353,92 @@ impl<DB: Database> Pruner<DB> {
 
         provider.save_prune_checkpoint(
             PrunePart::AccountHistory,
+            PruneCheckpoint { block_number: to_block, prune_mode },
+        )?;
+
+        Ok(())
+    }
+
+    /// Prune account history up to the provided block, inclusive.
+    #[instrument(level = "trace", skip(self, provider), target = "pruner")]
+    fn prune_storage_history(
+        &self,
+        provider: &DatabaseProviderRW<'_, DB>,
+        to_block: BlockNumber,
+        prune_mode: PruneMode,
+    ) -> PrunerResult {
+        let from_block = provider
+            .get_prune_checkpoint(PrunePart::StorageHistory)?
+            .map(|checkpoint| checkpoint.block_number + 1)
+            .unwrap_or_default();
+        let block_range = from_block..=to_block;
+        let total = block_range.clone().count();
+        let range = BlockNumberAddress::range(block_range);
+
+        let mut processed = 0;
+        provider.prune_dupsort_table_in_batches::<tables::StorageChangeSet, _>(
+            range,
+            self.batch_sizes.storage_history,
+            |entries| {
+                processed += entries;
+                trace!(
+                    target: "pruner",
+                    %entries,
+                    progress = format!("{:.1}%", 100.0 * processed as f64 / total as f64),
+                    "Pruned storage history (changesets)"
+                );
+            },
+        )?;
+
+        let mut cursor = provider.tx_ref().cursor_write::<tables::StorageHistory>()?;
+        while let Some(result) = cursor.next()? {
+            let (key, blocks): (StorageShardedKey, BlockNumberList) = result;
+
+            if key.sharded_key.highest_block_number <= to_block {
+                // If shard consists only of block numbers less than the target one, delete shard
+                // completely.
+                cursor.delete_current()?;
+                if key.sharded_key.highest_block_number == to_block {
+                    // Shard contains only block numbers up to the target one, so we can skip to the
+                    // next storage slot for this address. It is guaranteed that further shards for
+                    // this address and storage slot will not contain the target block number, as
+                    // it's in this shard.
+                    cursor.seek_exact(StorageShardedKey::last(key.address, key.sharded_key.key))?;
+                }
+            } else {
+                // Shard contains block numbers that are higher than the target one, so we need to
+                // filter it. It is guaranteed that further shards for this address and storage slot
+                // will not contain the target block number, as it's in this shard.
+                let blocks = blocks
+                    .iter(0)
+                    .skip_while(|block| *block <= to_block as usize)
+                    .collect::<Vec<_>>();
+                cursor.upsert(key.clone(), BlockNumberList::new_pre_sorted(blocks))?;
+
+                // Jump to the next address
+                cursor.seek_exact(StorageShardedKey::last(key.address, key.sharded_key.key))?;
+            }
+
+            processed += 1;
+            if processed % self.batch_sizes.storage_history == 0 {
+                trace!(
+                    target: "pruner",
+                    entries = self.batch_sizes.storage_history,
+                    "Pruned storage history (indices)"
+                );
+            }
+        }
+
+        if processed % self.batch_sizes.storage_history != 0 {
+            trace!(
+                target: "pruner",
+                entries = processed % self.batch_sizes.storage_history,
+                "Pruned storage history (indices)"
+            );
+        }
+
+        provider.save_prune_checkpoint(
+            PrunePart::StorageHistory,
             PruneCheckpoint { block_number: to_block, prune_mode },
         )?;
 
