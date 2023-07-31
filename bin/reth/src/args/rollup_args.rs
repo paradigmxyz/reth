@@ -9,6 +9,6 @@ pub struct RollupArgs {
     pub sequencer_http: Option<String>,
 
     /// Disable transaction pool gossip
-    #[arg(long = "rollup.disabletxpoolgossip")]
+    #[arg(long = "rollup.disable-tx-pool-gossip")]
     pub disable_txpool_gossip: bool,
 }
