@@ -10,20 +10,21 @@ description = "Helpers for configuring RPC"
 
 [dependencies]
 # reth
-reth-primitives = { workspace = true }
+reth-primitives.workspace = true
 reth-ipc = { path = "../ipc" }
-reth-interfaces = { workspace = true }
-reth-network-api = { workspace = true }
-reth-provider = { workspace = true }
+reth-interfaces.workspace = true
+reth-network-api.workspace = true
+reth-provider.workspace = true
 reth-rpc = { path = "../rpc" }
 reth-rpc-api = { path = "../rpc-api" }
 reth-rpc-engine-api = { path = "../rpc-engine-api" }
-reth-rpc-types = { workspace = true }
-reth-tasks = { workspace = true }
-reth-transaction-pool = { workspace = true }
+reth-rpc-types.workspace = true
+reth-tasks.workspace = true
+reth-transaction-pool.workspace = true
+reth-metrics = { workspace = true, features = ["common"] }
 
 # rpc/net
-jsonrpsee = { version = "0.18", features = ["server"] }
+jsonrpsee = { workspace = true, features = ["server"] }
 tower-http = { version = "0.4", features = ["full"] }
 tower = { version = "0.4", features = ["full"] }
 hyper = "0.14"
@@ -31,21 +32,18 @@ hyper = "0.14"
 # misc
 strum = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
-thiserror = { workspace = true }
-tracing = { workspace = true }
-rayon = { workspace = true }
-pin-project = { workspace = true }
-tokio = { workspace = true, features = ["sync"] }
+thiserror.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 reth-tracing = { path = "../../tracing" }
 reth-rpc-api = { path = "../rpc-api", features = ["client"] }
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
-reth-network-api = { workspace = true }
+reth-network-api.workspace = true
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-beacon-consensus = { path = "../../consensus/beacon" }
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
-serde_json = { workspace = true }
+serde_json.workspace = true

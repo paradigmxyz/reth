@@ -13,6 +13,8 @@ pub struct TreeMetrics {
     pub canonical_chain_height: Gauge,
     /// The number of reorgs
     pub reorgs: Counter,
+    /// The latest reorg depth
+    pub latest_reorg_depth: Gauge,
     /// Longest sidechain height
     pub longest_sidechain_height: Gauge,
 }

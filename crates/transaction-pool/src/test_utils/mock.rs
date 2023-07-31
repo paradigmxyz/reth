@@ -4,7 +4,7 @@ use crate::{
     identifier::{SenderIdentifiers, TransactionId},
     pool::txpool::TxPool,
     traits::TransactionOrigin,
-    PoolTransaction, TransactionOrdering, ValidPoolTransaction,
+    PoolTransaction, Priority, TransactionOrdering, ValidPoolTransaction,
 };
 use paste::paste;
 use rand::{
@@ -14,7 +14,7 @@ use rand::{
 use reth_primitives::{
     constants::MIN_PROTOCOL_BASE_FEE, hex, Address, FromRecoveredTransaction,
     IntoRecoveredTransaction, Signature, Transaction, TransactionKind, TransactionSigned,
-    TransactionSignedEcRecovered, TxEip1559, TxHash, TxLegacy, TxType, H256, U128, U256,
+    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxHash, TxLegacy, TxType, H256, U128, U256,
 };
 use std::{ops::Range, sync::Arc, time::Instant};
 
@@ -329,17 +329,6 @@ impl PoolTransaction for MockTransaction {
         }
     }
 
-    fn gas_cost(&self) -> U256 {
-        match self {
-            MockTransaction::Legacy { gas_price, gas_limit, .. } => {
-                U256::from(*gas_limit) * U256::from(*gas_price)
-            }
-            MockTransaction::Eip1559 { max_fee_per_gas, gas_limit, .. } => {
-                U256::from(*gas_limit) * U256::from(*max_fee_per_gas)
-            }
-        }
-    }
-
     fn gas_limit(&self) -> u64 {
         self.get_gas_limit()
     }
@@ -357,6 +346,28 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } => {
                 Some(*max_priority_fee_per_gas)
             }
+        }
+    }
+
+    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
+        let base_fee = base_fee as u128;
+        let max_fee_per_gas = self.max_fee_per_gas();
+        if max_fee_per_gas < base_fee {
+            return None
+        }
+
+        let fee = max_fee_per_gas - base_fee;
+        if let Some(priority_fee) = self.max_priority_fee_per_gas() {
+            return Some(fee.min(priority_fee))
+        }
+
+        Some(fee)
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        match self {
+            MockTransaction::Legacy { gas_price, .. } => *gas_price,
+            MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } => *max_priority_fee_per_gas,
         }
     }
 
@@ -461,6 +472,66 @@ impl IntoRecoveredTransaction for MockTransaction {
     }
 }
 
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::arbitrary::Arbitrary for MockTransaction {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<MockTransaction>;
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::{any, Strategy};
+
+        any::<(Transaction, Address, H256)>()
+            .prop_map(|(tx, sender, tx_hash)| match &tx {
+                Transaction::Legacy(TxLegacy {
+                    nonce,
+                    gas_price,
+                    gas_limit,
+                    to,
+                    value,
+                    input,
+                    ..
+                }) |
+                Transaction::Eip2930(TxEip2930 {
+                    nonce,
+                    gas_price,
+                    gas_limit,
+                    to,
+                    value,
+                    input,
+                    ..
+                }) => MockTransaction::Legacy {
+                    sender,
+                    hash: tx_hash,
+                    nonce: *nonce,
+                    gas_price: *gas_price,
+                    gas_limit: *gas_limit,
+                    to: *to,
+                    value: U256::from(*value),
+                },
+                Transaction::Eip1559(TxEip1559 {
+                    nonce,
+                    gas_limit,
+                    max_fee_per_gas,
+                    max_priority_fee_per_gas,
+                    to,
+                    value,
+                    input,
+                    ..
+                }) => MockTransaction::Eip1559 {
+                    sender,
+                    hash: tx_hash,
+                    nonce: *nonce,
+                    max_fee_per_gas: *max_fee_per_gas,
+                    max_priority_fee_per_gas: *max_priority_fee_per_gas,
+                    gas_limit: *gas_limit,
+                    to: *to,
+                    value: U256::from(*value),
+                },
+            })
+            .boxed()
+    }
+}
+
 #[derive(Default)]
 pub struct MockTransactionFactory {
     pub(crate) ids: SenderIdentifiers,
@@ -513,11 +584,15 @@ impl MockTransactionFactory {
 pub struct MockOrdering;
 
 impl TransactionOrdering for MockOrdering {
-    type Priority = U256;
+    type PriorityValue = U256;
     type Transaction = MockTransaction;
 
-    fn priority(&self, transaction: &Self::Transaction) -> Self::Priority {
-        transaction.gas_cost()
+    fn priority(
+        &self,
+        transaction: &Self::Transaction,
+        base_fee: u64,
+    ) -> Priority<Self::PriorityValue> {
+        transaction.effective_tip_per_gas(base_fee).map(U256::from).into()
     }
 }
 
@@ -559,5 +634,5 @@ fn test_mock_priority() {
     let o = MockOrdering;
     let lo = MockTransaction::eip1559().with_gas_limit(100_000);
     let hi = lo.next().inc_price();
-    assert!(o.priority(&hi) > o.priority(&lo));
+    assert!(o.priority(&hi, 0) > o.priority(&lo, 0));
 }

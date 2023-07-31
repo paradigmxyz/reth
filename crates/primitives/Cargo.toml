@@ -22,7 +22,7 @@ crunchy = { version = "0.2.2", default-features = false, features = ["limit_256"
 ruint = { version = "1.9.0", features = ["primitive-types", "rlp"] }
 
 # Bloom
-fixed-hash = { version = "0.8", default-features = false, features = ["rustc-hex"] }
+ fixed-hash = { version = "0.8", default-features = false, features = ["rustc-hex"] }
 
 # crypto
 secp256k1 = { workspace = true, default-features = false, features = [
@@ -35,18 +35,18 @@ secp256k1 = { workspace = true, default-features = false, features = [
 crc = "3"
 
 # tracing
-tracing = { workspace = true }
+tracing.workspace = true
 
 # tokio
 tokio = { workspace = true, default-features = false, features = ["sync"] }
-tokio-stream = { workspace = true }
+tokio-stream.workspace = true
 
 # misc
 bytes.workspace = true
-serde = { workspace = true }
-serde_json = { workspace = true }
+serde.workspace = true
+serde_json.workspace = true
 serde_with = "2.1.0"
-thiserror = { workspace = true }
+thiserror.workspace = true
 sucds = "0.5.0"
 hex = "0.4"
 hex-literal = "0.3"
@@ -71,10 +71,10 @@ proptest-derive = { version = "0.3", optional = true }
 strum = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
-serde_json = { workspace = true }
+serde_json.workspace = true
 hex-literal = "0.3"
 test-fuzz = "4"
-rand = { workspace = true }
+rand.workspace = true
 revm-primitives = { workspace = true, features = ["arbitrary"] }
 arbitrary = { version = "1.1.7", features = ["derive"] }
 proptest = { version = "1.0" }
@@ -84,7 +84,7 @@ toml = "0.7.4"
 
 # necessary so we don't hit a "undeclared 'std'": 
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198 
-secp256k1 = { workspace = true }
+secp256k1.workspace = true
 criterion = "0.5"
 pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterion"] }
 

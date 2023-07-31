@@ -11,18 +11,18 @@ Reth RPC implementation
 """
 [dependencies]
 # reth
-reth-interfaces = { workspace = true }
-reth-primitives = { workspace = true }
+reth-interfaces.workspace = true
+reth-primitives.workspace = true
 reth-rpc-api = { path = "../rpc-api" }
-reth-rlp = { workspace = true }
-reth-rpc-types = { workspace = true }
+reth-rlp.workspace = true
+reth-rpc-types.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
-reth-network-api = { workspace = true }
+reth-network-api.workspace = true
 reth-rpc-engine-api = { path = "../rpc-engine-api" }
 reth-revm = { path = "../../revm" }
-reth-tasks = { workspace = true }
-reth-metrics = { workspace = true }
+reth-tasks.workspace = true
+reth-metrics.workspace = true
 reth-consensus-common = { path = "../../consensus/common" }
 
 # eth
@@ -35,34 +35,35 @@ ethers-core = { workspace = true, features = ["eip712"] }
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # rpc
-jsonrpsee = { version = "0.18" }
+jsonrpsee.workspace = true
 http = "0.2.8"
 http-body = "0.4.5"
 hyper = "0.14.24"
 jsonwebtoken = "8"
 
 # async
-async-trait = { workspace = true }
+async-trait.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tower = "0.4"
 tokio-stream = { workspace = true, features = ["sync"] }
 tokio-util = "0.7"
-pin-project = { workspace = true }
+pin-project.workspace = true
+rayon.workspace = true
 
 bytes.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
+serde_json.workspace = true
+thiserror.workspace = true
 hex = "0.4"
-rand = { workspace = true }
-tracing = { workspace = true }
+rand.workspace = true
+tracing.workspace = true
 tracing-futures = "0.2"
 schnellru = "0.2"
-futures = { workspace = true }
+futures.workspace = true
 
 [dev-dependencies]
-jsonrpsee = { version = "0.18", features = ["client"] }
+jsonrpsee = { workspace = true, features = ["client"] }
 assert_matches = "1.5.0"
 tempfile = "3.5.0"
 reth-interfaces = { workspace = true, features = ["test-utils"] }

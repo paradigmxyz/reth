@@ -392,7 +392,7 @@ where
 mod tests {
     use crate::{
         eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
-        EthApi,
+        EthApi, TracingCallPool,
     };
     use jsonrpsee::types::error::INVALID_PARAMS_CODE;
     use reth_interfaces::test_utils::{generators, generators::Rng};
@@ -428,6 +428,7 @@ mod tests {
             cache.clone(),
             GasPriceOracle::new(provider, Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
+            TracingCallPool::build().expect("failed to build tracing pool"),
         )
     }
 
