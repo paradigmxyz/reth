@@ -11,4 +11,11 @@ pub struct RollupArgs {
     /// Disable transaction pool gossip
     #[arg(long = "rollup.disable-tx-pool-gossip")]
     pub disable_txpool_gossip: bool,
+
+    /// By default the pending block equals the latest block
+    /// to save resources and not leak txs from the tx-pool,
+    /// this flag enables computing of the pending block
+    /// from the tx-pool instead.
+    #[arg(long = "rollup.compute-pending-block"))]
+    pub compute_pending_block: bool,
 }
