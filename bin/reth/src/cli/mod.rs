@@ -90,6 +90,9 @@ impl Cli {
             guard
         });
 
+        #[cfg(feature = "tokio-console")]
+        layers.push(Box::new(console_subscriber::spawn()));
+
         reth_tracing::init(layers);
         Ok(guard.flatten())
     }

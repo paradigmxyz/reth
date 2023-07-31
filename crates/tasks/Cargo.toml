@@ -24,4 +24,13 @@ dyn-clone = "1.0"
 reth-metrics.workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }
+tokio = { workspace = true, features = [
+    "sync",
+    "rt",
+    "rt-multi-thread",
+    "time",
+    "macros",
+] }
+
+[features]
+tokio-console = ["tokio/tracing"]

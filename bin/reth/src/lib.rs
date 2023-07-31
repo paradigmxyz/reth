@@ -16,6 +16,10 @@
 //!   and leak detection functionality. See [jemalloc's opt.prof](https://jemalloc.net/jemalloc.3.html#opt.prof)
 //!   documentation for usage details. This is **not recommended on Windows**. See [here](https://rust-lang.github.io/rfcs/1974-global-allocators.html#jemalloc)
 //!   for more info.
+//! - `tokio-console`: Enables tracing subscriber layer for [tokio-console](https://github.com/tokio-rs/console)
+//!   telemetry. The project must be built with `RUSTFLAGS="--cfg tokio_unstable"` in order to
+//!   enable tokio tracing. Caution: Currently, the tracing support in the tokio runtime is
+//!   considered _experimental_.
 //! - `min-error-logs`: Disables all logs below `error` level.
 //! - `min-warn-logs`: Disables all logs below `warn` level.
 //! - `min-info-logs`: Disables all logs below `info` level. This can speed up the node, since fewer

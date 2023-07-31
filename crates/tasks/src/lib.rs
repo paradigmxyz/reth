@@ -251,15 +251,35 @@ impl TaskExecutor {
     }
 
     /// Spawns a future on the tokio runtime depending on the [TaskKind]
-    fn spawn_on_rt<F>(&self, fut: F, task_kind: TaskKind) -> JoinHandle<()>
+    ///
+    /// With `tokio-console` feature flag enabled, the tasks are spawned through an unstable task
+    /// builder. The returned `Result` is currently unreachable. Ref: <https://docs.rs/tokio/latest/src/tokio/task/builder.rs.html#91>.
+    fn spawn_on_rt<F>(&self, name: &'static str, fut: F, task_kind: TaskKind) -> JoinHandle<()>
     where
         F: Future<Output = ()> + Send + 'static,
     {
         match task_kind {
-            TaskKind::Default => self.handle.spawn(fut),
+            TaskKind::Default => {
+                if cfg!(feature = "tokio-console") {
+                    tokio::task::Builder::new()
+                        .name(name)
+                        .spawn_on(fut, &self.handle)
+                        .expect("noop")
+                } else {
+                    self.handle.spawn(fut)
+                }
+            }
             TaskKind::Blocking => {
-                let handle = self.handle.clone();
-                self.handle.spawn_blocking(move || handle.block_on(fut))
+                if cfg!(feature = "tokio-console") {
+                    let handle = self.handle.clone();
+                    tokio::task::Builder::new()
+                        .name(name)
+                        .spawn_blocking_on(move || handle.block_on(fut), &self.handle)
+                        .expect("noop")
+                } else {
+                    let handle = self.handle.clone();
+                    self.handle.spawn_blocking(move || handle.block_on(fut))
+                }
             }
         }
     }
@@ -277,7 +297,7 @@ impl TaskExecutor {
         }
         .in_current_span();
 
-        self.spawn_on_rt(task, task_kind)
+        self.spawn_on_rt("", task, task_kind)
     }
 
     /// Spawns the task onto the runtime.
@@ -346,7 +366,7 @@ impl TaskExecutor {
             let _ = select(on_shutdown, task).await;
         };
 
-        self.spawn_on_rt(task, task_kind)
+        self.spawn_on_rt(name, task, task_kind)
     }
 
     /// This spawns a critical blocking task onto the runtime.
