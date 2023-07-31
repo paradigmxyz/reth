@@ -4,7 +4,6 @@ on:
     - cron: '0 0 * * *'
 
 env:
-  RUSTFLAGS: -D warnings
   CARGO_TERM_COLOR: always
 
 concurrency:

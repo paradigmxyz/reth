@@ -308,16 +308,16 @@ pub struct VmExecutedOperation {
     /// The total gas used.
     pub used: u64,
     /// The stack item placed, if any.
-    pub push: Option<H256>,
+    pub push: Vec<H256>,
     /// If altered, the memory delta.
     pub mem: Option<MemoryDelta>,
     /// The altered storage value, if any.
     pub store: Option<StorageDelta>,
 }
 
+/// A diff of some chunk of memory.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-/// A diff of some chunk of memory.
 pub struct MemoryDelta {
     /// Offset into memory the change begins.
     pub off: usize,
@@ -325,6 +325,7 @@ pub struct MemoryDelta {
     pub data: Bytes,
 }
 
+/// A diff of some storage value.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StorageDelta {

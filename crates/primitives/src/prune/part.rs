@@ -4,7 +4,7 @@ use thiserror::Error;
 
 /// Part of the data that can be pruned.
 #[main_codec]
-#[derive(Debug, Display, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Display, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum PrunePart {
     /// Prune part responsible for the `TxSenders` table.
     SenderRecovery,

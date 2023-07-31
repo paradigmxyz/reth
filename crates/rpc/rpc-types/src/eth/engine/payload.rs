@@ -172,6 +172,9 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
             ommers_hash: EMPTY_LIST_HASH,
             difficulty: Default::default(),
             nonce: Default::default(),
+            // TODO: add conversion once ExecutionPayload has 4844 fields
+            blob_gas_used: None,
+            excess_blob_gas: None,
         }
         .seal_slow();
 
