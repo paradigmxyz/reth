@@ -431,7 +431,7 @@ where
                             "Stage encountered a validation error: {error}"
                         );
 
-                        // When handling errors, we do not commit the database transaction. This
+                        // FIXME: When handling errors, we do not commit the database transaction. This
                         // leads to the Merkle stage not clearing its
                         // checkpoint, and restarting from an invalid place.
                         drop(provider_rw);
