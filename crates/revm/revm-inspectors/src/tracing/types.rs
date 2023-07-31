@@ -392,14 +392,16 @@ impl CallTraceNode {
     }
 
     /// If the trace is a selfdestruct, returns the `TransactionTrace` for a parity trace.
-    pub(crate) fn parity_selfdestruct_trace(&self) -> Option<TransactionTrace> {
+    pub(crate) fn parity_selfdestruct_trace(
+        &self,
+        trace_address: Vec<usize>,
+    ) -> Option<TransactionTrace> {
         let trace = self.parity_selfdestruct_action()?;
         Some(TransactionTrace {
             action: trace,
             error: None,
             result: None,
-            // this trace belongs under the parent call trace
-            trace_address: vec![0],
+            trace_address,
             subtraces: 0,
         })
     }
