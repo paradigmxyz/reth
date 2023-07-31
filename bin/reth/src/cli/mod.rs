@@ -57,7 +57,7 @@ pub struct Cli<Ext: RethCliExt = ()> {
     verbosity: Verbosity,
 }
 
-impl Cli {
+impl<Ext: RethCliExt> Cli<Ext> {
     /// Execute the configured cli command.
     pub fn run(mut self) -> eyre::Result<()> {
         // add network name to logs dir
@@ -98,7 +98,7 @@ impl Cli {
 /// Convenience function for parsing CLI options, set up logging and run the chosen command.
 #[inline]
 pub fn run() -> eyre::Result<()> {
-    Cli::parse().run()
+    Cli::<()>::parse().run()
 }
 
 /// Commands to be executed

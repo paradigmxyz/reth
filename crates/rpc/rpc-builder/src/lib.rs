@@ -731,6 +731,21 @@ impl<Provider, Pool, Network, Tasks, Events>
         }
     }
 
+    /// Returns a reference to the provider
+    pub fn pool(&self) -> &Pool {
+        &self.pool
+    }
+
+    /// Returns a reference to the events type
+    pub fn events(&self) -> &Events {
+        &self.events
+    }
+
+    /// Returns a reference to the tasks type
+    pub fn tasks(&self) -> &Tasks {
+        &self.executor
+    }
+
     /// Returns all installed methods
     pub fn methods(&self) -> Vec<Methods> {
         self.modules.values().cloned().collect()
@@ -1499,8 +1514,8 @@ impl TransportRpcModules<()> {
         &mut self,
         other: impl Into<Methods>,
     ) -> Result<bool, jsonrpsee::core::error::Error> {
-        if let Some(ref mut http) = self.http {
-            return http.merge(other.into()).map(|_| true)
+        if let Some(ref mut ipc) = self.ipc {
+            return ipc.merge(other.into()).map(|_| true)
         }
         Ok(false)
     }
