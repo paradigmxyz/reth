@@ -92,7 +92,7 @@ impl<DB: Database> Pruner<DB> {
         }
 
         if let Some((to_block, prune_mode)) =
-            self.modes.prune_target_block_account_history(tip_block_number)
+            self.modes.prune_target_block_account_history(tip_block_number)?
         {
             self.prune_account_history(&provider, to_block, prune_mode)?;
         }
