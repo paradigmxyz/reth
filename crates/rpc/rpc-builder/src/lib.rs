@@ -89,7 +89,7 @@
 //!     let builder = RpcModuleBuilder::new(provider, pool, network, TokioTaskExecutor::default(), events);
 //!
 //!   // configure the server modules
-//!    let (modules, auth_module) = builder.build_with_auth_server(transports, engine_api);
+//!    let (modules, auth_module, _registry) = builder.build_with_auth_server(transports, engine_api);
 //!
 //!   // start the servers
 //!   let auth_config = AuthServerConfig::builder(JwtSecret::random()).build();
@@ -343,7 +343,11 @@ where
         self,
         module_config: TransportRpcModuleConfig,
         engine: EngineApi,
-    ) -> (TransportRpcModules<()>, AuthRpcModule)
+    ) -> (
+        TransportRpcModules<()>,
+        AuthRpcModule,
+        RethModuleRegistry<Provider, Pool, Network, Tasks, Events>,
+    )
     where
         EngineApi: EngineApiServer,
     {
@@ -369,7 +373,7 @@ where
 
         let auth_module = registry.create_auth_module(engine);
 
-        (modules, auth_module)
+        (modules, auth_module, registry)
     }
 
     /// Configures all [RpcModule]s specific to the given [TransportRpcModuleConfig] which can be
@@ -1026,12 +1030,12 @@ where
     }
 
     /// Returns the configured [EthHandlers] or creates it if it does not exist yet
-    fn eth_handlers(&mut self) -> EthHandlers<Provider, Pool, Network, Events> {
+    pub fn eth_handlers(&mut self) -> EthHandlers<Provider, Pool, Network, Events> {
         self.with_eth(|handlers| handlers.clone())
     }
 
     /// Returns the configured [EthApi] or creates it if it does not exist yet
-    fn eth_api(&mut self) -> EthApi<Provider, Pool, Network> {
+    pub fn eth_api(&mut self) -> EthApi<Provider, Pool, Network> {
         self.with_eth(|handlers| handlers.api.clone())
     }
 }
@@ -1456,6 +1460,65 @@ impl TransportRpcModules<()> {
         &self.config
     }
 
+    /// Merge the given Methods in the configured http methods.
+    ///
+    /// Fails if any of the methods in other is present already.
+    ///
+    /// Returns Ok(false) if no http transport is configured.
+    pub fn merge_http(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<bool, jsonrpsee::core::error::Error> {
+        if let Some(ref mut http) = self.http {
+            return http.merge(other.into()).map(|_| true)
+        }
+        Ok(false)
+    }
+
+    /// Merge the given Methods in the configured ws methods.
+    ///
+    /// Fails if any of the methods in other is present already.
+    ///
+    /// Returns Ok(false) if no http transport is configured.
+    pub fn merge_ws(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<bool, jsonrpsee::core::error::Error> {
+        if let Some(ref mut ws) = self.ws {
+            return ws.merge(other.into()).map(|_| true)
+        }
+        Ok(false)
+    }
+
+    /// Merge the given Methods in the configured ipc methods.
+    ///
+    /// Fails if any of the methods in other is present already.
+    ///
+    /// Returns Ok(false) if no ipc transport is configured.
+    pub fn merge_ipc(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<bool, jsonrpsee::core::error::Error> {
+        if let Some(ref mut http) = self.http {
+            return http.merge(other.into()).map(|_| true)
+        }
+        Ok(false)
+    }
+
+    /// Merge the given Methods in all configured methods.
+    ///
+    /// Fails if any of the methods in other is present already.
+    pub fn merge_configured(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<(), jsonrpsee::core::error::Error> {
+        let other = other.into();
+        self.merge_http(other.clone())?;
+        self.merge_ws(other.clone())?;
+        self.merge_ipc(other.clone())?;
+        Ok(())
+    }
+
     /// Convenience function for starting a server
     pub async fn start_server(self, builder: RpcServerConfig) -> Result<RpcServerHandle, RpcError> {
         builder.start(self).await
@@ -1500,7 +1563,7 @@ impl WsHttpServers {
                 config.ensure_ws_http_identical()?;
 
                 if let Some(module) = http_module.or(ws_module) {
-                    let handle = both.start(module).await?;
+                    let handle = both.start(module).await;
                     http_handle = Some(handle.clone());
                     ws_handle = Some(handle);
                 }
@@ -1509,12 +1572,12 @@ impl WsHttpServers {
                 if let Some((server, module)) =
                     http.and_then(|server| http_module.map(|module| (server, module)))
                 {
-                    http_handle = Some(server.start(module).await?);
+                    http_handle = Some(server.start(module).await);
                 }
                 if let Some((server, module)) =
                     ws.and_then(|server| ws_module.map(|module| (server, module)))
                 {
-                    ws_handle = Some(server.start(module).await?);
+                    ws_handle = Some(server.start(module).await);
                 }
             }
         }
@@ -1541,10 +1604,10 @@ enum WsHttpServerKind {
 
 impl WsHttpServerKind {
     /// Starts the server and returns the handle
-    async fn start(self, module: RpcModule<()>) -> Result<ServerHandle, RpcError> {
+    async fn start(self, module: RpcModule<()>) -> ServerHandle {
         match self {
-            WsHttpServerKind::Plain(server) => Ok(server.start(module)?),
-            WsHttpServerKind::WithCors(server) => Ok(server.start(module)?),
+            WsHttpServerKind::Plain(server) => server.start(module),
+            WsHttpServerKind::WithCors(server) => server.start(module),
         }
     }
 

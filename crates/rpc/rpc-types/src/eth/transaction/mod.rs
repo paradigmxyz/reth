@@ -112,7 +112,7 @@ impl Transaction {
         let (gas_price, max_fee_per_gas) = match signed_tx.tx_type() {
             TxType::Legacy => (Some(U128::from(signed_tx.max_fee_per_gas())), None),
             TxType::EIP2930 => (Some(U128::from(signed_tx.max_fee_per_gas())), None),
-            TxType::EIP1559 => {
+            TxType::EIP1559 | TxType::EIP4844 => {
                 // the gas price field for EIP1559 is set to `min(tip, gasFeeCap - baseFee) +
                 // baseFee`
                 let gas_price = base_fee

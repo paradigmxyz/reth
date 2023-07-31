@@ -115,7 +115,7 @@ where
 
     let local_addr = server.local_addr()?;
 
-    let handle = server.start(module)?;
+    let handle = server.start(module);
     Ok(AuthServerHandle { handle, local_addr, secret })
 }
 
@@ -154,7 +154,7 @@ impl AuthServerConfig {
 
         let local_addr = server.local_addr()?;
 
-        let handle = server.start(module.inner)?;
+        let handle = server.start(module.inner);
         Ok(AuthServerHandle { handle, local_addr, secret })
     }
 }
