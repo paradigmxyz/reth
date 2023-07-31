@@ -251,15 +251,24 @@ impl TaskExecutor {
     }
 
     /// Spawns a future on the tokio runtime depending on the [TaskKind]
-    fn spawn_on_rt<F>(&self, fut: F, task_kind: TaskKind) -> JoinHandle<()>
+    fn spawn_on_rt<F>(&self, fut: F, task_kind: TaskKind, name: &'static str) -> JoinHandle<()>
     where
         F: Future<Output = ()> + Send + 'static,
     {
         match task_kind {
-            TaskKind::Default => self.handle.spawn(fut),
+            TaskKind::Default => {
+                if name == "" {
+                    return self.handle.spawn(fut)
+                }
+                tokio::task::Builder::new().name(name).spawn_on(fut, &self.handle).unwrap()
+            }
             TaskKind::Blocking => {
                 let handle = self.handle.clone();
-                self.handle.spawn_blocking(move || handle.block_on(fut))
+                let f = move || handle.block_on(fut);
+                if name == "" {
+                    return self.handle.spawn_blocking(f)
+                }
+                tokio::task::Builder::new().name(name).spawn_blocking_on(f, &self.handle).unwrap()
             }
         }
     }
@@ -277,7 +286,7 @@ impl TaskExecutor {
         }
         .in_current_span();
 
-        self.spawn_on_rt(task, task_kind)
+        self.spawn_on_rt(task, task_kind, "")
     }
 
     /// Spawns the task onto the runtime.
@@ -346,7 +355,7 @@ impl TaskExecutor {
             let _ = select(on_shutdown, task).await;
         };
 
-        self.spawn_on_rt(task, task_kind)
+        self.spawn_on_rt(task, task_kind, name)
     }
 
     /// This spawns a critical blocking task onto the runtime.

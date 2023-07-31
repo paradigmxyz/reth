@@ -11,7 +11,7 @@ description = "Task management"
 [dependencies]
 
 ## async
-tokio = { workspace = true, features = ["sync", "rt"] }
+tokio = { workspace = true, features = ["sync", "rt", "tracing"] }
 tracing-futures = "0.2"
 futures-util.workspace = true
 

@@ -7247,6 +7247,7 @@ dependencies = [
  "signal-hook-registry",
  "socket2 0.4.9",
  "tokio-macros",
+ "tracing",
  "windows-sys 0.48.0",
 ]
 
