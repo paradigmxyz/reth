@@ -47,6 +47,7 @@ members = [
     "testing/ef-tests",
 
     "examples",
+    "examples/additional-rpc-namespace-in-cli",
 ]
 default-members = ["bin/reth"]
 
@@ -84,6 +85,7 @@ revm-primitives = { git = "https://github.com/bluealloy/revm/", branch = "releas
 ## reth
 revm = { version = "3" }
 revm-primitives = "1.1"
+reth = { path = "./bin/reth" }
 reth-primitives = { path = "./crates/primitives" }
 reth-interfaces = { path = "./crates/interfaces" }
 reth-provider = { path = "./crates/storage/provider" }

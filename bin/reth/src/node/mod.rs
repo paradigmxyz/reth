@@ -148,7 +148,7 @@ pub struct Command<Ext: RethCliExt = ()> {
     pruning: PruningArgs,
 }
 
-impl Command {
+impl<Ext: RethCliExt> Command<Ext> {
     /// Execute `node` command
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
