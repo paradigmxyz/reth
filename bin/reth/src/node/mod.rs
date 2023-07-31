@@ -2,9 +2,16 @@
 //!
 //! Starts the client
 use crate::{
-    args::{get_secret_key, DebugArgs, DevArgs, NetworkArgs, RpcServerArgs, TxPoolArgs},
-    dirs::DataDirPath,
+    args::{
+        get_secret_key,
+        utils::{genesis_value_parser, parse_socket_address},
+        DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, RpcServerArgs,
+        TxPoolArgs,
+    },
+    cli::ext::RethCliExt,
+    dirs::{DataDirPath, MaybePlatformPath},
     init::init_genesis,
+    node::cl_events::ConsensusLayerHealthEvents,
     prometheus_exporter,
     runner::CliContext,
     utils::get_single_header,
@@ -32,26 +39,30 @@ use reth_interfaces::{
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
         either::EitherDownloader,
-        headers::downloader::HeaderDownloader,
+        headers::{client::HeadersClient, downloader::HeaderDownloader},
     },
 };
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
+use reth_payload_builder::PayloadBuilderService;
 use reth_primitives::{
-    stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, H256,
+    stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head,
+    SealedHeader, H256,
 };
 use reth_provider::{
-    BlockHashReader, BlockReader, CanonStateSubscriptions, HeaderProvider, ProviderFactory,
-    StageCheckpointReader,
+    providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
+    HeaderProvider, ProviderFactory, StageCheckpointReader,
 };
+use reth_prune::BatchSizes;
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
 use reth_stages::{
     prelude::*,
     stages::{
-        ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
-        TotalDifficultyStage,
+        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, HeaderSyncMode,
+        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
+        StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
     },
     MetricEventsSender, MetricsListener,
 };
@@ -66,30 +77,12 @@ use std::{
 use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
 
-use crate::{
-    args::{
-        utils::{genesis_value_parser, parse_socket_address},
-        DatabaseArgs, PayloadBuilderArgs,
-    },
-    dirs::MaybePlatformPath,
-    node::cl_events::ConsensusLayerHealthEvents,
-};
-use reth_interfaces::p2p::headers::client::HeadersClient;
-use reth_payload_builder::PayloadBuilderService;
-use reth_primitives::DisplayHardforks;
-use reth_provider::providers::BlockchainProvider;
-use reth_prune::BatchSizes;
-use reth_stages::stages::{
-    AccountHashingStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
-    StorageHashingStage, TransactionLookupStage,
-};
-
 pub mod cl_events;
 pub mod events;
 
 /// Start the node
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct Command<Ext: RethCliExt = ()> {
     /// The path to the data dir for all reth files and subdirectories.
     ///
     /// Defaults to the OS-specific data directory:
@@ -134,7 +127,7 @@ pub struct Command {
     network: NetworkArgs,
 
     #[clap(flatten)]
-    rpc: RpcServerArgs,
+    rpc: RpcServerArgs<Ext::RpcExt>,
 
     #[clap(flatten)]
     txpool: TxPoolArgs,
@@ -820,60 +813,61 @@ async fn run_network_until_shutdown<C>(
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::DEV;
-
     use super::*;
+    use reth_primitives::DEV;
     use std::{net::IpAddr, path::Path};
 
     #[test]
     fn parse_help_node_command() {
-        let err = Command::try_parse_from(["reth", "--help"]).unwrap_err();
+        let err = Command::<()>::try_parse_from(["reth", "--help"]).unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
     }
 
     #[test]
     fn parse_common_node_command_chain_args() {
         for chain in ["mainnet", "sepolia", "goerli"] {
-            let args: Command = Command::parse_from(["reth", "--chain", chain]);
+            let args: Command = Command::<()>::parse_from(["reth", "--chain", chain]);
             assert_eq!(args.chain.chain, chain.parse().unwrap());
         }
     }
 
     #[test]
     fn parse_discovery_port() {
-        let cmd = Command::try_parse_from(["reth", "--discovery.port", "300"]).unwrap();
+        let cmd = Command::<()>::try_parse_from(["reth", "--discovery.port", "300"]).unwrap();
         assert_eq!(cmd.network.discovery.port, Some(300));
     }
 
     #[test]
     fn parse_port() {
         let cmd =
-            Command::try_parse_from(["reth", "--discovery.port", "300", "--port", "99"]).unwrap();
+            Command::<()>::try_parse_from(["reth", "--discovery.port", "300", "--port", "99"])
+                .unwrap();
         assert_eq!(cmd.network.discovery.port, Some(300));
         assert_eq!(cmd.network.port, Some(99));
     }
 
     #[test]
     fn parse_metrics_port() {
-        let cmd = Command::try_parse_from(["reth", "--metrics", "9001"]).unwrap();
+        let cmd = Command::<()>::try_parse_from(["reth", "--metrics", "9001"]).unwrap();
         assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
 
-        let cmd = Command::try_parse_from(["reth", "--metrics", ":9001"]).unwrap();
+        let cmd = Command::<()>::try_parse_from(["reth", "--metrics", ":9001"]).unwrap();
         assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
 
-        let cmd = Command::try_parse_from(["reth", "--metrics", "localhost:9001"]).unwrap();
+        let cmd = Command::<()>::try_parse_from(["reth", "--metrics", "localhost:9001"]).unwrap();
         assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
     }
 
     #[test]
     fn parse_config_path() {
-        let cmd = Command::try_parse_from(["reth", "--config", "my/path/to/reth.toml"]).unwrap();
+        let cmd =
+            Command::<()>::try_parse_from(["reth", "--config", "my/path/to/reth.toml"]).unwrap();
         // always store reth.toml in the data dir, not the chain specific data dir
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
         let config_path = cmd.config.unwrap_or(data_dir.config_path());
         assert_eq!(config_path, Path::new("my/path/to/reth.toml"));
 
-        let cmd = Command::try_parse_from(["reth"]).unwrap();
+        let cmd = Command::<()>::try_parse_from(["reth"]).unwrap();
 
         // always store reth.toml in the data dir, not the chain specific data dir
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
@@ -883,12 +877,12 @@ mod tests {
 
     #[test]
     fn parse_db_path() {
-        let cmd = Command::try_parse_from(["reth"]).unwrap();
+        let cmd = Command::<()>::try_parse_from(["reth"]).unwrap();
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
         let db_path = data_dir.db_path();
         assert!(db_path.ends_with("reth/mainnet/db"), "{:?}", cmd.config);
 
-        let cmd = Command::try_parse_from(["reth", "--datadir", "my/custom/path"]).unwrap();
+        let cmd = Command::<()>::try_parse_from(["reth", "--datadir", "my/custom/path"]).unwrap();
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
         let db_path = data_dir.db_path();
         assert_eq!(db_path, Path::new("my/custom/path/db"));
@@ -896,7 +890,7 @@ mod tests {
 
     #[test]
     fn parse_dev() {
-        let cmd = Command::parse_from(["reth", "--dev"]);
+        let cmd = Command::<()>::parse_from(["reth", "--dev"]);
         let chain = DEV.clone();
         assert_eq!(cmd.chain.chain, chain.chain);
         assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
