@@ -223,10 +223,16 @@ impl ParityTraceBuilder {
                     // selfdestructs are not recorded as individual call traces but are derived from
                     // the call trace and are added as additional `TransactionTrace` objects in the
                     // trace array
-                    let mut addr = traces.last().expect("exists").trace_address.clone();
-                    addr.push(0);
+                    let addr = {
+                        let last = traces.last_mut().expect("exists");
+                        let mut addr = last.trace_address.clone();
+                        addr.push(last.subtraces);
+                        // need to account for the additional selfdestruct trace
+                        last.subtraces += 1;
+                        addr
+                    };
+
                     if let Some(trace) = node.parity_selfdestruct_trace(addr) {
-                        traces.last_mut().expect("exists").subtraces += 1;
                         traces.push(trace);
                     }
                 }
@@ -384,9 +390,10 @@ where
         let (mut trace, node) = self.iter.next()?;
         if node.is_selfdestruct() {
             // since selfdestructs are emitted as additional trace, increase the trace count
-            trace.subtraces += 1;
             let mut addr = trace.trace_address.clone();
-            addr.push(0);
+            addr.push(trace.subtraces);
+            // need to account for the additional selfdestruct trace
+            trace.subtraces += 1;
             self.next_selfdestruct = node.parity_selfdestruct_trace(addr);
         }
         Some(trace)
