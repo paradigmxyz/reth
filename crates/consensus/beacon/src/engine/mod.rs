@@ -1714,10 +1714,13 @@ where
             // 1. Pipeline is idle
             // 2. Pruning is running and we need to prioritize checking its events OR no engine and
             //  sync messages are pending and we may start pruning
-            // 3. At least one FCU has been processed by the engine
+            // 3. Latest FCU status is VALID
             if this.sync.is_pipeline_idle() &&
                 (this.is_prune_active() || is_pending) &&
-                !this.forkchoice_state_tracker.is_empty()
+                this.forkchoice_state_tracker
+                    .latest_status()
+                    .map(|status| status.is_valid())
+                    .unwrap_or_default()
             {
                 if let Some(ref mut prune) = this.prune {
                     match prune.poll(cx, this.blockchain.canonical_tip().number) {
