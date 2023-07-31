@@ -685,7 +685,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         let mut deleted = 0;
 
         for key in keys {
-            if cursor.seek(key)?.is_some() {
+            if cursor.seek_exact(key)?.is_some() {
                 cursor.delete_current()?;
                 deleted += 1;
 
