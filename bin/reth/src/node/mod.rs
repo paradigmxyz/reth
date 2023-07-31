@@ -5,8 +5,8 @@ use crate::{
     args::{
         get_secret_key,
         utils::{genesis_value_parser, parse_socket_address},
-        DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, RpcServerArgs,
-        TxPoolArgs,
+        DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
+        RpcServerArgs, TxPoolArgs,
     },
     cli::ext::RethCliExt,
     dirs::{DataDirPath, MaybePlatformPath},
@@ -27,7 +27,7 @@ use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine, MIN_BLOCKS_F
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
-use reth_config::Config;
+use reth_config::{config::PruneConfig, Config};
 use reth_db::{database::Database, init_db, DatabaseEnv};
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_downloaders::{
@@ -143,6 +143,9 @@ pub struct Command<Ext: RethCliExt = ()> {
 
     #[clap(flatten)]
     dev: DevArgs,
+
+    #[clap(flatten)]
+    pruning: PruningArgs,
 }
 
 impl Command {
@@ -298,6 +301,8 @@ impl Command {
             None
         };
 
+        let prune_config = self.pruning.prune_config(Arc::clone(&self.chain)).or(config.prune);
+
         // Configure the pipeline
         let (mut pipeline, client) = if self.dev.dev {
             info!(target: "reth::cli", "Starting Reth in dev mode");
@@ -332,6 +337,7 @@ impl Command {
                     db.clone(),
                     &ctx.task_executor,
                     metrics_tx,
+                    prune_config,
                     max_block,
                 )
                 .await?;
@@ -351,6 +357,7 @@ impl Command {
                     db.clone(),
                     &ctx.task_executor,
                     metrics_tx,
+                    prune_config,
                     max_block,
                 )
                 .await?;
@@ -373,7 +380,7 @@ impl Command {
             None
         };
 
-        let pruner = config.prune.map(|prune_config| {
+        let pruner = prune_config.map(|prune_config| {
             info!(target: "reth::cli", "Pruner initialized");
             reth_prune::Pruner::new(
                 db.clone(),
@@ -479,6 +486,7 @@ impl Command {
         db: DB,
         task_executor: &TaskExecutor,
         metrics_tx: MetricEventsSender,
+        prune_config: Option<PruneConfig>,
         max_block: Option<BlockNumber>,
     ) -> eyre::Result<Pipeline<DB>>
     where
@@ -504,6 +512,7 @@ impl Command {
                 max_block,
                 self.debug.continuous,
                 metrics_tx,
+                prune_config,
             )
             .await?;
 
@@ -685,6 +694,7 @@ impl Command {
         max_block: Option<u64>,
         continuous: bool,
         metrics_tx: MetricEventsSender,
+        prune_config: Option<PruneConfig>,
     ) -> eyre::Result<Pipeline<DB>>
     where
         DB: Database + Clone + 'static,
@@ -746,7 +756,7 @@ impl Command {
                             max_blocks: stage_config.execution.max_blocks,
                             max_changes: stage_config.execution.max_changes,
                         },
-                        config.prune.map(|prune| prune.parts).unwrap_or_default(),
+                        prune_config.map(|prune| prune.parts).unwrap_or_default(),
                     )
                     .with_metrics_tx(metrics_tx),
                 )
