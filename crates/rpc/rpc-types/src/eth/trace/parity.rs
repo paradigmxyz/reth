@@ -315,9 +315,9 @@ pub struct VmExecutedOperation {
     pub store: Option<StorageDelta>,
 }
 
+/// A diff of some chunk of memory.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-/// A diff of some chunk of memory.
 pub struct MemoryDelta {
     /// Offset into memory the change begins.
     pub off: usize,
@@ -325,9 +325,9 @@ pub struct MemoryDelta {
     pub data: Bytes,
 }
 
+/// A diff of some storage value.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-/// A diff of some storage value.
 pub struct StorageDelta {
     pub key: U256,
     pub val: U256,
