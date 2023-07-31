@@ -22,7 +22,10 @@ thiserror.workspace = true
 itertools.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-jsonrpsee-types.workspace = true
+jsonrpsee-types = { workspace = true, optional = true }
+
+[features]
+default = ["jsonrpsee-types"]
 
 [dev-dependencies]
 # misc
