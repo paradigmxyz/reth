@@ -267,8 +267,8 @@ impl CallTraceNode {
                 opcode::CALL |
                 opcode::STATICCALL |
                 opcode::CALLCODE => {
-                    // the opcode is a call but it could it's result could be a revert or out of gas
-                    // in which case there's no actual child call executed and recorded
+                    // The opcode of this step is a call but it's possible that this step resulted
+                    // in a revert or out of gas error in which case there's no actual child call executed and recorded: <https://github.com/paradigmxyz/reth/issues/3915>
                     if let Some(call_id) = self.children.get(child_id).copied() {
                         item.call_child_id = Some(call_id);
                         child_id += 1;
