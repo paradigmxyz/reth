@@ -64,7 +64,7 @@ proptest-derive = "0.3"
 default = ["serde"]
 serde = ["dep:serde", "smol_str/serde"]
 arbitrary = ["reth-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
-optimism = []
+optimism = ["reth-primitives/optimism"]
 
 [[test]]
 name = "fuzz_roundtrip"
