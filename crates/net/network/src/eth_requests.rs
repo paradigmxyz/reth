@@ -7,8 +7,11 @@ use reth_eth_wire::{
     Receipts,
 };
 use reth_interfaces::p2p::error::RequestResult;
-use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, PeerId};
+use reth_primitives::{
+    bytes::BytesMut, BlockBody, BlockHashOrNumber, Header, HeadersDirection, PeerId,
+};
 use reth_provider::{BlockReader, HeaderProvider, ReceiptProvider};
+use reth_rlp::Encodable;
 use std::{
     borrow::Borrow,
     future::Future,
@@ -36,9 +39,6 @@ const MAX_HEADERS_SERVE: usize = 1024;
 /// Used to limit lookups. With 24KB block sizes nowadays, the practical limit will always be
 /// SOFT_RESPONSE_LIMIT.
 const MAX_BODIES_SERVE: usize = 1024;
-
-/// Estimated size in bytes of an RLP encoded receipt.
-const APPROX_RECEIPT_SIZE: usize = 24 * 1024;
 
 /// Estimated size in bytes of an RLP encoded body.
 // TODO: check 24kb blocksize assumption
@@ -201,25 +201,27 @@ where
         response: oneshot::Sender<RequestResult<Receipts>>,
     ) {
         let mut receipts = Vec::new();
-
-        let mut total_bytes = APPROX_RECEIPT_SIZE;
+        let mut total_len = 0;
 
         for hash in request.0 {
             if let Some(receipts_by_block) =
                 self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
             {
-                receipts.push(
-                    receipts_by_block
-                        .into_iter()
-                        .map(|receipt| receipt.with_bloom())
-                        .collect::<Vec<_>>(),
-                );
+                let block_receipts = receipts_by_block
+                    .into_iter()
+                    .map(|receipt| receipt.with_bloom())
+                    .collect::<Vec<_>>();
 
-                total_bytes += APPROX_RECEIPT_SIZE;
+                let mut buf = BytesMut::new();
+                block_receipts.encode(&mut buf);
 
-                if total_bytes > SOFT_RESPONSE_LIMIT {
+                total_len += buf.len();
+
+                if total_len > SOFT_RESPONSE_LIMIT {
                     break
                 }
+
+                receipts.push(block_receipts);
 
                 if receipts.len() >= MAX_RECEIPTS_SERVE {
                     break
