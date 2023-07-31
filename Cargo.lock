@@ -13,6 +13,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "additional-rpc-namespace-in-cli"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "eyre",
+ "jsonrpsee",
+ "reth",
+ "reth-transaction-pool",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5031,8 +5042,10 @@ dependencies = [
  "reth-revm-inspectors",
  "reth-rlp",
  "reth-rpc",
+ "reth-rpc-api",
  "reth-rpc-builder",
  "reth-rpc-engine-api",
+ "reth-rpc-types",
  "reth-stages",
  "reth-tasks",
  "reth-tracing",
