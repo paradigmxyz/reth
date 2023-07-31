@@ -104,8 +104,8 @@ impl From<Header> for SealedHeader {
             parent_hash: value.parent_hash,
             logs_bloom: value.bloom,
             withdrawals_root: value.withdrawals_root,
-            blob_gas_used: value.blob_gas_used.map(|v| v.0.to::<u64>()),
-            excess_blob_gas: value.excess_blob_gas.map(|v| v.0.to::<u64>()),
+            blob_gas_used: None,
+            excess_blob_gas: None,
         };
         header.seal(value.hash)
     }

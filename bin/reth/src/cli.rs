@@ -1,5 +1,6 @@
 //! CLI definition and entrypoint to executable
 use crate::{
+    args::utils::genesis_value_parser,
     chain, config, db, debug_cmd,
     dirs::{LogsDir, PlatformPath},
     node, p2p,
@@ -8,11 +9,13 @@ use crate::{
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{ArgAction, Args, Parser, Subcommand};
+use reth_primitives::ChainSpec;
 use reth_tracing::{
     tracing::{metadata::LevelFilter, Level, Subscriber},
     tracing_subscriber::{filter::Directive, registry::LookupSpan, EnvFilter},
     BoxedLayer, FileWorkerGuard,
 };
+use std::sync::Arc;
 
 /// The main reth cli interface.
 ///
@@ -24,6 +27,25 @@ pub struct Cli {
     #[clap(subcommand)]
     command: Commands,
 
+    /// The chain this node is running.
+    ///
+    /// Possible values are either a built-in chain or the path to a chain specification file.
+    ///
+    /// Built-in chains:
+    /// - mainnet
+    /// - goerli
+    /// - sepolia
+    #[arg(
+        long,
+        value_name = "CHAIN_OR_PATH",
+        global = true,
+        verbatim_doc_comment,
+        default_value = "mainnet",
+        value_parser = genesis_value_parser,
+        global = true,
+    )]
+    chain: Arc<ChainSpec>,
+
     #[clap(flatten)]
     logs: Logs,
 
@@ -33,7 +55,10 @@ pub struct Cli {
 
 impl Cli {
     /// Execute the configured cli command.
-    pub fn run(self) -> eyre::Result<()> {
+    pub fn run(mut self) -> eyre::Result<()> {
+        // add network name to logs dir
+        self.logs.log_directory = self.logs.log_directory.join(self.chain.chain.to_string());
+
         let _guard = self.init_tracing()?;
 
         let runner = CliRunner::default();
@@ -212,5 +237,22 @@ mod tests {
             // > Not a true "error" as it means --help or similar was used. The help message will be sent to stdout.
             assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
         }
+    }
+
+    /// Tests that the log directory is parsed correctly. It's always tied to the specific chain's
+    /// name
+    #[test]
+    fn parse_logs_path() {
+        let mut reth = Cli::try_parse_from(["reth", "node", "--log.persistent"]).unwrap();
+        reth.logs.log_directory = reth.logs.log_directory.join(reth.chain.chain.to_string());
+        let log_dir = reth.logs.log_directory;
+        assert!(log_dir.as_ref().ends_with("reth/logs/mainnet"), "{:?}", log_dir);
+
+        let mut reth =
+            Cli::try_parse_from(["reth", "node", "--chain", "sepolia", "--log.persistent"])
+                .unwrap();
+        reth.logs.log_directory = reth.logs.log_directory.join(reth.chain.chain.to_string());
+        let log_dir = reth.logs.log_directory;
+        assert!(log_dir.as_ref().ends_with("reth/logs/sepolia"), "{:?}", log_dir);
     }
 }

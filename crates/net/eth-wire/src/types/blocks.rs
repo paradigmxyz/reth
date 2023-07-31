@@ -492,7 +492,7 @@ mod test {
                             base_fee_per_gas: None,
                             withdrawals_root: None,
                             blob_gas_used: None,
-                            excess_blob_gas: None
+                            excess_blob_gas: None,
                         },
                     ],
                     withdrawals: None,
