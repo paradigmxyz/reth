@@ -818,7 +818,7 @@ where
         let eth = self.eth_handlers();
         self.modules.insert(
             RethRpcModule::Trace,
-            TraceApi::new(self.provider.clone(), eth.api.clone(), self.tracing_call_guard.clone())
+            TraceApi::new(self.provider.clone(), eth.api, self.tracing_call_guard.clone())
                 .into_rpc()
                 .into(),
         );
