@@ -186,8 +186,8 @@ fn receipts_provider_example<T: ReceiptProvider + TransactionsProvider + HeaderP
     // topics. This API is a bit clunky and not obvious to use at the moemnt.
     let filter = Filter::new().address(addr).topic0(topic);
     let filter_params = FilteredParams::new(Some(filter));
-    let address_filter = FilteredParams::address_filter(&Some(addr.into()));
-    let topics_filter = FilteredParams::topics_filter(&Some(vec![topic.into()]));
+    let address_filter = FilteredParams::address_filter(&addr.into());
+    let topics_filter = FilteredParams::topics_filter(&[topic.into()]);
 
     // 3. If the address & topics filters match do something. We use the outer check against the
     // bloom filter stored in the header to avoid having to query the receipts table when there

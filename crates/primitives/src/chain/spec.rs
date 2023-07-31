@@ -54,6 +54,8 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1681338455)),
         ]),
+        // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
+        deposit_contract_deployment_block: Some(11052984),
     }
     .into()
 });
@@ -88,6 +90,8 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1678832736)),
         ]),
+        // https://goerli.etherscan.io/tx/0xa3c07dc59bfdb1bfc2d50920fed2ef2c1c4e0a09fe2325dbc14e07702f965a78
+        deposit_contract_deployment_block: Some(4367322),
     }
     .into()
 });
@@ -126,6 +130,8 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1677557088)),
         ]),
+        // https://sepolia.etherscan.io/tx/0x025ecbf81a2f1220da6285d1701dc89fb5a956b62562ee922e1a9efd73eb4b14
+        deposit_contract_deployment_block: Some(1273020),
     }
     .into()
 });
@@ -163,6 +169,7 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
         ]),
+        deposit_contract_deployment_block: Some(0),
     }
     .into()
 });
@@ -201,6 +208,10 @@ pub struct ChainSpec {
 
     /// The active hard forks and their activation conditions
     pub hardforks: BTreeMap<Hardfork, ForkCondition>,
+
+    /// The block at which the deposit contract for PoS was deployed.
+    #[serde(skip, default)]
+    pub deposit_contract_deployment_block: Option<BlockNumber>,
 }
 
 impl ChainSpec {
@@ -433,6 +444,7 @@ impl From<Genesis> for ChainSpec {
             fork_timestamps: ForkTimestamps::from_hardforks(&hardforks),
             hardforks,
             paris_block_and_final_difficulty: None,
+            deposit_contract_deployment_block: None,
         }
     }
 }
@@ -655,6 +667,7 @@ impl ChainSpecBuilder {
             fork_timestamps: ForkTimestamps::from_hardforks(&self.hardforks),
             hardforks: self.hardforks,
             paris_block_and_final_difficulty: None,
+            deposit_contract_deployment_block: None,
         }
     }
 }

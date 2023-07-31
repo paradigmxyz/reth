@@ -1,5 +1,5 @@
 use crate::Log as RpcLog;
-use jsonrpsee_types::SubscriptionId;
+use itertools::{EitherOrBoth::*, Itertools};
 use reth_primitives::{
     bloom::{Bloom, Input},
     keccak256, Address, BlockNumberOrTag, Log, H160, H256, U256, U64,
@@ -9,13 +9,120 @@ use serde::{
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::ops::{Range, RangeFrom, RangeTo};
+use std::{
+    collections::HashSet,
+    hash::Hash,
+    ops::{Range, RangeFrom, RangeTo},
+};
 
 /// Helper type to represent a bloom filter used for matching logs.
-pub type BloomFilter = Vec<Option<Bloom>>;
+#[derive(Default, Debug)]
+pub struct BloomFilter(Vec<Bloom>);
+
+impl From<Vec<Bloom>> for BloomFilter {
+    fn from(src: Vec<Bloom>) -> Self {
+        BloomFilter(src)
+    }
+}
+
+impl BloomFilter {
+    /// Returns whether the given bloom matches the list of Blooms in the current filter.
+    /// If the filter is empty (the list is empty), then any bloom matches
+    /// Otherwise, there must be at least one matche for the BloomFilter to match.
+    pub fn matches(&self, bloom: Bloom) -> bool {
+        self.0.is_empty() || self.0.iter().any(|a| bloom.contains_bloom(a))
+    }
+}
+
+#[derive(Default, Debug, PartialEq, Eq, Clone, Deserialize)]
+/// FilterSet is a set of values that will be used to filter logs
+pub struct FilterSet<T: Eq + Hash>(HashSet<T>);
+
+impl<T: Eq + Hash> From<T> for FilterSet<T> {
+    fn from(src: T) -> Self {
+        FilterSet(HashSet::from([src]))
+    }
+}
+
+impl<T: Eq + Hash> From<Vec<T>> for FilterSet<T> {
+    fn from(src: Vec<T>) -> Self {
+        FilterSet(HashSet::from_iter(src.into_iter().map(Into::into)))
+    }
+}
+
+impl<T: Eq + Hash> From<ValueOrArray<T>> for FilterSet<T> {
+    fn from(src: ValueOrArray<T>) -> Self {
+        match src {
+            ValueOrArray::Value(val) => val.into(),
+            ValueOrArray::Array(arr) => arr.into(),
+        }
+    }
+}
+
+impl<T: Eq + Hash> From<ValueOrArray<Option<T>>> for FilterSet<T> {
+    fn from(src: ValueOrArray<Option<T>>) -> Self {
+        match src {
+            ValueOrArray::Value(None) => FilterSet(HashSet::new()),
+            ValueOrArray::Value(Some(val)) => val.into(),
+            ValueOrArray::Array(arr) => {
+                // If the array contains at least one `null` (ie. None), as it's considered
+                // a "wildcard" value, the whole filter should be treated as matching everything,
+                // thus is empty.
+                if arr.iter().contains(&None) {
+                    FilterSet(HashSet::new())
+                } else {
+                    // Otherwise, we flatten the array, knowing there are no `None` values
+                    arr.into_iter().flatten().collect::<Vec<T>>().into()
+                }
+            }
+        }
+    }
+}
+
+impl<T: Eq + Hash> FilterSet<T> {
+    /// Returns wheter the filter is empty
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Returns whether the given value matches the filter. It the filter is empty
+    /// any value matches. Otherwise, the filter must include the value
+    pub fn matches(&self, value: &T) -> bool {
+        self.is_empty() || self.0.contains(value)
+    }
+}
+
+impl<T: AsRef<[u8]> + Eq + Hash> FilterSet<T> {
+    /// Returns a list of Bloom (BloomFilter) corresponding to the filter's values
+    pub fn to_bloom_filter(&self) -> BloomFilter {
+        self.0.iter().map(|a| Input::Raw(a.as_ref()).into()).collect::<Vec<Bloom>>().into()
+    }
+}
+
+impl<T: Clone + Eq + Hash> FilterSet<T> {
+    /// Returns a ValueOrArray inside an Option, so that:
+    ///   - If the filter is empty, it returns None
+    ///   - If the filter has only 1 value, it returns the single value
+    ///   - Otherwise it returns an array of values
+    /// This should be useful for serialization
+    pub fn to_value_or_array(&self) -> Option<ValueOrArray<T>> {
+        let mut values = self.0.iter().cloned().collect::<Vec<T>>();
+        match values.len() {
+            0 => None,
+            1 => Some(ValueOrArray::Value(values.pop().expect("values length is one"))),
+            _ => Some(ValueOrArray::Array(values)),
+        }
+    }
+}
 
 /// A single topic
-pub type Topic = ValueOrArray<Option<H256>>;
+pub type Topic = FilterSet<H256>;
+
+impl From<U256> for Topic {
+    fn from(src: U256) -> Self {
+        Into::<H256>::into(src).into()
+    }
+}
 
 /// Represents the target range of blocks for the filter
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -141,16 +248,16 @@ impl FilterBlockOption {
 }
 
 /// Filter for
-#[derive(Default, Debug, PartialEq, Eq, Clone, Hash)]
+#[derive(Default, Debug, PartialEq, Eq, Clone)]
 pub struct Filter {
     /// Filter block options, specifying on which blocks the filter should
     /// match.
     // https://eips.ethereum.org/EIPS/eip-234
     pub block_option: FilterBlockOption,
     /// Address
-    pub address: Option<ValueOrArray<Address>>,
+    pub address: FilterSet<Address>,
     /// Topics (maxmimum of 4)
-    pub topics: [Option<Topic>; 4],
+    pub topics: [Topic; 4],
 }
 
 impl Filter {
@@ -279,7 +386,7 @@ impl Filter {
     /// ```
     #[must_use]
     pub fn address<T: Into<ValueOrArray<Address>>>(mut self, address: T) -> Self {
-        self.address = Some(address.into());
+        self.address = address.into().into();
         self
     }
 
@@ -300,28 +407,28 @@ impl Filter {
     /// Sets topic0 (the event name for non-anonymous events)
     #[must_use]
     pub fn topic0<T: Into<Topic>>(mut self, topic: T) -> Self {
-        self.topics[0] = Some(topic.into());
+        self.topics[0] = topic.into();
         self
     }
 
     /// Sets the 1st indexed topic
     #[must_use]
     pub fn topic1<T: Into<Topic>>(mut self, topic: T) -> Self {
-        self.topics[1] = Some(topic.into());
+        self.topics[1] = topic.into();
         self
     }
 
     /// Sets the 2nd indexed topic
     #[must_use]
     pub fn topic2<T: Into<Topic>>(mut self, topic: T) -> Self {
-        self.topics[2] = Some(topic.into());
+        self.topics[2] = topic.into();
         self
     }
 
     /// Sets the 3rd indexed topic
     #[must_use]
     pub fn topic3<T: Into<Topic>>(mut self, topic: T) -> Self {
-        self.topics[3] = Some(topic.into());
+        self.topics[3] = topic.into();
         self
     }
 
@@ -348,64 +455,9 @@ impl Filter {
         }
     }
 
-    /// Flattens the topics using the cartesian product
-    fn flatten(&self) -> Vec<ValueOrArray<Option<H256>>> {
-        fn cartesian(lists: &[Vec<Option<H256>>]) -> Vec<Vec<Option<H256>>> {
-            let mut res = Vec::new();
-            let mut list_iter = lists.iter();
-            if let Some(first_list) = list_iter.next() {
-                for &i in first_list {
-                    res.push(vec![i]);
-                }
-            }
-            for l in list_iter {
-                let mut tmp = Vec::new();
-                for r in res {
-                    for &el in l {
-                        let mut tmp_el = r.clone();
-                        tmp_el.push(el);
-                        tmp.push(tmp_el);
-                    }
-                }
-                res = tmp;
-            }
-            res
-        }
-        let mut out = Vec::new();
-        let mut tmp = Vec::new();
-        for v in self.topics.iter() {
-            let v = if let Some(v) = v {
-                match v {
-                    ValueOrArray::Value(s) => {
-                        vec![*s]
-                    }
-                    ValueOrArray::Array(s) => {
-                        if s.is_empty() {
-                            vec![None]
-                        } else {
-                            s.clone()
-                        }
-                    }
-                }
-            } else {
-                vec![None]
-            };
-            tmp.push(v);
-        }
-        for v in cartesian(&tmp) {
-            out.push(ValueOrArray::Array(v));
-        }
-        out
-    }
-
-    /// Returns an iterator over all existing topics
-    pub fn topics(&self) -> impl Iterator<Item = &Topic> + '_ {
-        self.topics.iter().flatten()
-    }
-
     /// Returns true if at least one topic is set
     pub fn has_topics(&self) -> bool {
-        self.topics.iter().any(|t| t.is_some())
+        self.topics.iter().any(|t| !t.is_empty())
     }
 }
 
@@ -429,26 +481,27 @@ impl Serialize for Filter {
             FilterBlockOption::AtBlockHash(ref h) => s.serialize_field("blockHash", h)?,
         }
 
-        if let Some(ref address) = self.address {
-            s.serialize_field("address", address)?;
+        if let Some(address) = self.address.to_value_or_array() {
+            s.serialize_field("address", &address)?;
         }
 
         let mut filtered_topics = Vec::new();
-        for i in 0..4 {
-            if self.topics[i].is_some() {
-                filtered_topics.push(&self.topics[i]);
-            } else {
-                // TODO: This can be optimized
-                if self.topics[i + 1..].iter().any(|x| x.is_some()) {
-                    filtered_topics.push(&None);
-                }
+        let mut filtered_topics_len = 0;
+        for (i, topic) in self.topics.iter().enumerate() {
+            if !topic.is_empty() {
+                filtered_topics_len = i + 1;
             }
+            filtered_topics.push(topic.to_value_or_array());
         }
+        filtered_topics.truncate(filtered_topics_len);
         s.serialize_field("topics", &filtered_topics)?;
 
         s.end()
     }
 }
+
+type RawAddressFilter = ValueOrArray<Option<Address>>;
+type RawTopicsFilter = Vec<Option<ValueOrArray<Option<H256>>>>;
 
 impl<'de> Deserialize<'de> for Filter {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -471,8 +524,8 @@ impl<'de> Deserialize<'de> for Filter {
                 let mut from_block: Option<Option<BlockNumberOrTag>> = None;
                 let mut to_block: Option<Option<BlockNumberOrTag>> = None;
                 let mut block_hash: Option<Option<H256>> = None;
-                let mut address: Option<Option<ValueOrArray<Address>>> = None;
-                let mut topics: Option<Option<Vec<Option<Topic>>>> = None;
+                let mut address: Option<Option<RawAddressFilter>> = None;
+                let mut topics: Option<Option<RawTopicsFilter>> = None;
 
                 while let Some(key) = map.next_key::<String>()? {
                     match key.as_str() {
@@ -534,16 +587,21 @@ impl<'de> Deserialize<'de> for Filter {
                 let from_block = from_block.unwrap_or_default();
                 let to_block = to_block.unwrap_or_default();
                 let block_hash = block_hash.unwrap_or_default();
-                let address = address.unwrap_or_default();
+                let address = address.flatten().map(|a| a.into()).unwrap_or_default();
                 let topics_vec = topics.flatten().unwrap_or_default();
 
                 // maximum allowed filter len
                 if topics_vec.len() > 4 {
                     return Err(serde::de::Error::custom("exceeded maximum topics len"))
                 }
-                let mut topics: [Option<Topic>; 4] = [None, None, None, None];
+                let mut topics: [Topic; 4] = [
+                    Default::default(),
+                    Default::default(),
+                    Default::default(),
+                    Default::default(),
+                ];
                 for (idx, topic) in topics_vec.into_iter().enumerate() {
-                    topics[idx] = topic;
+                    topics[idx] = topic.map(|t| t.into()).unwrap_or_default();
                 }
 
                 let block_option = if let Some(block_hash) = block_hash {
@@ -581,44 +639,9 @@ impl From<Vec<H160>> for ValueOrArray<H160> {
     }
 }
 
-impl From<H256> for Topic {
-    fn from(src: H256) -> Self {
-        ValueOrArray::Value(Some(src))
-    }
-}
-
 impl From<Vec<H256>> for ValueOrArray<H256> {
     fn from(src: Vec<H256>) -> Self {
         ValueOrArray::Array(src)
-    }
-}
-
-impl From<ValueOrArray<H256>> for Topic {
-    fn from(src: ValueOrArray<H256>) -> Self {
-        match src {
-            ValueOrArray::Value(val) => ValueOrArray::Value(Some(val)),
-            ValueOrArray::Array(arr) => arr.into(),
-        }
-    }
-}
-
-impl<I: Into<H256>> From<Vec<I>> for Topic {
-    fn from(src: Vec<I>) -> Self {
-        ValueOrArray::Array(src.into_iter().map(Into::into).map(Some).collect())
-    }
-}
-
-impl From<Address> for Topic {
-    fn from(src: Address) -> Self {
-        let mut bytes = [0; 32];
-        bytes[12..32].copy_from_slice(src.as_bytes());
-        ValueOrArray::Value(Some(H256::from(bytes)))
-    }
-}
-
-impl From<U256> for Topic {
-    fn from(src: U256) -> Self {
-        ValueOrArray::Value(Some(src.into()))
     }
 }
 
@@ -672,8 +695,6 @@ where
 pub struct FilteredParams {
     /// The original filter, if any
     pub filter: Option<Filter>,
-    /// Flattened topics of the `filter` used to determine if the the filter matches a log.
-    pub flat_topics: Vec<ValueOrArray<Option<H256>>>,
 }
 
 impl FilteredParams {
@@ -681,86 +702,43 @@ impl FilteredParams {
     /// for matching
     pub fn new(filter: Option<Filter>) -> Self {
         if let Some(filter) = filter {
-            let flat_topics = filter.flatten();
-            FilteredParams { filter: Some(filter), flat_topics }
+            FilteredParams { filter: Some(filter) }
         } else {
             Default::default()
         }
     }
 
     /// Returns the [BloomFilter] for the given address
-    pub fn address_filter(address: &Option<ValueOrArray<Address>>) -> BloomFilter {
-        address.as_ref().map(address_to_bloom_filter).unwrap_or_default()
+    pub fn address_filter(address: &FilterSet<Address>) -> BloomFilter {
+        address.to_bloom_filter()
     }
 
     /// Returns the [BloomFilter] for the given topics
-    pub fn topics_filter(topics: &Option<Vec<ValueOrArray<Option<H256>>>>) -> Vec<BloomFilter> {
-        let mut output = Vec::new();
-        if let Some(topics) = topics {
-            output.extend(topics.iter().map(topics_to_bloom_filter));
-        }
-        output
+    pub fn topics_filter(topics: &[FilterSet<H256>]) -> Vec<BloomFilter> {
+        topics.iter().map(|t| t.to_bloom_filter()).collect()
     }
 
     /// Returns `true` if the bloom matches the topics
-    pub fn matches_topics(bloom: Bloom, topic_filters: &[BloomFilter]) -> bool {
+    pub fn matches_topics(bloom: Bloom, topic_filters: &Vec<BloomFilter>) -> bool {
         if topic_filters.is_empty() {
             return true
         }
 
-        // returns true if a filter matches
+        // for each filter, iterate through the list of filter blooms. for each set of filter
+        // (each BloomFilter), the given `bloom` must match at least one of them, unless the list is
+        // empty (no filters).
         for filter in topic_filters.iter() {
-            let mut is_match = false;
-            for maybe_bloom in filter {
-                is_match = maybe_bloom.as_ref().map(|b| bloom.contains_bloom(b)).unwrap_or(true);
-                if !is_match {
-                    break
-                }
-            }
-            if is_match {
-                return true
+            if !filter.matches(bloom) {
+                return false
             }
         }
-        false
+        true
     }
 
-    /// Returns `true` if the bloom contains the address
+    /// Returns `true` if the bloom contains one of the address blooms, or the address blooms
+    /// list is empty (thus, no filters)
     pub fn matches_address(bloom: Bloom, address_filter: &BloomFilter) -> bool {
-        if address_filter.is_empty() {
-            return true
-        } else {
-            for maybe_bloom in address_filter {
-                if maybe_bloom.as_ref().map(|b| bloom.contains_bloom(b)).unwrap_or(true) {
-                    return true
-                }
-            }
-        }
-        false
-    }
-
-    /// Replace None values - aka wildcards - for the log input value in that position.
-    pub fn replace(&self, log: &Log, topic: Topic) -> Option<Vec<H256>> {
-        let mut out: Vec<H256> = Vec::new();
-        match topic {
-            ValueOrArray::Value(value) => {
-                if let Some(value) = value {
-                    out.push(value);
-                }
-            }
-            ValueOrArray::Array(value) => {
-                for (k, v) in value.into_iter().enumerate() {
-                    if let Some(v) = v {
-                        out.push(v);
-                    } else {
-                        out.push(log.topics[k]);
-                    }
-                }
-            }
-        };
-        if out.is_empty() {
-            return None
-        }
-        Some(out)
+        address_filter.matches(bloom)
     }
 
     /// Returns true if the filter matches the given block number
@@ -805,18 +783,30 @@ impl FilteredParams {
 
     /// Returns `true` if the filter matches the given log.
     pub fn filter_address(&self, log: &Log) -> bool {
-        if let Some(input_address) = &self.filter.as_ref().and_then(|f| f.address.clone()) {
-            match input_address {
-                ValueOrArray::Value(x) => {
-                    if log.address != *x {
+        self.filter.as_ref().map(|f| f.address.matches(&log.address)).unwrap_or(true)
+    }
+
+    /// Returns `true` if the log matches the filter's topics
+    pub fn filter_topics(&self, log: &Log) -> bool {
+        let topics = match self.filter.as_ref() {
+            None => return true,
+            Some(f) => &f.topics,
+        };
+        for topic_tuple in topics.iter().zip_longest(log.topics.iter()) {
+            match topic_tuple {
+                // We exhausted the `log.topics`, so if there's a filter set for
+                // this topic index, there is no match. Otherwise (empty filter), continue.
+                Left(filter_topic) => {
+                    if !filter_topic.is_empty() {
                         return false
                     }
                 }
-                ValueOrArray::Array(x) => {
-                    if x.is_empty() {
-                        return true
-                    }
-                    if !x.contains(&log.address) {
+                // We exhausted the filter topics, therefore any subsequent log topic
+                // will match.
+                Right(_) => return true,
+                // Check that `log_topic` is included in `filter_topic`
+                Both(filter_topic, log_topic) => {
+                    if !filter_topic.matches(log_topic) {
                         return false
                     }
                 }
@@ -824,98 +814,6 @@ impl FilteredParams {
         }
         true
     }
-
-    /// Returns `true` if the log matches any topic
-    pub fn filter_topics(&self, log: &Log) -> bool {
-        let mut out: bool = true;
-        for topic in self.flat_topics.iter().cloned() {
-            match topic {
-                ValueOrArray::Value(single) => {
-                    if let Some(single) = single {
-                        if !log.topics.starts_with(&[single]) {
-                            out = false;
-                        }
-                    }
-                }
-                ValueOrArray::Array(multi) => {
-                    if multi.is_empty() {
-                        out = true;
-                        continue
-                    }
-                    // Shrink the topics until the last item is Some.
-                    let mut new_multi = multi;
-                    while new_multi.iter().last().unwrap_or(&Some(H256::default())).is_none() {
-                        new_multi.pop();
-                    }
-                    // We can discard right away any logs with lesser topics than the filter.
-                    if new_multi.len() > log.topics.len() {
-                        out = false;
-                        break
-                    }
-                    let replaced: Option<Vec<H256>> =
-                        self.replace(log, ValueOrArray::Array(new_multi));
-                    if let Some(replaced) = replaced {
-                        out = false;
-                        if log.topics.starts_with(&replaced[..]) {
-                            out = true;
-                            break
-                        }
-                    }
-                }
-            }
-        }
-        out
-    }
-}
-
-fn topics_to_bloom_filter(topics: &ValueOrArray<Option<H256>>) -> BloomFilter {
-    let mut blooms = BloomFilter::new();
-    match topics {
-        ValueOrArray::Value(topic) => {
-            if let Some(topic) = topic {
-                let bloom: Bloom = Input::Raw(topic.as_ref()).into();
-                blooms.push(Some(bloom));
-            } else {
-                blooms.push(None);
-            }
-        }
-        ValueOrArray::Array(topics) => {
-            if topics.is_empty() {
-                blooms.push(None);
-            } else {
-                for topic in topics.iter() {
-                    if let Some(topic) = topic {
-                        let bloom: Bloom = Input::Raw(topic.as_ref()).into();
-                        blooms.push(Some(bloom));
-                    } else {
-                        blooms.push(None);
-                    }
-                }
-            }
-        }
-    }
-    blooms
-}
-
-fn address_to_bloom_filter(address: &ValueOrArray<Address>) -> BloomFilter {
-    let mut blooms = BloomFilter::new();
-    match address {
-        ValueOrArray::Value(address) => {
-            let bloom: Bloom = Input::Raw(address.as_ref()).into();
-            blooms.push(Some(bloom))
-        }
-        ValueOrArray::Array(addresses) => {
-            if addresses.is_empty() {
-                blooms.push(None);
-            } else {
-                for address in addresses.iter() {
-                    let bloom: Bloom = Input::Raw(address.as_ref()).into();
-                    blooms.push(Some(bloom));
-                }
-            }
-        }
-    }
-    blooms
 }
 
 /// Response of the `eth_getFilterChanges` RPC.
@@ -975,7 +873,7 @@ impl<'de> Deserialize<'de> for FilterChanges {
     }
 }
 
-/// Owned equivalent of [SubscriptionId]
+/// Owned equivalent of a `SubscriptionId`
 #[derive(Debug, PartialEq, Clone, Hash, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[serde(untagged)]
@@ -986,20 +884,22 @@ pub enum FilterId {
     Str(String),
 }
 
-impl From<FilterId> for SubscriptionId<'_> {
+#[cfg(feature = "jsonrpsee-types")]
+impl From<FilterId> for jsonrpsee_types::SubscriptionId<'_> {
     fn from(value: FilterId) -> Self {
         match value {
-            FilterId::Num(n) => SubscriptionId::Num(n),
-            FilterId::Str(s) => SubscriptionId::Str(s.into()),
+            FilterId::Num(n) => jsonrpsee_types::SubscriptionId::Num(n),
+            FilterId::Str(s) => jsonrpsee_types::SubscriptionId::Str(s.into()),
         }
     }
 }
 
-impl From<SubscriptionId<'_>> for FilterId {
-    fn from(value: SubscriptionId<'_>) -> Self {
+#[cfg(feature = "jsonrpsee-types")]
+impl From<jsonrpsee_types::SubscriptionId<'_>> for FilterId {
+    fn from(value: jsonrpsee_types::SubscriptionId<'_>) -> Self {
         match value {
-            SubscriptionId::Num(n) => FilterId::Num(n),
-            SubscriptionId::Str(s) => FilterId::Str(s.into_owned()),
+            jsonrpsee_types::SubscriptionId::Num(n) => FilterId::Num(n),
+            jsonrpsee_types::SubscriptionId::Str(s) => FilterId::Str(s.into_owned()),
         }
     }
 }
@@ -1007,6 +907,7 @@ impl From<SubscriptionId<'_>> for FilterId {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_primitives::U256;
     use serde_json::json;
 
     fn serialize<T: serde::Serialize>(t: &T) -> serde_json::Value {
@@ -1020,40 +921,36 @@ mod tests {
         similar_asserts::assert_eq!(
             filter.topics,
             [
-                Some(ValueOrArray::Array(vec![Some(
-                    "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"
-                        .parse()
-                        .unwrap()
-                ),])),
-                Some(ValueOrArray::Array(vec![])),
-                Some(ValueOrArray::Array(vec![Some(
-                    "0x0000000000000000000000000c17e776cd218252adfca8d4e761d3fe757e9778"
-                        .parse()
-                        .unwrap()
-                )])),
-                None
+                "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"
+                    .parse::<H256>()
+                    .unwrap()
+                    .into(),
+                Default::default(),
+                "0x0000000000000000000000000c17e776cd218252adfca8d4e761d3fe757e9778"
+                    .parse::<H256>()
+                    .unwrap()
+                    .into(),
+                Default::default(),
             ]
         );
+    }
 
-        let filtered_params = FilteredParams::new(Some(filter));
-        let topics = filtered_params.flat_topics;
-        assert_eq!(
-            topics,
-            vec![ValueOrArray::Array(vec![
-                Some(
-                    "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"
-                        .parse()
-                        .unwrap()
-                ),
-                None,
-                Some(
-                    "0x0000000000000000000000000c17e776cd218252adfca8d4e761d3fe757e9778"
-                        .parse()
-                        .unwrap()
-                ),
-                None
-            ])]
-        )
+    #[test]
+    fn test_filter_topics_middle_wildcard() {
+        let s = r#"{"fromBlock": "0xfc359e", "toBlock": "0xfc359e", "topics": [["0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"], [], [null, "0x0000000000000000000000000c17e776cd218252adfca8d4e761d3fe757e9778"]]}"#;
+        let filter = serde_json::from_str::<Filter>(s).unwrap();
+        similar_asserts::assert_eq!(
+            filter.topics,
+            [
+                "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"
+                    .parse::<H256>()
+                    .unwrap()
+                    .into(),
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            ]
+        );
     }
 
     #[test]
@@ -1076,11 +973,13 @@ mod tests {
 
     #[test]
     fn filter_serialization_test() {
-        let t1 = "9729a6fbefefc8f6005933898b13dc45c3a2c8b7".parse::<Address>().unwrap();
+        let t1 = "0000000000000000000000009729a6fbefefc8f6005933898b13dc45c3a2c8b7"
+            .parse::<H256>()
+            .unwrap();
         let t2 = H256::from([0; 32]);
         let t3 = U256::from(123);
 
-        let t1_padded = H256::from(t1);
+        let t1_padded = t1;
         let t3_padded = H256::from({
             let mut x = [0; 32];
             x[31] = 123;
@@ -1143,24 +1042,17 @@ mod tests {
         block_bloom
     }
 
-    fn topic_filter(
-        topic1: H256,
-        topic2: H256,
-        topic3: H256,
-    ) -> (Filter, Option<Vec<ValueOrArray<Option<H256>>>>) {
-        let filter = Filter {
+    fn topic_filter(topic1: H256, topic2: H256, topic3: H256) -> Filter {
+        Filter {
             block_option: Default::default(),
-            address: None,
+            address: Default::default(),
             topics: [
-                Some(ValueOrArray::Value(Some(topic1))),
-                Some(ValueOrArray::Array(vec![Some(topic2), Some(topic3)])),
-                None,
-                None,
+                topic1.into(),
+                vec![topic2, topic3].into(),
+                Default::default(),
+                Default::default(),
             ],
-        };
-        let filtered_params = FilteredParams::new(Some(filter.clone()));
-
-        (filter, Some(filtered_params.flat_topics))
+        }
     }
 
     #[test]
@@ -1169,7 +1061,7 @@ mod tests {
         let topic2 = H256::random();
         let topic3 = H256::random();
 
-        let (_, topics) = topic_filter(topic1, topic2, topic3);
+        let topics = topic_filter(topic1, topic2, topic3).topics;
         let topics_bloom = FilteredParams::topics_filter(&topics);
         assert!(!FilteredParams::matches_topics(
             build_bloom(Address::random(), H256::random(), H256::random()),
@@ -1183,7 +1075,7 @@ mod tests {
         let topic2 = H256::random();
         let topic3 = H256::random();
 
-        let (_, topics) = topic_filter(topic1, topic2, topic3);
+        let topics = topic_filter(topic1, topic2, topic3).topics;
         let _topics_bloom = FilteredParams::topics_filter(&topics);
 
         let topics_bloom = FilteredParams::topics_filter(&topics);
@@ -1195,11 +1087,12 @@ mod tests {
 
     #[test]
     fn can_match_empty_topics() {
-        let filter =
-            Filter { block_option: Default::default(), address: None, topics: Default::default() };
-
-        let filtered_params = FilteredParams::new(Some(filter));
-        let topics = Some(filtered_params.flat_topics);
+        let filter = Filter {
+            block_option: Default::default(),
+            address: Default::default(),
+            topics: Default::default(),
+        };
+        let topics = filter.topics;
 
         let topics_bloom = FilteredParams::topics_filter(&topics);
         assert!(FilteredParams::matches_topics(
@@ -1217,16 +1110,16 @@ mod tests {
 
         let filter = Filter {
             block_option: Default::default(),
-            address: Some(ValueOrArray::Value(rng_address)),
+            address: rng_address.into(),
             topics: [
-                Some(ValueOrArray::Value(Some(topic1))),
-                Some(ValueOrArray::Array(vec![Some(topic2), Some(topic3)])),
-                None,
-                None,
+                topic1.into(),
+                vec![topic2, topic3].into(),
+                Default::default(),
+                Default::default(),
             ],
         };
-        let filtered_params = FilteredParams::new(Some(filter.clone()));
-        let topics = Some(filtered_params.flat_topics);
+        let topics = filter.topics;
+
         let address_filter = FilteredParams::address_filter(&filter.address);
         let topics_filter = FilteredParams::topics_filter(&topics);
         assert!(
@@ -1248,11 +1141,16 @@ mod tests {
 
         let filter = Filter {
             block_option: Default::default(),
-            address: None,
-            topics: [None, Some(ValueOrArray::Array(vec![Some(topic2), Some(topic3)])), None, None],
+            address: Default::default(),
+            topics: [
+                Default::default(),
+                vec![topic2, topic3].into(),
+                Default::default(),
+                Default::default(),
+            ],
         };
-        let filtered_params = FilteredParams::new(Some(filter));
-        let topics = Some(filtered_params.flat_topics);
+        let topics = filter.topics;
+
         let topics_bloom = FilteredParams::topics_filter(&topics);
         assert!(FilteredParams::matches_topics(
             build_bloom(Address::random(), topic1, topic2),
@@ -1264,16 +1162,16 @@ mod tests {
     fn can_match_topics_wildcard_mismatch() {
         let filter = Filter {
             block_option: Default::default(),
-            address: None,
+            address: Default::default(),
             topics: [
-                None,
-                Some(ValueOrArray::Array(vec![Some(H256::random()), Some(H256::random())])),
-                None,
-                None,
+                Default::default(),
+                vec![H256::random(), H256::random()].into(),
+                Default::default(),
+                Default::default(),
             ],
         };
-        let filtered_params = FilteredParams::new(Some(filter));
-        let topics_input = Some(filtered_params.flat_topics);
+        let topics_input = filter.topics;
+
         let topics_bloom = FilteredParams::topics_filter(&topics_input);
         assert!(!FilteredParams::matches_topics(
             build_bloom(Address::random(), H256::random(), H256::random()),
@@ -1286,7 +1184,7 @@ mod tests {
         let rng_address = Address::random();
         let filter = Filter {
             block_option: Default::default(),
-            address: Some(ValueOrArray::Value(rng_address)),
+            address: rng_address.into(),
             topics: Default::default(),
         };
         let address_bloom = FilteredParams::address_filter(&filter.address);
@@ -1302,7 +1200,7 @@ mod tests {
         let rng_address = Address::random();
         let filter = Filter {
             block_option: Default::default(),
-            address: Some(ValueOrArray::Value(rng_address)),
+            address: rng_address.into(),
             topics: Default::default(),
         };
         let address_bloom = FilteredParams::address_filter(&filter.address);
@@ -1335,26 +1233,24 @@ mod tests {
                     from_block: Some(4365627u64.into()),
                     to_block: Some(4365627u64.into()),
                 },
-                address: Some(ValueOrArray::Value(
-                    "0xb59f67a8bff5d8cd03f6ac17265c550ed8f33907".parse().unwrap()
-                )),
+                address: "0xb59f67a8bff5d8cd03f6ac17265c550ed8f33907"
+                    .parse::<Address>()
+                    .unwrap()
+                    .into(),
                 topics: [
-                    Some(ValueOrArray::Value(Some(
-                        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
-                            .parse()
-                            .unwrap(),
-                    ))),
-                    Some(ValueOrArray::Value(Some(
-                        "0x00000000000000000000000000b46c2526e227482e2ebb8f4c69e4674d262e75"
-                            .parse()
-                            .unwrap(),
-                    ))),
-                    Some(ValueOrArray::Value(Some(
-                        "0x00000000000000000000000054a2d42a40f51259dedd1978f6c118a0f0eff078"
-                            .parse()
-                            .unwrap(),
-                    ))),
-                    None,
+                    "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+                        .parse::<H256>()
+                        .unwrap()
+                        .into(),
+                    "0x00000000000000000000000000b46c2526e227482e2ebb8f4c69e4674d262e75"
+                        .parse::<H256>()
+                        .unwrap()
+                        .into(),
+                    "0x00000000000000000000000054a2d42a40f51259dedd1978f6c118a0f0eff078"
+                        .parse::<H256>()
+                        .unwrap()
+                        .into(),
+                    Default::default(),
                 ],
             }
         );
@@ -1379,8 +1275,8 @@ mod tests {
                     from_block: Some(4365627u64.into()),
                     to_block: Some(4365627u64.into()),
                 },
-                address: None,
-                topics: [None, None, None, None,],
+                address: Default::default(),
+                topics: Default::default(),
             }
         );
     }

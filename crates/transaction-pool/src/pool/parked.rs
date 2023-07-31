@@ -306,10 +306,11 @@ pub(crate) struct QueuedOrd<T: PoolTransaction>(Arc<ValidPoolTransaction<T>>);
 
 impl_ord_wrapper!(QueuedOrd);
 
+// TODO: temporary solution for ordering the queued pool.
 impl<T: PoolTransaction> Ord for QueuedOrd<T> {
     fn cmp(&self, other: &Self) -> Ordering {
-        // Higher cost is better
-        self.gas_cost().cmp(&other.gas_cost()).then_with(||
+        // Higher price is better
+        self.max_fee_per_gas().cmp(&self.max_fee_per_gas()).then_with(||
             // Lower timestamp is better
             other.timestamp.cmp(&self.timestamp))
     }
