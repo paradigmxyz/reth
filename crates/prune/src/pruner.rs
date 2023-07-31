@@ -376,7 +376,7 @@ impl<DB: Database> Pruner<DB> {
         let range = BlockNumberAddress::range(block_range);
 
         let mut processed = 0;
-        provider.prune_dupsort_table_in_batches::<tables::StorageChangeSet, _>(
+        provider.prune_table_with_range_in_batches::<tables::StorageChangeSet>(
             range,
             self.batch_sizes.storage_history,
             |entries| {
