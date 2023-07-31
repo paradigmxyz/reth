@@ -5,7 +5,7 @@
 #[command(next_help_heading = "Rollup")]
 pub struct RollupArgs {
     /// HTTP endpoint for the sequencer mempool
-    #[arg(long = "rollup.sequencerhttp", value_name = "HTTP_URL")]
+    #[arg(long = "rollup.sequencer-http", value_name = "HTTP_URL")]
     pub sequencer_http: Option<String>,
 
     /// Disable transaction pool gossip
