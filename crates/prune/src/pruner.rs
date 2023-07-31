@@ -458,7 +458,7 @@ mod tests {
         },
     };
     use reth_primitives::{
-        Address, BlockNumber, PruneCheckpoint, PruneMode, PruneModes, PrunePart, H256, MAINNET,
+        BlockNumber, PruneCheckpoint, PruneMode, PruneModes, PrunePart, H256, MAINNET,
     };
     use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::TestTransaction;
@@ -624,7 +624,7 @@ mod tests {
         let (changesets, _) = random_changeset_range(
             &mut rng,
             blocks.iter(),
-            accounts.clone().into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+            accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
             0..0,
             0..0,
         );
@@ -632,7 +632,7 @@ mod tests {
         tx.insert_history(changesets.clone(), None).expect("insert history");
 
         let account_occurrences = tx.table::<tables::AccountHistory>().unwrap().into_iter().fold(
-            BTreeMap::<Address, usize>::new(),
+            BTreeMap::<_, usize>::new(),
             |mut map, (key, _)| {
                 map.entry(key.key).or_default().add_assign(1);
                 map
@@ -689,6 +689,101 @@ mod tests {
 
             assert_eq!(
                 tx.inner().get_prune_checkpoint(PrunePart::AccountHistory).unwrap(),
+                Some(PruneCheckpoint { block_number: to_block, prune_mode })
+            );
+        };
+
+        // Prune first time: no previous checkpoint is present
+        test_prune(3000);
+        // Prune second time: previous checkpoint is present, should continue pruning from where
+        // ended last time
+        test_prune(4500);
+    }
+
+    #[test]
+    fn prune_storage_history() {
+        let tx = TestTransaction::default();
+        let mut rng = generators::rng();
+
+        let block_num = 7000;
+        let blocks = random_block_range(&mut rng, 0..=block_num, H256::zero(), 0..1);
+        tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
+
+        let accounts =
+            random_eoa_account_range(&mut rng, 0..3).into_iter().collect::<BTreeMap<_, _>>();
+
+        let (changesets, _) = random_changeset_range(
+            &mut rng,
+            blocks.iter(),
+            accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+            1..2,
+            1..2,
+        );
+        tx.insert_changesets(changesets.clone(), None).expect("insert changesets");
+        tx.insert_history(changesets.clone(), None).expect("insert history");
+
+        let storage_occurences = tx.table::<tables::StorageHistory>().unwrap().into_iter().fold(
+            BTreeMap::<_, usize>::new(),
+            |mut map, (key, _)| {
+                map.entry((key.address, key.sharded_key.key)).or_default().add_assign(1);
+                map
+            },
+        );
+        assert!(storage_occurences.into_iter().any(|(_, occurrences)| occurrences > 1));
+
+        assert_eq!(
+            tx.table::<tables::StorageChangeSet>().unwrap().len(),
+            changesets.iter().flatten().flat_map(|(_, _, entries)| entries).count()
+        );
+
+        let original_shards = tx.table::<tables::StorageHistory>().unwrap();
+
+        let test_prune = |to_block: BlockNumber| {
+            let prune_mode = PruneMode::Before(to_block);
+            let pruner = Pruner::new(
+                tx.inner_raw(),
+                MAINNET.clone(),
+                5,
+                0,
+                PruneModes { storage_history: Some(prune_mode), ..Default::default() },
+                BatchSizes {
+                    // Less than total amount of blocks to prune to test the batching logic
+                    storage_history: 10,
+                    ..Default::default()
+                },
+            );
+
+            let provider = tx.inner_rw();
+            assert_matches!(pruner.prune_storage_history(&provider, to_block, prune_mode), Ok(()));
+            provider.commit().expect("commit");
+
+            assert_eq!(
+                tx.table::<tables::StorageChangeSet>().unwrap().len(),
+                changesets[to_block as usize + 1..]
+                    .iter()
+                    .flatten()
+                    .flat_map(|(_, _, entries)| entries)
+                    .count()
+            );
+
+            let actual_shards = tx.table::<tables::StorageHistory>().unwrap();
+
+            let expected_shards = original_shards
+                .iter()
+                .filter(|(key, _)| key.sharded_key.highest_block_number > to_block)
+                .map(|(key, blocks)| {
+                    let new_blocks = blocks
+                        .iter(0)
+                        .skip_while(|block| *block <= to_block as usize)
+                        .collect::<Vec<_>>();
+                    (key.clone(), BlockNumberList::new_pre_sorted(new_blocks))
+                })
+                .collect::<Vec<_>>();
+
+            assert_eq!(actual_shards, expected_shards);
+
+            assert_eq!(
+                tx.inner().get_prune_checkpoint(PrunePart::StorageHistory).unwrap(),
                 Some(PruneCheckpoint { block_number: to_block, prune_mode })
             );
         };
