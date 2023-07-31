@@ -133,5 +133,10 @@ futures = "0.3.26"
 pin-project = "1.0.12"
 futures-util = "0.3.25"
 
+## json
+jsonrpsee = { version = "0.19" }
+jsonrpsee-core = { version = "0.19" }
+jsonrpsee-types = { version = "0.19" }
+
 ## crypto
 secp256k1 = { version = "0.27.0", default-features = false, features = ["global-context", "rand-std", "recovery"] }

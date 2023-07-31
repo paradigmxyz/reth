@@ -25,8 +25,8 @@ tokio = { workspace = true, features = ["sync"] }
 # misc
 async-trait.workspace = true
 thiserror.workspace = true
-jsonrpsee-types = "0.18"
-jsonrpsee-core = "0.18"
+jsonrpsee-types.workspace = true
+jsonrpsee-core.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
