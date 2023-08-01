@@ -39,10 +39,17 @@ pub enum FullTransactionEvent<T: PoolTransaction> {
 impl<T: PoolTransaction> Clone for FullTransactionEvent<T> {
     fn clone(&self) -> Self {
         match self {
+            Self::Pending(hash) => Self::Pending(*hash),
+            Self::Queued(hash) => Self::Queued(*hash),
+            Self::Mined { tx_hash, block_hash } => {
+                Self::Mined { tx_hash: *tx_hash, block_hash: *block_hash }
+            }
             Self::Replaced { transaction, replaced_by } => {
                 Self::Replaced { transaction: Arc::clone(transaction), replaced_by: *replaced_by }
             }
-            other => other.clone(),
+            Self::Discarded(hash) => Self::Discarded(*hash),
+            Self::Invalid(hash) => Self::Invalid(*hash),
+            Self::Propagated(propagated) => Self::Propagated(Arc::clone(propagated)),
         }
     }
 }
