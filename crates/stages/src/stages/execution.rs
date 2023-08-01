@@ -193,7 +193,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     /// [`tables::AccountsTrie`] and [`tables::HashedAccount`] to ensure that the stages haven't
     /// been previously executed.
     fn adjust_prune_modes<DB: Database>(
-        &mut self,
+        &self,
         provider: &DatabaseProviderRW<'_, &DB>,
         start_block: u64,
         max_block: u64,
