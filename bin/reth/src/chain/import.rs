@@ -189,8 +189,8 @@ impl ImportCommand {
                         .stages
                         .merkle
                         .clean_threshold
-                        .min(config.stages.account_hashing.clean_threshold)
-                        .min(config.stages.storage_hashing.clean_threshold),
+                        .max(config.stages.account_hashing.clean_threshold)
+                        .max(config.stages.storage_hashing.clean_threshold),
                     config.prune.map(|prune| prune.parts).unwrap_or_default(),
                 )),
             )

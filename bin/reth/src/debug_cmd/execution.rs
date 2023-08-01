@@ -145,8 +145,8 @@ impl Command {
                     stage_conf
                         .merkle
                         .clean_threshold
-                        .min(stage_conf.account_hashing.clean_threshold)
-                        .min(stage_conf.storage_hashing.clean_threshold),
+                        .max(stage_conf.account_hashing.clean_threshold)
+                        .max(stage_conf.storage_hashing.clean_threshold),
                     config.prune.map(|prune| prune.parts).unwrap_or_default(),
                 )),
             )
