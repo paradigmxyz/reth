@@ -23,6 +23,7 @@ pub mod abi;
 mod account;
 pub mod basefee;
 mod bits;
+pub mod blobfee;
 mod block;
 pub mod bloom;
 mod chain;
@@ -80,7 +81,7 @@ pub use net::{
     SEPOLIA_BOOTNODES,
 };
 pub use peer::{PeerId, WithPeerId};
-pub use prune::{PruneCheckpoint, PruneMode, PruneModes, PrunePart};
+pub use prune::{PruneCheckpoint, PruneMode, PruneModes, PrunePart, PrunePartError};
 pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef};
 pub use revm_primitives::JumpMap;
 pub use serde_helper::JsonU256;

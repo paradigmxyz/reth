@@ -10,7 +10,7 @@ use reth_primitives::{
     hex,
     stage::{EntitiesCheckpoint, MerkleCheckpoint, StageCheckpoint, StageId},
     trie::StoredSubNode,
-    BlockNumber, SealedHeader, H256,
+    BlockNumber, PruneModes, SealedHeader, H256,
 };
 use reth_provider::{
     DatabaseProviderRW, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,
@@ -47,6 +47,9 @@ pub enum MerkleStage {
         /// The threshold (in number of blocks) for switching from incremental trie building
         /// of changes to whole rebuild.
         clean_threshold: u64,
+        /// Prune mode configuration. Required to know if we can actually make an incremental root
+        /// update based on how many changesets exist.
+        prune_modes: PruneModes,
     },
     /// The unwind portion of the merkle stage.
     Unwind,
@@ -54,13 +57,13 @@ pub enum MerkleStage {
     /// Able to execute and unwind. Used for tests
     #[cfg(any(test, feature = "test-utils"))]
     #[allow(missing_docs)]
-    Both { clean_threshold: u64 },
+    Both { clean_threshold: u64, prune_modes: PruneModes },
 }
 
 impl MerkleStage {
     /// Stage default for the [MerkleStage::Execution].
     pub fn default_execution() -> Self {
-        Self::Execution { clean_threshold: 50_000 }
+        Self::Execution { clean_threshold: 50_000, prune_modes: PruneModes::default() }
     }
 
     /// Stage default for the [MerkleStage::Unwind].
@@ -69,8 +72,8 @@ impl MerkleStage {
     }
 
     /// Create new instance of [MerkleStage::Execution].
-    pub fn new_execution(clean_threshold: u64) -> Self {
-        Self::Execution { clean_threshold }
+    pub fn new_execution(clean_threshold: u64, prune_modes: PruneModes) -> Self {
+        Self::Execution { clean_threshold, prune_modes }
     }
 
     /// Check that the computed state root matches the root in the expected header.
@@ -128,6 +131,26 @@ impl MerkleStage {
         }
         Ok(provider.save_stage_checkpoint_progress(StageId::MerkleExecute, buf)?)
     }
+
+    /// When pruning is enabled for account and storage history, we might not have all changesets
+    /// required for an incremental state root update on a pipeline re-run.
+    pub fn has_enough_changesets(
+        &self,
+        prune_modes: PruneModes,
+        from_block: BlockNumber,
+        to_block: BlockNumber,
+    ) -> Result<bool, StageError> {
+        Ok(prune_modes
+            .prune_target_block_account_history(to_block)?
+            .map(|(block_number, _)| block_number)
+            .unwrap_or_default() <
+            from_block &&
+            prune_modes
+                .prune_target_block_storage_history(to_block)?
+                .map(|(block_number, _)| block_number)
+                .unwrap_or_default() <
+                from_block)
+    }
 }
 
 #[async_trait::async_trait]
@@ -148,14 +171,16 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let threshold = match self {
+        let (threshold, prune_modes) = match self {
             MerkleStage::Unwind => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
                 return Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
             }
-            MerkleStage::Execution { clean_threshold } => *clean_threshold,
+            MerkleStage::Execution { clean_threshold, prune_modes } => {
+                (*clean_threshold, *prune_modes)
+            }
             #[cfg(any(test, feature = "test-utils"))]
-            MerkleStage::Both { clean_threshold } => *clean_threshold,
+            MerkleStage::Both { clean_threshold, prune_modes } => (*clean_threshold, *prune_modes),
         };
 
         let range = input.next_block_range();
@@ -168,10 +193,12 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let target_block_root = target_block.state_root;
 
         let mut checkpoint = self.get_execution_checkpoint(provider)?;
-
         let (trie_root, entities_checkpoint) = if range.is_empty() {
             (target_block_root, input.checkpoint().entities_stage_checkpoint().unwrap_or_default())
-        } else if to_block - from_block > threshold || from_block == 1 {
+        } else if to_block - from_block > threshold ||
+            from_block == 1 ||
+            !self.has_enough_changesets(prune_modes, from_block, to_block)?
+        {
             // if there are more blocks than threshold it is faster to rebuild the trie
             let mut entities_checkpoint = if let Some(checkpoint) =
                 checkpoint.as_ref().filter(|c| c.target_block == to_block)
@@ -445,11 +472,16 @@ mod tests {
     struct MerkleTestRunner {
         tx: TestTransaction,
         clean_threshold: u64,
+        prune_modes: PruneModes,
     }
 
     impl Default for MerkleTestRunner {
         fn default() -> Self {
-            Self { tx: TestTransaction::default(), clean_threshold: 10000 }
+            Self {
+                tx: TestTransaction::default(),
+                clean_threshold: 10000,
+                prune_modes: PruneModes::default(),
+            }
         }
     }
 
@@ -461,7 +493,7 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            Self::S::Both { clean_threshold: self.clean_threshold }
+            Self::S::Both { clean_threshold: self.clean_threshold, prune_modes: self.prune_modes }
         }
     }
 
