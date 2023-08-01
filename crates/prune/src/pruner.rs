@@ -328,7 +328,23 @@ impl<DB: Database> Pruner<DB> {
                     .skip_while(|block| *block <= to_block as usize)
                     .collect::<Vec<_>>();
                 if blocks.is_empty() {
-                    cursor.delete_current()?;
+                    // If there are no more blocks in this shard, we need to remove it, as empty
+                    // shards are not allowed.
+                    if key.highest_block_number == u64::MAX {
+                        // If current shard is the last shard for this address, replace it with the
+                        // previous shard.
+                        if let Some((prev_key, prev_value)) = cursor.prev()? {
+                            if prev_key.key == key.key {
+                                cursor.delete_current()?;
+                                // Upsert will replace the last shard for this address with the
+                                // previous value
+                                cursor.upsert(key.clone(), prev_value)?;
+                            }
+                        }
+                    } else {
+                        // If current shard is not the last shard for this address, just delete it.
+                        cursor.delete_current()?;
+                    }
                 } else {
                     cursor.upsert(key.clone(), BlockNumberList::new_pre_sorted(blocks))?;
                 }
