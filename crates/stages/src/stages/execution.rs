@@ -2,6 +2,7 @@ use crate::{
     stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD, ExecInput, ExecOutput, MetricEvent,
     MetricEventsSender, Stage, StageError, UnwindInput, UnwindOutput,
 };
+use num_traits::Zero;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
@@ -200,8 +201,8 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     ) -> Result<PruneModes, StageError> {
         let mut prune_modes = self.prune_modes;
         if !(max_block - start_block > self.external_clean_threshold ||
-            (provider.tx_ref().cursor_read::<tables::AccountsTrie>()?.first()?.is_none() &&
-                provider.tx_ref().cursor_read::<tables::HashedAccount>()?.first()?.is_none()))
+            (provider.tx_ref().entries::<tables::AccountsTrie>()?.is_zero() &&
+                provider.tx_ref().entries::<tables::HashedAccount>()?.is_zero()))
         {
             prune_modes.account_history = None;
             prune_modes.storage_history = None;
