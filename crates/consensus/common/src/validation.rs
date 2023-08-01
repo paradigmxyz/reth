@@ -339,11 +339,6 @@ pub fn validate_header_regarding_parent(
         }
     }
 
-    // ensure that the blob gas fields for this block
-    if chain_spec.fork(Hardfork::Cancun).active_at_timestamp(child.timestamp) {
-        validate_4844_header_with_parent(parent, child)?;
-    }
-
     Ok(())
 }
 
@@ -649,8 +644,6 @@ mod tests {
             nonce: 0x0000000000000000,
             base_fee_per_gas: 0x28f0001df.into(),
             withdrawals_root: None,
-            blob_gas_used: None,
-            excess_blob_gas: None,
         };
         // size: 0x9b5
 

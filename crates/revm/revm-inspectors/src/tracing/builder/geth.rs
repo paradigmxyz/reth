@@ -4,12 +4,8 @@ use crate::tracing::{
     types::{CallTraceNode, CallTraceStepStackItem},
     TracingInspectorConfig,
 };
-use reth_primitives::{Address, Bytes, H256, U256};
-use reth_rpc_types::trace::geth::{
-    AccountState, CallConfig, CallFrame, DefaultFrame, DiffMode, GethDefaultTracingOptions,
-    PreStateConfig, PreStateFrame, PreStateMode, StructLog,
-};
-use revm::{db::DatabaseRef, primitives::ResultAndState};
+use reth_primitives::{Address, Bytes, H256};
+use reth_rpc_types::trace::geth::*;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 /// A type for creating geth style traces

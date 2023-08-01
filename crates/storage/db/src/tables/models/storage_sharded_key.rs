@@ -19,9 +19,7 @@ pub const NUM_OF_INDICES_IN_SHARD: usize = 2_000;
 /// `Address | Storagekey | 200` -> data is from transition 0 to 200.
 ///
 /// `Address | StorageKey | 300` -> data is from transition 201 to 300.
-#[derive(
-    Debug, Default, Clone, Eq, Ord, PartialOrd, PartialEq, AsRef, Serialize, Deserialize, Hash,
-)]
+#[derive(Debug, Default, Clone, Eq, Ord, PartialOrd, PartialEq, AsRef, Serialize, Deserialize)]
 pub struct StorageShardedKey {
     /// Storage account address.
     pub address: H160,

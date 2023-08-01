@@ -5,6 +5,7 @@ on:
     branches: [main]
 
 env:
+  RUSTFLAGS: -D warnings
   CARGO_TERM_COLOR: always
 
 concurrency:

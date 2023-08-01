@@ -1,3 +1,0 @@
-mod payload;
-
-fn main() {}

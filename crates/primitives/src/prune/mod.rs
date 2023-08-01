@@ -5,5 +5,5 @@ mod target;
 
 pub use checkpoint::PruneCheckpoint;
 pub use mode::PruneMode;
-pub use part::{PrunePart, PrunePartError};
+pub use part::PrunePart;
 pub use target::PruneModes;

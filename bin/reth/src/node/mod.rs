@@ -11,7 +11,6 @@ use crate::{
     cli::ext::{RethCliExt, RethNodeCommandExt},
     dirs::{DataDirPath, MaybePlatformPath},
     init::init_genesis,
-    node::cl_events::ConsensusLayerHealthEvents,
     prometheus_exporter,
     runner::CliContext,
     utils::get_single_header,
@@ -38,29 +37,26 @@ use reth_interfaces::{
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
         either::EitherDownloader,
-        headers::{client::HeadersClient, downloader::HeaderDownloader},
+        headers::downloader::HeaderDownloader,
     },
 };
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head,
-    SealedHeader, H256,
+    stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, H256,
 };
 use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
-    HeaderProvider, ProviderFactory, StageCheckpointReader,
+    BlockHashReader, BlockReader, CanonStateSubscriptions, HeaderProvider, ProviderFactory,
+    StageCheckpointReader,
 };
-use reth_prune::BatchSizes;
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
 use reth_stages::{
     prelude::*,
     stages::{
-        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, HeaderSyncMode,
-        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
-        StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
+        ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
+        TotalDifficultyStage,
     },
     MetricEventsSender, MetricsListener,
 };
@@ -74,6 +70,24 @@ use std::{
 };
 use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
+
+use crate::{
+    args::{
+        utils::{genesis_value_parser, parse_socket_address},
+        DatabaseArgs, PayloadBuilderArgs,
+    },
+    dirs::MaybePlatformPath,
+    node::cl_events::ConsensusLayerHealthEvents,
+};
+use reth_interfaces::p2p::headers::client::HeadersClient;
+use reth_payload_builder::PayloadBuilderService;
+use reth_primitives::DisplayHardforks;
+use reth_provider::providers::BlockchainProvider;
+use reth_prune::BatchSizes;
+use reth_stages::stages::{
+    AccountHashingStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
+    StorageHashingStage, TransactionLookupStage,
+};
 
 pub mod cl_events;
 pub mod events;
@@ -863,8 +877,9 @@ async fn run_network_until_shutdown<C>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use reth_primitives::DEV;
+
+    use super::*;
     use std::{net::IpAddr, path::Path};
 
     #[test]

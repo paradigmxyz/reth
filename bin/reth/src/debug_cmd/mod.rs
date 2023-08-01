@@ -4,7 +4,6 @@ use clap::{Parser, Subcommand};
 use crate::runner::CliContext;
 
 mod execution;
-mod in_memory_merkle;
 mod merkle;
 
 /// `reth debug` command
@@ -21,8 +20,6 @@ pub enum Subcommands {
     Execution(execution::Command),
     /// Debug the clean & incremental state root calculations.
     Merkle(merkle::Command),
-    /// Debug in-memory state root calculation.
-    InMemoryMerkle(in_memory_merkle::Command),
 }
 
 impl Command {
@@ -31,7 +28,6 @@ impl Command {
         match self.command {
             Subcommands::Execution(command) => command.execute(ctx).await,
             Subcommands::Merkle(command) => command.execute().await,
-            Subcommands::InMemoryMerkle(command) => command.execute(ctx).await,
         }
     }
 }

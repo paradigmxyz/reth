@@ -4,7 +4,7 @@ use crate::{
     identifier::{SenderIdentifiers, TransactionId},
     pool::txpool::TxPool,
     traits::TransactionOrigin,
-    PoolTransaction, Priority, TransactionOrdering, ValidPoolTransaction,
+    PoolTransaction, TransactionOrdering, ValidPoolTransaction,
 };
 use paste::paste;
 use rand::{
@@ -418,6 +418,19 @@ impl PoolTransaction for MockTransaction {
         }
     }
 
+    fn gas_cost(&self) -> U256 {
+        match self {
+            MockTransaction::Legacy { gas_price, gas_limit, .. } => {
+                U256::from(*gas_limit) * U256::from(*gas_price)
+            }
+            MockTransaction::Eip1559 { max_fee_per_gas, gas_limit, .. } => {
+                U256::from(*gas_limit) * U256::from(*max_fee_per_gas)
+            }
+            #[cfg(feature = "optimism")]
+            MockTransaction::DepositTx { .. } => U256::ZERO,
+        }
+    }
+
     fn gas_limit(&self) -> u64 {
         self.get_gas_limit()
     }
@@ -750,15 +763,11 @@ impl MockTransactionFactory {
 pub struct MockOrdering;
 
 impl TransactionOrdering for MockOrdering {
-    type PriorityValue = U256;
+    type Priority = U256;
     type Transaction = MockTransaction;
 
-    fn priority(
-        &self,
-        transaction: &Self::Transaction,
-        base_fee: u64,
-    ) -> Priority<Self::PriorityValue> {
-        transaction.effective_tip_per_gas(base_fee).map(U256::from).into()
+    fn priority(&self, transaction: &Self::Transaction) -> Self::Priority {
+        transaction.gas_cost()
     }
 }
 
@@ -800,5 +809,5 @@ fn test_mock_priority() {
     let o = MockOrdering;
     let lo = MockTransaction::eip1559().with_gas_limit(100_000);
     let hi = lo.next().inc_price();
-    assert!(o.priority(&hi, 0) > o.priority(&lo, 0));
+    assert!(o.priority(&hi) > o.priority(&lo));
 }

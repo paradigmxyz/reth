@@ -39,8 +39,6 @@ pub enum Hardfork {
     Paris,
     /// Shanghai.
     Shanghai,
-    /// Cancun.
-    Cancun,
     /// Bedrock.
     #[cfg(feature = "optimism")]
     Bedrock,
@@ -90,7 +88,6 @@ impl FromStr for Hardfork {
             "grayglacier" => Hardfork::GrayGlacier,
             "paris" => Hardfork::Paris,
             "shanghai" => Hardfork::Shanghai,
-            "cancun" => Hardfork::Cancun,
             #[cfg(feature = "optimism")]
             "bedrock" => Hardfork::Bedrock,
             #[cfg(feature = "optimism")]
@@ -110,6 +107,7 @@ impl Display for Hardfork {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::{Chain, Genesis};
     use std::collections::BTreeMap;
 
@@ -132,7 +130,6 @@ mod tests {
             "grayglacier",
             "PARIS",
             "ShAnGhAI",
-            "CaNcUn",
         ];
         let expected_hardforks = [
             Hardfork::Frontier,
@@ -151,7 +148,6 @@ mod tests {
             Hardfork::GrayGlacier,
             Hardfork::Paris,
             Hardfork::Shanghai,
-            Hardfork::Cancun,
         ];
 
         let hardforks: Vec<Hardfork> =

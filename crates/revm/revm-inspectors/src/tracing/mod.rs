@@ -406,6 +406,7 @@ where
         if self.config.record_steps {
             self.gas_inspector.step_end(interp, data, is_static, eval);
             self.fill_step_on_step_end(interp, data, eval);
+            return eval
         }
         InstructionResult::Continue
     }
