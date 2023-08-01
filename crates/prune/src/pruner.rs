@@ -1,6 +1,6 @@
 //! Support for pruning.
 
-use crate::PrunerError;
+use crate::{Metrics, PrunerError};
 use rayon::prelude::*;
 use reth_db::{database::Database, tables};
 use reth_primitives::{
@@ -10,7 +10,7 @@ use reth_provider::{
     BlockReader, DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
     TransactionsProvider,
 };
-use std::{ops::RangeInclusive, sync::Arc};
+use std::{ops::RangeInclusive, sync::Arc, time::Instant};
 use tracing::{debug, instrument, trace};
 
 /// Result of [Pruner::run] execution
@@ -33,14 +33,11 @@ impl Default for BatchSizes {
 
 /// Pruning routine. Main pruning logic happens in [Pruner::run].
 pub struct Pruner<DB> {
+    metrics: Metrics,
     provider_factory: ProviderFactory<DB>,
     /// Minimum pruning interval measured in blocks. All prune parts are checked and, if needed,
     /// pruned, when the chain advances by the specified number of blocks.
     min_block_interval: u64,
-    /// Maximum prune depth. Used to determine the pruning target for parts that are needed during
-    /// the reorg, e.g. changesets.
-    #[allow(dead_code)]
-    max_prune_depth: u64,
     /// Last pruned block number. Used in conjunction with `min_block_interval` to determine
     /// when the pruning needs to be initiated.
     last_pruned_block_number: Option<BlockNumber>,
@@ -54,14 +51,13 @@ impl<DB: Database> Pruner<DB> {
         db: DB,
         chain_spec: Arc<ChainSpec>,
         min_block_interval: u64,
-        max_prune_depth: u64,
         modes: PruneModes,
         batch_sizes: BatchSizes,
     ) -> Self {
         Self {
+            metrics: Metrics::default(),
             provider_factory: ProviderFactory::new(db, chain_spec),
             min_block_interval,
-            max_prune_depth,
             last_pruned_block_number: None,
             modes,
             batch_sizes,
@@ -70,29 +66,48 @@ impl<DB: Database> Pruner<DB> {
 
     /// Run the pruner
     pub fn run(&mut self, tip_block_number: BlockNumber) -> PrunerResult {
+        let start = Instant::now();
+
         let provider = self.provider_factory.provider_rw()?;
 
         if let Some((to_block, prune_mode)) =
             self.modes.prune_target_block_receipts(tip_block_number)?
         {
+            let part_start = Instant::now();
             self.prune_receipts(&provider, to_block, prune_mode)?;
+            self.metrics
+                .get_prune_part_metrics(PrunePart::Receipts)
+                .duration_seconds
+                .record(part_start.elapsed())
         }
 
         if let Some((to_block, prune_mode)) =
             self.modes.prune_target_block_transaction_lookup(tip_block_number)?
         {
+            let part_start = Instant::now();
             self.prune_transaction_lookup(&provider, to_block, prune_mode)?;
+            self.metrics
+                .get_prune_part_metrics(PrunePart::TransactionLookup)
+                .duration_seconds
+                .record(part_start.elapsed())
         }
 
         if let Some((to_block, prune_mode)) =
             self.modes.prune_target_block_sender_recovery(tip_block_number)?
         {
+            let part_start = Instant::now();
             self.prune_transaction_senders(&provider, to_block, prune_mode)?;
+            self.metrics
+                .get_prune_part_metrics(PrunePart::SenderRecovery)
+                .duration_seconds
+                .record(part_start.elapsed())
         }
 
         provider.commit()?;
-
         self.last_pruned_block_number = Some(tip_block_number);
+
+        self.metrics.pruner.duration_seconds.record(start.elapsed());
+
         Ok(())
     }
 
@@ -323,7 +338,7 @@ mod tests {
     fn is_pruning_needed() {
         let db = create_test_rw_db();
         let pruner =
-            Pruner::new(db, MAINNET.clone(), 5, 0, PruneModes::default(), BatchSizes::default());
+            Pruner::new(db, MAINNET.clone(), 5, PruneModes::default(), BatchSizes::default());
 
         // No last pruned block number was set before
         let first_block_number = 1;
@@ -370,7 +385,6 @@ mod tests {
                 tx.inner_raw(),
                 MAINNET.clone(),
                 5,
-                0,
                 PruneModes { receipts: Some(prune_mode), ..Default::default() },
                 BatchSizes {
                     // Less than total amount of blocks to prune to test the batching logic
@@ -431,7 +445,6 @@ mod tests {
                 tx.inner_raw(),
                 MAINNET.clone(),
                 5,
-                0,
                 PruneModes { transaction_lookup: Some(prune_mode), ..Default::default() },
                 BatchSizes {
                     // Less than total amount of blocks to prune to test the batching logic
@@ -498,7 +511,6 @@ mod tests {
                 tx.inner_raw(),
                 MAINNET.clone(),
                 5,
-                0,
                 PruneModes { sender_recovery: Some(prune_mode), ..Default::default() },
                 BatchSizes {
                     // Less than total amount of blocks to prune to test the batching logic

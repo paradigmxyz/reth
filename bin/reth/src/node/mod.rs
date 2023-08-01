@@ -386,7 +386,6 @@ impl<Ext: RethCliExt> Command<Ext> {
                 db.clone(),
                 self.chain.clone(),
                 prune_config.block_interval,
-                tree_config.max_reorg_depth(),
                 prune_config.parts,
                 BatchSizes::default(),
             )
