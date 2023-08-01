@@ -60,6 +60,14 @@ pub struct NetworkArgs {
     /// Network listening port. default: 30303
     #[arg(long = "port", value_name = "PORT")]
     pub port: Option<u16>,
+
+    /// Maximum number of outbound requests. default: 100
+    #[arg(long)]
+    pub max_outbound_peers: Option<usize>,
+
+    /// Maximum number of inbound requests. default: 30
+    #[arg(long)]
+    pub max_inbound_peers: Option<usize>,
 }
 
 impl NetworkArgs {
@@ -78,9 +86,19 @@ impl NetworkArgs {
         let chain_bootnodes = chain_spec.chain.bootnodes().unwrap_or_else(mainnet_nodes);
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
-        // Configure basic network stack.
+        // Configure peer connections
+        let mut peer_config = config.peers.clone();
+        if let Some(max_inbound_peers) = self.max_inbound_peers {
+            peer_config = peer_config.with_max_inbound(max_inbound_peers);
+        }
+        if let Some(max_inbound_peers) = self.max_outbound_peers {
+            peer_config = peer_config.with_max_outbound(max_inbound_peers);
+        }
+
+        // Configure basic network stack
         let mut network_config_builder = config
             .network_config(self.nat, self.persistent_peers_file(peers_file), secret_key)
+            .peer_config(peer_config)
             .boot_nodes(self.bootnodes.clone().unwrap_or(chain_bootnodes))
             .chain_spec(chain_spec);
 
@@ -91,11 +109,7 @@ impl NetworkArgs {
 
         self.discovery.apply_to_builder(network_config_builder)
     }
-}
 
-// === impl NetworkArgs ===
-
-impl NetworkArgs {
     /// If `no_persist_peers` is true then this returns the path to the persistent peers file path.
     pub fn persistent_peers_file(&self, peers_file: PathBuf) -> Option<PathBuf> {
         if self.no_persist_peers {
@@ -162,5 +176,24 @@ mod tests {
         let args =
             CommandParser::<NetworkArgs>::parse_from(["reth", "--nat", "extip:0.0.0.0"]).args;
         assert_eq!(args.nat, NatResolver::ExternalIp("0.0.0.0".parse().unwrap()));
+    }
+
+    #[test]
+    fn parse_peer_args() {
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--max-outbound-peers", "50"]).args;
+        assert_eq!(args.max_outbound_peers, Some(50));
+        assert_eq!(args.max_inbound_peers, None);
+
+        let args = CommandParser::<NetworkArgs>::parse_from([
+            "reth",
+            "--max-outbound-peers",
+            "75",
+            "--max-inbound-peers",
+            "15",
+        ])
+        .args;
+        assert_eq!(args.max_outbound_peers, Some(75));
+        assert_eq!(args.max_inbound_peers, Some(15));
     }
 }
