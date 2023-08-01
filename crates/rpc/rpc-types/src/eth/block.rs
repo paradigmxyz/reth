@@ -20,6 +20,7 @@ pub enum BlockTransactions {
     /// Special case for uncle response.
     Uncle,
 }
+
 impl BlockTransactions {
     /// Check if the enum variant is
     /// used for an uncle response.
