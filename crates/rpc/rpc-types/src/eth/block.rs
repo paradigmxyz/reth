@@ -240,10 +240,10 @@ pub struct Header {
     pub withdrawals_root: Option<H256>,
     /// Blob gas used
     #[serde(rename = "blobGasUsed", skip_serializing_if = "Option::is_none")]
-    pub blob_gas_used: Option<U256>,
+    pub blob_gas_used: Option<U64>,
     /// Excess blob gas
     #[serde(rename = "excessBlobGas", skip_serializing_if = "Option::is_none")]
-    pub excess_blob_gas: Option<U256>,
+    pub excess_blob_gas: Option<U64>,
 }
 
 // === impl Header ===
@@ -298,8 +298,8 @@ impl Header {
             mix_hash,
             nonce: Some(nonce.to_be_bytes().into()),
             base_fee_per_gas: base_fee_per_gas.map(U256::from),
-            blob_gas_used: blob_gas_used.map(U256::from),
-            excess_blob_gas: excess_blob_gas.map(U256::from),
+            blob_gas_used: blob_gas_used.map(U64::from),
+            excess_blob_gas: excess_blob_gas.map(U64::from),
         }
     }
 }
