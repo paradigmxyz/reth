@@ -7,8 +7,8 @@ use futures::FutureExt;
 use reth_eth_wire::{
     capability::RawCapabilityMessage, message::RequestPair, BlockBodies, BlockHeaders, EthMessage,
     GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts, NewBlock,
-    NewBlockHashes, NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts,
-    SharedTransactions, Transactions,
+    NewBlockHashes, NewPooledTransactionHashes, NodeData, PooledTransactions, RawReceipts,
+    Receipts, SharedTransactions, Transactions,
 };
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
 use reth_primitives::{
@@ -80,7 +80,7 @@ pub enum PeerRequest {
         request: GetBlockHeaders,
         response: oneshot::Sender<RequestResult<BlockHeaders>>,
     },
-    /// Request Block headers from the peer.
+    /// Request Block bodies from the peer.
     ///
     /// The response should be sent through the channel.
     GetBlockBodies {
@@ -102,6 +102,10 @@ pub enum PeerRequest {
     ///
     /// The response should be sent through the channel.
     GetReceipts { request: GetReceipts, response: oneshot::Sender<RequestResult<Receipts>> },
+    /// Request for raw receipts.
+    ///
+    /// The response should be sent through the channel.
+    GetRawReceipts { request: GetReceipts, response: oneshot::Sender<RequestResult<RawReceipts>> },
 }
 
 // === impl PeerRequest ===
@@ -120,6 +124,7 @@ impl PeerRequest {
             PeerRequest::GetPooledTransactions { response, .. } => response.send(Err(err)).ok(),
             PeerRequest::GetNodeData { response, .. } => response.send(Err(err)).ok(),
             PeerRequest::GetReceipts { response, .. } => response.send(Err(err)).ok(),
+            PeerRequest::GetRawReceipts { response, .. } => response.send(Err(err)).ok(),
         };
     }
 
@@ -144,6 +149,9 @@ impl PeerRequest {
             PeerRequest::GetReceipts { request, .. } => {
                 EthMessage::GetReceipts(RequestPair { request_id, message: request.clone() })
             }
+            PeerRequest::GetRawReceipts { request, .. } => {
+                EthMessage::GetReceipts(RequestPair { request_id, message: request.clone() })
+            }
         }
     }
 }
@@ -156,6 +164,7 @@ pub enum PeerResponse {
     PooledTransactions { response: oneshot::Receiver<RequestResult<PooledTransactions>> },
     NodeData { response: oneshot::Receiver<RequestResult<NodeData>> },
     Receipts { response: oneshot::Receiver<RequestResult<Receipts>> },
+    RawReceipts { response: oneshot::Receiver<RequestResult<RawReceipts>> },
 }
 
 // === impl PeerResponse ===
@@ -188,6 +197,9 @@ impl PeerResponse {
             PeerResponse::Receipts { response } => {
                 poll_request!(response, Receipts, cx)
             }
+            PeerResponse::RawReceipts { response } => {
+                poll_request!(response, RawReceipts, cx)
+            }
         };
         Poll::Ready(res)
     }
@@ -202,6 +214,7 @@ pub enum PeerResponseResult {
     PooledTransactions(RequestResult<Vec<TransactionSigned>>),
     NodeData(RequestResult<Vec<Bytes>>),
     Receipts(RequestResult<Vec<Vec<ReceiptWithBloom>>>),
+    RawReceipts(RequestResult<Vec<Bytes>>),
 }
 
 // === impl PeerResponseResult ===
@@ -236,6 +249,9 @@ impl PeerResponseResult {
             PeerResponseResult::Receipts(resp) => {
                 to_message!(resp, Receipts, id)
             }
+            PeerResponseResult::RawReceipts(resp) => {
+                to_message!(resp, RawReceipts, id)
+            }
         }
     }
 
@@ -247,6 +263,7 @@ impl PeerResponseResult {
             PeerResponseResult::PooledTransactions(res) => res.as_ref().err(),
             PeerResponseResult::NodeData(res) => res.as_ref().err(),
             PeerResponseResult::Receipts(res) => res.as_ref().err(),
+            PeerResponseResult::RawReceipts(res) => res.as_ref().err(),
         }
     }
 
@@ -259,6 +276,7 @@ impl PeerResponseResult {
             PeerResponseResult::PooledTransactions(res) => res.is_err(),
             PeerResponseResult::NodeData(res) => res.is_err(),
             PeerResponseResult::Receipts(res) => res.is_err(),
+            PeerResponseResult::RawReceipts(res) => res.is_err(),
         }
     }
 }

@@ -4,7 +4,7 @@ use super::{
     GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, Transactions,
 };
-use crate::{errors::EthStreamError, EthVersion, SharedTransactions};
+use crate::{errors::EthStreamError, EthVersion, RawReceipts, SharedTransactions};
 use reth_primitives::bytes::{Buf, BufMut};
 use reth_rlp::{length_of_length, Decodable, Encodable, Header};
 use std::{fmt::Debug, sync::Arc};
@@ -183,6 +183,7 @@ pub enum EthMessage {
     NodeData(RequestPair<NodeData>),
     GetReceipts(RequestPair<GetReceipts>),
     Receipts(RequestPair<Receipts>),
+    RawReceipts(RequestPair<RawReceipts>),
 }
 
 impl EthMessage {
@@ -205,6 +206,7 @@ impl EthMessage {
             EthMessage::NodeData(_) => EthMessageID::NodeData,
             EthMessage::GetReceipts(_) => EthMessageID::GetReceipts,
             EthMessage::Receipts(_) => EthMessageID::Receipts,
+            EthMessage::RawReceipts(_) => EthMessageID::Receipts,
         }
     }
 }
@@ -228,6 +230,7 @@ impl Encodable for EthMessage {
             EthMessage::NodeData(data) => data.encode(out),
             EthMessage::GetReceipts(request) => request.encode(out),
             EthMessage::Receipts(receipts) => receipts.encode(out),
+            EthMessage::RawReceipts(receipts) => receipts.encode(out),
         }
     }
     fn length(&self) -> usize {
@@ -248,6 +251,7 @@ impl Encodable for EthMessage {
             EthMessage::NodeData(data) => data.length(),
             EthMessage::GetReceipts(request) => request.length(),
             EthMessage::Receipts(receipts) => receipts.length(),
+            EthMessage::RawReceipts(receipts) => receipts.length(),
         }
     }
 }

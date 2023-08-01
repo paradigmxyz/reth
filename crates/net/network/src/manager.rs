@@ -417,6 +417,13 @@ where
                     response,
                 })
             }
+            PeerRequest::GetRawReceipts { request, response } => {
+                self.delegate_eth_request(IncomingEthRequest::GetRawReceipts {
+                    peer_id,
+                    request,
+                    response,
+                })
+            }
             PeerRequest::GetPooledTransactions { request, response } => {
                 self.notify_tx_manager(NetworkTransactionEvent::GetPooledTransactions {
                     peer_id,

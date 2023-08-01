@@ -4,14 +4,14 @@ use crate::{metrics::EthRequestHandlerMetrics, peers::PeersHandle};
 use futures::StreamExt;
 use reth_eth_wire::{
     BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, NodeData,
-    Receipts,
+    RawReceipts, Receipts,
 };
 use reth_interfaces::p2p::error::RequestResult;
 use reth_primitives::{
-    bytes::BytesMut, BlockBody, BlockHashOrNumber, Header, HeadersDirection, PeerId,
+    bytes::BytesMut, BlockBody, BlockHashOrNumber, Bytes, Header, HeadersDirection, PeerId,
 };
 use reth_provider::{BlockReader, HeaderProvider, ReceiptProvider};
-use reth_rlp::Encodable;
+use reth_rlp::{Decodable, Encodable};
 use std::{
     borrow::Borrow,
     future::Future,
@@ -200,6 +200,30 @@ where
         request: GetReceipts,
         response: oneshot::Sender<RequestResult<Receipts>>,
     ) {
+        let receipts = self.get_raw_receipts(request);
+        let mut b = Vec::new();
+        receipts.encode(&mut b);
+
+        let receipts = Receipts::decode(&mut b.as_ref()).expect("Valid receipts");
+        let _ = response.send(Ok(receipts));
+    }
+
+    fn on_raw_receipts_request(
+        &mut self,
+        _peer_id: PeerId,
+        request: GetReceipts,
+        response: oneshot::Sender<RequestResult<RawReceipts>>,
+    ) {
+        let receipts = RawReceipts(self.get_raw_receipts(request));
+
+        let mut b = BytesMut::new();
+        receipts.encode(&mut b);
+
+        Receipts::decode(&mut b.as_ref()).expect("Valid receipts");
+        let _ = response.send(Ok(receipts));
+    }
+
+    fn get_raw_receipts(&mut self, request: GetReceipts) -> Vec<Bytes> {
         let mut receipts = Vec::new();
         let mut total_len = 0;
 
@@ -216,22 +240,15 @@ where
                 block_receipts.encode(&mut buf);
 
                 total_len += buf.len();
+                receipts.push(buf.freeze().into());
 
-                if total_len > SOFT_RESPONSE_LIMIT {
+                if total_len > SOFT_RESPONSE_LIMIT || receipts.len() >= MAX_RECEIPTS_SERVE {
                     break
                 }
-
-                receipts.push(block_receipts);
-
-                if receipts.len() >= MAX_RECEIPTS_SERVE {
-                    break
-                }
-            } else {
-                break
             }
         }
 
-        let _ = response.send(Ok(Receipts(receipts)));
+        receipts
     }
 }
 
@@ -259,8 +276,9 @@ where
                         this.on_bodies_request(peer_id, request, response)
                     }
                     IncomingEthRequest::GetNodeData { .. } => {}
-                    IncomingEthRequest::GetReceipts { peer_id, request, response } => {
-                        this.on_receipts_request(peer_id, request, response)
+                    IncomingEthRequest::GetReceipts { .. } => {}
+                    IncomingEthRequest::GetRawReceipts { peer_id, request, response } => {
+                        this.on_raw_receipts_request(peer_id, request, response)
                     }
                 },
             }
@@ -319,5 +337,13 @@ pub enum IncomingEthRequest {
         peer_id: PeerId,
         request: GetReceipts,
         response: oneshot::Sender<RequestResult<Receipts>>,
+    },
+    /// Request Raw Receipts from the peer.
+    ///
+    /// The respose should be sent through the channel.
+    GetRawReceipts {
+        peer_id: PeerId,
+        request: GetReceipts,
+        response: oneshot::Sender<RequestResult<RawReceipts>>,
     },
 }

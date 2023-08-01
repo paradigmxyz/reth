@@ -225,10 +225,13 @@ impl ActiveSession {
                 on_response!(resp, GetNodeData)
             }
             EthMessage::GetReceipts(req) => {
-                on_request!(req, Receipts, GetReceipts)
+                on_request!(req, RawReceipts, GetRawReceipts)
             }
             EthMessage::Receipts(resp) => {
                 on_response!(resp, GetReceipts)
+            }
+            EthMessage::RawReceipts(resp) => {
+                on_response!(resp, GetRawReceipts)
             }
         }
     }

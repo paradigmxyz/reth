@@ -1,6 +1,6 @@
 //! Implements the `GetReceipts` and `Receipts` message types.
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{ReceiptWithBloom, H256};
+use reth_primitives::{Bytes, ReceiptWithBloom, H256};
 use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 
 #[cfg(feature = "serde")]
@@ -29,6 +29,14 @@ pub struct Receipts(
         )
     )]
     pub Vec<Vec<ReceiptWithBloom>>,
+);
+
+/// The response to [`GetReceipts`], containing the already encoded receipt bodies.
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct RawReceipts(
+    /// The requested receipts, each of which should correspond to a hash in the request.
+    pub Vec<Bytes>,
 );
 
 #[cfg(test)]
@@ -160,5 +168,9 @@ mod test {
                 ]),
             }
         );
+    }
+
+    fn decode_raw_receipts() {
+        todo!();
     }
 }
