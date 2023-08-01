@@ -154,8 +154,7 @@ mod tests {
             );
 
             // Check AccountHistory
-            let mut acc_indexing_stage =
-                IndexAccountHistoryStage { prune_modes, ..Default::default() };
+            let mut acc_indexing_stage = IndexAccountHistoryStage::default();
 
             if let Some(PruneMode::Full) = prune_modes.account_history {
                 // Full is not supported
@@ -168,8 +167,7 @@ mod tests {
             }
 
             // Check StorageHistory
-            let mut storage_indexing_stage =
-                IndexStorageHistoryStage { prune_modes, ..Default::default() };
+            let mut storage_indexing_stage = IndexStorageHistoryStage::default();
 
             if let Some(PruneMode::Full) = prune_modes.storage_history {
                 // Full is not supported
