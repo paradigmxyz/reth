@@ -315,7 +315,11 @@ impl<DB: Database> Pruner<DB> {
                     .iter(0)
                     .skip_while(|block| *block <= to_block as usize)
                     .collect::<Vec<_>>();
-                cursor.upsert(key.clone(), BlockNumberList::new_pre_sorted(blocks))?;
+                if blocks.is_empty() {
+                    cursor.delete_current()?;
+                } else {
+                    cursor.upsert(key.clone(), BlockNumberList::new_pre_sorted(blocks))?;
+                }
 
                 // Jump to the next address
                 cursor.seek_exact(ShardedKey::last(key.key))?;
