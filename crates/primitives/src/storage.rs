@@ -2,11 +2,14 @@ use super::{H256, U256};
 use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
 
-/// Account storage entry.
+/// Account storage entry as it is saved inside
+/// [`StorageChangeSet`][crate::tables::StorageChangeSet].
+///
+/// [`key`] is the subkey.
 #[derive_arbitrary(compact)]
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 pub struct StorageEntry {
-    /// Storage key.
+    /// Storage key. Acts as `DupSort::SubKey`.
     pub key: H256,
     /// Value on storage key.
     pub value: U256,
