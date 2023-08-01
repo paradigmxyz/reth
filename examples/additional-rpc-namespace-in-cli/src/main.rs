@@ -15,8 +15,8 @@ use clap::Parser;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth::{
     cli::{
-        ext::{RethCliExt, RethRpcConfig, RethRpcServerArgsExt},
         Cli,
+        ext::{RethCliExt, RethRpcServerArgsExt},
     },
     network::{NetworkInfo, Peers},
     providers::{
@@ -26,6 +26,7 @@ use reth::{
     rpc::builder::{RethModuleRegistry, TransportRpcModules},
     tasks::TaskSpawner,
 };
+use reth::cli::config::RethRpcConfig;
 use reth_transaction_pool::TransactionPool;
 
 fn main() {

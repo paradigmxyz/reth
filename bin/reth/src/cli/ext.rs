@@ -1,12 +1,13 @@
 //! Support for integrating customizations into the CLI.
 
+use crate::cli::config::RethRpcConfig;
 use clap::Args;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
     BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider,
     StateProviderFactory,
 };
-use reth_rpc_builder::{EthConfig, RethModuleRegistry, TransportRpcModules};
+use reth_rpc_builder::{RethModuleRegistry, TransportRpcModules};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::fmt;
@@ -24,20 +25,6 @@ impl RethCliExt for () {
 /// An [Args] extension that does nothing.
 #[derive(Debug, Clone, Copy, Default, Args)]
 pub struct NoopArgsExt;
-
-/// A trait that provides configured RPC server.
-///
-/// This provides all basic config values for the RPC server and is implemented by the
-/// [RpcServerArgs](crate::args::RpcServerArgs) type.
-pub trait RethRpcConfig {
-    /// Returns whether ipc is enabled.
-    fn is_ipc_enabled(&self) -> bool;
-
-    /// The configured ethereum RPC settings.
-    fn eth_config(&self) -> EthConfig;
-
-    // TODO extract more functions from RpcServerArgs
-}
 
 /// A trait that allows further customization of the RPC server via CLI.
 pub trait RethRpcServerArgsExt: fmt::Debug + clap::Args {

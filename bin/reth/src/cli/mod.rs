@@ -3,7 +3,7 @@ use crate::{
     args::utils::genesis_value_parser,
     chain,
     cli::ext::RethCliExt,
-    config, db, debug_cmd,
+    db, debug_cmd,
     dirs::{LogsDir, PlatformPath},
     node, p2p,
     runner::CliRunner,
@@ -19,6 +19,7 @@ use reth_tracing::{
 };
 use std::sync::Arc;
 
+pub mod config;
 pub mod ext;
 
 /// The main reth cli interface.
@@ -127,7 +128,7 @@ pub enum Commands<Ext: RethCliExt = ()> {
     TestVectors(test_vectors::Command),
     /// Write config to stdout
     #[command(name = "config")]
-    Config(config::Command),
+    Config(crate::config::Command),
     /// Various debug routines
     #[command(name = "debug")]
     Debug(debug_cmd::Command),

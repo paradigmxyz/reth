@@ -8,7 +8,7 @@ use crate::{
         DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
         RpcServerArgs, TxPoolArgs,
     },
-    cli::ext::RethCliExt,
+    cli::{config::PayloadBuilderConfig, ext::RethCliExt},
     dirs::{DataDirPath, MaybePlatformPath},
     init::init_genesis,
     node::cl_events::ConsensusLayerHealthEvents,
@@ -284,7 +284,7 @@ impl<Ext: RethCliExt> Command<Ext> {
                 .interval(self.builder.interval)
                 .deadline(self.builder.deadline)
                 .max_payload_tasks(self.builder.max_payload_tasks)
-                .extradata(self.builder.extradata_bytes())
+                .extradata(self.builder.extradata_rlp_bytes())
                 .max_gas_limit(self.builder.max_gas_limit),
             Arc::clone(&self.chain),
         );

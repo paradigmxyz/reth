@@ -2,7 +2,10 @@
 
 use crate::{
     args::GasPriceOracleArgs,
-    cli::ext::{NoopArgsExt, RethRpcConfig, RethRpcServerArgsExt},
+    cli::{
+        config::RethRpcConfig,
+        ext::{NoopArgsExt, RethRpcServerArgsExt},
+    },
 };
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
