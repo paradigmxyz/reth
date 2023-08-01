@@ -21,6 +21,7 @@ const NON_ZERO_BYTE_COST: u64 = 16;
 /// uint64 _sequenceNumber, bytes32 _batcherHash, uint256 _l1FeeOverhead, uint256 _l1FeeScalar)
 ///
 /// For now, we only care about the fields necessary for L1 cost calculation.
+#[derive(Clone, Copy)]
 pub struct L1BlockInfo {
     l1_base_fee: U256,
     l1_fee_overhead: U256,
@@ -84,7 +85,7 @@ impl TryFrom<&Block> for L1BlockInfo {
 
 impl L1BlockInfo {
     /// Calculate the gas cost of a transaction based on L1 block data posted on L2
-    pub fn calculate_tx_l1_cost(&mut self, tx: &TransactionSigned) -> U256 {
+    pub fn calculate_tx_l1_cost(&self, tx: &TransactionSigned) -> U256 {
         let rollup_data_gas_cost = U256::from(tx.input().iter().fold(0, |acc, byte| {
             acc + if *byte == 0x00 { ZERO_BYTE_COST } else { NON_ZERO_BYTE_COST }
         }));
