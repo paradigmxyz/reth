@@ -764,7 +764,6 @@ impl<Ext: RethCliExt> Command<Ext> {
                 .set(AccountHashingStage::new(
                     stage_config.account_hashing.clean_threshold,
                     stage_config.account_hashing.commit_threshold,
-                    config.prune.map(|prune| prune.parts).unwrap_or_default(),
                 ))
                 .set(StorageHashingStage::new(
                     stage_config.storage_hashing.clean_threshold,

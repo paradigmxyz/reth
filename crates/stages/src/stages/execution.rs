@@ -59,10 +59,11 @@ pub struct ExecutionStage<EF: ExecutorFactory> {
     executor_factory: EF,
     /// The commit thresholds of the execution stage.
     thresholds: ExecutionStageThresholds,
-    /// The threshold (in number of blocks) for switching from incremental trie building
-    /// of changes to whole rebuild. This is required to figure out if can prune or not changesets
-    /// on subsequent pipeline runs.
-    merkle_clean_threshold: u64,
+    /// The highest threshold (in number of blocks) for switching between incremental
+    /// and full calculations across [`super::MerkleStage`], [`super::AccountHashingStage`] and
+    /// [`super::StorageHashingStage`]. This is required to figure out if can prune or not
+    /// changesets on subsequent pipeline runs.
+    external_clean_threshold: u64,
     /// Pruning configuration.
     prune_modes: PruneModes,
 }
@@ -72,10 +73,16 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     pub fn new(
         executor_factory: EF,
         thresholds: ExecutionStageThresholds,
-        merkle_clean_threshold: u64,
+        external_clean_threshold: u64,
         prune_modes: PruneModes,
     ) -> Self {
-        Self { metrics_tx: None, merkle_clean_threshold, executor_factory, thresholds, prune_modes }
+        Self {
+            metrics_tx: None,
+            external_clean_threshold,
+            executor_factory,
+            thresholds,
+            prune_modes,
+        }
     }
 
     /// Create an execution stage with the provided  executor factory.
@@ -108,6 +115,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         let start_block = input.next_block();
         let max_block = input.target();
+        let prune_modes = self.adjust_prune_modes(provider, start_block, max_block)?;
 
         // Build executor
         let mut executor =
@@ -120,7 +128,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // Execute block range
         let mut state = PostState::default();
-        state.add_prune_modes(self.prune_modes);
+        state.add_prune_modes(prune_modes);
 
         for block_number in start_block..=max_block {
             let td = provider
@@ -172,6 +180,33 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 .with_execution_stage_checkpoint(stage_checkpoint),
             done,
         })
+    }
+
+    /// Adjusts the prune modes related to changesets.
+    ///
+    /// This function verifies whether the MerkleStage or Hashing stages will run from scratch.
+    /// If at least one stage isn't starting anew, it implies that pruning of changesets cannot
+    /// occur. This is determined by checking the highest clean threshold
+    /// (`self.external_clean_threshold`) across the stages.
+    ///
+    /// Given that `start_block` changes with each checkpoint, it's necessary to inspect
+    /// [`tables::AccountsTrie`] and [`tables::HashedAccount`] to ensure that the stages haven't
+    /// been previously executed.
+    fn adjust_prune_modes<DB: Database>(
+        &mut self,
+        provider: &DatabaseProviderRW<'_, &DB>,
+        start_block: u64,
+        max_block: u64,
+    ) -> Result<PruneModes, StageError> {
+        let mut prune_modes = self.prune_modes;
+        if !(max_block - start_block > self.external_clean_threshold ||
+            (provider.tx_ref().cursor_read::<tables::AccountsTrie>()?.first()?.is_none() &&
+                provider.tx_ref().cursor_read::<tables::HashedAccount>()?.first()?.is_none()))
+        {
+            prune_modes.account_history = None;
+            prune_modes.storage_history = None;
+        }
+        Ok(prune_modes)
     }
 }
 

@@ -142,7 +142,11 @@ impl Command {
                 .set(ExecutionStage::new(
                     factory,
                     ExecutionStageThresholds { max_blocks: None, max_changes: None },
-                    stage_conf.merkle.clean_threshold,
+                    stage_conf
+                        .merkle
+                        .clean_threshold
+                        .min(stage_conf.account_hashing.clean_threshold)
+                        .min(stage_conf.storage_hashing.clean_threshold),
                     config.prune.map(|prune| prune.parts).unwrap_or_default(),
                 )),
             )

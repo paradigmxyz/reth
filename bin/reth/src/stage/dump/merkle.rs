@@ -87,14 +87,10 @@ async fn unwind_and_copy<DB: Database>(
 
     // Bring hashes to TO
 
-    AccountHashingStage {
-        clean_threshold: u64::MAX,
-        commit_threshold: u64::MAX,
-        prune_modes: PruneModes::none(),
-    }
-    .execute(&provider, execute_input)
-    .await
-    .unwrap();
+    AccountHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX }
+        .execute(&provider, execute_input)
+        .await
+        .unwrap();
     StorageHashingStage {
         clean_threshold: u64::MAX,
         commit_threshold: u64::MAX,

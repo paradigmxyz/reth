@@ -185,7 +185,12 @@ impl ImportCommand {
                         max_blocks: config.stages.execution.max_blocks,
                         max_changes: config.stages.execution.max_changes,
                     },
-                    config.stages.merkle.clean_threshold,
+                    config
+                        .stages
+                        .merkle
+                        .clean_threshold
+                        .min(config.stages.account_hashing.clean_threshold)
+                        .min(config.stages.storage_hashing.clean_threshold),
                     config.prune.map(|prune| prune.parts).unwrap_or_default(),
                 )),
             )
