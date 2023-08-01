@@ -16,6 +16,6 @@ pub struct RollupArgs {
     /// to save resources and not leak txs from the tx-pool,
     /// this flag enables computing of the pending block
     /// from the tx-pool instead.
-    #[arg(long = "rollup.compute-pending-block"))]
+    #[arg(long = "rollup.compute-pending-block")]
     pub compute_pending_block: bool,
 }
