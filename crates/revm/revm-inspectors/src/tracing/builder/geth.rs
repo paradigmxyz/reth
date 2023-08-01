@@ -172,7 +172,7 @@ impl GethTraceBuilder {
         let account_diffs: Vec<_> =
             state.into_iter().map(|(addr, acc)| (*addr, &acc.info)).collect();
 
-        if prestate_config.is_diff_mode() {
+        if !prestate_config.is_diff_mode() {
             let mut prestate = PreStateMode::default();
             for (addr, _) in account_diffs {
                 let db_acc = db.basic(addr)?.unwrap_or_default();

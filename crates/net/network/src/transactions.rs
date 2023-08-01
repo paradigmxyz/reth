@@ -267,12 +267,17 @@ where
                     // send hashes of transactions
                     self.network.send_transactions_hashes(*peer_id, new_pooled_hashes);
                 } else {
-                    // send full transactions
-                    self.network.send_transactions(*peer_id, full_transactions.build());
+                    let new_full_transactions = full_transactions.build();
 
-                    for hash in new_pooled_hashes.into_iter_hashes() {
-                        propagated.0.entry(hash).or_default().push(PropagateKind::Full(*peer_id));
+                    for tx in new_full_transactions.iter() {
+                        propagated
+                            .0
+                            .entry(tx.hash())
+                            .or_default()
+                            .push(PropagateKind::Full(*peer_id));
                     }
+                    // send full transactions
+                    self.network.send_transactions(*peer_id, new_full_transactions);
                 }
             }
         }
