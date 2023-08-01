@@ -87,9 +87,11 @@ impl NetworkArgs {
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
         // Configure peer connections
-        let mut peer_config = config.peers.clone();
-        peer_config = peer_config.with_max_inbound_opt(self.max_inbound_peers);
-        peer_config = peer_config.with_max_outbound_opt(self.max_outbound_peers);
+        let mut peer_config = config
+            .peers
+            .clone()
+            .with_max_inbound_opt(self.max_inbound_peers)
+            .with_max_outbound_opt(self.max_outbound_peers);
 
         // Configure basic network stack
         let mut network_config_builder = config
