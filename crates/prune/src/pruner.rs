@@ -300,7 +300,7 @@ impl<DB: Database> Pruner<DB> {
         let total = range.clone().count();
 
         let mut processed = 0;
-        provider.prune_table_in_batches::<tables::TxSenders, _>(
+        provider.prune_table_with_range_in_batches::<tables::TxSenders>(
             range,
             self.batch_sizes.transaction_senders,
             |entries| {
