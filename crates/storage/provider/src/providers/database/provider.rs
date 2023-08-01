@@ -640,7 +640,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         &self,
         keys: impl IntoIterator<Item = K>,
         batch_size: usize,
-        mut batch_callback: impl FnMut(usize),
+        batch_callback: impl Fn(usize),
     ) -> std::result::Result<usize, DatabaseError>
     where
         T: Table<Key = K>,
@@ -650,9 +650,8 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         let mut deleted = 0;
 
         for key in keys {
-            if cursor.seek_exact(key)?.is_some() {
-                cursor.delete_current()?;
-            }
+            cursor.seek_exact(key)?;
+            cursor.delete_current()?;
             deleted += 1;
 
             if deleted % batch_size == 0 {

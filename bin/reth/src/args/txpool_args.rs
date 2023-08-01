@@ -2,7 +2,7 @@
 
 use clap::Args;
 use reth_transaction_pool::{
-    PoolConfig, SubPoolLimit, DEFAULT_PRICE_BUMP, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
+    PoolConfig, SubPoolLimit, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
     TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
 };
 
@@ -33,10 +33,6 @@ pub struct TxPoolArgs {
     /// Max number of executable transaction slots guaranteed per account
     #[arg(long = "txpool.max_account_slots", help_heading = "TxPool", default_value_t = TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER)]
     pub max_account_slots: usize,
-
-    /// Price bump (in %) for the transaction pool underpriced check.
-    #[arg(long = "txpool.price_bump", help_heading = "TxPool", default_value_t = DEFAULT_PRICE_BUMP)]
-    pub price_bump: u128,
 }
 
 impl TxPoolArgs {
@@ -56,7 +52,6 @@ impl TxPoolArgs {
                 max_size: self.queued_max_size * 1024 * 1024,
             },
             max_account_slots: self.max_account_slots,
-            price_bump: self.price_bump,
         }
     }
 }

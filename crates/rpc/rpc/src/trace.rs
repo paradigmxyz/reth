@@ -1,7 +1,8 @@
 use crate::{
     eth::{
+        cache::EthStateCache,
         error::{EthApiError, EthResult},
-        revm_utils::{inspect, inspect_and_return_db, prepare_call_env, EvmOverrides},
+        revm_utils::{inspect, prepare_call_env, EvmOverrides},
         utils::recover_raw_transaction,
         EthTransactions,
     },
@@ -28,10 +29,11 @@ use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*},
     BlockError, BlockOverrides, CallRequest, Index, TransactionInfo,
 };
+use reth_tasks::TaskSpawner;
 use revm::{db::CacheDB, primitives::Env};
 use revm_primitives::{db::DatabaseCommit, ExecutionResult, ResultAndState};
-use std::{collections::HashSet, sync::Arc};
-use tokio::sync::{AcquireError, OwnedSemaphorePermit};
+use std::{collections::HashSet, future::Future, sync::Arc};
+use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit};
 
 /// `trace` API implementation.
 ///
@@ -49,8 +51,20 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
     }
 
     /// Create a new instance of the [TraceApi]
-    pub fn new(provider: Provider, eth_api: Eth, tracing_call_guard: TracingCallGuard) -> Self {
-        let inner = Arc::new(TraceApiInner { provider, eth_api, tracing_call_guard });
+    pub fn new(
+        provider: Provider,
+        eth_api: Eth,
+        eth_cache: EthStateCache,
+        task_spawner: Box<dyn TaskSpawner>,
+        tracing_call_guard: TracingCallGuard,
+    ) -> Self {
+        let inner = Arc::new(TraceApiInner {
+            provider,
+            eth_api,
+            eth_cache,
+            task_spawner,
+            tracing_call_guard,
+        });
         Self { inner }
     }
 
@@ -69,6 +83,23 @@ where
     Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
     Eth: EthTransactions + 'static,
 {
+    /// Executes the future on a new blocking task.
+    async fn on_blocking_task<C, F, R>(&self, c: C) -> EthResult<R>
+    where
+        C: FnOnce(Self) -> F,
+        F: Future<Output = EthResult<R>> + Send + 'static,
+        R: Send + 'static,
+    {
+        let (tx, rx) = oneshot::channel();
+        let this = self.clone();
+        let f = c(this);
+        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
+            let res = f.await;
+            let _ = tx.send(res);
+        }));
+        rx.await.map_err(|_| EthApiError::InternalTracingError)?
+    }
+
     /// Executes the given call and returns a number of possible traces for it.
     pub async fn trace_call(
         &self,
@@ -78,22 +109,42 @@ where
         state_overrides: Option<StateOverride>,
         block_overrides: Option<Box<BlockOverrides>>,
     ) -> EthResult<TraceResults> {
+        self.on_blocking_task(|this| async move {
+            this.try_trace_call(
+                call,
+                trace_types,
+                block_id,
+                EvmOverrides::new(state_overrides, block_overrides),
+            )
+            .await
+        })
+        .await
+    }
+
+    async fn try_trace_call(
+        &self,
+        call: CallRequest,
+        trace_types: HashSet<TraceType>,
+        block_id: Option<BlockId>,
+        overrides: EvmOverrides,
+    ) -> EthResult<TraceResults> {
         let at = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
         let config = tracing_config(&trace_types);
-        let overrides = EvmOverrides::new(state_overrides, block_overrides);
         let mut inspector = TracingInspector::new(config);
-        self.inner
+
+        let (res, _, db) = self
+            .inner
             .eth_api
-            .spawn_with_call_at(call, at, overrides, move |db, env| {
-                let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
-                let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
-                    res,
-                    &trace_types,
-                    &db,
-                )?;
-                Ok(trace_res)
-            })
-            .await
+            .inspect_call_at_and_return_state(call, at, overrides, &mut inspector)
+            .await?;
+
+        let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
+            res,
+            &trace_types,
+            &db,
+        )?;
+
+        Ok(trace_res)
     }
 
     /// Traces a call to `eth_sendRawTransaction` without making the call, returning the traces.
@@ -115,16 +166,16 @@ where
 
         let config = tracing_config(&trace_types);
 
-        self.inner
-            .eth_api
-            .spawn_trace_at_with_state(env, config, at, move |inspector, res, db| {
+        self.on_blocking_task(|this| async move {
+            this.inner.eth_api.trace_at_with_state(env, config, at, |inspector, res, db| {
                 Ok(inspector.into_parity_builder().into_trace_results_with_state(
                     res,
                     &trace_types,
                     &db,
                 )?)
             })
-            .await
+        })
+        .await
     }
 
     /// Performs multiple call traces on top of the same block. i.e. transaction n will be executed
@@ -139,11 +190,10 @@ where
         let at = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending));
         let (cfg, block_env, at) = self.inner.eth_api.evm_env_at(at).await?;
 
-        let gas_limit = self.inner.eth_api.call_gas_limit();
-        // execute all transactions on top of each other and record the traces
-        self.inner
-            .eth_api
-            .spawn_with_state_at_block(at, move |state| {
+        self.on_blocking_task(|this| async move {
+            let gas_limit = this.inner.eth_api.call_gas_limit();
+            // execute all transactions on top of each other and record the traces
+            this.inner.eth_api.with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(calls.len());
                 let mut db = SubState::new(State::new(state));
 
@@ -189,7 +239,8 @@ where
 
                 Ok(results)
             })
-            .await
+        })
+        .await
     }
 
     /// Replays a transaction, returning the traces.
@@ -199,19 +250,22 @@ where
         trace_types: HashSet<TraceType>,
     ) -> EthResult<TraceResults> {
         let config = tracing_config(&trace_types);
-        self.inner
-            .eth_api
-            .spawn_trace_transaction_in_block(hash, config, move |_, inspector, res, db| {
-                let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
-                    res,
-                    &trace_types,
-                    &db,
-                )?;
-                Ok(trace_res)
-            })
-            .await
-            .transpose()
-            .ok_or_else(|| EthApiError::TransactionNotFound)?
+        self.on_blocking_task(|this| async move {
+            this.inner
+                .eth_api
+                .trace_transaction_in_block(hash, config, |_, inspector, res, db| {
+                    let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
+                        res,
+                        &trace_types,
+                        &db,
+                    )?;
+                    Ok(trace_res)
+                })
+                .await
+                .transpose()
+                .ok_or_else(|| EthApiError::TransactionNotFound)?
+        })
+        .await
     }
 
     /// Returns transaction trace objects at the given index
@@ -254,18 +308,22 @@ where
         &self,
         hash: H256,
     ) -> EthResult<Option<Vec<LocalizedTransactionTrace>>> {
-        self.inner
-            .eth_api
-            .spawn_trace_transaction_in_block(
-                hash,
-                TracingInspectorConfig::default_parity(),
-                move |tx_info, inspector, _, _| {
-                    let traces =
-                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
-                    Ok(traces)
-                },
-            )
-            .await
+        self.on_blocking_task(|this| async move {
+            this.inner
+                .eth_api
+                .trace_transaction_in_block(
+                    hash,
+                    TracingInspectorConfig::default_parity(),
+                    |tx_info, inspector, _, _| {
+                        let traces = inspector
+                            .into_parity_builder()
+                            .into_localized_transaction_traces(tx_info);
+                        Ok(traces)
+                    },
+                )
+                .await
+        })
+        .await
     }
 
     /// Executes all transactions of a block and returns a list of callback results.
@@ -313,46 +371,48 @@ where
         let block_hash = block.hash;
         let transactions = block.body;
 
-        // replay all transactions of the block
-        self.inner
-            .eth_api
-            .spawn_with_state_at_block(state_at.into(), move |state| {
-                let mut results = Vec::with_capacity(transactions.len());
-                let mut db = SubState::new(State::new(state));
+        self.on_blocking_task(|this| async move {
+            // replay all transactions of the block
+            this.inner
+                .eth_api
+                .with_state_at_block(state_at.into(), move |state| {
+                    let mut results = Vec::with_capacity(transactions.len());
+                    let mut db = SubState::new(State::new(state));
 
-                let mut transactions = transactions.into_iter().enumerate().peekable();
+                    let mut transactions = transactions.into_iter().enumerate().peekable();
 
-                while let Some((idx, tx)) = transactions.next() {
-                    let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
-                    let tx_info = TransactionInfo {
-                        hash: Some(tx.hash()),
-                        index: Some(idx as u64),
-                        block_hash: Some(block_hash),
-                        block_number: Some(block_env.number.try_into().unwrap_or(u64::MAX)),
-                        base_fee: Some(block_env.basefee.try_into().unwrap_or(u64::MAX)),
-                    };
+                    while let Some((idx, tx)) = transactions.next() {
+                        let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
+                        let tx_info = TransactionInfo {
+                            hash: Some(tx.hash()),
+                            index: Some(idx as u64),
+                            block_hash: Some(block_hash),
+                            block_number: Some(block_env.number.try_into().unwrap_or(u64::MAX)),
+                            base_fee: Some(block_env.basefee.try_into().unwrap_or(u64::MAX)),
+                        };
 
-                    let tx = tx_env_with_recovered(&tx);
-                    let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                        let tx = tx_env_with_recovered(&tx);
+                        let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
 
-                    let mut inspector = TracingInspector::new(config);
-                    let (res, _) = inspect(&mut db, env, &mut inspector)?;
-                    let ResultAndState { result, state } = res;
-                    results.push(f(tx_info, inspector, result, &state, &db)?);
+                        let mut inspector = TracingInspector::new(config);
+                        let (res, _) = inspect(&mut db, env, &mut inspector)?;
+                        let ResultAndState { result, state } = res;
+                        results.push(f(tx_info, inspector, result, &state, &db)?);
 
-                    // need to apply the state changes of this transaction before executing the
-                    // next transaction
-                    if transactions.peek().is_some() {
-                        // need to apply the state changes of this transaction before executing
-                        // the next transaction
-                        db.commit(state)
+                        // need to apply the state changes of this transaction before executing the
+                        // next transaction
+                        if transactions.peek().is_some() {
+                            // need to apply the state changes of this transaction before executing
+                            // the next transaction
+                            db.commit(state)
+                        }
                     }
-                }
 
-                Ok(results)
-            })
-            .await
-            .map(Some)
+                    Ok(results)
+                })
+                .map(Some)
+        })
+        .await
     }
 
     /// Returns traces created at given block.
@@ -566,6 +626,11 @@ struct TraceApiInner<Provider, Eth> {
     provider: Provider,
     /// Access to commonly used code of the `eth` namespace
     eth_api: Eth,
+    /// The async cache frontend for eth-related data
+    #[allow(unused)] // we need this for trace_filter eventually
+    eth_cache: EthStateCache,
+    /// The type that can spawn tasks which would otherwise be blocking.
+    task_spawner: Box<dyn TaskSpawner>,
     // restrict the number of concurrent calls to `trace_*`
     tracing_call_guard: TracingCallGuard,
 }

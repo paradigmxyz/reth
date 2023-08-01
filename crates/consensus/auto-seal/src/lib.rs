@@ -269,8 +269,6 @@ impl StorageInner {
             nonce: 0,
             base_fee_per_gas,
             extra_data: Default::default(),
-            blob_gas_used: None,
-            excess_blob_gas: None,
         };
 
         header.transactions_root = if transactions.is_empty() {

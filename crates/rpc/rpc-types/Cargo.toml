@@ -19,17 +19,17 @@ reth-rlp.workspace = true
 thiserror.workspace = true
 
 # misc
-itertools.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-jsonrpsee-types = { workspace = true, optional = true }
-
-[features]
-default = ["jsonrpsee-types"]
+jsonrpsee-types = { version = "0.18" }
 
 [dev-dependencies]
+# reth
+reth-interfaces = { workspace = true, features = ["test-utils"] }
+
 # misc
 rand.workspace = true
+assert_matches = "1.5"
 similar-asserts = "1.4"
 
 [features]

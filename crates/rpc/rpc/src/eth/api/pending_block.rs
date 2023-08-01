@@ -145,8 +145,6 @@ impl PendingBlockEnv {
             difficulty: U256::ZERO,
             gas_used: cumulative_gas_used,
             extra_data: Default::default(),
-            blob_gas_used: None,
-            excess_blob_gas: None,
         };
 
         // seal the block

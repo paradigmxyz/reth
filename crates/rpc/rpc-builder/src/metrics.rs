@@ -1,7 +1,4 @@
-use jsonrpsee::{
-    helpers::MethodResponseResult,
-    server::logger::{HttpRequest, Logger, MethodKind, Params, TransportProtocol},
-};
+use jsonrpsee::server::logger::{HttpRequest, Logger, MethodKind, Params, TransportProtocol};
 use reth_metrics::{
     metrics::{self, Counter, Histogram},
     Metrics,
@@ -61,13 +58,13 @@ impl Logger for RpcServerMetrics {
     fn on_result(
         &self,
         _method_name: &str,
-        success: MethodResponseResult,
+        success: bool,
         started_at: Self::Instant,
         _transport: TransportProtocol,
     ) {
         // capture call duration
         self.call_latency.record(started_at.elapsed().as_millis() as f64);
-        if success.is_error() {
+        if !success {
             self.failed_calls.increment(1);
         } else {
             self.successful_calls.increment(1);

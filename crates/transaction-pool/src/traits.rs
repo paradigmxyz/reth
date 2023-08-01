@@ -470,6 +470,12 @@ pub trait PoolTransaction:
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     fn cost(&self) -> U256;
 
+    /// Returns the gas cost for this transaction.
+    ///
+    /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit`.
+    /// For legacy transactions: `gas_price * gas_limit`.
+    fn gas_cost(&self) -> U256;
+
     /// Amount of gas that should be used in executing this transaction. This is paid up-front.
     fn gas_limit(&self) -> u64;
 
@@ -484,16 +490,6 @@ pub trait PoolTransaction:
     ///
     /// This will return `None` for non-EIP1559 transactions
     fn max_priority_fee_per_gas(&self) -> Option<u128>;
-
-    /// Returns the effective tip for this transaction.
-    ///
-    /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
-    /// For legacy transactions: `gas_price - base_fee`.
-    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128>;
-
-    /// Returns the max priority fee per gas if the transaction is an EIP-1559 transaction, and
-    /// otherwise returns the gas price.
-    fn priority_fee_or_price(&self) -> u128;
 
     /// Returns the transaction's [`TransactionKind`], which is the address of the recipient or
     /// [`TransactionKind::Create`] if the transaction is a contract creation.
@@ -529,27 +525,13 @@ pub struct PooledTransaction {
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     pub(crate) cost: U256,
+
+    /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit`.
+    /// For legacy transactions: `gas_price * gas_limit`.
+    pub(crate) gas_cost: U256,
 }
 
 impl PooledTransaction {
-    /// Create new instance of [Self].
-    pub fn new(transaction: TransactionSignedEcRecovered) -> Self {
-        let gas_cost = match &transaction.transaction {
-            Transaction::Legacy(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
-            Transaction::Eip2930(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
-            Transaction::Eip1559(t) => U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit),
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => {
-                // Gas price is always set to 0 for deposits in order to zero out ETH refunds,
-                // because they already pay for their gas on L1.
-                U256::ZERO
-            }
-        };
-        let cost = gas_cost + U256::from(transaction.value());
-
-        Self { transaction, cost }
-    }
-
     /// Return the reference to the underlying transaction.
     pub fn transaction(&self) -> &TransactionSignedEcRecovered {
         &self.transaction
@@ -578,6 +560,14 @@ impl PoolTransaction for PooledTransaction {
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     fn cost(&self) -> U256 {
         self.cost
+    }
+
+    /// Returns the gas cost for this transaction.
+    ///
+    /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
+    /// For legacy transactions: `gas_price * gas_limit + tx_value`.
+    fn gas_cost(&self) -> U256 {
+        self.gas_cost
     }
 
     /// Amount of gas that should be used in executing this transaction. This is paid up-front.
@@ -613,20 +603,6 @@ impl PoolTransaction for PooledTransaction {
         }
     }
 
-    /// Returns the effective tip for this transaction.
-    ///
-    /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
-    /// For legacy transactions: `gas_price - base_fee`.
-    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
-        self.transaction.effective_tip_per_gas(base_fee)
-    }
-
-    /// Returns the max priority fee per gas if the transaction is an EIP-1559 transaction, and
-    /// otherwise returns the gas price.
-    fn priority_fee_or_price(&self) -> u128 {
-        self.transaction.priority_fee_or_price()
-    }
-
     /// Returns the transaction's [`TransactionKind`], which is the address of the recipient or
     /// [`TransactionKind::Create`] if the transaction is a contract creation.
     fn kind(&self) -> &TransactionKind {
@@ -656,7 +632,20 @@ impl PoolTransaction for PooledTransaction {
 
 impl FromRecoveredTransaction for PooledTransaction {
     fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
-        PooledTransaction::new(tx)
+        let gas_cost = match &tx.transaction {
+            Transaction::Legacy(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
+            Transaction::Eip2930(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
+            Transaction::Eip1559(t) => U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit),
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(_) => {
+                // Gas price is always set to 0 for deposits in order to zero out ETH refunds,
+                // because they already pay for their gas on L1.
+                U256::ZERO
+            }
+        };
+        let cost = gas_cost + U256::from(tx.value());
+
+        PooledTransaction { transaction: tx, cost, gas_cost }
     }
 }
 
