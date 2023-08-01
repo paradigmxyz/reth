@@ -29,7 +29,7 @@ use reth_blockchain_tree::{
 };
 use reth_config::{config::PruneConfig, Config};
 use reth_db::{database::Database, init_db, DatabaseEnv};
-use reth_discv4::DEFAULT_DISCOVERY_PORT;
+use reth_discv4::{DEFAULT_DISCOVERY_PORT, SECONDARY_DISCOVERY_PORT};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -56,6 +56,7 @@ use reth_provider::{
 use reth_prune::BatchSizes;
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
+use reth_rpc_builder::constants;
 use reth_rpc_engine_api::EngineApi;
 use reth_stages::{
     prelude::*,
@@ -123,6 +124,19 @@ pub struct Command<Ext: RethCliExt = ()> {
     #[arg(long, value_name = "SOCKET", value_parser = parse_socket_address, help_heading = "Metrics")]
     metrics: Option<SocketAddr>,
 
+    /// Add a secondary node
+    ///
+    /// Configures the ports of the node to avoid conflicts with the defaults.
+    /// This is useful for running multiple nodes on the same machine.
+    ///
+    /// Changes to the following port numbers:
+    /// - DISCOVERY_PORT: 30304
+    /// - AUTH_PORT: 8552
+    /// - HTTP_RPC_PORT: 8544
+    /// - WS_RPC_PORT: 8547
+    #[arg(long)]
+    secondary: bool,
+
     #[clap(flatten)]
     network: NetworkArgs,
 
@@ -150,7 +164,7 @@ pub struct Command<Ext: RethCliExt = ()> {
 
 impl<Ext: RethCliExt> Command<Ext> {
     /// Execute `node` command
-    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
+    pub async fn execute(mut self, ctx: CliContext) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         // Raise the fd limit of the process.
@@ -441,6 +455,9 @@ impl<Ext: RethCliExt> Command<Ext> {
         let default_jwt_path = data_dir.jwt_path();
         let jwt_secret = self.rpc.jwt_secret(default_jwt_path)?;
 
+        // Check if --secondary flag is enabled and if so change rpc port numbers
+        self.change_rpc_ports_if_secondary();
+
         // Start RPC servers
         let (_rpc_server, _auth_server) = self
             .rpc
@@ -674,11 +691,19 @@ impl<Ext: RethCliExt> Command<Ext> {
             .set_head(head)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::UNSPECIFIED,
-                self.network.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
+                self.network.port.unwrap_or(if self.secondary {
+                    SECONDARY_DISCOVERY_PORT
+                } else {
+                    DEFAULT_DISCOVERY_PORT
+                }),
             )))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::UNSPECIFIED,
-                self.network.discovery.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
+                self.network.discovery.port.unwrap_or(if self.secondary {
+                    SECONDARY_DISCOVERY_PORT
+                } else {
+                    DEFAULT_DISCOVERY_PORT
+                }),
             )))
             .build(ProviderFactory::new(db, self.chain.clone()))
     }
@@ -785,6 +810,15 @@ impl<Ext: RethCliExt> Command<Ext> {
             .build(db, self.chain.clone());
 
         Ok(pipeline)
+    }
+
+    /// Change rpc port numbers if `--secondary` flag is enabled.
+    fn change_rpc_ports_if_secondary(&mut self) {
+        if self.secondary {
+            self.rpc.auth_port = constants::SECONDARY_AUTH_PORT;
+            self.rpc.http_port = constants::SECONDARY_HTTP_RPC_PORT;
+            self.rpc.ws_port = constants::SECONDARY_WS_RPC_PORT;
+        }
     }
 }
 
@@ -914,5 +948,23 @@ mod tests {
         assert!(cmd.network.discovery.disable_discovery);
 
         assert!(cmd.dev.dev);
+    }
+
+    #[test]
+    fn parse_secondary() {
+        let mut cmd = Command::<()>::parse_from(["reth", "--secondary"]);
+        cmd.change_rpc_ports_if_secondary();
+        cmd.network.port = if cmd.secondary {
+            Some(SECONDARY_DISCOVERY_PORT)
+        } else {
+            Some(DEFAULT_DISCOVERY_PORT)
+        };
+
+        // check rpc port numbers
+        assert_eq!(cmd.rpc.auth_port, constants::SECONDARY_AUTH_PORT);
+        assert_eq!(cmd.rpc.http_port, constants::SECONDARY_HTTP_RPC_PORT);
+        assert_eq!(cmd.rpc.ws_port, constants::SECONDARY_WS_RPC_PORT);
+        // check network listening port number
+        assert_eq!(cmd.network.port.unwrap(), SECONDARY_DISCOVERY_PORT);
     }
 }

@@ -31,6 +31,19 @@ pub struct Cli<Ext: RethCliExt = ()> {
     #[clap(subcommand)]
     command: Commands<Ext>,
 
+    /// Add a secondary node
+    ///
+    /// Configures the ports of the node to avoid conflicts with the defaults.
+    /// This is useful for running multiple nodes on the same machine.
+    ///
+    /// Changes to the following port numbers:
+    /// - DISCOVERY_PORT: 30304
+    /// - AUTH_PORT: 8552
+    /// - HTTP_RPC_PORT: 8544
+    /// - WS_RPC_PORT: 8547
+    #[arg(long, global = true)]
+    secondary: bool,
+
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.

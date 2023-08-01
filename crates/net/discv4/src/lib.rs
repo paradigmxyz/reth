@@ -92,6 +92,11 @@ pub use reth_net_nat::{external_ip, NatResolver};
 /// Note: the default TCP port is the same.
 pub const DEFAULT_DISCOVERY_PORT: u16 = 30303;
 
+/// The secondary port for discv4 via UDP
+///
+/// Note: the secondary TCP port is the same.
+pub const SECONDARY_DISCOVERY_PORT: u16 = 30304;
+
 /// The maximum size of any packet is 1280 bytes.
 const MAX_PACKET_SIZE: usize = 1280;
 
