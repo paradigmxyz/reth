@@ -786,9 +786,9 @@ where
         gas_limit: block_gas_limit,
         difficulty: U256::ZERO,
         gas_used: 0,
-        extra_data: extra_data.into(),
         blob_gas_used: None,
         excess_blob_gas: None,
+        extra_data: extra_data.into(),
     };
 
     let block = Block { header, body: vec![], ommers: vec![], withdrawals };
