@@ -22,7 +22,7 @@ crunchy = { version = "0.2.2", default-features = false, features = ["limit_256"
 ruint = { version = "1.9.0", features = ["primitive-types", "rlp"] }
 
 # Bloom
- fixed-hash = { version = "0.8", default-features = false, features = ["rustc-hex"] }
+fixed-hash = { version = "0.8", default-features = false, features = ["rustc-hex"] }
 
 # crypto
 secp256k1 = { workspace = true, default-features = false, features = [

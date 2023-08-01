@@ -13,7 +13,8 @@ use crate::{
         AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
     },
     traits::{BlockInfo, PoolSize},
-    PoolConfig, PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
+    PoolConfig, PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, PRICE_BUMP,
+    U256,
 };
 use fnv::FnvHashMap;
 use reth_primitives::{
@@ -148,8 +149,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             }
             Ordering::Greater => {
                 // increased base fee: recheck pending pool and remove all that are no longer valid
-                let removed = self.pending_pool.update_base_fee(pending_basefee);
-                for tx in removed {
+                for tx in self.pending_pool.enforce_basefee(pending_basefee) {
                     let to = {
                         let tx =
                             self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
@@ -162,8 +162,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             }
             Ordering::Less => {
                 // decreased base fee: recheck basefee pool and promote all that are now valid
-                let removed = self.basefee_pool.enforce_basefee(pending_basefee);
-                for tx in removed {
+                for tx in self.basefee_pool.enforce_basefee(pending_basefee) {
                     let to = {
                         let tx =
                             self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
@@ -184,7 +183,6 @@ impl<T: TransactionOrdering> TxPool<T> {
         let BlockInfo { last_seen_block_hash, last_seen_block_number, pending_basefee } = info;
         self.all_transactions.last_seen_block_hash = last_seen_block_hash;
         self.all_transactions.last_seen_block_number = last_seen_block_number;
-        self.all_transactions.pending_basefee = pending_basefee;
         self.update_basefee(pending_basefee)
     }
 
@@ -213,10 +211,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 // base fee decreased, we need to move transactions from the basefee pool to the
                 // pending pool
                 let unlocked = self.basefee_pool.satisfy_base_fee_transactions(basefee);
-                Box::new(
-                    self.pending_pool
-                        .best_with_unlocked(unlocked, self.all_transactions.pending_basefee),
-                )
+                Box::new(self.pending_pool.best_with_unlocked(unlocked))
             }
         }
     }
@@ -550,7 +545,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 self.queued_pool.add_transaction(tx);
             }
             SubPool::Pending => {
-                self.pending_pool.add_transaction(tx, self.all_transactions.pending_basefee);
+                self.pending_pool.add_transaction(tx);
             }
             SubPool::BaseFee => {
                 self.basefee_pool.add_transaction(tx);
@@ -1110,7 +1105,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 if Self::is_underpriced(
                     transaction.as_ref(),
                     entry.get().transaction.as_ref(),
-                    PoolConfig::default().price_bump,
+                    PRICE_BUMP,
                 ) {
                     return Err(InsertErr::Underpriced {
                         transaction: pool_tx.transaction,

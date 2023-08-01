@@ -1,7 +1,5 @@
 //! Sharded key
 
-use std::hash::Hash;
-
 use crate::{
     table::{Decode, Encode},
     DatabaseError,
@@ -74,15 +72,5 @@ where
         let key = T::decode(&value[..tx_num_index])?;
 
         Ok(ShardedKey::new(key, highest_tx_number))
-    }
-}
-
-impl<T> Hash for ShardedKey<T>
-where
-    T: Hash,
-{
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.key.hash(state);
-        self.highest_block_number.hash(state);
     }
 }

@@ -25,12 +25,11 @@ tokio = { workspace = true, features = ["sync"] }
 # misc
 async-trait.workspace = true
 thiserror.workspace = true
-jsonrpsee-types.workspace = true
-jsonrpsee-core.workspace = true
+jsonrpsee-types = "0.18"
+jsonrpsee-core = "0.18"
 tracing.workspace = true
 
 [dev-dependencies]
-reth-rlp.workspace = true
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-payload-builder = { workspace = true, features = ["test-utils"] }

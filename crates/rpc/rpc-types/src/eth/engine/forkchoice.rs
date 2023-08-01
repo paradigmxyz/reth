@@ -50,7 +50,6 @@ pub enum ForkchoiceUpdateError {
     UnknownFinalBlock,
 }
 
-#[cfg(feature = "jsonrpsee-types")]
 impl From<ForkchoiceUpdateError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(value: ForkchoiceUpdateError) -> Self {
         match value {

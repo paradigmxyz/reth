@@ -4,9 +4,6 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum PrunerError {
-    #[error(transparent)]
-    PrunePart(#[from] reth_primitives::PrunePartError),
-
     #[error("Inconsistent data: {0}")]
     InconsistentData(&'static str),
 
