@@ -49,7 +49,7 @@ impl<T: PoolTransaction> Clone for FullTransactionEvent<T> {
             }
             Self::Discarded(hash) => Self::Discarded(*hash),
             Self::Invalid(hash) => Self::Invalid(*hash),
-            Self::Propagated(propagated) => Self::Propagated(Arc::clone(&propagated)),
+            Self::Propagated(propagated) => Self::Propagated(Arc::clone(propagated)),
         }
     }
 }
