@@ -19,6 +19,10 @@ use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress};
 use std::fmt::Debug;
 use tracing::*;
 
+/// The default threshold (in number of blocks) for switching from incremental trie building
+/// of changes to whole rebuild.
+pub const MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD: u64 = 50_000;
+
 /// The merkle hashing stage uses input from
 /// [`AccountHashingStage`][crate::stages::AccountHashingStage] and
 /// [`StorageHashingStage`][crate::stages::AccountHashingStage] to calculate intermediate hashes
@@ -63,7 +67,10 @@ pub enum MerkleStage {
 impl MerkleStage {
     /// Stage default for the [MerkleStage::Execution].
     pub fn default_execution() -> Self {
-        Self::Execution { clean_threshold: 50_000, prune_modes: PruneModes::default() }
+        Self::Execution {
+            clean_threshold: MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+            prune_modes: PruneModes::default(),
+        }
     }
 
     /// Stage default for the [MerkleStage::Unwind].

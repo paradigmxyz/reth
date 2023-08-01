@@ -1,6 +1,6 @@
 use crate::{
-    ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageError, UnwindInput,
-    UnwindOutput,
+    stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD, ExecInput, ExecOutput, MetricEvent,
+    MetricEventsSender, Stage, StageError, UnwindInput, UnwindOutput,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -59,6 +59,10 @@ pub struct ExecutionStage<EF: ExecutorFactory> {
     executor_factory: EF,
     /// The commit thresholds of the execution stage.
     thresholds: ExecutionStageThresholds,
+    /// The threshold (in number of blocks) for switching from incremental trie building
+    /// of changes to whole rebuild. This is required to figure out if can prune or not changesets
+    /// on subsequent pipeline runs.
+    merkle_clean_threshold: u64,
     /// Pruning configuration.
     prune_modes: PruneModes,
 }
@@ -68,16 +72,22 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     pub fn new(
         executor_factory: EF,
         thresholds: ExecutionStageThresholds,
+        merkle_clean_threshold: u64,
         prune_modes: PruneModes,
     ) -> Self {
-        Self { metrics_tx: None, executor_factory, thresholds, prune_modes }
+        Self { metrics_tx: None, merkle_clean_threshold, executor_factory, thresholds, prune_modes }
     }
 
     /// Create an execution stage with the provided  executor factory.
     ///
     /// The commit threshold will be set to 10_000.
     pub fn new_with_factory(executor_factory: EF) -> Self {
-        Self::new(executor_factory, ExecutionStageThresholds::default(), PruneModes::default())
+        Self::new(
+            executor_factory,
+            ExecutionStageThresholds::default(),
+            MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+            PruneModes::default(),
+        )
     }
 
     /// Set the metric events sender.
@@ -438,6 +448,7 @@ mod tests {
         ExecutionStage::new(
             factory,
             ExecutionStageThresholds { max_blocks: Some(100), max_changes: None },
+            MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::none(),
         )
     }

@@ -7,7 +7,7 @@ use reth_provider::ProviderFactory;
 use reth_stages::{
     stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
-        StorageHashingStage,
+        StorageHashingStage, MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
     },
     Stage, UnwindInput,
 };
@@ -70,6 +70,7 @@ async fn unwind_and_copy<DB: Database>(
     let mut exec_stage = ExecutionStage::new(
         reth_revm::Factory::new(db_tool.chain.clone()),
         ExecutionStageThresholds { max_blocks: Some(u64::MAX), max_changes: None },
+        MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
         PruneModes::all(),
     );
 

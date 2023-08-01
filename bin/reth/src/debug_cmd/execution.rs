@@ -142,6 +142,7 @@ impl Command {
                 .set(ExecutionStage::new(
                     factory,
                     ExecutionStageThresholds { max_blocks: None, max_changes: None },
+                    stage_conf.merkle.clean_threshold,
                     config.prune.map(|prune| prune.parts).unwrap_or_default(),
                 )),
             )

@@ -756,6 +756,7 @@ impl<Ext: RethCliExt> Command<Ext> {
                             max_blocks: stage_config.execution.max_blocks,
                             max_changes: stage_config.execution.max_changes,
                         },
+                        stage_config.merkle.clean_threshold,
                         prune_config.map(|prune| prune.parts).unwrap_or_default(),
                     )
                     .with_metrics_tx(metrics_tx),

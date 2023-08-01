@@ -134,6 +134,7 @@ mod tests {
             let mut execution_stage = ExecutionStage::new(
                 Factory::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build())),
                 ExecutionStageThresholds { max_blocks: Some(100), max_changes: None },
+                MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
                 prune_modes,
             );
 
