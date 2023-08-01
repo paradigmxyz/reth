@@ -15,8 +15,9 @@ use clap::Parser;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth::{
     cli::{
+        config::RethRpcConfig,
+        ext::{RethCliExt, RethNodeCommandExt},
         Cli,
-        ext::{RethCliExt, RethRpcServerArgsExt},
     },
     network::{NetworkInfo, Peers},
     providers::{
@@ -26,7 +27,6 @@ use reth::{
     rpc::builder::{RethModuleRegistry, TransportRpcModules},
     tasks::TaskSpawner,
 };
-use reth::cli::config::RethRpcConfig;
 use reth_transaction_pool::TransactionPool;
 
 fn main() {
@@ -38,7 +38,7 @@ struct MyRethCliExt;
 
 impl RethCliExt for MyRethCliExt {
     /// This tells the reth CLI to install the `txpool` rpc namespace via `RethCliTxpoolExt`
-    type RpcExt = RethCliTxpoolExt;
+    type Node = RethCliTxpoolExt;
 }
 
 /// Our custom cli args extension that adds one flag to reth default CLI.
@@ -49,7 +49,7 @@ struct RethCliTxpoolExt {
     pub enable_ext: bool,
 }
 
-impl RethRpcServerArgsExt for RethCliTxpoolExt {
+impl RethNodeCommandExt for RethCliTxpoolExt {
     // This is the entrypoint for the CLI to extend the RPC server with custom rpc namespaces.
     fn extend_rpc_modules<Conf, Provider, Pool, Network, Tasks, Events>(
         &self,
