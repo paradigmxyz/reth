@@ -40,5 +40,45 @@ pub mod test_vectors;
 pub mod utils;
 pub mod version;
 
+/// Re-exported from `reth_provider`.
+pub mod providers {
+    pub use reth_provider::*;
+}
+
+/// Re-exported from `reth_tasks`.
+pub mod tasks {
+    pub use reth_tasks::*;
+}
+
+/// Re-exported from `reth_network`.
+pub mod network {
+    pub use reth_network::*;
+    pub use reth_network_api::{noop, reputation, NetworkInfo, PeerKind, Peers, PeersInfo};
+}
+
+/// Re-exported from `reth_transaction_pool`.
+pub mod transaction_pool {
+    pub use reth_transaction_pool::*;
+}
+
+/// Re-export of `reth_rpc_*` crates.
+pub mod rpc {
+
+    /// Re-exported from `reth_rpc_builder`.
+    pub mod builder {
+        pub use reth_rpc_builder::*;
+    }
+
+    /// Re-exported from `reth_rpc_types`.
+    pub mod types {
+        pub use reth_rpc_types::*;
+    }
+
+    /// Re-exported from `reth_rpc_api`.
+    pub mod api {
+        pub use reth_rpc_api::*;
+    }
+}
+
 #[cfg(all(feature = "jemalloc", unix))]
 use jemallocator as _;

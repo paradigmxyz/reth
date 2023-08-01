@@ -18,36 +18,40 @@ reth-revm = { path = "../../crates/revm" }
 reth-revm-inspectors = { path = "../../crates/revm/revm-inspectors" }
 reth-stages = { path = "../../crates/stages" }
 reth-interfaces = { workspace = true, features = ["test-utils", "clap"] }
-reth-transaction-pool = { workspace = true }
+reth-transaction-pool.workspace = true
 reth-beacon-consensus = { path = "../../crates/consensus/beacon" }
 reth-auto-seal-consensus = { path = "../../crates/consensus/auto-seal" }
+reth-consensus-common = { path = "../../crates/consensus/common" }
 reth-blockchain-tree = { path = "../../crates/blockchain-tree" }
 reth-rpc-engine-api = { path = "../../crates/rpc/rpc-engine-api" }
 reth-rpc-builder = { path = "../../crates/rpc/rpc-builder" }
 reth-rpc = { path = "../../crates/rpc/rpc" }
-reth-rlp = { workspace = true }
+reth-rpc-types = { path = "../../crates/rpc/rpc-types" }
+reth-rpc-api = { path = "../../crates/rpc/rpc-api" }
+reth-rlp.workspace = true
 reth-network = { path = "../../crates/net/network", features = ["serde"] }
-reth-network-api = { workspace = true }
+reth-network-api.workspace = true
 reth-downloaders = { path = "../../crates/net/downloaders", features = ["test-utils"] }
 reth-tracing = { path = "../../crates/tracing" }
-reth-tasks = { workspace = true }
+reth-tasks.workspace = true
 reth-net-nat = { path = "../../crates/net/nat" }
-reth-payload-builder = { workspace = true }
+reth-payload-builder.workspace = true
 reth-basic-payload-builder = { path = "../../crates/payload/basic" }
 reth-discv4 = { path = "../../crates/net/discv4" }
-reth-metrics = { workspace = true }
+reth-metrics.workspace = true
 reth-prune = { path = "../../crates/prune" }
+reth-trie = { path = "../../crates/trie" }
 
 # crypto
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
 # tracing
-tracing = { workspace = true }
+tracing.workspace = true
 
 # io
 fdlimit = "0.2.1"
-serde = { workspace = true }
-serde_json = { workspace = true }
+serde.workspace = true
+serde_json.workspace = true
 shellexpand = "3.0.0"
 dirs-next = "2.0.0"
 confy = "0.5"
@@ -69,8 +73,8 @@ human_bytes = "0.4.1"
 
 # async
 tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
-futures = { workspace = true }
-pin-project = { workspace = true }
+futures.workspace = true
+pin-project.workspace = true
 
 # http/rpc
 hyper = "0.14.25"
@@ -81,7 +85,7 @@ clap = { version = "4", features = ["derive"] }
 tempfile = { version = "3.3.0" }
 backon = "0.4"
 hex = "0.4"
-thiserror = { workspace = true }
+thiserror.workspace = true
 pretty_assertions = "1.3.0"
 humantime = "2.1.0"
 const-str = "0.5.6"

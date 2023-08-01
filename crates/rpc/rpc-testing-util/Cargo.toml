@@ -12,16 +12,16 @@ Reth RPC testing helpers
 
 [dependencies]
 # reth
-reth-primitives = { workspace = true }
-reth-rpc-types = { workspace = true }
+reth-primitives.workspace = true
+reth-rpc-types.workspace = true
 reth-rpc-api = { path = "../rpc-api", default-features = false, features = ["client"] }
 
 # async
-async-trait = { workspace = true }
-futures = { workspace = true }
+async-trait.workspace = true
+futures.workspace = true
 
 # misc
-jsonrpsee = { version = "0.18", features = ["client", "async-client"] }
+jsonrpsee = { workspace = true, features = ["client", "async-client"] }
 serde_json.workspace = true
 
 [dev-dependencies]

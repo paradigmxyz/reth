@@ -8,7 +8,7 @@ use reth_eth_wire::{
 };
 use reth_interfaces::p2p::error::RequestResult;
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, PeerId};
-use reth_provider::{BlockReader, HeaderProvider};
+use reth_provider::{BlockReader, HeaderProvider, ReceiptProvider};
 use std::{
     borrow::Borrow,
     future::Future,
@@ -21,6 +21,11 @@ use tokio_stream::wrappers::ReceiverStream;
 
 // Limits: <https://github.com/ethereum/go-ethereum/blob/b0d44338bbcefee044f1f635a84487cbbd8f0538/eth/protocols/eth/handler.go#L34-L56>
 
+/// Maximum number of receipts to serve.
+///
+/// Used to limit lookups.
+const MAX_RECEIPTS_SERVE: usize = 1024;
+
 /// Maximum number of block headers to serve.
 ///
 /// Used to limit lookups.
@@ -31,6 +36,9 @@ const MAX_HEADERS_SERVE: usize = 1024;
 /// Used to limit lookups. With 24KB block sizes nowadays, the practical limit will always be
 /// SOFT_RESPONSE_LIMIT.
 const MAX_BODIES_SERVE: usize = 1024;
+
+/// Estimated size in bytes of an RLP encoded receipt.
+const APPROX_RECEIPT_SIZE: usize = 24 * 1024;
 
 /// Estimated size in bytes of an RLP encoded body.
 // TODO: check 24kb blocksize assumption
@@ -70,7 +78,7 @@ impl<C> EthRequestHandler<C> {
 
 impl<C> EthRequestHandler<C>
 where
-    C: BlockReader + HeaderProvider,
+    C: BlockReader + HeaderProvider + ReceiptProvider,
 {
     /// Returns the list of requested headers
     fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
@@ -185,6 +193,44 @@ where
 
         let _ = response.send(Ok(BlockBodies(bodies)));
     }
+
+    fn on_receipts_request(
+        &mut self,
+        _peer_id: PeerId,
+        request: GetReceipts,
+        response: oneshot::Sender<RequestResult<Receipts>>,
+    ) {
+        let mut receipts = Vec::new();
+
+        let mut total_bytes = APPROX_RECEIPT_SIZE;
+
+        for hash in request.0 {
+            if let Some(receipts_by_block) =
+                self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
+            {
+                receipts.push(
+                    receipts_by_block
+                        .into_iter()
+                        .map(|receipt| receipt.with_bloom())
+                        .collect::<Vec<_>>(),
+                );
+
+                total_bytes += APPROX_RECEIPT_SIZE;
+
+                if total_bytes > SOFT_RESPONSE_LIMIT {
+                    break
+                }
+
+                if receipts.len() >= MAX_RECEIPTS_SERVE {
+                    break
+                }
+            } else {
+                break
+            }
+        }
+
+        let _ = response.send(Ok(Receipts(receipts)));
+    }
 }
 
 /// An endless future.
@@ -211,7 +257,9 @@ where
                         this.on_bodies_request(peer_id, request, response)
                     }
                     IncomingEthRequest::GetNodeData { .. } => {}
-                    IncomingEthRequest::GetReceipts { .. } => {}
+                    IncomingEthRequest::GetReceipts { peer_id, request, response } => {
+                        this.on_receipts_request(peer_id, request, response)
+                    }
                 },
             }
         }

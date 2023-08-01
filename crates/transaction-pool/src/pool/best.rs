@@ -1,7 +1,6 @@
 use crate::{
-    identifier::TransactionId,
-    pool::pending::{PendingTransaction, PendingTransactionRef},
-    PoolTransaction, TransactionOrdering, ValidPoolTransaction,
+    identifier::TransactionId, pool::pending::PendingTransaction, PoolTransaction,
+    TransactionOrdering, ValidPoolTransaction,
 };
 use reth_primitives::H256 as TxHash;
 use std::{
@@ -54,12 +53,12 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithBasefee<T> {
 pub(crate) struct BestTransactions<T: TransactionOrdering> {
     /// Contains a copy of _all_ transactions of the pending pool at the point in time this
     /// iterator was created.
-    pub(crate) all: BTreeMap<TransactionId, Arc<PendingTransaction<T>>>,
+    pub(crate) all: BTreeMap<TransactionId, PendingTransaction<T>>,
     /// Transactions that can be executed right away: these have the expected nonce.
     ///
     /// Once an `independent` transaction with the nonce `N` is returned, it unlocks `N+1`, which
     /// then can be moved from the `all` set to the `independent` set.
-    pub(crate) independent: BTreeSet<PendingTransactionRef<T>>,
+    pub(crate) independent: BTreeSet<PendingTransaction<T>>,
     /// There might be the case where a yielded transactions is invalid, this will track it.
     pub(crate) invalid: HashSet<TxHash>,
 }
@@ -74,7 +73,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     ///
     /// Note: for a transaction with nonce higher than the current on chain nonce this will always
     /// return an ancestor since all transaction in this pool are gapless.
-    pub(crate) fn ancestor(&self, id: &TransactionId) -> Option<&Arc<PendingTransaction<T>>> {
+    pub(crate) fn ancestor(&self, id: &TransactionId) -> Option<&PendingTransaction<T>> {
         self.all.get(&id.unchecked_ancestor()?)
     }
 }
@@ -106,7 +105,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
 
             // Insert transactions that just got unlocked.
             if let Some(unlocked) = self.all.get(&best.unlocks()) {
-                self.independent.insert(unlocked.transaction.clone());
+                self.independent.insert(unlocked.clone());
             }
 
             return Some(best.transaction)
@@ -133,7 +132,7 @@ mod tests {
         for nonce in 0..num_tx {
             let tx = tx.clone().rng_hash().with_nonce(nonce);
             let valid_tx = f.validated(tx);
-            pool.add_transaction(Arc::new(valid_tx));
+            pool.add_transaction(Arc::new(valid_tx), 0);
         }
 
         let mut best = pool.best();
@@ -159,7 +158,7 @@ mod tests {
         for nonce in 0..num_tx {
             let tx = tx.clone().rng_hash().with_nonce(nonce);
             let valid_tx = f.validated(tx);
-            pool.add_transaction(Arc::new(valid_tx));
+            pool.add_transaction(Arc::new(valid_tx), 0);
         }
 
         let mut best = pool.best();

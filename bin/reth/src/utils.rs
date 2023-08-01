@@ -1,6 +1,7 @@
 //! Common CLI utility functions.
 
 use eyre::Result;
+use reth_consensus_common::validation::validate_block_standalone;
 use reth_db::{
     cursor::DbCursorRO,
     database::Database,
@@ -8,10 +9,13 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::p2p::{
+    bodies::client::BodiesClient,
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
 };
-use reth_primitives::{fs, BlockHashOrNumber, ChainSpec, HeadersDirection, SealedHeader};
+use reth_primitives::{
+    fs, BlockHashOrNumber, ChainSpec, HeadersDirection, SealedBlock, SealedHeader,
+};
 use std::{
     env::VarError,
     path::{Path, PathBuf},
@@ -54,6 +58,35 @@ where
     }
 
     Ok(header)
+}
+
+/// Get a body from network based on header
+pub async fn get_single_body<Client>(
+    client: Client,
+    chain_spec: Arc<ChainSpec>,
+    header: SealedHeader,
+) -> Result<SealedBlock>
+where
+    Client: BodiesClient,
+{
+    let (peer_id, response) = client.get_block_body(header.hash).await?.split();
+
+    if response.is_none() {
+        client.report_bad_message(peer_id);
+        eyre::bail!("Invalid number of bodies received. Expected: 1. Received: 0")
+    }
+
+    let block = response.unwrap();
+    let block = SealedBlock {
+        header,
+        body: block.transactions,
+        ommers: block.ommers,
+        withdrawals: block.withdrawals,
+    };
+
+    validate_block_standalone(&block, &chain_spec)?;
+
+    Ok(block)
 }
 
 /// Wrapper over DB that implements many useful DB queries.

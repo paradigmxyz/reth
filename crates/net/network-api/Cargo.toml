@@ -10,16 +10,16 @@ description = "Network interfaces"
 
 [dependencies]
 # reth
-reth-primitives = { workspace = true }
+reth-primitives.workspace = true
 reth-eth-wire = { path = "../eth-wire" }
-reth-rpc-types = { workspace = true }
+reth-rpc-types.workspace = true
 
 # io
 serde = { workspace = true, features = ["derive"], optional = true }
 
 # misc
-async-trait = { workspace = true }
-thiserror = { workspace = true }
+async-trait.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 
 [features]

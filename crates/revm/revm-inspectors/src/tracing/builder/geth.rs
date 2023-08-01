@@ -4,8 +4,12 @@ use crate::tracing::{
     types::{CallTraceNode, CallTraceStepStackItem},
     TracingInspectorConfig,
 };
-use reth_primitives::{Address, Bytes, H256};
-use reth_rpc_types::trace::geth::*;
+use reth_primitives::{Address, Bytes, H256, U256};
+use reth_rpc_types::trace::geth::{
+    AccountState, CallConfig, CallFrame, DefaultFrame, DiffMode, GethDefaultTracingOptions,
+    PreStateConfig, PreStateFrame, PreStateMode, StructLog,
+};
+use revm::{db::DatabaseRef, primitives::ResultAndState};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 /// A type for creating geth style traces
@@ -145,6 +149,77 @@ impl GethTraceBuilder {
                 debug_assert!(call_frames.is_empty(), "only one root node has no parent");
                 return call
             }
+        }
+    }
+
+    ///  Returns the accounts necessary for transaction execution.
+    ///
+    /// The prestate mode returns the accounts necessary to execute a given transaction.
+    /// diff_mode returns the differences between the transaction's pre and post-state.
+    ///
+    /// * `state` - The state post-transaction execution.
+    /// * `diff_mode` - if prestate is in diff or prestate mode.
+    /// * `db` - The database to fetch state pre-transaction execution.
+    pub fn geth_prestate_traces<DB>(
+        &self,
+        ResultAndState { state, .. }: &ResultAndState,
+        prestate_config: PreStateConfig,
+        db: DB,
+    ) -> Result<PreStateFrame, DB::Error>
+    where
+        DB: DatabaseRef,
+    {
+        let account_diffs: Vec<_> =
+            state.into_iter().map(|(addr, acc)| (*addr, &acc.info)).collect();
+
+        if !prestate_config.is_diff_mode() {
+            let mut prestate = PreStateMode::default();
+            for (addr, _) in account_diffs {
+                let db_acc = db.basic(addr)?.unwrap_or_default();
+                prestate.0.insert(
+                    addr,
+                    AccountState {
+                        balance: Some(db_acc.balance),
+                        nonce: Some(U256::from(db_acc.nonce)),
+                        code: db_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
+                        storage: None,
+                    },
+                );
+            }
+            self.update_storage_from_trace(&mut prestate.0, false);
+            Ok(PreStateFrame::Default(prestate))
+        } else {
+            let mut state_diff = DiffMode::default();
+            for (addr, changed_acc) in account_diffs {
+                let db_acc = db.basic(addr)?.unwrap_or_default();
+                let pre_state = AccountState {
+                    balance: Some(db_acc.balance),
+                    nonce: Some(U256::from(db_acc.nonce)),
+                    code: db_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
+                    storage: None,
+                };
+                let post_state = AccountState {
+                    balance: Some(changed_acc.balance),
+                    nonce: Some(U256::from(changed_acc.nonce)),
+                    code: changed_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
+                    storage: None,
+                };
+                state_diff.pre.insert(addr, pre_state);
+                state_diff.post.insert(addr, post_state);
+            }
+            self.update_storage_from_trace(&mut state_diff.pre, false);
+            self.update_storage_from_trace(&mut state_diff.post, true);
+            Ok(PreStateFrame::Diff(state_diff))
+        }
+    }
+
+    fn update_storage_from_trace(
+        &self,
+        account_states: &mut BTreeMap<Address, AccountState>,
+        post_value: bool,
+    ) {
+        for node in self.nodes.iter() {
+            node.geth_update_account_storage(account_states, post_value);
         }
     }
 }
