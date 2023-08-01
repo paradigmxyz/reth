@@ -22,11 +22,12 @@ pub type PrunerWithResult<DB> = (Pruner<DB>, PrunerResult);
 pub struct BatchSizes {
     receipts: usize,
     transaction_lookup: usize,
+    transaction_senders: usize,
 }
 
 impl Default for BatchSizes {
     fn default() -> Self {
-        Self { receipts: 10000, transaction_lookup: 10000 }
+        Self { receipts: 10000, transaction_lookup: 10000, transaction_senders: 10000 }
     }
 }
 
@@ -83,6 +84,12 @@ impl<DB: Database> Pruner<DB> {
             self.prune_transaction_lookup(&provider, to_block, prune_mode)?;
         }
 
+        if let Some((to_block, prune_mode)) =
+            self.modes.prune_target_block_sender_recovery(tip_block_number)?
+        {
+            self.prune_transaction_senders(&provider, to_block, prune_mode)?;
+        }
+
         provider.commit()?;
 
         self.last_pruned_block_number = Some(tip_block_number);
@@ -124,13 +131,16 @@ impl<DB: Database> Pruner<DB> {
         prune_part: PrunePart,
         to_block: BlockNumber,
     ) -> reth_interfaces::Result<Option<RangeInclusive<TxNumber>>> {
-        let from_tx_num = provider
-            .get_prune_checkpoint(prune_part)?
-            .map(|checkpoint| provider.block_body_indices(checkpoint.block_number + 1))
-            .transpose()?
-            .flatten()
-            .map(|body| body.first_tx_num)
-            .unwrap_or_default();
+        let checkpoint = provider.get_prune_checkpoint(prune_part)?.unwrap_or(PruneCheckpoint {
+            block_number: 0,             // No checkpoint, fresh pruning
+            prune_mode: PruneMode::Full, // Doesn't matter in this case, can be anything
+        });
+        // Get first transaction of the next block after the highest pruned one
+        let from_tx_num =
+            provider.block_body_indices(checkpoint.block_number + 1)?.map(|body| body.first_tx_num);
+        // If no block body index is found, the DB is either corrupted or we've already pruned up to
+        // the latest block, so there's no thing to prune now.
+        let Some(from_tx_num) = from_tx_num else { return Ok(None) };
 
         let to_tx_num = match provider.block_body_indices(to_block)? {
             Some(body) => body,
@@ -200,7 +210,7 @@ impl<DB: Database> Pruner<DB> {
         )? {
             Some(range) => range,
             None => {
-                trace!(target: "pruner", "No receipts to prune");
+                trace!(target: "pruner", "No transaction lookup entries to prune");
                 return Ok(())
             }
         };
@@ -243,6 +253,50 @@ impl<DB: Database> Pruner<DB> {
 
         provider.save_prune_checkpoint(
             PrunePart::TransactionLookup,
+            PruneCheckpoint { block_number: to_block, prune_mode },
+        )?;
+
+        Ok(())
+    }
+
+    /// Prune transaction senders up to the provided block, inclusive.
+    #[instrument(level = "trace", skip(self, provider), target = "pruner")]
+    fn prune_transaction_senders(
+        &self,
+        provider: &DatabaseProviderRW<'_, DB>,
+        to_block: BlockNumber,
+        prune_mode: PruneMode,
+    ) -> PrunerResult {
+        let range = match self.get_next_tx_num_range_from_checkpoint(
+            provider,
+            PrunePart::SenderRecovery,
+            to_block,
+        )? {
+            Some(range) => range,
+            None => {
+                trace!(target: "pruner", "No transaction senders to prune");
+                return Ok(())
+            }
+        };
+        let total = range.clone().count();
+
+        let mut processed = 0;
+        provider.prune_table_in_batches::<tables::TxSenders, _>(
+            range,
+            self.batch_sizes.transaction_senders,
+            |entries| {
+                processed += entries;
+                trace!(
+                    target: "pruner",
+                    %entries,
+                    progress = format!("{:.1}%", 100.0 * processed as f64 / total as f64),
+                    "Pruned transaction senders"
+                );
+            },
+        )?;
+
+        provider.save_prune_checkpoint(
+            PrunePart::SenderRecovery,
             PruneCheckpoint { block_number: to_block, prune_mode },
         )?;
 
@@ -399,6 +453,73 @@ mod tests {
             );
             assert_eq!(
                 tx.inner().get_prune_checkpoint(PrunePart::TransactionLookup).unwrap(),
+                Some(PruneCheckpoint { block_number: to_block, prune_mode })
+            );
+        };
+
+        // Pruning first time ever, no previous checkpoint is present
+        test_prune(10);
+        // Prune second time, previous checkpoint is present, should continue pruning from where
+        // ended last time
+        test_prune(20);
+    }
+
+    #[test]
+    fn prune_transaction_senders() {
+        let tx = TestTransaction::default();
+        let mut rng = generators::rng();
+
+        let blocks = random_block_range(&mut rng, 0..=100, H256::zero(), 0..10);
+        tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
+
+        let mut transaction_senders = Vec::new();
+        for block in &blocks {
+            for transaction in &block.body {
+                transaction_senders.push((
+                    transaction_senders.len() as u64,
+                    transaction.recover_signer().expect("recover signer"),
+                ));
+            }
+        }
+        tx.insert_transaction_senders(transaction_senders).expect("insert transaction senders");
+
+        assert_eq!(
+            tx.table::<tables::Transactions>().unwrap().len(),
+            blocks.iter().map(|block| block.body.len()).sum::<usize>()
+        );
+        assert_eq!(
+            tx.table::<tables::Transactions>().unwrap().len(),
+            tx.table::<tables::TxSenders>().unwrap().len()
+        );
+
+        let test_prune = |to_block: BlockNumber| {
+            let prune_mode = PruneMode::Before(to_block);
+            let pruner = Pruner::new(
+                tx.inner_raw(),
+                MAINNET.clone(),
+                5,
+                0,
+                PruneModes { sender_recovery: Some(prune_mode), ..Default::default() },
+                BatchSizes {
+                    // Less than total amount of blocks to prune to test the batching logic
+                    transaction_senders: 10,
+                    ..Default::default()
+                },
+            );
+
+            let provider = tx.inner_rw();
+            assert_matches!(
+                pruner.prune_transaction_senders(&provider, to_block, prune_mode),
+                Ok(())
+            );
+            provider.commit().expect("commit");
+
+            assert_eq!(
+                tx.table::<tables::TxSenders>().unwrap().len(),
+                blocks[to_block as usize + 1..].iter().map(|block| block.body.len()).sum::<usize>()
+            );
+            assert_eq!(
+                tx.inner().get_prune_checkpoint(PrunePart::SenderRecovery).unwrap(),
                 Some(PruneCheckpoint { block_number: to_block, prune_mode })
             );
         };
