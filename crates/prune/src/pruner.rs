@@ -464,10 +464,11 @@ impl<DB: Database> Pruner<DB> {
                     }
                 }
 
-                processed += 1;
                 // Jump to the next address
                 cursor.seek_exact(ShardedKey::last(key.key))?;
             }
+
+            processed += 1;
 
             if processed % self.batch_sizes.account_history == 0 {
                 trace!(
@@ -540,7 +541,6 @@ impl<DB: Database> Pruner<DB> {
                 // If shard consists only of block numbers less than the target one, delete shard
                 // completely.
                 cursor.delete_current()?;
-                processed += 1;
                 if key.sharded_key.highest_block_number == to_block {
                     // Shard contains only block numbers up to the target one, so we can skip to the
                     // next storage slot for this address. It is guaranteed that further shards for
@@ -552,40 +552,52 @@ impl<DB: Database> Pruner<DB> {
                 // Shard contains block numbers that are higher than the target one, so we need to
                 // filter it. It is guaranteed that further shards for this address and storage slot
                 // will not contain the target block number, as it's in this shard.
-                let blocks = blocks
+                let new_blocks = blocks
                     .iter(0)
                     .skip_while(|block| *block <= to_block as usize)
                     .collect::<Vec<_>>();
-                if blocks.is_empty() {
-                    // If there are no more blocks in this shard, we need to remove it, as empty
-                    // shards are not allowed.
-                    if key.sharded_key.highest_block_number == u64::MAX {
-                        // If current shard is the last shard for this address and storage slot,
-                        // replace it with the previous shard.
-                        if let Some((prev_key, prev_value)) = cursor.prev()? {
-                            if prev_key.address == key.address &&
-                                prev_key.sharded_key.key == key.sharded_key.key
+
+                if blocks.len() != new_blocks.len() {
+                    // If there were blocks less than or equal to the target one
+                    // (so the shard has changed), update the shard.
+                    if new_blocks.is_empty() {
+                        // If there are no more blocks in this shard, we need to remove it, as empty
+                        // shards are not allowed.
+                        if key.sharded_key.highest_block_number == u64::MAX {
+                            // If current shard is the last shard for this address and storage slot,
+                            // replace it with the previous shard.
+                            if let Some(prev_value) = cursor
+                                .prev()?
+                                .filter(|(prev_key, _)| {
+                                    prev_key.address == key.address &&
+                                        prev_key.sharded_key.key == key.sharded_key.key
+                                })
+                                .map(|(_, prev_value)| prev_value)
                             {
                                 cursor.delete_current()?;
                                 // Upsert will replace the last shard for this address and storage
                                 // slot with the previous value
                                 cursor.upsert(key.clone(), prev_value)?;
-                                processed += 1;
+                            } else {
+                                // If there's no previous shard for this address, just delete last
+                                // shard completely.
+                                cursor.delete_current()?;
                             }
+                        } else {
+                            // If current shard is not the last shard for this address, just delete
+                            // it.
+                            cursor.delete_current()?;
                         }
                     } else {
-                        // If current shard is not the last shard for this address, just delete it.
-                        cursor.delete_current()?;
-                        processed += 1;
+                        cursor.upsert(key.clone(), BlockNumberList::new_pre_sorted(new_blocks))?;
                     }
-                } else {
-                    cursor.upsert(key.clone(), BlockNumberList::new_pre_sorted(blocks))?;
-                    processed += 1;
                 }
 
                 // Jump to the next address
                 cursor.seek_exact(StorageShardedKey::last(key.address, key.sharded_key.key))?;
             }
+
+            processed += 1;
 
             if processed % self.batch_sizes.storage_history == 0 {
                 trace!(
