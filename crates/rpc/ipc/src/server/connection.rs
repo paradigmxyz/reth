@@ -131,7 +131,7 @@ pub(crate) struct IpcConnDriver<T, S, Fut> {
     pub(crate) service: S,
     /// rpc requests in progress
     #[pin]
-    pub(crate) active_requests: FuturesUnordered<Fut>,
+    pub(crate) pending_calls: FuturesUnordered<Fut>,
     pub(crate) items: VecDeque<String>,
 }
 
@@ -183,8 +183,8 @@ where
             'inner: loop {
                 let mut drained = false;
                 // drain all calls that are ready and put them in the output item queue
-                if !this.active_requests.is_empty() {
-                    if let Poll::Ready(Some(res)) = this.active_requests.as_mut().poll_next(cx) {
+                if !this.pending_calls.is_empty() {
+                    if let Poll::Ready(Some(res)) = this.pending_calls.as_mut().poll_next(cx) {
                         let item = match res {
                             Ok(Some(resp)) => resp,
                             Ok(None) => continue 'inner,
@@ -213,7 +213,7 @@ where
                                     continue 'outer
                                 }
                                 Poll::Pending => {
-                                    this.active_requests.push(call);
+                                    this.pending_calls.push(call);
                                 }
                             }
                         }
@@ -224,7 +224,7 @@ where
                         None => return Poll::Ready(()),
                     },
                     Poll::Pending => {
-                        if drained || this.active_requests.is_empty() {
+                        if drained || this.pending_calls.is_empty() {
                             // at this point all things are pending
                             return Poll::Pending
                         }

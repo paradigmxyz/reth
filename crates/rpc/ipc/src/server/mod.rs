@@ -300,7 +300,7 @@ async fn spawn_connection<S, T>(
         let conn = IpcConnDriver {
             conn,
             service,
-            active_requests: Default::default(),
+            pending_calls: Default::default(),
             items: Default::default(),
         };
         tokio::pin!(conn, rx_item);
