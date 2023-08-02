@@ -1710,10 +1710,15 @@ where
             // we're pending if both engine messages and sync events are pending (fully drained)
             let is_pending = engine_messages_pending && sync_pending;
 
-            // check prune events if pipeline is idle AND (pruning is running and we need to
-            // prioritize checking its events OR no engine and sync messages are pending and we may
-            // start pruning)
-            if this.sync.is_pipeline_idle() && (this.is_prune_active() || is_pending) {
+            // Poll prune controller if all conditions are met:
+            // 1. Pipeline is idle
+            // 2. Pruning is running and we need to prioritize checking its events OR no engine and
+            //  sync messages are pending and we may start pruning
+            // 3. Latest FCU status is VALID
+            if this.sync.is_pipeline_idle() &&
+                (this.is_prune_active() || is_pending) &&
+                this.forkchoice_state_tracker.is_latest_valid()
+            {
                 if let Some(ref mut prune) = this.prune {
                     match prune.poll(cx, this.blockchain.canonical_tip().number) {
                         Poll::Ready(prune_event) => {
