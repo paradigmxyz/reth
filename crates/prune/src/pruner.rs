@@ -81,6 +81,11 @@ impl<DB: Database> Pruner<DB> {
 
     /// Run the pruner
     pub fn run(&mut self, tip_block_number: BlockNumber) -> PrunerResult {
+        trace!(
+            target: "pruner",
+            %tip_block_number,
+            "Pruner started"
+        );
         let start = Instant::now();
 
         let provider = self.provider_factory.provider_rw()?;
@@ -143,8 +148,15 @@ impl<DB: Database> Pruner<DB> {
         provider.commit()?;
         self.last_pruned_block_number = Some(tip_block_number);
 
-        self.metrics.pruner.duration_seconds.record(start.elapsed());
+        let elapsed = start.elapsed();
+        self.metrics.pruner.duration_seconds.record(elapsed);
 
+        trace!(
+            target: "pruner",
+            %tip_block_number,
+            ?elapsed,
+            "Pruner finished"
+        );
         Ok(())
     }
 
