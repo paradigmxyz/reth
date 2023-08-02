@@ -397,6 +397,7 @@ impl<DB: Database> Pruner<DB> {
             },
         )?;
 
+        processed = 0;
         let mut cursor = provider.tx_ref().cursor_write::<tables::AccountHistory>()?;
         // Prune `AccountHistory` table:
         // 1. If the shard has `highest_block_number` less than or equal to the target block number
@@ -411,6 +412,7 @@ impl<DB: Database> Pruner<DB> {
                 // If shard consists only of block numbers less than the target one, delete shard
                 // completely.
                 cursor.delete_current()?;
+                processed += 1;
                 if key.highest_block_number == to_block {
                     // Shard contains only block numbers up to the target one, so we can skip to the
                     // next address. It is guaranteed that further shards for this address will not
@@ -437,21 +439,23 @@ impl<DB: Database> Pruner<DB> {
                                 // Upsert will replace the last shard for this address with the
                                 // previous value
                                 cursor.upsert(key.clone(), prev_value)?;
+                                processed += 1;
                             }
                         }
                     } else {
                         // If current shard is not the last shard for this address, just delete it.
                         cursor.delete_current()?;
+                        processed += 1;
                     }
                 } else {
                     cursor.upsert(key.clone(), BlockNumberList::new_pre_sorted(blocks))?;
+                    processed += 1;
                 }
 
                 // Jump to the next address
                 cursor.seek_exact(ShardedKey::last(key.key))?;
             }
 
-            processed += 1;
             if processed % self.batch_sizes.account_history == 0 {
                 trace!(
                     target: "pruner",
@@ -508,6 +512,7 @@ impl<DB: Database> Pruner<DB> {
             },
         )?;
 
+        processed = 0;
         let mut cursor = provider.tx_ref().cursor_write::<tables::StorageHistory>()?;
         // Prune `StorageHistory` table:
         // 1. If the shard has `highest_block_number` less than or equal to the target block number
@@ -522,6 +527,7 @@ impl<DB: Database> Pruner<DB> {
                 // If shard consists only of block numbers less than the target one, delete shard
                 // completely.
                 cursor.delete_current()?;
+                processed += 1;
                 if key.sharded_key.highest_block_number == to_block {
                     // Shard contains only block numbers up to the target one, so we can skip to the
                     // next storage slot for this address. It is guaranteed that further shards for
@@ -551,21 +557,23 @@ impl<DB: Database> Pruner<DB> {
                                 // Upsert will replace the last shard for this address and storage
                                 // slot with the previous value
                                 cursor.upsert(key.clone(), prev_value)?;
+                                processed += 1;
                             }
                         }
                     } else {
                         // If current shard is not the last shard for this address, just delete it.
                         cursor.delete_current()?;
+                        processed += 1;
                     }
                 } else {
                     cursor.upsert(key.clone(), BlockNumberList::new_pre_sorted(blocks))?;
+                    processed += 1;
                 }
 
                 // Jump to the next address
                 cursor.seek_exact(StorageShardedKey::last(key.address, key.sharded_key.key))?;
             }
 
-            processed += 1;
             if processed % self.batch_sizes.storage_history == 0 {
                 trace!(
                     target: "pruner",
