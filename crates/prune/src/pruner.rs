@@ -495,7 +495,9 @@ impl<DB: Database> Pruner<DB> {
                         // If current shard is the last shard for this address and storage slot,
                         // replace it with the previous shard.
                         if let Some((prev_key, prev_value)) = cursor.prev()? {
-                            if prev_key.sharded_key.key == key.sharded_key.key {
+                            if prev_key.address == key.address &&
+                                prev_key.sharded_key.key == key.sharded_key.key
+                            {
                                 cursor.delete_current()?;
                                 // Upsert will replace the last shard for this address and storage
                                 // slot with the previous value
