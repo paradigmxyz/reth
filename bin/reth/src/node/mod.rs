@@ -755,6 +755,11 @@ impl<Ext: RethCliExt> Command<Ext> {
                             max_blocks: stage_config.execution.max_blocks,
                             max_changes: stage_config.execution.max_changes,
                         },
+                        stage_config
+                            .merkle
+                            .clean_threshold
+                            .max(stage_config.account_hashing.clean_threshold)
+                            .max(stage_config.storage_hashing.clean_threshold),
                         prune_config.map(|prune| prune.parts).unwrap_or_default(),
                     )
                     .with_metrics_tx(metrics_tx),
@@ -762,17 +767,12 @@ impl<Ext: RethCliExt> Command<Ext> {
                 .set(AccountHashingStage::new(
                     stage_config.account_hashing.clean_threshold,
                     stage_config.account_hashing.commit_threshold,
-                    config.prune.map(|prune| prune.parts).unwrap_or_default(),
                 ))
                 .set(StorageHashingStage::new(
                     stage_config.storage_hashing.clean_threshold,
                     stage_config.storage_hashing.commit_threshold,
-                    config.prune.map(|prune| prune.parts).unwrap_or_default(),
                 ))
-                .set(MerkleStage::new_execution(
-                    stage_config.merkle.clean_threshold,
-                    config.prune.map(|prune| prune.parts).unwrap_or_default(),
-                ))
+                .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
                 .set(TransactionLookupStage::new(stage_config.transaction_lookup.commit_threshold))
                 .set(IndexAccountHistoryStage::new(
                     stage_config.index_account_history.commit_threshold,
