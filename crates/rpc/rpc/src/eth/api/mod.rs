@@ -16,7 +16,9 @@ use reth_network_api::NetworkInfo;
 use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, H256, U256, U64,
 };
-use reth_provider::{BlockReaderIdExt, EvmEnvProvider, StateProviderBox, StateProviderFactory};
+use reth_provider::{
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
+};
 use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
@@ -78,7 +80,7 @@ pub struct EthApi<Provider, Pool, Network> {
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
-    Provider: BlockReaderIdExt,
+    Provider: BlockReaderIdExt + ChainSpecProvider,
 {
     /// Creates a new, shareable instance using the default tokio task spawner.
     pub fn new(
@@ -188,7 +190,8 @@ where
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
-    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider:
+        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
 {
     /// Returns the state at the given [BlockId] enum.
     pub fn state_at_block_id(&self, at: BlockId) -> EthResult<StateProviderBox<'_>> {
@@ -222,7 +225,8 @@ where
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
-    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider:
+        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
@@ -243,7 +247,10 @@ where
             // assumed child block is in the next slot
             latest.timestamp += 12;
             // base fee of the child block
-            latest.base_fee_per_gas = latest.next_block_base_fee();
+            latest.base_fee_per_gas = latest.next_block_base_fee(
+                self.provider().chain_spec().elasticity_multiplier(),
+                self.provider().chain_spec().base_fee_change_denominator(),
+            );
 
             PendingBlockEnvOrigin::DerivedFromLatest(latest)
         };
@@ -321,7 +328,8 @@ impl<Provider, Pool, Events> Clone for EthApi<Provider, Pool, Events> {
 impl<Provider, Pool, Network> EthApiSpec for EthApi<Provider, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider:
+        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + 'static,
 {
     /// Returns the current ethereum protocol version.
