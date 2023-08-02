@@ -254,8 +254,11 @@ where
             #[cfg(feature = "optimism")]
             {
                 let db = self.db();
-                let l1_cost =
-                    l1_block_info.map(|l1_block| l1_block.calculate_tx_l1_cost(transaction));
+                let l1_cost = if let Some(l1_block_info) = &l1_block_info {
+                    Some(l1_block_info.calculate_tx_l1_cost(transaction))
+                } else {
+                    None
+                };
 
                 let sender_account =
                     db.load_account(sender).map_err(|_| BlockExecutionError::ProviderError)?;
@@ -268,27 +271,23 @@ where
                     sender_account.info.balance += U256::from(m);
                 }
 
-                match l1_cost {
-                    Some(l1_cost) => {
-                        // Check if the sender balance can cover the L1 cost.
-                        // Deposits pay for their gas directly on L1 so they are exempt from the L2
-                        // tx fee.
-                        if !transaction.is_deposit() {
-                            if sender_account.info.balance.cmp(&l1_cost) == std::cmp::Ordering::Less
-                            {
-                                return Err(BlockExecutionError::InsufficientFundsForL1Cost {
-                                    have: sender_account.info.balance.to::<u64>(),
-                                    want: l1_cost.to::<u64>(),
-                                })
-                            }
-
-                            // Safely take l1_cost from sender (the rest will be deducted by the
-                            // internal EVM execution and included in result.gas_used())
-                            // TODO: need to handle calls with `disable_balance_check` flag set?
-                            sender_account.info.balance -= l1_cost;
+                if let Some(l1_cost) = l1_cost {
+                    // Check if the sender balance can cover the L1 cost.
+                    // Deposits pay for their gas directly on L1 so they are exempt from the L2
+                    // tx fee.
+                    if !transaction.is_deposit() {
+                        if sender_account.info.balance.cmp(&l1_cost) == std::cmp::Ordering::Less {
+                            return Err(BlockExecutionError::InsufficientFundsForL1Cost {
+                                have: sender_account.info.balance.to::<u64>(),
+                                want: l1_cost.to::<u64>(),
+                            })
                         }
+
+                        // Safely take l1_cost from sender (the rest will be deducted by the
+                        // internal EVM execution and included in result.gas_used())
+                        // TODO: need to handle calls with `disable_balance_check` flag set?
+                        sender_account.info.balance -= l1_cost;
                     }
-                    None => (),
                 }
 
                 let new_sender_info = to_reth_acc(&sender_account.info);
@@ -346,17 +345,14 @@ where
                 }
 
                 if self.chain_spec.optimism.is_some() {
-                    match l1_cost {
-                        Some(l1_cost) => {
-                            // Route the l1 cost and base fee to the appropriate optimism vaults
-                            self.increment_account_balance(
-                                block.number,
-                                optimism::l1_cost_recipient(),
-                                l1_cost,
-                                &mut post_state,
-                            )?
-                        }
-                        None => (),
+                    // Route the l1 cost and base fee to the appropriate optimism vaults
+                    if let Some(l1_cost) = l1_cost {
+                        self.increment_account_balance(
+                            block.number,
+                            optimism::l1_cost_recipient(),
+                            l1_cost,
+                            &mut post_state,
+                        )?
                     }
                     self.increment_account_balance(
                         block.number,
