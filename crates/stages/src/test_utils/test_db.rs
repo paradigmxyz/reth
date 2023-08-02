@@ -392,12 +392,9 @@ impl TestTransaction {
 
         for (block, changeset) in changesets.into_iter().enumerate() {
             for (address, _, storage_entries) in changeset {
-                accounts.entry(address).or_insert(Vec::new()).push(block as u64);
+                accounts.entry(address).or_default().push(block as u64);
                 for storage_entry in storage_entries {
-                    storages
-                        .entry((address, storage_entry.key))
-                        .or_insert(Vec::new())
-                        .push(block as u64);
+                    storages.entry((address, storage_entry.key)).or_default().push(block as u64);
                 }
             }
         }
