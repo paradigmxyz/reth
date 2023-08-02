@@ -331,7 +331,7 @@ impl<Ext: RethCliExt> Command<Ext> {
 
             let mut pipeline = self
                 .build_networked_pipeline(
-                    &mut config,
+                    &config,
                     client.clone(),
                     Arc::clone(&consensus),
                     db.clone(),
@@ -351,7 +351,7 @@ impl<Ext: RethCliExt> Command<Ext> {
         } else {
             let pipeline = self
                 .build_networked_pipeline(
-                    &mut config,
+                    &config,
                     network_client.clone(),
                     Arc::clone(&consensus),
                     db.clone(),
@@ -480,7 +480,7 @@ impl<Ext: RethCliExt> Command<Ext> {
     #[allow(clippy::too_many_arguments)]
     async fn build_networked_pipeline<DB, Client>(
         &self,
-        config: &mut Config,
+        config: &Config,
         client: Client,
         consensus: Arc<dyn Consensus>,
         db: DB,
