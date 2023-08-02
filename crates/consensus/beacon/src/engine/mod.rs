@@ -26,7 +26,7 @@ use reth_primitives::{
     Head, Header, SealedBlock, SealedHeader, H256, U256,
 };
 use reth_provider::{
-    BlockIdReader, BlockReader, BlockSource, CanonChainTracker, ProviderError,
+    BlockIdReader, BlockReader, BlockSource, CanonChainTracker, ChainSpecProvider, ProviderError,
     StageCheckpointReader,
 };
 use reth_prune::Pruner;
@@ -208,6 +208,7 @@ where
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader
+        + ChainSpecProvider
         + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
@@ -279,6 +280,7 @@ where
             task_spawner.clone(),
             run_pipeline_continuously,
             max_block,
+            blockchain.chain_spec(),
         );
         let prune = pruner.map(|pruner| EnginePruneController::new(pruner, task_spawner));
         let mut this = Self {
@@ -1651,6 +1653,7 @@ where
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader
+        + ChainSpecProvider
         + Unpin
         + 'static,
 {
