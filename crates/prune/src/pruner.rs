@@ -121,13 +121,23 @@ impl<DB: Database> Pruner<DB> {
         if let Some((to_block, prune_mode)) =
             self.modes.prune_target_block_account_history(tip_block_number)?
         {
+            let part_start = Instant::now();
             self.prune_account_history(&provider, to_block, prune_mode)?;
+            self.metrics
+                .get_prune_part_metrics(PrunePart::AccountHistory)
+                .duration_seconds
+                .record(part_start.elapsed())
         }
 
         if let Some((to_block, prune_mode)) =
             self.modes.prune_target_block_storage_history(tip_block_number)?
         {
+            let part_start = Instant::now();
             self.prune_storage_history(&provider, to_block, prune_mode)?;
+            self.metrics
+                .get_prune_part_metrics(PrunePart::StorageHistory)
+                .duration_seconds
+                .record(part_start.elapsed())
         }
 
         provider.commit()?;
