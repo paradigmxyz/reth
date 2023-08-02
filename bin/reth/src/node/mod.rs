@@ -148,7 +148,7 @@ pub struct Command<Ext: RethCliExt = ()> {
     pruning: PruningArgs,
 }
 
-impl Command {
+impl<Ext: RethCliExt> Command<Ext> {
     /// Execute `node` command
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
@@ -331,7 +331,7 @@ impl Command {
 
             let mut pipeline = self
                 .build_networked_pipeline(
-                    &mut config,
+                    &config,
                     client.clone(),
                     Arc::clone(&consensus),
                     db.clone(),
@@ -351,7 +351,7 @@ impl Command {
         } else {
             let pipeline = self
                 .build_networked_pipeline(
-                    &mut config,
+                    &config,
                     network_client.clone(),
                     Arc::clone(&consensus),
                     db.clone(),
@@ -386,7 +386,6 @@ impl Command {
                 db.clone(),
                 self.chain.clone(),
                 prune_config.block_interval,
-                tree_config.max_reorg_depth(),
                 prune_config.parts,
                 BatchSizes::default(),
             )
@@ -480,7 +479,7 @@ impl Command {
     #[allow(clippy::too_many_arguments)]
     async fn build_networked_pipeline<DB, Client>(
         &self,
-        config: &mut Config,
+        config: &Config,
         client: Client,
         consensus: Arc<dyn Consensus>,
         db: DB,
