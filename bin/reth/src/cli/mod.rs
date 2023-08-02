@@ -84,7 +84,8 @@ impl<Ext: RethCliExt> Cli<Ext> {
     /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
     /// that all logs are flushed to disk.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
-        let mut layers = vec![reth_tracing::stdout(self.verbosity.directive())];
+        let mut layers =
+            vec![reth_tracing::stdout(self.verbosity.directive(), self.logs.not_coloured)];
         let guard = self.logs.layer()?.map(|(layer, guard)| {
             layers.push(layer);
             guard
@@ -158,6 +159,10 @@ pub struct Logs {
     /// The filter to use for logs written to the log file.
     #[arg(long = "log.filter", value_name = "FILTER", global = true, default_value = "error")]
     filter: String,
+
+    /// The flag to disable colour coding of console output.
+    #[arg(long = "log.not-coloured", global = true)]
+    not_coloured: bool,
 }
 
 impl Logs {
