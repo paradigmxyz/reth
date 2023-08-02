@@ -491,7 +491,8 @@ where
             RequestError::UnsupportedCapability => ReputationChangeKind::BadProtocol,
             RequestError::Timeout => ReputationChangeKind::Timeout,
             RequestError::ChannelClosed | RequestError::ConnectionDropped => {
-                ReputationChangeKind::Dropped
+                // peer is already disconnected
+                return
             }
             RequestError::BadResponse => ReputationChangeKind::BadTransactions,
         };
@@ -561,7 +562,8 @@ where
                     this.on_request_error(req.peer_id, req_err);
                 }
                 Poll::Ready(Err(_)) => {
-                    this.on_request_error(req.peer_id, RequestError::ConnectionDropped)
+                    // request channel closed/dropped
+                    this.on_request_error(req.peer_id, RequestError::ChannelClosed)
                 }
             }
         }
