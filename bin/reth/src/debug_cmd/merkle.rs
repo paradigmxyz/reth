@@ -14,7 +14,7 @@ use reth_provider::{ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
-        StorageHashingStage,
+        StorageHashingStage, MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
     },
     ExecInput, PipelineError, Stage,
 };
@@ -96,6 +96,7 @@ impl Command {
         let mut execution_stage = ExecutionStage::new(
             factory,
             ExecutionStageThresholds { max_blocks: Some(1), max_changes: None },
+            MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::all(),
         );
 
