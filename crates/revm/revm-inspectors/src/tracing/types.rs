@@ -487,7 +487,7 @@ impl CallTraceNode {
         post_value: bool,
     ) {
         let addr = self.trace.address;
-        let acc_state = account_states.entry(addr).or_insert_with(AccountState::default);
+        let acc_state = account_states.entry(addr).or_default();
         for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
             let StorageChange { key, value, had_value } = change;
             let storage_map = acc_state.storage.get_or_insert_with(BTreeMap::new);
