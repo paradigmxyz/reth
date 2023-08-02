@@ -931,7 +931,6 @@ mod tests {
                 tx.inner_raw(),
                 MAINNET.clone(),
                 5,
-                0,
                 PruneModes { storage_history: Some(prune_mode), ..Default::default() },
                 BatchSizes {
                     // Less than total amount of blocks to prune to test the batching logic
