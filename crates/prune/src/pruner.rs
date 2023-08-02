@@ -472,6 +472,12 @@ impl<DB: Database> Pruner<DB> {
         )?;
 
         let mut cursor = provider.tx_ref().cursor_write::<tables::StorageHistory>()?;
+        // Prune `StorageHistory` table:
+        // 1. If the shard has `highest_block_number` less than or equal to the target block number
+        // for pruning, delete the shard completely.
+        // 2. If the shard has `highest_block_number` greater than the target block number for
+        // pruning, filter block numbers inside the shard which are less than the target
+        // block number for pruning.
         while let Some(result) = cursor.next()? {
             let (key, blocks): (StorageShardedKey, BlockNumberList) = result;
 
