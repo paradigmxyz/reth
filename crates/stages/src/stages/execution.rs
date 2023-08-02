@@ -201,8 +201,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     ) -> Result<PruneModes, StageError> {
         let mut prune_modes = self.prune_modes;
         if !(max_block - start_block > self.external_clean_threshold ||
-            (provider.tx_ref().entries::<tables::AccountsTrie>()?.is_zero() &&
-                provider.tx_ref().entries::<tables::HashedAccount>()?.is_zero()))
+            provider.tx_ref().entries::<tables::AccountsTrie>()?.is_zero())
         {
             prune_modes.account_history = None;
             prune_modes.storage_history = None;
