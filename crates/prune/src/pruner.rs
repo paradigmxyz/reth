@@ -386,10 +386,11 @@ impl<DB: Database> Pruner<DB> {
         provider.prune_table_with_range_in_batches::<tables::AccountChangeSet>(
             range,
             self.batch_sizes.account_history,
-            |keys, _| {
+            |keys, rows| {
                 trace!(
                     target: "pruner",
                     %keys,
+                    %rows,
                     progress = format!("{:.1}%", 100.0 * keys as f64 / total as f64),
                     "Pruned account history (changesets)"
                 );
@@ -438,10 +439,11 @@ impl<DB: Database> Pruner<DB> {
         provider.prune_table_with_range_in_batches::<tables::StorageChangeSet>(
             range,
             self.batch_sizes.storage_history,
-            |keys, _| {
+            |keys, rows| {
                 trace!(
                     target: "pruner",
                     %keys,
+                    %rows,
                     progress = format!("{:.1}%", 100.0 * keys as f64 / total as f64),
                     "Pruned storage history (changesets)"
                 );
