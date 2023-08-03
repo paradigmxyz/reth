@@ -1,8 +1,11 @@
 use assert_matches::assert_matches;
 use reth_transaction_pool::{
-    test_utils::{testing_pool, MockTransactionFactory},
-    FullTransactionEvent, TransactionEvent, TransactionOrigin, TransactionPool,
+    noop::MockTransactionValidator,
+    test_utils::{testing_pool, testing_pool_with_validator, MockTransactionFactory},
+    FullTransactionEvent, PendingTransactionListenerKind, TransactionEvent, TransactionOrigin,
+    TransactionPool,
 };
+use std::{future::poll_fn, task::Poll};
 use tokio_stream::StreamExt;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -36,4 +39,28 @@ async fn txpool_listener_all() {
         all_tx_events.next().await,
         Some(FullTransactionEvent::Pending(hash)) if hash == transaction.transaction.get_hash()
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn txpool_listener_propagate_only() {
+    let txpool = testing_pool_with_validator(MockTransactionValidator::no_propagate_local());
+    let mut mock_tx_factory = MockTransactionFactory::default();
+    let transaction = mock_tx_factory.create_eip1559();
+    let expected = *transaction.hash();
+    let mut listener_network = txpool.pending_transactions_listener();
+    let mut listener_all =
+        txpool.pending_transactions_listener_for(PendingTransactionListenerKind::All);
+    let result =
+        txpool.add_transaction(TransactionOrigin::Local, transaction.transaction.clone()).await;
+    assert!(result.is_ok());
+
+    let inserted = listener_all.recv().await.unwrap();
+    assert_eq!(inserted, expected);
+
+    poll_fn(|cx| {
+        // no propagation
+        assert!(listener_network.poll_recv(cx).is_pending());
+        Poll::Ready(())
+    })
+    .await;
 }
