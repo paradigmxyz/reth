@@ -7,8 +7,8 @@ use reth_primitives::{Address, U64};
 use reth_rpc_types::{trace::parity::*, TransactionInfo};
 use revm::{
     db::DatabaseRef,
-    interpreter::opcode,
-    primitives::{AccountInfo, ExecutionResult, ResultAndState, KECCAK_EMPTY},
+    interpreter::{opcode, opcode::spec_opcode_gas},
+    primitives::{AccountInfo, ExecutionResult, ResultAndState, SpecId, KECCAK_EMPTY},
 };
 use std::collections::{HashSet, VecDeque};
 
@@ -19,6 +19,8 @@ use std::collections::{HashSet, VecDeque};
 pub struct ParityTraceBuilder {
     /// Recorded trace nodes
     nodes: Vec<CallTraceNode>,
+    /// The spec id of the EVM.
+    spec_id: Option<SpecId>,
 
     /// How the traces were recorded
     _config: TracingInspectorConfig,
@@ -26,8 +28,12 @@ pub struct ParityTraceBuilder {
 
 impl ParityTraceBuilder {
     /// Returns a new instance of the builder
-    pub(crate) fn new(nodes: Vec<CallTraceNode>, _config: TracingInspectorConfig) -> Self {
-        Self { nodes, _config }
+    pub(crate) fn new(
+        nodes: Vec<CallTraceNode>,
+        spec_id: Option<SpecId>,
+        _config: TracingInspectorConfig,
+    ) -> Self {
+        Self { nodes, spec_id, _config }
     }
 
     /// Returns a list of all addresses that appeared as callers.
@@ -313,7 +319,7 @@ impl ParityTraceBuilder {
                             _ => None,
                         };
 
-                        instructions.push(Self::make_instruction(step, maybe_sub));
+                        instructions.push(self.make_instruction(step, maybe_sub));
                     }
 
                     match current.parent {
@@ -338,7 +344,7 @@ impl ParityTraceBuilder {
 
     /// Creates a VM instruction from a [CallTraceStep] and a [VmTrace] for the subcall if there is
     /// one
-    fn make_instruction(step: &CallTraceStep, maybe_sub: Option<VmTrace>) -> VmInstruction {
+    fn make_instruction(&self, step: &CallTraceStep, maybe_sub: Option<VmTrace>) -> VmInstruction {
         let maybe_storage = step.storage_change.map(|storage_change| StorageDelta {
             key: storage_change.key,
             val: storage_change.value,
@@ -358,12 +364,14 @@ impl ParityTraceBuilder {
             store: maybe_storage,
         });
 
-        VmInstruction {
-            pc: step.pc,
-            cost: 0, // TODO: use op gas cost
-            ex: maybe_execution,
-            sub: maybe_sub,
-        }
+        let cost = self
+            .spec_id
+            .and_then(|spec_id| {
+                spec_opcode_gas(spec_id).get(step.op.u8() as usize).map(|op| op.get_gas())
+            })
+            .unwrap_or_default();
+
+        VmInstruction { pc: step.pc, cost: cost as u64, ex: maybe_execution, sub: maybe_sub }
     }
 }
 
