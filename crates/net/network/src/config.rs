@@ -72,6 +72,9 @@ pub struct NetworkConfig<C> {
     pub status: Status,
     /// Sets the hello message for the p2p handshake in RLPx
     pub hello_message: HelloMessage,
+    #[cfg(feature = "optimism")]
+    /// The sequencer HTTP endpoint, if provided via CLI flag
+    pub sequencer_endpoint: Option<String>,
 }
 
 // === impl NetworkConfig ===
@@ -149,6 +152,9 @@ pub struct NetworkConfigBuilder {
     hello_message: Option<HelloMessage>,
     /// Head used to start set for the fork filter and status.
     head: Option<Head>,
+    #[cfg(feature = "optimism")]
+    /// The sequencer HTTP endpoint, if provided via CLI flag
+    sequencer_endpoint: Option<String>,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -170,6 +176,8 @@ impl NetworkConfigBuilder {
             executor: None,
             hello_message: None,
             head: None,
+            #[cfg(feature = "optimism")]
+            sequencer_endpoint: None,
         }
     }
 
@@ -343,6 +351,13 @@ impl NetworkConfigBuilder {
         }
     }
 
+    #[cfg(feature = "optimism")]
+    /// Sets the sequencer HTTP endpoint.
+    pub fn set_sequencer_endpoint(mut self, endpoint: Option<String>) -> Self {
+        self.sequencer_endpoint = endpoint;
+        self
+    }
+
     /// Consumes the type and creates the actual [`NetworkConfig`]
     /// for the given client type that can interact with the chain.
     ///
@@ -365,6 +380,8 @@ impl NetworkConfigBuilder {
             executor,
             hello_message,
             head,
+            #[cfg(feature = "optimism")]
+            sequencer_endpoint,
         } = self;
 
         let listener_addr = listener_addr.unwrap_or_else(|| {
@@ -419,6 +436,8 @@ impl NetworkConfigBuilder {
             status,
             hello_message,
             fork_filter,
+            #[cfg(feature = "optimism")]
+            sequencer_endpoint,
         }
     }
 }

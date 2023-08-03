@@ -92,6 +92,12 @@ pub enum EthApiError {
     InternalJsTracerError(String),
     #[error(transparent)]
     CallInputError(#[from] CallInputError),
+    #[cfg(feature = "optimism")]
+    #[error(transparent)]
+    HyperError(#[from] hyper::Error),
+    #[cfg(feature = "optimism")]
+    #[error(transparent)]
+    HttpError(#[from] http::Error),
 }
 
 impl From<EthApiError> for ErrorObject<'static> {
@@ -127,6 +133,10 @@ impl From<EthApiError> for ErrorObject<'static> {
             err @ EthApiError::InternalTracingError => internal_rpc_err(err.to_string()),
             err @ EthApiError::InternalEthError => internal_rpc_err(err.to_string()),
             err @ EthApiError::CallInputError(_) => invalid_params_rpc_err(err.to_string()),
+            #[cfg(feature = "optimism")]
+            EthApiError::HyperError(err) => internal_rpc_err(err.to_string()),
+            #[cfg(feature = "optimism")]
+            EthApiError::HttpError(err) => internal_rpc_err(err.to_string()),
         }
     }
 }
