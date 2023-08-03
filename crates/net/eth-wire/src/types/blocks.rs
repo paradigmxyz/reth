@@ -53,12 +53,14 @@ impl From<Vec<Header>> for BlockHeaders {
 
 /// A request for a peer to return block bodies for the given block hashes.
 #[derive_arbitrary(rlp)]
-#[derive(Clone, Debug, Default, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)] // RlpEncodableWrapper, RlpDecodableWrapper
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GetBlockBodies(
     /// The block hashes to request bodies for.
     pub Vec<H256>,
 );
+
+reth_primitives::dummy_rlp!(GetBlockBodies);
 
 impl From<Vec<H256>> for GetBlockBodies {
     fn from(hashes: Vec<H256>) -> Self {

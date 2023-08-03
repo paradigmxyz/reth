@@ -289,11 +289,13 @@ pub struct EnrRequest {
 }
 
 /// A [ENRResponse packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#enrresponse-packet-0x06).
-#[derive(Clone, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EnrResponse {
     pub request_hash: H256,
     pub enr: EnrWrapper<SecretKey>,
 }
+
+reth_primitives::dummy_rlp!(EnrResponse);
 
 // === impl EnrResponse ===
 
@@ -308,7 +310,7 @@ impl EnrResponse {
 }
 
 /// A [Ping packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#ping-packet-0x01).
-#[derive(Debug, Clone, Eq, PartialEq, RlpEncodable, RlpDecodable)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 // #[rlp(trailing)]
 pub struct Ping {
     pub version: u32,
@@ -319,8 +321,10 @@ pub struct Ping {
     pub enr_sq: Option<u64>,
 }
 
+reth_primitives::dummy_rlp!(Ping);
+
 /// A [Pong packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#pong-packet-0x02).
-#[derive(Clone, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 // #[rlp(trailing)]
 pub struct Pong {
     pub to: NodeEndpoint,
@@ -329,6 +333,8 @@ pub struct Pong {
     /// Optional enr_seq for <https://eips.ethereum.org/EIPS/eip-868>
     pub enr_sq: Option<u64>,
 }
+
+reth_primitives::dummy_rlp!(Pong);
 
 #[cfg(test)]
 mod tests {

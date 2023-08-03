@@ -24,12 +24,14 @@ use reth_primitives::{
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
 #[derive_arbitrary(rlp)]
-#[derive(Clone, Debug, Default, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)] // RlpEncodableWrapper, RlpDecodableWrapper
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GetPooledTransactions(
     /// The transaction hashes to request transaction bodies for.
     pub Vec<H256>,
 );
+
+reth_primitives::dummy_rlp!(GetPooledTransactions);
 
 impl<T> From<Vec<T>> for GetPooledTransactions
 where
@@ -73,7 +75,7 @@ impl From<PooledTransactions> for Vec<TransactionSigned> {
 /// This is defined in [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#networking) as an element
 /// of a [PooledTransactions] response.
 #[add_arbitrary_tests(rlp, 20)]
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct BlobTransaction {
     /// The transaction payload.
     pub transaction: TransactionSigned,
@@ -84,6 +86,8 @@ pub struct BlobTransaction {
     /// The transaction's blob proofs.
     pub proofs: Vec<Bytes48>,
 }
+
+reth_primitives::dummy_rlp!(BlobTransaction);
 
 impl BlobTransaction {
     /// Verifies that the transaction's blob data, commitments, and proofs are all valid.

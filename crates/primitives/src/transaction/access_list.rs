@@ -8,7 +8,7 @@ use std::mem;
 /// A list of addresses and storage keys that the transaction plans to access.
 /// Accesses outside the list are possible, but become more expensive.
 #[main_codec(rlp)]
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub struct AccessListItem {
     /// Account addresses that would be loaded at the start of execution
@@ -22,6 +22,8 @@ pub struct AccessListItem {
     )]
     pub storage_keys: Vec<H256>,
 }
+
+dummy_rlp!(AccessListItem);
 
 impl AccessListItem {
     /// Calculates a heuristic for the in-memory size of the [AccessListItem].

@@ -5,7 +5,7 @@ use std::mem;
 
 /// Withdrawal represents a validator withdrawal from the consensus layer.
 #[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodable, RlpDecodable)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
 pub struct Withdrawal {
     /// Monotonically increasing identifier issued by consensus layer.
     #[serde(with = "u64_hex")]
@@ -19,6 +19,8 @@ pub struct Withdrawal {
     #[serde(with = "u64_hex")]
     pub amount: u64,
 }
+
+dummy_rlp!(Withdrawal);
 
 impl Withdrawal {
     /// Return the withdrawal amount in wei.

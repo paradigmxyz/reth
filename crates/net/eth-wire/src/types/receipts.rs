@@ -8,12 +8,13 @@ use serde::{Deserialize, Serialize};
 
 /// A request for transaction receipts from the given block hashes.
 #[derive_arbitrary(rlp)]
-#[derive(Clone, Debug, Default, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)] // RlpEncodableWrapper, RlpDecodableWrapper
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GetReceipts(
     /// The block hashes to request receipts for.
     pub Vec<H256>,
 );
+reth_primitives::dummy_rlp!(GetReceipts);
 
 /// The response to [`GetReceipts`], containing receipt lists that correspond to each block
 /// requested.

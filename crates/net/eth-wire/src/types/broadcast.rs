@@ -37,7 +37,7 @@ impl NewBlockHashes {
 
 /// A block hash _and_ a block number.
 #[derive_arbitrary(rlp)]
-#[derive(Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BlockHashNumber {
     /// The block hash
@@ -45,6 +45,8 @@ pub struct BlockHashNumber {
     /// The block number
     pub number: u64,
 }
+
+reth_primitives::dummy_rlp!(BlockHashNumber);
 
 impl From<Vec<BlockHashNumber>> for NewBlockHashes {
     fn from(v: Vec<BlockHashNumber>) -> Self {
@@ -207,7 +209,7 @@ impl From<NewPooledTransactionHashes68> for NewPooledTransactionHashes {
 /// This informs peers of transaction hashes for transactions that have appeared on the network,
 /// but have not been included in a block.
 #[derive_arbitrary(rlp)]
-#[derive(Clone, Debug, Default, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)] // RlpEncodableWrapper, RlpDecodableWrapper
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NewPooledTransactionHashes66(
     /// Transaction hashes for new transactions that have appeared on the network.
@@ -215,6 +217,8 @@ pub struct NewPooledTransactionHashes66(
     /// [`GetPooledTransactions`](crate::GetPooledTransactions) message.
     pub Vec<H256>,
 );
+
+reth_primitives::dummy_rlp!(NewPooledTransactionHashes66);
 
 impl From<Vec<H256>> for NewPooledTransactionHashes66 {
     fn from(v: Vec<H256>) -> Self {
@@ -258,13 +262,14 @@ pub struct NewPooledTransactionHashes68 {
     pub hashes: Vec<H256>,
 }
 
-#[derive(RlpEncodable)]
+// #[derive(RlpEncodable)]
 #[allow(unused)]
 struct EncodableNewPooledTransactionHashes68<'a> {
     types: &'a [u8],
     sizes: &'a Vec<usize>,
     hashes: &'a Vec<H256>,
 }
+reth_primitives::dummy_rlp!(EncodableNewPooledTransactionHashes68<'_>, Encodable);
 
 impl Encodable for NewPooledTransactionHashes68 {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
@@ -287,12 +292,12 @@ impl Encodable for NewPooledTransactionHashes68 {
 
 impl Decodable for NewPooledTransactionHashes68 {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        #[derive(RlpDecodable)]
         struct EncodableNewPooledTransactionHashes68 {
             types: Bytes,
             sizes: Vec<usize>,
             hashes: Vec<H256>,
         }
+        reth_primitives::dummy_rlp!(EncodableNewPooledTransactionHashes68, Decodable);
 
         let encodable = EncodableNewPooledTransactionHashes68::decode(buf)?;
         Ok(Self { types: encodable.types.into(), sizes: encodable.sizes, hashes: encodable.hashes })

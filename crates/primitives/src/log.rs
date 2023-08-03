@@ -4,7 +4,7 @@ use reth_codecs::{main_codec, Compact};
 
 /// Ethereum Log
 #[main_codec(rlp)]
-#[derive(Clone, Debug, Default, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Log {
     /// Contract that emitted this log.
     pub address: Address,
@@ -19,3 +19,5 @@ pub struct Log {
     /// Arbitrary length data.
     pub data: Bytes,
 }
+
+dummy_rlp!(Log);

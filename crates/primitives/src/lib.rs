@@ -20,6 +20,39 @@
 //! - `arbitrary`: Adds `proptest` and `arbitrary` support for primitive types.
 //! - `test-utils`: Export utilities for testing
 
+#[macro_use]
+mod macros {
+    /// TODO: temporarily used to make the build pass.
+    /// replace with derive macros
+    #[macro_export]
+    macro_rules! dummy_rlp {
+        ($t:ty) => {
+            $crate::dummy_rlp!($t, Encodable);
+            $crate::dummy_rlp!($t, Decodable);
+        };
+
+        ($t:ty, Encodable) => {
+            impl alloy_rlp::Encodable for $t {
+                fn encode(&self, _out: &mut dyn alloy_rlp::BufMut) {
+                    unimplemented!(concat!(stringify!($t), "::encode"))
+                }
+
+                fn length(&self) -> usize {
+                    unimplemented!(concat!(stringify!($t), "::length"))
+                }
+            }
+        };
+
+        ($t:ty, Decodable) => {
+            impl alloy_rlp::Decodable for $t {
+                fn decode(_buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+                    unimplemented!(concat!(stringify!($t), "::decode"))
+                }
+            }
+        };
+    }
+}
+
 pub mod abi;
 mod account;
 pub mod basefee;

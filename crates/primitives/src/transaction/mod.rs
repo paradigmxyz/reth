@@ -409,7 +409,8 @@ impl Transaction {
                 len += to.length();
                 len += value.length();
                 len += access_list.length();
-                len += blob_versioned_hashes.length();
+                // TODO(rlp)
+                // len += blob_versioned_hashes.length();
                 len += max_fee_per_blob_gas.length();
                 len += input.0.length();
                 len
@@ -499,7 +500,8 @@ impl Transaction {
                 input.0.encode(out);
                 access_list.encode(out);
                 max_fee_per_blob_gas.encode(out);
-                blob_versioned_hashes.encode(out);
+                // TODO(rlp)
+                // blob_versioned_hashes.encode(out);
             }
         }
     }
@@ -1101,7 +1103,7 @@ impl TransactionSigned {
                 input: Bytes(Decodable::decode(data)?),
                 access_list: Decodable::decode(data)?,
                 max_fee_per_blob_gas: Decodable::decode(data)?,
-                blob_versioned_hashes: Decodable::decode(data)?,
+                blob_versioned_hashes: todo!("TODO(rlp)"),
             }),
             _ => return Err(RlpError::Custom("unsupported typed transaction type")),
         };

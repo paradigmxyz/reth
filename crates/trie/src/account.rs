@@ -2,7 +2,7 @@ use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_primitives::{proofs::EMPTY_ROOT, Account, H256, KECCAK_EMPTY, U256};
 
 /// An Ethereum account as represented in the trie.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct EthAccount {
     /// Account nonce.
     nonce: u64,
@@ -13,6 +13,8 @@ pub struct EthAccount {
     /// Hash of the account's bytecode.
     code_hash: H256,
 }
+
+reth_primitives::dummy_rlp!(EthAccount);
 
 impl From<Account> for EthAccount {
     fn from(acc: Account) -> Self {

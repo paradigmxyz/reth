@@ -10,9 +10,10 @@ use serde::{Deserialize, Serialize};
 /// This message was removed in `eth/67`, only clients running `eth/66` or earlier will respond to
 /// this message.
 #[derive_arbitrary(rlp)]
-#[derive(Clone, Debug, Default, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)] // RlpEncodableWrapper, RlpDecodableWrapper
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GetNodeData(pub Vec<H256>);
+reth_primitives::dummy_rlp!(GetNodeData);
 
 /// The response to [`GetNodeData`], containing the state tree nodes or contract bytecode
 /// corresponding to the requested hashes.
