@@ -351,6 +351,13 @@ impl NetworkConfigBuilder {
         }
     }
 
+    #[cfg(feature = "optimism")]
+    /// Sets the sequencer HTTP endpoint.
+    pub fn sequencer_endpoint(mut self, endpoint: Option<String>) -> Self {
+        self.sequencer_endpoint = endpoint;
+        self
+    }
+
     /// Consumes the type and creates the actual [`NetworkConfig`]
     /// for the given client type that can interact with the chain.
     ///

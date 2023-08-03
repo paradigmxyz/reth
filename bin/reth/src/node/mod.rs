@@ -670,7 +670,8 @@ impl Command {
         secret_key: SecretKey,
         default_peers_path: PathBuf,
     ) -> NetworkConfig<ProviderFactory<Arc<DatabaseEnv>>> {
-        self.network
+        let cfg_builder = self
+            .network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(executor))
             .set_head(head)
@@ -681,8 +682,12 @@ impl Command {
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::UNSPECIFIED,
                 self.network.discovery.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
-            )))
-            .build(ProviderFactory::new(db, self.chain.clone()))
+            )));
+
+        #[cfg(feature = "optimism")]
+        let cfg_builder = cfg_builder.sequencer_endpoint(self.rollup.sequencer_http.clone());
+
+        cfg_builder.build(ProviderFactory::new(db, self.chain.clone()))
     }
 
     #[allow(clippy::too_many_arguments)]
