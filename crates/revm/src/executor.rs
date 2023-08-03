@@ -231,7 +231,11 @@ where
         self.init_env(&block.header, total_difficulty);
 
         #[cfg(feature = "optimism")]
-        let mut l1_block_info = optimism::L1BlockInfo::try_from(block)?;
+        let l1_block_info = if self.chain_spec.optimism.is_some() {
+            Some(optimism::L1BlockInfo::try_from(block)?)
+        } else {
+            None
+        };
 
         let mut cumulative_gas_used = 0;
         let mut post_state = PostState::with_tx_capacity(block.number, block.body.len());
@@ -250,7 +254,11 @@ where
             #[cfg(feature = "optimism")]
             {
                 let db = self.db();
-                let l1_cost = l1_block_info.calculate_tx_l1_cost(transaction);
+                let l1_cost = if let Some(l1_block_info) = &l1_block_info {
+                    Some(l1_block_info.calculate_tx_l1_cost(transaction))
+                } else {
+                    None
+                };
 
                 let sender_account =
                     db.load_account(sender).map_err(|_| BlockExecutionError::ProviderError)?;
@@ -263,20 +271,23 @@ where
                     sender_account.info.balance += U256::from(m);
                 }
 
-                // Check if the sender balance can cover the L1 cost.
-                // Deposits pay for their gas directly on L1 so they are exempt from the L2 tx fee.
-                if !transaction.is_deposit() {
-                    if sender_account.info.balance.cmp(&l1_cost) == std::cmp::Ordering::Less {
-                        return Err(BlockExecutionError::InsufficientFundsForL1Cost {
-                            have: sender_account.info.balance.to::<u64>(),
-                            want: l1_cost.to::<u64>(),
-                        })
-                    }
+                if let Some(l1_cost) = l1_cost {
+                    // Check if the sender balance can cover the L1 cost.
+                    // Deposits pay for their gas directly on L1 so they are exempt from the L2
+                    // tx fee.
+                    if !transaction.is_deposit() {
+                        if sender_account.info.balance.cmp(&l1_cost) == std::cmp::Ordering::Less {
+                            return Err(BlockExecutionError::InsufficientFundsForL1Cost {
+                                have: sender_account.info.balance.to::<u64>(),
+                                want: l1_cost.to::<u64>(),
+                            })
+                        }
 
-                    // Safely take l1_cost from sender (the rest will be deducted by the
-                    // internal EVM execution and included in result.gas_used())
-                    // TODO: need to handle calls with `disable_balance_check` flag set?
-                    sender_account.info.balance -= l1_cost;
+                        // Safely take l1_cost from sender (the rest will be deducted by the
+                        // internal EVM execution and included in result.gas_used())
+                        // TODO: need to handle calls with `disable_balance_check` flag set?
+                        sender_account.info.balance -= l1_cost;
+                    }
                 }
 
                 let new_sender_info = to_reth_acc(&sender_account.info);
@@ -333,24 +344,28 @@ where
                     cumulative_gas_used += result.gas_used()
                 }
 
-                // Route the l1 cost and base fee to the appropriate optimism vaults
-                self.increment_account_balance(
-                    block.number,
-                    optimism::l1_cost_recipient(),
-                    l1_cost,
-                    &mut post_state,
-                )?;
-                self.increment_account_balance(
-                    block.number,
-                    optimism::base_fee_recipient(),
-                    U256::from(
-                        block
-                            .base_fee_per_gas
-                            .unwrap_or_default()
-                            .saturating_mul(result.gas_used()),
-                    ),
-                    &mut post_state,
-                )?;
+                if self.chain_spec.optimism.is_some() {
+                    // Route the l1 cost and base fee to the appropriate optimism vaults
+                    if let Some(l1_cost) = l1_cost {
+                        self.increment_account_balance(
+                            block.number,
+                            optimism::l1_cost_recipient(),
+                            l1_cost,
+                            &mut post_state,
+                        )?
+                    }
+                    self.increment_account_balance(
+                        block.number,
+                        optimism::base_fee_recipient(),
+                        U256::from(
+                            block
+                                .base_fee_per_gas
+                                .unwrap_or_default()
+                                .saturating_mul(result.gas_used()),
+                        ),
+                        &mut post_state,
+                    )?;
+                }
 
                 // cast revm logs to reth logs
                 let logs = result.logs().into_iter().map(into_reth_log).collect();
