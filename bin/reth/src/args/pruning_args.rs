@@ -25,7 +25,10 @@ impl PruningArgs {
                 parts: PruneModes {
                     sender_recovery: Some(PruneMode::Distance(128)),
                     transaction_lookup: None,
-                    receipts: chain_spec.deposit_contract_deployment_block.map(PruneMode::Before),
+                    receipts: chain_spec
+                        .deposit_contract
+                        .as_ref()
+                        .map(|contract| PruneMode::Before(contract.block)),
                     account_history: Some(PruneMode::Distance(128)),
                     storage_history: Some(PruneMode::Distance(128)),
                 },
