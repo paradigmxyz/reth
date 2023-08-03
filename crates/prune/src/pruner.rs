@@ -592,7 +592,7 @@ mod tests {
         },
     };
     use reth_primitives::{
-        Address, BlockNumber, PruneCheckpoint, PruneMode, PruneModes, PrunePart, H256, MAINNET,
+        BlockNumber, PruneCheckpoint, PruneMode, PruneModes, PrunePart, H256, MAINNET,
     };
     use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::TestTransaction;
