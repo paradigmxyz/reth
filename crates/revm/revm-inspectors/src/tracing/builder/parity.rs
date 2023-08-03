@@ -7,7 +7,6 @@ use reth_primitives::{Address, U64};
 use reth_rpc_types::{trace::parity::*, TransactionInfo};
 use revm::{
     db::DatabaseRef,
-    interpreter::opcode,
     primitives::{AccountInfo, ExecutionResult, ResultAndState, KECCAK_EMPTY},
 };
 use std::collections::{HashSet, VecDeque};
@@ -301,16 +300,10 @@ impl ParityTraceBuilder {
                         Vec::with_capacity(current.trace.steps.len());
 
                     for step in &current.trace.steps {
-                        let maybe_sub = match step.op.u8() {
-                            opcode::CALL |
-                            opcode::CALLCODE |
-                            opcode::DELEGATECALL |
-                            opcode::STATICCALL |
-                            opcode::CREATE |
-                            opcode::CREATE2 => {
-                                sub_stack.pop_front().expect("there should be a sub trace")
-                            }
-                            _ => None,
+                        let maybe_sub = if step.is_calllike_op() {
+                            sub_stack.pop_front().expect("there should be a sub trace")
+                        } else {
+                            None
                         };
 
                         instructions.push(Self::make_instruction(step, maybe_sub));
