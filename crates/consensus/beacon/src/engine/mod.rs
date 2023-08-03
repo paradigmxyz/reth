@@ -1636,8 +1636,11 @@ where
         !self.is_prune_idle()
     }
 
-    /// Returns [`Option::Some`] if prune controller emitted an [`EnginePruneEvent`] which
-    /// resulted in an error (see [`Self::on_prune_event`] for error handling)
+    /// Polls the prune controller, if it exists, and processes the event [`EnginePruneEvent`]
+    /// emitted by it.
+    ///
+    /// Returns [`Option::Some`] if prune controller emitted an event which resulted in the error
+    /// (see [`Self::on_prune_event`] for error handling)
     fn poll_prune(
         &mut self,
         cx: &mut Context<'_>,
