@@ -348,46 +348,50 @@ where
         }
 
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
+        let transaction_index = transaction_index.unwrap_or_default();
 
-        let transaction_index = transaction_index.unwrap_or(-1);
-        let state_at = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
-
-        let block_hash = self
-            .inner
-            .provider
-            .block_hash_for_id(state_at)?
-            .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-
+        let target_block = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
         let ((cfg, block_env, _), block) = futures::try_join!(
-            self.inner.eth_api.evm_env_at(block_hash.into()),
-            self.inner.eth_api.block_by_id(state_at),
+            self.inner.eth_api.evm_env_at(target_block),
+            self.inner.eth_api.block_by_id(target_block),
         )?;
 
         let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
         let tracing_options = opts.unwrap_or_default();
+        let gas_limit = self.inner.eth_api.call_gas_limit();
 
-        self.on_blocking_task(|this| async move {
-            this.inner.eth_api.with_state_at_block(state_at, |state| {
-                let gas_limit = this.inner.eth_api.call_gas_limit();
+        // we're essentially replaying the transactions in the block here, hence we need the state
+        // that points to the beginning of the block, which is the state at the parent block
+        let mut at = block.parent_hash;
+        let mut replay_block_txs = true;
+
+        // but if all transactions are to be replayed, we can use the state at the block itself
+        let num_txs = transaction_index.index().unwrap_or(block.body.len());
+        if num_txs == block.body.len() {
+            at = block.hash;
+            replay_block_txs = false;
+        }
+
+        let this = self.clone();
+        self.inner
+            .eth_api
+            .spawn_with_state_at_block(at.into(), move |state| {
                 let mut results = Vec::with_capacity(bundles.len());
                 let mut db = SubState::new(State::new(state));
 
-                let mut transactions = if transaction_index == -1 {
-                    block.body.into_iter()
-                } else {
-                    block.body
-                        [0..usize::try_from(transaction_index).expect("Tx index outside bounds.")]
-                        .to_vec()
-                        .into_iter()
-                };
+                if replay_block_txs {
+                    // only need to replay the transactions in the block if not all transactions are
+                    // to be replayed
+                    let transactions = block.body.into_iter().take(num_txs);
 
-                // Execute all transactions until index
-                while let Some(tx) = transactions.next() {
-                    let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
-                    let tx = tx_env_with_recovered(&tx);
-                    let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
-                    let (res, _) = transact(&mut db, env)?;
-                    db.commit(res.state);
+                    // Execute all transactions until index
+                    for tx in transactions {
+                        let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
+                        let tx = tx_env_with_recovered(&tx);
+                        let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                        let (res, _) = transact(&mut db, env)?;
+                        db.commit(res.state);
+                    }
                 }
 
                 // Trace all bundles
@@ -412,7 +416,7 @@ where
                         let (trace, state) = this.trace_transaction(
                             tracing_options.clone(),
                             env,
-                            state_at,
+                            target_block,
                             &mut db,
                         )?;
 
@@ -424,8 +428,7 @@ where
                 }
                 Ok(results)
             })
-        })
-        .await
+            .await
     }
 
     /// Executes the configured transaction with the environment on the given database.
