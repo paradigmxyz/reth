@@ -660,33 +660,40 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     }
 
     /// Prune the table for the specified key range, calling `chunk_callback` after every
-    /// `batch_size` pruned rows.
+    /// `batch_size` pruned rows with number of total unique keys and total rows pruned. For dupsort
+    /// tables, these numbers will be different as one key can correspond to multiple rows.
     ///
     /// Returns number of rows pruned.
     pub fn prune_table_with_range_in_batches<T: Table>(
         &self,
         keys: impl RangeBounds<T::Key>,
         batch_size: usize,
-        mut batch_callback: impl FnMut(usize),
-    ) -> std::result::Result<usize, DatabaseError> {
+        mut batch_callback: impl FnMut(usize, usize),
+    ) -> std::result::Result<(), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut walker = cursor.walk_range(keys)?;
-        let mut deleted = 0;
+        let mut deleted_keys = 0;
+        let mut deleted_rows = 0;
+        let mut previous_key = None;
 
-        while walker.next().transpose()?.is_some() {
+        while let Some((key, _)) = walker.next().transpose()? {
             walker.delete_current()?;
-            deleted += 1;
+            deleted_rows += 1;
+            if previous_key.as_ref().map(|previous_key| previous_key != &key).unwrap_or(true) {
+                deleted_keys += 1;
+                previous_key = Some(key);
+            }
 
-            if deleted % batch_size == 0 {
-                batch_callback(batch_size);
+            if deleted_rows % batch_size == 0 {
+                batch_callback(deleted_keys, deleted_rows);
             }
         }
 
-        if deleted % batch_size != 0 {
-            batch_callback(deleted % batch_size);
+        if deleted_rows % batch_size != 0 {
+            batch_callback(deleted_keys, deleted_rows);
         }
 
-        Ok(deleted)
+        Ok(())
     }
 
     /// Load shard and remove it. If list is empty, last shard was full or
