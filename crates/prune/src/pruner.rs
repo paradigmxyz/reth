@@ -241,11 +241,11 @@ impl<DB: Database> Pruner<DB> {
         provider.prune_table_with_iterator_in_batches::<tables::Receipts>(
             range,
             self.batch_sizes.receipts,
-            |entries| {
-                processed += entries;
+            |rows| {
+                processed += rows;
                 trace!(
                     target: "pruner",
-                    %entries,
+                    %rows,
                     progress = format!("{:.1}%", 100.0 * processed as f64 / total as f64),
                     "Pruned receipts"
                 );
@@ -306,11 +306,11 @@ impl<DB: Database> Pruner<DB> {
             // Pre-sort hashes to prune them in order
             hashes.sort_unstable();
 
-            let entries = provider.prune_table_with_iterator::<tables::TxHashNumber>(hashes)?;
-            processed += entries;
+            let rows = provider.prune_table_with_iterator::<tables::TxHashNumber>(hashes)?;
+            processed += rows;
             trace!(
                 target: "pruner",
-                %entries,
+                %rows,
                 progress = format!("{:.1}%", 100.0 * processed as f64 / total as f64),
                 "Pruned transaction lookup"
             );
@@ -349,11 +349,11 @@ impl<DB: Database> Pruner<DB> {
         provider.prune_table_with_range_in_batches::<tables::TxSenders>(
             range,
             self.batch_sizes.transaction_senders,
-            |entries, _| {
-                processed += entries;
+            |rows, _| {
+                processed += rows;
                 trace!(
                     target: "pruner",
-                    %entries,
+                    %rows,
                     progress = format!("{:.1}%", 100.0 * processed as f64 / total as f64),
                     "Pruned transaction senders"
                 );
@@ -402,10 +402,10 @@ impl<DB: Database> Pruner<DB> {
             |a, b| a.key == b.key,
             |key| ShardedKey::last(key.key),
             self.batch_sizes.account_history,
-            |entries| {
+            |rows| {
                 trace!(
                     target: "pruner",
-                    entries,
+                    rows,
                     "Pruned account history (indices)"
                 );
             },
@@ -454,10 +454,10 @@ impl<DB: Database> Pruner<DB> {
             |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
             |key| StorageShardedKey::last(key.address, key.sharded_key.key),
             self.batch_sizes.storage_history,
-            |entries| {
+            |rows| {
                 trace!(
                     target: "pruner",
-                    entries,
+                    rows,
                     "Pruned storage history (indices)"
                 );
             },
