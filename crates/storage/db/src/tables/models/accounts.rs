@@ -64,7 +64,9 @@ impl Compact for AccountBeforeTx {
 /// [`StorageChangeSet`](crate::tables::StorageChangeSet)
 ///
 /// Since it's used as a key, it isn't compressed when encoding it.
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Ord, PartialOrd)]
+#[derive(
+    Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Ord, PartialOrd, Hash,
+)]
 pub struct BlockNumberAddress(pub (BlockNumber, Address));
 
 impl BlockNumberAddress {

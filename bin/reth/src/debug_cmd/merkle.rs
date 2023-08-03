@@ -8,13 +8,13 @@ use reth_db::{cursor::DbCursorRO, init_db, tables, transaction::DbTx};
 use reth_primitives::{
     fs,
     stage::{StageCheckpoint, StageId},
-    ChainSpec, PruneTargets,
+    ChainSpec, PruneModes,
 };
 use reth_provider::{ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
-        StorageHashingStage,
+        StorageHashingStage, MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
     },
     ExecInput, PipelineError, Stage,
 };
@@ -96,7 +96,8 @@ impl Command {
         let mut execution_stage = ExecutionStage::new(
             factory,
             ExecutionStageThresholds { max_blocks: Some(1), max_changes: None },
-            PruneTargets::all(),
+            MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+            PruneModes::all(),
         );
 
         let mut account_hashing_stage = AccountHashingStage::default();

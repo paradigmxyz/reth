@@ -50,7 +50,7 @@ impl PendingBlockEnv {
         let block_number = block_env.number.to::<u64>();
 
         let mut executed_txs = Vec::new();
-        let mut best_txs = pool.best_transactions_with_base_fee(base_fee as u128);
+        let mut best_txs = pool.best_transactions_with_base_fee(base_fee);
 
         while let Some(pool_tx) = best_txs.next() {
             // ensure we still have capacity for this transaction
@@ -142,6 +142,8 @@ impl PendingBlockEnv {
             gas_limit: block_gas_limit,
             difficulty: U256::ZERO,
             gas_used: cumulative_gas_used,
+            blob_gas_used: None,
+            excess_blob_gas: None,
             extra_data: Default::default(),
         };
 

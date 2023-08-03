@@ -2,9 +2,16 @@
 //!
 //! Starts the client
 use crate::{
-    args::{get_secret_key, DebugArgs, NetworkArgs, RpcServerArgs, TxPoolArgs},
-    dirs::DataDirPath,
+    args::{
+        get_secret_key,
+        utils::{genesis_value_parser, parse_socket_address},
+        DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
+        RpcServerArgs, TxPoolArgs,
+    },
+    cli::ext::RethCliExt,
+    dirs::{DataDirPath, MaybePlatformPath},
     init::init_genesis,
+    node::cl_events::ConsensusLayerHealthEvents,
     prometheus_exporter,
     runner::CliContext,
     utils::get_single_header,
@@ -14,13 +21,13 @@ use clap::Parser;
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{future::Either, pin_mut, stream, stream_select, StreamExt};
-use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus};
+use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine, MIN_BLOCKS_FOR_PIPELINE_RUN};
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
-use reth_config::Config;
+use reth_config::{config::PruneConfig, Config};
 use reth_db::{database::Database, init_db, DatabaseEnv};
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_downloaders::{
@@ -32,26 +39,30 @@ use reth_interfaces::{
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
         either::EitherDownloader,
-        headers::downloader::HeaderDownloader,
+        headers::{client::HeadersClient, downloader::HeaderDownloader},
     },
 };
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
+use reth_payload_builder::PayloadBuilderService;
 use reth_primitives::{
-    stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, H256,
+    stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head,
+    SealedHeader, H256,
 };
 use reth_provider::{
-    BlockHashReader, BlockReader, CanonStateSubscriptions, HeaderProvider, ProviderFactory,
-    StageCheckpointReader,
+    providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
+    HeaderProvider, ProviderFactory, StageCheckpointReader,
 };
+use reth_prune::BatchSizes;
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
 use reth_stages::{
     prelude::*,
     stages::{
-        ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
-        TotalDifficultyStage,
+        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, HeaderSyncMode,
+        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
+        StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
     },
     MetricEventsSender, MetricsListener,
 };
@@ -66,29 +77,12 @@ use std::{
 use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
 
-use crate::{
-    args::{
-        utils::{genesis_value_parser, parse_socket_address},
-        DatabaseArgs, PayloadBuilderArgs,
-    },
-    dirs::MaybePlatformPath,
-    node::cl_events::ConsensusLayerHealthEvents,
-};
-use reth_interfaces::p2p::headers::client::HeadersClient;
-use reth_payload_builder::PayloadBuilderService;
-use reth_primitives::DisplayHardforks;
-use reth_provider::providers::BlockchainProvider;
-use reth_stages::stages::{
-    AccountHashingStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
-    StorageHashingStage, TransactionLookupStage,
-};
-
 pub mod cl_events;
 pub mod events;
 
 /// Start the node
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct Command<Ext: RethCliExt = ()> {
     /// The path to the data dir for all reth files and subdirectories.
     ///
     /// Defaults to the OS-specific data directory:
@@ -111,12 +105,15 @@ pub struct Command {
     /// - mainnet
     /// - goerli
     /// - sepolia
+    /// - dev
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
         verbatim_doc_comment,
         default_value = "mainnet",
-        value_parser = genesis_value_parser
+        default_value_if("dev", "true", "dev"),
+        value_parser = genesis_value_parser,
+        required = false,
     )]
     chain: Arc<ChainSpec>,
 
@@ -130,7 +127,7 @@ pub struct Command {
     network: NetworkArgs,
 
     #[clap(flatten)]
-    rpc: RpcServerArgs,
+    rpc: RpcServerArgs<Ext::RpcExt>,
 
     #[clap(flatten)]
     txpool: TxPoolArgs,
@@ -144,12 +141,14 @@ pub struct Command {
     #[clap(flatten)]
     db: DatabaseArgs,
 
-    /// Automatically mine blocks for new transactions
-    #[arg(long)]
-    auto_mine: bool,
+    #[clap(flatten)]
+    dev: DevArgs,
+
+    #[clap(flatten)]
+    pruning: PruningArgs,
 }
 
-impl Command {
+impl<Ext: RethCliExt> Command<Ext> {
     /// Execute `node` command
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
@@ -180,7 +179,7 @@ impl Command {
 
         info!(target: "reth::cli", "{}", DisplayHardforks::from(self.chain.hardforks().clone()));
 
-        let consensus: Arc<dyn Consensus> = if self.auto_mine {
+        let consensus: Arc<dyn Consensus> = if self.dev.dev {
             debug!(target: "reth::cli", "Using auto seal");
             Arc::new(AutoSealConsensus::new(Arc::clone(&self.chain)))
         } else {
@@ -302,25 +301,43 @@ impl Command {
             None
         };
 
+        let prune_config = self.pruning.prune_config(Arc::clone(&self.chain)).or(config.prune);
+
         // Configure the pipeline
-        let (mut pipeline, client) = if self.auto_mine {
+        let (mut pipeline, client) = if self.dev.dev {
+            info!(target: "reth::cli", "Starting Reth in dev mode");
+
+            let mining_mode = if let Some(interval) = self.dev.block_time {
+                MiningMode::interval(interval)
+            } else if let Some(max_transactions) = self.dev.block_max_transactions {
+                MiningMode::instant(
+                    max_transactions,
+                    transaction_pool.pending_transactions_listener(),
+                )
+            } else {
+                info!(target: "reth::cli", "No mining mode specified, defaulting to ReadyTransaction");
+                MiningMode::instant(1, transaction_pool.pending_transactions_listener())
+            };
+
             let (_, client, mut task) = AutoSealBuilder::new(
                 Arc::clone(&self.chain),
                 blockchain_db.clone(),
                 transaction_pool.clone(),
                 consensus_engine_tx.clone(),
                 canon_state_notification_sender,
+                mining_mode,
             )
             .build();
 
             let mut pipeline = self
                 .build_networked_pipeline(
-                    &mut config,
+                    &config,
                     client.clone(),
                     Arc::clone(&consensus),
                     db.clone(),
                     &ctx.task_executor,
                     metrics_tx,
+                    prune_config,
                     max_block,
                 )
                 .await?;
@@ -334,12 +351,13 @@ impl Command {
         } else {
             let pipeline = self
                 .build_networked_pipeline(
-                    &mut config,
+                    &config,
                     network_client.clone(),
                     Arc::clone(&consensus),
                     db.clone(),
                     &ctx.task_executor,
                     metrics_tx,
+                    prune_config,
                     max_block,
                 )
                 .await?;
@@ -362,9 +380,15 @@ impl Command {
             None
         };
 
-        let pruner = config.prune.map(|prune_config| {
+        let pruner = prune_config.map(|prune_config| {
             info!(target: "reth::cli", "Pruner initialized");
-            reth_prune::Pruner::new(prune_config.block_interval, tree_config.max_reorg_depth())
+            reth_prune::Pruner::new(
+                db.clone(),
+                self.chain.clone(),
+                prune_config.block_interval,
+                prune_config.parts,
+                BatchSizes::default(),
+            )
         });
 
         // Configure the consensus engine
@@ -455,12 +479,13 @@ impl Command {
     #[allow(clippy::too_many_arguments)]
     async fn build_networked_pipeline<DB, Client>(
         &self,
-        config: &mut Config,
+        config: &Config,
         client: Client,
         consensus: Arc<dyn Consensus>,
         db: DB,
         task_executor: &TaskExecutor,
         metrics_tx: MetricEventsSender,
+        prune_config: Option<PruneConfig>,
         max_block: Option<BlockNumber>,
     ) -> eyre::Result<Pipeline<DB>>
     where
@@ -486,6 +511,7 @@ impl Command {
                 max_block,
                 self.debug.continuous,
                 metrics_tx,
+                prune_config,
             )
             .await?;
 
@@ -667,6 +693,7 @@ impl Command {
         max_block: Option<u64>,
         continuous: bool,
         metrics_tx: MetricEventsSender,
+        prune_config: Option<PruneConfig>,
     ) -> eyre::Result<Pipeline<DB>>
     where
         DB: Database + Clone + 'static,
@@ -728,7 +755,12 @@ impl Command {
                             max_blocks: stage_config.execution.max_blocks,
                             max_changes: stage_config.execution.max_changes,
                         },
-                        config.prune.map(|prune| prune.parts).unwrap_or_default(),
+                        stage_config
+                            .merkle
+                            .clean_threshold
+                            .max(stage_config.account_hashing.clean_threshold)
+                            .max(stage_config.storage_hashing.clean_threshold),
+                        prune_config.map(|prune| prune.parts).unwrap_or_default(),
                     )
                     .with_metrics_tx(metrics_tx),
                 )
@@ -791,57 +823,60 @@ async fn run_network_until_shutdown<C>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_primitives::DEV;
     use std::{net::IpAddr, path::Path};
 
     #[test]
     fn parse_help_node_command() {
-        let err = Command::try_parse_from(["reth", "--help"]).unwrap_err();
+        let err = Command::<()>::try_parse_from(["reth", "--help"]).unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
     }
 
     #[test]
     fn parse_common_node_command_chain_args() {
         for chain in ["mainnet", "sepolia", "goerli"] {
-            let args: Command = Command::parse_from(["reth", "--chain", chain]);
+            let args: Command = Command::<()>::parse_from(["reth", "--chain", chain]);
             assert_eq!(args.chain.chain, chain.parse().unwrap());
         }
     }
 
     #[test]
     fn parse_discovery_port() {
-        let cmd = Command::try_parse_from(["reth", "--discovery.port", "300"]).unwrap();
+        let cmd = Command::<()>::try_parse_from(["reth", "--discovery.port", "300"]).unwrap();
         assert_eq!(cmd.network.discovery.port, Some(300));
     }
 
     #[test]
     fn parse_port() {
         let cmd =
-            Command::try_parse_from(["reth", "--discovery.port", "300", "--port", "99"]).unwrap();
+            Command::<()>::try_parse_from(["reth", "--discovery.port", "300", "--port", "99"])
+                .unwrap();
         assert_eq!(cmd.network.discovery.port, Some(300));
         assert_eq!(cmd.network.port, Some(99));
     }
 
     #[test]
     fn parse_metrics_port() {
-        let cmd = Command::try_parse_from(["reth", "--metrics", "9001"]).unwrap();
+        let cmd = Command::<()>::try_parse_from(["reth", "--metrics", "9001"]).unwrap();
         assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
 
-        let cmd = Command::try_parse_from(["reth", "--metrics", ":9001"]).unwrap();
+        let cmd = Command::<()>::try_parse_from(["reth", "--metrics", ":9001"]).unwrap();
         assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
 
-        let cmd = Command::try_parse_from(["reth", "--metrics", "localhost:9001"]).unwrap();
+        let cmd = Command::<()>::try_parse_from(["reth", "--metrics", "localhost:9001"]).unwrap();
         assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
     }
 
     #[test]
     fn parse_config_path() {
-        let cmd = Command::try_parse_from(["reth", "--config", "my/path/to/reth.toml"]).unwrap();
+        let cmd =
+            Command::<()>::try_parse_from(["reth", "--config", "my/path/to/reth.toml"]).unwrap();
         // always store reth.toml in the data dir, not the chain specific data dir
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
         let config_path = cmd.config.unwrap_or(data_dir.config_path());
         assert_eq!(config_path, Path::new("my/path/to/reth.toml"));
 
-        let cmd = Command::try_parse_from(["reth"]).unwrap();
+        let cmd = Command::<()>::try_parse_from(["reth"]).unwrap();
 
         // always store reth.toml in the data dir, not the chain specific data dir
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
@@ -851,14 +886,32 @@ mod tests {
 
     #[test]
     fn parse_db_path() {
-        let cmd = Command::try_parse_from(["reth"]).unwrap();
+        let cmd = Command::<()>::try_parse_from(["reth"]).unwrap();
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
         let db_path = data_dir.db_path();
         assert!(db_path.ends_with("reth/mainnet/db"), "{:?}", cmd.config);
 
-        let cmd = Command::try_parse_from(["reth", "--datadir", "my/custom/path"]).unwrap();
+        let cmd = Command::<()>::try_parse_from(["reth", "--datadir", "my/custom/path"]).unwrap();
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
         let db_path = data_dir.db_path();
         assert_eq!(db_path, Path::new("my/custom/path/db"));
+    }
+
+    #[test]
+    fn parse_dev() {
+        let cmd = Command::<()>::parse_from(["reth", "--dev"]);
+        let chain = DEV.clone();
+        assert_eq!(cmd.chain.chain, chain.chain);
+        assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
+        assert_eq!(
+            cmd.chain.paris_block_and_final_difficulty,
+            chain.paris_block_and_final_difficulty
+        );
+        assert_eq!(cmd.chain.hardforks, chain.hardforks);
+
+        assert!(cmd.rpc.http);
+        assert!(cmd.network.discovery.disable_discovery);
+
+        assert!(cmd.dev.dev);
     }
 }

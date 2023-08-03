@@ -12,7 +12,10 @@ use reth_eth_wire::{
     EthVersion, GetPooledTransactions, NewPooledTransactionHashes, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, PooledTransactions, Transactions,
 };
-use reth_interfaces::{p2p::error::RequestResult, sync::SyncStateProvider};
+use reth_interfaces::{
+    p2p::error::{RequestError, RequestResult},
+    sync::SyncStateProvider,
+};
 use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{Peers, ReputationChangeKind};
 use reth_primitives::{
@@ -264,12 +267,17 @@ where
                     // send hashes of transactions
                     self.network.send_transactions_hashes(*peer_id, new_pooled_hashes);
                 } else {
-                    // send full transactions
-                    self.network.send_transactions(*peer_id, full_transactions.build());
+                    let new_full_transactions = full_transactions.build();
 
-                    for hash in new_pooled_hashes.into_iter_hashes() {
-                        propagated.0.entry(hash).or_default().push(PropagateKind::Full(*peer_id));
+                    for tx in new_full_transactions.iter() {
+                        propagated
+                            .0
+                            .entry(tx.hash())
+                            .or_default()
+                            .push(PropagateKind::Full(*peer_id));
                     }
+                    // send full transactions
+                    self.network.send_transactions(*peer_id, new_full_transactions);
                 }
             }
         }
@@ -472,10 +480,23 @@ where
         }
     }
 
-    fn report_bad_message(&self, peer_id: PeerId) {
-        trace!(target: "net::tx", ?peer_id, "Penalizing peer for bad transaction");
+    fn report_peer(&self, peer_id: PeerId, kind: ReputationChangeKind) {
+        trace!(target: "net::tx", ?peer_id, ?kind);
+        self.network.reputation_change(peer_id, kind);
         self.metrics.reported_bad_transactions.increment(1);
-        self.network.reputation_change(peer_id, ReputationChangeKind::BadTransactions);
+    }
+
+    fn on_request_error(&self, peer_id: PeerId, req_err: RequestError) {
+        let kind = match req_err {
+            RequestError::UnsupportedCapability => ReputationChangeKind::BadProtocol,
+            RequestError::Timeout => ReputationChangeKind::Timeout,
+            RequestError::ChannelClosed | RequestError::ConnectionDropped => {
+                // peer is already disconnected
+                return
+            }
+            RequestError::BadResponse => ReputationChangeKind::BadTransactions,
+        };
+        self.report_peer(peer_id, kind);
     }
 
     fn report_already_seen(&self, peer_id: PeerId) {
@@ -492,7 +513,7 @@ where
     fn on_bad_import(&mut self, hash: TxHash) {
         if let Some(peers) = self.transactions_by_peers.remove(&hash) {
             for peer_id in peers {
-                self.report_bad_message(peer_id);
+                self.report_peer(peer_id, ReputationChangeKind::BadTransactions);
             }
         }
     }
@@ -537,11 +558,12 @@ where
                 Poll::Ready(Ok(Ok(txs))) => {
                     this.import_transactions(req.peer_id, txs.0, TransactionSource::Response);
                 }
-                Poll::Ready(Ok(Err(_))) => {
-                    this.report_bad_message(req.peer_id);
+                Poll::Ready(Ok(Err(req_err))) => {
+                    this.on_request_error(req.peer_id, req_err);
                 }
                 Poll::Ready(Err(_)) => {
-                    this.report_bad_message(req.peer_id);
+                    // request channel closed/dropped
+                    this.on_request_error(req.peer_id, RequestError::ChannelClosed)
                 }
             }
         }

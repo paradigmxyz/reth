@@ -54,6 +54,8 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1681338455)),
         ]),
+        // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
+        deposit_contract_deployment_block: Some(11052984),
     }
     .into()
 });
@@ -88,6 +90,8 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1678832736)),
         ]),
+        // https://goerli.etherscan.io/tx/0xa3c07dc59bfdb1bfc2d50920fed2ef2c1c4e0a09fe2325dbc14e07702f965a78
+        deposit_contract_deployment_block: Some(4367322),
     }
     .into()
 });
@@ -126,6 +130,46 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1677557088)),
         ]),
+        // https://sepolia.etherscan.io/tx/0x025ecbf81a2f1220da6285d1701dc89fb5a956b62562ee922e1a9efd73eb4b14
+        deposit_contract_deployment_block: Some(1273020),
+    }
+    .into()
+});
+
+/// Dev testnet specification
+///
+/// Includes 20 prefunded accounts with 10_000 ETH each derived from mnemonic "test test test test
+/// test test test test test test test junk".
+pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    ChainSpec {
+        chain: Chain::dev(),
+        genesis: serde_json::from_str(include_str!("../../res/genesis/dev.json"))
+            .expect("Can't deserialize Dev testnet genesis json"),
+        genesis_hash: Some(H256(hex!(
+            "2f980576711e3617a5e4d83dd539548ec0f7792007d505a3d2e9674833af2d7c"
+        ))),
+        paris_block_and_final_difficulty: Some((0, U256::from(0))),
+        fork_timestamps: ForkTimestamps::default().shanghai(0),
+        hardforks: BTreeMap::from([
+            (Hardfork::Frontier, ForkCondition::Block(0)),
+            (Hardfork::Homestead, ForkCondition::Block(0)),
+            (Hardfork::Dao, ForkCondition::Block(0)),
+            (Hardfork::Tangerine, ForkCondition::Block(0)),
+            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+            (Hardfork::Byzantium, ForkCondition::Block(0)),
+            (Hardfork::Constantinople, ForkCondition::Block(0)),
+            (Hardfork::Petersburg, ForkCondition::Block(0)),
+            (Hardfork::Istanbul, ForkCondition::Block(0)),
+            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
+            (Hardfork::Berlin, ForkCondition::Block(0)),
+            (Hardfork::London, ForkCondition::Block(0)),
+            (
+                Hardfork::Paris,
+                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
+            ),
+            (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
+        ]),
+        deposit_contract_deployment_block: Some(0),
     }
     .into()
 });
@@ -164,6 +208,10 @@ pub struct ChainSpec {
 
     /// The active hard forks and their activation conditions
     pub hardforks: BTreeMap<Hardfork, ForkCondition>,
+
+    /// The block at which the deposit contract for PoS was deployed.
+    #[serde(skip, default)]
+    pub deposit_contract_deployment_block: Option<BlockNumber>,
 }
 
 impl ChainSpec {
@@ -267,6 +315,15 @@ impl ChainSpec {
             .shanghai
             .map(|shanghai| timestamp >= shanghai)
             .unwrap_or_else(|| self.is_fork_active_at_timestamp(Hardfork::Shanghai, timestamp))
+    }
+
+    /// Convenience method to check if [Hardfork::Cancun] is active at a given timestamp.
+    #[inline]
+    pub fn is_cancun_activated_at_timestamp(&self, timestamp: u64) -> bool {
+        self.fork_timestamps
+            .cancun
+            .map(|cancun| timestamp >= cancun)
+            .unwrap_or_else(|| self.is_fork_active_at_timestamp(Hardfork::Cancun, timestamp))
     }
 
     /// Creates a [`ForkFilter`](crate::ForkFilter) for the block described by [Head].
@@ -387,6 +444,7 @@ impl From<Genesis> for ChainSpec {
             fork_timestamps: ForkTimestamps::from_hardforks(&hardforks),
             hardforks,
             paris_block_and_final_difficulty: None,
+            deposit_contract_deployment_block: None,
         }
     }
 }
@@ -396,6 +454,8 @@ impl From<Genesis> for ChainSpec {
 pub struct ForkTimestamps {
     /// The timestamp of the shanghai fork
     pub shanghai: Option<u64>,
+    /// The timestamp of the cancun fork
+    pub cancun: Option<u64>,
 }
 
 impl ForkTimestamps {
@@ -405,12 +465,21 @@ impl ForkTimestamps {
         if let Some(shanghai) = forks.get(&Hardfork::Shanghai).and_then(|f| f.as_timestamp()) {
             timestamps = timestamps.shanghai(shanghai);
         }
+        if let Some(cancun) = forks.get(&Hardfork::Cancun).and_then(|f| f.as_timestamp()) {
+            timestamps = timestamps.cancun(cancun);
+        }
         timestamps
     }
 
     /// Sets the given shanghai timestamp
     pub fn shanghai(mut self, shanghai: u64) -> Self {
         self.shanghai = Some(shanghai);
+        self
+    }
+
+    /// Sets the given cancun timestamp
+    pub fn cancun(mut self, cancun: u64) -> Self {
+        self.cancun = Some(cancun);
         self
     }
 }
@@ -577,6 +646,13 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable Cancun at genesis.
+    pub fn cancun_activated(mut self) -> Self {
+        self = self.paris_activated();
+        self.hardforks.insert(Hardfork::Cancun, ForkCondition::Timestamp(0));
+        self
+    }
+
     /// Build the resulting [`ChainSpec`].
     ///
     /// # Panics
@@ -591,6 +667,7 @@ impl ChainSpecBuilder {
             fork_timestamps: ForkTimestamps::from_hardforks(&self.hardforks),
             hardforks: self.hardforks,
             paris_block_and_final_difficulty: None,
+            deposit_contract_deployment_block: None,
         }
     }
 }
@@ -887,8 +964,8 @@ where
 mod tests {
     use crate::{
         Address, AllGenesisFormats, Chain, ChainSpec, ChainSpecBuilder, DisplayHardforks,
-        ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head, GOERLI, H256, MAINNET, SEPOLIA,
-        U256,
+        ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head, DEV, GOERLI, H256, MAINNET,
+        SEPOLIA, U256,
     };
     use bytes::BytesMut;
     use ethers_core::types as EtherType;
@@ -1186,6 +1263,17 @@ Post-merge hard forks (timestamp based):
                 ),
             ],
         );
+    }
+
+    #[test]
+    fn dev_forkids() {
+        test_fork_ids(
+            &DEV,
+            &[(
+                Head { number: 0, ..Default::default() },
+                ForkId { hash: ForkHash([0x45, 0xb8, 0x36, 0x12]), next: 0 },
+            )],
+        )
     }
 
     /// Checks that time-based forks work

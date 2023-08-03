@@ -59,3 +59,6 @@ pub use hashing::HashingWriter;
 
 mod history;
 pub use history::HistoryWriter;
+
+mod prune_checkpoint;
+pub use prune_checkpoint::{PruneCheckpointReader, PruneCheckpointWriter};

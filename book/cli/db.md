@@ -16,6 +16,8 @@ Commands:
           Gets the content of a table for the given key
   drop
           Deletes all database entries
+  clear
+          Deletes all table entries
   version
           Lists current and local database versions
   path
@@ -95,90 +97,14 @@ Display:
           Silence all log output
 ```
 
-## `reth db drop`
+## `reth db stats`
 
-Deletes all database entries
-
-```bash
-$ reth db drop --help
-
-Usage: reth db drop [OPTIONS]
-
-Options:
-      --datadir <DATA_DIR>
-          The path to the data dir for all reth files and subdirectories.
-          
-          Defaults to the OS-specific data directory:
-          
-          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-          - Windows: `{FOLDERID_RoamingAppData}/reth/`
-          - macOS: `$HOME/Library/Application Support/reth/`
-          
-          [default: default]
-
-      --chain <CHAIN_OR_PATH>
-          The chain this node is running.
-          
-          Possible values are either a built-in chain or the path to a chain specification file.
-          
-          Built-in chains:
-          - mainnet
-          - goerli
-          - sepolia
-          
-          [default: mainnet]
-
-  -h, --help
-          Print help (see a summary with '-h')
-
-Logging:
-      --log.persistent
-          The flag to enable persistent logs
-
-      --log.directory <PATH>
-          The path to put log files in
-          
-          [default: /reth/logs]
-
-      --log.journald
-          Log events to journald
-
-      --log.filter <FILTER>
-          The filter to use for logs written to the log file
-          
-          [default: error]
-
-Display:
-  -v, --verbosity...
-          Set the minimum log level.
-          
-          -v      Errors
-          -vv     Warnings
-          -vvv    Info
-          -vvvv   Debug
-          -vvvvv  Traces (warning: very verbose!)
-
-  -q, --quiet
-          Silence all log output
-```
-
-## `reth db get`
-
-Gets the content of a table for the given key
+Lists all the tables, their entry count and their size
 
 ```bash
-$ reth db get --help
+$ reth db stats --help
 
-Usage: reth db get [OPTIONS] <TABLE> <KEY>
-
-Arguments:
-  <TABLE>
-          The table name
-          
-          NOTE: The dupsort tables are not supported now.
-
-  <KEY>
-          The key to get content for
+Usage: reth db stats [OPTIONS]
 
 Options:
       --datadir <DATA_DIR>
@@ -325,14 +251,23 @@ Display:
           Silence all log output
 ```
 
-## `reth db path`
+## `reth db get`
 
-Returns the full database path
+Gets the content of a table for the given key
 
 ```bash
-$ reth db path --help
+$ reth db get --help
 
-Usage: reth db path [OPTIONS]
+Usage: reth db get [OPTIONS] <TABLE> <KEY>
+
+Arguments:
+  <TABLE>
+          The table name
+          
+          NOTE: The dupsort tables are not supported now.
+
+  <KEY>
+          The key to get content for
 
 Options:
       --datadir <DATA_DIR>
@@ -392,14 +327,85 @@ Display:
           Silence all log output
 ```
 
-## `reth db stats`
+## `reth db drop`
 
-Lists all the tables, their entry count and their size
+Deletes all database entries
 
 ```bash
-$ reth db stats --help
+$ reth db drop --help
 
-Usage: reth db stats [OPTIONS]
+Usage: reth db drop [OPTIONS]
+
+Options:
+      --datadir <DATA_DIR>
+          The path to the data dir for all reth files and subdirectories.
+          
+          Defaults to the OS-specific data directory:
+          
+          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+          - Windows: `{FOLDERID_RoamingAppData}/reth/`
+          - macOS: `$HOME/Library/Application Support/reth/`
+          
+          [default: default]
+
+      --chain <CHAIN_OR_PATH>
+          The chain this node is running.
+          
+          Possible values are either a built-in chain or the path to a chain specification file.
+          
+          Built-in chains:
+          - mainnet
+          - goerli
+          - sepolia
+          
+          [default: mainnet]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Logging:
+      --log.persistent
+          The flag to enable persistent logs
+
+      --log.directory <PATH>
+          The path to put log files in
+          
+          [default: /reth/logs]
+
+      --log.journald
+          Log events to journald
+
+      --log.filter <FILTER>
+          The filter to use for logs written to the log file
+          
+          [default: error]
+
+Display:
+  -v, --verbosity...
+          Set the minimum log level.
+          
+          -v      Errors
+          -vv     Warnings
+          -vvv    Info
+          -vvvv   Debug
+          -vvvvv  Traces (warning: very verbose!)
+
+  -q, --quiet
+          Silence all log output
+```
+
+## `reth db clear`
+
+Deletes all table entries
+
+```bash
+$ reth db clear --help
+
+Usage: reth db clear [OPTIONS] <TABLE>
+
+Arguments:
+  <TABLE>
+          Table name
 
 Options:
       --datadir <DATA_DIR>
@@ -467,6 +473,73 @@ Lists current and local database versions
 $ reth db version --help
 
 Usage: reth db version [OPTIONS]
+
+Options:
+      --datadir <DATA_DIR>
+          The path to the data dir for all reth files and subdirectories.
+          
+          Defaults to the OS-specific data directory:
+          
+          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+          - Windows: `{FOLDERID_RoamingAppData}/reth/`
+          - macOS: `$HOME/Library/Application Support/reth/`
+          
+          [default: default]
+
+      --chain <CHAIN_OR_PATH>
+          The chain this node is running.
+          
+          Possible values are either a built-in chain or the path to a chain specification file.
+          
+          Built-in chains:
+          - mainnet
+          - goerli
+          - sepolia
+          
+          [default: mainnet]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Logging:
+      --log.persistent
+          The flag to enable persistent logs
+
+      --log.directory <PATH>
+          The path to put log files in
+          
+          [default: /reth/logs]
+
+      --log.journald
+          Log events to journald
+
+      --log.filter <FILTER>
+          The filter to use for logs written to the log file
+          
+          [default: error]
+
+Display:
+  -v, --verbosity...
+          Set the minimum log level.
+          
+          -v      Errors
+          -vv     Warnings
+          -vvv    Info
+          -vvvv   Debug
+          -vvvvv  Traces (warning: very verbose!)
+
+  -q, --quiet
+          Silence all log output
+```
+
+## `reth db path`
+
+Returns the full database path
+
+```bash
+$ reth db path --help
+
+Usage: reth db path [OPTIONS]
 
 Options:
       --datadir <DATA_DIR>

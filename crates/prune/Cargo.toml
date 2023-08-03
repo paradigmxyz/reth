@@ -12,9 +12,23 @@ Pruning implementation
 
 [dependencies]
 # reth
-reth-primitives = { workspace = true }
+reth-primitives.workspace = true
+reth-db.workspace = true
+reth-provider.workspace = true
+reth-interfaces.workspace = true
+reth-metrics.workspace = true
 
 # misc
-tracing = { workspace = true }
-thiserror = { workspace = true }
+tracing.workspace = true
+thiserror.workspace = true
+itertools.workspace = true
+rayon.workspace = true
 
+[dev-dependencies]
+# reth
+reth-db = { workspace = true, features = ["test-utils"] }
+reth-stages = { path = "../stages", features = ["test-utils"] }
+
+# misc
+
+assert_matches = "1.5.0"

@@ -13,8 +13,7 @@ use crate::{
         AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
     },
     traits::{BlockInfo, PoolSize},
-    PoolConfig, PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, PRICE_BUMP,
-    U256,
+    PoolConfig, PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
 use reth_primitives::{
@@ -142,14 +141,15 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///
     /// Depending on the change in direction of the basefee, this will promote or demote
     /// transactions from the basefee pool.
-    fn update_basefee(&mut self, pending_basefee: u128) {
+    fn update_basefee(&mut self, pending_basefee: u64) {
         match pending_basefee.cmp(&self.all_transactions.pending_basefee) {
             Ordering::Equal => {
                 // fee unchanged, nothing to update
             }
             Ordering::Greater => {
                 // increased base fee: recheck pending pool and remove all that are no longer valid
-                for tx in self.pending_pool.enforce_basefee(pending_basefee) {
+                let removed = self.pending_pool.update_base_fee(pending_basefee);
+                for tx in removed {
                     let to = {
                         let tx =
                             self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
@@ -162,7 +162,8 @@ impl<T: TransactionOrdering> TxPool<T> {
             }
             Ordering::Less => {
                 // decreased base fee: recheck basefee pool and promote all that are now valid
-                for tx in self.basefee_pool.enforce_basefee(pending_basefee) {
+                let removed = self.basefee_pool.enforce_basefee(pending_basefee);
+                for tx in removed {
                     let to = {
                         let tx =
                             self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
@@ -183,6 +184,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         let BlockInfo { last_seen_block_hash, last_seen_block_number, pending_basefee } = info;
         self.all_transactions.last_seen_block_hash = last_seen_block_hash;
         self.all_transactions.last_seen_block_number = last_seen_block_number;
+        self.all_transactions.pending_basefee = pending_basefee;
         self.update_basefee(pending_basefee)
     }
 
@@ -195,7 +197,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// the given base fee.
     pub(crate) fn best_transactions_with_base_fee(
         &self,
-        basefee: u128,
+        basefee: u64,
     ) -> Box<dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T::Transaction>>>>
     {
         match basefee.cmp(&self.all_transactions.pending_basefee) {
@@ -211,7 +213,10 @@ impl<T: TransactionOrdering> TxPool<T> {
                 // base fee decreased, we need to move transactions from the basefee pool to the
                 // pending pool
                 let unlocked = self.basefee_pool.satisfy_base_fee_transactions(basefee);
-                Box::new(self.pending_pool.best_with_unlocked(unlocked))
+                Box::new(
+                    self.pending_pool
+                        .best_with_unlocked(unlocked, self.all_transactions.pending_basefee),
+                )
             }
         }
     }
@@ -545,7 +550,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 self.queued_pool.add_transaction(tx);
             }
             SubPool::Pending => {
-                self.pending_pool.add_transaction(tx);
+                self.pending_pool.add_transaction(tx, self.all_transactions.pending_basefee);
             }
             SubPool::BaseFee => {
                 self.basefee_pool.add_transaction(tx);
@@ -649,7 +654,7 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// Minimum base fee required by the protocol.
     ///
     /// Transactions with a lower base fee will never be included by the chain
-    minimal_protocol_basefee: u128,
+    minimal_protocol_basefee: u64,
     /// The max gas limit of the block
     block_gas_limit: u64,
     /// Max number of executable transaction slots guaranteed per account
@@ -665,7 +670,7 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// The current block hash the pool keeps track of.
     last_seen_block_hash: H256,
     /// Expected base fee for the pending block.
-    pending_basefee: u128,
+    pending_basefee: u64,
 }
 
 impl<T: PoolTransaction> AllTransactions<T> {
@@ -812,7 +817,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             tx.state.insert(TxState::NO_PARKED_ANCESTORS);
 
             // Update the first transaction of this sender.
-            Self::update_tx_base_fee(&self.pending_basefee, tx);
+            Self::update_tx_base_fee(self.pending_basefee, tx);
             // Track if the transaction's sub-pool changed.
             Self::record_subpool_update(&mut updates, tx);
 
@@ -858,7 +863,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 has_parked_ancestor = !tx.state.is_pending();
 
                 // Update and record sub-pool changes.
-                Self::update_tx_base_fee(&self.pending_basefee, tx);
+                Self::update_tx_base_fee(self.pending_basefee, tx);
                 Self::record_subpool_update(&mut updates, tx);
 
                 // Advance iterator
@@ -887,9 +892,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 
     /// Rechecks the transaction's dynamic fee condition.
-    fn update_tx_base_fee(pending_block_base_fee: &u128, tx: &mut PoolInternalTransaction<T>) {
+    fn update_tx_base_fee(pending_block_base_fee: u64, tx: &mut PoolInternalTransaction<T>) {
         // Recheck dynamic fee condition.
-        match tx.transaction.max_fee_per_gas().cmp(pending_block_base_fee) {
+        match tx.transaction.max_fee_per_gas().cmp(&(pending_block_base_fee as u128)) {
             Ordering::Greater | Ordering::Equal => {
                 tx.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
             }
@@ -1070,10 +1075,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
         // Check dynamic fee
         let fee_cap = transaction.max_fee_per_gas();
 
-        if fee_cap < self.minimal_protocol_basefee {
+        if fee_cap < self.minimal_protocol_basefee as u128 {
             return Err(InsertErr::FeeCapBelowMinimumProtocolFeeCap { transaction, fee_cap })
         }
-        if fee_cap >= self.pending_basefee {
+        if fee_cap >= self.pending_basefee as u128 {
             state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
         }
 
@@ -1105,7 +1110,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 if Self::is_underpriced(
                     transaction.as_ref(),
                     entry.get().transaction.as_ref(),
-                    PRICE_BUMP,
+                    PoolConfig::default().price_bump,
                 ) {
                     return Err(InsertErr::Underpriced {
                         transaction: pool_tx.transaction,
@@ -1570,7 +1575,7 @@ mod tests {
 
         let first_in_pool = pool.get(first.id()).unwrap();
 
-        assert!(tx.get_gas_price() < pool.pending_basefee);
+        assert!(tx.get_gas_price() < pool.pending_basefee as u128);
         // has nonce gap
         assert!(!first_in_pool.state.contains(TxState::NO_NONCE_GAPS));
 
@@ -1671,7 +1676,7 @@ mod tests {
 
         assert_eq!(pool.pending_pool.len(), 1);
 
-        pool.update_basefee(tx.max_fee_per_gas() + 1);
+        pool.update_basefee((tx.max_fee_per_gas() + 1) as u64);
 
         assert!(pool.pending_pool.is_empty());
         assert_eq!(pool.basefee_pool.len(), 1);

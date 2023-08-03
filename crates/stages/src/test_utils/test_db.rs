@@ -9,11 +9,12 @@ use reth_db::{
     transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
     DatabaseEnv, DatabaseError as DbError,
 };
+use reth_interfaces::test_utils::generators::ChangeSet;
 use reth_primitives::{
-    keccak256, Account, Address, BlockNumber, SealedBlock, SealedHeader, StorageEntry, H256,
-    MAINNET, U256,
+    keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader, StorageEntry,
+    TxHash, TxNumber, H256, MAINNET, U256,
 };
-use reth_provider::{DatabaseProviderRO, DatabaseProviderRW, ProviderFactory};
+use reth_provider::{DatabaseProviderRO, DatabaseProviderRW, HistoryWriter, ProviderFactory};
 use std::{
     borrow::Borrow,
     collections::BTreeMap,
@@ -268,6 +269,43 @@ impl TestTransaction {
         })
     }
 
+    pub fn insert_tx_hash_numbers<I>(&self, tx_hash_numbers: I) -> Result<(), DbError>
+    where
+        I: IntoIterator<Item = (TxHash, TxNumber)>,
+    {
+        self.commit(|tx| {
+            tx_hash_numbers.into_iter().try_for_each(|(tx_hash, tx_num)| {
+                // Insert into tx hash numbers table.
+                tx.put::<tables::TxHashNumber>(tx_hash, tx_num)
+            })
+        })
+    }
+
+    /// Insert collection of ([TxNumber], [Receipt]) into the corresponding table.
+    pub fn insert_receipts<I>(&self, receipts: I) -> Result<(), DbError>
+    where
+        I: IntoIterator<Item = (TxNumber, Receipt)>,
+    {
+        self.commit(|tx| {
+            receipts.into_iter().try_for_each(|(tx_num, receipt)| {
+                // Insert into receipts table.
+                tx.put::<tables::Receipts>(tx_num, receipt)
+            })
+        })
+    }
+
+    pub fn insert_transaction_senders<I>(&self, transaction_senders: I) -> Result<(), DbError>
+    where
+        I: IntoIterator<Item = (TxNumber, Address)>,
+    {
+        self.commit(|tx| {
+            transaction_senders.into_iter().try_for_each(|(tx_num, sender)| {
+                // Insert into receipts table.
+                tx.put::<tables::TxSenders>(tx_num, sender)
+            })
+        })
+    }
+
     /// Insert collection of ([Address], [Account]) into corresponding tables.
     pub fn insert_accounts_and_storages<I, S>(&self, accounts: I) -> Result<(), DbError>
     where
@@ -310,35 +348,62 @@ impl TestTransaction {
         })
     }
 
-    /// Insert collection of Vec<([Address], [Account], Vec<[StorageEntry]>)> into
-    /// corresponding tables.
-    pub fn insert_transitions<I>(
+    /// Insert collection of [ChangeSet] into corresponding tables.
+    pub fn insert_changesets<I>(
         &self,
-        transitions: I,
-        transition_offset: Option<u64>,
+        changesets: I,
+        block_offset: Option<u64>,
     ) -> Result<(), DbError>
     where
-        I: IntoIterator<Item = Vec<(Address, Account, Vec<StorageEntry>)>>,
+        I: IntoIterator<Item = ChangeSet>,
     {
-        let offset = transition_offset.unwrap_or_default();
+        let offset = block_offset.unwrap_or_default();
         self.commit(|tx| {
-            transitions.into_iter().enumerate().try_for_each(|(transition_id, changes)| {
-                changes.into_iter().try_for_each(|(address, old_account, old_storage)| {
-                    let tid = offset + transition_id as u64;
+            changesets.into_iter().enumerate().try_for_each(|(block, changeset)| {
+                changeset.into_iter().try_for_each(|(address, old_account, old_storage)| {
+                    let block = offset + block as u64;
                     // Insert into account changeset.
                     tx.put::<tables::AccountChangeSet>(
-                        tid,
+                        block,
                         AccountBeforeTx { address, info: Some(old_account) },
                     )?;
 
-                    let tid_address = (tid, address).into();
+                    let block_address = (block, address).into();
 
                     // Insert into storage changeset.
                     old_storage.into_iter().try_for_each(|entry| {
-                        tx.put::<tables::StorageChangeSet>(tid_address, entry)
+                        tx.put::<tables::StorageChangeSet>(block_address, entry)
                     })
                 })
             })
         })
+    }
+
+    pub fn insert_history<I>(
+        &self,
+        changesets: I,
+        block_offset: Option<u64>,
+    ) -> reth_interfaces::Result<()>
+    where
+        I: IntoIterator<Item = ChangeSet>,
+    {
+        let mut accounts = BTreeMap::<Address, Vec<u64>>::new();
+        let mut storages = BTreeMap::<(Address, H256), Vec<u64>>::new();
+
+        for (block, changeset) in changesets.into_iter().enumerate() {
+            for (address, _, storage_entries) in changeset {
+                accounts.entry(address).or_default().push(block as u64);
+                for storage_entry in storage_entries {
+                    storages.entry((address, storage_entry.key)).or_default().push(block as u64);
+                }
+            }
+        }
+
+        let provider = self.factory.provider_rw()?;
+        provider.insert_account_history_index(accounts)?;
+        provider.insert_storage_history_index(storages)?;
+        provider.commit()?;
+
+        Ok(())
     }
 }

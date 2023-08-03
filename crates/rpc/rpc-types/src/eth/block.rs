@@ -20,6 +20,7 @@ pub enum BlockTransactions {
     /// Special case for uncle response.
     Uncle,
 }
+
 impl BlockTransactions {
     /// Check if the enum variant is
     /// used for an uncle response.
@@ -238,6 +239,12 @@ pub struct Header {
     /// Withdrawals root hash added by EIP-4895 and is ignored in legacy headers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub withdrawals_root: Option<H256>,
+    /// Blob gas used
+    #[serde(rename = "blobGasUsed", skip_serializing_if = "Option::is_none")]
+    pub blob_gas_used: Option<U64>,
+    /// Excess blob gas
+    #[serde(rename = "excessBlobGas", skip_serializing_if = "Option::is_none")]
+    pub excess_blob_gas: Option<U64>,
 }
 
 // === impl Header ===
@@ -267,6 +274,8 @@ impl Header {
                     base_fee_per_gas,
                     extra_data,
                     withdrawals_root,
+                    blob_gas_used,
+                    excess_blob_gas,
                 },
             hash,
         } = primitive_header;
@@ -290,6 +299,8 @@ impl Header {
             mix_hash,
             nonce: Some(nonce.to_be_bytes().into()),
             base_fee_per_gas: base_fee_per_gas.map(U256::from),
+            blob_gas_used: blob_gas_used.map(U64::from),
+            excess_blob_gas: excess_blob_gas.map(U64::from),
         }
     }
 }
@@ -376,7 +387,6 @@ pub struct BlockOverrides {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jsonrpsee_types::SubscriptionResponse;
 
     #[test]
     fn test_full_conversion() {
@@ -388,7 +398,9 @@ mod tests {
     }
 
     #[test]
-    fn serde_header() {
+    #[cfg(feature = "jsonrpsee-types")]
+    fn serde_json_header() {
+        use jsonrpsee_types::SubscriptionResponse;
         let resp = r#"{"jsonrpc":"2.0","method":"eth_subscribe","params":{"subscription":"0x7eef37ff35d471f8825b1c8f67a5d3c0","result":{"hash":"0x7a7ada12e140961a32395059597764416499f4178daf1917193fad7bd2cc6386","parentHash":"0xdedbd831f496e705e7f2ec3c8dcb79051040a360bf1455dbd7eb8ea6ad03b751","sha3Uncles":"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347","miner":"0x0000000000000000000000000000000000000000","stateRoot":"0x0000000000000000000000000000000000000000000000000000000000000000","transactionsRoot":"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421","receiptsRoot":"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421","number":"0x8","gasUsed":"0x0","gasLimit":"0x1c9c380","extraData":"0x","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","timestamp":"0x642aa48f","difficulty":"0x0","mixHash":"0x0000000000000000000000000000000000000000000000000000000000000000","nonce":"0x0000000000000000"}}}"#;
         let _header: SubscriptionResponse<'_, Header> = serde_json::from_str(resp).unwrap();
 
@@ -418,6 +430,8 @@ mod tests {
                 mix_hash: H256::from_low_u64_be(14),
                 nonce: Some(H64::from_low_u64_be(15)),
                 base_fee_per_gas: Some(U256::from(20)),
+                blob_gas_used: None,
+                excess_blob_gas: None,
             },
             total_difficulty: Some(U256::from(100000)),
             uncles: vec![H256::from_low_u64_be(17)],
@@ -456,6 +470,8 @@ mod tests {
                 mix_hash: H256::from_low_u64_be(14),
                 nonce: Some(H64::from_low_u64_be(15)),
                 base_fee_per_gas: Some(U256::from(20)),
+                blob_gas_used: None,
+                excess_blob_gas: None,
             },
             total_difficulty: Some(U256::from(100000)),
             uncles: vec![H256::from_low_u64_be(17)],

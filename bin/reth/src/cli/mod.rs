@@ -1,6 +1,9 @@
 //! CLI definition and entrypoint to executable
 use crate::{
-    chain, config, db, debug_cmd,
+    args::utils::genesis_value_parser,
+    chain,
+    cli::ext::RethCliExt,
+    config, db, debug_cmd,
     dirs::{LogsDir, PlatformPath},
     node, p2p,
     runner::CliRunner,
@@ -8,45 +11,102 @@ use crate::{
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{ArgAction, Args, Parser, Subcommand};
+use reth_primitives::ChainSpec;
 use reth_tracing::{
     tracing::{metadata::LevelFilter, Level, Subscriber},
     tracing_subscriber::{filter::Directive, registry::LookupSpan, EnvFilter},
     BoxedLayer, FileWorkerGuard,
 };
+use std::sync::Arc;
 
-/// Parse CLI options, set up logging and run the chosen command.
-pub fn run() -> eyre::Result<()> {
-    let opt = Cli::parse();
+pub mod ext;
 
-    let mut layers = vec![reth_tracing::stdout(opt.verbosity.directive())];
-    let _guard = opt.logs.layer()?.map(|(layer, guard)| {
-        layers.push(layer);
-        guard
-    });
+/// The main reth cli interface.
+///
+/// This is the entrypoint to the executable.
+#[derive(Debug, Parser)]
+#[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
+pub struct Cli<Ext: RethCliExt = ()> {
+    /// The command to run
+    #[clap(subcommand)]
+    command: Commands<Ext>,
 
-    reth_tracing::init(layers);
+    /// The chain this node is running.
+    ///
+    /// Possible values are either a built-in chain or the path to a chain specification file.
+    ///
+    /// Built-in chains:
+    /// - mainnet
+    /// - goerli
+    /// - sepolia
+    #[arg(
+        long,
+        value_name = "CHAIN_OR_PATH",
+        global = true,
+        verbatim_doc_comment,
+        default_value = "mainnet",
+        value_parser = genesis_value_parser,
+        global = true,
+    )]
+    chain: Arc<ChainSpec>,
 
-    let runner = CliRunner::default();
+    #[clap(flatten)]
+    logs: Logs,
 
-    match opt.command {
-        Commands::Node(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
-        Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-        Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-        Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-        Commands::Stage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-        Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::Debug(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
+    #[clap(flatten)]
+    verbosity: Verbosity,
+}
+
+impl<Ext: RethCliExt> Cli<Ext> {
+    /// Execute the configured cli command.
+    pub fn run(mut self) -> eyre::Result<()> {
+        // add network name to logs dir
+        self.logs.log_directory = self.logs.log_directory.join(self.chain.chain.to_string());
+
+        let _guard = self.init_tracing()?;
+
+        let runner = CliRunner::default();
+        match self.command {
+            Commands::Node(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
+            Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Stage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::Debug(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
+        }
     }
+
+    /// Initializes tracing with the configured options.
+    ///
+    /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
+    /// that all logs are flushed to disk.
+    pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
+        let mut layers = vec![reth_tracing::stdout(self.verbosity.directive())];
+        let guard = self.logs.layer()?.map(|(layer, guard)| {
+            layers.push(layer);
+            guard
+        });
+
+        reth_tracing::init(layers);
+        Ok(guard.flatten())
+    }
+}
+
+/// Convenience function for parsing CLI options, set up logging and run the chosen command.
+#[inline]
+pub fn run() -> eyre::Result<()> {
+    Cli::<()>::parse().run()
 }
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
-pub enum Commands {
+pub enum Commands<Ext: RethCliExt = ()> {
     /// Start the node
     #[command(name = "node")]
-    Node(node::Command),
+    Node(node::Command<Ext>),
     /// Initialize the database from a genesis file.
     #[command(name = "init")]
     Init(chain::InitCommand),
@@ -71,20 +131,6 @@ pub enum Commands {
     /// Various debug routines
     #[command(name = "debug")]
     Debug(debug_cmd::Command),
-}
-
-#[derive(Debug, Parser)]
-#[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
-struct Cli {
-    /// The command to run
-    #[clap(subcommand)]
-    command: Commands,
-
-    #[clap(flatten)]
-    logs: Logs,
-
-    #[clap(flatten)]
-    verbosity: Verbosity,
 }
 
 /// The log configuration.
@@ -183,9 +229,9 @@ mod tests {
     /// runtime
     #[test]
     fn test_parse_help_all_subcommands() {
-        let reth = Cli::command();
+        let reth = Cli::<()>::command();
         for sub_command in reth.get_subcommands() {
-            let err = Cli::try_parse_from(["reth", sub_command.get_name(), "--help"])
+            let err = Cli::<()>::try_parse_from(["reth", sub_command.get_name(), "--help"])
                 .err()
                 .unwrap_or_else(|| {
                     panic!("Failed to parse help message {}", sub_command.get_name())
@@ -195,5 +241,22 @@ mod tests {
             // > Not a true "error" as it means --help or similar was used. The help message will be sent to stdout.
             assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
         }
+    }
+
+    /// Tests that the log directory is parsed correctly. It's always tied to the specific chain's
+    /// name
+    #[test]
+    fn parse_logs_path() {
+        let mut reth = Cli::<()>::try_parse_from(["reth", "node", "--log.persistent"]).unwrap();
+        reth.logs.log_directory = reth.logs.log_directory.join(reth.chain.chain.to_string());
+        let log_dir = reth.logs.log_directory;
+        assert!(log_dir.as_ref().ends_with("reth/logs/mainnet"), "{:?}", log_dir);
+
+        let mut reth =
+            Cli::<()>::try_parse_from(["reth", "node", "--chain", "sepolia", "--log.persistent"])
+                .unwrap();
+        reth.logs.log_directory = reth.logs.log_directory.join(reth.chain.chain.to_string());
+        let log_dir = reth.logs.log_directory;
+        assert!(log_dir.as_ref().ends_with("reth/logs/sepolia"), "{:?}", log_dir);
     }
 }

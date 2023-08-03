@@ -1,5 +1,7 @@
 mod error;
+mod metrics;
 mod pruner;
 
 pub use error::PrunerError;
-pub use pruner::{Pruner, PrunerResult, PrunerWithResult};
+use metrics::Metrics;
+pub use pruner::{BatchSizes, Pruner, PrunerResult, PrunerWithResult};

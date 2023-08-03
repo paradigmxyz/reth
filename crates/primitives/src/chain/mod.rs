@@ -11,7 +11,7 @@ use std::{fmt, str::FromStr};
 mod spec;
 pub use spec::{
     AllGenesisFormats, ChainSpec, ChainSpecBuilder, DisplayHardforks, ForkCondition,
-    ForkTimestamps, GOERLI, MAINNET, SEPOLIA,
+    ForkTimestamps, DEV, GOERLI, MAINNET, SEPOLIA,
 };
 
 // The chain info module.
@@ -42,6 +42,11 @@ impl Chain {
     /// Returns the sepolia chain.
     pub const fn sepolia() -> Self {
         Chain::Named(ethers_core::types::Chain::Sepolia)
+    }
+
+    /// Returns the dev chain.
+    pub const fn dev() -> Self {
+        Chain::Named(ethers_core::types::Chain::Dev)
     }
 
     /// The id of the chain
