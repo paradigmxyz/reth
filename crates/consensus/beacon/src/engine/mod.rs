@@ -1715,12 +1715,13 @@ where
 
             // Poll prune controller if all conditions are met:
             // 1. Pipeline is idle
-            // 2. Pruning is running and we need to prioritize checking its events OR no engine and
-            //  sync messages are pending and we may start pruning
-            // 3. Latest FCU status is VALID
+            // 2. Either of two:
+            //  1. Pruning is running and we need to prioritize checking its events
+            //  2. Both engine and sync messages are pending AND latest FCU status is not INVALID,
+            //     so we may start pruning
             if this.sync.is_pipeline_idle() &&
-                (this.is_prune_active() || is_pending) &&
-                this.forkchoice_state_tracker.is_latest_valid()
+                (this.is_prune_active() ||
+                    is_pending && !this.forkchoice_state_tracker.is_latest_invalid())
             {
                 if let Some(ref mut prune) = this.prune {
                     match prune.poll(cx, this.blockchain.canonical_tip().number) {
