@@ -660,7 +660,8 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     }
 
     /// Prune the table for the specified key range, calling `chunk_callback` after every
-    /// `batch_size` pruned rows with .
+    /// `batch_size` pruned rows with number of total unique keys and total rows pruned. For dupsort
+    /// tables, these numbers will be different as one key can correspond to multiple rows.
     ///
     /// Returns number of rows pruned.
     pub fn prune_table_with_range_in_batches<T: Table>(
