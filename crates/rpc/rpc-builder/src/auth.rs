@@ -12,8 +12,7 @@ use jsonrpsee::{
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt,
-    StateProviderFactory,
+    BlockReaderIdExt, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
@@ -41,11 +40,10 @@ pub async fn launch<Provider, Pool, Network, Tasks, EngineApi>(
 ) -> Result<AuthServerHandle, RpcError>
 where
     Provider: BlockReaderIdExt
-        + ChainSpecProvider
-        + EvmEnvProvider
-        + HeaderProvider
         + ReceiptProviderIdExt
+        + HeaderProvider
         + StateProviderFactory
+        + EvmEnvProvider
         + Clone
         + Unpin
         + 'static,
@@ -87,7 +85,6 @@ pub async fn launch_with_eth_api<Provider, Pool, Network, EngineApi>(
 ) -> Result<AuthServerHandle, RpcError>
 where
     Provider: BlockReaderIdExt
-        + ChainSpecProvider
         + HeaderProvider
         + StateProviderFactory
         + EvmEnvProvider

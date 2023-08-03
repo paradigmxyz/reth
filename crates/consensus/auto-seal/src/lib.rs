@@ -246,18 +246,10 @@ impl StorageInner {
 
     /// Fills in pre-execution header fields based on the current best block and given
     /// transactions.
-    pub(crate) fn build_header_template(
-        &self,
-        transactions: &Vec<TransactionSigned>,
-        chain_spec: Arc<ChainSpec>,
-    ) -> Header {
+    pub(crate) fn build_header_template(&self, transactions: &Vec<TransactionSigned>) -> Header {
         // check previous block for base fee
-        let base_fee_per_gas = self.headers.get(&self.best_block).and_then(|parent| {
-            parent.next_block_base_fee(
-                chain_spec.elasticity_multiplier(),
-                chain_spec.base_fee_change_denominator(),
-            )
-        });
+        let base_fee_per_gas =
+            self.headers.get(&self.best_block).and_then(|parent| parent.next_block_base_fee());
 
         let mut header = Header {
             parent_hash: self.best_hash,
@@ -343,9 +335,8 @@ impl StorageInner {
         &mut self,
         transactions: Vec<TransactionSigned>,
         executor: &mut Executor<DB>,
-        chain_spec: Arc<ChainSpec>,
     ) -> Result<(SealedHeader, PostState), BlockExecutionError> {
-        let header = self.build_header_template(&transactions, chain_spec);
+        let header = self.build_header_template(&transactions);
 
         let block = Block { header, body: transactions, ommers: vec![], withdrawals: None };
 

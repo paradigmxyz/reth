@@ -134,14 +134,7 @@ impl PayloadBuilderAttributes {
             prevrandao: Some(self.prev_randao),
             gas_limit: U256::from(parent.gas_limit),
             // calculate basefee based on parent block's gas usage
-            basefee: U256::from(
-                parent
-                    .next_block_base_fee(
-                        chain_spec.base_fee_change_denominator(),
-                        chain_spec.elasticity_multiplier(),
-                    )
-                    .unwrap_or_default(),
-            ),
+            basefee: U256::from(parent.next_block_base_fee().unwrap_or_default()),
         };
 
         (cfg, block_env)
