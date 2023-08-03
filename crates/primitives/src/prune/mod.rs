@@ -6,4 +6,4 @@ mod target;
 pub use checkpoint::PruneCheckpoint;
 pub use mode::PruneMode;
 pub use part::{PrunePart, PrunePartError};
-pub use target::PruneModes;
+pub use target::{ContractLogPart, PruneModes};

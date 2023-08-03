@@ -2,7 +2,7 @@
 
 use clap::Args;
 use reth_config::config::PruneConfig;
-use reth_primitives::{ChainSpec, PruneMode, PruneModes};
+use reth_primitives::{ChainSpec, ContractLogPart, PruneMode, PruneModes};
 use std::sync::Arc;
 
 /// Parameters for pruning and full node
@@ -31,13 +31,14 @@ impl PruningArgs {
                         .map(|contract| PruneMode::Before(contract.block)),
                     account_history: Some(PruneMode::Distance(128)),
                     storage_history: Some(PruneMode::Distance(128)),
-                    only_contract_logs: chain_spec
-                        .deposit_contract
-                        .as_ref()
-                        .map(|contract| vec![(contract.block, vec![contract.address])])
-                        .into_iter()
-                        .flatten()
-                        .collect(),
+                    only_contract_logs: ContractLogPart(
+                        chain_spec
+                            .deposit_contract
+                            .as_ref()
+                            .map(|contract| (PruneMode::Before(contract.block), contract.address))
+                            .into_iter()
+                            .collect(),
+                    ),
                 },
             })
         } else {

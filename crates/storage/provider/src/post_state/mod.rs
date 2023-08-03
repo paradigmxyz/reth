@@ -657,27 +657,30 @@ impl PostState {
             let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
             let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
 
+            let contract_log_pruner =
+                self.prune_modes.only_contract_logs.flatten(tip).expect("TODO");
             // Empty implies that there is going to be
             // addresses to include in the filter in a future block. None means there isn't any kind
             // of configuration.
-            let mut address_filter = None;
+            let mut address_filter: Option<(u64, Vec<&Address>)> = None;
 
             for (block, receipts) in self.receipts {
                 if receipts.is_empty() || self.prune_modes.should_prune_receipts(block, tip) {
                     continue
                 }
 
-                if !self.prune_modes.only_contract_logs.is_empty() {
+                if !contract_log_pruner.is_empty() {
                     if address_filter.is_none() {
                         address_filter = Some((0, vec![]));
                     }
 
-                    // Get all addresses higher than prev_block up to this block
+                    // Get all addresses higher than the previous checked block up to the current
+                    // one
                     if let Some((prev_block, filter)) = &mut address_filter {
-                        self.prune_modes
-                            .only_contract_logs
-                            .range(*prev_block..=block)
-                            .for_each(|(_, addresses)| filter.extend(addresses));
+                        for (_, addresses) in contract_log_pruner.range(*prev_block..=block) {
+                            filter.extend_from_slice(addresses.as_slice())
+                        }
+
                         *prev_block = block;
                     }
                 }
@@ -690,7 +693,7 @@ impl PostState {
                     // If there is an address_filter, and it does not contain any of the contract
                     // addresses, then skip writing this receipt.
                     if let Some((_, filter)) = &address_filter {
-                        if !receipt.logs.iter().any(|log| filter.contains(&log.address)) {
+                        if !receipt.logs.iter().any(|log| filter.contains(&&log.address)) {
                             continue
                         }
                     }
