@@ -9,16 +9,14 @@ use reth_primitives::{
     U256,
 };
 use reth_provider::{
-    AccountReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider,
-    StateProviderFactory,
+    AccountReader, BlockReaderIdExt, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
 use reth_rpc_types::{EIP1186AccountProofResponse, StorageProof};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
-    Provider:
-        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: Send + Sync + 'static,
 {

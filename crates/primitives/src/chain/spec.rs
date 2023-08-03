@@ -201,10 +201,7 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Regolith, ForkCondition::Timestamp(1679079600)),
         ]),
-        optimism: Some(OptimismConfig {
-            eip_1559_elasticity: crate::constants::EIP1559_DEFAULT_OPTIMISM_ELASTICITY_MULTIPLIER,
-            eip_1559_denominator: crate::constants::EIP1559_DEFAULT_OPTIMISM_CHANGE_DENOMINATOR,
-        }),
+        optimism: Some(OptimismConfig { eip_1559_elasticity: 10, eip_1559_denominator: 50 }),
     }
     .into()
 });
@@ -421,30 +418,6 @@ impl ChainSpec {
         }
 
         ForkId { hash: forkhash, next: 0 }
-    }
-
-    /// Return the configured EIP-1559 max base fee change denominator
-    pub fn base_fee_change_denominator(&self) -> u64 {
-        #[cfg(not(feature = "optimism"))]
-        {
-            crate::constants::EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR
-        }
-        #[cfg(feature = "optimism")]
-        {
-            self.optimism.as_ref().unwrap().eip_1559_denominator
-        }
-    }
-
-    /// Return the configured EIP-1559 elasticity multiplier
-    pub fn elasticity_multiplier(&self) -> u64 {
-        #[cfg(not(feature = "optimism"))]
-        {
-            crate::constants::EIP1559_ELASTICITY_MULTIPLIER
-        }
-        #[cfg(feature = "optimism")]
-        {
-            self.optimism.as_ref().unwrap().eip_1559_elasticity
-        }
     }
 
     /// Build a chainspec using [`ChainSpecBuilder`]

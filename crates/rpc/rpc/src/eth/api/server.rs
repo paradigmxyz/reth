@@ -16,8 +16,8 @@ use reth_primitives::{
     AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes, H256, H64, U256, U64,
 };
 use reth_provider::{
-    BlockIdReader, BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider,
-    HeaderProvider, StateProviderFactory,
+    BlockIdReader, BlockReader, BlockReaderIdExt, EvmEnvProvider, HeaderProvider,
+    StateProviderFactory,
 };
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
@@ -36,7 +36,6 @@ where
     Provider: BlockReader
         + BlockIdReader
         + BlockReaderIdExt
-        + ChainSpecProvider
         + HeaderProvider
         + StateProviderFactory
         + EvmEnvProvider
@@ -399,12 +398,12 @@ mod tests {
     use reth_interfaces::test_utils::{generators, generators::Rng};
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{
-        constants::{self, ETHEREUM_BLOCK_GAS_LIMIT},
-        Block, BlockNumberOrTag, Header, TransactionSigned, H256, U256,
+        basefee::calculate_next_block_base_fee, constants::ETHEREUM_BLOCK_GAS_LIMIT, Block,
+        BlockNumberOrTag, Header, TransactionSigned, H256, U256,
     };
     use reth_provider::{
-        test_utils::NoopProvider, BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider,
-        StateProviderFactory,
+        test_utils::{MockEthProvider, NoopProvider},
+        BlockReader, BlockReaderIdExt, EvmEnvProvider, StateProviderFactory,
     };
     use reth_rpc_api::EthApiServer;
     use reth_rpc_types::FeeHistory;
@@ -413,7 +412,6 @@ mod tests {
     fn build_test_eth_api<
         P: BlockReaderIdExt
             + BlockReader
-            + ChainSpecProvider
             + EvmEnvProvider
             + StateProviderFactory
             + Unpin
@@ -451,10 +449,6 @@ mod tests {
     /// Handler for: `eth_test_fee_history`
     // TODO: Split this into multiple tests, and add tests for percentiles.
     #[tokio::test]
-    // TODO(op-reth): fix this for optimism. currently the MockEthProvider uses
-    // a chain_spec for mainnet, but this test needs the Optimism config values
-    // to be specified.
-    #[cfg(not(feature = "optimism"))]
     async fn test_fee_history() {
         let mut rng = generators::rng();
 
@@ -466,7 +460,7 @@ mod tests {
         let mut gas_used_ratios = Vec::new();
         let mut base_fees_per_gas = Vec::new();
         let mut last_header = None;
-        let mock_provider = reth_provider::test_utils::MockEthProvider::default();
+        let mock_provider = MockEthProvider::default();
 
         for i in (0..block_count).rev() {
             let hash = H256::random();
@@ -527,15 +521,11 @@ mod tests {
 
         // Add final base fee (for the next block outside of the request)
         let last_header = last_header.unwrap();
-        base_fees_per_gas.push(U256::from(
-            reth_primitives::basefee::calculate_next_block_base_fee(
-                last_header.gas_used,
-                last_header.gas_limit,
-                last_header.base_fee_per_gas.unwrap_or_default(),
-                constants::EIP1559_ELASTICITY_MULTIPLIER,
-                constants::EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR,
-            ),
-        ));
+        base_fees_per_gas.push(U256::from(calculate_next_block_base_fee(
+            last_header.gas_used,
+            last_header.gas_limit,
+            last_header.base_fee_per_gas.unwrap_or_default(),
+        )));
 
         let eth_api = build_test_eth_api(mock_provider);
 
