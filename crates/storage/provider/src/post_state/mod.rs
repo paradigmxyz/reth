@@ -669,7 +669,7 @@ impl PostState {
 
                 if !self.prune_modes.only_contract_logs.is_empty() {
                     if address_filter.is_none() {
-                        address_filter = Some((block, vec![]));
+                        address_filter = Some((0, vec![]));
                     }
 
                     // Get all addresses higher than prev_block up to this block
