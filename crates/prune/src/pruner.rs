@@ -528,7 +528,7 @@ impl<DB: Database> Pruner<DB> {
                             // with the previous shard.
                             if let Some(prev_value) = cursor
                                 .prev()?
-                                .filter(|(prev_key, _)| key_matches(&prev_key, &key))
+                                .filter(|(prev_key, _)| key_matches(prev_key, &key))
                                 .map(|(_, prev_value)| prev_value)
                             {
                                 cursor.delete_current()?;
