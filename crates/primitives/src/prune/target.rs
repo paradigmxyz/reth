@@ -1,12 +1,13 @@
 use crate::{
-    prune::PrunePartError, serde_helper::deserialize_opt_prune_mode_with_min_blocks, BlockNumber,
-    PruneMode, PrunePart,
+    prune::PrunePartError, serde_helper::deserialize_opt_prune_mode_with_min_blocks, Address,
+    BlockNumber, PruneMode, PrunePart,
 };
 use paste::paste;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Pruning configuration for every part of the data that can be pruned.
-#[derive(Debug, Clone, Default, Copy, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct PruneModes {
     /// Sender Recovery pruning configuration.
@@ -20,7 +21,8 @@ pub struct PruneModes {
     /// Transaction Lookup pruning configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transaction_lookup: Option<PruneMode>,
-    /// Receipts pruning configuration.
+    /// Receipts pruning configuration. Supersedes `PruneModes::only_contract_logs` and it's more
+    /// performant.
     #[serde(
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<64, _>"
@@ -38,6 +40,9 @@ pub struct PruneModes {
         deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<64, _>"
     )]
     pub storage_history: Option<PruneMode>,
+    /// Includes only receipts with logs that were emitted by these addresses. Excludes every
+    /// other. It's superseded by `PruneModes::receipts`.
+    pub only_contract_logs: BTreeMap<BlockNumber, Vec<Address>>,
 }
 
 macro_rules! impl_prune_parts {
@@ -88,6 +93,7 @@ macro_rules! impl_prune_parts {
                 $(
                     $part: Some(PruneMode::Full),
                 )+
+                only_contract_logs: BTreeMap::new()
             }
         }
 

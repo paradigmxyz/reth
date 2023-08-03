@@ -657,9 +657,29 @@ impl PostState {
             let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
             let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
 
+            // Empty implies that there is going to be
+            // addresses to include in the filter in a future block. None means there isn't any kind
+            // of configuration.
+            let mut address_filter = None;
+
             for (block, receipts) in self.receipts {
-                if self.prune_modes.should_prune_receipts(block, tip) {
+                if receipts.is_empty() || self.prune_modes.should_prune_receipts(block, tip) {
                     continue
+                }
+
+                if !self.prune_modes.only_contract_logs.is_empty() {
+                    if address_filter.is_none() {
+                        address_filter = Some((block, vec![]));
+                    }
+
+                    // Get all addresses higher than prev_block up to this block
+                    if let Some((prev_block, filter)) = &mut address_filter {
+                        self.prune_modes
+                            .only_contract_logs
+                            .range(*prev_block..=block)
+                            .for_each(|(_, addresses)| filter.extend(addresses));
+                        *prev_block = block;
+                    }
                 }
 
                 let (_, body_indices) =
@@ -667,11 +687,17 @@ impl PostState {
                 let tx_range = body_indices.tx_num_range();
                 assert_eq!(receipts.len(), tx_range.clone().count(), "Receipt length mismatch");
                 for (tx_num, receipt) in tx_range.zip(receipts) {
+                    // If there is an address_filter, and it does not contain any of the contract
+                    // addresses, then skip writing this receipt.
+                    if let Some((_, filter)) = &address_filter {
+                        if !receipt.logs.iter().any(|log| filter.contains(&log.address)) {
+                            continue
+                        }
+                    }
                     receipts_cursor.append(tx_num, receipt)?;
                 }
             }
         }
-
         Ok(())
     }
 }

@@ -199,7 +199,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         start_block: u64,
         max_block: u64,
     ) -> Result<PruneModes, StageError> {
-        let mut prune_modes = self.prune_modes;
+        let mut prune_modes = self.prune_modes.clone();
 
         // If we're not executing MerkleStage from scratch (by threshold or first-sync), then erase
         // changeset related pruning configurations

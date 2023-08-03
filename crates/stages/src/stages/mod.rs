@@ -173,34 +173,34 @@ mod tests {
         // In an unpruned configuration there is 1 receipt, 3 changed accounts and 1 changed
         // storage.
         let mut prune = PruneModes::none();
-        check_pruning(factory.clone(), prune, 1, 3, 1).await;
+        check_pruning(factory.clone(), prune.clone(), 1, 3, 1).await;
 
         prune.receipts = Some(PruneMode::Full);
         prune.account_history = Some(PruneMode::Full);
         prune.storage_history = Some(PruneMode::Full);
         // This will result in error for account_history and storage_history, which is caught.
-        check_pruning(factory.clone(), prune, 0, 0, 0).await;
+        check_pruning(factory.clone(), prune.clone(), 0, 0, 0).await;
 
         prune.receipts = Some(PruneMode::Before(1));
         prune.account_history = Some(PruneMode::Before(1));
         prune.storage_history = Some(PruneMode::Before(1));
-        check_pruning(factory.clone(), prune, 1, 3, 1).await;
+        check_pruning(factory.clone(), prune.clone(), 1, 3, 1).await;
 
         prune.receipts = Some(PruneMode::Before(2));
         prune.account_history = Some(PruneMode::Before(2));
         prune.storage_history = Some(PruneMode::Before(2));
         // The one account is the miner
-        check_pruning(factory.clone(), prune, 0, 1, 0).await;
+        check_pruning(factory.clone(), prune.clone(), 0, 1, 0).await;
 
         prune.receipts = Some(PruneMode::Distance(66));
         prune.account_history = Some(PruneMode::Distance(66));
         prune.storage_history = Some(PruneMode::Distance(66));
-        check_pruning(factory.clone(), prune, 1, 3, 1).await;
+        check_pruning(factory.clone(), prune.clone(), 1, 3, 1).await;
 
         prune.receipts = Some(PruneMode::Distance(64));
         prune.account_history = Some(PruneMode::Distance(64));
         prune.storage_history = Some(PruneMode::Distance(64));
         // The one account is the miner
-        check_pruning(factory.clone(), prune, 0, 1, 0).await;
+        check_pruning(factory.clone(), prune.clone(), 0, 1, 0).await;
     }
 }

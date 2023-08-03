@@ -31,6 +31,13 @@ impl PruningArgs {
                         .map(|contract| PruneMode::Before(contract.block)),
                     account_history: Some(PruneMode::Distance(128)),
                     storage_history: Some(PruneMode::Distance(128)),
+                    only_contract_logs: chain_spec
+                        .deposit_contract
+                        .as_ref()
+                        .map(|contract| vec![(contract.block, vec![contract.address])])
+                        .into_iter()
+                        .flatten()
+                        .collect(),
                 },
             })
         } else {
