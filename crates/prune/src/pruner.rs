@@ -6,12 +6,13 @@ use reth_db::{
     abstraction::cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress, ShardedKey},
+    table::Table,
     tables,
     transaction::DbTxMut,
     BlockNumberList,
 };
 use reth_primitives::{
-    Address, BlockNumber, ChainSpec, PruneCheckpoint, PruneMode, PruneModes, PrunePart, TxNumber,
+    BlockNumber, ChainSpec, PruneCheckpoint, PruneMode, PruneModes, PrunePart, TxNumber,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
@@ -397,95 +398,20 @@ impl<DB: Database> Pruner<DB> {
             },
         )?;
 
-        processed = 0;
-        let mut cursor = provider.tx_ref().cursor_write::<tables::AccountHistory>()?;
-        // Prune `AccountHistory` table:
-        // 1. If the shard has `highest_block_number` less than or equal to the target block number
-        //  for pruning, delete the shard completely.
-        // 2. If the shard has `highest_block_number` greater than the target block number for
-        //  pruning, filter block numbers inside the shard which are less than the target
-        //  block number for pruning.
-        while let Some(result) = cursor.next()? {
-            let (key, blocks): (ShardedKey<Address>, BlockNumberList) = result;
-
-            if key.highest_block_number <= to_block {
-                // If shard consists only of block numbers less than the target one, delete shard
-                // completely.
-                cursor.delete_current()?;
-                if key.highest_block_number == to_block {
-                    // Shard contains only block numbers up to the target one, so we can skip to the
-                    // next address. It is guaranteed that further shards for this address will not
-                    // contain the target block number, as it's in this shard.
-                    cursor.seek_exact(ShardedKey::last(key.key))?;
-                }
-            } else {
-                // Shard contains block numbers that are higher than the target one, so we need to
-                // filter it. It is guaranteed that further shards for this address will not contain
-                // the target block number, as it's in this shard.
-                let new_blocks = blocks
-                    .iter(0)
-                    .skip_while(|block| *block <= to_block as usize)
-                    .collect::<Vec<_>>();
-
-                if blocks.len() != new_blocks.len() {
-                    // If there were blocks less than or equal to the target one
-                    // (so the shard has changed), update the shard.
-                    if new_blocks.is_empty() {
-                        // If there are no more blocks in this shard, we need to remove it, as empty
-                        // shards are not allowed.
-                        if key.highest_block_number == u64::MAX {
-                            // If current shard is the last shard for this address, optionally
-                            // replace it with the previous shard.
-                            if let Some(prev_value) = cursor
-                                .prev()?
-                                .filter(|(prev_key, _)| prev_key.key == key.key)
-                                .map(|(_, prev_value)| prev_value)
-                            {
-                                // If there's a previous shard for this address, replace current
-                                // (last) shard with the previous shard.
-
-                                // Delete previous shard.
-                                cursor.delete_current()?;
-                                // Upsert last shard for this address with the value of the previous
-                                // shard.
-                                cursor.upsert(key.clone(), prev_value)?;
-                            } else {
-                                // If there's no previous shard for this address, just delete last
-                                // shard completely.
-                                cursor.delete_current()?;
-                            }
-                        } else {
-                            // If current shard is not the last shard for this address, just delete
-                            // it.
-                            cursor.delete_current()?;
-                        }
-                    } else {
-                        cursor.upsert(key.clone(), BlockNumberList::new_pre_sorted(new_blocks))?;
-                    }
-                }
-
-                // Jump to the next address
-                cursor.seek_exact(ShardedKey::last(key.key))?;
-            }
-
-            processed += 1;
-
-            if processed % self.batch_sizes.account_history == 0 {
+        self.prune_history_indices::<tables::AccountHistory, _>(
+            provider,
+            to_block,
+            |a, b| a.key == b.key,
+            |key| ShardedKey::last(key.key),
+            self.batch_sizes.account_history,
+            |entries| {
                 trace!(
                     target: "pruner",
-                    entries = self.batch_sizes.account_history,
+                    entries,
                     "Pruned account history (indices)"
                 );
-            }
-        }
-
-        if processed % self.batch_sizes.account_history != 0 {
-            trace!(
-                target: "pruner",
-                entries = processed % self.batch_sizes.account_history,
-                "Pruned account history (indices)"
-            );
-        }
+            },
+        )?;
 
         provider.save_prune_checkpoint(
             PrunePart::AccountHistory,
@@ -526,32 +452,68 @@ impl<DB: Database> Pruner<DB> {
             },
         )?;
 
-        processed = 0;
-        let mut cursor = provider.tx_ref().cursor_write::<tables::StorageHistory>()?;
-        // Prune `StorageHistory` table:
+        self.prune_history_indices::<tables::StorageHistory, _>(
+            provider,
+            to_block,
+            |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
+            |key| StorageShardedKey::last(key.address, key.sharded_key.key),
+            self.batch_sizes.storage_history,
+            |entries| {
+                trace!(
+                    target: "pruner",
+                    entries,
+                    "Pruned storage history (indices)"
+                );
+            },
+        )?;
+
+        provider.save_prune_checkpoint(
+            PrunePart::StorageHistory,
+            PruneCheckpoint { block_number: to_block, prune_mode },
+        )?;
+
+        Ok(())
+    }
+
+    /// Prune history indices up to the provided block, inclusive.
+    fn prune_history_indices<T, SK>(
+        &self,
+        provider: &DatabaseProviderRW<'_, DB>,
+        to_block: BlockNumber,
+        key_matches: impl Fn(&T::Key, &T::Key) -> bool,
+        last_key: impl Fn(&T::Key) -> T::Key,
+        batch_size: usize,
+        batch_callback: impl Fn(usize),
+    ) -> PrunerResult
+    where
+        T: Table<Value = BlockNumberList>,
+        T::Key: AsRef<ShardedKey<SK>>,
+    {
+        let mut processed = 0;
+        let mut cursor = provider.tx_ref().cursor_write::<T>()?;
+        // Prune history table:
         // 1. If the shard has `highest_block_number` less than or equal to the target block number
         // for pruning, delete the shard completely.
         // 2. If the shard has `highest_block_number` greater than the target block number for
         // pruning, filter block numbers inside the shard which are less than the target
         // block number for pruning.
         while let Some(result) = cursor.next()? {
-            let (key, blocks): (StorageShardedKey, BlockNumberList) = result;
+            let (key, blocks): (T::Key, BlockNumberList) = result;
 
-            if key.sharded_key.highest_block_number <= to_block {
+            if key.as_ref().highest_block_number <= to_block {
                 // If shard consists only of block numbers less than the target one, delete shard
                 // completely.
                 cursor.delete_current()?;
-                if key.sharded_key.highest_block_number == to_block {
+                if key.as_ref().highest_block_number == to_block {
                     // Shard contains only block numbers up to the target one, so we can skip to the
-                    // next storage slot for this address. It is guaranteed that further shards for
-                    // this address and storage slot will not contain the target block number, as
-                    // it's in this shard.
-                    cursor.seek_exact(StorageShardedKey::last(key.address, key.sharded_key.key))?;
+                    // next sharded key. It is guaranteed that further shards for this sharded key
+                    // will not contain the target block number, as it's in this shard.
+                    cursor.seek_exact(last_key(&key))?;
                 }
             } else {
                 // Shard contains block numbers that are higher than the target one, so we need to
-                // filter it. It is guaranteed that further shards for this address and storage slot
-                // will not contain the target block number, as it's in this shard.
+                // filter it. It is guaranteed that further shards for this sharded key will not
+                // contain the target block number, as it's in this shard.
                 let new_blocks = blocks
                     .iter(0)
                     .skip_while(|block| *block <= to_block as usize)
@@ -563,29 +525,26 @@ impl<DB: Database> Pruner<DB> {
                     if new_blocks.is_empty() {
                         // If there are no more blocks in this shard, we need to remove it, as empty
                         // shards are not allowed.
-                        if key.sharded_key.highest_block_number == u64::MAX {
-                            // If current shard is the last shard for this address and storage slot,
-                            // replace it with the previous shard.
+                        if key.as_ref().highest_block_number == u64::MAX {
+                            // If current shard is the last shard for this sharded key, replace it
+                            // with the previous shard.
                             if let Some(prev_value) = cursor
                                 .prev()?
-                                .filter(|(prev_key, _)| {
-                                    prev_key.address == key.address &&
-                                        prev_key.sharded_key.key == key.sharded_key.key
-                                })
+                                .filter(|(prev_key, _)| key_matches(&prev_key, &key))
                                 .map(|(_, prev_value)| prev_value)
                             {
                                 cursor.delete_current()?;
-                                // Upsert will replace the last shard for this address and storage
-                                // slot with the previous value
+                                // Upsert will replace the last shard for this sharded key with the
+                                // previous value
                                 cursor.upsert(key.clone(), prev_value)?;
                             } else {
-                                // If there's no previous shard for this address, just delete last
-                                // shard completely.
+                                // If there's no previous shard for this sharded key,
+                                // just delete last shard completely.
                                 cursor.delete_current()?;
                             }
                         } else {
-                            // If current shard is not the last shard for this address, just delete
-                            // it.
+                            // If current shard is not the last shard for this sharded key,
+                            // just delete it.
                             cursor.delete_current()?;
                         }
                     } else {
@@ -594,32 +553,19 @@ impl<DB: Database> Pruner<DB> {
                 }
 
                 // Jump to the next address
-                cursor.seek_exact(StorageShardedKey::last(key.address, key.sharded_key.key))?;
+                cursor.seek_exact(last_key(&key))?;
             }
 
             processed += 1;
 
-            if processed % self.batch_sizes.storage_history == 0 {
-                trace!(
-                    target: "pruner",
-                    entries = self.batch_sizes.storage_history,
-                    "Pruned storage history (indices)"
-                );
+            if processed % batch_size == 0 {
+                batch_callback(batch_size);
             }
         }
 
-        if processed % self.batch_sizes.storage_history != 0 {
-            trace!(
-                target: "pruner",
-                entries = processed % self.batch_sizes.storage_history,
-                "Pruned storage history (indices)"
-            );
+        if processed % batch_size != 0 {
+            batch_callback(processed % batch_size);
         }
-
-        provider.save_prune_checkpoint(
-            PrunePart::StorageHistory,
-            PruneCheckpoint { block_number: to_block, prune_mode },
-        )?;
 
         Ok(())
     }
@@ -637,7 +583,7 @@ mod tests {
         },
     };
     use reth_primitives::{
-        Address, BlockNumber, PruneCheckpoint, PruneMode, PruneModes, PrunePart, H256, MAINNET,
+        BlockNumber, PruneCheckpoint, PruneMode, PruneModes, PrunePart, H256, MAINNET,
     };
     use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::TestTransaction;
