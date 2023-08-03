@@ -130,7 +130,8 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
         let network_events = network.event_listener();
         let (command_tx, command_rx) = mpsc::unbounded_channel();
 
-        // install a listener for new transactions
+        // install a listener for new pending transactions that are allowed to be propagated over
+        // the network
         let pending = pool.pending_transactions_listener();
 
         Self {

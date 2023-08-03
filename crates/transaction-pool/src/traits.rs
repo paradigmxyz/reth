@@ -105,10 +105,23 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Returns a new transaction change event stream for _all_ transactions in the pool.
     fn all_transactions_event_listener(&self) -> AllTransactionsEvents<Self::Transaction>;
 
-    /// Returns a new Stream that yields transactions hashes for new ready transactions.
+    /// Returns a new Stream that yields transactions hashes for new __pending__ transactions
+    /// inserted into the pool that are allowed to be propagated.
     ///
-    /// Consumer: RPC
-    fn pending_transactions_listener(&self) -> Receiver<TxHash>;
+    /// Note: This is intended for networking and will __only__ yield transactions that are allowed
+    /// to be propagated over the network.
+    ///
+    /// Consumer: RPC/P2P
+    fn pending_transactions_listener(&self) -> Receiver<TxHash> {
+        self.pending_transactions_listener_for(PendingTransactionListenerKind::PropagateOnly)
+    }
+
+    /// Returns a new Stream that yields transactions hashes for new __pending__ transactions
+    /// inserted into the pool depending on the given [PendingTransactionListenerKind] argument.
+    fn pending_transactions_listener_for(
+        &self,
+        kind: PendingTransactionListenerKind,
+    ) -> Receiver<TxHash>;
 
     /// Returns a new stream that yields new valid transactions added to the pool.
     fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>>;
@@ -271,6 +284,28 @@ pub trait TransactionPoolExt: TransactionPool {
 
     /// Updates the accounts in the pool
     fn update_accounts(&self, accounts: Vec<ChangedAccount>);
+}
+
+/// Determines what kind of new pending transactions should be emitted by a stream of pending
+/// transactions.
+///
+/// This gives control whether to include transactions that are allowed to be propagated.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum PendingTransactionListenerKind {
+    /// Any new pending transactions
+    All,
+    /// Only transactions that are allowed to be propagated.
+    ///
+    /// See also [ValidPoolTransaction]
+    PropagateOnly,
+}
+
+impl PendingTransactionListenerKind {
+    /// Returns true if we're only interested in transactions that are allowed to be propagated.
+    #[inline]
+    pub fn is_propagate_only(&self) -> bool {
+        matches!(self, Self::PropagateOnly)
+    }
 }
 
 /// A Helper type that bundles all transactions in the pool.
