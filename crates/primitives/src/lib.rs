@@ -80,7 +80,7 @@ pub use net::{
 };
 pub use peer::{PeerId, WithPeerId};
 pub use prune::{
-    ContractLogPart, PruneCheckpoint, PruneMode, PruneModes, PrunePart, PrunePartError,
+    ContractLogsPruneConfig, PruneCheckpoint, PruneMode, PruneModes, PrunePart, PrunePartError,
 };
 pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef};
 pub use revm_primitives::JumpMap;

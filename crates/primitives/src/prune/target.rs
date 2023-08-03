@@ -1,10 +1,9 @@
 use crate::{
-    prune::PrunePartError, serde_helper::deserialize_opt_prune_mode_with_min_blocks, Address,
-    BlockNumber, PruneMode, PrunePart,
+    prune::PrunePartError, serde_helper::deserialize_opt_prune_mode_with_min_blocks, BlockNumber,
+    ContractLogsPruneConfig, PruneMode, PrunePart,
 };
 use paste::paste;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 /// Pruning configuration for every part of the data that can be pruned.
 #[derive(Debug, Clone, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -22,7 +21,7 @@ pub struct PruneModes {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transaction_lookup: Option<PruneMode>,
     /// Configuration for pruning of receipts. This setting overrides
-    /// `PruneModes::only_contract_logs` and offers improved performance.
+    /// `PruneModes::contract_logs_filter` and offers improved performance.
     #[serde(
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<64, _>"
@@ -45,7 +44,7 @@ pub struct PruneModes {
     ///
     /// The [`BlockNumber`] represents the starting block from which point onwards the receipts are
     /// preserved.
-    pub only_contract_logs: ContractLogPart,
+    pub contract_logs_filter: ContractLogsPruneConfig,
 }
 
 macro_rules! impl_prune_parts {
@@ -88,7 +87,7 @@ macro_rules! impl_prune_parts {
                 $(
                     $part: Some(PruneMode::Full),
                 )+
-                only_contract_logs: Default::default()
+                contract_logs_filter: Default::default()
             }
         }
 
@@ -108,35 +107,4 @@ impl PruneModes {
         (account_history, AccountHistory, Some(64)),
         (storage_history, StorageHistory, Some(64))
     );
-}
-
-/// Configuration for pruning receipts not associated with logs emitted by the specified contracts.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct ContractLogPart(pub Vec<(PruneMode, Address)>);
-
-impl ContractLogPart {
-    /// Checks if the configuration is empty
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    /// Given the `tip` block number, flatten the struct so it can easily be queried for filtering
-    /// across a range of blocks.
-    ///
-    /// The [`BlockNumber`] key of the map should be viewed as `PruneMode::Before(block)`.
-    pub fn flatten(
-        &self,
-        tip: BlockNumber,
-    ) -> Result<BTreeMap<BlockNumber, Vec<&Address>>, PrunePartError> {
-        let mut map = BTreeMap::new();
-        for (mode, address) in self.0.iter() {
-            let block = mode
-                .prune_target_block(tip, 0, PrunePart::ContractLogs)?
-                .map(|(block, _)| block)
-                .unwrap_or_default();
-
-            map.entry(block).or_insert_with(Vec::new).push(address)
-        }
-        Ok(map)
-    }
 }

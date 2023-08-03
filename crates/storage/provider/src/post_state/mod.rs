@@ -658,7 +658,7 @@ impl PostState {
             let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
 
             let contract_log_pruner =
-                self.prune_modes.only_contract_logs.flatten(tip).expect("TODO");
+                self.prune_modes.contract_logs_filter.flatten(tip).expect("TODO");
             // Empty implies that there is going to be
             // addresses to include in the filter in a future block. None means there isn't any kind
             // of configuration.
