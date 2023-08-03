@@ -1635,6 +1635,16 @@ where
     fn is_prune_active(&self) -> bool {
         !self.is_prune_idle()
     }
+
+    fn poll_prune(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Option<Result<(), BeaconConsensusEngineError>> {
+        match self.prune.as_mut()?.poll(cx, self.blockchain.canonical_tip().number) {
+            Poll::Ready(prune_event) => self.on_prune_event(prune_event),
+            Poll::Pending => None,
+        }
+    }
 }
 
 /// On initialization, the consensus engine will poll the message receiver and return
@@ -1665,6 +1675,14 @@ where
         // Process all incoming messages from the CL, these can affect the state of the
         // SyncController, hence they are polled first, and they're also time sensitive.
         loop {
+            // Poll prune controller first if it's active, as we will not be able to process any
+            // engine messages until it's finished.
+            if this.is_prune_active() {
+                if let Some(res) = this.poll_prune(cx) {
+                    return Poll::Ready(res)
+                }
+            }
+
             let mut engine_messages_pending = false;
             let mut sync_pending = false;
 
@@ -1715,23 +1733,14 @@ where
 
             // Poll prune controller if all conditions are met:
             // 1. Pipeline is idle
-            // 2. Either of two:
-            //  1. Pruning is running and we need to prioritize checking its events
-            //  2. Both engine and sync messages are pending AND latest FCU status is not INVALID,
-            //     so we may start pruning
+            // 2. No engine and sync messages are pending
+            // 3. Latest FCU status is not INVALID
             if this.sync.is_pipeline_idle() &&
-                (this.is_prune_active() ||
-                    is_pending && !this.forkchoice_state_tracker.is_latest_invalid())
+                is_pending &&
+                !this.forkchoice_state_tracker.is_latest_invalid()
             {
-                if let Some(ref mut prune) = this.prune {
-                    match prune.poll(cx, this.blockchain.canonical_tip().number) {
-                        Poll::Ready(prune_event) => {
-                            if let Some(res) = this.on_prune_event(prune_event) {
-                                return Poll::Ready(res)
-                            }
-                        }
-                        Poll::Pending => {}
-                    }
+                if let Some(res) = this.poll_prune(cx) {
+                    return Poll::Ready(res)
                 }
             }
 
