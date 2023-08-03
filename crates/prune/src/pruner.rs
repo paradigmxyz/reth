@@ -433,7 +433,6 @@ impl<DB: Database> Pruner<DB> {
             .map(|checkpoint| checkpoint.block_number + 1)
             .unwrap_or_default();
         let block_range = from_block..=to_block;
-        let total = block_range.clone().count();
         let range = BlockNumberAddress::range(block_range);
 
         provider.prune_table_with_range_in_batches::<tables::StorageChangeSet>(
@@ -444,7 +443,6 @@ impl<DB: Database> Pruner<DB> {
                     target: "pruner",
                     %keys,
                     %rows,
-                    progress = format!("{:.1}%", 100.0 * keys as f64 / total as f64),
                     "Pruned storage history (changesets)"
                 );
             },
