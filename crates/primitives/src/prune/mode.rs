@@ -1,4 +1,4 @@
-use crate::BlockNumber;
+use crate::{BlockNumber, PrunePart, PrunePartError};
 use reth_codecs::{main_codec, Compact};
 
 /// Prune mode.
@@ -12,6 +12,42 @@ pub enum PruneMode {
     Distance(u64),
     /// Prune blocks before the specified block number. The specified block number is not pruned.
     Before(BlockNumber),
+}
+
+impl PruneMode {
+    /// Returns block up to which variant pruning needs to be done, inclusive, according to the
+    /// provided tip.
+    pub fn prune_target_block(
+        &self,
+        tip: BlockNumber,
+        min_blocks: u64,
+        prune_part: PrunePart,
+    ) -> Result<Option<(BlockNumber, PruneMode)>, PrunePartError> {
+        Ok(match self {
+            PruneMode::Full if min_blocks == 0 => Some((tip, *self)),
+            PruneMode::Distance(distance) if *distance > tip => None, // Nothing to prune yet
+            PruneMode::Distance(distance) if *distance >= min_blocks => {
+                Some((tip - distance, *self))
+            }
+            PruneMode::Before(n) if *n > tip => None, // Nothing to prune yet
+            PruneMode::Before(n) if tip - n >= min_blocks => Some((n - 1, *self)),
+            _ => return Err(PrunePartError::Configuration(prune_part)),
+        })
+    }
+
+    /// Check if target block should be pruned according to the provided prune mode and tip.
+    pub fn should_prune(&self, block: BlockNumber, tip: BlockNumber) -> bool {
+        match self {
+            PruneMode::Full => true,
+            PruneMode::Distance(distance) => {
+                if *distance > tip {
+                    return false
+                }
+                block < tip - *distance
+            }
+            PruneMode::Before(n) => *n > block,
+        }
+    }
 }
 
 #[cfg(test)]

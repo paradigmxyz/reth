@@ -59,7 +59,7 @@ macro_rules! impl_prune_parts {
                 )]
                 pub fn [<should_prune_ $part>](&self, block: BlockNumber, tip: BlockNumber) -> bool {
                     if let Some(mode) = &self.$part {
-                        return self.should_prune(mode, block, tip)
+                        return mode.should_prune(block, tip)
                     }
                     false
                 }
@@ -74,16 +74,8 @@ macro_rules! impl_prune_parts {
                     " pruning needs to be done, inclusive, according to the provided tip."
                 )]
                 pub fn [<prune_target_block_ $part>](&self, tip: BlockNumber) -> Result<Option<(BlockNumber, PruneMode)>, PrunePartError> {
-                    let min_blocks: u64 = $min_blocks.unwrap_or_default();
-                    match self.$part {
-                        Some(mode) => Ok(match mode {
-                            PruneMode::Full if min_blocks == 0 => Some((tip, mode)),
-                            PruneMode::Distance(distance) if distance > tip => None, // Nothing to prune yet
-                            PruneMode::Distance(distance) if distance >= min_blocks => Some((tip - distance, mode)),
-                            PruneMode::Before(n) if n > tip => None, // Nothing to prune yet
-                            PruneMode::Before(n) if tip - n >= min_blocks => Some((n - 1, mode)),
-                            _ => return Err(PrunePartError::Configuration(PrunePart::$variant)),
-                        }),
+                     match self.$part {
+                        Some(mode) => mode.prune_target_block(tip, $min_blocks.unwrap_or_default(), PrunePart::$variant),
                         None => Ok(None)
                     }
                 }
@@ -107,20 +99,6 @@ impl PruneModes {
     /// Sets pruning to no target.
     pub fn none() -> Self {
         PruneModes::default()
-    }
-
-    /// Check if target block should be pruned according to the provided prune mode and tip.
-    pub fn should_prune(&self, mode: &PruneMode, block: BlockNumber, tip: BlockNumber) -> bool {
-        match mode {
-            PruneMode::Full => true,
-            PruneMode::Distance(distance) => {
-                if *distance > tip {
-                    return false
-                }
-                block < tip - *distance
-            }
-            PruneMode::Before(n) => *n > block,
-        }
     }
 
     impl_prune_parts!(
