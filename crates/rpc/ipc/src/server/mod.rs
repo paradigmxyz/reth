@@ -300,7 +300,7 @@ async fn spawn_connection<S, T>(
 ) where
     S: Service<String, Response = Option<String>> + Send + 'static,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
-    S::Future: Send,
+    S::Future: Send + Unpin,
     T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let task = tokio::task::spawn(async move {
