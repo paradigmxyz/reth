@@ -246,11 +246,7 @@ impl StorageInner {
 
     /// Fills in pre-execution header fields based on the current best block and given
     /// transactions.
-    pub(crate) fn build_header_template(
-        &self,
-        transactions: &Vec<TransactionSigned>,
-        chain_spec: Arc<ChainSpec>,
-    ) -> Header {
+    pub(crate) fn build_header_template(&self, transactions: &Vec<TransactionSigned>) -> Header {
         // check previous block for base fee
         let base_fee_per_gas = self
             .headers
@@ -343,9 +339,8 @@ impl StorageInner {
         &mut self,
         transactions: Vec<TransactionSigned>,
         executor: &mut Executor<DB>,
-        chain_spec: Arc<ChainSpec>,
     ) -> Result<(SealedHeader, PostState), BlockExecutionError> {
-        let header = self.build_header_template(&transactions, chain_spec);
+        let header = self.build_header_template(&transactions);
 
         let block = Block { header, body: transactions, ommers: vec![], withdrawals: None };
 

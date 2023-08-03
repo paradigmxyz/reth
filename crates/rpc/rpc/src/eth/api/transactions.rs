@@ -230,8 +230,7 @@ pub trait EthTransactions: Send + Sync {
 impl<Provider, Pool, Network> EthTransactions for EthApi<Provider, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Provider:
-        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
     fn call_gas_limit(&self) -> u64 {
@@ -643,8 +642,7 @@ where
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
-    Provider:
-        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: 'static,
 {
     /// Helper function for `eth_getTransactionReceipt`
@@ -668,8 +666,7 @@ where
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Pool: TransactionPool + 'static,
-    Provider:
-        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
     pub(crate) fn sign_request(

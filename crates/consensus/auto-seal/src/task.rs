@@ -109,7 +109,6 @@ where
                 let to_engine = this.to_engine.clone();
                 let client = this.client.clone();
                 let chain_spec = Arc::clone(&this.chain_spec);
-                let chain_spec2 = Arc::clone(&this.chain_spec);
                 let pool = this.pool.clone();
                 let events = this.pipe_line_events.take();
                 let canon_state_notification = this.canon_state_notification.clone();

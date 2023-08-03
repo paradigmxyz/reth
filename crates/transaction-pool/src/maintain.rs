@@ -10,9 +10,7 @@ use futures_util::{
     FutureExt, Stream, StreamExt,
 };
 use reth_primitives::{Address, BlockHash, BlockNumberOrTag, FromRecoveredTransaction};
-use reth_provider::{
-    BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, PostState, StateProviderFactory,
-};
+use reth_provider::{BlockReaderIdExt, CanonStateNotification, PostState, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
     borrow::Borrow,
@@ -51,7 +49,7 @@ pub fn maintain_transaction_pool_future<Client, P, St, Tasks>(
     config: MaintainPoolConfig,
 ) -> BoxFuture<'static, ()>
 where
-    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Send + 'static,
+    Client: StateProviderFactory + BlockReaderIdExt + Clone + Send + 'static,
     P: TransactionPoolExt + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
