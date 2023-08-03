@@ -45,6 +45,7 @@ impl NetworkHandle {
         network_mode: NetworkMode,
         bandwidth_meter: BandwidthMeter,
         chain_id: Arc<AtomicU64>,
+        #[cfg(feature = "optimism")] sequencer_endpoint: Option<String>,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -57,6 +58,8 @@ impl NetworkHandle {
             is_syncing: Arc::new(AtomicBool::new(false)),
             initial_sync_done: Arc::new(AtomicBool::new(false)),
             chain_id,
+            #[cfg(feature = "optimism")]
+            sequencer_endpoint,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -252,6 +255,11 @@ impl NetworkInfo for NetworkHandle {
     fn is_initially_syncing(&self) -> bool {
         SyncStateProvider::is_initially_syncing(self)
     }
+
+    #[cfg(feature = "optimism")]
+    fn sequencer_endpoint(&self) -> Option<String> {
+        self.inner.sequencer_endpoint.clone()
+    }
 }
 
 impl SyncStateProvider for NetworkHandle {
@@ -261,7 +269,7 @@ impl SyncStateProvider for NetworkHandle {
     // used to guard the txpool
     fn is_initially_syncing(&self) -> bool {
         if self.inner.initial_sync_done.load(Ordering::Relaxed) {
-            return false
+            return false;
         }
         self.inner.is_syncing.load(Ordering::Relaxed)
     }
@@ -305,6 +313,9 @@ struct NetworkInner {
     initial_sync_done: Arc<AtomicBool>,
     /// The chain id
     chain_id: Arc<AtomicU64>,
+    #[cfg(feature = "optimism")]
+    /// The sequencer HTTP Endpoint
+    sequencer_endpoint: Option<String>,
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
