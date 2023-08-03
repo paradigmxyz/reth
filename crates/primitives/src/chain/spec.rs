@@ -973,7 +973,7 @@ where
 }
 
 /// PoS deposit contract details.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DepositContract {
     /// Deposit Contract Address
     pub address: Address,
