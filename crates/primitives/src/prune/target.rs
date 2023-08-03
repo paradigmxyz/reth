@@ -21,8 +21,8 @@ pub struct PruneModes {
     /// Transaction Lookup pruning configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transaction_lookup: Option<PruneMode>,
-    /// Receipts pruning configuration. Supersedes `PruneModes::only_contract_logs` and it's more
-    /// performant.
+    /// Configuration for pruning of receipts. This setting overrides
+    /// `PruneModes::only_contract_logs` and offers improved performance.
     #[serde(
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<64, _>"
@@ -40,8 +40,11 @@ pub struct PruneModes {
         deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<64, _>"
     )]
     pub storage_history: Option<PruneMode>,
-    /// Includes only receipts with logs that were emitted by these addresses. Excludes every
-    /// other. It's superseded by `PruneModes::receipts`.
+    /// Retains only those receipts that contain logs emitted by the specified addresses,
+    /// discarding all others. Note that this setting is overridden by `PruneModes::receipts`.
+    ///
+    /// The [`BlockNumber`] represents the starting block from which point onwards the receipts are
+    /// preserved.
     pub only_contract_logs: BTreeMap<BlockNumber, Vec<Address>>,
 }
 
