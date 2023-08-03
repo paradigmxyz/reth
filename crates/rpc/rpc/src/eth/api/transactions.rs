@@ -394,29 +394,29 @@ where
     }
 
     async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256> {
-        let recovered = recover_raw_transaction(tx)?;
-
-        let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered);
-
         #[cfg(feature = "optimism")]
         if let Some(endpoint) = self.network().sequencer_endpoint() {
             let client = Client::new();
 
-            let body = r#"{
+            let body = serde_json::json!({
                 "jsonrpc": "2.0",
                 "method": "eth_sendRawTransaction",
-                "params":[hex!(tx)],
+                "params": [hex::encode(tx.clone())],
                 "id": self.network().chain_id()
-            }"#;
+            });
 
             let req = Request::builder()
                 .method(Method::POST)
                 .uri(endpoint)
                 .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
-                .body(Body::from(body))?;
+                .body(Body::from(serde_json::to_string(&body).unwrap()))?;
 
             client.request(req).await?;
         }
+
+        let recovered = recover_raw_transaction(tx)?;
+
+        let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered);
 
         // submit the transaction to the pool with a `Local` origin
         let hash = self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
