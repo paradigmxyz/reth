@@ -52,7 +52,7 @@ pub trait NetworkInfo: Send + Sync {
 
     #[cfg(feature = "optimism")]
     /// Returns the sequencer HTTP endpoint, if set.
-    fn sequencer_endpoint(&self) -> Option<String>;
+    fn sequencer_endpoint(&self) -> &Option<String>;
 }
 
 /// Provides general purpose information about Peers in the network.

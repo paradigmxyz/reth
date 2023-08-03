@@ -252,8 +252,8 @@ impl NetworkInfo for NetworkHandle {
     }
 
     #[cfg(feature = "optimism")]
-    fn sequencer_endpoint(&self) -> Option<String> {
-        self.inner.sequencer_endpoint.clone()
+    fn sequencer_endpoint(&self) -> &Option<String> {
+        &self.inner.sequencer_endpoint
     }
 }
 

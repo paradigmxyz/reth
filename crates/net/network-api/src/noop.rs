@@ -47,8 +47,8 @@ impl NetworkInfo for NoopNetwork {
     }
 
     #[cfg(feature = "optimism")]
-    fn sequencer_endpoint(&self) -> Option<String> {
-        None
+    fn sequencer_endpoint(&self) -> &Option<String> {
+        &None
     }
 }
 
