@@ -349,7 +349,7 @@ impl<DB: Database> Pruner<DB> {
         provider.prune_table_with_range_in_batches::<tables::TxSenders>(
             range,
             self.batch_sizes.transaction_senders,
-            |entries| {
+            |entries, _| {
                 processed += entries;
                 trace!(
                     target: "pruner",
@@ -383,16 +383,14 @@ impl<DB: Database> Pruner<DB> {
         let range = from_block..=to_block;
         let total = range.clone().count();
 
-        let mut processed = 0;
         provider.prune_table_with_range_in_batches::<tables::AccountChangeSet>(
             range,
             self.batch_sizes.account_history,
-            |entries| {
-                processed += entries;
+            |keys, _| {
                 trace!(
                     target: "pruner",
-                    %entries,
-                    progress = format!("{:.1}%", 100.0 * processed as f64 / total as f64),
+                    %keys,
+                    progress = format!("{:.1}%", 100.0 * keys as f64 / total as f64),
                     "Pruned account history (changesets)"
                 );
             },
@@ -437,16 +435,14 @@ impl<DB: Database> Pruner<DB> {
         let total = block_range.clone().count();
         let range = BlockNumberAddress::range(block_range);
 
-        let mut processed = 0;
         provider.prune_table_with_range_in_batches::<tables::StorageChangeSet>(
             range,
             self.batch_sizes.storage_history,
-            |entries| {
-                processed += entries;
+            |keys, _| {
                 trace!(
                     target: "pruner",
-                    %entries,
-                    progress = format!("{:.1}%", 100.0 * processed as f64 / total as f64),
+                    %keys,
+                    progress = format!("{:.1}%", 100.0 * keys as f64 / total as f64),
                     "Pruned storage history (changesets)"
                 );
             },
