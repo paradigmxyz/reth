@@ -2,7 +2,7 @@
 
 use crate::{
     args::GasPriceOracleArgs,
-    cli::ext::{NoopArgsExt, RethRpcConfig, RethRpcServerArgsExt},
+    cli::{config::RethRpcConfig, ext::RethNodeCommandExt},
 };
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
@@ -57,7 +57,7 @@ pub(crate) const RPC_DEFAULT_MAX_TRACING_REQUESTS: u32 = 25;
 /// Parameters for configuring the rpc more granularity via CLI
 #[derive(Debug, Args)]
 #[command(next_help_heading = "RPC")]
-pub struct RpcServerArgs<Ext: RethRpcServerArgsExt = NoopArgsExt> {
+pub struct RpcServerArgs {
     /// Enable the HTTP-RPC server
     #[arg(long, default_value_if("dev", "true", "true"))]
     pub http: bool,
@@ -163,13 +163,9 @@ pub struct RpcServerArgs<Ext: RethRpcServerArgsExt = NoopArgsExt> {
     /// Maximum number of env cache entries.
     #[arg(long, default_value_t = DEFAULT_ENV_CACHE_MAX_LEN)]
     pub env_cache_len: u32,
-
-    /// Additional arguments for rpc.
-    #[clap(flatten)]
-    pub ext: Ext,
 }
 
-impl<Ext: RethRpcServerArgsExt> RpcServerArgs<Ext> {
+impl RpcServerArgs {
     /// Returns the max request size in bytes.
     pub fn rpc_max_request_size_bytes(&self) -> u32 {
         self.rpc_max_request_size * 1024 * 1024
@@ -227,7 +223,7 @@ impl<Ext: RethRpcServerArgsExt> RpcServerArgs<Ext> {
     /// for the auth server that handles the `engine_` API that's accessed by the consensus
     /// layer.
     #[allow(clippy::too_many_arguments)]
-    pub async fn start_servers<Provider, Pool, Network, Tasks, Events, Engine>(
+    pub async fn start_servers<Provider, Pool, Network, Tasks, Events, Engine, Ext>(
         &self,
         provider: Provider,
         pool: Pool,
@@ -236,6 +232,7 @@ impl<Ext: RethRpcServerArgsExt> RpcServerArgs<Ext> {
         events: Events,
         engine_api: Engine,
         jwt_secret: JwtSecret,
+        ext: &Ext,
     ) -> eyre::Result<(RpcServerHandle, AuthServerHandle)>
     where
         Provider: BlockReaderIdExt
@@ -252,6 +249,7 @@ impl<Ext: RethRpcServerArgsExt> RpcServerArgs<Ext> {
         Tasks: TaskSpawner + Clone + 'static,
         Events: CanonStateSubscriptions + Clone + 'static,
         Engine: EngineApiServer,
+        Ext: RethNodeCommandExt,
     {
         let auth_config = self.auth_server_config(jwt_secret)?;
 
@@ -267,7 +265,7 @@ impl<Ext: RethRpcServerArgsExt> RpcServerArgs<Ext> {
             .build_with_auth_server(module_config, engine_api);
 
         // apply configured customization
-        self.ext.extend_rpc_modules(self, &mut registry, &mut rpc_modules)?;
+        ext.extend_rpc_modules(self, &mut registry, &mut rpc_modules)?;
 
         let server_config = self.rpc_server_config();
         let launch_rpc = rpc_modules.start_server(server_config).map_ok(|handle| {
@@ -448,7 +446,7 @@ impl<Ext: RethRpcServerArgsExt> RpcServerArgs<Ext> {
     }
 }
 
-impl<Ext: RethRpcServerArgsExt> RethRpcConfig for RpcServerArgs<Ext> {
+impl RethRpcConfig for RpcServerArgs {
     fn is_ipc_enabled(&self) -> bool {
         // By default IPC is enabled therefor it is enabled if the `ipcdisable` is false.
         !self.ipcdisable
