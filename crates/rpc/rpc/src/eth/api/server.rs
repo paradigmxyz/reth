@@ -22,8 +22,8 @@ use reth_provider::{
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
     state::StateOverride, BlockOverrides, Bundle, CallRequest, EIP1186AccountProofResponse,
-    FeeHistory, Index, RichBlock, StateContext, SyncStatus, TransactionReceipt, TransactionRequest,
-    Work, EthCallResponse,
+    EthCallResponse, FeeHistory, Index, RichBlock, StateContext, SyncStatus, TransactionReceipt,
+    TransactionRequest, Work,
 };
 use reth_transaction_pool::TransactionPool;
 use serde_json::Value;
@@ -302,13 +302,13 @@ where
     /// Handler for: `eth_gasPrice`
     async fn gas_price(&self) -> Result<U256> {
         trace!(target: "rpc::eth", "Serving eth_gasPrice");
-        return Ok(EthApi::gas_price(self).await?);
+        return Ok(EthApi::gas_price(self).await?)
     }
 
     /// Handler for: `eth_maxPriorityFeePerGas`
     async fn max_priority_fee_per_gas(&self) -> Result<U256> {
         trace!(target: "rpc::eth", "Serving eth_maxPriorityFeePerGas");
-        return Ok(EthApi::suggested_priority_fee(self).await?);
+        return Ok(EthApi::suggested_priority_fee(self).await?)
     }
 
     // FeeHistory is calculated based on lazy evaluation of fees for historical blocks, and further
@@ -327,13 +327,8 @@ where
         reward_percentiles: Option<Vec<f64>>,
     ) -> Result<FeeHistory> {
         trace!(target: "rpc::eth", ?block_count, ?newest_block, ?reward_percentiles, "Serving eth_feeHistory");
-        return Ok(EthApi::fee_history(
-            self,
-            block_count.as_u64(),
-            newest_block,
-            reward_percentiles,
-        )
-        .await?);
+        return Ok(EthApi::fee_history(self, block_count.as_u64(), newest_block, reward_percentiles)
+            .await?)
     }
 
     /// Handler for: `eth_mining`

@@ -4,8 +4,9 @@ use reth_primitives::{
     AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes, H256, H64, U256, U64,
 };
 use reth_rpc_types::{
-    state::StateOverride, BlockOverrides, Bundle, CallRequest, EIP1186AccountProofResponse, FeeHistory,
-    Index, RichBlock, SyncStatus, Transaction, TransactionReceipt, TransactionRequest, Work, StateContext, EthCallResponse,
+    state::StateOverride, BlockOverrides, Bundle, CallRequest, EIP1186AccountProofResponse,
+    EthCallResponse, FeeHistory, Index, RichBlock, StateContext, SyncStatus, Transaction,
+    TransactionReceipt, TransactionRequest, Work,
 };
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
@@ -153,8 +154,8 @@ pub trait EthApi {
         block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<Bytes>;
 
-    /// Simulate arbitrary number of transactions at an arbitrary blockchain index, with the optionality
-    /// of state overrides
+    /// Simulate arbitrary number of transactions at an arbitrary blockchain index, with the
+    /// optionality of state overrides
     #[method(name = "callMany")]
     async fn call_many(
         &self,

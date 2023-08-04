@@ -66,8 +66,8 @@ where
         ensure_success(res.result)
     }
 
-    /// Simulate arbitrary number of transactions at an arbitrary blockchain index, with the optionality
-    /// of state overrides
+    /// Simulate arbitrary number of transactions at an arbitrary blockchain index, with the
+    /// optionality of state overrides
     pub async fn call_many(
         &self,
         bundle: Bundle,
@@ -76,7 +76,7 @@ where
     ) -> EthResult<Vec<EthCallResponse>> {
         let Bundle { transactions, block_override } = bundle;
         if transactions.is_empty() {
-            return Err(EthApiError::InvalidParams(String::from("transactions are empty.")));
+            return Err(EthApiError::InvalidParams(String::from("transactions are empty.")))
         }
 
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
@@ -102,8 +102,8 @@ where
         }
 
         let this = self.clone();
-        let res = self
-            .inner
+
+        self.inner
             .tracing_call_pool
             .spawn(move || {
                 let state = this.state_at(at.into())?;
@@ -129,8 +129,8 @@ where
                 let overrides =
                     EvmOverrides::new(state_override.clone(), block_override.map(Box::new));
 
-                let mut transactions = transactions.into_iter().peekable();
-                while let Some(tx) = transactions.next() {
+                let transactions = transactions.into_iter().peekable();
+                for tx in transactions {
                     let env = prepare_call_env(
                         cfg.clone(),
                         block_env.clone(),
@@ -168,9 +168,7 @@ where
                 // Ok(Vec::new())
             })
             .await
-            .map_err(|_| EthApiError::InternalEthError)?;
-
-        res
+            .map_err(|_| EthApiError::InternalEthError)?
     }
 
     /// Estimates the gas usage of the `request` with the state.
@@ -220,9 +218,9 @@ where
                         if env.tx.value > available_funds {
                             return Err(
                                 RpcInvalidTransactionError::InsufficientFundsForTransfer.into()
-                            );
+                            )
                         }
-                        return Ok(U256::from(MIN_TRANSACTION_GAS));
+                        return Ok(U256::from(MIN_TRANSACTION_GAS))
                     }
                 }
             }
@@ -254,7 +252,7 @@ where
             // if price or limit was included in the request then we can execute the request
             // again with the block's gas limit to check if revert is gas related or not
             if request_gas.is_some() || request_gas_price.is_some() {
-                return Err(map_out_of_gas_err(env_gas_limit, env, &mut db));
+                return Err(map_out_of_gas_err(env_gas_limit, env, &mut db))
             }
         }
 
@@ -274,7 +272,7 @@ where
                 } else {
                     // the transaction did revert
                     Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into())
-                };
+                }
             }
         }
 
@@ -311,7 +309,7 @@ where
 
                 // new midpoint
                 mid_gas_limit = ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64;
-                continue;
+                continue
             }
 
             let (res, _) = ethres?;
@@ -333,7 +331,7 @@ where
                         err => {
                             // these should be unreachable because we know the transaction succeeds,
                             // but we consider these cases an error
-                            return Err(RpcInvalidTransactionError::EvmHalt(err).into());
+                            return Err(RpcInvalidTransactionError::EvmHalt(err).into())
                         }
                     }
                 }
