@@ -415,6 +415,7 @@ pub fn encode_fixed_size<E: MaxEncodedLen<LEN>, const LEN: usize>(v: &E) -> Arra
 
 #[cfg(feature = "kzg")]
 mod kzg_support {
+<<<<<<< HEAD
     extern crate c_kzg;
 
     use super::BufMut;
