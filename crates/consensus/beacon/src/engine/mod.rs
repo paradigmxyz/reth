@@ -1062,7 +1062,7 @@ where
             self.try_insert_new_payload(block)
         } else {
             if self.is_prune_active() {
-                warn!(target: "consensus::engine", "Pruning is in progress, buffering new payload.");
+                debug!(target: "consensus::engine", "Pruning is in progress, buffering new payload.");
             }
             self.try_buffer_payload(block)
         };
