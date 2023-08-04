@@ -5,7 +5,7 @@ use crate::{
         error::{ensure_success, EthApiError, EthResult, RevertError, RpcInvalidTransactionError},
         revm_utils::{
             build_call_evm_env, caller_gas_allowance, cap_tx_gas_limit_with_caller_allowance,
-            get_precompiles, inspect, transact, EvmOverrides,
+            get_precompiles, inspect, prepare_call_env, transact, EvmOverrides,
         },
         EthTransactions,
     },
@@ -18,12 +18,16 @@ use reth_provider::{BlockReaderIdExt, EvmEnvProvider, StateProvider, StateProvid
 use reth_revm::{
     access_list::AccessListInspector,
     database::{State, SubState},
+    env::tx_env_with_recovered,
 };
-use reth_rpc_types::CallRequest;
+use reth_rpc_types::{
+    state::StateOverride, BlockError, Bundle, CallRequest, EthCallResponse, StateContext,
+};
 use reth_transaction_pool::TransactionPool;
 use revm::{
     db::{CacheDB, DatabaseRef},
     primitives::{BlockEnv, CfgEnv, Env, ExecutionResult, Halt, TransactTo},
+    DatabaseCommit,
 };
 use tracing::trace;
 
@@ -60,6 +64,113 @@ where
             .await?;
 
         ensure_success(res.result)
+    }
+
+    /// Simulate arbitrary number of transactions at an arbitrary blockchain index, with the optionality
+    /// of state overrides
+    pub async fn call_many(
+        &self,
+        bundle: Bundle,
+        state_context: Option<StateContext>,
+        state_override: Option<StateOverride>,
+    ) -> EthResult<Vec<EthCallResponse>> {
+        let Bundle { transactions, block_override } = bundle;
+        if transactions.is_empty() {
+            return Err(EthApiError::InvalidParams(String::from("transactions are empty.")));
+        }
+
+        let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
+        let transaction_index = transaction_index.unwrap_or_default();
+
+        let target_block = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let ((cfg, block_env, _), block) =
+            futures::try_join!(self.evm_env_at(target_block), self.block_by_id(target_block))?;
+
+        let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        let gas_limit = self.inner.gas_cap;
+
+        // we're essentially replaying the transactions in the block here, hence we need the state
+        // that points to the beginning of the block, which is the state at the parent block
+        let mut at = block.parent_hash;
+        let mut replay_block_txs = true;
+
+        // but if all transactions are to be replayed, we can use the state at the block itself
+        let num_txs = transaction_index.index().unwrap_or(block.body.len());
+        if num_txs == block.body.len() {
+            at = block.hash;
+            replay_block_txs = false;
+        }
+
+        let this = self.clone();
+        let res = self
+            .inner
+            .tracing_call_pool
+            .spawn(move || {
+                let state = this.state_at(at.into())?;
+
+                let mut results: Vec<EthCallResponse> = Vec::with_capacity(transactions.len());
+                let mut db = SubState::new(State::new(state));
+
+                if replay_block_txs {
+                    // only need to replay the transactions in the block if not all transactions are
+                    // to be replayed
+                    let transactions = block.body.into_iter().take(num_txs);
+
+                    // Execute all transactions until index
+                    for tx in transactions {
+                        let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
+                        let tx = tx_env_with_recovered(&tx);
+                        let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                        let (res, _) = transact(&mut db, env)?;
+                        db.commit(res.state);
+                    }
+                }
+
+                let overrides =
+                    EvmOverrides::new(state_override.clone(), block_override.map(Box::new));
+
+                let mut transactions = transactions.into_iter().peekable();
+                while let Some(tx) = transactions.next() {
+                    let env = prepare_call_env(
+                        cfg.clone(),
+                        block_env.clone(),
+                        tx,
+                        gas_limit,
+                        &mut db,
+                        overrides.clone(),
+                    )?;
+                    let (res, _) = transact(&mut db, env)?;
+
+                    match res.result {
+                        ExecutionResult::Success { output, .. } => {
+                            results.push(EthCallResponse {
+                                output: Some(output.into_data().into()),
+                                error: None,
+                            });
+                        }
+                        ExecutionResult::Revert { output, .. } => {
+                            results
+                                .push(EthCallResponse { output: None, error: Some(output.into()) });
+                        }
+                        ExecutionResult::Halt { .. } => {
+                            results.push(EthCallResponse {
+                                output: None,
+                                error: Some(Default::default()),
+                            });
+                        }
+                    }
+
+                    // need to apply the state changes of this call before executing the next call
+                    db.commit(res.state);
+                }
+
+                Ok(results)
+                // Ok(Vec::new())
+            })
+            .await
+            .map_err(|_| EthApiError::InternalEthError)?;
+
+        res
     }
 
     /// Estimates the gas usage of the `request` with the state.
@@ -109,9 +220,9 @@ where
                         if env.tx.value > available_funds {
                             return Err(
                                 RpcInvalidTransactionError::InsufficientFundsForTransfer.into()
-                            )
+                            );
                         }
-                        return Ok(U256::from(MIN_TRANSACTION_GAS))
+                        return Ok(U256::from(MIN_TRANSACTION_GAS));
                     }
                 }
             }
@@ -143,7 +254,7 @@ where
             // if price or limit was included in the request then we can execute the request
             // again with the block's gas limit to check if revert is gas related or not
             if request_gas.is_some() || request_gas_price.is_some() {
-                return Err(map_out_of_gas_err(env_gas_limit, env, &mut db))
+                return Err(map_out_of_gas_err(env_gas_limit, env, &mut db));
             }
         }
 
@@ -163,7 +274,7 @@ where
                 } else {
                     // the transaction did revert
                     Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into())
-                }
+                };
             }
         }
 
@@ -200,7 +311,7 @@ where
 
                 // new midpoint
                 mid_gas_limit = ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64;
-                continue
+                continue;
             }
 
             let (res, _) = ethres?;
@@ -222,7 +333,7 @@ where
                         err => {
                             // these should be unreachable because we know the transaction succeeds,
                             // but we consider these cases an error
-                            return Err(RpcInvalidTransactionError::EvmHalt(err).into())
+                            return Err(RpcInvalidTransactionError::EvmHalt(err).into());
                         }
                     }
                 }
