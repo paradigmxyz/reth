@@ -6,6 +6,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DatabaseError as DbError,
 };
+use reth_interfaces::Error;
 use reth_primitives::{
     bloom::logs_bloom, keccak256, proofs::calculate_receipt_root_ref, Account, Address,
     BlockNumber, Bloom, Bytecode, Log, PruneMode, PruneModes, Receipt, StorageEntry, H256, U256,
@@ -600,7 +601,7 @@ impl PostState {
         mut self,
         tx: &TX,
         tip: BlockNumber,
-    ) -> Result<(), DbError> {
+    ) -> Result<(), Error> {
         self.write_history_to_db(tx, tip)?;
 
         // Write new storage state
@@ -657,8 +658,12 @@ impl PostState {
             let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
             let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
 
-            let contract_log_pruner =
-                self.prune_modes.contract_logs_filter.flatten(tip).expect("TODO");
+            let contract_log_pruner = self
+                .prune_modes
+                .contract_logs_filter
+                .flatten(tip)
+                .map_err(|e| Error::Custom(e.to_string()))?;
+
             // Empty implies that there is going to be
             // addresses to include in the filter in a future block. None means there isn't any kind
             // of configuration.

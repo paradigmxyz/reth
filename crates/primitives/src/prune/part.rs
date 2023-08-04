@@ -12,7 +12,7 @@ pub enum PrunePart {
     TransactionLookup,
     /// Prune part responsible for all `Receipts`.
     Receipts,
-    /// Prune part responsible for some `Receipts`.
+    /// Prune part responsible for some `Receipts` filtered by logs.
     ContractLogs,
     /// Prune part responsible for the `AccountChangeSet` and `AccountHistory` tables.
     AccountHistory,
