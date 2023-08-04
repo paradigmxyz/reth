@@ -32,6 +32,10 @@ impl ContractLogsPruneConfig {
     ) -> Result<BTreeMap<BlockNumber, Vec<&Address>>, PrunePartError> {
         let mut map = BTreeMap::new();
         for (mode, address) in self.0.iter() {
+            // Getting `None`, means that there is nothing to prune yet, so we need it to include in
+            // the BTreeMap (block = 0), otherwise it will be excluded.
+            // Reminder that this BTreeMap works as an inclusion list that excludes (prunes) all
+            // other receipts.
             let block = mode
                 .prune_target_block(tip, MINIMUM_PRUNING_DISTANCE, PrunePart::ContractLogs)?
                 .map(|(block, _)| block)
