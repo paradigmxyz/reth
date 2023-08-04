@@ -188,7 +188,11 @@ impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
             balance: Default::default(),
             state_nonce: 0,
             transaction,
-            propagate: if origin.is_local() { self.propagate_local } else { true },
+            propagate: match origin {
+                TransactionOrigin::External => true,
+                TransactionOrigin::Local => self.propagate_local,
+                TransactionOrigin::Private => false,
+            },
         }
     }
 }
