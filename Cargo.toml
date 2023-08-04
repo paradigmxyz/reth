@@ -143,3 +143,7 @@ jsonrpsee-types = { version = "0.19" }
 
 ## crypto
 secp256k1 = { version = "0.27.0", default-features = false, features = ["global-context", "rand-std", "recovery"] }
+
+### misc-testing
+proptest = "1.0"
+arbitrary = "1.1"
