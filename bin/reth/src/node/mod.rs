@@ -8,7 +8,7 @@ use crate::{
         DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
         RpcServerArgs, TxPoolArgs,
     },
-    cli::ext::RethCliExt,
+    cli::ext::{RethCliExt, RethNodeCommandExt},
     dirs::{DataDirPath, MaybePlatformPath},
     init::init_genesis,
     node::cl_events::ConsensusLayerHealthEvents,
@@ -22,7 +22,7 @@ use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{future::Either, pin_mut, stream, stream_select, StreamExt};
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
-use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
+
 use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine, MIN_BLOCKS_FOR_PIPELINE_RUN};
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
@@ -44,7 +44,7 @@ use reth_interfaces::{
 };
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
-use reth_payload_builder::PayloadBuilderService;
+
 use reth_primitives::{
     stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head,
     SealedHeader, H256,
@@ -127,7 +127,7 @@ pub struct Command<Ext: RethCliExt = ()> {
     network: NetworkArgs,
 
     #[clap(flatten)]
-    rpc: RpcServerArgs<Ext::RpcExt>,
+    rpc: RpcServerArgs,
 
     #[clap(flatten)]
     txpool: TxPoolArgs,
@@ -146,6 +146,10 @@ pub struct Command<Ext: RethCliExt = ()> {
 
     #[clap(flatten)]
     pruning: PruningArgs,
+
+    /// Additional cli arguments
+    #[clap(flatten)]
+    pub ext: Ext::Node,
 }
 
 impl<Ext: RethCliExt> Command<Ext> {
@@ -276,22 +280,14 @@ impl<Ext: RethCliExt> Command<Ext> {
 
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
-        let payload_generator = BasicPayloadJobGenerator::new(
+        debug!(target: "reth::cli", "Spawning payload builder service");
+        let payload_builder = self.ext.spawn_payload_builder_service(
+            &self.builder,
             blockchain_db.clone(),
             transaction_pool.clone(),
             ctx.task_executor.clone(),
-            BasicPayloadJobGeneratorConfig::default()
-                .interval(self.builder.interval)
-                .deadline(self.builder.deadline)
-                .max_payload_tasks(self.builder.max_payload_tasks)
-                .extradata(self.builder.extradata_bytes())
-                .max_gas_limit(self.builder.max_gas_limit),
             Arc::clone(&self.chain),
-        );
-        let (payload_service, payload_builder) = PayloadBuilderService::new(payload_generator);
-
-        debug!(target: "reth::cli", "Spawning payload builder service");
-        ctx.task_executor.spawn_critical("payload builder service", payload_service);
+        )?;
 
         let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
@@ -451,6 +447,7 @@ impl<Ext: RethCliExt> Command<Ext> {
                 blockchain_tree,
                 engine_api,
                 jwt_secret,
+                &self.ext,
             )
             .await?;
 
