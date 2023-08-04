@@ -454,7 +454,7 @@ where
                 .into(),
             )
         }
-        
+
         // Return the valid transaction
         TransactionValidationOutcome::Valid {
             balance: account.balance,
@@ -465,7 +465,7 @@ where
                 TransactionOrigin::External => true,
                 TransactionOrigin::Local => self.propagate_local_transactions,
                 TransactionOrigin::Private => false,
-            }
+            },
         }
     }
 }

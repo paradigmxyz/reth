@@ -408,7 +408,7 @@ pub enum TransactionOrigin {
     ///
     /// This type of transaction should not be propagated to the network. It's meant for
     /// private usage within the local node only.   
-    Private
+    Private,
 }
 
 // === impl TransactionOrigin ===
