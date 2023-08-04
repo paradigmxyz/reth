@@ -454,15 +454,18 @@ where
                 .into(),
             )
         }
-
+        
         // Return the valid transaction
         TransactionValidationOutcome::Valid {
             balance: account.balance,
             state_nonce: account.nonce,
             transaction,
             // by this point assume all external transactions should be propagated
-            propagate: matches!(origin, TransactionOrigin::External) ||
-                (self.propagate_local_transactions && !matches!(origin,TransactionOrigin::Private)),
+            propagate: match origin {
+                TransactionOrigin::External => true,
+                TransactionOrigin::Local => self.propagate_local_transactions,
+                TransactionOrigin::Private => false,
+            }
         }
     }
 }
