@@ -462,7 +462,7 @@ where
             transaction,
             // by this point assume all external transactions should be propagated
             propagate: matches!(origin, TransactionOrigin::External) ||
-                self.propagate_local_transactions,
+                (self.propagate_local_transactions && !matches!(origin,TransactionOrigin::Private)),
         }
     }
 }
