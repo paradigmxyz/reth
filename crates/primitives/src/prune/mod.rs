@@ -21,11 +21,11 @@ impl ContractLogsPruneConfig {
         self.0.is_empty()
     }
 
-    /// Given the `tip` block number, flatten the struct so it can easily be queried for filtering
-    /// across a range of blocks.
+    /// Given the `tip` block number, consolidates the structure so it can easily be queried for
+    /// filtering across a range of blocks.
     ///
     /// The [`BlockNumber`] key of the map should be viewed as `PruneMode::Before(block)`.
-    pub fn flatten(
+    pub fn group_by_block(
         &self,
         tip: BlockNumber,
     ) -> Result<BTreeMap<BlockNumber, Vec<&Address>>, PrunePartError> {

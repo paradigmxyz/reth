@@ -662,7 +662,7 @@ impl PostState {
             let contract_log_pruner = self
                 .prune_modes
                 .contract_logs_filter
-                .flatten(tip)
+                .group_by_block(tip)
                 .map_err(|e| Error::Custom(e.to_string()))?;
 
             // Empty implies that there is going to be
