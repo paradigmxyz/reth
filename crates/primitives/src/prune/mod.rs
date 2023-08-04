@@ -3,14 +3,13 @@ mod mode;
 mod part;
 mod target;
 
+use crate::{Address, BlockNumber};
 pub use checkpoint::PruneCheckpoint;
 pub use mode::PruneMode;
 pub use part::{PrunePart, PrunePartError};
-pub use target::{PruneModes, MINIMUM_PRUNING_DISTANCE};
-
-use crate::{Address, BlockNumber};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+pub use target::{PruneModes, MINIMUM_PRUNING_DISTANCE};
 
 /// Configuration for pruning receipts not associated with logs emitted by the specified contracts.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
