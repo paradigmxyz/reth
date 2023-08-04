@@ -1751,7 +1751,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockExecutionWriter for DatabaseP
             // Unwind account history indices.
             self.unwind_account_history_indices(range.clone())?;
 
-            // Unwind storage hashed. Add changed accounts and storages to corresponding prefix
+            // Unwind storage hashes. Add changed account and storage keys to corresponding prefix
             // sets.
             let storage_entries = self.unwind_storage_hashing(storage_range.clone())?;
             for (hashed_address, hashed_slots) in storage_entries {
