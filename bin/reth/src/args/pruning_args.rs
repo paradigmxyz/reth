@@ -37,7 +37,7 @@ impl PruningArgs {
                         chain_spec
                             .deposit_contract
                             .as_ref()
-                            .map(|contract| (PruneMode::Before(contract.block), contract.address))
+                            .map(|contract| (contract.address, PruneMode::Before(contract.block)))
                             .into_iter()
                             .collect(),
                     ),

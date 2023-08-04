@@ -13,7 +13,7 @@ pub use target::{PruneModes, MINIMUM_PRUNING_DISTANCE};
 
 /// Configuration for pruning receipts not associated with logs emitted by the specified contracts.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct ContractLogsPruneConfig(pub Vec<(PruneMode, Address)>);
+pub struct ContractLogsPruneConfig(pub BTreeMap<Address, PruneMode>);
 
 impl ContractLogsPruneConfig {
     /// Checks if the configuration is empty
@@ -30,7 +30,7 @@ impl ContractLogsPruneConfig {
         tip: BlockNumber,
     ) -> Result<BTreeMap<BlockNumber, Vec<&Address>>, PrunePartError> {
         let mut map = BTreeMap::new();
-        for (mode, address) in self.0.iter() {
+        for (address, mode) in self.0.iter() {
             // Getting `None`, means that there is nothing to prune yet, so we need it to include in
             // the BTreeMap (block = 0), otherwise it will be excluded.
             // Reminder that this BTreeMap works as an inclusion list that excludes (prunes) all
