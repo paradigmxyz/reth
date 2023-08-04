@@ -5,6 +5,9 @@ use crate::{
 use paste::paste;
 use serde::{Deserialize, Serialize};
 
+/// Minimum distance necessary from the tip so blockchain tree can work correctly.
+pub const MINIMUM_PRUNING_DISTANCE: u64 = 128;
+
 /// Pruning configuration for every part of the data that can be pruned.
 #[derive(Debug, Clone, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]

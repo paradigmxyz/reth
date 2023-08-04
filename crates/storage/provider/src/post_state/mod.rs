@@ -9,7 +9,8 @@ use reth_db::{
 use reth_interfaces::Error;
 use reth_primitives::{
     bloom::logs_bloom, keccak256, proofs::calculate_receipt_root_ref, Account, Address,
-    BlockNumber, Bloom, Bytecode, Log, PruneMode, PruneModes, Receipt, StorageEntry, H256, U256,
+    BlockNumber, Bloom, Bytecode, Log, PruneMode, PruneModes, Receipt, StorageEntry, H256,
+    MINIMUM_PRUNING_DISTANCE, U256,
 };
 use reth_trie::{
     hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
@@ -674,7 +675,12 @@ impl PostState {
                     continue
                 }
 
-                if !contract_log_pruner.is_empty() {
+                // All receipts from the last 128 blocks are required for blockchain tree, even with
+                // the contract log filters.
+                let prunable_receipts =
+                    PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(block, tip);
+
+                if prunable_receipts && !contract_log_pruner.is_empty() {
                     if address_filter.is_none() {
                         address_filter = Some((0, vec![]));
                     }
@@ -694,12 +700,16 @@ impl PostState {
                     bodies_cursor.seek_exact(block)?.expect("body indices exist");
                 let tx_range = body_indices.tx_num_range();
                 assert_eq!(receipts.len(), tx_range.clone().count(), "Receipt length mismatch");
+
                 for (tx_num, receipt) in tx_range.zip(receipts) {
-                    // If there is an address_filter, and it does not contain any of the contract
-                    // addresses, then skip writing this receipt.
-                    if let Some((_, filter)) = &address_filter {
-                        if !receipt.logs.iter().any(|log| filter.contains(&&log.address)) {
-                            continue
+                    if prunable_receipts {
+                        // If there is an address_filter, and it does not contain any of the
+                        // contract addresses, then skip writing this
+                        // receipt.
+                        if let Some((_, filter)) = &address_filter {
+                            if !receipt.logs.iter().any(|log| filter.contains(&&log.address)) {
+                                continue
+                            }
                         }
                     }
                     receipts_cursor.append(tx_num, receipt)?;

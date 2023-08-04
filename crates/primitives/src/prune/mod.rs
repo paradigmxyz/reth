@@ -6,7 +6,7 @@ mod target;
 pub use checkpoint::PruneCheckpoint;
 pub use mode::PruneMode;
 pub use part::{PrunePart, PrunePartError};
-pub use target::PruneModes;
+pub use target::{PruneModes, MINIMUM_PRUNING_DISTANCE};
 
 use crate::{Address, BlockNumber};
 use serde::{Deserialize, Serialize};
