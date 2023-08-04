@@ -2,9 +2,12 @@ use reth_metrics::{metrics, metrics::Histogram, Metrics};
 use reth_primitives::PrunePart;
 use std::collections::HashMap;
 
-#[derive(Debug, Default)]
+#[derive(Metrics)]
+#[metrics(scope = "pruner")]
 pub(crate) struct Metrics {
-    pub(crate) pruner: PrunerMetrics,
+    /// Pruning duration
+    pub(crate) duration_seconds: Histogram,
+    #[metric(skip)]
     prune_parts: HashMap<PrunePart, PrunerPartMetrics>,
 }
 
@@ -19,13 +22,6 @@ impl Metrics {
             PrunerPartMetrics::new_with_labels(&[("part", prune_part.to_string())])
         })
     }
-}
-
-#[derive(Metrics)]
-#[metrics(scope = "pruner")]
-pub(crate) struct PrunerMetrics {
-    /// Pruning duration
-    pub(crate) duration_seconds: Histogram,
 }
 
 #[derive(Metrics)]

@@ -150,7 +150,7 @@ impl<DB: Database> Pruner<DB> {
         self.last_pruned_block_number = Some(tip_block_number);
 
         let elapsed = start.elapsed();
-        self.metrics.pruner.duration_seconds.record(elapsed);
+        self.metrics.duration_seconds.record(elapsed);
 
         trace!(
             target: "pruner",
