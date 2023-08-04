@@ -1599,6 +1599,9 @@ where
             EnginePruneEvent::Started(tip_block_number) => {
                 trace!(target: "consensus::engine", %tip_block_number, "Pruner started");
                 self.metrics.pruner_runs.increment(1);
+                // Engine can't process any FCU/payload messages from CL while we're pruning, as
+                // pruner needs an exclusive write access to the database. To prevent CL from
+                // sending us unneeded updates, we need to respond `true` on `eth_syncing` request.
                 self.sync_state_updater.update_sync_state(SyncState::Syncing);
             }
             EnginePruneEvent::TaskDropped => {
