@@ -33,7 +33,7 @@ impl ContractLogsPruneConfig {
         let mut map = BTreeMap::new();
         for (mode, address) in self.0.iter() {
             let block = mode
-                .prune_target_block(tip, 128, PrunePart::ContractLogs)?
+                .prune_target_block(tip, MINIMUM_PRUNING_DISTANCE, PrunePart::ContractLogs)?
                 .map(|(block, _)| block)
                 .unwrap_or_default();
 
