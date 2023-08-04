@@ -164,7 +164,7 @@ mod tests {
             hardforks: BTreeMap::from([(Hardfork::Frontier, ForkCondition::Never)]),
             fork_timestamps: Default::default(),
             paris_block_and_final_difficulty: None,
-            deposit_contract_deployment_block: None,
+            deposit_contract: None,
         };
 
         assert_eq!(Hardfork::Frontier.fork_id(&spec), None);
@@ -179,7 +179,7 @@ mod tests {
             hardforks: BTreeMap::from([(Hardfork::Shanghai, ForkCondition::Never)]),
             fork_timestamps: Default::default(),
             paris_block_and_final_difficulty: None,
-            deposit_contract_deployment_block: None,
+            deposit_contract: None,
         };
 
         assert_eq!(Hardfork::Shanghai.fork_filter(&spec), None);

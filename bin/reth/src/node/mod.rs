@@ -327,7 +327,7 @@ impl<Ext: RethCliExt> Command<Ext> {
 
             let mut pipeline = self
                 .build_networked_pipeline(
-                    &mut config,
+                    &config,
                     client.clone(),
                     Arc::clone(&consensus),
                     db.clone(),
@@ -347,7 +347,7 @@ impl<Ext: RethCliExt> Command<Ext> {
         } else {
             let pipeline = self
                 .build_networked_pipeline(
-                    &mut config,
+                    &config,
                     network_client.clone(),
                     Arc::clone(&consensus),
                     db.clone(),
@@ -382,7 +382,6 @@ impl<Ext: RethCliExt> Command<Ext> {
                 db.clone(),
                 self.chain.clone(),
                 prune_config.block_interval,
-                tree_config.max_reorg_depth(),
                 prune_config.parts,
                 BatchSizes::default(),
             )
@@ -477,7 +476,7 @@ impl<Ext: RethCliExt> Command<Ext> {
     #[allow(clippy::too_many_arguments)]
     async fn build_networked_pipeline<DB, Client>(
         &self,
-        config: &mut Config,
+        config: &Config,
         client: Client,
         consensus: Arc<dyn Consensus>,
         db: DB,
@@ -753,6 +752,11 @@ impl<Ext: RethCliExt> Command<Ext> {
                             max_blocks: stage_config.execution.max_blocks,
                             max_changes: stage_config.execution.max_changes,
                         },
+                        stage_config
+                            .merkle
+                            .clean_threshold
+                            .max(stage_config.account_hashing.clean_threshold)
+                            .max(stage_config.storage_hashing.clean_threshold),
                         prune_config.map(|prune| prune.parts).unwrap_or_default(),
                     )
                     .with_metrics_tx(metrics_tx),
@@ -760,17 +764,12 @@ impl<Ext: RethCliExt> Command<Ext> {
                 .set(AccountHashingStage::new(
                     stage_config.account_hashing.clean_threshold,
                     stage_config.account_hashing.commit_threshold,
-                    config.prune.map(|prune| prune.parts).unwrap_or_default(),
                 ))
                 .set(StorageHashingStage::new(
                     stage_config.storage_hashing.clean_threshold,
                     stage_config.storage_hashing.commit_threshold,
-                    config.prune.map(|prune| prune.parts).unwrap_or_default(),
                 ))
-                .set(MerkleStage::new_execution(
-                    stage_config.merkle.clean_threshold,
-                    config.prune.map(|prune| prune.parts).unwrap_or_default(),
-                ))
+                .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
                 .set(TransactionLookupStage::new(stage_config.transaction_lookup.commit_threshold))
                 .set(IndexAccountHistoryStage::new(
                     stage_config.index_account_history.commit_threshold,

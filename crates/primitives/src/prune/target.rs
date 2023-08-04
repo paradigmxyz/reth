@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 pub struct PruneModes {
     /// Sender Recovery pruning configuration.
     // TODO(alexey): removing min blocks restriction is possible if we start calculating the senders
-    // dynamically on blockchain tree unwind.
+    //  dynamically on blockchain tree unwind.
     #[serde(
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<64, _>"
@@ -41,12 +41,12 @@ pub struct PruneModes {
 }
 
 macro_rules! impl_prune_parts {
-    ($(($part:ident, $human_part:expr, $min_blocks:expr)),+) => {
+    ($(($part:ident, $variant:ident, $min_blocks:expr)),+) => {
         $(
             paste! {
                 #[doc = concat!(
                     "Check if ",
-                    $human_part,
+                    stringify!($variant),
                     " should be pruned at the target block according to the provided tip."
                 )]
                 pub fn [<should_prune_ $part>](&self, block: BlockNumber, tip: BlockNumber) -> bool {
@@ -62,16 +62,20 @@ macro_rules! impl_prune_parts {
             paste! {
                 #[doc = concat!(
                     "Returns block up to which ",
-                    $human_part,
+                    stringify!($variant),
                     " pruning needs to be done, inclusive, according to the provided tip."
                 )]
                 pub fn [<prune_target_block_ $part>](&self, tip: BlockNumber) -> Result<Option<(BlockNumber, PruneMode)>, PrunePartError> {
-                    match &self.$part {
-                        Some(mode) =>
-                            match self.prune_target_block(mode, tip, $min_blocks) {
-                                Some(block) => Ok(Some((block, *mode))),
-                                None => Err(PrunePartError::Configuration(PrunePart::[<$human_part>]))
-                            }
+                    let min_blocks: u64 = $min_blocks.unwrap_or_default();
+                    match self.$part {
+                        Some(mode) => Ok(match mode {
+                            PruneMode::Full if min_blocks == 0 => Some((tip, mode)),
+                            PruneMode::Distance(distance) if distance > tip => None, // Nothing to prune yet
+                            PruneMode::Distance(distance) if distance >= min_blocks => Some((tip - distance, mode)),
+                            PruneMode::Before(n) if n > tip => None, // Nothing to prune yet
+                            PruneMode::Before(n) if tip - n >= min_blocks => Some((n - 1, mode)),
+                            _ => return Err(PrunePartError::Configuration(PrunePart::$variant)),
+                        }),
                         None => Ok(None)
                     }
                 }
@@ -110,31 +114,11 @@ impl PruneModes {
         }
     }
 
-    /// Returns block up to which pruning needs to be done, inclusive, according to the provided
-    /// prune mode, tip block number and minimum number of blocks allowed to be pruned.
-    pub fn prune_target_block(
-        &self,
-        mode: &PruneMode,
-        tip: BlockNumber,
-        min_blocks: Option<u64>,
-    ) -> Option<BlockNumber> {
-        match mode {
-            PruneMode::Full if min_blocks.unwrap_or_default() == 0 => Some(tip),
-            PruneMode::Distance(distance) if *distance >= min_blocks.unwrap_or_default() => {
-                Some(tip.saturating_sub(*distance))
-            }
-            PruneMode::Before(n) if tip.saturating_sub(*n) >= min_blocks.unwrap_or_default() => {
-                Some(n.saturating_sub(1))
-            }
-            _ => None,
-        }
-    }
-
     impl_prune_parts!(
-        (sender_recovery, "SenderRecovery", Some(64)),
-        (transaction_lookup, "TransactionLookup", None),
-        (receipts, "Receipts", Some(64)),
-        (account_history, "AccountHistory", Some(64)),
-        (storage_history, "StorageHistory", Some(64))
+        (sender_recovery, SenderRecovery, Some(64)),
+        (transaction_lookup, TransactionLookup, None),
+        (receipts, Receipts, Some(64)),
+        (account_history, AccountHistory, Some(64)),
+        (storage_history, StorageHistory, Some(64))
     );
 }

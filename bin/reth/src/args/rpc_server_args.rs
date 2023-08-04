@@ -103,8 +103,8 @@ pub struct RpcServerArgs {
     pub ipcdisable: bool,
 
     /// Filename for IPC socket/pipe within the datadir
-    #[arg(long)]
-    pub ipcpath: Option<String>,
+    #[arg(long, default_value_t = constants::DEFAULT_IPC_ENDPOINT.to_string())]
+    pub ipcpath: String,
 
     /// Auth server address to listen on
     #[arg(long = "authrpc.addr", default_value_t = IpAddr::V4(Ipv4Addr::LOCALHOST))]
@@ -431,9 +431,8 @@ impl RpcServerArgs {
         }
 
         if self.is_ipc_enabled() {
-            config = config.with_ipc(self.ipc_server_builder()).with_ipc_endpoint(
-                self.ipcpath.as_ref().unwrap_or(&constants::DEFAULT_IPC_ENDPOINT.to_string()),
-            );
+            config =
+                config.with_ipc(self.ipc_server_builder()).with_ipc_endpoint(self.ipcpath.clone());
         }
 
         config
