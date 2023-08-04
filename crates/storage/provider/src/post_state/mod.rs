@@ -671,12 +671,13 @@ impl PostState {
             let mut address_filter: Option<(u64, Vec<&Address>)> = None;
 
             for (block, receipts) in self.receipts {
+                // [`PrunePart::Receipts`] takes priority over [`PrunePart::ContractLogs`]
                 if receipts.is_empty() || self.prune_modes.should_prune_receipts(block, tip) {
                     continue
                 }
 
                 // All receipts from the last 128 blocks are required for blockchain tree, even with
-                // the contract log filters.
+                // [`PrunePart::ContractLogs`].
                 let prunable_receipts =
                     PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(block, tip);
 
