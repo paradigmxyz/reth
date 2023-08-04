@@ -196,13 +196,16 @@ impl<DB: Database> Pruner<DB> {
         prune_part: PrunePart,
         to_block: BlockNumber,
     ) -> reth_interfaces::Result<Option<RangeInclusive<TxNumber>>> {
-        let checkpoint = provider.get_prune_checkpoint(prune_part)?.unwrap_or(PruneCheckpoint {
-            block_number: 0,             // No checkpoint, fresh pruning
-            prune_mode: PruneMode::Full, // Doesn't matter in this case, can be anything
-        });
-        // Get first transaction of the next block after the highest pruned one
+        let from_block_number = provider
+            .get_prune_checkpoint(prune_part)?
+            // Checkpoint exists, prune from the next block after the highest pruned one
+            .map(|checkpoint| checkpoint.block_number + 1)
+            // No checkpoint exists, prune from genesis
+            .unwrap_or(0);
+
+        // Get first transaction
         let from_tx_num =
-            provider.block_body_indices(checkpoint.block_number + 1)?.map(|body| body.first_tx_num);
+            provider.block_body_indices(from_block_number)?.map(|body| body.first_tx_num);
         // If no block body index is found, the DB is either corrupted or we've already pruned up to
         // the latest block, so there's no thing to prune now.
         let Some(from_tx_num) = from_tx_num else { return Ok(None) };
