@@ -1599,6 +1599,7 @@ where
             EnginePruneEvent::Started(tip_block_number) => {
                 trace!(target: "consensus::engine", %tip_block_number, "Pruner started");
                 self.metrics.pruner_runs.increment(1);
+                self.sync_state_updater.update_sync_state(SyncState::Syncing);
             }
             EnginePruneEvent::TaskDropped => {
                 error!(target: "consensus::engine", "Failed to receive spawned pruner");
@@ -1606,6 +1607,7 @@ where
             }
             EnginePruneEvent::Finished { result } => {
                 trace!(target: "consensus::engine", ?result, "Pruner finished");
+                self.sync_state_updater.update_sync_state(SyncState::Idle);
                 match result {
                     Ok(_) => {
                         // Update the state and hashes of the blockchain tree if possible.
