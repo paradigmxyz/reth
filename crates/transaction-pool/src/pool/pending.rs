@@ -53,7 +53,7 @@ pub(crate) struct PendingPool<T: TransactionOrdering> {
 impl<T: TransactionOrdering> PendingPool<T> {
     /// Create a new pool instance.
     pub(crate) fn new(ordering: T) -> Self {
-        let (new_transaction_notifier, _) = broadcast::channel(1000);
+        let (new_transaction_notifier, _) = broadcast::channel(200);
         Self {
             ordering,
             submission_id: 0,
@@ -230,11 +230,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
         }
         self.all.insert(tx.clone());
 
-        self.by_id.insert(tx_id, tx.clone());
         // send the new transaction to any existing pendingpool snapshot iterators
-        // drop the Result value returned as Err effectively means there are no subscribers
-        // and Ok just returns the # of subscribed recievers
-        let _ = self.new_transaction_notifier.send(tx);
+        if self.new_transaction_notifier.receiver_count() > 0 {
+            let _ = self.new_transaction_notifier.send(tx.clone());
+        }
+
+        self.by_id.insert(tx_id, tx);
     }
 
     /// Removes a _mined_ transaction from the pool.

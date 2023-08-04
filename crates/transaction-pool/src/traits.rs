@@ -472,6 +472,10 @@ impl ChangedAccount {
 ///
 /// This makes no assumptions about the order of the transactions, but expects that _all_
 /// transactions are valid (no nonce gaps.) for the tracked state of the pool.
+///
+/// Note: this iterator will always return the best transaction that it currently knows.
+/// There is no guarantee transactions returned will always be in decreasing
+/// priority order.
 pub trait BestTransactions: Iterator + Send {
     /// Mark the transaction as invalid.
     ///

@@ -65,10 +65,8 @@ pub(crate) struct BestTransactions<T: TransactionOrdering> {
     /// Used to recieve any new pending transactions that have been added to the pool after this
     /// iterator was snapshotted
     ///
-    /// We prioritize these new transactions over existing ones by first inserting these into the
-    /// pool, and then yielding. This breaks the contract that the iterator yields the directly
-    /// "next" best transaction from the POV of the consumer, but we assume more often than not
-    /// newer transactions are better
+    /// These new pending transactions are inserted into this iterator's pool before yielding the
+    /// next value
     pub(crate) new_transaction_reciever: Receiver<PendingTransaction<T>>,
 }
 
@@ -86,6 +84,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
         self.all.get(&id.unchecked_ancestor()?)
     }
 
+    /// Non-blocking read on the new pending transactions subscription channel
     fn try_recv(&mut self) -> Option<PendingTransaction<T>> {
         match self.new_transaction_reciever.try_recv() {
             Ok(tx) => Some(tx),
@@ -98,6 +97,20 @@ impl<T: TransactionOrdering> BestTransactions<T> {
             // this case is still better than the existing iterator behavior where no new
             // pending txs are surfaced to consumers
             Err(_) => None,
+        }
+    }
+
+    /// Checks for new transactions that have come into the PendingPool after this iterator was
+    /// created and inserts them
+    fn add_new_transactions(&mut self) {
+        while let Some(pending_tx) = self.try_recv() {
+            let tx = pending_tx.transaction.clone();
+            //  same logic as PendingPool::add_transaction/PendingPool::best_with_unlocked
+            let tx_id = *tx.id();
+            if self.ancestor(&tx_id).is_none() {
+                self.independent.insert(pending_tx.clone());
+            }
+            self.all.insert(tx_id, pending_tx);
         }
     }
 }
@@ -113,16 +126,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            // check for new txs that have come in after this iterator was snapshotted and add them
-            if let Some(pending_tx) = self.try_recv() {
-                let tx = pending_tx.transaction.clone();
-                //  same logic as PendingPool::add_transaction/PendingPool::best_with_unlocked
-                let tx_id = *tx.id();
-                if self.ancestor(&tx_id).is_none() {
-                    self.independent.insert(pending_tx.clone());
-                }
-                self.all.insert(tx_id, pending_tx);
-            }
+            self.add_new_transactions();
             // Remove the next independent tx with the highest priority
             let best = self.independent.pop_last()?;
             let hash = best.transaction.hash();
