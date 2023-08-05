@@ -1,7 +1,7 @@
 //! Collection of methods for block validation.
 use reth_interfaces::{consensus::ConsensusError, Result as RethResult};
 use reth_primitives::{
-    blobfee::calculate_excess_blob_gas,
+    eip4844::calculate_excess_blob_gas,
     constants::{
         self,
         eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},

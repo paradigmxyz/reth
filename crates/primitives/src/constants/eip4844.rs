@@ -37,3 +37,6 @@ pub static KZG_TRUSTED_SETUP: Lazy<Arc<KzgSettings>> = Lazy::new(|| {
     file.write_all(TRUSTED_SETUP_RAW.as_bytes()).unwrap();
     Arc::new(KzgSettings::load_trusted_setup_file(file.path().into()).unwrap())
 });
+
+/// Commitment version of a KZG commitment
+pub const VERSIONED_HASH_VERSION_KZG: u8 = 0x01;

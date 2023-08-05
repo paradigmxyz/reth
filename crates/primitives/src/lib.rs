@@ -23,7 +23,7 @@ pub mod abi;
 mod account;
 pub mod basefee;
 mod bits;
-pub mod blobfee;
+pub mod eip4844;
 mod block;
 pub mod bloom;
 mod chain;
