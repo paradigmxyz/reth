@@ -352,7 +352,7 @@ impl ParityTraceBuilder {
         };
 
         let maybe_execution = Some(VmExecutedOperation {
-            used: step.gas_cost,
+            used: step.gas_remaining,
             push: step.new_stack.into_iter().map(|new_stack| new_stack.into()).collect(),
             mem: maybe_memory,
             store: maybe_storage,
