@@ -415,12 +415,12 @@ pub fn encode_fixed_size<E: MaxEncodedLen<LEN>, const LEN: usize>(v: &E) -> Arra
 
 #[cfg(feature = "kzg")]
 mod kzg_support {
+    extern crate c_kzg;
+
     use super::BufMut;
     use crate::{Decodable, DecodeError, Encodable};
     use c_kzg::{Blob, Bytes48, KzgCommitment, KzgProof, BYTES_PER_BLOB, BYTES_PER_COMMITMENT};
     use core::ops::Deref;
-
-    extern crate c_kzg;
 
     impl Encodable for Blob {
         fn encode(&self, out: &mut dyn BufMut) {
