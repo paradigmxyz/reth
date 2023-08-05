@@ -254,13 +254,7 @@ where
         state_override: Option<StateOverride>,
     ) -> Result<Vec<EthCallResponse>> {
         trace!(target: "rpc::eth", ?bundle, ?state_context, ?state_override, "Serving eth_callMany");
-        let res = self
-            .on_blocking_task(|this| async move {
-                this.call_many(bundle, state_context, state_override).await
-            })
-            .await?;
-
-        Ok(res)
+        Ok(EthApi::call_many(self, bundle, state_context, state_override).await?)
     }
 
     /// Handler for: `eth_createAccessList`

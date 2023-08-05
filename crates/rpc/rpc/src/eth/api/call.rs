@@ -101,69 +101,58 @@ where
             replay_block_txs = false;
         }
 
-        let this = self.clone();
+        self.spawn_with_state_at_block(at.into(), move |state| {
+            let mut results = Vec::with_capacity(transactions.len());
+            let mut db = SubState::new(State::new(state));
 
-        self.inner
-            .tracing_call_pool
-            .spawn(move || {
-                let state = this.state_at(at.into())?;
+            if replay_block_txs {
+                // only need to replay the transactions in the block if not all transactions are
+                // to be replayed
+                let transactions = block.body.into_iter().take(num_txs);
 
-                let mut results: Vec<EthCallResponse> = Vec::with_capacity(transactions.len());
-                let mut db = SubState::new(State::new(state));
-
-                if replay_block_txs {
-                    // only need to replay the transactions in the block if not all transactions are
-                    // to be replayed
-                    let transactions = block.body.into_iter().take(num_txs);
-
-                    // Execute all transactions until index
-                    for tx in transactions {
-                        let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
-                        let tx = tx_env_with_recovered(&tx);
-                        let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
-                        let (res, _) = transact(&mut db, env)?;
-                        db.commit(res.state);
-                    }
-                }
-
-                let overrides =
-                    EvmOverrides::new(state_override.clone(), block_override.map(Box::new));
-
-                let mut transactions = transactions.into_iter().peekable();
-                while let Some(tx) = transactions.next() {
-                    let env = prepare_call_env(
-                        cfg.clone(),
-                        block_env.clone(),
-                        tx,
-                        gas_limit,
-                        &mut db,
-                        overrides.clone(),
-                    )?;
+                // Execute all transactions until index
+                for tx in transactions {
+                    let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
+                    let tx = tx_env_with_recovered(&tx);
+                    let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
                     let (res, _) = transact(&mut db, env)?;
+                    db.commit(res.state);
+                }
+            }
 
-                    match ensure_success(res.result)  {
-                        Ok(output) => {
-                            results.push(EthCallResponse { output: Some(output), error: None });
-                        }
-                        Err(err) => {
-                            results.push(EthCallResponse {
-                                output: None,
-                                error: Some(err.to_string()),
-                            });
-                        }
+            let overrides = EvmOverrides::new(state_override.clone(), block_override.map(Box::new));
+
+            let mut transactions = transactions.into_iter().peekable();
+            while let Some(tx) = transactions.next() {
+                let env = prepare_call_env(
+                    cfg.clone(),
+                    block_env.clone(),
+                    tx,
+                    gas_limit,
+                    &mut db,
+                    overrides.clone(),
+                )?;
+                let (res, _) = transact(&mut db, env)?;
+
+                match ensure_success(res.result) {
+                    Ok(output) => {
+                        results.push(EthCallResponse { output: Some(output), error: None });
                     }
-
-                    if transactions.peek().is_some() {
-                        // need to apply the state changes of this call before executing the next call
-                        db.commit(res.state);
+                    Err(err) => {
+                        results
+                            .push(EthCallResponse { output: None, error: Some(err.to_string()) });
                     }
                 }
 
-                Ok(results)
-                // Ok(Vec::new())
-            })
-            .await
-            .map_err(|_| EthApiError::InternalEthError)?
+                if transactions.peek().is_some() {
+                    // need to apply the state changes of this call before executing the next call
+                    db.commit(res.state);
+                }
+            }
+
+            Ok(results)
+        })
+        .await
     }
 
     /// Estimates the gas usage of the `request` with the state.
