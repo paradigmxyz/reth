@@ -30,8 +30,8 @@ pub struct EthCallResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     /// eth_call output (if no error)
     pub output: Option<Bytes>,
-    /// eth_call error output
-    pub error: Option<Bytes>,
+    /// eth_call output (if error)
+    pub error: Option<String>,
 }
 
 /// Represents a transaction index where -1 means all transactions

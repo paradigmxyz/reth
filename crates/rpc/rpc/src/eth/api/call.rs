@@ -141,27 +141,24 @@ where
                     )?;
                     let (res, _) = transact(&mut db, env)?;
 
-                    match res.result {
-                        ExecutionResult::Success { output, .. } => {
-                            results.push(EthCallResponse {
-                                output: Some(output.into_data().into()),
-                                error: None,
-                            });
+                    let res_output = ensure_success(res.result);
+
+                    match res_output {
+                        Ok(x) => {
+                            results.push(EthCallResponse { output: Some(x), error: None });
                         }
-                        ExecutionResult::Revert { output, .. } => {
-                            results
-                                .push(EthCallResponse { output: None, error: Some(output.into()) });
-                        }
-                        ExecutionResult::Halt { .. } => {
+                        Err(err) => {
                             results.push(EthCallResponse {
                                 output: None,
-                                error: Some(Default::default()),
+                                error: Some(err.to_string()),
                             });
                         }
                     }
 
-                    // need to apply the state changes of this call before executing the next call
-                    db.commit(res.state);
+                    if transactions.peek().is_some() {
+                        // need to apply the state changes of this call before executing the next call
+                        db.commit(res.state);
+                    }
                 }
 
                 Ok(results)
