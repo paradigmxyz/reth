@@ -96,7 +96,7 @@ pub trait RethNodeCommandExt: fmt::Debug + clap::Args {
     // TODO move network related functions here
 }
 
-/// The default configuration for the reth node command [Command](crate::node::Command).
+/// The default configuration for the reth node command [Command](crate::node::NodeCommand).
 #[derive(Debug, Clone, Copy, Default, Args)]
 pub struct DefaultRethNodeCommandConfig;
 
