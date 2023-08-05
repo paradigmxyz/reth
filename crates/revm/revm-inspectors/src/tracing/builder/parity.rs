@@ -365,7 +365,14 @@ impl ParityTraceBuilder {
             })
             .unwrap_or_default();
 
-        VmInstruction { pc: step.pc, cost: cost as u64, ex: maybe_execution, sub: maybe_sub }
+        VmInstruction {
+            pc: step.pc,
+            cost: cost as u64,
+            ex: maybe_execution,
+            sub: maybe_sub,
+            op: Some(step.op.to_string()),
+            idx: None,
+        }
     }
 }
 
