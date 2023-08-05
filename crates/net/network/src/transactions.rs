@@ -7,7 +7,7 @@ use crate::{
     metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
     NetworkHandle,
 };
-use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
+use futures::{stream::FuturesUnordered, Future, FutureExt, StreamExt};
 use reth_eth_wire::{
     EthVersion, GetPooledTransactions, NewPooledTransactionHashes, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, PooledTransactions, Transactions,
@@ -29,7 +29,6 @@ use reth_transaction_pool::{
 };
 use std::{
     collections::{hash_map::Entry, HashMap},
-    future::Future,
     num::NonZeroUsize,
     pin::Pin,
     sync::Arc,
@@ -206,8 +205,8 @@ where
     /// transactions to a fraction of peers usually ensures that all nodes receive the transaction
     /// and won't need to request it.
     fn on_new_transactions(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
-        // Nothing to propagate while syncing
-        if self.network.is_syncing() {
+        // Nothing to propagate while initially syncing
+        if self.network.is_initially_syncing() {
             return
         }
 
@@ -310,8 +309,8 @@ where
         peer_id: PeerId,
         msg: NewPooledTransactionHashes,
     ) {
-        // If the node is currently syncing, ignore transactions
-        if self.network.is_syncing() {
+        // If the node is initially syncing, ignore transactions
+        if self.network.is_initially_syncing() {
             return
         }
 
@@ -405,7 +404,7 @@ where
                 // Send a `NewPooledTransactionHashes` to the peer with up to
                 // `NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT` transactions in the
                 // pool
-                if !self.network.is_syncing() {
+                if !self.network.is_initially_syncing() {
                     let peer = self.peers.get_mut(&peer_id).expect("is present; qed");
 
                     let mut msg_builder = PooledTransactionsHashesBuilder::new(version);
@@ -437,8 +436,8 @@ where
         transactions: Vec<TransactionSigned>,
         source: TransactionSource,
     ) {
-        // If the node is currently syncing, ignore transactions
-        if self.network.is_syncing() {
+        // If the node is pipeline syncing, ignore transactions
+        if self.network.is_initially_syncing() {
             return
         }
 
@@ -595,10 +594,11 @@ where
                     this.on_good_import(hash);
                 }
                 Err(err) => {
-                    // if we're syncing and the transaction is bad we ignore it, otherwise we
-                    // penalize the peer that sent the bad transaction with the assumption that the
-                    // peer should have known that this transaction is bad. (e.g. consensus rules)
-                    if err.is_bad_transaction() && !this.network.is_syncing() {
+                    // if we're initially syncing and the transaction is bad we ignore it, otherwise
+                    // we penalize the peer that sent the bad transaction with
+                    // the assumption that the peer should have known that this
+                    // transaction is bad. (e.g. consensus rules)
+                    if err.is_bad_transaction() && !this.network.is_initially_syncing() {
                         trace!(target: "net::tx", ?err, "Bad transaction import");
                         this.on_bad_import(*err.hash());
                         continue
@@ -826,8 +826,63 @@ mod tests {
             peer_id,
             msg: Transactions(vec![TransactionSigned::default()]),
         });
-
+        // this is a no-op assert that doesn't actually test the SyncState
+        // logic above, a rand PeerId short-circuits even if
+        // SyncState::Idle
         assert!(pool.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[cfg_attr(not(feature = "geth-tests"), ignore)]
+    async fn test_tx_broadcasts_through_two_syncs() {
+        reth_tracing::init_test_tracing();
+
+        let secret_key = SecretKey::new(&mut rand::thread_rng());
+
+        let client = NoopProvider::default();
+        let pool = testing_pool();
+        let config = NetworkConfigBuilder::new(secret_key)
+            .disable_discovery()
+            .listener_port(0)
+            .build(client);
+        let (handle, network, mut transactions, _) = NetworkManager::new(config)
+            .await
+            .unwrap()
+            .into_builder()
+            .transactions(pool.clone())
+            .split_with_handle();
+
+        tokio::task::spawn(network);
+
+        // go to syncing (pipline sync) to idle and then to syncing (live)
+        handle.update_sync_state(SyncState::Syncing);
+        assert!(NetworkInfo::is_syncing(&handle));
+        handle.update_sync_state(SyncState::Idle);
+        assert!(!NetworkInfo::is_syncing(&handle));
+        handle.update_sync_state(SyncState::Syncing);
+        assert!(NetworkInfo::is_syncing(&handle));
+
+        let peer_id = PeerId::random();
+        transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
+            peer_id,
+            msg: Transactions(vec![TransactionSigned::default()]),
+        });
+        assert!(!NetworkInfo::is_initially_syncing(&handle));
+        assert!(NetworkInfo::is_syncing(&handle));
+        // assert!(!pool.is_empty()); this keeps failing - indicating that there's a bug with these
+        // tests
+
+        // if we attempt to modify the initial test above with SyncState::Idle, the same assert
+        // fails.
+
+        // this is because the tx doesn't actually make its way to the pool with a
+        // Rand PeerId because there is no matching peer in the TM's peerset
+
+        // so lets say we fix that by implementing the boiler plate SessionEstablished logic from
+        // the below tests - the assert !pool.empty() still fails because there doesn't seem
+        // to be anything polling the TM future to make progress on draining the pool_import
+        // futures to make progress on adding the txs to the pool
+        // The same can be seen in the tests below, try assert !pool.empty() and they will fail!
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -906,6 +961,8 @@ mod tests {
             *handle1.peer_id(),
             transactions.transactions_by_peers.get(&signed_tx.hash()).unwrap()[0]
         );
+        // assert!(!pool.is_empty()); This fails - since pool_imports doesnt make progress on adding
+        // the tx to the pool (?)
         handle.terminate().await;
     }
 

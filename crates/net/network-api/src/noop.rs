@@ -45,6 +45,10 @@ impl NetworkInfo for NoopNetwork {
     fn is_syncing(&self) -> bool {
         false
     }
+
+    fn is_initially_syncing(&self) -> bool {
+        false
+    }
 }
 
 impl PeersInfo for NoopNetwork {
