@@ -275,7 +275,7 @@ impl TracingInspector {
             op,
             contract: interp.contract.address,
             stack,
-            new_stack: None,
+            push_stack: None,
             memory,
             memory_size: interp.memory.len(),
             gas_remaining: self.gas_inspector.gas_remaining(),
@@ -302,7 +302,8 @@ impl TracingInspector {
         let step = &mut self.traces.arena[trace_idx].trace.steps[step_idx];
 
         if interp.stack.len() > step.stack.len() {
-            step.new_stack = interp.stack.data().last().copied();
+            // if the stack grew, we need to record the new values
+            step.push_stack = Some(interp.stack.data()[step.stack.len()..].to_vec());
         }
 
         if self.config.record_memory_snapshots {
