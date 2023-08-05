@@ -30,6 +30,7 @@ pub struct EthCallResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     /// eth_call output (if no error)
     pub output: Option<Bytes>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     /// eth_call output (if error)
     pub error: Option<String>,
 }

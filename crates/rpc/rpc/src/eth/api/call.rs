@@ -129,8 +129,8 @@ where
                 let overrides =
                     EvmOverrides::new(state_override.clone(), block_override.map(Box::new));
 
-                let transactions = transactions.into_iter().peekable();
-                for tx in transactions {
+                let mut transactions = transactions.into_iter().peekable();
+                while let Some(tx) = transactions.next() {
                     let env = prepare_call_env(
                         cfg.clone(),
                         block_env.clone(),
@@ -141,11 +141,9 @@ where
                     )?;
                     let (res, _) = transact(&mut db, env)?;
 
-                    let res_output = ensure_success(res.result);
-
-                    match res_output {
-                        Ok(x) => {
-                            results.push(EthCallResponse { output: Some(x), error: None });
+                    match ensure_success(res.result)  {
+                        Ok(output) => {
+                            results.push(EthCallResponse { output: Some(output), error: None });
                         }
                         Err(err) => {
                             results.push(EthCallResponse {
