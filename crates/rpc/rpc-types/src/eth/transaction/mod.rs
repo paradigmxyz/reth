@@ -148,6 +148,16 @@ impl Transaction {
                     })
                     .collect(),
             ),
+            PrimitiveTransaction::Eip4844(tx) => Some(
+                tx.access_list
+                    .0
+                    .iter()
+                    .map(|item| AccessListItem {
+                        address: item.address.0.into(),
+                        storage_keys: item.storage_keys.iter().map(|key| key.0.into()).collect(),
+                    })
+                    .collect(),
+            ),
         };
 
         let signature = Signature::from_primitive_signature(

@@ -444,6 +444,9 @@ impl FromRecoveredTransaction for MockTransaction {
             Transaction::Eip2930 { .. } => {
                 unimplemented!()
             }
+            Transaction::Eip4844 { .. } => {
+                unimplemented!()
+            }
         }
     }
 }

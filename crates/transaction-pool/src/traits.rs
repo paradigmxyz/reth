@@ -407,7 +407,7 @@ pub enum TransactionOrigin {
     /// Transaction is originated locally and is intended to remain private.
     ///
     /// This type of transaction should not be propagated to the network. It's meant for
-    /// private usage within the local node only.   
+    /// private usage within the local node only.
     Private,
 }
 
@@ -582,6 +582,7 @@ impl PooledTransaction {
             Transaction::Legacy(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
             Transaction::Eip2930(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
             Transaction::Eip1559(t) => U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit),
+            Transaction::Eip4844(t) => U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit),
         };
         let cost = gas_cost + U256::from(transaction.value());
 
@@ -633,6 +634,7 @@ impl PoolTransaction for PooledTransaction {
             Transaction::Legacy(tx) => tx.gas_price,
             Transaction::Eip2930(tx) => tx.gas_price,
             Transaction::Eip1559(tx) => tx.max_fee_per_gas,
+            Transaction::Eip4844(tx) => tx.max_fee_per_gas,
         }
     }
 
@@ -644,6 +646,7 @@ impl PoolTransaction for PooledTransaction {
             Transaction::Legacy(_) => None,
             Transaction::Eip2930(_) => None,
             Transaction::Eip1559(tx) => Some(tx.max_priority_fee_per_gas),
+            Transaction::Eip4844(tx) => Some(tx.max_priority_fee_per_gas),
         }
     }
 
