@@ -262,7 +262,7 @@ impl SyncStateProvider for NetworkHandle {
     fn is_initially_syncing(&self) -> bool {
         let init_sync_done = self.inner.initial_sync_done.load(Ordering::Relaxed);
         let is_currently_syncing = self.inner.is_syncing.load(Ordering::Relaxed);
-        return is_currently_syncing && !init_sync_done
+        is_currently_syncing && !init_sync_done
     }
 }
 
