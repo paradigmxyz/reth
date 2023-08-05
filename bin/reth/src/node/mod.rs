@@ -160,7 +160,7 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
 
 impl<Ext: RethCliExt> NodeCommand<Ext> {
     /// Execute `node` command
-    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
+    pub async fn execute(mut self, ctx: CliContext) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         // Raise the fd limit of the process.
@@ -453,7 +453,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 blockchain_tree,
                 engine_api,
                 jwt_secret,
-                &self.ext,
+                &mut self.ext,
             )
             .await?;
 
