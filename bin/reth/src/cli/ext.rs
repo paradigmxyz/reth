@@ -16,11 +16,17 @@ use reth_transaction_pool::TransactionPool;
 use std::{fmt, sync::Arc};
 
 /// A trait that allows for extending parts of the CLI with additional functionality.
+///
+/// This is intended as a way to allow to _extend_ the node command. For example, to register
+/// additional RPC namespaces.
 pub trait RethCliExt {
-    /// Provides additional configuration for the node command.
+    /// Provides additional configuration for the node CLI command.
+    ///
+    /// This supports additional CLI arguments that can be used to modify the node configuration.
     type Node: RethNodeCommandExt;
 }
 
+/// The default CLI extension.
 impl RethCliExt for () {
     type Node = DefaultRethNodeCommandConfig;
 }
@@ -32,7 +38,7 @@ pub trait RethNodeCommandExt: fmt::Debug + clap::Args {
     /// This is expected to call the merge functions of [TransportRpcModules], for example
     /// [TransportRpcModules::merge_configured]
     fn extend_rpc_modules<Conf, Provider, Pool, Network, Tasks, Events>(
-        &self,
+        &mut self,
         _config: &Conf,
         _registry: &mut RethModuleRegistry<Provider, Pool, Network, Tasks, Events>,
         _modules: &mut TransportRpcModules<()>,
@@ -61,7 +67,7 @@ pub trait RethNodeCommandExt: fmt::Debug + clap::Args {
     /// By default this spawns a [BasicPayloadJobGenerator] with the default configuration
     /// [BasicPayloadJobGeneratorConfig].
     fn spawn_payload_builder_service<Conf, Provider, Pool, Tasks>(
-        &self,
+        &mut self,
         conf: &Conf,
         provider: Provider,
         pool: Pool,
