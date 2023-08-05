@@ -5801,6 +5801,7 @@ dependencies = [
  "arbitrary",
  "assert_matches",
  "bytes",
+ "c-kzg",
  "crc",
  "criterion",
  "crunchy",

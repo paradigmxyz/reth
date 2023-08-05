@@ -31,6 +31,9 @@ secp256k1 = { workspace = true, default-features = false, features = [
     "recovery",
 ] }
 
+# for eip-4844
+c-kzg = { git = "https://github.com/ethereum/c-kzg-4844" }
+
 # used for forkid
 crc = "3"
 

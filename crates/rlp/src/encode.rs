@@ -415,13 +415,71 @@ pub fn encode_fixed_size<E: MaxEncodedLen<LEN>, const LEN: usize>(v: &E) -> Arra
 
 #[cfg(feature = "kzg")]
 mod kzg_support {
-    use c_kzg::Blob;
-    use super::*;
+    use super::BufMut;
+    use crate::{Decodable, DecodeError, Encodable};
+    use c_kzg::{Blob, Bytes48, KzgCommitment, KzgProof, BYTES_PER_BLOB, BYTES_PER_COMMITMENT};
+    use core::ops::Deref;
 
     extern crate c_kzg;
 
     impl Encodable for Blob {
         fn encode(&self, out: &mut dyn BufMut) {
+            // Deref is implemented to get the underlying bytes
+            self.deref().encode(out);
+        }
+
+        fn length(&self) -> usize {
+            self.deref().length()
+        }
+    }
+
+    impl Decodable for Blob {
+        fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+            let bytes: [u8; BYTES_PER_BLOB] = Decodable::decode(buf)?;
+            Ok(Blob::from(bytes))
+        }
+    }
+
+    impl Encodable for Bytes48 {
+        fn encode(&self, out: &mut dyn BufMut) {
+            self.deref().encode(out);
+        }
+
+        fn length(&self) -> usize {
+            self.deref().length()
+        }
+    }
+
+    impl Decodable for Bytes48 {
+        fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+            let bytes: [u8; BYTES_PER_COMMITMENT] = Decodable::decode(buf)?;
+            Ok(Bytes48::from(bytes))
+        }
+    }
+
+    /// Only [Encodable] is implemented for [KzgCommitment] because this is a validated type - it
+    /// should be decoded using [Decodable] into a [Bytes48] type, validated, _then_ converted
+    /// into a [KzgCommitment].
+    impl Encodable for KzgCommitment {
+        fn encode(&self, out: &mut dyn BufMut) {
+            self.deref().encode(out);
+        }
+
+        fn length(&self) -> usize {
+            self.deref().length()
+        }
+    }
+
+    /// Only [Encodable] is implemented for [KzgProof] because this is a validated type - it should
+    /// be decoded using [Decodable] into a [Bytes48] type, validated, _then_ converted into a
+    /// [KzgProof].
+    impl Encodable for KzgProof {
+        fn encode(&self, out: &mut dyn BufMut) {
+            self.deref().encode(out);
+        }
+
+        fn length(&self) -> usize {
+            self.deref().length()
         }
     }
 }
