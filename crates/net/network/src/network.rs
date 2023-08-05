@@ -269,17 +269,17 @@ impl SyncStateProvider for NetworkHandle {
 impl NetworkSyncUpdater for NetworkHandle {
     fn update_sync_state(&self, state: SyncState) {
         let future_state = state.is_syncing();
-        let curr_state = self.inner.is_syncing.load(Ordering::Relaxed);
-        let init_sync_done = self.inner.initial_sync_done.load(Ordering::Relaxed);
+        let curr_syncing = self.inner.is_syncing.load(Ordering::Relaxed);
         self.inner.is_syncing.store(future_state, Ordering::Relaxed);
-        if !init_sync_done {
-            // we've either been in Idle or pipeline Syncing here, check to see if we're
-            // moving from a pipeline sync to idle
-            if curr_state && !future_state {
-                // set initial_sync_done flag to true here, every sync after this will be a livesync
-                self.inner.initial_sync_done.store(true, Ordering::Relaxed);
-            }
-        }
+        // explicitly throw this error away since we expect it to error every time after it's been
+        // set to true, i.e after every live sync
+        let _ = self.inner.initial_sync_done.compare_exchange(
+            false,
+            // on first move back from Syncing->Idle - swap and set init_sync_done to true
+            curr_syncing && !future_state,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        );
     }
 
     /// Update the status of the node.

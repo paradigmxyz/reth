@@ -50,7 +50,7 @@ pub trait NetworkInfo: Send + Sync {
     /// Returns `true` if the network is undergoing sync.
     fn is_syncing(&self) -> bool;
 
-    /// Returns `true` if the network is undergoing an initial sync.
+    /// Returns `true` when a fresh node is initially being synced, known as a Pipeline sync
     fn is_initially_syncing(&self) -> bool;
 }
 
