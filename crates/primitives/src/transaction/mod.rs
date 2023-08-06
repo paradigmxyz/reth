@@ -614,10 +614,10 @@ impl Transaction {
                 gas_limit.encode(out);
                 to.encode(out);
                 value.encode(out);
+                input.0.encode(out);
                 access_list.encode(out);
                 max_fee_per_blob_gas.encode(out);
                 blob_versioned_hashes.encode(out);
-                input.0.encode(out);
             }
         }
     }
