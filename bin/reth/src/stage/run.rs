@@ -202,28 +202,19 @@ impl Command {
                                 max_blocks: Some(batch_size),
                                 max_changes: None,
                             },
+                            config.stages.merkle.clean_threshold,
                             config.prune.map(|prune| prune.parts).unwrap_or_default(),
                         )),
                         None,
                     )
                 }
                 StageEnum::TxLookup => (Box::new(TransactionLookupStage::new(batch_size)), None),
-                StageEnum::AccountHashing => (
-                    Box::new(AccountHashingStage::new(
-                        1,
-                        batch_size,
-                        config.prune.map(|prune| prune.parts).unwrap_or_default(),
-                    )),
-                    None,
-                ),
-                StageEnum::StorageHashing => (
-                    Box::new(StorageHashingStage::new(
-                        1,
-                        batch_size,
-                        config.prune.map(|prune| prune.parts).unwrap_or_default(),
-                    )),
-                    None,
-                ),
+                StageEnum::AccountHashing => {
+                    (Box::new(AccountHashingStage::new(1, batch_size)), None)
+                }
+                StageEnum::StorageHashing => {
+                    (Box::new(StorageHashingStage::new(1, batch_size)), None)
+                }
                 StageEnum::Merkle => (
                     Box::new(MerkleStage::default_execution()),
                     Some(Box::new(MerkleStage::default_unwind())),
@@ -272,6 +263,10 @@ impl Command {
                 provider_rw.commit()?;
                 provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
             }
+        }
+
+        if self.commit {
+            provider_rw.commit()?;
         }
 
         Ok(())

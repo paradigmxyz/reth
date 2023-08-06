@@ -7,7 +7,7 @@ use reth_provider::ProviderFactory;
 use reth_stages::{
     stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
-        StorageHashingStage,
+        StorageHashingStage, MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
     },
     Stage, UnwindInput,
 };
@@ -15,7 +15,7 @@ use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
 pub(crate) async fn dump_merkle_stage<DB: Database>(
-    db_tool: &mut DbTool<'_, DB>,
+    db_tool: &DbTool<'_, DB>,
     from: BlockNumber,
     to: BlockNumber,
     output_db: &PathBuf,
@@ -42,7 +42,7 @@ pub(crate) async fn dump_merkle_stage<DB: Database>(
 
 /// Dry-run an unwind to FROM block and copy the necessary table data to the new database.
 async fn unwind_and_copy<DB: Database>(
-    db_tool: &mut DbTool<'_, DB>,
+    db_tool: &DbTool<'_, DB>,
     range: (u64, u64),
     tip_block_number: u64,
     output_db: &DatabaseEnv,
@@ -70,6 +70,7 @@ async fn unwind_and_copy<DB: Database>(
     let mut exec_stage = ExecutionStage::new(
         reth_revm::Factory::new(db_tool.chain.clone()),
         ExecutionStageThresholds { max_blocks: Some(u64::MAX), max_changes: None },
+        MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
         PruneModes::all(),
     );
 
@@ -86,22 +87,14 @@ async fn unwind_and_copy<DB: Database>(
 
     // Bring hashes to TO
 
-    AccountHashingStage {
-        clean_threshold: u64::MAX,
-        commit_threshold: u64::MAX,
-        prune_modes: PruneModes::none(),
-    }
-    .execute(&provider, execute_input)
-    .await
-    .unwrap();
-    StorageHashingStage {
-        clean_threshold: u64::MAX,
-        commit_threshold: u64::MAX,
-        prune_modes: PruneModes::none(),
-    }
-    .execute(&provider, execute_input)
-    .await
-    .unwrap();
+    AccountHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX }
+        .execute(&provider, execute_input)
+        .await
+        .unwrap();
+    StorageHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX }
+        .execute(&provider, execute_input)
+        .await
+        .unwrap();
 
     let unwind_inner_tx = provider.into_tx();
 
@@ -132,7 +125,6 @@ async fn dry_run<DB: Database>(
             clean_threshold: u64::MAX, /* Forces updating the root instead of calculating
                                         * from
                                         * scratch */
-            prune_modes: Default::default(),
         }
         .execute(
             &provider,
