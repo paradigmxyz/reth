@@ -1100,6 +1100,19 @@ impl TransactionSigned {
                 input: Bytes(Decodable::decode(data)?),
                 access_list: Decodable::decode(data)?,
             }),
+            3 => Transaction::Eip4844(TxEip4844 {
+                chain_id: Decodable::decode(data)?,
+                nonce: Decodable::decode(data)?,
+                max_priority_fee_per_gas: Decodable::decode(data)?,
+                max_fee_per_gas: Decodable::decode(data)?,
+                gas_limit: Decodable::decode(data)?,
+                to: Decodable::decode(data)?,
+                value: Decodable::decode(data)?,
+                input: Bytes(Decodable::decode(data)?),
+                access_list: Decodable::decode(data)?,
+                max_fee_per_blob_gas: Decodable::decode(data)?,
+                blob_versioned_hashes: Decodable::decode(data)?,
+            }),
             _ => return Err(DecodeError::Custom("unsupported typed transaction type")),
         };
 
