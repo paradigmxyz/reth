@@ -44,6 +44,19 @@ pub enum CanonicalError {
     Validation(#[from] BlockValidationError),
     #[error(transparent)]
     BlockchainTree(#[from] BlockchainTreeError),
+
+    // === transaction errors ===
+    #[error("Transaction error on revert: {inner:?}")]
+    CanonicalRevert { inner: String },
+    #[error("Transaction error on commit: {inner:?}")]
+    CanonicalCommit { inner: String },
+}
+
+impl CanonicalError {
+    /// Returns `true` if the error is fatal.
+    pub fn is_fatal(&self) -> bool {
+        matches!(self, Self::CanonicalCommit { .. } | Self::CanonicalRevert { .. })
+    }
 }
 
 /// Error thrown when inserting a block failed because the block is considered invalid.
@@ -230,7 +243,9 @@ impl InsertBlockErrorKind {
                 false
             }
             InsertBlockErrorKind::Canonical(err) => match err {
-                CanonicalError::BlockchainTree(_) => false,
+                CanonicalError::BlockchainTree(_) |
+                CanonicalError::CanonicalCommit { .. } |
+                CanonicalError::CanonicalRevert { .. } => false,
                 CanonicalError::Validation(_) => true,
             },
         }

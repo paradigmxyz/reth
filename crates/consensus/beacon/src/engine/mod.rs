@@ -11,7 +11,7 @@ use futures::{Future, StreamExt};
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
-        error::{InsertBlockError, InsertBlockErrorKind},
+        error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
         BlockStatus, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
     },
     consensus::ForkchoiceState,
@@ -668,7 +668,7 @@ where
                 PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash))
             }
             Err(error) => {
-                if let Error::Execution(ref err) = error {
+                if let Error::Canonical(ref err) = error {
                     if err.is_fatal() {
                         tracing::error!(target: "consensus::engine", ?err, "Encountered fatal error");
                         return Err(error)
@@ -1398,7 +1398,9 @@ where
                     // it's part of the canonical chain: if it's the safe or the finalized block
                     if matches!(
                         err,
-                        Error::Execution(BlockExecutionError::BlockHashNotFoundInChain { .. })
+                        Error::Canonical(CanonicalError::BlockchainTree(
+                            BlockchainTreeError::BlockHashNotFoundInChain { .. }
+                        ))
                     ) {
                         // if the inserted block is the currently targeted `finalized` or `safe`
                         // block, we will attempt to make them canonical,
