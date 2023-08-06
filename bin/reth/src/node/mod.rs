@@ -159,6 +159,40 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
 }
 
 impl<Ext: RethCliExt> NodeCommand<Ext> {
+    /// Replaces the extension of the node command
+    pub fn with_ext<E: RethCliExt>(self, ext: E::Node) -> NodeCommand<E> {
+        let Self {
+            datadir,
+            config,
+            chain,
+            metrics,
+            network,
+            rpc,
+            txpool,
+            builder,
+            debug,
+            db,
+            dev,
+            pruning,
+            ..
+        } = self;
+        NodeCommand {
+            datadir,
+            config,
+            chain,
+            metrics,
+            network,
+            rpc,
+            txpool,
+            builder,
+            debug,
+            db,
+            dev,
+            pruning,
+            ext,
+        }
+    }
+
     /// Execute `node` command
     pub async fn execute(mut self, ctx: CliContext) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
