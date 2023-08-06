@@ -66,7 +66,7 @@ impl NodeState {
                         stage = %stage_id,
                         from = self.current_checkpoint.block_number,
                         checkpoint = %self.current_checkpoint,
-                        eta = self.eta.fmt_for_stage(stage_id),
+                        eta = %self.eta.fmt_for_stage(stage_id),
                         "Executing stage",
                     );
                 }
@@ -85,7 +85,7 @@ impl NodeState {
                     stage = %stage_id,
                     block = checkpoint.block_number,
                     %checkpoint,
-                    eta = self.eta.fmt_for_stage(stage_id),
+                    eta = %self.eta.fmt_for_stage(stage_id),
                     "{}",
                     if done {
                         "Stage finished executing"
