@@ -609,14 +609,14 @@ impl Transaction {
             }) => {
                 chain_id.encode(out);
                 nonce.encode(out);
-                gas_limit.encode(out);
-                max_fee_per_gas.encode(out);
                 max_priority_fee_per_gas.encode(out);
+                max_fee_per_gas.encode(out);
+                gas_limit.encode(out);
                 to.encode(out);
                 value.encode(out);
                 access_list.encode(out);
-                blob_versioned_hashes.encode(out);
                 max_fee_per_blob_gas.encode(out);
+                blob_versioned_hashes.encode(out);
                 input.0.encode(out);
             }
         }
