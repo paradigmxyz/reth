@@ -45,7 +45,7 @@ members = [
     "crates/transaction-pool",
     "crates/trie",
     "testing/ef-tests",
-
+    "crates/rpc/rpc-types-util",
     "examples",
     "examples/additional-rpc-namespace-in-cli",
 ]

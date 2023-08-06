@@ -1,20 +1,12 @@
-mod common;
-mod receipt;
-mod request;    
-mod signature;
-mod typed;
-
-pub use common::TransactionInfo;
-pub use receipt::TransactionReceipt;
-pub use request::TransactionRequest;
-pub use signature::Signature;
-pub use typed::*;
 
 use reth_primitives::{
     AccessListItem, Address, BlockNumber, Bytes, Transaction as PrimitiveTransaction,
     TransactionKind as PrimitiveTransactionKind, TransactionSignedEcRecovered, TxType, H256, U128,
     U256, U64,
 };
+
+use reth_rpc_types::Signature;
+
 use serde::{Deserialize, Serialize};
 
 /// Transaction object used in RPC
@@ -180,78 +172,6 @@ impl Transaction {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::eth::transaction::signature::Parity;
-    use super::*;
 
-    #[test]
-    fn serde_transaction() {
-        let transaction = Transaction {
-            hash: H256::from_low_u64_be(1),
-            nonce: U256::from(2),
-            block_hash: Some(H256::from_low_u64_be(3)),
-            block_number: Some(U256::from(4)),
-            transaction_index: Some(U256::from(5)),
-            from: Address::from_low_u64_be(6),
-            to: Some(Address::from_low_u64_be(7)),
-            value: U256::from(8),
-            gas_price: Some(U128::from(9)),
-            gas: U256::from(10),
-            input: Bytes::from(vec![11, 12, 13]),
-            signature: Some(Signature {
-                v: U256::from(14),
-                r: U256::from(14),
-                s: U256::from(14),
-                y_parity: None,
-            }),
-            chain_id: Some(U64::from(17)),
-            access_list: None,
-            transaction_type: Some(U64::from(20)),
-            max_fee_per_gas: Some(U128::from(21)),
-            max_priority_fee_per_gas: Some(U128::from(22)),
-        };
-        let serialized = serde_json::to_string(&transaction).unwrap();
-        assert_eq!(
-            serialized,
-            r#"{"hash":"0x0000000000000000000000000000000000000000000000000000000000000001","nonce":"0x2","blockHash":"0x0000000000000000000000000000000000000000000000000000000000000003","blockNumber":"0x4","transactionIndex":"0x5","from":"0x0000000000000000000000000000000000000006","to":"0x0000000000000000000000000000000000000007","value":"0x8","gasPrice":"0x9","gas":"0xa","maxFeePerGas":"0x15","maxPriorityFeePerGas":"0x16","input":"0x0b0c0d","r":"0xe","s":"0xe","v":"0xe","chainId":"0x11","type":"0x14"}"#
-        );
-        let deserialized: Transaction = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(transaction, deserialized);
-    }
 
-    #[test]
-    fn serde_transaction_with_parity_bit() {
-        let transaction = Transaction {
-            hash: H256::from_low_u64_be(1),
-            nonce: U256::from(2),
-            block_hash: Some(H256::from_low_u64_be(3)),
-            block_number: Some(U256::from(4)),
-            transaction_index: Some(U256::from(5)),
-            from: Address::from_low_u64_be(6),
-            to: Some(Address::from_low_u64_be(7)),
-            value: U256::from(8),
-            gas_price: Some(U128::from(9)),
-            gas: U256::from(10),
-            input: Bytes::from(vec![11, 12, 13]),
-            signature: Some(Signature {
-                v: U256::from(14),
-                r: U256::from(14),
-                s: U256::from(14),
-                y_parity: Some(Parity(true)),
-            }),
-            chain_id: Some(U64::from(17)),
-            access_list: None,
-            transaction_type: Some(U64::from(20)),
-            max_fee_per_gas: Some(U128::from(21)),
-            max_priority_fee_per_gas: Some(U128::from(22)),
-        };
-        let serialized = serde_json::to_string(&transaction).unwrap();
-        assert_eq!(
-            serialized,
-            r#"{"hash":"0x0000000000000000000000000000000000000000000000000000000000000001","nonce":"0x2","blockHash":"0x0000000000000000000000000000000000000000000000000000000000000003","blockNumber":"0x4","transactionIndex":"0x5","from":"0x0000000000000000000000000000000000000006","to":"0x0000000000000000000000000000000000000007","value":"0x8","gasPrice":"0x9","gas":"0xa","maxFeePerGas":"0x15","maxPriorityFeePerGas":"0x16","input":"0x0b0c0d","r":"0xe","s":"0xe","v":"0xe","yParity":"0x1","chainId":"0x11","type":"0x14"}"#
-        );
-        let deserialized: Transaction = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(transaction, deserialized);
-    }
-}
+

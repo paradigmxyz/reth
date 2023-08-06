@@ -1,0 +1,17 @@
+[package]
+name = "rpc-types-util"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+reth-primitives.workspace = true
+reth-rpc-types.workspace = true
+
+serde = { workspace = true, features = ["derive"] }

@@ -6296,6 +6296,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rpc-types-util"
+version = "0.1.0-alpha.4"
+dependencies = [
+ "reth-primitives",
+ "reth-rpc-types",
+ "serde",
+]
+
+[[package]]
 name = "ruint"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
