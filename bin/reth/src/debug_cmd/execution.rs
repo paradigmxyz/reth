@@ -42,7 +42,7 @@ use std::{
 use tokio::sync::watch;
 use tracing::*;
 
-/// `reth execution-debug` command
+/// `reth debug execution` command
 #[derive(Debug, Parser)]
 pub struct Command {
     /// The path to the data dir for all reth files and subdirectories.
@@ -142,6 +142,11 @@ impl Command {
                 .set(ExecutionStage::new(
                     factory,
                     ExecutionStageThresholds { max_blocks: None, max_changes: None },
+                    stage_conf
+                        .merkle
+                        .clean_threshold
+                        .max(stage_conf.account_hashing.clean_threshold)
+                        .max(stage_conf.storage_hashing.clean_threshold),
                     config.prune.map(|prune| prune.parts).unwrap_or_default(),
                 )),
             )

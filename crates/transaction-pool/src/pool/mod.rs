@@ -96,7 +96,7 @@ mod events;
 pub use events::{FullTransactionEvent, TransactionEvent};
 
 mod listener;
-use crate::pool::txpool::UpdateOutcome;
+use crate::{pool::txpool::UpdateOutcome, traits::PendingTransactionListenerKind};
 pub use listener::{AllTransactionsEvents, TransactionEvents};
 
 mod best;
@@ -119,8 +119,8 @@ pub struct PoolInner<V: TransactionValidator, T: TransactionOrdering> {
     config: PoolConfig,
     /// Manages listeners for transaction state change events.
     event_listener: RwLock<PoolEventBroadcast<T::Transaction>>,
-    /// Listeners for new ready transactions.
-    pending_transaction_listener: Mutex<Vec<mpsc::Sender<TxHash>>>,
+    /// Listeners for new pending transactions.
+    pending_transaction_listener: Mutex<Vec<PendingTransactionListener>>,
     /// Listeners for new transactions added to the pool.
     transaction_listener: Mutex<Vec<mpsc::Sender<NewTransactionEvent<T::Transaction>>>>,
 }
@@ -196,15 +196,19 @@ where
     }
 
     /// Adds a new transaction listener to the pool that gets notified about every new _pending_
-    /// transaction.
-    pub fn add_pending_listener(&self) -> mpsc::Receiver<TxHash> {
+    /// transaction inserted into the pool
+    pub fn add_pending_listener(
+        &self,
+        kind: PendingTransactionListenerKind,
+    ) -> mpsc::Receiver<TxHash> {
         const TX_LISTENER_BUFFER_SIZE: usize = 2048;
-        let (tx, rx) = mpsc::channel(TX_LISTENER_BUFFER_SIZE);
-        self.pending_transaction_listener.lock().push(tx);
+        let (sender, rx) = mpsc::channel(TX_LISTENER_BUFFER_SIZE);
+        let listener = PendingTransactionListener { sender, kind };
+        self.pending_transaction_listener.lock().push(listener);
         rx
     }
 
-    /// Adds a new transaction listener to the pool that gets notified about every new transaction
+    /// Adds a new transaction listener to the pool that gets notified about every new transaction.
     pub fn add_new_transaction_listener(
         &self,
     ) -> mpsc::Receiver<NewTransactionEvent<T::Transaction>> {
@@ -318,8 +322,8 @@ where
                 let hash = *added.hash();
 
                 // Notify about new pending transactions
-                if let Some(pending_hash) = added.as_pending() {
-                    self.on_new_pending_transaction(pending_hash);
+                if added.is_pending() {
+                    self.on_new_pending_transaction(&added);
                 }
 
                 // Notify tx event listeners
@@ -387,20 +391,31 @@ where
     }
 
     /// Notify all listeners about a new pending transaction.
-    fn on_new_pending_transaction(&self, ready: &TxHash) {
+    fn on_new_pending_transaction(&self, pending: &AddedTransaction<T::Transaction>) {
+        let tx_hash = *pending.hash();
+        let propagate_allowed = pending.is_propagate_allowed();
+
         let mut transaction_listeners = self.pending_transaction_listener.lock();
-        transaction_listeners.retain_mut(|listener| match listener.try_send(*ready) {
-            Ok(()) => true,
-            Err(err) => {
-                if matches!(err, mpsc::error::TrySendError::Full(_)) {
-                    debug!(
-                        target: "txpool",
-                        "[{:?}] failed to send pending tx; channel full",
-                        ready,
-                    );
-                    true
-                } else {
-                    false
+        transaction_listeners.retain_mut(|listener| {
+            if listener.kind.is_propagate_only() && !propagate_allowed {
+                // only emit this hash to listeners that are only allowed to receive propagate only
+                // transactions, such as network
+                return !listener.sender.is_closed()
+            }
+
+            match listener.sender.try_send(tx_hash) {
+                Ok(()) => true,
+                Err(err) => {
+                    if matches!(err, mpsc::error::TrySendError::Full(_)) {
+                        debug!(
+                            target: "txpool",
+                            "[{:?}] failed to send pending tx; channel full",
+                            tx_hash,
+                        );
+                        true
+                    } else {
+                        false
+                    }
                 }
             }
         });
@@ -568,6 +583,14 @@ impl<V: TransactionValidator, T: TransactionOrdering> fmt::Debug for PoolInner<V
     }
 }
 
+/// An active listener for new pending transactions.
+#[derive(Debug)]
+struct PendingTransactionListener {
+    sender: mpsc::Sender<TxHash>,
+    /// Whether to include transactions that should not be propagated over the network.
+    kind: PendingTransactionListenerKind,
+}
+
 /// Tracks an added transaction and all graph changes caused by adding it.
 #[derive(Debug, Clone)]
 pub struct AddedPendingTransaction<T: PoolTransaction> {
@@ -599,13 +622,9 @@ pub enum AddedTransaction<T: PoolTransaction> {
 }
 
 impl<T: PoolTransaction> AddedTransaction<T> {
-    /// Returns the hash of the transaction if it's pending
-    pub(crate) fn as_pending(&self) -> Option<&TxHash> {
-        if let AddedTransaction::Pending(tx) = self {
-            Some(tx.transaction.hash())
-        } else {
-            None
-        }
+    /// Returns whether the transaction is pending
+    pub(crate) fn is_pending(&self) -> bool {
+        matches!(self, AddedTransaction::Pending(_))
     }
 
     /// Returns the hash of the transaction
@@ -613,6 +632,13 @@ impl<T: PoolTransaction> AddedTransaction<T> {
         match self {
             AddedTransaction::Pending(tx) => tx.transaction.hash(),
             AddedTransaction::Parked { transaction, .. } => transaction.hash(),
+        }
+    }
+    /// Returns if the transaction should be propagated.
+    pub(crate) fn is_propagate_allowed(&self) -> bool {
+        match self {
+            AddedTransaction::Pending(transaction) => transaction.transaction.propagate,
+            AddedTransaction::Parked { transaction, .. } => transaction.propagate,
         }
     }
 

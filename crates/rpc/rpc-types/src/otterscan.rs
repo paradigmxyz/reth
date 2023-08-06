@@ -1,4 +1,4 @@
-use crate::{Block, Transaction, TransactionReceipt};
+use crate::{Block, BlockTransactions, Rich, Transaction, TransactionReceipt};
 use reth_primitives::{Address, Bytes, U256};
 use serde::{Deserialize, Serialize};
 
@@ -36,7 +36,7 @@ pub struct TraceEntry {
 }
 
 /// Internal issuance struct for `BlockDetails` struct
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct InternalIssuance {
     block_reward: U256,
@@ -94,4 +94,26 @@ pub struct TransactionsWithReceipts {
 pub struct ContractCreator {
     tx: Transaction,
     creator: Address,
+}
+
+impl From<Block> for OtsBlock {
+    fn from(block: Block) -> Self {
+        let transaction_count = match &block.transactions {
+            BlockTransactions::Full(t) => t.len(),
+            BlockTransactions::Hashes(t) => t.len(),
+            BlockTransactions::Uncle => 0,
+        };
+
+        Self { block, transaction_count }
+    }
+}
+
+impl From<Rich<Block>> for BlockDetails {
+    fn from(rich_block: Rich<Block>) -> Self {
+        Self {
+            block: rich_block.inner.into(),
+            issuance: Default::default(),
+            total_fees: U256::default(),
+        }
+    }
 }

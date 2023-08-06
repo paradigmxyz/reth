@@ -10,6 +10,7 @@ use reth_primitives::{
 };
 use std::{fmt, time::Instant};
 
+mod constants;
 mod eth;
 mod task;
 
@@ -18,6 +19,9 @@ pub use eth::{EthTransactionValidator, EthTransactionValidatorBuilder};
 
 /// A spawnable task that performs transaction validation.
 pub use task::ValidationTask;
+
+/// Validation constants.
+pub use constants::{MAX_CODE_SIZE, MAX_INIT_CODE_SIZE, TX_MAX_SIZE, TX_SLOT_SIZE};
 
 /// A Result type returned after checking a transaction's validity.
 #[derive(Debug)]
@@ -113,7 +117,7 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     pub transaction: T,
     /// The identifier for this transaction.
     pub transaction_id: TransactionId,
-    /// Whether to propagate the transaction.
+    /// Whether it is allowed to propagate the transaction.
     pub propagate: bool,
     /// Timestamp when this was added to the pool.
     pub timestamp: Instant,
@@ -164,19 +168,25 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.cost()
     }
 
-    /// Returns the effective tip for this transaction.
-    ///
-    /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit`.
-    /// For legacy transactions: `gas_price * gas_limit`.
-    pub fn gas_cost(&self) -> U256 {
-        self.transaction.gas_cost()
-    }
-
     /// Returns the EIP-1559 Max base fee the caller is willing to pay.
     ///
     /// For legacy transactions this is `gas_price`.
     pub fn max_fee_per_gas(&self) -> u128 {
         self.transaction.max_fee_per_gas()
+    }
+
+    /// Returns the effective tip for this transaction.
+    ///
+    /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
+    /// For legacy transactions: `gas_price - base_fee`.
+    pub fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
+        self.transaction.effective_tip_per_gas(base_fee)
+    }
+
+    /// Returns the max priority fee per gas if the transaction is an EIP-1559 transaction, and
+    /// otherwise returns the gas price.
+    pub fn priority_fee_or_price(&self) -> u128 {
+        self.transaction.priority_fee_or_price()
     }
 
     /// Maximum amount of gas that the transaction is allowed to consume.

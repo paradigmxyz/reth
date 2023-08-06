@@ -1,6 +1,9 @@
 //! clap [Args](clap::Args) for RPC related arguments.
 
-use crate::args::GasPriceOracleArgs;
+use crate::{
+    args::GasPriceOracleArgs,
+    cli::{config::RethRpcConfig, ext::RethNodeCommandExt},
+};
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
@@ -52,7 +55,7 @@ pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 100;
 pub(crate) const RPC_DEFAULT_MAX_TRACING_REQUESTS: u32 = 25;
 
 /// Parameters for configuring the rpc more granularity via CLI
-#[derive(Debug, Args, PartialEq, Eq, Default)]
+#[derive(Debug, Args)]
 #[command(next_help_heading = "RPC")]
 pub struct RpcServerArgs {
     /// Enable the HTTP-RPC server
@@ -60,12 +63,12 @@ pub struct RpcServerArgs {
     pub http: bool,
 
     /// Http server address to listen on
-    #[arg(long = "http.addr")]
-    pub http_addr: Option<IpAddr>,
+    #[arg(long = "http.addr", default_value_t = IpAddr::V4(Ipv4Addr::LOCALHOST))]
+    pub http_addr: IpAddr,
 
     /// Http server port to listen on
-    #[arg(long = "http.port")]
-    pub http_port: Option<u16>,
+    #[arg(long = "http.port", default_value_t = constants::DEFAULT_HTTP_RPC_PORT)]
+    pub http_port: u16,
 
     /// Rpc Modules to be configured for the HTTP server
     #[arg(long = "http.api", value_parser = RpcModuleSelectionValueParser::default())]
@@ -80,12 +83,12 @@ pub struct RpcServerArgs {
     pub ws: bool,
 
     /// Ws server address to listen on
-    #[arg(long = "ws.addr")]
-    pub ws_addr: Option<IpAddr>,
+    #[arg(long = "ws.addr", default_value_t = IpAddr::V4(Ipv4Addr::LOCALHOST))]
+    pub ws_addr: IpAddr,
 
     /// Ws server port to listen on
-    #[arg(long = "ws.port")]
-    pub ws_port: Option<u16>,
+    #[arg(long = "ws.port", default_value_t = constants::DEFAULT_WS_RPC_PORT)]
+    pub ws_port: u16,
 
     /// Origins from which to accept WebSocket requests
     #[arg(long = "ws.origins", name = "ws.origins")]
@@ -100,16 +103,16 @@ pub struct RpcServerArgs {
     pub ipcdisable: bool,
 
     /// Filename for IPC socket/pipe within the datadir
-    #[arg(long)]
-    pub ipcpath: Option<String>,
+    #[arg(long, default_value_t = constants::DEFAULT_IPC_ENDPOINT.to_string())]
+    pub ipcpath: String,
 
     /// Auth server address to listen on
-    #[arg(long = "authrpc.addr")]
-    pub auth_addr: Option<IpAddr>,
+    #[arg(long = "authrpc.addr", default_value_t = IpAddr::V4(Ipv4Addr::LOCALHOST))]
+    pub auth_addr: IpAddr,
 
     /// Auth server port to listen on
-    #[arg(long = "authrpc.port")]
-    pub auth_port: Option<u16>,
+    #[arg(long = "authrpc.port", default_value_t = constants::DEFAULT_AUTH_PORT)]
+    pub auth_port: u16,
 
     /// Path to a JWT secret to use for authenticated RPC endpoints
     #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false)]
@@ -120,7 +123,7 @@ pub struct RpcServerArgs {
     pub rpc_max_request_size: u32,
 
     /// Set the maximum RPC response payload size for both HTTP and WS in megabytes.
-    #[arg(long, default_value_t = RPC_DEFAULT_MAX_RESPONSE_SIZE_MB)]
+    #[arg(long, visible_alias = "--rpc.returndata.limit", default_value_t = RPC_DEFAULT_MAX_RESPONSE_SIZE_MB)]
     pub rpc_max_response_size: u32,
 
     /// Set the the maximum concurrent subscriptions per connection.
@@ -183,21 +186,6 @@ impl RpcServerArgs {
         )
     }
 
-    /// Extracts the [EthConfig] from the args.
-    pub fn eth_config(&self) -> EthConfig {
-        EthConfig::default()
-            .max_tracing_requests(self.rpc_max_tracing_requests)
-            .rpc_gas_cap(self.rpc_gas_cap)
-            .gpo_config(self.gas_price_oracle_config())
-    }
-
-    /// Convenience function that returns whether ipc is enabled
-    ///
-    /// By default IPC is enabled therefor it is enabled if the `ipcdisable` is false.
-    fn is_ipc_enabled(&self) -> bool {
-        !self.ipcdisable
-    }
-
     /// The execution layer and consensus layer clients SHOULD accept a configuration parameter:
     /// jwt-secret, which designates a file containing the hex-encoded 256 bit secret key to be used
     /// for verifying/generating JWT tokens.
@@ -235,7 +223,7 @@ impl RpcServerArgs {
     /// for the auth server that handles the `engine_` API that's accessed by the consensus
     /// layer.
     #[allow(clippy::too_many_arguments)]
-    pub async fn start_servers<Provider, Pool, Network, Tasks, Events, Engine>(
+    pub async fn start_servers<Provider, Pool, Network, Tasks, Events, Engine, Ext>(
         &self,
         provider: Provider,
         pool: Pool,
@@ -244,7 +232,8 @@ impl RpcServerArgs {
         events: Events,
         engine_api: Engine,
         jwt_secret: JwtSecret,
-    ) -> Result<(RpcServerHandle, AuthServerHandle), RpcError>
+        ext: &Ext,
+    ) -> eyre::Result<(RpcServerHandle, AuthServerHandle)>
     where
         Provider: BlockReaderIdExt
             + HeaderProvider
@@ -260,19 +249,23 @@ impl RpcServerArgs {
         Tasks: TaskSpawner + Clone + 'static,
         Events: CanonStateSubscriptions + Clone + 'static,
         Engine: EngineApiServer,
+        Ext: RethNodeCommandExt,
     {
         let auth_config = self.auth_server_config(jwt_secret)?;
 
         let module_config = self.transport_rpc_module_config();
         debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
 
-        let (rpc_modules, auth_module) = RpcModuleBuilder::default()
+        let (mut rpc_modules, auth_module, mut registry) = RpcModuleBuilder::default()
             .with_provider(provider)
             .with_pool(pool)
             .with_network(network)
             .with_events(events)
             .with_executor(executor)
             .build_with_auth_server(module_config, engine_api);
+
+        // apply configured customization
+        ext.extend_rpc_modules(self, &mut registry, &mut rpc_modules)?;
 
         let server_config = self.rpc_server_config();
         let launch_rpc = rpc_modules.start_server(server_config).map_ok(|handle| {
@@ -295,7 +288,7 @@ impl RpcServerArgs {
         });
 
         // launch servers concurrently
-        futures::future::try_join(launch_rpc, launch_auth).await
+        Ok(futures::future::try_join(launch_rpc, launch_auth).await?)
     }
 
     /// Convenience function for starting a rpc server with configs which extracted from cli args.
@@ -356,10 +349,7 @@ impl RpcServerArgs {
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
     {
-        let socket_address = SocketAddr::new(
-            self.auth_addr.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)),
-            self.auth_port.unwrap_or(constants::DEFAULT_AUTH_PORT),
-        );
+        let socket_address = SocketAddr::new(self.auth_addr, self.auth_port);
 
         reth_rpc_builder::auth::launch(
             provider,
@@ -427,10 +417,7 @@ impl RpcServerArgs {
         let mut config = RpcServerConfig::default();
 
         if self.http {
-            let socket_address = SocketAddr::new(
-                self.http_addr.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)),
-                self.http_port.unwrap_or(constants::DEFAULT_HTTP_RPC_PORT),
-            );
+            let socket_address = SocketAddr::new(self.http_addr, self.http_port);
             config = config
                 .with_http_address(socket_address)
                 .with_http(self.http_ws_server_builder())
@@ -439,17 +426,13 @@ impl RpcServerArgs {
         }
 
         if self.ws {
-            let socket_address = SocketAddr::new(
-                self.ws_addr.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)),
-                self.ws_port.unwrap_or(constants::DEFAULT_WS_RPC_PORT),
-            );
+            let socket_address = SocketAddr::new(self.ws_addr, self.ws_port);
             config = config.with_ws_address(socket_address).with_ws(self.http_ws_server_builder());
         }
 
         if self.is_ipc_enabled() {
-            config = config.with_ipc(self.ipc_server_builder()).with_ipc_endpoint(
-                self.ipcpath.as_ref().unwrap_or(&constants::DEFAULT_IPC_ENDPOINT.to_string()),
-            );
+            config =
+                config.with_ipc(self.ipc_server_builder()).with_ipc_endpoint(self.ipcpath.clone());
         }
 
         config
@@ -457,12 +440,23 @@ impl RpcServerArgs {
 
     /// Creates the [AuthServerConfig] from cli args.
     fn auth_server_config(&self, jwt_secret: JwtSecret) -> Result<AuthServerConfig, RpcError> {
-        let address = SocketAddr::new(
-            self.auth_addr.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)),
-            self.auth_port.unwrap_or(constants::DEFAULT_AUTH_PORT),
-        );
+        let address = SocketAddr::new(self.auth_addr, self.auth_port);
 
         Ok(AuthServerConfig::builder(jwt_secret).socket_addr(address).build())
+    }
+}
+
+impl RethRpcConfig for RpcServerArgs {
+    fn is_ipc_enabled(&self) -> bool {
+        // By default IPC is enabled therefor it is enabled if the `ipcdisable` is false.
+        !self.ipcdisable
+    }
+
+    fn eth_config(&self) -> EthConfig {
+        EthConfig::default()
+            .max_tracing_requests(self.rpc_max_tracing_requests)
+            .rpc_gas_cap(self.rpc_gas_cap)
+            .gpo_config(self.gas_price_oracle_config())
     }
 }
 

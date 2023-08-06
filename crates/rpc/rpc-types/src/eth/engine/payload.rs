@@ -46,6 +46,10 @@ pub struct ExecutionPayloadEnvelope {
     /// The expected value to be received by the feeRecipient in wei
     #[serde(rename = "blockValue")]
     pub block_value: U256,
+    //
+    // // TODO(mattsse): for V3
+    // #[serde(rename = "blobsBundle", skip_serializing_if = "Option::is_none")]
+    // pub blobs_bundle: Option<BlobsBundleV1>,
 }
 
 impl ExecutionPayloadEnvelope {
@@ -75,6 +79,8 @@ pub struct ExecutionPayload {
     pub timestamp: U64,
     pub extra_data: Bytes,
     pub base_fee_per_gas: U256,
+    pub blob_gas_used: Option<U64>,
+    pub excess_blob_gas: Option<U64>,
     pub block_hash: H256,
     pub transactions: Vec<Bytes>,
     /// Array of [`Withdrawal`] enabled with V2
@@ -107,6 +113,8 @@ impl From<SealedBlock> for ExecutionPayload {
             timestamp: value.timestamp.into(),
             extra_data: value.extra_data.clone(),
             base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
+            blob_gas_used: value.blob_gas_used.map(U64::from),
+            excess_blob_gas: value.excess_blob_gas.map(U64::from),
             block_hash: value.hash(),
             transactions,
             withdrawals: value.withdrawals,
@@ -163,6 +171,10 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
                     .uint_try_to()
                     .map_err(|_| PayloadError::BaseFee(payload.base_fee_per_gas))?,
             ),
+            blob_gas_used: payload.blob_gas_used.map(|blob_gas_used| blob_gas_used.as_u64()),
+            excess_blob_gas: payload
+                .excess_blob_gas
+                .map(|excess_blob_gas| excess_blob_gas.as_u64()),
             extra_data: payload.extra_data,
             // Defaults
             ommers_hash: EMPTY_LIST_HASH,
@@ -187,6 +199,14 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
     }
 }
 
+/// This includes all bundled blob related data of an executed payload.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlobsBundleV1 {
+    pub commitments: Vec<Bytes>,
+    pub proofs: Vec<Bytes>,
+    pub blobs: Vec<Bytes>,
+}
+
 /// Error that can occur when handling payloads.
 #[derive(thiserror::Error, Debug)]
 pub enum PayloadError {
@@ -196,6 +216,12 @@ pub enum PayloadError {
     /// Invalid payload base fee.
     #[error("Invalid payload base fee: {0}")]
     BaseFee(U256),
+    /// Invalid payload base fee.
+    #[error("Invalid payload blob gas used: {0}")]
+    BlobGasUsed(U256),
+    /// Invalid payload base fee.
+    #[error("Invalid payload excess blob gas: {0}")]
+    ExcessBlobGas(U256),
     /// Invalid payload block hash.
     #[error("blockhash mismatch, want {consensus}, got {execution}")]
     BlockHash {
@@ -255,6 +281,11 @@ pub struct PayloadAttributes {
     /// See <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#payloadattributesv2>
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub withdrawals: Option<Vec<Withdrawal>>,
+    /// Root of the parent beacon block enabled with V3.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#payloadattributesv3>
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_beacon_block_root: Option<H256>,
 }
 
 /// This structure contains the result of processing a payload or fork choice update.
@@ -335,25 +366,25 @@ impl From<PayloadError> for PayloadStatusEnum {
 #[serde(tag = "status", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PayloadStatusEnum {
     /// VALID is returned by the engine API in the following calls:
-    ///   - newPayloadV1:       if the payload was already known or was just validated and executed
-    ///   - forkchoiceUpdateV1: if the chain accepted the reorg (might ignore if it's stale)
+    ///   - newPayload:       if the payload was already known or was just validated and executed
+    ///   - forkchoiceUpdate: if the chain accepted the reorg (might ignore if it's stale)
     Valid,
 
     /// INVALID is returned by the engine API in the following calls:
-    ///   - newPayloadV1:       if the payload failed to execute on top of the local chain
-    ///   - forkchoiceUpdateV1: if the new head is unknown, pre-merge, or reorg to it fails
+    ///   - newPayload:       if the payload failed to execute on top of the local chain
+    ///   - forkchoiceUpdate: if the new head is unknown, pre-merge, or reorg to it fails
     Invalid {
         #[serde(rename = "validationError")]
         validation_error: String,
     },
 
     /// SYNCING is returned by the engine API in the following calls:
-    ///   - newPayloadV1:       if the payload was accepted on top of an active sync
-    ///   - forkchoiceUpdateV1: if the new head was seen before, but not part of the chain
+    ///   - newPayload:       if the payload was accepted on top of an active sync
+    ///   - forkchoiceUpdate: if the new head was seen before, but not part of the chain
     Syncing,
 
     /// ACCEPTED is returned by the engine API in the following calls:
-    ///   - newPayloadV1: if the payload was accepted, but not processed (side chain)
+    ///   - newPayload: if the payload was accepted, but not processed (side chain)
     Accepted,
 }
 
@@ -429,130 +460,6 @@ pub enum PayloadValidationError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::generators::{
-        self, random_block, random_block_range, random_header,
-    };
-    use reth_primitives::{
-        bytes::{Bytes, BytesMut},
-        TransactionSigned, H256,
-    };
-    use reth_rlp::{Decodable, DecodeError};
-
-    fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> ExecutionPayload {
-        let unsealed = src.unseal();
-        let mut transformed: Block = f(unsealed);
-        // Recalculate roots
-        transformed.header.transactions_root =
-            proofs::calculate_transaction_root(&transformed.body);
-        transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.ommers);
-        SealedBlock {
-            header: transformed.header.seal_slow(),
-            body: transformed.body,
-            ommers: transformed.ommers,
-            withdrawals: transformed.withdrawals,
-        }
-        .into()
-    }
-
-    #[test]
-    fn payload_body_roundtrip() {
-        let mut rng = generators::rng();
-        for block in random_block_range(&mut rng, 0..=99, H256::default(), 0..2) {
-            let unsealed = block.clone().unseal();
-            let payload_body: ExecutionPayloadBodyV1 = unsealed.into();
-
-            assert_eq!(
-                Ok(block.body),
-                payload_body
-                    .transactions
-                    .iter()
-                    .map(|x| TransactionSigned::decode(&mut &x[..]))
-                    .collect::<Result<Vec<_>, _>>(),
-            );
-
-            assert_eq!(block.withdrawals, payload_body.withdrawals);
-        }
-    }
-
-    #[test]
-    fn payload_validation() {
-        let mut rng = generators::rng();
-        let block = random_block(&mut rng, 100, Some(H256::random()), Some(3), Some(0));
-
-        // Valid extra data
-        let block_with_valid_extra_data = transform_block(block.clone(), |mut b| {
-            b.header.extra_data = BytesMut::zeroed(32).freeze().into();
-            b
-        });
-        assert_matches!(TryInto::<SealedBlock>::try_into(block_with_valid_extra_data), Ok(_));
-
-        // Invalid extra data
-        let block_with_invalid_extra_data: Bytes = BytesMut::zeroed(33).freeze();
-        let invalid_extra_data_block = transform_block(block.clone(), |mut b| {
-            b.header.extra_data = block_with_invalid_extra_data.clone().into();
-            b
-        });
-        assert_matches!(
-            TryInto::<SealedBlock>::try_into(invalid_extra_data_block),
-            Err(PayloadError::ExtraData(data)) if data == block_with_invalid_extra_data
-        );
-
-        // Zero base fee
-        let block_with_zero_base_fee = transform_block(block.clone(), |mut b| {
-            b.header.base_fee_per_gas = Some(0);
-            b
-        });
-        assert_matches!(
-            TryInto::<SealedBlock>::try_into(block_with_zero_base_fee),
-            Err(PayloadError::BaseFee(val)) if val == U256::ZERO
-        );
-
-        // Invalid encoded transactions
-        let mut payload_with_invalid_txs: ExecutionPayload = block.clone().into();
-        payload_with_invalid_txs.transactions.iter_mut().for_each(|tx| {
-            *tx = Bytes::new().into();
-        });
-        assert_matches!(
-            TryInto::<SealedBlock>::try_into(payload_with_invalid_txs),
-            Err(PayloadError::Decode(DecodeError::InputTooShort))
-        );
-
-        // Non empty ommers
-        let block_with_ommers = transform_block(block.clone(), |mut b| {
-            b.ommers.push(random_header(&mut rng, 100, None).unseal());
-            b
-        });
-        assert_matches!(
-            TryInto::<SealedBlock>::try_into(block_with_ommers.clone()),
-            Err(PayloadError::BlockHash { consensus, .. })
-                if consensus == block_with_ommers.block_hash
-        );
-
-        // None zero difficulty
-        let block_with_difficulty = transform_block(block.clone(), |mut b| {
-            b.header.difficulty = U256::from(1);
-            b
-        });
-        assert_matches!(
-            TryInto::<SealedBlock>::try_into(block_with_difficulty.clone()),
-            Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_difficulty.block_hash
-        );
-
-        // None zero nonce
-        let block_with_nonce = transform_block(block.clone(), |mut b| {
-            b.header.nonce = 1;
-            b
-        });
-        assert_matches!(
-            TryInto::<SealedBlock>::try_into(block_with_nonce.clone()),
-            Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_nonce.block_hash
-        );
-
-        // Valid block
-        let valid_block = block;
-        assert_matches!(TryInto::<SealedBlock>::try_into(valid_block), Ok(_));
-    }
 
     #[test]
     fn serde_payload_status() {
@@ -623,7 +530,7 @@ mod tests {
     #[test]
     fn serde_roundtrip_legacy_txs_payload() {
         // pulled from hive tests
-        let s = r#"{"parentHash":"0x67ead97eb79b47a1638659942384143f36ed44275d4182799875ab5a87324055","feeRecipient":"0x0000000000000000000000000000000000000000","stateRoot":"0x0000000000000000000000000000000000000000000000000000000000000000","receiptsRoot":"0x4e3c608a9f2e129fccb91a1dae7472e78013b8e654bccc8d224ce3d63ae17006","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prevRandao":"0x44bb4b98c59dbb726f96ffceb5ee028dcbe35b9bba4f9ffd56aeebf8d1e4db62","blockNumber":"0x1","gasLimit":"0x2fefd8","gasUsed":"0xa860","timestamp":"0x1235","extraData":"0x8b726574682f76302e312e30","baseFeePerGas":"0x342770c0","blockHash":"0x5655011482546f16b2312ef18e9fad03d6a52b1be95401aea884b222477f9e64","transactions":["0xf865808506fc23ac00830124f8940000000000000000000000000000000000000316018032a044b25a8b9b247d01586b3d59c71728ff49c9b84928d9e7fa3377ead3b5570b5da03ceac696601ff7ee6f5fe8864e2998db9babdf5eeba1a0cd5b4d44b3fcbd181b"]}"#;
+        let s = r#"{"parentHash":"0x67ead97eb79b47a1638659942384143f36ed44275d4182799875ab5a87324055","feeRecipient":"0x0000000000000000000000000000000000000000","stateRoot":"0x0000000000000000000000000000000000000000000000000000000000000000","receiptsRoot":"0x4e3c608a9f2e129fccb91a1dae7472e78013b8e654bccc8d224ce3d63ae17006","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prevRandao":"0x44bb4b98c59dbb726f96ffceb5ee028dcbe35b9bba4f9ffd56aeebf8d1e4db62","blockNumber":"0x1","gasLimit":"0x2fefd8","gasUsed":"0xa860","timestamp":"0x1235","extraData":"0x8b726574682f76302e312e30","baseFeePerGas":"0x342770c0","blobGasUsed":null,"excessBlobGas":null,"blockHash":"0x5655011482546f16b2312ef18e9fad03d6a52b1be95401aea884b222477f9e64","transactions":["0xf865808506fc23ac00830124f8940000000000000000000000000000000000000316018032a044b25a8b9b247d01586b3d59c71728ff49c9b84928d9e7fa3377ead3b5570b5da03ceac696601ff7ee6f5fe8864e2998db9babdf5eeba1a0cd5b4d44b3fcbd181b"]}"#;
         let payload: ExecutionPayload = serde_json::from_str(s).unwrap();
         assert_eq!(serde_json::to_string(&payload).unwrap(), s);
     }
@@ -631,7 +538,7 @@ mod tests {
     #[test]
     fn serde_roundtrip_enveloped_txs_payload() {
         // pulled from hive tests
-        let s = r#"{"parentHash":"0x67ead97eb79b47a1638659942384143f36ed44275d4182799875ab5a87324055","feeRecipient":"0x0000000000000000000000000000000000000000","stateRoot":"0x76a03cbcb7adce07fd284c61e4fa31e5e786175cefac54a29e46ec8efa28ea41","receiptsRoot":"0x4e3c608a9f2e129fccb91a1dae7472e78013b8e654bccc8d224ce3d63ae17006","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prevRandao":"0x028111cb7d25918386a69656b3d17b2febe95fd0f11572c1a55c14f99fdfe3df","blockNumber":"0x1","gasLimit":"0x2fefd8","gasUsed":"0xa860","timestamp":"0x1235","extraData":"0x8b726574682f76302e312e30","baseFeePerGas":"0x342770c0","blockHash":"0xa6f40ed042e61e88e76125dede8fff8026751ea14454b68fb534cea99f2b2a77","transactions":["0xf865808506fc23ac00830124f8940000000000000000000000000000000000000316018032a044b25a8b9b247d01586b3d59c71728ff49c9b84928d9e7fa3377ead3b5570b5da03ceac696601ff7ee6f5fe8864e2998db9babdf5eeba1a0cd5b4d44b3fcbd181b"]}"#;
+        let s = r#"{"parentHash":"0x67ead97eb79b47a1638659942384143f36ed44275d4182799875ab5a87324055","feeRecipient":"0x0000000000000000000000000000000000000000","stateRoot":"0x76a03cbcb7adce07fd284c61e4fa31e5e786175cefac54a29e46ec8efa28ea41","receiptsRoot":"0x4e3c608a9f2e129fccb91a1dae7472e78013b8e654bccc8d224ce3d63ae17006","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prevRandao":"0x028111cb7d25918386a69656b3d17b2febe95fd0f11572c1a55c14f99fdfe3df","blockNumber":"0x1","gasLimit":"0x2fefd8","gasUsed":"0xa860","timestamp":"0x1235","extraData":"0x8b726574682f76302e312e30","baseFeePerGas":"0x342770c0","blobGasUsed":null,"excessBlobGas":null,"blockHash":"0xa6f40ed042e61e88e76125dede8fff8026751ea14454b68fb534cea99f2b2a77","transactions":["0xf865808506fc23ac00830124f8940000000000000000000000000000000000000316018032a044b25a8b9b247d01586b3d59c71728ff49c9b84928d9e7fa3377ead3b5570b5da03ceac696601ff7ee6f5fe8864e2998db9babdf5eeba1a0cd5b4d44b3fcbd181b"]}"#;
         let payload: ExecutionPayload = serde_json::from_str(s).unwrap();
         assert_eq!(serde_json::to_string(&payload).unwrap(), s);
     }

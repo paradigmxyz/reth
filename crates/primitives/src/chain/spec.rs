@@ -3,8 +3,8 @@ use crate::{
     forkid::ForkFilterKey,
     header::Head,
     proofs::genesis_state_root,
-    BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, Hardfork, Header, SealedHeader,
-    H256, U256,
+    Address, BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, Hardfork, Header,
+    SealedHeader, H160, H256, U256,
 };
 use hex_literal::hex;
 use once_cell::sync::Lazy;
@@ -54,6 +54,12 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1681338455)),
         ]),
+        // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
+        deposit_contract: Some(DepositContract::new(
+            H160(hex!("00000000219ab540356cbb839cbe05303d7705fa")),
+            11052984,
+            H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
+        )),
     }
     .into()
 });
@@ -88,6 +94,12 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1678832736)),
         ]),
+        // https://goerli.etherscan.io/tx/0xa3c07dc59bfdb1bfc2d50920fed2ef2c1c4e0a09fe2325dbc14e07702f965a78
+        deposit_contract: Some(DepositContract::new(
+            H160(hex!("ff50ed3d0ec03ac01d4c79aad74928bff48a7b2b")),
+            4367322,
+            H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
+        )),
     }
     .into()
 });
@@ -126,6 +138,12 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1677557088)),
         ]),
+        // https://sepolia.etherscan.io/tx/0x025ecbf81a2f1220da6285d1701dc89fb5a956b62562ee922e1a9efd73eb4b14
+        deposit_contract: Some(DepositContract::new(
+            H160(hex!("7f02c3e3c98b133055b8b348b2ac625669ed295d")),
+            1273020,
+            H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
+        )),
     }
     .into()
 });
@@ -163,6 +181,7 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
         ]),
+        deposit_contract: None, // TODO: do we even have?
     }
     .into()
 });
@@ -201,6 +220,10 @@ pub struct ChainSpec {
 
     /// The active hard forks and their activation conditions
     pub hardforks: BTreeMap<Hardfork, ForkCondition>,
+
+    /// The deposit contract deployed for PoS.
+    #[serde(skip, default)]
+    pub deposit_contract: Option<DepositContract>,
 }
 
 impl ChainSpec {
@@ -304,6 +327,15 @@ impl ChainSpec {
             .shanghai
             .map(|shanghai| timestamp >= shanghai)
             .unwrap_or_else(|| self.is_fork_active_at_timestamp(Hardfork::Shanghai, timestamp))
+    }
+
+    /// Convenience method to check if [Hardfork::Cancun] is active at a given timestamp.
+    #[inline]
+    pub fn is_cancun_activated_at_timestamp(&self, timestamp: u64) -> bool {
+        self.fork_timestamps
+            .cancun
+            .map(|cancun| timestamp >= cancun)
+            .unwrap_or_else(|| self.is_fork_active_at_timestamp(Hardfork::Cancun, timestamp))
     }
 
     /// Creates a [`ForkFilter`](crate::ForkFilter) for the block described by [Head].
@@ -424,6 +456,7 @@ impl From<Genesis> for ChainSpec {
             fork_timestamps: ForkTimestamps::from_hardforks(&hardforks),
             hardforks,
             paris_block_and_final_difficulty: None,
+            deposit_contract: None,
         }
     }
 }
@@ -433,6 +466,8 @@ impl From<Genesis> for ChainSpec {
 pub struct ForkTimestamps {
     /// The timestamp of the shanghai fork
     pub shanghai: Option<u64>,
+    /// The timestamp of the cancun fork
+    pub cancun: Option<u64>,
 }
 
 impl ForkTimestamps {
@@ -442,12 +477,21 @@ impl ForkTimestamps {
         if let Some(shanghai) = forks.get(&Hardfork::Shanghai).and_then(|f| f.as_timestamp()) {
             timestamps = timestamps.shanghai(shanghai);
         }
+        if let Some(cancun) = forks.get(&Hardfork::Cancun).and_then(|f| f.as_timestamp()) {
+            timestamps = timestamps.cancun(cancun);
+        }
         timestamps
     }
 
     /// Sets the given shanghai timestamp
     pub fn shanghai(mut self, shanghai: u64) -> Self {
         self.shanghai = Some(shanghai);
+        self
+    }
+
+    /// Sets the given cancun timestamp
+    pub fn cancun(mut self, cancun: u64) -> Self {
+        self.cancun = Some(cancun);
         self
     }
 }
@@ -614,6 +658,13 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable Cancun at genesis.
+    pub fn cancun_activated(mut self) -> Self {
+        self = self.paris_activated();
+        self.hardforks.insert(Hardfork::Cancun, ForkCondition::Timestamp(0));
+        self
+    }
+
     /// Build the resulting [`ChainSpec`].
     ///
     /// # Panics
@@ -628,6 +679,7 @@ impl ChainSpecBuilder {
             fork_timestamps: ForkTimestamps::from_hardforks(&self.hardforks),
             hardforks: self.hardforks,
             paris_block_and_final_difficulty: None,
+            deposit_contract: None,
         }
     }
 }
@@ -917,6 +969,23 @@ where
         }
 
         Self { pre_merge, with_merge, post_merge }
+    }
+}
+
+/// PoS deposit contract details.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DepositContract {
+    /// Deposit Contract Address
+    pub address: Address,
+    /// Deployment Block
+    pub block: BlockNumber,
+    /// `DepositEvent` event signature
+    pub topic: H256,
+}
+
+impl DepositContract {
+    fn new(address: Address, block: BlockNumber, topic: H256) -> Self {
+        DepositContract { address, block, topic }
     }
 }
 

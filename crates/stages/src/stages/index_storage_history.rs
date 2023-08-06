@@ -73,17 +73,29 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::test_utils::TestTransaction;
+    use crate::test_utils::{
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        TestTransaction, UnwindStageTestRunner,
+    };
+    use itertools::Itertools;
     use reth_db::{
+        cursor::DbCursorRO,
         models::{
+            sharded_key,
             storage_sharded_key::{StorageShardedKey, NUM_OF_INDICES_IN_SHARD},
             BlockNumberAddress, ShardedKey, StoredBlockBodyIndices,
         },
         tables,
-        transaction::DbTxMut,
+        transaction::{DbTx, DbTxMut},
         BlockNumberList,
     };
-    use reth_primitives::{hex_literal::hex, StorageEntry, H160, H256, MAINNET, U256};
+    use reth_interfaces::test_utils::{
+        generators,
+        generators::{random_block_range, random_changeset_range, random_contract_account_range},
+    };
+    use reth_primitives::{
+        hex_literal::hex, Address, BlockNumber, StorageEntry, H160, H256, MAINNET, U256,
+    };
 
     const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));
     const STORAGE_KEY: H256 =
@@ -367,5 +379,143 @@ mod tests {
                 (shard(u64::MAX), vec![2, 3])
             ])
         );
+    }
+
+    stage_test_suite_ext!(IndexStorageHistoryTestRunner, index_storage_history);
+
+    struct IndexStorageHistoryTestRunner {
+        pub(crate) tx: TestTransaction,
+        commit_threshold: u64,
+    }
+
+    impl Default for IndexStorageHistoryTestRunner {
+        fn default() -> Self {
+            Self { tx: TestTransaction::default(), commit_threshold: 1000 }
+        }
+    }
+
+    impl StageTestRunner for IndexStorageHistoryTestRunner {
+        type S = IndexStorageHistoryStage;
+
+        fn tx(&self) -> &TestTransaction {
+            &self.tx
+        }
+
+        fn stage(&self) -> Self::S {
+            Self::S { commit_threshold: self.commit_threshold }
+        }
+    }
+
+    impl ExecuteStageTestRunner for IndexStorageHistoryTestRunner {
+        type Seed = ();
+
+        fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
+            let stage_process = input.checkpoint().block_number;
+            let start = stage_process + 1;
+            let end = input.target();
+            let mut rng = generators::rng();
+
+            let num_of_accounts = 31;
+            let accounts = random_contract_account_range(&mut rng, &mut (0..num_of_accounts))
+                .into_iter()
+                .collect::<BTreeMap<_, _>>();
+
+            let blocks = random_block_range(&mut rng, start..=end, H256::zero(), 0..3);
+
+            let (transitions, _) = random_changeset_range(
+                &mut rng,
+                blocks.iter(),
+                accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+                0..3,
+                0..256,
+            );
+
+            // add block changeset from block 1.
+            self.tx.insert_changesets(transitions, Some(start))?;
+
+            Ok(())
+        }
+
+        fn validate_execution(
+            &self,
+            input: ExecInput,
+            output: Option<ExecOutput>,
+        ) -> Result<(), TestRunnerError> {
+            if let Some(output) = output {
+                let start_block = input.next_block();
+                let end_block = output.checkpoint.block_number;
+                if start_block > end_block {
+                    return Ok(())
+                }
+
+                assert_eq!(
+                    output,
+                    ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true }
+                );
+
+                let provider = self.tx.inner();
+                let mut changeset_cursor =
+                    provider.tx_ref().cursor_read::<tables::StorageChangeSet>()?;
+
+                let storage_transitions = changeset_cursor
+                    .walk_range(BlockNumberAddress::range(start_block..=end_block))?
+                    .try_fold(
+                        BTreeMap::new(),
+                        |mut storages: BTreeMap<(Address, H256), Vec<u64>>,
+                         entry|
+                         -> Result<_, TestRunnerError> {
+                            let (index, storage) = entry?;
+                            storages
+                                .entry((index.address(), storage.key))
+                                .or_default()
+                                .push(index.block_number());
+                            Ok(storages)
+                        },
+                    )?;
+
+                let mut result = BTreeMap::new();
+                for (partial_key, indices) in storage_transitions {
+                    // chunk indices and insert them in shards of N size.
+                    let mut chunks = indices
+                        .iter()
+                        .chunks(sharded_key::NUM_OF_INDICES_IN_SHARD)
+                        .into_iter()
+                        .map(|chunks| chunks.map(|i| *i as usize).collect::<Vec<usize>>())
+                        .collect::<Vec<_>>();
+                    let last_chunk = chunks.pop();
+
+                    chunks.into_iter().for_each(|list| {
+                        result.insert(
+                            StorageShardedKey::new(
+                                partial_key.0,
+                                partial_key.1,
+                                *list.last().expect("Chuck does not return empty list")
+                                    as BlockNumber,
+                            ),
+                            list,
+                        );
+                    });
+
+                    if let Some(last_list) = last_chunk {
+                        result.insert(
+                            StorageShardedKey::new(partial_key.0, partial_key.1, u64::MAX),
+                            last_list,
+                        );
+                    };
+                }
+
+                let table = cast(self.tx.table::<tables::StorageHistory>().unwrap());
+                assert_eq!(table, result);
+            }
+            Ok(())
+        }
+    }
+
+    impl UnwindStageTestRunner for IndexStorageHistoryTestRunner {
+        fn validate_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
+            let table = self.tx.table::<tables::StorageHistory>().unwrap();
+            assert!(table.is_empty());
+            Ok(())
+        }
     }
 }

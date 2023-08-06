@@ -36,20 +36,6 @@ pub struct BlockchainTest {
     #[serde(default)]
     /// Engine spec.
     pub self_engine: SealEngine,
-    #[serde(rename = "_info")]
-    #[allow(unused)]
-    info: BlockchainTestInfo,
-}
-
-#[derive(Debug, PartialEq, Eq, Deserialize)]
-struct BlockchainTestInfo {
-    #[serde(rename = "filling-rpc-server")]
-    #[allow(unused)]
-    // One test has an invalid string in this field, which breaks our CI:
-    // https://github.com/ethereum/tests/blob/6c252923bdd1bd5a70f680df1214f866f76839db/GeneralStateTests/stTransactionTest/ValueOverflow.json#L5
-    // By using `serde_bytes::ByteBuf`, we ignore the validation of this field as a string.
-    // TODO(alexey): remove when `ethereum/tests` is fixed
-    filling_rpc_server: serde_bytes::ByteBuf,
 }
 
 /// A block header in an Ethereum blockchain test.
@@ -92,6 +78,10 @@ pub struct Header {
     pub base_fee_per_gas: Option<JsonU256>,
     /// Withdrawals root.
     pub withdrawals_root: Option<H256>,
+    /// Blob gas used.
+    pub blob_gas_used: Option<JsonU256>,
+    /// Excess blob gas.
+    pub excess_blob_gas: Option<JsonU256>,
 }
 
 impl From<Header> for SealedHeader {
@@ -114,6 +104,8 @@ impl From<Header> for SealedHeader {
             parent_hash: value.parent_hash,
             logs_bloom: value.bloom,
             withdrawals_root: value.withdrawals_root,
+            blob_gas_used: value.blob_gas_used.map(|v| v.0.to::<u64>()),
+            excess_blob_gas: value.excess_blob_gas.map(|v| v.0.to::<u64>()),
         };
         header.seal(value.hash)
     }

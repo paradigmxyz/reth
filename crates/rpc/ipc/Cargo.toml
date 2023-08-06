@@ -13,21 +13,21 @@ IPC support for reth
 [dependencies]
 
 # async/net
-futures = { workspace = true }
+futures.workspace = true
 parity-tokio-ipc = "0.9.0"
 tokio = { workspace = true, features = ["net", "time", "rt-multi-thread"] }
 tokio-util = { workspace = true, features = ["codec"] }
-tokio-stream = { workspace = true }
-async-trait = { workspace = true }
-pin-project = { workspace = true }
+tokio-stream.workspace = true
+async-trait.workspace = true
+pin-project.workspace = true
 tower = "0.4"
 
 # misc
-jsonrpsee = { version = "0.18", features = ["server", "client"] }
-serde_json = { workspace = true }
-tracing = { workspace = true }
-bytes = { workspace = true }
-thiserror = { workspace = true }
+jsonrpsee = { workspace = true, features = ["server", "client"] }
+serde_json.workspace = true
+tracing.workspace = true
+bytes.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 tokio-stream = { workspace = true, features = ["sync"] }

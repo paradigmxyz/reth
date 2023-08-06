@@ -92,7 +92,7 @@ mod tests {
     };
     use reth_interfaces::test_utils::{
         generators,
-        generators::{random_block_range, random_contract_account_range, random_transition_range},
+        generators::{random_block_range, random_changeset_range, random_contract_account_range},
     };
     use reth_primitives::{hex_literal::hex, Address, BlockNumber, H160, H256, MAINNET};
 
@@ -408,7 +408,7 @@ mod tests {
 
             let blocks = random_block_range(&mut rng, start..=end, H256::zero(), 0..3);
 
-            let (transitions, _) = random_transition_range(
+            let (transitions, _) = random_changeset_range(
                 &mut rng,
                 blocks.iter(),
                 accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
@@ -417,7 +417,7 @@ mod tests {
             );
 
             // add block changeset from block 1.
-            self.tx.insert_transitions(transitions, Some(start))?;
+            self.tx.insert_changesets(transitions, Some(start))?;
 
             Ok(())
         }

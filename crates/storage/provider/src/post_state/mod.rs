@@ -79,7 +79,7 @@ pub struct PostState {
     /// The receipt(s) of the executed transaction(s).
     receipts: BTreeMap<BlockNumber, Vec<Receipt>>,
     /// Pruning configuration.
-    prune_targets: PruneModes,
+    prune_modes: PruneModes,
 }
 
 impl PostState {
@@ -94,8 +94,8 @@ impl PostState {
     }
 
     /// Add a pruning configuration.
-    pub fn add_prune_targets(&mut self, prune_targets: PruneModes) {
-        self.prune_targets = prune_targets;
+    pub fn add_prune_modes(&mut self, prune_modes: PruneModes) {
+        self.prune_modes = prune_modes;
     }
 
     /// Return the current size of the poststate.
@@ -518,6 +518,7 @@ impl PostState {
     pub fn write_history_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         &mut self,
         tx: &TX,
+        tip: BlockNumber,
     ) -> Result<(), DbError> {
         // Write storage changes
         tracing::trace!(target: "provider::post_state", "Writing storage changes");
@@ -527,6 +528,10 @@ impl PostState {
             std::mem::take(&mut self.storage_changes).inner.into_iter()
         {
             for (address, mut storage) in storage_changes.into_iter() {
+                if self.prune_modes.should_prune_storage_history(block_number, tip) {
+                    continue
+                }
+
                 let storage_id = BlockNumberAddress((block_number, address));
 
                 // If the account was created and wiped at the same block, skip all storage changes
@@ -576,6 +581,10 @@ impl PostState {
         for (block_number, account_changes) in
             std::mem::take(&mut self.account_changes).inner.into_iter()
         {
+            if self.prune_modes.should_prune_account_history(block_number, tip) {
+                continue
+            }
+
             for (address, info) in account_changes.into_iter() {
                 tracing::trace!(target: "provider::post_state", block_number, ?address, old = ?info, "Account changed");
                 account_changeset_cursor
@@ -592,7 +601,7 @@ impl PostState {
         tx: &TX,
         tip: BlockNumber,
     ) -> Result<(), DbError> {
-        self.write_history_to_db(tx)?;
+        self.write_history_to_db(tx, tip)?;
 
         // Write new storage state
         tracing::trace!(target: "provider::post_state", len = self.storage.len(), "Writing new storage state");
@@ -644,12 +653,12 @@ impl PostState {
 
         // Write the receipts of the transactions if not pruned
         tracing::trace!(target: "provider::post_state", len = self.receipts.len(), "Writing receipts");
-        if !self.receipts.is_empty() && self.prune_targets.receipts != Some(PruneMode::Full) {
+        if !self.receipts.is_empty() && self.prune_modes.receipts != Some(PruneMode::Full) {
             let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
             let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
 
             for (block, receipts) in self.receipts {
-                if self.prune_targets.should_prune_receipts(block, tip) {
+                if self.prune_modes.should_prune_receipts(block, tip) {
                     continue
                 }
 

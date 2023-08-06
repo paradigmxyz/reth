@@ -39,4 +39,8 @@ pub use txpool_args::TxPoolArgs;
 mod dev_args;
 pub use dev_args::DevArgs;
 
+/// PruneArgs for configuring the pruning and full node
+mod pruning_args;
+pub use pruning_args::PruningArgs;
+
 pub mod utils;

@@ -1,13 +1,13 @@
 use crate::{
-    identifier::TransactionId,
-    pool::pending::{PendingTransaction, PendingTransactionRef},
-    PoolTransaction, TransactionOrdering, ValidPoolTransaction,
+    identifier::TransactionId, pool::pending::PendingTransaction, PoolTransaction,
+    TransactionOrdering, ValidPoolTransaction,
 };
 use reth_primitives::H256 as TxHash;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     sync::Arc,
 };
+use tokio::sync::broadcast::Receiver;
 use tracing::debug;
 
 /// An iterator that returns transactions that can be executed on the current state (*best*
@@ -54,14 +54,20 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithBasefee<T> {
 pub(crate) struct BestTransactions<T: TransactionOrdering> {
     /// Contains a copy of _all_ transactions of the pending pool at the point in time this
     /// iterator was created.
-    pub(crate) all: BTreeMap<TransactionId, Arc<PendingTransaction<T>>>,
+    pub(crate) all: BTreeMap<TransactionId, PendingTransaction<T>>,
     /// Transactions that can be executed right away: these have the expected nonce.
     ///
     /// Once an `independent` transaction with the nonce `N` is returned, it unlocks `N+1`, which
     /// then can be moved from the `all` set to the `independent` set.
-    pub(crate) independent: BTreeSet<PendingTransactionRef<T>>,
+    pub(crate) independent: BTreeSet<PendingTransaction<T>>,
     /// There might be the case where a yielded transactions is invalid, this will track it.
     pub(crate) invalid: HashSet<TxHash>,
+    /// Used to recieve any new pending transactions that have been added to the pool after this
+    /// iterator was snapshotted
+    ///
+    /// These new pending transactions are inserted into this iterator's pool before yielding the
+    /// next value
+    pub(crate) new_transaction_reciever: Receiver<PendingTransaction<T>>,
 }
 
 impl<T: TransactionOrdering> BestTransactions<T> {
@@ -74,8 +80,38 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     ///
     /// Note: for a transaction with nonce higher than the current on chain nonce this will always
     /// return an ancestor since all transaction in this pool are gapless.
-    pub(crate) fn ancestor(&self, id: &TransactionId) -> Option<&Arc<PendingTransaction<T>>> {
+    pub(crate) fn ancestor(&self, id: &TransactionId) -> Option<&PendingTransaction<T>> {
         self.all.get(&id.unchecked_ancestor()?)
+    }
+
+    /// Non-blocking read on the new pending transactions subscription channel
+    fn try_recv(&mut self) -> Option<PendingTransaction<T>> {
+        match self.new_transaction_reciever.try_recv() {
+            Ok(tx) => Some(tx),
+            // note TryRecvError::Lagged can be returned here, which is an error that attempts to
+            // correct itself on consecutive try_recv() attempts
+
+            // the cost of ignoring this error is allowing old transactions to get
+            // overwritten after the chan buffer size is met
+
+            // this case is still better than the existing iterator behavior where no new
+            // pending txs are surfaced to consumers
+            Err(_) => None,
+        }
+    }
+
+    /// Checks for new transactions that have come into the PendingPool after this iterator was
+    /// created and inserts them
+    fn add_new_transactions(&mut self) {
+        while let Some(pending_tx) = self.try_recv() {
+            let tx = pending_tx.transaction.clone();
+            //  same logic as PendingPool::add_transaction/PendingPool::best_with_unlocked
+            let tx_id = *tx.id();
+            if self.ancestor(&tx_id).is_none() {
+                self.independent.insert(pending_tx.clone());
+            }
+            self.all.insert(tx_id, pending_tx);
+        }
     }
 }
 
@@ -90,6 +126,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
+            self.add_new_transactions();
             // Remove the next independent tx with the highest priority
             let best = self.independent.pop_last()?;
             let hash = best.transaction.hash();
@@ -106,7 +143,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
 
             // Insert transactions that just got unlocked.
             if let Some(unlocked) = self.all.get(&best.unlocks()) {
-                self.independent.insert(unlocked.transaction.clone());
+                self.independent.insert(unlocked.clone());
             }
 
             return Some(best.transaction)
@@ -133,7 +170,7 @@ mod tests {
         for nonce in 0..num_tx {
             let tx = tx.clone().rng_hash().with_nonce(nonce);
             let valid_tx = f.validated(tx);
-            pool.add_transaction(Arc::new(valid_tx));
+            pool.add_transaction(Arc::new(valid_tx), 0);
         }
 
         let mut best = pool.best();
@@ -159,7 +196,7 @@ mod tests {
         for nonce in 0..num_tx {
             let tx = tx.clone().rng_hash().with_nonce(nonce);
             let valid_tx = f.validated(tx);
-            pool.add_transaction(Arc::new(valid_tx));
+            pool.add_transaction(Arc::new(valid_tx), 0);
         }
 
         let mut best = pool.best();

@@ -4,7 +4,7 @@ use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_payload_builder::PayloadStore;
-use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, U64};
+use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, H256, U64};
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
@@ -127,6 +127,26 @@ where
                 attrs.withdrawals.is_some(),
             )?;
         }
+        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
+    }
+
+    /// Sends a message to the beacon consensus engine to update the fork choice _with_ withdrawals,
+    /// but only _after_ cancun.
+    ///
+    /// See also  <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
+    pub async fn fork_choice_updated_v3(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        if let Some(ref attrs) = payload_attrs {
+            self.validate_withdrawals_presence(
+                EngineApiMessageVersion::V3,
+                attrs.timestamp.as_u64(),
+                attrs.withdrawals.is_some(),
+            )?;
+        }
+
         Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
     }
 
@@ -321,7 +341,7 @@ where
                     return Err(EngineApiError::NoWithdrawalsPostShanghai)
                 }
             }
-            EngineApiMessageVersion::V2 => {
+            EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 => {
                 if is_shanghai && !has_withdrawals {
                     return Err(EngineApiError::NoWithdrawalsPostShanghai)
                 }
@@ -355,6 +375,15 @@ where
         Ok(EngineApi::new_payload_v2(self, payload).await?)
     }
 
+    async fn new_payload_v3(
+        &self,
+        _payload: ExecutionPayload,
+        _versioned_hashes: Vec<H256>,
+        _parent_beacon_block_root: H256,
+    ) -> RpcResult<PayloadStatus> {
+        Err(jsonrpsee_types::error::ErrorCode::MethodNotFound.into())
+    }
+
     /// Handler for `engine_forkchoiceUpdatedV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
@@ -377,6 +406,17 @@ where
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV2");
         Ok(EngineApi::fork_choice_updated_v2(self, fork_choice_state, payload_attributes).await?)
+    }
+
+    /// Handler for `engine_forkchoiceUpdatedV2`
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
+    async fn fork_choice_updated_v3(
+        &self,
+        _fork_choice_state: ForkchoiceState,
+        _payload_attributes: Option<PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated> {
+        Err(jsonrpsee_types::error::ErrorCode::MethodNotFound.into())
     }
 
     /// Handler for `engine_getPayloadV1`
@@ -407,6 +447,10 @@ where
     async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelope> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV2");
         Ok(EngineApi::get_payload_v2(self, payload_id).await?)
+    }
+
+    async fn get_payload_v3(&self, _payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelope> {
+        Err(jsonrpsee_types::error::ErrorCode::MethodNotFound.into())
     }
 
     /// Handler for `engine_getPayloadBodiesByHashV1`

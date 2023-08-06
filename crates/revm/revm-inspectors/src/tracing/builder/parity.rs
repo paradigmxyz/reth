@@ -7,8 +7,8 @@ use reth_primitives::{Address, U64};
 use reth_rpc_types::{trace::parity::*, TransactionInfo};
 use revm::{
     db::DatabaseRef,
-    interpreter::opcode,
-    primitives::{AccountInfo, ExecutionResult, ResultAndState, KECCAK_EMPTY},
+    interpreter::opcode::spec_opcode_gas,
+    primitives::{AccountInfo, ExecutionResult, ResultAndState, SpecId, KECCAK_EMPTY},
 };
 use std::collections::{HashSet, VecDeque};
 
@@ -19,6 +19,8 @@ use std::collections::{HashSet, VecDeque};
 pub struct ParityTraceBuilder {
     /// Recorded trace nodes
     nodes: Vec<CallTraceNode>,
+    /// The spec id of the EVM.
+    spec_id: Option<SpecId>,
 
     /// How the traces were recorded
     _config: TracingInspectorConfig,
@@ -26,8 +28,12 @@ pub struct ParityTraceBuilder {
 
 impl ParityTraceBuilder {
     /// Returns a new instance of the builder
-    pub(crate) fn new(nodes: Vec<CallTraceNode>, _config: TracingInspectorConfig) -> Self {
-        Self { nodes, _config }
+    pub(crate) fn new(
+        nodes: Vec<CallTraceNode>,
+        spec_id: Option<SpecId>,
+        _config: TracingInspectorConfig,
+    ) -> Self {
+        Self { nodes, spec_id, _config }
     }
 
     /// Returns a list of all addresses that appeared as callers.
@@ -217,6 +223,25 @@ impl ParityTraceBuilder {
             if with_traces {
                 let trace = node.parity_transaction_trace(trace_address);
                 traces.push(trace);
+
+                // check if the trace node is a selfdestruct
+                if node.is_selfdestruct() {
+                    // selfdestructs are not recorded as individual call traces but are derived from
+                    // the call trace and are added as additional `TransactionTrace` objects in the
+                    // trace array
+                    let addr = {
+                        let last = traces.last_mut().expect("exists");
+                        let mut addr = last.trace_address.clone();
+                        addr.push(last.subtraces);
+                        // need to account for the additional selfdestruct trace
+                        last.subtraces += 1;
+                        addr
+                    };
+
+                    if let Some(trace) = node.parity_selfdestruct_trace(addr) {
+                        traces.push(trace);
+                    }
+                }
             }
             if with_diff {
                 node.parity_update_state_diff(&mut diff);
@@ -232,11 +257,15 @@ impl ParityTraceBuilder {
     /// Returns an iterator over all recorded traces  for `trace_transaction`
     pub fn into_transaction_traces_iter(self) -> impl Iterator<Item = TransactionTrace> {
         let trace_addresses = self.trace_addresses();
-        self.nodes
-            .into_iter()
-            .zip(trace_addresses)
-            .filter(|(node, _)| !node.is_precompile())
-            .map(|(node, trace_address)| node.parity_transaction_trace(trace_address))
+        TransactionTraceIter {
+            next_selfdestruct: None,
+            iter: self
+                .nodes
+                .into_iter()
+                .zip(trace_addresses)
+                .filter(|(node, _)| !node.is_precompile())
+                .map(|(node, trace_address)| (node.parity_transaction_trace(trace_address), node)),
+        }
     }
 
     /// Returns the raw traces of the transaction
@@ -278,19 +307,13 @@ impl ParityTraceBuilder {
                         Vec::with_capacity(current.trace.steps.len());
 
                     for step in &current.trace.steps {
-                        let maybe_sub = match step.op.u8() {
-                            opcode::CALL |
-                            opcode::CALLCODE |
-                            opcode::DELEGATECALL |
-                            opcode::STATICCALL |
-                            opcode::CREATE |
-                            opcode::CREATE2 => {
-                                sub_stack.pop_front().expect("there should be a sub trace")
-                            }
-                            _ => None,
+                        let maybe_sub = if step.is_calllike_op() {
+                            sub_stack.pop_front().expect("there should be a sub trace")
+                        } else {
+                            None
                         };
 
-                        instructions.push(Self::make_instruction(step, maybe_sub));
+                        instructions.push(self.make_instruction(step, maybe_sub));
                     }
 
                     match current.parent {
@@ -315,7 +338,7 @@ impl ParityTraceBuilder {
 
     /// Creates a VM instruction from a [CallTraceStep] and a [VmTrace] for the subcall if there is
     /// one
-    fn make_instruction(step: &CallTraceStep, maybe_sub: Option<VmTrace>) -> VmInstruction {
+    fn make_instruction(&self, step: &CallTraceStep, maybe_sub: Option<VmTrace>) -> VmInstruction {
         let maybe_storage = step.storage_change.map(|storage_change| StorageDelta {
             key: storage_change.key,
             val: storage_change.value,
@@ -330,17 +353,52 @@ impl ParityTraceBuilder {
 
         let maybe_execution = Some(VmExecutedOperation {
             used: step.gas_cost,
-            push: step.new_stack.map(|new_stack| new_stack.into()),
+            push: step.new_stack.into_iter().map(|new_stack| new_stack.into()).collect(),
             mem: maybe_memory,
             store: maybe_storage,
         });
 
-        VmInstruction {
-            pc: step.pc,
-            cost: 0, // TODO: use op gas cost
-            ex: maybe_execution,
-            sub: maybe_sub,
+        let cost = self
+            .spec_id
+            .and_then(|spec_id| {
+                spec_opcode_gas(spec_id).get(step.op.u8() as usize).map(|op| op.get_gas())
+            })
+            .unwrap_or_default();
+
+        VmInstruction { pc: step.pc, cost: cost as u64, ex: maybe_execution, sub: maybe_sub }
+    }
+}
+
+/// An iterator for [TransactionTrace]s
+///
+/// This iterator handles additional selfdestruct actions based on the last emitted
+/// [TransactionTrace], since selfdestructs are not recorded as individual call traces but are
+/// derived from recorded call
+struct TransactionTraceIter<Iter> {
+    iter: Iter,
+    next_selfdestruct: Option<TransactionTrace>,
+}
+
+impl<Iter> Iterator for TransactionTraceIter<Iter>
+where
+    Iter: Iterator<Item = (TransactionTrace, CallTraceNode)>,
+{
+    type Item = TransactionTrace;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(selfdestruct) = self.next_selfdestruct.take() {
+            return Some(selfdestruct)
         }
+        let (mut trace, node) = self.iter.next()?;
+        if node.is_selfdestruct() {
+            // since selfdestructs are emitted as additional trace, increase the trace count
+            let mut addr = trace.trace_address.clone();
+            addr.push(trace.subtraces);
+            // need to account for the additional selfdestruct trace
+            trace.subtraces += 1;
+            self.next_selfdestruct = node.parity_selfdestruct_trace(addr);
+        }
+        Some(trace)
     }
 }
 

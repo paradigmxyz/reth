@@ -47,6 +47,7 @@ members = [
     "testing/ef-tests",
 
     "examples",
+    "examples/additional-rpc-namespace-in-cli",
 ]
 default-members = ["bin/reth"]
 
@@ -77,9 +78,6 @@ codegen-units = 1
 incremental = false
 
 [patch.crates-io]
-# patched for quantity U256 responses <https://github.com/recmo/uint/issues/224>
-ruint = { git = "https://github.com/paradigmxyz/uint" }
-
 revm = { git = "https://github.com/bluealloy/revm/", branch = "release/v25" }
 revm-primitives = { git = "https://github.com/bluealloy/revm/", branch = "release/v25" }
 
@@ -87,6 +85,7 @@ revm-primitives = { git = "https://github.com/bluealloy/revm/", branch = "releas
 ## reth
 revm = { version = "3" }
 revm-primitives = "1.1"
+reth = { path = "./bin/reth" }
 reth-primitives = { path = "./crates/primitives" }
 reth-interfaces = { path = "./crates/interfaces" }
 reth-provider = { path = "./crates/storage/provider" }
@@ -113,11 +112,14 @@ ethers-middleware = { version = "2.0.8", default-features = false }
 ## misc
 bytes = "1.4"
 tracing = "0.1.0"
+tracing-appender = "0.2"
 thiserror = "1.0.37"
 serde_json = "1.0.94"
 serde = { version = "1.0", default-features = false }
 rand = "0.8.5"
 strum = "0.25"
+rayon = "1.7"
+itertools = "0.11"
 
 ### proc-macros
 proc-macro2 = "1.0"
@@ -134,5 +136,14 @@ futures = "0.3.26"
 pin-project = "1.0.12"
 futures-util = "0.3.25"
 
+## json
+jsonrpsee = { version = "0.19" }
+jsonrpsee-core = { version = "0.19" }
+jsonrpsee-types = { version = "0.19" }
+
 ## crypto
 secp256k1 = { version = "0.27.0", default-features = false, features = ["global-context", "rand-std", "recovery"] }
+
+### misc-testing
+proptest = "1.0"
+arbitrary = "1.1"
