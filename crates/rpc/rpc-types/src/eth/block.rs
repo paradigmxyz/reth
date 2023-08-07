@@ -7,7 +7,7 @@ use reth_primitives::{
 use reth_rlp::Encodable;
 use serde::{ser::Error, Deserialize, Serialize, Serializer};
 use std::{collections::BTreeMap, ops::Deref};
-
+use reth_rpc_types_compat::from_recovered_with_block_context;
 /// Block Transactions depending on the boolean attribute of `eth_getBlockBy*`,
 /// or if used by `eth_getUncle*`
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -141,7 +141,7 @@ impl Block {
         let mut transactions = Vec::with_capacity(block.body.len());
         for (idx, tx) in block.body.iter().enumerate() {
             let signed_tx = tx.clone().into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
-            transactions.push(Transaction::from_recovered_with_block_context(
+            transactions.push(from_recovered_with_block_context(
                 signed_tx,
                 block_hash,
                 block_number,
