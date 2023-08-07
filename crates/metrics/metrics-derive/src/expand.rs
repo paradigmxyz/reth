@@ -22,6 +22,14 @@ enum MetricField<'a> {
     Skipped(&'a Field),
 }
 
+impl<'a> MetricField<'a> {
+    fn field(&self) -> &'a Field {
+        match self {
+            MetricField::Included(Metric { field, .. }) | MetricField::Skipped(field) => field,
+        }
+    }
+}
+
 pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
     let ty = &node.ident;
     let vis = &node.vis;
@@ -40,33 +48,32 @@ pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
         MetricsScope::Static(scope) => {
             let (defaults, labeled_defaults, describes): (Vec<_>, Vec<_>, Vec<_>) = metric_fields
                 .iter()
-                .map(|metric| match metric {
-                    MetricField::Included(metric) => {
-                        let field_name = &metric.field.ident;
-                        let metric_name = format!(
-                            "{}{}{}",
-                            scope.value(),
-                            metrics_attr.separator(),
-                            metric.name()
-                        );
-                        let registrar = metric.register_stmt()?;
-                        let describe = metric.describe_stmt()?;
-                        let description = &metric.description;
-                        Ok((
-                            quote! {
-                                #field_name: #registrar(#metric_name),
-                            },
-                            quote! {
-                                #field_name: #registrar(#metric_name, labels.clone()),
-                            },
-                            Some(quote! {
-                                #describe(#metric_name, #description);
-                            }),
-                        ))
-                    }
-                    MetricField::Skipped(field) => {
-                        let field_name = &field.ident;
-                        Ok((
+                .map(|metric| {
+                    let field_name = &metric.field().ident;
+                    match metric {
+                        MetricField::Included(metric) => {
+                            let metric_name = format!(
+                                "{}{}{}",
+                                scope.value(),
+                                metrics_attr.separator(),
+                                metric.name()
+                            );
+                            let registrar = metric.register_stmt()?;
+                            let describe = metric.describe_stmt()?;
+                            let description = &metric.description;
+                            Ok((
+                                quote! {
+                                    #field_name: #registrar(#metric_name),
+                                },
+                                quote! {
+                                    #field_name: #registrar(#metric_name, labels.clone()),
+                                },
+                                Some(quote! {
+                                    #describe(#metric_name, #description);
+                                }),
+                            ))
+                        }
+                        MetricField::Skipped(_) => Ok((
                             quote! {
                                 #field_name: Default::default(),
                             },
@@ -74,7 +81,7 @@ pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
                                 #field_name: Default::default(),
                             },
                             None,
-                        ))
+                        )),
                     }
                 })
                 .collect::<Result<Vec<_>>>()?
@@ -117,35 +124,33 @@ pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
         MetricsScope::Dynamic => {
             let (defaults, labeled_defaults, describes): (Vec<_>, Vec<_>, Vec<_>) = metric_fields
                 .iter()
-                .map(|metric| match metric {
-                    MetricField::Included(metric) => {
-                        let name = metric.name();
-                        let separator = metrics_attr.separator();
-                        let metric_name = quote! {
-                            format!("{}{}{}", scope, #separator, #name)
-                        };
-                        let field_name = &metric.field.ident;
+                .map(|metric| {
+                    let field_name = &metric.field().ident;
+                    match metric {
+                        MetricField::Included(metric) => {
+                            let name = metric.name();
+                            let separator = metrics_attr.separator();
+                            let metric_name = quote! {
+                                format!("{}{}{}", scope, #separator, #name)
+                            };
 
-                        let registrar = metric.register_stmt()?;
-                        let describe = metric.describe_stmt()?;
-                        let description = &metric.description;
+                            let registrar = metric.register_stmt()?;
+                            let describe = metric.describe_stmt()?;
+                            let description = &metric.description;
 
-                        Ok((
-                            quote! {
-                                #field_name: #registrar(#metric_name),
-                            },
-                            quote! {
-                                #field_name: #registrar(#metric_name, labels.clone()),
-                            },
-                            Some(quote! {
-                                #describe(#metric_name, #description);
-                            }),
-                        ))
-                    }
-                    MetricField::Skipped(field) => {
-                        let field_name = &field.ident;
-
-                        Ok((
+                            Ok((
+                                quote! {
+                                    #field_name: #registrar(#metric_name),
+                                },
+                                quote! {
+                                    #field_name: #registrar(#metric_name, labels.clone()),
+                                },
+                                Some(quote! {
+                                    #describe(#metric_name, #description);
+                                }),
+                            ))
+                        }
+                        MetricField::Skipped(_) => Ok((
                             quote! {
                                 #field_name: Default::default(),
                             },
@@ -153,7 +158,7 @@ pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
                                 #field_name: Default::default(),
                             },
                             None,
-                        ))
+                        )),
                     }
                 })
                 .collect::<Result<Vec<_>>>()?
