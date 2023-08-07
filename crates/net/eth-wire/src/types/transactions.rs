@@ -54,30 +54,6 @@ impl From<PooledTransactions> for Vec<TransactionSigned> {
     }
 }
 
-/// An error that can occur when validating a [`BlobTransaction`].
-#[derive(Debug, thiserror::Error)]
-pub enum BlobTransactionValidationError {
-    /// An error arising from failed KZG proof validation.
-    #[error("KZG proof validation failed: {0:?}")]
-    KzgProofValidation(kzg::Error),
-    /// The number of blobs, commitments, and proofs in the blob transaction payload do not match.
-    #[error("Mismatched number of blobs, commitments, and proofs. Blobs: {blobs}, commitments: {commitments}, proofs: {proofs}")]
-    MismatchedLength {
-        /// The number of blobs in the blob transaction payload.
-        blobs: usize,
-        /// The number of commitments in the blob transaction payload.
-        commitments: usize,
-        /// The number of proofs in the blob transaction payload.
-        proofs: usize,
-    },
-}
-
-impl From<kzg::Error> for BlobTransactionValidationError {
-    fn from(err: kzg::Error) -> Self {
-        Self::KzgProofValidation(err)
-    }
-}
-
 /// A response to [`GetPooledTransactions`] that includes blob data, their commitments, and their
 /// corresponding proofs.
 ///
@@ -107,33 +83,14 @@ impl BlobTransaction {
     /// proof.
     ///
     /// Returns `false` if the a `(blob, commitment, proof)` tuple fails to verify.
-    pub fn validate(
-        &self,
-        proof_settings: &KzgSettings,
-    ) -> Result<bool, BlobTransactionValidationError> {
-        if self.blobs.len() != self.commitments.len() {
-            return Err(BlobTransactionValidationError::MismatchedLength {
-                blobs: self.blobs.len(),
-                commitments: self.commitments.len(),
-                proofs: self.proofs.len(),
-            })
-        }
-
-        if self.commitments.len() != self.proofs.len() {
-            return Err(BlobTransactionValidationError::MismatchedLength {
-                blobs: self.blobs.len(),
-                commitments: self.commitments.len(),
-                proofs: self.proofs.len(),
-            })
-        }
-
-        // Verify as a batch rather than one-by-one
-        Ok(KzgProof::verify_blob_kzg_proof_batch(
+    pub fn validate(&self, proof_settings: &KzgSettings) -> Result<bool, kzg::Error> {
+        // Verify as a batch
+        KzgProof::verify_blob_kzg_proof_batch(
             self.blobs.as_slice(),
             self.commitments.as_slice(),
             self.proofs.as_slice(),
             proof_settings,
-        )?)
+        )
     }
 }
 
