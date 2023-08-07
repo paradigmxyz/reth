@@ -82,7 +82,7 @@ impl BlobTransaction {
     /// commitments, and proofs. Each blob data element is verified against its commitment and
     /// proof.
     ///
-    /// Returns `false` if the a `(blob, commitment, proof)` tuple fails to verify.
+    /// Returns `false` if any blob KZG proof in the response fails to verify.
     pub fn validate(&self, proof_settings: &KzgSettings) -> Result<bool, kzg::Error> {
         // Verify as a batch
         KzgProof::verify_blob_kzg_proof_batch(
