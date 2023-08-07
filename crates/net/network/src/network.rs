@@ -269,14 +269,13 @@ impl SyncStateProvider for NetworkHandle {
 impl NetworkSyncUpdater for NetworkHandle {
     fn update_sync_state(&self, state: SyncState) {
         let future_state = state.is_syncing();
-        let curr_syncing = self.inner.is_syncing.load(Ordering::Relaxed);
-        self.inner.is_syncing.store(future_state, Ordering::Relaxed);
+        let prev_state = self.inner.is_syncing.swap(future_state, Ordering::Relaxed);
         // explicitly throw this error away since we expect it to error every time after it's been
         // set to true, i.e after every live sync
         let _ = self.inner.initial_sync_done.compare_exchange(
             false,
             // on first move back from Syncing->Idle - swap and set init_sync_done to true
-            curr_syncing && !future_state,
+            prev_state && !future_state,
             Ordering::Relaxed,
             Ordering::Relaxed,
         );
