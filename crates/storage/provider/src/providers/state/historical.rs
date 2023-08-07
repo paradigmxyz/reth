@@ -29,7 +29,9 @@ pub struct HistoricalStateProviderRef<'a, 'b, TX: DbTx<'a>> {
     tx: &'b TX,
     /// Block number is main index for the history state of accounts and storages.
     block_number: BlockNumber,
+    /// Lowest block number at which the account history is available.
     lowest_account_history_block_number: Option<BlockNumber>,
+    /// Lowest block number at which the storage history is available.
     lowest_storage_history_block_number: Option<BlockNumber>,
     /// Phantom lifetime `'a`
     _phantom: PhantomData<&'a TX>,
@@ -42,7 +44,7 @@ pub enum HistoryInfo {
 }
 
 impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
-    /// Create new StateProvider from history transaction number
+    /// Create new StateProvider for historical block number
     pub fn new(tx: &'b TX, block_number: BlockNumber) -> Self {
         Self {
             tx,
@@ -53,6 +55,8 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
         }
     }
 
+    /// Create new StateProvider for historical block number and lowest block numbers at which
+    /// account & storage histories are available.
     pub fn new_with_lowest_history_block_numbers(
         tx: &'b TX,
         lowest_account_history_block_number: Option<BlockNumber>,
@@ -242,14 +246,16 @@ pub struct HistoricalStateProvider<'a, TX: DbTx<'a>> {
     tx: TX,
     /// State at the block number is the main indexer of the state.
     block_number: BlockNumber,
+    /// Lowest block number at which the account history is available.
     lowest_account_history_block_number: Option<BlockNumber>,
+    /// Lowest block number at which the storage history is available.
     lowest_storage_history_block_number: Option<BlockNumber>,
     /// Phantom lifetime `'a`
     _phantom: PhantomData<&'a TX>,
 }
 
 impl<'a, TX: DbTx<'a>> HistoricalStateProvider<'a, TX> {
-    /// Create new StateProvider from history transaction number
+    /// Create new StateProvider for historical block number
     pub fn new(tx: TX, block_number: BlockNumber) -> Self {
         Self {
             tx,
@@ -260,11 +266,13 @@ impl<'a, TX: DbTx<'a>> HistoricalStateProvider<'a, TX> {
         }
     }
 
+    /// Set the lowest block number at which the account history is available.
     pub fn with_lowest_account_history_block_number(mut self, block_number: BlockNumber) -> Self {
         self.lowest_account_history_block_number = Some(block_number);
         self
     }
 
+    /// Set the lowest block number at which the storage history is available.
     pub fn with_lowest_storage_history_block_number(mut self, block_number: BlockNumber) -> Self {
         self.lowest_storage_history_block_number = Some(block_number);
         self
