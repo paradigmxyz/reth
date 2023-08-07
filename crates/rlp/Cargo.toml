@@ -18,6 +18,9 @@ ethereum-types = { version = "0.14", features = ["codec"], optional = true }
 revm-primitives = { workspace = true, features = ["serde"] }
 reth-rlp-derive = {  path = "./rlp-derive", optional = true }
 
+# for eip-4844
+c-kzg = { workspace = true, optional = true }
+
 [dev-dependencies]
 reth-rlp = { workspace = true, features = [
     "derive",
@@ -31,9 +34,11 @@ criterion = "0.5.0"
 pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterion"] }
 
 [features]
+default = ["kzg"]
 alloc = []
 derive = ["reth-rlp-derive"]
 std = ["alloc"]
+kzg = ["c-kzg"]
 
 [[bench]]
 name = "bench"
