@@ -102,15 +102,20 @@ impl<DB: Database> ProviderFactory<DB> {
         // +1 as the changeset that we want is the one that was applied after this block.
         block_number += 1;
 
+        let account_history_prune_checkpoint =
+            provider.get_prune_checkpoint(PrunePart::AccountHistory)?;
+        let storage_history_prune_checkpoint =
+            provider.get_prune_checkpoint(PrunePart::StorageHistory)?;
+
         let mut state_provider = HistoricalStateProvider::new(provider.into_tx(), block_number);
 
         // If we pruned account or storage history, we can't return state on every historical block.
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune part.
-        if let Some(prune_checkpoint) = provider.get_prune_checkpoint(PrunePart::AccountHistory)? {
+        if let Some(prune_checkpoint) = account_history_prune_checkpoint {
             state_provider = state_provider
                 .with_latest_account_history_block_number(prune_checkpoint.block_number);
         }
-        if let Some(prune_checkpoint) = provider.get_prune_checkpoint(PrunePart::StorageHistory)? {
+        if let Some(prune_checkpoint) = storage_history_prune_checkpoint {
             state_provider = state_provider
                 .with_latest_storage_history_block_number(prune_checkpoint.block_number);
         }
