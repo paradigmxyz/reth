@@ -113,11 +113,11 @@ impl<DB: Database> ProviderFactory<DB> {
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune part.
         if let Some(prune_checkpoint) = account_history_prune_checkpoint {
             state_provider = state_provider
-                .with_latest_account_history_block_number(prune_checkpoint.block_number);
+                .with_lowest_account_history_block_number(prune_checkpoint.block_number + 1);
         }
         if let Some(prune_checkpoint) = storage_history_prune_checkpoint {
             state_provider = state_provider
-                .with_latest_storage_history_block_number(prune_checkpoint.block_number);
+                .with_lowest_storage_history_block_number(prune_checkpoint.block_number + 1);
         }
 
         Ok(Box::new(state_provider))

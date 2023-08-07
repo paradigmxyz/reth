@@ -1,6 +1,6 @@
 use crate::{
     providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader, PostState,
-    ProviderError, ProviderFactory, StateProvider, StateRootProvider,
+    ProviderError, StateProvider, StateRootProvider,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -29,8 +29,8 @@ pub struct HistoricalStateProviderRef<'a, 'b, TX: DbTx<'a>> {
     tx: &'b TX,
     /// Block number is main index for the history state of accounts and storages.
     block_number: BlockNumber,
-    latest_account_history_block_number: Option<BlockNumber>,
-    latest_storage_history_block_number: Option<BlockNumber>,
+    lowest_account_history_block_number: Option<BlockNumber>,
+    lowest_storage_history_block_number: Option<BlockNumber>,
     /// Phantom lifetime `'a`
     _phantom: PhantomData<&'a TX>,
 }
@@ -47,35 +47,37 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
         Self {
             tx,
             block_number,
-            latest_account_history_block_number: None,
-            latest_storage_history_block_number: None,
+            lowest_account_history_block_number: None,
+            lowest_storage_history_block_number: None,
             _phantom: PhantomData {},
         }
     }
 
-    pub fn new_with_latest_history_block_numbers(
+    pub fn new_with_lowest_history_block_numbers(
         tx: &'b TX,
-        latest_account_history_block_number: Option<BlockNumber>,
-        latest_storage_history_block_number: Option<BlockNumber>,
+        lowest_account_history_block_number: Option<BlockNumber>,
+        lowest_storage_history_block_number: Option<BlockNumber>,
         block_number: BlockNumber,
     ) -> Self {
         Self {
             tx,
             block_number,
-            latest_account_history_block_number,
-            latest_storage_history_block_number,
+            lowest_account_history_block_number,
+            lowest_storage_history_block_number,
             _phantom: PhantomData {},
         }
     }
 
     /// Lookup an account in the AccountHistory table
     pub fn account_history_lookup(&self, address: Address) -> Result<HistoryInfo> {
+        // Check if lowest available block number for storage history is more than the requested
+        // block number for this historical provider instance.
         if self
-            .latest_account_history_block_number
-            .map(|block_number| block_number >= self.block_number)
+            .lowest_account_history_block_number
+            .map(|block_number| block_number > self.block_number)
             .unwrap_or(false)
         {
-            return Ok(HistoryInfo::NotYetWritten)
+            return Err(ProviderError::StateAtBlockPruned(self.block_number).into())
         }
 
         // history key to search IntegerList of block number changesets.
@@ -89,12 +91,14 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
         address: Address,
         storage_key: StorageKey,
     ) -> Result<HistoryInfo> {
+        // Check if lowest available block number for account history is more than the requested
+        // block number for this historical provider instance.
         if self
-            .latest_storage_history_block_number
-            .map(|block_number| block_number >= self.block_number)
+            .lowest_storage_history_block_number
+            .map(|block_number| block_number > self.block_number)
             .unwrap_or(false)
         {
-            return Ok(HistoryInfo::NotYetWritten)
+            return Err(ProviderError::StateAtBlockPruned(self.block_number).into())
         }
 
         // history key to search IntegerList of block number changesets.
@@ -238,8 +242,8 @@ pub struct HistoricalStateProvider<'a, TX: DbTx<'a>> {
     tx: TX,
     /// State at the block number is the main indexer of the state.
     block_number: BlockNumber,
-    latest_account_history_block_number: Option<BlockNumber>,
-    latest_storage_history_block_number: Option<BlockNumber>,
+    lowest_account_history_block_number: Option<BlockNumber>,
+    lowest_storage_history_block_number: Option<BlockNumber>,
     /// Phantom lifetime `'a`
     _phantom: PhantomData<&'a TX>,
 }
@@ -250,29 +254,29 @@ impl<'a, TX: DbTx<'a>> HistoricalStateProvider<'a, TX> {
         Self {
             tx,
             block_number,
-            latest_account_history_block_number: None,
-            latest_storage_history_block_number: None,
+            lowest_account_history_block_number: None,
+            lowest_storage_history_block_number: None,
             _phantom: PhantomData {},
         }
     }
 
-    pub fn with_latest_account_history_block_number(mut self, block_number: BlockNumber) -> Self {
-        self.latest_account_history_block_number = Some(block_number);
+    pub fn with_lowest_account_history_block_number(mut self, block_number: BlockNumber) -> Self {
+        self.lowest_account_history_block_number = Some(block_number);
         self
     }
 
-    pub fn with_latest_storage_history_block_number(mut self, block_number: BlockNumber) -> Self {
-        self.latest_storage_history_block_number = Some(block_number);
+    pub fn with_lowest_storage_history_block_number(mut self, block_number: BlockNumber) -> Self {
+        self.lowest_storage_history_block_number = Some(block_number);
         self
     }
 
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
     fn as_ref<'b>(&'b self) -> HistoricalStateProviderRef<'a, 'b, TX> {
-        HistoricalStateProviderRef::new_with_latest_history_block_numbers(
+        HistoricalStateProviderRef::new_with_lowest_history_block_numbers(
             &self.tx,
-            self.latest_account_history_block_number,
-            self.latest_storage_history_block_number,
+            self.lowest_account_history_block_number,
+            self.lowest_storage_history_block_number,
             self.block_number,
         )
     }
