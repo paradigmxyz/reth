@@ -37,6 +37,11 @@ use revm::{
 };
 use revm_primitives::{utilities::create_address, Env, ResultAndState, SpecId};
 
+#[cfg(feature = "optimism")]
+use http::{header::CONTENT_TYPE, HeaderValue};
+#[cfg(feature = "optimism")]
+use hyper::{Body, Client, Method, Request};
+
 /// Helper alias type for the state's [CacheDB]
 pub(crate) type StateCacheDB<'r> = CacheDB<State<StateProviderBox<'r>>>;
 
@@ -386,6 +391,26 @@ where
     }
 
     async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256> {
+        #[cfg(feature = "optimism")]
+        if let Some(endpoint) = self.network().sequencer_endpoint() {
+            let client = Client::new();
+
+            let body = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "eth_sendRawTransaction",
+                "params": [hex::encode(tx.clone())],
+                "id": self.network().chain_id()
+            });
+
+            let req = Request::builder()
+                .method(Method::POST)
+                .uri(endpoint)
+                .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
+                .body(Body::from(serde_json::to_string(&body).unwrap()))?;
+
+            client.request(req).await?;
+        }
+
         let recovered = recover_raw_transaction(tx)?;
 
         let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered);

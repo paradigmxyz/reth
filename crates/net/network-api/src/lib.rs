@@ -49,6 +49,10 @@ pub trait NetworkInfo: Send + Sync {
 
     /// Returns `true` if the network is undergoing sync.
     fn is_syncing(&self) -> bool;
+
+    #[cfg(feature = "optimism")]
+    /// Returns the sequencer HTTP endpoint, if set.
+    fn sequencer_endpoint(&self) -> &Option<String>;
 }
 
 /// Provides general purpose information about Peers in the network.

@@ -45,6 +45,7 @@ impl NetworkHandle {
         network_mode: NetworkMode,
         bandwidth_meter: BandwidthMeter,
         chain_id: Arc<AtomicU64>,
+        #[cfg(feature = "optimism")] sequencer_endpoint: Option<String>,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -56,6 +57,8 @@ impl NetworkHandle {
             bandwidth_meter,
             is_syncing: Arc::new(AtomicBool::new(false)),
             chain_id,
+            #[cfg(feature = "optimism")]
+            sequencer_endpoint,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -247,6 +250,11 @@ impl NetworkInfo for NetworkHandle {
     fn is_syncing(&self) -> bool {
         SyncStateProvider::is_syncing(self)
     }
+
+    #[cfg(feature = "optimism")]
+    fn sequencer_endpoint(&self) -> &Option<String> {
+        &self.inner.sequencer_endpoint
+    }
 }
 
 impl SyncStateProvider for NetworkHandle {
@@ -287,6 +295,9 @@ struct NetworkInner {
     is_syncing: Arc<AtomicBool>,
     /// The chain id
     chain_id: Arc<AtomicU64>,
+    #[cfg(feature = "optimism")]
+    /// The sequencer HTTP Endpoint
+    sequencer_endpoint: Option<String>,
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).

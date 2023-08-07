@@ -180,6 +180,7 @@ where
             status,
             fork_filter,
             dns_discovery_config,
+            sequencer_endpoint,
             ..
         } = config;
 
@@ -238,6 +239,8 @@ where
             network_mode,
             bandwidth_meter,
             Arc::new(AtomicU64::new(chain_spec.chain.id())),
+            #[cfg(feature = "optimism")]
+            sequencer_endpoint,
         );
 
         Ok(Self {
