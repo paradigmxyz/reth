@@ -51,6 +51,22 @@ impl From<PooledTransactions> for Vec<TransactionSigned> {
     }
 }
 
+/// A response to [`GetPooledTransactions`] that includes blob data, their commitments, and their
+/// corresponding proofs.
+// TODO: derive_arbitrary
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct BlobTransaction {
+    /// The transaction payload.
+    pub transaction: TransactionSigned,
+    /// The transaction's blob data.
+    pub blobs: Vec<Blob>,
+    /// The transaction's blob commitments.
+    pub commitments: Vec<Bytes48>,
+    /// The transaction's blob proofs.
+    pub proofs: Vec<Bytes48>,
+}
+
 #[cfg(test)]
 mod test {
     use crate::{message::RequestPair, GetPooledTransactions, PooledTransactions};
