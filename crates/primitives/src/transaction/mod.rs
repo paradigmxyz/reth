@@ -7,6 +7,7 @@ use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
 pub use error::InvalidTransactionError;
 pub use meta::TransactionMeta;
+use rayon::prelude::{ParallelBridge, ParallelIterator};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
 use reth_rlp::{
     length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
@@ -847,6 +848,24 @@ impl TransactionSigned {
     pub fn recover_signer(&self) -> Option<Address> {
         let signature_hash = self.signature_hash();
         self.signature.recover_signer(signature_hash)
+    }
+
+    /// Recovers a list of signers from a transaction list iterator
+    ///
+    /// Returns `None`, if some transaction's signature is invalid, see also
+    /// [Self::recover_signer].
+    pub fn recover_signers<'a>(
+        txes: impl Iterator<Item = &'a Self> + Send,
+        num_txes: usize,
+    ) -> Option<Vec<Address>> {
+        // Arbitrary value.
+        let threshold = 10;
+
+        if num_txes < threshold {
+            txes.map(|tx| tx.recover_signer()).collect()
+        } else {
+            txes.cloned().par_bridge().map(|tx| tx.recover_signer()).collect()
+        }
     }
 
     /// Consumes the type, recover signer and return [`TransactionSignedEcRecovered`]
