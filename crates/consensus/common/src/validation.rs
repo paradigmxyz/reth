@@ -7,7 +7,7 @@ use reth_primitives::{
         eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
     },
     BlockNumber, ChainSpec, Hardfork, Header, InvalidTransactionError, SealedBlock, SealedHeader,
-    Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy,
+    Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxLegacy,
 };
 use reth_provider::{AccountReader, HeaderProvider, WithdrawalsProvider};
 use std::collections::{hash_map::Entry, HashMap};
@@ -92,6 +92,20 @@ pub fn validate_transaction_regarding_header(
                 return Err(InvalidTransactionError::Eip1559Disabled.into())
             }
 
+            // EIP-1559: add more constraints to the tx validation
+            // https://github.com/ethereum/EIPs/pull/3594
+            if max_priority_fee_per_gas > max_fee_per_gas {
+                return Err(InvalidTransactionError::TipAboveFeeCap.into())
+            }
+
+            Some(*chain_id)
+        }
+        Transaction::Eip4844(TxEip4844 {
+            chain_id,
+            max_fee_per_gas,
+            max_priority_fee_per_gas,
+            ..
+        }) => {
             // EIP-1559: add more constraints to the tx validation
             // https://github.com/ethereum/EIPs/pull/3594
             if max_priority_fee_per_gas > max_fee_per_gas {

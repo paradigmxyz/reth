@@ -1,7 +1,7 @@
 use crate::config::revm_spec;
 use reth_primitives::{
     recover_signer, Address, Bytes, Chain, ChainSpec, Head, Header, Transaction, TransactionKind,
-    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy, U256,
+    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxLegacy, U256,
 };
 use revm::primitives::{AnalysisKind, BlockEnv, CfgEnv, SpecId, TransactTo, TxEnv};
 
@@ -186,6 +186,44 @@ where
             value,
             input,
             access_list,
+        }) => {
+            tx_env.gas_limit = *gas_limit;
+            tx_env.gas_price = U256::from(*max_fee_per_gas);
+            tx_env.gas_priority_fee = Some(U256::from(*max_priority_fee_per_gas));
+            tx_env.transact_to = match to {
+                TransactionKind::Call(to) => TransactTo::Call(*to),
+                TransactionKind::Create => TransactTo::create(),
+            };
+            tx_env.value = U256::from(*value);
+            tx_env.data = input.0.clone();
+            tx_env.chain_id = Some(*chain_id);
+            tx_env.nonce = Some(*nonce);
+            tx_env.access_list = access_list
+                .0
+                .iter()
+                .map(|l| {
+                    (
+                        l.address,
+                        l.storage_keys
+                            .iter()
+                            .map(|k| U256::from_be_bytes(k.to_fixed_bytes()))
+                            .collect(),
+                    )
+                })
+                .collect();
+        }
+        Transaction::Eip4844(TxEip4844 {
+            nonce,
+            chain_id,
+            gas_limit,
+            max_fee_per_gas,
+            max_priority_fee_per_gas,
+            to,
+            value,
+            access_list,
+            blob_versioned_hashes: _,
+            max_fee_per_blob_gas: _,
+            input,
         }) => {
             tx_env.gas_limit = *gas_limit;
             tx_env.gas_price = U256::from(*max_fee_per_gas);
