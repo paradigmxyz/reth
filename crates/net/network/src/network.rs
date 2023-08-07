@@ -45,7 +45,8 @@ impl NetworkHandle {
         network_mode: NetworkMode,
         bandwidth_meter: BandwidthMeter,
         chain_id: Arc<AtomicU64>,
-        #[cfg(feature = "optimism")] sequencer_endpoint: Option<String>,
+        #[cfg(feature = "optimism")]
+        sequencer_endpoint: Option<String>,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
