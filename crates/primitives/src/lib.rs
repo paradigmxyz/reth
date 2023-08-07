@@ -142,6 +142,11 @@ pub mod utils {
     pub use ethers_core::types::serde_helpers;
 }
 
+/// EIP-4844 + KZG helpers
+pub mod kzg {
+    pub use c_kzg::*;
+}
+
 /// Helpers for working with serde
 pub mod serde_helper;
 
