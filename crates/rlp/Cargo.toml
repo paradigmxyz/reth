@@ -19,7 +19,7 @@ revm-primitives = { workspace = true, features = ["serde"] }
 reth-rlp-derive = {  path = "./rlp-derive", optional = true }
 
 # for eip-4844
-c-kzg = { git = "https://github.com/ethereum/c-kzg-4844", optional = true }
+c-kzg = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-rlp = { workspace = true, features = [
