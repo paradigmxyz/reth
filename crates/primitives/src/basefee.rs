@@ -1,11 +1,13 @@
 //! Helpers for working with EIP-1559 base fee
 
-use crate::constants;
-
 /// Calculate base fee for next block. [EIP-1559](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1559.md) spec
-pub fn calculate_next_block_base_fee(gas_used: u64, gas_limit: u64, base_fee: u64) -> u64 {
-    let gas_target = gas_limit / constants::EIP1559_ELASTICITY_MULTIPLIER;
-
+pub fn calculate_next_block_base_fee(
+    gas_used: u64,
+    gas_limit: u64,
+    base_fee: u64,
+    base_fee_params: crate::BaseFeeParams,
+) -> u64 {
+    let gas_target = gas_limit / base_fee_params.elasticity_multiplier;
     if gas_used == gas_target {
         return base_fee
     }
@@ -15,14 +17,14 @@ pub fn calculate_next_block_base_fee(gas_used: u64, gas_limit: u64, base_fee: u6
             1,
             base_fee as u128 * gas_used_delta as u128 /
                 gas_target as u128 /
-                constants::EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR as u128,
+                base_fee_params.max_change_denominator as u128,
         );
         base_fee + (base_fee_delta as u64)
     } else {
         let gas_used_delta = gas_target - gas_used;
         let base_fee_per_gas_delta = base_fee as u128 * gas_used_delta as u128 /
             gas_target as u128 /
-            constants::EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR as u128;
+            base_fee_params.max_change_denominator as u128;
 
         base_fee.saturating_sub(base_fee_per_gas_delta as u64)
     }
@@ -54,7 +56,12 @@ mod tests {
         for i in 0..base_fee.len() {
             assert_eq!(
                 next_base_fee[i],
-                calculate_next_block_base_fee(gas_used[i], gas_limit[i], base_fee[i])
+                calculate_next_block_base_fee(
+                    gas_used[i],
+                    gas_limit[i],
+                    base_fee[i],
+                    crate::BaseFeeParams::ethereum(),
+                )
             );
         }
     }
