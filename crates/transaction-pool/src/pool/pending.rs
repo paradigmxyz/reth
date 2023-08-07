@@ -274,7 +274,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
     /// Removes the worst transaction from this pool.
     pub(crate) fn pop_worst(&mut self) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let worst = self.all.iter().next_back().map(|tx| *tx.transaction.id())?;
+        let worst = self.all.iter().next().map(|tx| *tx.transaction.id())?;
         self.remove_transaction(&worst)
     }
 
@@ -350,7 +350,10 @@ impl<T: TransactionOrdering> Ord for PendingTransaction<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{MockOrdering, MockTransaction, MockTransactionFactory};
+    use crate::{
+        test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
+        PoolTransaction,
+    };
 
     #[test]
     fn test_enforce_basefee() {
@@ -406,5 +409,20 @@ mod tests {
         let removed = pool.update_base_fee((root_tx.max_fee_per_gas() + 1) as u64);
         assert_eq!(removed.len(), 2);
         assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn evict_worst() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        let t = MockTransaction::eip1559();
+        pool.add_transaction(f.validated_arc(t.clone()), 0);
+
+        let t2 = MockTransaction::eip1559().inc_price_by(10);
+        pool.add_transaction(f.validated_arc(t2), 0);
+
+        // First transaction should be evicted.
+        assert_eq!(pool.pop_worst().map(|tx| *tx.hash()), Some(*t.hash()));
     }
 }
