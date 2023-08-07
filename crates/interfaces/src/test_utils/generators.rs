@@ -191,22 +191,21 @@ pub fn random_block_range<R: Rng>(
     blocks
 }
 
-/// Collection of account and storage entry changes
-pub type ChangeSet = Vec<(Address, Account, Vec<StorageEntry>)>;
+type Transition = Vec<(Address, Account, Vec<StorageEntry>)>;
 type AccountState = (Account, Vec<StorageEntry>);
 
-/// Generate a range of changesets for given blocks and accounts.
+/// Generate a range of transitions for given blocks and accounts.
 /// Assumes all accounts start with an empty storage.
 ///
-/// Returns a Vec of account and storage changes for each block,
+/// Returns a Vec of account and storage changes for each transition,
 /// along with the final state of all accounts and storages.
-pub fn random_changeset_range<'a, R: Rng, IBlk, IAcc>(
+pub fn random_transition_range<'a, R: Rng, IBlk, IAcc>(
     rng: &mut R,
     blocks: IBlk,
     accounts: IAcc,
-    n_storage_changes: std::ops::Range<u64>,
+    n_changes: std::ops::Range<u64>,
     key_range: std::ops::Range<u64>,
-) -> (Vec<ChangeSet>, BTreeMap<Address, AccountState>)
+) -> (Vec<Transition>, BTreeMap<Address, AccountState>)
 where
     IBlk: IntoIterator<Item = &'a SealedBlock>,
     IAcc: IntoIterator<Item = (Address, (Account, Vec<StorageEntry>))>,
@@ -218,20 +217,16 @@ where
 
     let valid_addresses = state.keys().copied().collect();
 
-    let mut changesets = Vec::new();
+    let mut transitions = Vec::new();
 
     blocks.into_iter().for_each(|block| {
-        let mut changeset = Vec::new();
-        let (from, to, mut transfer, new_entries) = random_account_change(
-            rng,
-            &valid_addresses,
-            n_storage_changes.clone(),
-            key_range.clone(),
-        );
+        let mut transition = Vec::new();
+        let (from, to, mut transfer, new_entries) =
+            random_account_change(rng, &valid_addresses, n_changes.clone(), key_range.clone());
 
         // extract from sending account
         let (prev_from, _) = state.get_mut(&from).unwrap();
-        changeset.push((from, *prev_from, Vec::new()));
+        transition.push((from, *prev_from, Vec::new()));
 
         transfer = max(min(transfer, prev_from.balance), U256::from(1));
         prev_from.balance = prev_from.balance.wrapping_sub(transfer);
@@ -255,11 +250,11 @@ where
             })
             .collect();
 
-        changeset.push((to, *prev_to, old_entries));
+        transition.push((to, *prev_to, old_entries));
 
         prev_to.balance = prev_to.balance.wrapping_add(transfer);
 
-        changesets.push(changeset);
+        transitions.push(transition);
     });
 
     let final_state = state
@@ -268,7 +263,7 @@ where
             (addr, (acc, storage.into_iter().map(|v| v.into()).collect()))
         })
         .collect();
-    (changesets, final_state)
+    (transitions, final_state)
 }
 
 /// Generate a random account change.
@@ -277,7 +272,7 @@ where
 pub fn random_account_change<R: Rng>(
     rng: &mut R,
     valid_addresses: &Vec<Address>,
-    n_storage_changes: std::ops::Range<u64>,
+    n_changes: std::ops::Range<u64>,
     key_range: std::ops::Range<u64>,
 ) -> (Address, Address, U256, Vec<StorageEntry>) {
     let mut addresses = valid_addresses.choose_multiple(rng, 2).cloned();
@@ -287,13 +282,9 @@ pub fn random_account_change<R: Rng>(
 
     let balance_change = U256::from(rng.gen::<u64>());
 
-    let storage_changes = if n_storage_changes.is_empty() {
-        Vec::new()
-    } else {
-        (0..n_storage_changes.sample_single(rng))
-            .map(|_| random_storage_entry(rng, key_range.clone()))
-            .collect()
-    };
+    let storage_changes = (0..n_changes.sample_single(rng))
+        .map(|_| random_storage_entry(rng, key_range.clone()))
+        .collect();
 
     (addr_from, addr_to, balance_change, storage_changes)
 }

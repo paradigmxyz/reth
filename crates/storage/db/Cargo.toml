@@ -41,8 +41,8 @@ derive_more = "0.99"
 eyre = "0.6.8"
 
 # arbitrary utils
-arbitrary = { workspace = true, features = ["derive"], optional = true }
-proptest = { workspace = true, optional = true }
+arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
+proptest = { version = "1.0", optional = true }
 proptest-derive = { version = "0.3", optional = true }
 
 [dev-dependencies]
@@ -65,8 +65,8 @@ secp256k1.workspace = true
 
 async-trait.workspace = true
 
-arbitrary = { workspace = true, features = ["derive"] }
-proptest.workspace = true
+arbitrary = { version = "1.1.7", features = ["derive"] }
+proptest = { version = "1.0" }
 proptest-derive = "0.3"
 
 serde_json.workspace = true

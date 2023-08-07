@@ -729,21 +729,6 @@ impl<Provider, Pool, Network, Tasks, Events>
         }
     }
 
-    /// Returns a reference to the provider
-    pub fn pool(&self) -> &Pool {
-        &self.pool
-    }
-
-    /// Returns a reference to the events type
-    pub fn events(&self) -> &Events {
-        &self.events
-    }
-
-    /// Returns a reference to the tasks type
-    pub fn tasks(&self) -> &Tasks {
-        &self.executor
-    }
-
     /// Returns all installed methods
     pub fn methods(&self) -> Vec<Methods> {
         self.modules.values().cloned().collect()
@@ -831,9 +816,15 @@ where
         let eth = self.eth_handlers();
         self.modules.insert(
             RethRpcModule::Trace,
-            TraceApi::new(self.provider.clone(), eth.api, self.tracing_call_guard.clone())
-                .into_rpc()
-                .into(),
+            TraceApi::new(
+                self.provider.clone(),
+                eth.api.clone(),
+                eth.cache,
+                Box::new(self.executor.clone()),
+                self.tracing_call_guard.clone(),
+            )
+            .into_rpc()
+            .into(),
         );
         self
     }
@@ -1466,65 +1457,6 @@ impl TransportRpcModules<()> {
     /// Returns the [TransportRpcModuleConfig] used to configure this instance.
     pub fn module_config(&self) -> &TransportRpcModuleConfig {
         &self.config
-    }
-
-    /// Merge the given Methods in the configured http methods.
-    ///
-    /// Fails if any of the methods in other is present already.
-    ///
-    /// Returns Ok(false) if no http transport is configured.
-    pub fn merge_http(
-        &mut self,
-        other: impl Into<Methods>,
-    ) -> Result<bool, jsonrpsee::core::error::Error> {
-        if let Some(ref mut http) = self.http {
-            return http.merge(other.into()).map(|_| true)
-        }
-        Ok(false)
-    }
-
-    /// Merge the given Methods in the configured ws methods.
-    ///
-    /// Fails if any of the methods in other is present already.
-    ///
-    /// Returns Ok(false) if no http transport is configured.
-    pub fn merge_ws(
-        &mut self,
-        other: impl Into<Methods>,
-    ) -> Result<bool, jsonrpsee::core::error::Error> {
-        if let Some(ref mut ws) = self.ws {
-            return ws.merge(other.into()).map(|_| true)
-        }
-        Ok(false)
-    }
-
-    /// Merge the given Methods in the configured ipc methods.
-    ///
-    /// Fails if any of the methods in other is present already.
-    ///
-    /// Returns Ok(false) if no ipc transport is configured.
-    pub fn merge_ipc(
-        &mut self,
-        other: impl Into<Methods>,
-    ) -> Result<bool, jsonrpsee::core::error::Error> {
-        if let Some(ref mut ipc) = self.ipc {
-            return ipc.merge(other.into()).map(|_| true)
-        }
-        Ok(false)
-    }
-
-    /// Merge the given Methods in all configured methods.
-    ///
-    /// Fails if any of the methods in other is present already.
-    pub fn merge_configured(
-        &mut self,
-        other: impl Into<Methods>,
-    ) -> Result<(), jsonrpsee::core::error::Error> {
-        let other = other.into();
-        self.merge_http(other.clone())?;
-        self.merge_ws(other.clone())?;
-        self.merge_ipc(other)?;
-        Ok(())
     }
 
     /// Convenience function for starting a server

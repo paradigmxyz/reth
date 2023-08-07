@@ -44,24 +44,13 @@ auto_impl = "1.0"
 # testing
 rand = { workspace = true, optional = true }
 paste = { version = "1.0", optional = true }
-proptest = { workspace = true, optional = true }
 
 [dev-dependencies]
-reth-primitives = { workspace = true, features = ["arbitrary"] }
 paste = "1.0"
 rand = "0.8"
-proptest.workspace = true
-criterion = "0.5"
-assert_matches = "1.5"
 
 [features]
 default = ["serde"]
 serde = ["dep:serde"]
 test-utils = ["rand", "paste", "serde"]
 optimism = ["reth-primitives/optimism"]
-arbitrary = ["proptest", "reth-primitives/arbitrary"]
-
-[[bench]]
-name = "reorder"
-required-features = ["test-utils"]
-harness = false

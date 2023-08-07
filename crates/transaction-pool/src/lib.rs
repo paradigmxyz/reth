@@ -165,9 +165,8 @@ pub use crate::{
     },
     traits::{
         AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
-        NewTransactionEvent, PendingTransactionListenerKind, PoolSize, PoolTransaction,
-        PooledTransaction, PropagateKind, PropagatedTransactions, TransactionOrigin,
-        TransactionPool, TransactionPoolExt,
+        NewTransactionEvent, PoolSize, PoolTransaction, PooledTransaction, PropagateKind,
+        PropagatedTransactions, TransactionOrigin, TransactionPool, TransactionPoolExt,
     },
     validate::{
         EthTransactionValidator, TransactionValidationOutcome, TransactionValidator,
@@ -365,11 +364,8 @@ where
         self.pool.add_all_transactions_event_listener()
     }
 
-    fn pending_transactions_listener_for(
-        &self,
-        kind: PendingTransactionListenerKind,
-    ) -> Receiver<TxHash> {
-        self.pool.add_pending_listener(kind)
+    fn pending_transactions_listener(&self) -> Receiver<TxHash> {
+        self.pool.add_pending_listener()
     }
 
     fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {

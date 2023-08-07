@@ -1134,29 +1134,11 @@ impl PeersConfig {
         self.connection_info.num_inbound = num_inbound;
         self
     }
-
     /// Maximum allowed outbound connections.
     pub fn with_max_outbound(mut self, max_outbound: usize) -> Self {
         self.connection_info.max_outbound = max_outbound;
         self
     }
-
-    /// Maximum allowed inbound connections with optional update.
-    pub fn with_max_inbound_opt(mut self, max_inbound: Option<usize>) -> Self {
-        if let Some(max_inbound) = max_inbound {
-            self.connection_info.max_inbound = max_inbound;
-        }
-        self
-    }
-
-    /// Maximum allowed outbound connections with optional update.
-    pub fn with_max_outbound_opt(mut self, max_outbound: Option<usize>) -> Self {
-        if let Some(max_outbound) = max_outbound {
-            self.connection_info.max_outbound = max_outbound;
-        }
-        self
-    }
-
     /// Maximum allowed inbound connections.
     pub fn with_max_inbound(mut self, max_inbound: usize) -> Self {
         self.connection_info.max_inbound = max_inbound;

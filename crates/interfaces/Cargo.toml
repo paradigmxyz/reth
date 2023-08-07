@@ -30,7 +30,7 @@ auto_impl = "1.0"
 thiserror.workspace = true
 tracing.workspace = true
 rand.workspace = true
-arbitrary = { workspace = true, features = ["derive"], optional = true }
+arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
 secp256k1 = { workspace = true, default-features = false, features = [
     "alloc",
     "recovery",
@@ -44,7 +44,7 @@ clap = { version = "4", features = ["derive"], optional = true }
 reth-db = { path = "../storage/db", features = ["test-utils"] }
 tokio = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true, features = ["sync"] }
-arbitrary = { workspace = true, features = ["derive"] }
+arbitrary = { version = "1.1.7", features = ["derive"] }
 hex-literal = "0.3"
 secp256k1 = { workspace = true, features = [
     "alloc",

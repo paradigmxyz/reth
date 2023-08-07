@@ -113,7 +113,7 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     pub transaction: T,
     /// The identifier for this transaction.
     pub transaction_id: TransactionId,
-    /// Whether it is allowed to propagate the transaction.
+    /// Whether to propagate the transaction.
     pub propagate: bool,
     /// Timestamp when this was added to the pool.
     pub timestamp: Instant,

@@ -41,7 +41,7 @@ reth-provider.workspace = true
 triehash = "0.8"
 
 # misc
-proptest.workspace = true
+proptest = "1.0"
 tokio = { workspace = true, default-features = false, features = ["sync", "rt", "macros"] }
 tokio-stream.workspace = true
 criterion = "0.5"

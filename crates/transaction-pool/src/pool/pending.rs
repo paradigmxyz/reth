@@ -10,7 +10,6 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
-use tokio::sync::broadcast;
 
 /// A pool of validated and gapless transactions that are ready to be executed on the current state
 /// and are waiting to be included in a block.
@@ -43,9 +42,6 @@ pub(crate) struct PendingPool<T: TransactionOrdering> {
     ///
     /// See also [`PoolTransaction::size`](crate::traits::PoolTransaction::size).
     size_of: SizeTracker,
-    /// Used to broadcast new transactions that have been added to the PendingPool to existing
-    /// snapshots of this pool.
-    new_transaction_notifier: broadcast::Sender<PendingTransaction<T>>,
 }
 
 // === impl PendingPool ===
@@ -53,7 +49,6 @@ pub(crate) struct PendingPool<T: TransactionOrdering> {
 impl<T: TransactionOrdering> PendingPool<T> {
     /// Create a new pool instance.
     pub(crate) fn new(ordering: T) -> Self {
-        let (new_transaction_notifier, _) = broadcast::channel(200);
         Self {
             ordering,
             submission_id: 0,
@@ -61,7 +56,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
             all: Default::default(),
             independent_transactions: Default::default(),
             size_of: Default::default(),
-            new_transaction_notifier,
         }
     }
 
@@ -88,7 +82,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
             all: self.by_id.clone(),
             independent: self.independent_transactions.clone(),
             invalid: Default::default(),
-            new_transaction_reciever: self.new_transaction_notifier.subscribe(),
         }
     }
 
@@ -209,12 +202,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
         }
         self.all.insert(transaction.clone());
 
-        // send the new transaction to any existing pendingpool snapshot iterators
-        if self.new_transaction_notifier.receiver_count() > 0 {
-            let _ = self.new_transaction_notifier.send(tx.clone());
-        }
+        let transaction = Arc::new(PendingTransaction { transaction });
 
-        self.by_id.insert(tx_id, tx);
+        self.by_id.insert(tx_id, transaction);
     }
 
     /// Removes a _mined_ transaction from the pool.

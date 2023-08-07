@@ -17,7 +17,7 @@ use reth_db::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
         ShardedKey, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals,
     },
-    table::Table,
+    table::{Key, Table},
     tables,
     transaction::{DbTx, DbTxMut},
     BlockNumberList, DatabaseError,
@@ -26,7 +26,6 @@ use reth_interfaces::Result;
 use reth_primitives::{
     keccak256,
     stage::{StageCheckpoint, StageId},
-    trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
     ChainInfo, ChainSpec, Hardfork, Head, Header, PruneCheckpoint, PrunePart, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta, TransactionSigned,
@@ -38,9 +37,9 @@ use reth_revm_primitives::{
     env::{fill_block_env, fill_cfg_and_block_env, fill_cfg_env},
     primitives::{BlockEnv, CfgEnv, SpecId},
 };
-use reth_trie::{prefix_set::PrefixSetMut, StateRoot};
+use reth_trie::StateRoot;
 use std::{
-    collections::{btree_map::Entry, BTreeMap, BTreeSet, HashMap},
+    collections::{btree_map::Entry, BTreeMap, BTreeSet},
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::Arc,
@@ -622,23 +621,31 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
     /// Prune the table for the specified pre-sorted key iterator.
     /// Returns number of rows pruned.
-    pub fn prune_table_with_iterator<T: Table>(
+    pub fn prune_table<T, K>(
         &self,
-        keys: impl IntoIterator<Item = T::Key>,
-    ) -> std::result::Result<usize, DatabaseError> {
-        self.prune_table_with_iterator_in_batches::<T>(keys, usize::MAX, |_| {})
+        keys: impl IntoIterator<Item = K>,
+    ) -> std::result::Result<usize, DatabaseError>
+    where
+        T: Table<Key = K>,
+        K: Key,
+    {
+        self.prune_table_in_batches::<T, K>(keys, usize::MAX, |_| {})
     }
 
     /// Prune the table for the specified pre-sorted key iterator, calling `chunk_callback` after
     /// every `batch_size` pruned rows.
     ///
     /// Returns number of rows pruned.
-    pub fn prune_table_with_iterator_in_batches<T: Table>(
+    pub fn prune_table_in_batches<T, K>(
         &self,
-        keys: impl IntoIterator<Item = T::Key>,
+        keys: impl IntoIterator<Item = K>,
         batch_size: usize,
-        mut batch_callback: impl FnMut(usize),
-    ) -> std::result::Result<usize, DatabaseError> {
+        batch_callback: impl Fn(usize),
+    ) -> std::result::Result<usize, DatabaseError>
+    where
+        T: Table<Key = K>,
+        K: Key,
+    {
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut deleted = 0;
 
@@ -657,43 +664,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         }
 
         Ok(deleted)
-    }
-
-    /// Prune the table for the specified key range, calling `chunk_callback` after every
-    /// `batch_size` pruned rows with number of total unique keys and total rows pruned. For dupsort
-    /// tables, these numbers will be different as one key can correspond to multiple rows.
-    ///
-    /// Returns number of rows pruned.
-    pub fn prune_table_with_range_in_batches<T: Table>(
-        &self,
-        keys: impl RangeBounds<T::Key>,
-        batch_size: usize,
-        mut batch_callback: impl FnMut(usize, usize),
-    ) -> std::result::Result<(), DatabaseError> {
-        let mut cursor = self.tx.cursor_write::<T>()?;
-        let mut walker = cursor.walk_range(keys)?;
-        let mut deleted_keys = 0;
-        let mut deleted_rows = 0;
-        let mut previous_key = None;
-
-        while let Some((key, _)) = walker.next().transpose()? {
-            walker.delete_current()?;
-            deleted_rows += 1;
-            if previous_key.as_ref().map(|previous_key| previous_key != &key).unwrap_or(true) {
-                deleted_keys += 1;
-                previous_key = Some(key);
-            }
-
-            if deleted_rows % batch_size == 0 {
-                batch_callback(deleted_keys, deleted_rows);
-            }
-        }
-
-        if deleted_rows % batch_size != 0 {
-            batch_callback(deleted_keys, deleted_rows);
-        }
-
-        Ok(())
     }
 
     /// Load shard and remove it. If list is empty, last shard was full or
@@ -1407,47 +1377,25 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
         end_block_hash: H256,
         expected_state_root: H256,
     ) -> Result<()> {
-        // Initialize prefix sets.
-        let mut account_prefix_set = PrefixSetMut::default();
-        let mut storage_prefix_set: HashMap<H256, PrefixSetMut> = HashMap::default();
-
         // storage hashing stage
         {
             let lists = self.changed_storages_with_range(range.clone())?;
             let storages = self.plainstate_storages(lists)?;
-            let storage_entries = self.insert_storage_for_hashing(storages)?;
-            for (hashed_address, hashed_slots) in storage_entries {
-                account_prefix_set.insert(Nibbles::unpack(hashed_address));
-                for slot in hashed_slots {
-                    storage_prefix_set
-                        .entry(hashed_address)
-                        .or_default()
-                        .insert(Nibbles::unpack(slot));
-                }
-            }
+            self.insert_storage_for_hashing(storages)?;
         }
 
         // account hashing stage
         {
             let lists = self.changed_accounts_with_range(range.clone())?;
             let accounts = self.basic_accounts(lists)?;
-            let hashed_addresses = self.insert_account_for_hashing(accounts)?;
-            for hashed_address in hashed_addresses {
-                account_prefix_set.insert(Nibbles::unpack(hashed_address));
-            }
+            self.insert_account_for_hashing(accounts)?;
         }
 
         // merkle tree
         {
-            // This is the same as `StateRoot::incremental_root_with_updates`, only the prefix sets
-            // are pre-loaded.
-            let (state_root, trie_updates) = StateRoot::new(&self.tx)
-                .with_changed_account_prefixes(account_prefix_set.freeze())
-                .with_changed_storage_prefixes(
-                    storage_prefix_set.into_iter().map(|(k, v)| (k, v.freeze())).collect(),
-                )
-                .root_with_updates()
-                .map_err(Into::<reth_db::DatabaseError>::into)?;
+            let (state_root, trie_updates) =
+                StateRoot::incremental_root_with_updates(&self.tx, range.clone())
+                    .map_err(Into::<reth_db::DatabaseError>::into)?;
             if state_root != expected_state_root {
                 return Err(ProviderError::StateRootMismatch {
                     got: state_root,
@@ -1462,15 +1410,11 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
         Ok(())
     }
 
-    fn unwind_storage_hashing(
-        &self,
-        range: Range<BlockNumberAddress>,
-    ) -> Result<HashMap<H256, BTreeSet<H256>>> {
+    fn unwind_storage_hashing(&self, range: Range<BlockNumberAddress>) -> Result<()> {
         let mut hashed_storage = self.tx.cursor_dup_write::<tables::HashedStorage>()?;
 
         // Aggregate all block changesets and make list of accounts that have been changed.
-        let hashed_storages = self
-            .tx
+        self.tx
             .cursor_read::<tables::StorageChangeSet>()?
             .walk_range(range)?
             .collect::<std::result::Result<Vec<_>, _>>()?
@@ -1489,14 +1433,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
             // hash addresses and collect it inside sorted BTreeMap.
             // We are doing keccak only once per address.
             .map(|((address, key), value)| ((keccak256(address), keccak256(key)), value))
-            .collect::<BTreeMap<_, _>>();
-
-        let mut hashed_storage_keys: HashMap<H256, BTreeSet<H256>> = HashMap::default();
-        for (hashed_address, hashed_slot) in hashed_storages.keys() {
-            hashed_storage_keys.entry(*hashed_address).or_default().insert(*hashed_slot);
-        }
-
-        hashed_storages
+            .collect::<BTreeMap<_, _>>()
             .into_iter()
             // Apply values to HashedStorage (if Value is zero just remove it);
             .try_for_each(|((hashed_address, key), value)| -> Result<()> {
@@ -1514,58 +1451,50 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
                 Ok(())
             })?;
 
-        Ok(hashed_storage_keys)
+        Ok(())
     }
 
     fn insert_storage_for_hashing(
         &self,
         storages: impl IntoIterator<Item = (Address, impl IntoIterator<Item = StorageEntry>)>,
-    ) -> Result<HashMap<H256, BTreeSet<H256>>> {
+    ) -> Result<()> {
         // hash values
-        let hashed_storages =
-            storages.into_iter().fold(BTreeMap::new(), |mut map, (address, storage)| {
-                let storage = storage.into_iter().fold(BTreeMap::new(), |mut map, entry| {
-                    map.insert(keccak256(entry.key), entry.value);
-                    map
-                });
-                map.insert(keccak256(address), storage);
+        let hashed = storages.into_iter().fold(BTreeMap::new(), |mut map, (address, storage)| {
+            let storage = storage.into_iter().fold(BTreeMap::new(), |mut map, entry| {
+                map.insert(keccak256(entry.key), entry.value);
                 map
             });
+            map.insert(keccak256(address), storage);
+            map
+        });
 
-        let hashed_storage_keys =
-            HashMap::from_iter(hashed_storages.iter().map(|(hashed_address, entries)| {
-                (*hashed_address, BTreeSet::from_iter(entries.keys().copied()))
-            }));
-
-        let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorage>()?;
+        let mut hashed_storage = self.tx.cursor_dup_write::<tables::HashedStorage>()?;
         // Hash the address and key and apply them to HashedStorage (if Storage is None
         // just remove it);
-        hashed_storages.into_iter().try_for_each(|(hashed_address, storage)| {
+        hashed.into_iter().try_for_each(|(hashed_address, storage)| {
             storage.into_iter().try_for_each(|(key, value)| -> Result<()> {
-                if hashed_storage_cursor
+                if hashed_storage
                     .seek_by_key_subkey(hashed_address, key)?
                     .filter(|entry| entry.key == key)
                     .is_some()
                 {
-                    hashed_storage_cursor.delete_current()?;
+                    hashed_storage.delete_current()?;
                 }
 
                 if value != U256::ZERO {
-                    hashed_storage_cursor.upsert(hashed_address, StorageEntry { key, value })?;
+                    hashed_storage.upsert(hashed_address, StorageEntry { key, value })?;
                 }
                 Ok(())
             })
         })?;
-
-        Ok(hashed_storage_keys)
+        Ok(())
     }
 
-    fn unwind_account_hashing(&self, range: RangeInclusive<BlockNumber>) -> Result<BTreeSet<H256>> {
-        let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccount>()?;
+    fn unwind_account_hashing(&self, range: RangeInclusive<BlockNumber>) -> Result<()> {
+        let mut hashed_accounts = self.tx.cursor_write::<tables::HashedAccount>()?;
 
         // Aggregate all block changesets and make a list of accounts that have been changed.
-        let hashed_accounts = self
-            .tx
+        self.tx
             .cursor_read::<tables::AccountChangeSet>()?
             .walk_range(range)?
             .collect::<std::result::Result<Vec<_>, _>>()?
@@ -1583,32 +1512,28 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
             // hash addresses and collect it inside sorted BTreeMap.
             // We are doing keccak only once per address.
             .map(|(address, account)| (keccak256(address), account))
-            .collect::<BTreeMap<_, _>>();
-
-        let hashed_account_keys = BTreeSet::from_iter(hashed_accounts.keys().copied());
-
-        hashed_accounts
+            .collect::<BTreeMap<_, _>>()
             .into_iter()
             // Apply values to HashedState (if Account is None remove it);
             .try_for_each(|(hashed_address, account)| -> Result<()> {
                 if let Some(account) = account {
-                    hashed_accounts_cursor.upsert(hashed_address, account)?;
-                } else if hashed_accounts_cursor.seek_exact(hashed_address)?.is_some() {
-                    hashed_accounts_cursor.delete_current()?;
+                    hashed_accounts.upsert(hashed_address, account)?;
+                } else if hashed_accounts.seek_exact(hashed_address)?.is_some() {
+                    hashed_accounts.delete_current()?;
                 }
                 Ok(())
             })?;
 
-        Ok(hashed_account_keys)
+        Ok(())
     }
 
     fn insert_account_for_hashing(
         &self,
         accounts: impl IntoIterator<Item = (Address, Option<Account>)>,
-    ) -> Result<BTreeSet<H256>> {
-        let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccount>()?;
+    ) -> Result<()> {
+        let mut hashed_accounts = self.tx.cursor_write::<tables::HashedAccount>()?;
 
-        let hashed_accounts = accounts.into_iter().fold(
+        let hashes_accounts = accounts.into_iter().fold(
             BTreeMap::new(),
             |mut map: BTreeMap<H256, Option<Account>>, (address, account)| {
                 map.insert(keccak256(address), account);
@@ -1616,18 +1541,15 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
             },
         );
 
-        let hashed_addresses = BTreeSet::from_iter(hashed_accounts.keys().copied());
-
-        hashed_accounts.into_iter().try_for_each(|(hashed_address, account)| -> Result<()> {
+        hashes_accounts.into_iter().try_for_each(|(hashed_address, account)| -> Result<()> {
             if let Some(account) = account {
-                hashed_accounts_cursor.upsert(hashed_address, account)?
-            } else if hashed_accounts_cursor.seek_exact(hashed_address)?.is_some() {
-                hashed_accounts_cursor.delete_current()?;
+                hashed_accounts.upsert(hashed_address, account)?
+            } else if hashed_accounts.seek_exact(hashed_address)?.is_some() {
+                hashed_accounts.delete_current()?;
             }
             Ok(())
         })?;
-
-        Ok(hashed_addresses)
+        Ok(())
     }
 }
 
@@ -1766,45 +1688,15 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockExecutionWriter for DatabaseP
         if TAKE {
             let storage_range = BlockNumberAddress::range(range.clone());
 
-            // Initialize prefix sets.
-            let mut account_prefix_set = PrefixSetMut::default();
-            let mut storage_prefix_set: HashMap<H256, PrefixSetMut> = HashMap::default();
-
-            // Unwind account hashes. Add changed accounts to account prefix set.
-            let hashed_addresses = self.unwind_account_hashing(range.clone())?;
-            for hashed_address in hashed_addresses {
-                account_prefix_set.insert(Nibbles::unpack(hashed_address));
-            }
-
-            // Unwind account history indices.
+            self.unwind_account_hashing(range.clone())?;
             self.unwind_account_history_indices(range.clone())?;
-
-            // Unwind storage hashes. Add changed account and storage keys to corresponding prefix
-            // sets.
-            let storage_entries = self.unwind_storage_hashing(storage_range.clone())?;
-            for (hashed_address, hashed_slots) in storage_entries {
-                account_prefix_set.insert(Nibbles::unpack(hashed_address));
-                for slot in hashed_slots {
-                    storage_prefix_set
-                        .entry(hashed_address)
-                        .or_default()
-                        .insert(Nibbles::unpack(slot));
-                }
-            }
-
-            // Unwind storage history indices.
+            self.unwind_storage_hashing(storage_range.clone())?;
             self.unwind_storage_history_indices(storage_range)?;
 
-            // Calculate the reverted merkle root.
-            // This is the same as `StateRoot::incremental_root_with_updates`, only the prefix sets
-            // are pre-loaded.
-            let (new_state_root, trie_updates) = StateRoot::new(&self.tx)
-                .with_changed_account_prefixes(account_prefix_set.freeze())
-                .with_changed_storage_prefixes(
-                    storage_prefix_set.into_iter().map(|(k, v)| (k, v.freeze())).collect(),
-                )
-                .root_with_updates()
-                .map_err(Into::<reth_db::DatabaseError>::into)?;
+            // merkle tree
+            let (new_state_root, trie_updates) =
+                StateRoot::incremental_root_with_updates(&self.tx, range.clone())
+                    .map_err(Into::<reth_db::DatabaseError>::into)?;
 
             let parent_number = range.start().saturating_sub(1);
             let parent_state_root = self

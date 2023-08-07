@@ -260,13 +260,18 @@ impl CallTraceNode {
             let mut item = CallTraceStepStackItem { trace_node: self, step, call_child_id: None };
 
             // If the opcode is a call, put the child trace on the stack
-            if step.is_calllike_op() {
-                // The opcode of this step is a call but it's possible that this step resulted
-                // in a revert or out of gas error in which case there's no actual child call executed and recorded: <https://github.com/paradigmxyz/reth/issues/3915>
-                if let Some(call_id) = self.children.get(child_id).copied() {
+            match step.op.u8() {
+                opcode::CREATE |
+                opcode::CREATE2 |
+                opcode::DELEGATECALL |
+                opcode::CALL |
+                opcode::STATICCALL |
+                opcode::CALLCODE => {
+                    let call_id = self.children[child_id];
                     item.call_child_id = Some(call_id);
                     child_id += 1;
                 }
+                _ => {}
             }
             stack.push(item);
         }
@@ -287,12 +292,6 @@ impl CallTraceNode {
     /// Returns the status of the call
     pub(crate) fn status(&self) -> InstructionResult {
         self.trace.status
-    }
-
-    /// Returns true if the call was a selfdestruct
-    #[inline]
-    pub(crate) fn is_selfdestruct(&self) -> bool {
-        self.status() == InstructionResult::SelfDestruct
     }
 
     /// Updates the values of the state diff
@@ -346,7 +345,9 @@ impl CallTraceNode {
     /// Converts this node into a parity `TransactionTrace`
     pub(crate) fn parity_transaction_trace(&self, trace_address: Vec<usize>) -> TransactionTrace {
         let action = self.parity_action();
-        let result = if self.trace.is_error() && !self.trace.is_revert() {
+        let result = if action.is_selfdestruct() ||
+            (self.trace.is_error() && !self.trace.is_revert())
+        {
             // if the trace is a selfdestruct or an error that is not a revert, the result is None
             None
         } else {
@@ -373,39 +374,15 @@ impl CallTraceNode {
         }
     }
 
-    /// If the trace is a selfdestruct, returns the `Action` for a parity trace.
-    pub(crate) fn parity_selfdestruct_action(&self) -> Option<Action> {
-        if self.is_selfdestruct() {
-            Some(Action::Selfdestruct(SelfdestructAction {
+    /// Returns the `Action` for a parity trace
+    pub(crate) fn parity_action(&self) -> Action {
+        if self.status() == InstructionResult::SelfDestruct {
+            return Action::Selfdestruct(SelfdestructAction {
                 address: self.trace.address,
                 refund_address: self.trace.selfdestruct_refund_target.unwrap_or_default(),
                 balance: self.trace.value,
-            }))
-        } else {
-            None
+            })
         }
-    }
-
-    /// If the trace is a selfdestruct, returns the `TransactionTrace` for a parity trace.
-    pub(crate) fn parity_selfdestruct_trace(
-        &self,
-        trace_address: Vec<usize>,
-    ) -> Option<TransactionTrace> {
-        let trace = self.parity_selfdestruct_action()?;
-        Some(TransactionTrace {
-            action: trace,
-            error: None,
-            result: None,
-            trace_address,
-            subtraces: 0,
-        })
-    }
-
-    /// Returns the `Action` for a parity trace.
-    ///
-    /// Caution: This does not include the selfdestruct action, if the trace is a selfdestruct,
-    /// since those are handled in addition to the call action.
-    pub(crate) fn parity_action(&self) -> Action {
         match self.kind() {
             CallKind::Call | CallKind::StaticCall | CallKind::CallCode | CallKind::DelegateCall => {
                 Action::Call(CallAction {
@@ -465,34 +442,6 @@ impl CallTraceNode {
         }
 
         call_frame
-    }
-
-    /// Adds storage in-place to account state for all accounts that were touched in the trace
-    /// [CallTrace] execution.
-    ///
-    /// * `account_states` - the account map updated in place.
-    /// * `post_value` - if true, it adds storage values after trace transaction execution, if
-    ///   false, returns the storage values before trace execution.
-    pub(crate) fn geth_update_account_storage(
-        &self,
-        account_states: &mut BTreeMap<Address, AccountState>,
-        post_value: bool,
-    ) {
-        let addr = self.trace.address;
-        let acc_state = account_states.entry(addr).or_default();
-        for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
-            let StorageChange { key, value, had_value } = change;
-            let storage_map = acc_state.storage.get_or_insert_with(BTreeMap::new);
-            let value_to_insert = if post_value {
-                H256::from(value)
-            } else {
-                match had_value {
-                    Some(had_value) => H256::from(had_value),
-                    None => continue,
-                }
-            };
-            storage_map.insert(key.into(), value_to_insert);
-        }
     }
 }
 
@@ -595,21 +544,6 @@ impl CallTraceStep {
         }
 
         log
-    }
-
-    /// Returns true if the step is a call operation, any of
-    /// CALL, CALLCODE, DELEGATECALL, STATICCALL, CREATE, CREATE2
-    #[inline]
-    pub(crate) fn is_calllike_op(&self) -> bool {
-        matches!(
-            self.op.u8(),
-            opcode::CALL |
-                opcode::DELEGATECALL |
-                opcode::STATICCALL |
-                opcode::CREATE |
-                opcode::CALLCODE |
-                opcode::CREATE2
-        )
     }
 
     // Returns true if the status code is an error or revert, See [InstructionResult::Revert]

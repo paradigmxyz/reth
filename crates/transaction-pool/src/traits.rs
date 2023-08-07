@@ -105,23 +105,10 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Returns a new transaction change event stream for _all_ transactions in the pool.
     fn all_transactions_event_listener(&self) -> AllTransactionsEvents<Self::Transaction>;
 
-    /// Returns a new Stream that yields transactions hashes for new __pending__ transactions
-    /// inserted into the pool that are allowed to be propagated.
+    /// Returns a new Stream that yields transactions hashes for new ready transactions.
     ///
-    /// Note: This is intended for networking and will __only__ yield transactions that are allowed
-    /// to be propagated over the network.
-    ///
-    /// Consumer: RPC/P2P
-    fn pending_transactions_listener(&self) -> Receiver<TxHash> {
-        self.pending_transactions_listener_for(PendingTransactionListenerKind::PropagateOnly)
-    }
-
-    /// Returns a new Stream that yields transactions hashes for new __pending__ transactions
-    /// inserted into the pool depending on the given [PendingTransactionListenerKind] argument.
-    fn pending_transactions_listener_for(
-        &self,
-        kind: PendingTransactionListenerKind,
-    ) -> Receiver<TxHash>;
+    /// Consumer: RPC
+    fn pending_transactions_listener(&self) -> Receiver<TxHash>;
 
     /// Returns a new stream that yields new valid transactions added to the pool.
     fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>>;
@@ -286,28 +273,6 @@ pub trait TransactionPoolExt: TransactionPool {
     fn update_accounts(&self, accounts: Vec<ChangedAccount>);
 }
 
-/// Determines what kind of new pending transactions should be emitted by a stream of pending
-/// transactions.
-///
-/// This gives control whether to include transactions that are allowed to be propagated.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum PendingTransactionListenerKind {
-    /// Any new pending transactions
-    All,
-    /// Only transactions that are allowed to be propagated.
-    ///
-    /// See also [ValidPoolTransaction]
-    PropagateOnly,
-}
-
-impl PendingTransactionListenerKind {
-    /// Returns true if we're only interested in transactions that are allowed to be propagated.
-    #[inline]
-    pub fn is_propagate_only(&self) -> bool {
-        matches!(self, Self::PropagateOnly)
-    }
-}
-
 /// A Helper type that bundles all transactions in the pool.
 #[derive(Debug, Clone)]
 pub struct AllPoolTransactions<T: PoolTransaction> {
@@ -404,11 +369,6 @@ pub enum TransactionOrigin {
     /// This is usually considered an "untrusted" source, for example received from another in the
     /// network.
     External,
-    /// Transaction is originated locally and is intended to remain private.
-    ///
-    /// This type of transaction should not be propagated to the network. It's meant for
-    /// private usage within the local node only.   
-    Private,
 }
 
 // === impl TransactionOrigin ===
@@ -477,10 +437,6 @@ impl ChangedAccount {
 ///
 /// This makes no assumptions about the order of the transactions, but expects that _all_
 /// transactions are valid (no nonce gaps.) for the tracked state of the pool.
-///
-/// Note: this iterator will always return the best transaction that it currently knows.
-/// There is no guarantee transactions will be returned sequentially in decreasing
-/// priority order.
 pub trait BestTransactions: Iterator + Send {
     /// Mark the transaction as invalid.
     ///

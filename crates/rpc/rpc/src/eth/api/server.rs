@@ -21,9 +21,8 @@ use reth_provider::{
 };
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
-    state::StateOverride, BlockOverrides, Bundle, CallRequest, EIP1186AccountProofResponse,
-    EthCallResponse, FeeHistory, Index, RichBlock, StateContext, SyncStatus, TransactionReceipt,
-    TransactionRequest, Work,
+    state::StateOverride, BlockOverrides, CallRequest, EIP1186AccountProofResponse, FeeHistory,
+    Index, RichBlock, SyncStatus, TransactionReceipt, TransactionRequest, Work,
 };
 use reth_transaction_pool::TransactionPool;
 use serde_json::Value;
@@ -244,17 +243,6 @@ where
                 .await
             })
             .await?)
-    }
-
-    /// Handler for: `eth_callMany`
-    async fn call_many(
-        &self,
-        bundle: Bundle,
-        state_context: Option<StateContext>,
-        state_override: Option<StateOverride>,
-    ) -> Result<Vec<EthCallResponse>> {
-        trace!(target: "rpc::eth", ?bundle, ?state_context, ?state_override, "Serving eth_callMany");
-        Ok(EthApi::call_many(self, bundle, state_context, state_override).await?)
     }
 
     /// Handler for: `eth_createAccessList`

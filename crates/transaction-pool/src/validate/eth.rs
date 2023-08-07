@@ -432,12 +432,7 @@ where
             balance: account.balance,
             state_nonce: account.nonce,
             transaction,
-            // by this point assume all external transactions should be propagated
-            propagate: match origin {
-                TransactionOrigin::External => true,
-                TransactionOrigin::Local => self.propagate_local_transactions,
-                TransactionOrigin::Private => false,
-            },
+            propagate: true,
         }
     }
 }

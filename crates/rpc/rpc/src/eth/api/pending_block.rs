@@ -144,8 +144,6 @@ impl PendingBlockEnv {
             gas_limit: block_gas_limit,
             difficulty: U256::ZERO,
             gas_used: cumulative_gas_used,
-            blob_gas_used: None,
-            excess_blob_gas: None,
             extra_data: Default::default(),
         };
 

@@ -1,6 +1,6 @@
 //! Sync management for the engine implementation.
 
-use crate::{engine::metrics::EngineSyncMetrics, BeaconConsensus};
+use crate::engine::metrics::EngineSyncMetrics;
 use futures::FutureExt;
 use reth_db::database::Database;
 use reth_interfaces::p2p::{
@@ -8,13 +8,12 @@ use reth_interfaces::p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     headers::client::HeadersClient,
 };
-use reth_primitives::{BlockNumber, ChainSpec, SealedBlock, H256};
+use reth_primitives::{BlockNumber, SealedBlock, H256};
 use reth_stages::{ControlFlow, Pipeline, PipelineError, PipelineWithResult};
 use reth_tasks::TaskSpawner;
 use std::{
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap},
-    sync::Arc,
     task::{ready, Context, Poll},
 };
 use tokio::sync::oneshot;
@@ -69,13 +68,9 @@ where
         pipeline_task_spawner: Box<dyn TaskSpawner>,
         run_pipeline_continuously: bool,
         max_block: Option<BlockNumber>,
-        chain_spec: Arc<ChainSpec>,
     ) -> Self {
         Self {
-            full_block_client: FullBlockClient::new(
-                client,
-                Arc::new(BeaconConsensus::new(chain_spec)),
-            ),
+            full_block_client: FullBlockClient::new(client),
             pipeline_task_spawner,
             pipeline_state: PipelineState::Idle(Some(pipeline)),
             pending_pipeline_target: None,
@@ -399,8 +394,7 @@ mod tests {
     };
     use reth_interfaces::{p2p::either::EitherDownloader, test_utils::TestFullBlockClient};
     use reth_primitives::{
-        constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpec,
-        ChainSpecBuilder, Header, SealedHeader, MAINNET,
+        stage::StageCheckpoint, BlockBody, ChainSpec, ChainSpecBuilder, SealedHeader, MAINNET,
     };
     use reth_provider::{test_utils::TestExecutorFactory, PostState};
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
@@ -497,7 +491,6 @@ mod tests {
         fn build<DB>(
             self,
             pipeline: Pipeline<DB>,
-            chain_spec: Arc<ChainSpec>,
         ) -> EngineSyncController<DB, EitherDownloader<Client, TestFullBlockClient>>
         where
             DB: Database + 'static,
@@ -515,7 +508,6 @@ mod tests {
                 // run_pipeline_continuously: false here until we want to test this
                 false,
                 self.max_block,
-                chain_spec,
             )
         }
     }
@@ -547,11 +539,10 @@ mod tests {
                 checkpoint: StageCheckpoint::new(5),
                 done: true,
             })]))
-            .build(chain_spec.clone());
+            .build(chain_spec);
 
-        let mut sync_controller = TestSyncControllerBuilder::new()
-            .with_client(client.clone())
-            .build(pipeline, chain_spec);
+        let mut sync_controller =
+            TestSyncControllerBuilder::new().with_client(client.clone()).build(pipeline);
 
         let tip = client.highest_block().expect("there should be blocks here");
         sync_controller.set_pipeline_sync_target(tip.hash);
@@ -586,27 +577,20 @@ mod tests {
         );
 
         let client = TestFullBlockClient::default();
-        let mut header = Header {
-            base_fee_per_gas: Some(7),
-            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
-            ..Default::default()
-        }
-        .seal_slow();
+        let mut header = SealedHeader::default();
         let body = BlockBody::default();
         for _ in 0..10 {
             header.parent_hash = header.hash_slow();
             header.number += 1;
-            header.timestamp += 1;
             header = header.header.seal_slow();
             client.insert(header.clone(), body.clone());
         }
 
         // set up a pipeline
-        let pipeline = TestPipelineBuilder::new().build(chain_spec.clone());
+        let pipeline = TestPipelineBuilder::new().build(chain_spec);
 
-        let mut sync_controller = TestSyncControllerBuilder::new()
-            .with_client(client.clone())
-            .build(pipeline, chain_spec);
+        let mut sync_controller =
+            TestSyncControllerBuilder::new().with_client(client.clone()).build(pipeline);
 
         let tip = client.highest_block().expect("there should be blocks here");
 

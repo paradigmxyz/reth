@@ -1,8 +1,7 @@
 use crate::{
-    stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD, ExecInput, ExecOutput, MetricEvent,
-    MetricEventsSender, Stage, StageError, UnwindInput, UnwindOutput,
+    ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageError, UnwindInput,
+    UnwindOutput,
 };
-use num_traits::Zero;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
@@ -60,11 +59,6 @@ pub struct ExecutionStage<EF: ExecutorFactory> {
     executor_factory: EF,
     /// The commit thresholds of the execution stage.
     thresholds: ExecutionStageThresholds,
-    /// The highest threshold (in number of blocks) for switching between incremental
-    /// and full calculations across [`super::MerkleStage`], [`super::AccountHashingStage`] and
-    /// [`super::StorageHashingStage`]. This is required to figure out if can prune or not
-    /// changesets on subsequent pipeline runs.
-    external_clean_threshold: u64,
     /// Pruning configuration.
     prune_targets: PruneModes,
 }
@@ -74,28 +68,16 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     pub fn new(
         executor_factory: EF,
         thresholds: ExecutionStageThresholds,
-        external_clean_threshold: u64,
-        prune_modes: PruneModes,
+        prune_targets: PruneModes,
     ) -> Self {
-        Self {
-            metrics_tx: None,
-            external_clean_threshold,
-            executor_factory,
-            thresholds,
-            prune_modes,
-        }
+        Self { metrics_tx: None, executor_factory, thresholds, prune_targets }
     }
 
     /// Create an execution stage with the provided  executor factory.
     ///
     /// The commit threshold will be set to 10_000.
     pub fn new_with_factory(executor_factory: EF) -> Self {
-        Self::new(
-            executor_factory,
-            ExecutionStageThresholds::default(),
-            MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
-            PruneModes::default(),
-        )
+        Self::new(executor_factory, ExecutionStageThresholds::default(), PruneModes::default())
     }
 
     /// Set the metric events sender.
@@ -116,7 +98,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         let start_block = input.next_block();
         let max_block = input.target();
-        let prune_modes = self.adjust_prune_modes(provider, start_block, max_block)?;
 
         // Build executor
         let mut executor =
@@ -129,7 +110,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // Execute block range
         let mut state = PostState::default();
-        state.add_prune_modes(prune_modes);
+        state.add_prune_targets(self.prune_targets);
 
         for block_number in start_block..=max_block {
             let td = provider
@@ -181,35 +162,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 .with_execution_stage_checkpoint(stage_checkpoint),
             done,
         })
-    }
-
-    /// Adjusts the prune modes related to changesets.
-    ///
-    /// This function verifies whether the [`super::MerkleStage`] or Hashing stages will run from
-    /// scratch. If at least one stage isn't starting anew, it implies that pruning of
-    /// changesets cannot occur. This is determined by checking the highest clean threshold
-    /// (`self.external_clean_threshold`) across the stages.
-    ///
-    /// Given that `start_block` changes with each checkpoint, it's necessary to inspect
-    /// [`tables::AccountsTrie`] to ensure that [`super::MerkleStage`] hasn't
-    /// been previously executed.
-    fn adjust_prune_modes<DB: Database>(
-        &self,
-        provider: &DatabaseProviderRW<'_, &DB>,
-        start_block: u64,
-        max_block: u64,
-    ) -> Result<PruneModes, StageError> {
-        let mut prune_modes = self.prune_modes;
-
-        // If we're not executing MerkleStage from scratch (by threshold or first-sync), then erase
-        // changeset related pruning configurations
-        if !(max_block - start_block > self.external_clean_threshold ||
-            provider.tx_ref().entries::<tables::AccountsTrie>()?.is_zero())
-        {
-            prune_modes.account_history = None;
-            prune_modes.storage_history = None;
-        }
-        Ok(prune_modes)
     }
 }
 
@@ -487,7 +439,6 @@ mod tests {
         ExecutionStage::new(
             factory,
             ExecutionStageThresholds { max_blocks: Some(100), max_changes: None },
-            MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::none(),
         )
     }

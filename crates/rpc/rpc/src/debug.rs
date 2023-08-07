@@ -2,8 +2,8 @@ use crate::{
     eth::{
         error::{EthApiError, EthResult},
         revm_utils::{
-            clone_into_empty_db, inspect, inspect_and_return_db, prepare_call_env,
-            replay_transactions_until, result_output, transact, EvmOverrides,
+            clone_into_empty_db, inspect, prepare_call_env, replay_transactions_until,
+            result_output, EvmOverrides,
         },
         EthTransactions, TransactionSource,
     },
@@ -25,12 +25,11 @@ use reth_revm::{
 use reth_rlp::{Decodable, Encodable};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::{
-    state::StateOverride,
     trace::geth::{
         BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
         GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult,
     },
-    BlockError, Bundle, CallRequest, RichBlock, StateContext,
+    BlockError, CallRequest, RichBlock,
 };
 use reth_tasks::TaskSpawner;
 use revm::{
@@ -361,103 +360,6 @@ where
         Ok(frame.into())
     }
 
-    /// The debug_traceCallMany method lets you run an `eth_callMany` within the context of the
-    /// given block execution using the first n transactions in the given block as base
-    pub async fn debug_trace_call_many(
-        &self,
-        bundles: Vec<Bundle>,
-        state_context: Option<StateContext>,
-        opts: Option<GethDebugTracingOptions>,
-        state_override: Option<StateOverride>,
-    ) -> EthResult<Vec<GethTrace>> {
-        if bundles.is_empty() {
-            return Err(EthApiError::InvalidParams(String::from("bundles are empty.")))
-        }
-
-        let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
-        let transaction_index = transaction_index.unwrap_or_default();
-
-        let target_block = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
-        let ((cfg, block_env, _), block) = futures::try_join!(
-            self.inner.eth_api.evm_env_at(target_block),
-            self.inner.eth_api.block_by_id(target_block),
-        )?;
-
-        let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-        let tracing_options = opts.unwrap_or_default();
-        let gas_limit = self.inner.eth_api.call_gas_limit();
-
-        // we're essentially replaying the transactions in the block here, hence we need the state
-        // that points to the beginning of the block, which is the state at the parent block
-        let mut at = block.parent_hash;
-        let mut replay_block_txs = true;
-
-        // but if all transactions are to be replayed, we can use the state at the block itself
-        let num_txs = transaction_index.index().unwrap_or(block.body.len());
-        if num_txs == block.body.len() {
-            at = block.hash;
-            replay_block_txs = false;
-        }
-
-        let this = self.clone();
-        self.inner
-            .eth_api
-            .spawn_with_state_at_block(at.into(), move |state| {
-                let mut results = Vec::with_capacity(bundles.len());
-                let mut db = SubState::new(State::new(state));
-
-                if replay_block_txs {
-                    // only need to replay the transactions in the block if not all transactions are
-                    // to be replayed
-                    let transactions = block.body.into_iter().take(num_txs);
-
-                    // Execute all transactions until index
-                    for tx in transactions {
-                        let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
-                        let tx = tx_env_with_recovered(&tx);
-                        let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
-                        let (res, _) = transact(&mut db, env)?;
-                        db.commit(res.state);
-                    }
-                }
-
-                // Trace all bundles
-                let mut bundles = bundles.into_iter().peekable();
-                while let Some(bundle) = bundles.next() {
-                    //let mut result = Vec::with_capacity(bundle.len());
-                    let Bundle { transactions, block_override } = bundle;
-                    let overrides =
-                        EvmOverrides::new(state_override.clone(), block_override.map(Box::new));
-
-                    let mut transactions = transactions.into_iter().peekable();
-                    while let Some(tx) = transactions.next() {
-                        let env = prepare_call_env(
-                            cfg.clone(),
-                            block_env.clone(),
-                            tx,
-                            gas_limit,
-                            &mut db,
-                            overrides.clone(),
-                        )?;
-
-                        let (trace, state) = this.trace_transaction(
-                            tracing_options.clone(),
-                            env,
-                            target_block,
-                            &mut db,
-                        )?;
-
-                        if bundles.peek().is_none() && transactions.peek().is_none() {
-                            db.commit(state);
-                        }
-                        results.push(trace);
-                    }
-                }
-                Ok(results)
-            })
-            .await
-    }
-
     /// Executes the configured transaction with the environment on the given database.
     ///
     /// Returns the trace frame and the state that got updated after executing the transaction.
@@ -757,18 +659,6 @@ where
     ) -> RpcResult<GethTrace> {
         let _permit = self.acquire_trace_permit().await;
         Ok(DebugApi::debug_trace_call(self, request, block_number, opts.unwrap_or_default())
-            .await?)
-    }
-
-    async fn debug_trace_call_many(
-        &self,
-        bundles: Vec<Bundle>,
-        state_context: Option<StateContext>,
-        opts: Option<GethDebugTracingOptions>,
-        state_override: Option<StateOverride>,
-    ) -> RpcResult<Vec<GethTrace>> {
-        let _permit = self.acquire_trace_permit().await;
-        Ok(DebugApi::debug_trace_call_many(self, bundles, state_context, opts, state_override)
             .await?)
     }
 }

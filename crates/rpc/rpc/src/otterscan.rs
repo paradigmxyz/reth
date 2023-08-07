@@ -59,14 +59,12 @@ where
         &self,
         block_number: BlockNumberOrTag,
     ) -> RpcResult<Option<BlockDetails>> {
-        let block = self.eth.block_by_number(block_number, true).await?;
-        Ok(block.map(Into::into))
+        Err(internal_rpc_err("unimplemented"))
     }
 
     /// Handler for `getBlockDetailsByHash`
     async fn get_block_details_by_hash(&self, block_hash: H256) -> RpcResult<Option<BlockDetails>> {
-        let block = self.eth.block_by_hash(block_hash, true).await?;
-        Ok(block.map(Into::into))
+        Err(internal_rpc_err("unimplemented"))
     }
 
     /// Handler for `getBlockTransactions`

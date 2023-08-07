@@ -26,7 +26,7 @@ use reth_primitives::{
     Head, Header, SealedBlock, SealedHeader, H256, U256,
 };
 use reth_provider::{
-    BlockIdReader, BlockReader, BlockSource, CanonChainTracker, ChainSpecProvider, ProviderError,
+    BlockIdReader, BlockReader, BlockSource, CanonChainTracker, ProviderError,
     StageCheckpointReader,
 };
 use reth_prune::Pruner;
@@ -208,7 +208,6 @@ where
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader
-        + ChainSpecProvider
         + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
@@ -280,7 +279,6 @@ where
             task_spawner.clone(),
             run_pipeline_continuously,
             max_block,
-            blockchain.chain_spec(),
         );
         let prune = pruner.map(|pruner| EnginePruneController::new(pruner, task_spawner));
         let mut this = Self {
@@ -1062,7 +1060,7 @@ where
             self.try_insert_new_payload(block)
         } else {
             if self.is_prune_active() {
-                debug!(target: "consensus::engine", "Pruning is in progress, buffering new payload.");
+                warn!(target: "consensus::engine", "Pruning is in progress, buffering new payload.");
             }
             self.try_buffer_payload(block)
         };
@@ -1599,10 +1597,6 @@ where
             EnginePruneEvent::Started(tip_block_number) => {
                 trace!(target: "consensus::engine", %tip_block_number, "Pruner started");
                 self.metrics.pruner_runs.increment(1);
-                // Engine can't process any FCU/payload messages from CL while we're pruning, as
-                // pruner needs an exclusive write access to the database. To prevent CL from
-                // sending us unneeded updates, we need to respond `true` on `eth_syncing` request.
-                self.sync_state_updater.update_sync_state(SyncState::Syncing);
             }
             EnginePruneEvent::TaskDropped => {
                 error!(target: "consensus::engine", "Failed to receive spawned pruner");
@@ -1610,7 +1604,6 @@ where
             }
             EnginePruneEvent::Finished { result } => {
                 trace!(target: "consensus::engine", ?result, "Pruner finished");
-                self.sync_state_updater.update_sync_state(SyncState::Idle);
                 match result {
                     Ok(_) => {
                         // Update the state and hashes of the blockchain tree if possible.
@@ -1640,21 +1633,6 @@ where
     fn is_prune_active(&self) -> bool {
         !self.is_prune_idle()
     }
-
-    /// Polls the prune controller, if it exists, and processes the event [`EnginePruneEvent`]
-    /// emitted by it.
-    ///
-    /// Returns [`Option::Some`] if prune controller emitted an event which resulted in the error
-    /// (see [`Self::on_prune_event`] for error handling)
-    fn poll_prune(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Option<Result<(), BeaconConsensusEngineError>> {
-        match self.prune.as_mut()?.poll(cx, self.blockchain.canonical_tip().number) {
-            Poll::Ready(prune_event) => self.on_prune_event(prune_event),
-            Poll::Pending => None,
-        }
-    }
 }
 
 /// On initialization, the consensus engine will poll the message receiver and return
@@ -1673,7 +1651,6 @@ where
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader
-        + ChainSpecProvider
         + Unpin
         + 'static,
 {
@@ -1685,14 +1662,6 @@ where
         // Process all incoming messages from the CL, these can affect the state of the
         // SyncController, hence they are polled first, and they're also time sensitive.
         loop {
-            // Poll prune controller first if it's active, as we will not be able to process any
-            // engine messages until it's finished.
-            if this.is_prune_active() {
-                if let Some(res) = this.poll_prune(cx) {
-                    return Poll::Ready(res)
-                }
-            }
-
             let mut engine_messages_pending = false;
             let mut sync_pending = false;
 
@@ -1741,16 +1710,19 @@ where
             // we're pending if both engine messages and sync events are pending (fully drained)
             let is_pending = engine_messages_pending && sync_pending;
 
-            // Poll prune controller if all conditions are met:
-            // 1. Pipeline is idle
-            // 2. No engine and sync messages are pending
-            // 3. Latest FCU status is not INVALID
-            if this.sync.is_pipeline_idle() &&
-                is_pending &&
-                !this.forkchoice_state_tracker.is_latest_invalid()
-            {
-                if let Some(res) = this.poll_prune(cx) {
-                    return Poll::Ready(res)
+            // check prune events if pipeline is idle AND (pruning is running and we need to
+            // prioritize checking its events OR no engine and sync messages are pending and we may
+            // start pruning)
+            if this.sync.is_pipeline_idle() && (this.is_prune_active() || is_pending) {
+                if let Some(ref mut prune) = this.prune {
+                    match prune.poll(cx, this.blockchain.canonical_tip().number) {
+                        Poll::Ready(prune_event) => {
+                            if let Some(res) = this.on_prune_event(prune_event) {
+                                return Poll::Ready(res)
+                            }
+                        }
+                        Poll::Pending => {}
+                    }
                 }
             }
 

@@ -291,20 +291,14 @@ pub struct VmTrace {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VmInstruction {
+    /// The program counter.
+    pub pc: usize,
     /// The gas cost for this instruction.
     pub cost: u64,
     /// Information concerning the execution of the operation.
     pub ex: Option<VmExecutedOperation>,
-    /// The program counter.
-    pub pc: usize,
     /// Subordinate trace of the CALL/CREATE if applicable.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub sub: Option<VmTrace>,
-    /// Stringified opcode.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub op: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub idx: Option<String>,
 }
 
 /// A record of an executed VM operation.

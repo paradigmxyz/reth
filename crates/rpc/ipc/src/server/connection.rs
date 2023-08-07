@@ -1,7 +1,7 @@
 //! A IPC connection.
 
 use crate::stream_codec::StreamCodec;
-use futures::{ready, stream::FuturesUnordered, FutureExt, Sink, Stream, StreamExt};
+use futures::{ready, stream::FuturesUnordered, Sink, Stream, StreamExt};
 use std::{
     collections::VecDeque,
     future::Future,
@@ -129,7 +129,6 @@ pub(crate) struct IpcConnDriver<T, S, Fut> {
     #[pin]
     pub(crate) conn: IpcConn<JsonRpcStream<T>>,
     pub(crate) service: S,
-    /// rpc requests in progress
     #[pin]
     pub(crate) pending_calls: FuturesUnordered<Fut>,
     pub(crate) items: VecDeque<String>,
@@ -146,7 +145,7 @@ impl<T, S> Future for IpcConnDriver<T, S, S::Future>
 where
     S: Service<String, Response = Option<String>> + Send + 'static,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
-    S::Future: Send + Unpin,
+    S::Future: Send,
     T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     type Output = ();
@@ -154,21 +153,20 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
 
-        // items are also pushed from external
-        // this will act as a manual yield point to reduce latencies of the polling future that may
-        // submit items from an additional source (subscription)
-        let mut budget = 5;
-
-        // ensure we still have enough budget for another iteration
-        'outer: loop {
-            budget -= 1;
-            if budget == 0 {
-                // make sure we're woken up again
-                cx.waker().wake_by_ref();
-                return Poll::Pending
+        loop {
+            // process calls
+            if !this.pending_calls.is_empty() {
+                while let Poll::Ready(Some(res)) = this.pending_calls.as_mut().poll_next(cx) {
+                    let item = match res {
+                        Ok(Some(resp)) => resp,
+                        Ok(None) => continue,
+                        Err(err) => err.into().to_string(),
+                    };
+                    this.items.push_back(item);
+                }
             }
 
-            // write all responses to the sink
+            // write to the sink
             while this.conn.as_mut().poll_ready(cx).is_ready() {
                 if let Some(item) = this.items.pop_front() {
                     if let Err(err) = this.conn.as_mut().start_send(item) {
@@ -180,56 +178,17 @@ where
                 }
             }
 
-            'inner: loop {
-                let mut drained = false;
-                // drain all calls that are ready and put them in the output item queue
-                if !this.pending_calls.is_empty() {
-                    if let Poll::Ready(Some(res)) = this.pending_calls.as_mut().poll_next(cx) {
-                        let item = match res {
-                            Ok(Some(resp)) => resp,
-                            Ok(None) => continue 'inner,
-                            Err(err) => err.into().to_string(),
-                        };
-                        this.items.push_back(item);
-                        continue 'outer
-                    } else {
-                        drained = true;
-                    }
+            // read from the stream
+            match ready!(this.conn.as_mut().poll_next(cx)) {
+                Some(Ok(item)) => {
+                    let call = this.service.call(item);
+                    this.pending_calls.push(call);
                 }
-
-                // read from the stream
-                match this.conn.as_mut().poll_next(cx) {
-                    Poll::Ready(res) => match res {
-                        Some(Ok(item)) => {
-                            let mut call = this.service.call(item);
-                            match call.poll_unpin(cx) {
-                                Poll::Ready(res) => {
-                                    let item = match res {
-                                        Ok(Some(resp)) => resp,
-                                        Ok(None) => continue 'inner,
-                                        Err(err) => err.into().to_string(),
-                                    };
-                                    this.items.push_back(item);
-                                    continue 'outer
-                                }
-                                Poll::Pending => {
-                                    this.pending_calls.push(call);
-                                }
-                            }
-                        }
-                        Some(Err(err)) => {
-                            tracing::warn!("IPC request failed: {:?}", err);
-                            return Poll::Ready(())
-                        }
-                        None => return Poll::Ready(()),
-                    },
-                    Poll::Pending => {
-                        if drained || this.pending_calls.is_empty() {
-                            // at this point all things are pending
-                            return Poll::Pending
-                        }
-                    }
+                Some(Err(err)) => {
+                    tracing::warn!("IPC request failed: {:?}", err);
+                    return Poll::Ready(())
                 }
+                None => return Poll::Ready(()),
             }
         }
     }

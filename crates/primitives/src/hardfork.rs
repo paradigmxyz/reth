@@ -182,7 +182,6 @@ mod tests {
             hardforks: BTreeMap::from([(Hardfork::Frontier, ForkCondition::Never)]),
             fork_timestamps: Default::default(),
             paris_block_and_final_difficulty: None,
-            deposit_contract: None,
             #[cfg(feature = "optimism")]
             optimism: None,
         };
@@ -199,7 +198,6 @@ mod tests {
             hardforks: BTreeMap::from([(Hardfork::Shanghai, ForkCondition::Never)]),
             fork_timestamps: Default::default(),
             paris_block_and_final_difficulty: None,
-            deposit_contract: None,
             #[cfg(feature = "optimism")]
             optimism: None,
         };

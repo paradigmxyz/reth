@@ -8,7 +8,6 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     sync::Arc,
 };
-use tokio::sync::broadcast::Receiver;
 use tracing::debug;
 
 /// An iterator that returns transactions that can be executed on the current state (*best*
@@ -63,12 +62,6 @@ pub(crate) struct BestTransactions<T: TransactionOrdering> {
     pub(crate) independent: BTreeSet<PendingTransactionRef<T>>,
     /// There might be the case where a yielded transactions is invalid, this will track it.
     pub(crate) invalid: HashSet<TxHash>,
-    /// Used to recieve any new pending transactions that have been added to the pool after this
-    /// iterator was snapshotted
-    ///
-    /// These new pending transactions are inserted into this iterator's pool before yielding the
-    /// next value
-    pub(crate) new_transaction_reciever: Receiver<PendingTransaction<T>>,
 }
 
 impl<T: TransactionOrdering> BestTransactions<T> {
@@ -84,36 +77,6 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     pub(crate) fn ancestor(&self, id: &TransactionId) -> Option<&Arc<PendingTransaction<T>>> {
         self.all.get(&id.unchecked_ancestor()?)
     }
-
-    /// Non-blocking read on the new pending transactions subscription channel
-    fn try_recv(&mut self) -> Option<PendingTransaction<T>> {
-        match self.new_transaction_reciever.try_recv() {
-            Ok(tx) => Some(tx),
-            // note TryRecvError::Lagged can be returned here, which is an error that attempts to
-            // correct itself on consecutive try_recv() attempts
-
-            // the cost of ignoring this error is allowing old transactions to get
-            // overwritten after the chan buffer size is met
-
-            // this case is still better than the existing iterator behavior where no new
-            // pending txs are surfaced to consumers
-            Err(_) => None,
-        }
-    }
-
-    /// Checks for new transactions that have come into the PendingPool after this iterator was
-    /// created and inserts them
-    fn add_new_transactions(&mut self) {
-        while let Some(pending_tx) = self.try_recv() {
-            let tx = pending_tx.transaction.clone();
-            //  same logic as PendingPool::add_transaction/PendingPool::best_with_unlocked
-            let tx_id = *tx.id();
-            if self.ancestor(&tx_id).is_none() {
-                self.independent.insert(pending_tx.clone());
-            }
-            self.all.insert(tx_id, pending_tx);
-        }
-    }
 }
 
 impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactions<T> {
@@ -127,7 +90,6 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            self.add_new_transactions();
             // Remove the next independent tx with the highest priority
             let best = self.independent.pop_last()?;
             let hash = best.transaction.hash();
