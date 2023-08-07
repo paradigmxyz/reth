@@ -107,7 +107,7 @@ pub fn run() -> eyre::Result<()> {
 pub enum Commands<Ext: RethCliExt = ()> {
     /// Start the node
     #[command(name = "node")]
-    Node(node::Command<Ext>),
+    Node(node::NodeCommand<Ext>),
     /// Initialize the database from a genesis file.
     #[command(name = "init")]
     Init(chain::InitCommand),
