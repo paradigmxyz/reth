@@ -377,6 +377,9 @@ where
             return added
         }
 
+        let mut listener = self.event_listener.write();
+        discarded.iter().for_each(|tx| listener.discarded(tx));
+
         // It may happen that a newly added transaction is immediately discarded, so we need to
         // adjust the result here
         added
