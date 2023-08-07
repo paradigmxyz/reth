@@ -273,6 +273,7 @@ mod tests {
             genesis_hash: None,
             paris_block_and_final_difficulty: None,
             deposit_contract: None,
+            ..Default::default()
         });
 
         let db = create_test_rw_db();
