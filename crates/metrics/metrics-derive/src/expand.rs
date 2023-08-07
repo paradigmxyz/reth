@@ -86,18 +86,14 @@ pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
                 })
                 .collect::<Result<Vec<_>>>()?
                 .into_iter()
-                .fold(
-                    (vec![], vec![], vec![]),
-                    |(mut defaults, mut labeled_defaults, mut describes),
-                     (default, labeled_default, describe)| {
-                        defaults.push(default);
-                        labeled_defaults.push(labeled_default);
-                        if let Some(describe) = describe {
-                            describes.push(describe);
-                        }
-                        (defaults, labeled_defaults, describes)
-                    },
-                );
+                .fold((vec![], vec![], vec![]), |mut acc, x| {
+                    acc.0.push(x.0);
+                    acc.1.push(x.1);
+                    if let Some(describe) = x.2 {
+                        acc.2.push(describe);
+                    }
+                    acc
+                });
 
             quote! {
                 impl Default for #ty {
@@ -167,18 +163,14 @@ pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
                 })
                 .collect::<Result<Vec<_>>>()?
                 .into_iter()
-                .fold(
-                    (vec![], vec![], vec![]),
-                    |(mut defaults, mut labeled_defaults, mut describes),
-                     (default, labeled_default, describe)| {
-                        defaults.push(default);
-                        labeled_defaults.push(labeled_default);
-                        if let Some(describe) = describe {
-                            describes.push(describe);
-                        }
-                        (defaults, labeled_defaults, describes)
-                    },
-                );
+                .fold((vec![], vec![], vec![]), |mut acc, x| {
+                    acc.0.push(x.0);
+                    acc.1.push(x.1);
+                    if let Some(describe) = x.2 {
+                        acc.2.push(describe);
+                    }
+                    acc
+                });
 
             quote! {
                 impl #ty {
