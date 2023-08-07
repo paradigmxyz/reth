@@ -1,6 +1,6 @@
 use crate::{
     providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader, PostState,
-    ProviderError, StateProvider, StateRootProvider,
+    ProviderError, ProviderFactory, StateProvider, StateRootProvider,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -29,6 +29,8 @@ pub struct HistoricalStateProviderRef<'a, 'b, TX: DbTx<'a>> {
     tx: &'b TX,
     /// Block number is main index for the history state of accounts and storages.
     block_number: BlockNumber,
+    latest_account_history_block_number: Option<BlockNumber>,
+    latest_storage_history_block_number: Option<BlockNumber>,
     /// Phantom lifetime `'a`
     _phantom: PhantomData<&'a TX>,
 }
@@ -42,11 +44,40 @@ pub enum HistoryInfo {
 impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
     /// Create new StateProvider from history transaction number
     pub fn new(tx: &'b TX, block_number: BlockNumber) -> Self {
-        Self { tx, block_number, _phantom: PhantomData {} }
+        Self {
+            tx,
+            block_number,
+            latest_account_history_block_number: None,
+            latest_storage_history_block_number: None,
+            _phantom: PhantomData {},
+        }
+    }
+
+    pub fn new_with_latest_history_block_numbers(
+        tx: &'b TX,
+        latest_account_history_block_number: Option<BlockNumber>,
+        latest_storage_history_block_number: Option<BlockNumber>,
+        block_number: BlockNumber,
+    ) -> Self {
+        Self {
+            tx,
+            block_number,
+            latest_account_history_block_number,
+            latest_storage_history_block_number,
+            _phantom: PhantomData {},
+        }
     }
 
     /// Lookup an account in the AccountHistory table
     pub fn account_history_lookup(&self, address: Address) -> Result<HistoryInfo> {
+        if self
+            .latest_account_history_block_number
+            .map(|block_number| block_number >= self.block_number)
+            .unwrap_or(false)
+        {
+            return Ok(HistoryInfo::NotYetWritten)
+        }
+
         // history key to search IntegerList of block number changesets.
         let history_key = ShardedKey::new(address, self.block_number);
         self.history_info::<tables::AccountHistory, _>(history_key, |key| key.key == address)
@@ -58,6 +89,14 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
         address: Address,
         storage_key: StorageKey,
     ) -> Result<HistoryInfo> {
+        if self
+            .latest_storage_history_block_number
+            .map(|block_number| block_number >= self.block_number)
+            .unwrap_or(false)
+        {
+            return Ok(HistoryInfo::NotYetWritten)
+        }
+
         // history key to search IntegerList of block number changesets.
         let history_key = StorageShardedKey::new(address, storage_key, self.block_number);
         self.history_info::<tables::StorageHistory, _>(history_key, |key| {
@@ -199,6 +238,8 @@ pub struct HistoricalStateProvider<'a, TX: DbTx<'a>> {
     tx: TX,
     /// State at the block number is the main indexer of the state.
     block_number: BlockNumber,
+    latest_account_history_block_number: Option<BlockNumber>,
+    latest_storage_history_block_number: Option<BlockNumber>,
     /// Phantom lifetime `'a`
     _phantom: PhantomData<&'a TX>,
 }
@@ -206,13 +247,34 @@ pub struct HistoricalStateProvider<'a, TX: DbTx<'a>> {
 impl<'a, TX: DbTx<'a>> HistoricalStateProvider<'a, TX> {
     /// Create new StateProvider from history transaction number
     pub fn new(tx: TX, block_number: BlockNumber) -> Self {
-        Self { tx, block_number, _phantom: PhantomData {} }
+        Self {
+            tx,
+            block_number,
+            latest_account_history_block_number: None,
+            latest_storage_history_block_number: None,
+            _phantom: PhantomData {},
+        }
+    }
+
+    pub fn with_latest_account_history_block_number(mut self, block_number: BlockNumber) -> Self {
+        self.latest_account_history_block_number = Some(block_number);
+        self
+    }
+
+    pub fn with_latest_storage_history_block_number(mut self, block_number: BlockNumber) -> Self {
+        self.latest_storage_history_block_number = Some(block_number);
+        self
     }
 
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
     fn as_ref<'b>(&'b self) -> HistoricalStateProviderRef<'a, 'b, TX> {
-        HistoricalStateProviderRef::new(&self.tx, self.block_number)
+        HistoricalStateProviderRef::new_with_latest_history_block_numbers(
+            &self.tx,
+            self.latest_account_history_block_number,
+            self.latest_storage_history_block_number,
+            self.block_number,
+        )
     }
 }
 
