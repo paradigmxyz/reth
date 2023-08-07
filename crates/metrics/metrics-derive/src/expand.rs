@@ -86,14 +86,18 @@ pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
                 })
                 .collect::<Result<Vec<_>>>()?
                 .into_iter()
-                .fold((vec![], vec![], vec![]), |mut acc, (default, labeled_default, describe)| {
-                    acc.0.push(default);
-                    acc.1.push(labeled_default);
-                    if let Some(describe) = describe {
-                        acc.2.push(describe);
-                    }
-                    acc
-                });
+                .fold(
+                    (vec![], vec![], vec![]),
+                    |(mut defaults, mut labeled_defaults, mut describes),
+                     (default, labeled_default, describe)| {
+                        defaults.push(default);
+                        labeled_defaults.push(labeled_default);
+                        if let Some(describe) = describe {
+                            describes.push(describe);
+                        }
+                        (defaults, labeled_defaults, describes)
+                    },
+                );
 
             quote! {
                 impl Default for #ty {
@@ -163,14 +167,18 @@ pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
                 })
                 .collect::<Result<Vec<_>>>()?
                 .into_iter()
-                .fold((vec![], vec![], vec![]), |mut acc, (default, labeled_default, describe)| {
-                    acc.0.push(default);
-                    acc.1.push(labeled_default);
-                    if let Some(describe) = describe {
-                        acc.2.push(describe);
-                    }
-                    acc
-                });
+                .fold(
+                    (vec![], vec![], vec![]),
+                    |(mut defaults, mut labeled_defaults, mut describes),
+                     (default, labeled_default, describe)| {
+                        defaults.push(default);
+                        labeled_defaults.push(labeled_default);
+                        if let Some(describe) = describe {
+                            describes.push(describe);
+                        }
+                        (defaults, labeled_defaults, describes)
+                    },
+                );
 
             quote! {
                 impl #ty {
