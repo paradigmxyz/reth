@@ -428,8 +428,19 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             .map(|(id, tx)| (id, tx.into()))
             .collect::<Vec<(u64, TransactionSigned)>>();
 
-        let senders =
-            self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)?;
+        let senders = match self
+            .get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)
+        {
+            Ok(senders) => senders,
+            // with SenderRecovery prune part enabled, not all senders are in database anymore
+            Err(DatabaseError::Read(_)) => transactions
+                .clone()
+                .into_iter()
+                // I suppose signatures are valid since taken from db
+                .map(|(id, tx_signed)| (id, tx_signed.recover_signer().unwrap()))
+                .collect(),
+            Err(err) => return Err(err.into()),
+        };
 
         if TAKE {
             // Remove TxHashNumber
