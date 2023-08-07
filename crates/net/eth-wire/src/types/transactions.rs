@@ -80,6 +80,9 @@ impl From<kzg::Error> for BlobTransactionValidationError {
 
 /// A response to [`GetPooledTransactions`] that includes blob data, their commitments, and their
 /// corresponding proofs.
+///
+/// This is defined in [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#networking) as an element
+/// of a [PooledTransactions] response.
 // TODO: derive_arbitrary
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
 pub struct BlobTransaction {
