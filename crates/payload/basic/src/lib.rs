@@ -786,6 +786,8 @@ where
         gas_limit: block_gas_limit,
         difficulty: U256::ZERO,
         gas_used: 0,
+        blob_gas_used: None,
+        excess_blob_gas: None,
         extra_data: extra_data.into(),
     };
 

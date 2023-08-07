@@ -1,6 +1,9 @@
 //! clap [Args](clap::Args) for RPC related arguments.
 
-use crate::args::GasPriceOracleArgs;
+use crate::{
+    args::GasPriceOracleArgs,
+    cli::{config::RethRpcConfig, ext::RethNodeCommandExt},
+};
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
@@ -100,8 +103,8 @@ pub struct RpcServerArgs {
     pub ipcdisable: bool,
 
     /// Filename for IPC socket/pipe within the datadir
-    #[arg(long)]
-    pub ipcpath: Option<String>,
+    #[arg(long, default_value_t = constants::DEFAULT_IPC_ENDPOINT.to_string())]
+    pub ipcpath: String,
 
     /// Auth server address to listen on
     #[arg(long = "authrpc.addr")]
@@ -235,7 +238,7 @@ impl RpcServerArgs {
     /// for the auth server that handles the `engine_` API that's accessed by the consensus
     /// layer.
     #[allow(clippy::too_many_arguments)]
-    pub async fn start_servers<Provider, Pool, Network, Tasks, Events, Engine>(
+    pub async fn start_servers<Provider, Pool, Network, Tasks, Events, Engine, Ext>(
         &self,
         provider: Provider,
         pool: Pool,
@@ -244,7 +247,8 @@ impl RpcServerArgs {
         events: Events,
         engine_api: Engine,
         jwt_secret: JwtSecret,
-    ) -> Result<(RpcServerHandle, AuthServerHandle), RpcError>
+        ext: &mut Ext,
+    ) -> eyre::Result<(RpcServerHandle, AuthServerHandle)>
     where
         Provider: BlockReaderIdExt
             + HeaderProvider
@@ -260,6 +264,7 @@ impl RpcServerArgs {
         Tasks: TaskSpawner + Clone + 'static,
         Events: CanonStateSubscriptions + Clone + 'static,
         Engine: EngineApiServer,
+        Ext: RethNodeCommandExt,
     {
         let auth_config = self.auth_server_config(jwt_secret)?;
 
@@ -273,6 +278,9 @@ impl RpcServerArgs {
             .with_events(events)
             .with_executor(executor)
             .build_with_auth_server(module_config, engine_api);
+
+        // apply configured customization
+        ext.extend_rpc_modules(self, &mut registry, &mut rpc_modules)?;
 
         let server_config = self.rpc_server_config();
         let launch_rpc = rpc_modules.start_server(server_config).map_ok(|handle| {
@@ -447,9 +455,8 @@ impl RpcServerArgs {
         }
 
         if self.is_ipc_enabled() {
-            config = config.with_ipc(self.ipc_server_builder()).with_ipc_endpoint(
-                self.ipcpath.as_ref().unwrap_or(&constants::DEFAULT_IPC_ENDPOINT.to_string()),
-            );
+            config =
+                config.with_ipc(self.ipc_server_builder()).with_ipc_endpoint(self.ipcpath.clone());
         }
 
         config
@@ -463,6 +470,20 @@ impl RpcServerArgs {
         );
 
         Ok(AuthServerConfig::builder(jwt_secret).socket_addr(address).build())
+    }
+}
+
+impl RethRpcConfig for RpcServerArgs {
+    fn is_ipc_enabled(&self) -> bool {
+        // By default IPC is enabled therefor it is enabled if the `ipcdisable` is false.
+        !self.ipcdisable
+    }
+
+    fn eth_config(&self) -> EthConfig {
+        EthConfig::default()
+            .max_tracing_requests(self.rpc_max_tracing_requests)
+            .rpc_gas_cap(self.rpc_gas_cap)
+            .gpo_config(self.gas_price_oracle_config())
     }
 }
 

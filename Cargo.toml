@@ -47,6 +47,7 @@ members = [
     "testing/ef-tests",
 
     "examples",
+    "examples/additional-rpc-namespace-in-cli",
 ]
 default-members = ["bin/reth"]
 
@@ -84,6 +85,7 @@ revm-primitives = { git = "https://github.com/bluealloy/revm/", branch = "releas
 ## reth
 revm = { version = "3" }
 revm-primitives = "1.1"
+reth = { path = "./bin/reth" }
 reth-primitives = { path = "./crates/primitives" }
 reth-interfaces = { path = "./crates/interfaces" }
 reth-provider = { path = "./crates/storage/provider" }
@@ -134,3 +136,7 @@ futures-util = "0.3.25"
 
 ## crypto
 secp256k1 = { version = "0.27.0", default-features = false, features = ["global-context", "rand-std", "recovery"] }
+
+### misc-testing
+proptest = "1.0"
+arbitrary = "1.1"

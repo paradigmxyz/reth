@@ -279,7 +279,15 @@ impl<L: Logger> Service<String> for TowerService<L> {
             method_sink: self.inner.method_sink.clone(),
             id_provider: self.inner.id_provider.clone(),
         };
-        Box::pin(ipc::handle_request(request, data).map(Ok))
+
+        // an ipc connection needs to handle read+write concurrently
+        // even if the underlying rpc handler spawns the actual work or is does a lot of async any
+        // additional overhead performed by `handle_request` can result in I/O latencies, for
+        // example tracing calls are relatively CPU expensive on serde::serialize alone, moving this
+        // work to a separate task takes the pressure off the connection so all concurrent responses
+        // are also serialized concurrently and the connection can focus on read+write
+        let f = tokio::task::spawn(async move { ipc::handle_request(request, data).await });
+        Box::pin(async move { f.await.map_err(|err| err.into()) })
     }
 }
 
@@ -292,7 +300,7 @@ async fn spawn_connection<S, T>(
 ) where
     S: Service<String, Response = Option<String>> + Send + 'static,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
-    S::Future: Send,
+    S::Future: Send + Unpin,
     T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let task = tokio::task::spawn(async move {

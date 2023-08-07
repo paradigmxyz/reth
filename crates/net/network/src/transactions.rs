@@ -130,7 +130,8 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
         let network_events = network.event_listener();
         let (command_tx, command_rx) = mpsc::unbounded_channel();
 
-        // install a listener for new transactions
+        // install a listener for new pending transactions that are allowed to be propagated over
+        // the network
         let pending = pool.pending_transactions_listener();
 
         Self {
@@ -267,12 +268,17 @@ where
                     // send hashes of transactions
                     self.network.send_transactions_hashes(*peer_id, new_pooled_hashes);
                 } else {
-                    // send full transactions
-                    self.network.send_transactions(*peer_id, full_transactions.build());
+                    let new_full_transactions = full_transactions.build();
 
-                    for hash in new_pooled_hashes.into_iter_hashes() {
-                        propagated.0.entry(hash).or_default().push(PropagateKind::Full(*peer_id));
+                    for tx in new_full_transactions.iter() {
+                        propagated
+                            .0
+                            .entry(tx.hash())
+                            .or_default()
+                            .push(PropagateKind::Full(*peer_id));
                     }
+                    // send full transactions
+                    self.network.send_transactions(*peer_id, new_full_transactions);
                 }
             }
         }
@@ -486,7 +492,8 @@ where
             RequestError::UnsupportedCapability => ReputationChangeKind::BadProtocol,
             RequestError::Timeout => ReputationChangeKind::Timeout,
             RequestError::ChannelClosed | RequestError::ConnectionDropped => {
-                ReputationChangeKind::Dropped
+                // peer is already disconnected
+                return
             }
             RequestError::BadResponse => ReputationChangeKind::BadTransactions,
         };
@@ -556,7 +563,8 @@ where
                     this.on_request_error(req.peer_id, req_err);
                 }
                 Poll::Ready(Err(_)) => {
-                    this.on_request_error(req.peer_id, RequestError::ConnectionDropped)
+                    // request channel closed/dropped
+                    this.on_request_error(req.peer_id, RequestError::ChannelClosed)
                 }
             }
         }

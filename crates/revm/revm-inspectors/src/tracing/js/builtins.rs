@@ -16,6 +16,9 @@ use std::collections::HashSet;
 pub(crate) const BIG_INT_JS: &str = include_str!("bigint.js");
 
 /// Registers all the builtin functions and global bigint property
+///
+/// Note: this does not register the `isPrecompiled` builtin, as this requires the precompile
+/// addresses, see [PrecompileList::register_callable].
 pub(crate) fn register_builtins(ctx: &mut Context<'_>) -> JsResult<()> {
     let big_int = ctx.eval(Source::from_bytes(BIG_INT_JS.as_bytes()))?;
     ctx.register_global_property("bigint", big_int, Attribute::all())?;
@@ -24,8 +27,6 @@ pub(crate) fn register_builtins(ctx: &mut Context<'_>) -> JsResult<()> {
     ctx.register_global_callable("toAddress", 1, NativeFunction::from_fn_ptr(to_address))?;
     ctx.register_global_callable("toContract", 2, NativeFunction::from_fn_ptr(to_contract))?;
     ctx.register_global_callable("toContract2", 3, NativeFunction::from_fn_ptr(to_contract2))?;
-
-    // TODO: isPrecompiled slice
 
     Ok(())
 }
