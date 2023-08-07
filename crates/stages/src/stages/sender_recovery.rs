@@ -11,9 +11,11 @@ use reth_interfaces::consensus;
 use reth_primitives::{
     keccak256,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    TransactionSignedNoHash, TxNumber, H160,
+    PrunePart, TransactionSignedNoHash, TxNumber, H160,
 };
-use reth_provider::{BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError};
+use reth_provider::{
+    BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
+};
 use std::fmt::Debug;
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -207,9 +209,20 @@ fn recover_sender(
 
 fn stage_checkpoint<DB: Database>(
     provider: &DatabaseProviderRW<'_, &DB>,
-) -> Result<EntitiesCheckpoint, DatabaseError> {
+) -> Result<EntitiesCheckpoint, StageError> {
+    let pruned_entries = provider
+        .get_prune_checkpoint(PrunePart::SenderRecovery)?
+        .map(|checkpoint| provider.block_body_indices(checkpoint.block_number))
+        .transpose()?
+        .flatten()
+        // +1 is needed because TxNumber is 0-indexed
+        .map(|body| body.last_tx_num() + 1)
+        .unwrap_or_default();
     Ok(EntitiesCheckpoint {
-        processed: provider.tx_ref().entries::<tables::TxSenders>()? as u64,
+        // If `TxSenders` table was pruned, we will have a number of entries in it not matching
+        // the actual number of processed transactions. To fix that, we add the number of pruned
+        // `TxSenders` entries.
+        processed: provider.tx_ref().entries::<tables::TxSenders>()? as u64 + pruned_entries,
         total: provider.tx_ref().entries::<tables::Transactions>()? as u64,
     })
 }
@@ -239,9 +252,10 @@ mod tests {
         generators::{random_block, random_block_range},
     };
     use reth_primitives::{
-        stage::StageUnitCheckpoint, BlockNumber, SealedBlock, TransactionSigned, H256,
+        stage::StageUnitCheckpoint, BlockNumber, PruneCheckpoint, PruneMode, SealedBlock,
+        TransactionSigned, H256, MAINNET,
     };
-    use reth_provider::TransactionsProvider;
+    use reth_provider::{ProviderFactory, PruneCheckpointWriter, TransactionsProvider};
 
     use super::*;
     use crate::test_utils::{
@@ -364,6 +378,58 @@ mod tests {
         );
 
         assert!(runner.validate_execution(first_input, result.ok()).is_ok(), "validation failed");
+    }
+
+    #[test]
+    fn stage_checkpoint_pruned() {
+        let tx = TestTransaction::default();
+        let mut rng = generators::rng();
+
+        let blocks = random_block_range(&mut rng, 0..=100, H256::zero(), 0..10);
+        tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
+
+        let max_pruned_block = 30;
+        let max_processed_block = 70;
+
+        let mut tx_senders = Vec::new();
+        let mut tx_number = 0;
+        for block in &blocks[..=max_processed_block] {
+            for transaction in &block.body {
+                if block.number > max_pruned_block {
+                    tx_senders
+                        .push((tx_number, transaction.recover_signer().expect("recover signer")));
+                }
+                tx_number += 1;
+            }
+        }
+        tx.insert_transaction_senders(tx_senders).expect("insert tx hash numbers");
+
+        let provider = tx.inner_rw();
+        provider
+            .save_prune_checkpoint(
+                PrunePart::SenderRecovery,
+                PruneCheckpoint {
+                    block_number: max_pruned_block as BlockNumber,
+                    prune_mode: PruneMode::Full,
+                },
+            )
+            .expect("save stage checkpoint");
+        provider.commit().expect("commit");
+
+        let db = tx.inner_raw();
+        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
+        let provider = factory.provider_rw().expect("provider rw");
+
+        assert_eq!(
+            stage_checkpoint(&provider).expect("stage checkpoint"),
+            EntitiesCheckpoint {
+                processed: blocks[..=max_processed_block]
+                    .iter()
+                    .map(|block| block.body.len() as u64)
+                    .sum::<u64>(),
+                total: blocks.iter().map(|block| block.body.len() as u64).sum::<u64>()
+            }
+        );
     }
 
     struct SenderRecoveryTestRunner {

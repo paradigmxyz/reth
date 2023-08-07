@@ -346,7 +346,7 @@ where
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-//// Environment Builder
+// Environment Builder
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -512,6 +512,7 @@ where
                 match rx.recv() {
                     Ok(msg) => match msg {
                         TxnManagerMessage::Begin { parent, flags, sender } => {
+                            #[allow(clippy::redundant_locals)]
                             let e = e;
                             let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
                             sender

@@ -17,7 +17,7 @@
 //! Ethereum's networking protocol is specified in [devp2p](https://github.com/ethereum/devp2p).
 //!
 //! In order for a node to join the ethereum p2p network it needs to know what nodes are already
-//! port of that network. This includes public identities (public key) and addresses (where to reach
+//! part of that network. This includes public identities (public key) and addresses (where to reach
 //! them).
 //!
 //! ## Bird's Eye View
