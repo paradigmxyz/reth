@@ -177,7 +177,6 @@ impl AppendableChain {
 
     /// Validate and execute the given block that _extends the canonical chain_, validating its
     /// state root after execution.
-    #[tracing::instrument(skip(post_state_data_provider, externals), target = "blockchain_tree")]
     fn validate_and_execute<PSDP, DB, C, EF>(
         block: SealedBlockWithSenders,
         parent_block: &SealedHeader,
