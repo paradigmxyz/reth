@@ -7,6 +7,7 @@ use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
 pub use error::InvalidTransactionError;
 pub use meta::TransactionMeta;
+use rayon::prelude::{ParallelBridge, ParallelIterator};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
 use reth_rlp::{
     length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
@@ -31,6 +32,10 @@ mod meta;
 mod signature;
 mod tx_type;
 pub(crate) mod util;
+
+// Expected number of transactions where we can expect a speed-up by recovering the senders in
+// parallel.
+const PARALLEL_SENDER_RECOVERY_THRESHOLD: usize = 10;
 
 /// A raw transaction.
 ///
@@ -65,6 +70,18 @@ pub enum Transaction {
     /// transaction, incentivizing miners to include transactions with higher priority fees per
     /// gas.
     Eip1559(TxEip1559),
+    /// Shard Blob Transactions ([EIP-4844](https://eips.ethereum.org/EIPS/eip-4844)), type `0x3`.
+    ///
+    /// Shard Blob Transactions introduce a new transaction type called a blob-carrying transaction
+    /// to reduce gas costs. These transactions are similar to regular Ethereum transactions but
+    /// include additional data called a blob.
+    ///
+    /// Blobs are larger (~125 kB) and cheaper than the current calldata, providing an immutable
+    /// and read-only memory for storing transaction data.
+    ///
+    /// EIP-4844, also known as proto-danksharding, implements the framework and logic of
+    /// danksharding, introducing new transaction formats and verification rules.
+    Eip4844(TxEip4844),
 }
 
 impl Transaction {
@@ -116,6 +133,7 @@ impl Transaction {
             Transaction::Legacy(tx) => tx.nonce = nonce,
             Transaction::Eip2930(tx) => tx.nonce = nonce,
             Transaction::Eip1559(tx) => tx.nonce = nonce,
+            Transaction::Eip4844(tx) => tx.nonce = nonce,
         }
     }
 
@@ -125,6 +143,7 @@ impl Transaction {
             Transaction::Legacy(tx) => tx.value = value,
             Transaction::Eip2930(tx) => tx.value = value,
             Transaction::Eip1559(tx) => tx.value = value,
+            Transaction::Eip4844(tx) => tx.value = value,
         }
     }
 
@@ -134,6 +153,7 @@ impl Transaction {
             Transaction::Legacy(tx) => tx.input = input,
             Transaction::Eip2930(tx) => tx.input = input,
             Transaction::Eip1559(tx) => tx.input = input,
+            Transaction::Eip4844(tx) => tx.input = input,
         }
     }
 
@@ -144,6 +164,7 @@ impl Transaction {
             Transaction::Legacy(tx) => tx.size(),
             Transaction::Eip2930(tx) => tx.size(),
             Transaction::Eip1559(tx) => tx.size(),
+            Transaction::Eip4844(tx) => tx.size(),
         }
     }
 }
@@ -166,6 +187,10 @@ impl Compact for Transaction {
                 tx.to_compact(buf);
                 2
             }
+            Transaction::Eip4844(tx) => {
+                tx.to_compact(buf);
+                3
+            }
         }
     }
 
@@ -182,6 +207,10 @@ impl Compact for Transaction {
             2 => {
                 let (tx, buf) = TxEip1559::from_compact(buf, buf.len());
                 (Transaction::Eip1559(tx), buf)
+            }
+            3 => {
+                let (tx, buf) = TxEip4844::from_compact(buf, buf.len());
+                (Transaction::Eip4844(tx), buf)
             }
             _ => unreachable!("Junk data in database: unknown Transaction variant"),
         }
@@ -205,6 +234,7 @@ impl Transaction {
             Transaction::Legacy(TxLegacy { chain_id, .. }) => *chain_id,
             Transaction::Eip2930(TxEip2930 { chain_id, .. }) => Some(*chain_id),
             Transaction::Eip1559(TxEip1559 { chain_id, .. }) => Some(*chain_id),
+            Transaction::Eip4844(TxEip4844 { chain_id, .. }) => Some(*chain_id),
         }
     }
 
@@ -214,6 +244,7 @@ impl Transaction {
             Transaction::Legacy(TxLegacy { chain_id: ref mut c, .. }) => *c = Some(chain_id),
             Transaction::Eip2930(TxEip2930 { chain_id: ref mut c, .. }) => *c = chain_id,
             Transaction::Eip1559(TxEip1559 { chain_id: ref mut c, .. }) => *c = chain_id,
+            Transaction::Eip4844(TxEip4844 { chain_id: ref mut c, .. }) => *c = chain_id,
         }
     }
 
@@ -223,7 +254,8 @@ impl Transaction {
         match self {
             Transaction::Legacy(TxLegacy { to, .. }) |
             Transaction::Eip2930(TxEip2930 { to, .. }) |
-            Transaction::Eip1559(TxEip1559 { to, .. }) => to,
+            Transaction::Eip1559(TxEip1559 { to, .. }) |
+            Transaction::Eip4844(TxEip4844 { to, .. }) => to,
         }
     }
 
@@ -238,6 +270,7 @@ impl Transaction {
             Transaction::Legacy { .. } => TxType::Legacy,
             Transaction::Eip2930 { .. } => TxType::EIP2930,
             Transaction::Eip1559 { .. } => TxType::EIP1559,
+            Transaction::Eip4844 { .. } => TxType::EIP4844,
         }
     }
 
@@ -247,6 +280,7 @@ impl Transaction {
             Transaction::Legacy(TxLegacy { value, .. }) => value,
             Transaction::Eip2930(TxEip2930 { value, .. }) => value,
             Transaction::Eip1559(TxEip1559 { value, .. }) => value,
+            Transaction::Eip4844(TxEip4844 { value, .. }) => value,
         }
     }
 
@@ -256,6 +290,7 @@ impl Transaction {
             Transaction::Legacy(TxLegacy { nonce, .. }) => *nonce,
             Transaction::Eip2930(TxEip2930 { nonce, .. }) => *nonce,
             Transaction::Eip1559(TxEip1559 { nonce, .. }) => *nonce,
+            Transaction::Eip4844(TxEip4844 { nonce, .. }) => *nonce,
         }
     }
 
@@ -264,7 +299,8 @@ impl Transaction {
         match self {
             Transaction::Legacy(TxLegacy { gas_limit, .. }) |
             Transaction::Eip2930(TxEip2930 { gas_limit, .. }) |
-            Transaction::Eip1559(TxEip1559 { gas_limit, .. }) => *gas_limit,
+            Transaction::Eip1559(TxEip1559 { gas_limit, .. }) |
+            Transaction::Eip4844(TxEip4844 { gas_limit, .. }) => *gas_limit,
         }
     }
 
@@ -275,7 +311,8 @@ impl Transaction {
         match self {
             Transaction::Legacy(TxLegacy { gas_price, .. }) |
             Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
-            Transaction::Eip1559(TxEip1559 { max_fee_per_gas, .. }) => *max_fee_per_gas,
+            Transaction::Eip1559(TxEip1559 { max_fee_per_gas, .. }) |
+            Transaction::Eip4844(TxEip4844 { max_fee_per_gas, .. }) => *max_fee_per_gas,
         }
     }
 
@@ -287,7 +324,8 @@ impl Transaction {
         match self {
             Transaction::Legacy(_) => None,
             Transaction::Eip2930(_) => None,
-            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) => {
+            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) |
+            Transaction::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. }) => {
                 Some(*max_priority_fee_per_gas)
             }
         }
@@ -304,7 +342,8 @@ impl Transaction {
         match self {
             Transaction::Legacy(TxLegacy { gas_price, .. }) |
             Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
-            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) => {
+            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) |
+            Transaction::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. }) => {
                 *max_priority_fee_per_gas
             }
         }
@@ -318,6 +357,7 @@ impl Transaction {
             Transaction::Legacy(tx) => tx.gas_price,
             Transaction::Eip2930(tx) => tx.gas_price,
             Transaction::Eip1559(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
+            Transaction::Eip4844(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
         }
     }
 
@@ -373,6 +413,7 @@ impl Transaction {
             Transaction::Legacy(TxLegacy { input, .. }) => input,
             Transaction::Eip2930(TxEip2930 { input, .. }) => input,
             Transaction::Eip1559(TxEip1559 { input, .. }) => input,
+            Transaction::Eip4844(TxEip4844 { input, .. }) => input,
         }
     }
 
@@ -469,6 +510,33 @@ impl Transaction {
                 len += access_list.length();
                 len
             }
+            Transaction::Eip4844(TxEip4844 {
+                chain_id,
+                nonce,
+                gas_limit,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                to,
+                value,
+                access_list,
+                blob_versioned_hashes,
+                max_fee_per_blob_gas,
+                input,
+            }) => {
+                let mut len = 0;
+                len += chain_id.length();
+                len += nonce.length();
+                len += gas_limit.length();
+                len += max_fee_per_gas.length();
+                len += max_priority_fee_per_gas.length();
+                len += to.length();
+                len += value.length();
+                len += access_list.length();
+                len += blob_versioned_hashes.length();
+                len += max_fee_per_blob_gas.length();
+                len += input.0.length();
+                len
+            }
         }
     }
 
@@ -530,6 +598,31 @@ impl Transaction {
                 value.encode(out);
                 input.0.encode(out);
                 access_list.encode(out);
+            }
+            Transaction::Eip4844(TxEip4844 {
+                chain_id,
+                nonce,
+                gas_limit,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                to,
+                value,
+                access_list,
+                blob_versioned_hashes,
+                max_fee_per_blob_gas,
+                input,
+            }) => {
+                chain_id.encode(out);
+                nonce.encode(out);
+                max_priority_fee_per_gas.encode(out);
+                max_fee_per_gas.encode(out);
+                gas_limit.encode(out);
+                to.encode(out);
+                value.encode(out);
+                input.0.encode(out);
+                access_list.encode(out);
+                max_fee_per_blob_gas.encode(out);
+                blob_versioned_hashes.encode(out);
             }
         }
     }
@@ -849,6 +942,21 @@ impl TransactionSigned {
         self.signature.recover_signer(signature_hash)
     }
 
+    /// Recovers a list of signers from a transaction list iterator
+    ///
+    /// Returns `None`, if some transaction's signature is invalid, see also
+    /// [Self::recover_signer].
+    pub fn recover_signers<'a>(
+        txes: impl Iterator<Item = &'a Self> + Send,
+        num_txes: usize,
+    ) -> Option<Vec<Address>> {
+        if num_txes < PARALLEL_SENDER_RECOVERY_THRESHOLD {
+            txes.map(|tx| tx.recover_signer()).collect()
+        } else {
+            txes.cloned().par_bridge().map(|tx| tx.recover_signer()).collect()
+        }
+    }
+
     /// Consumes the type, recover signer and return [`TransactionSignedEcRecovered`]
     ///
     /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
@@ -1011,6 +1119,19 @@ impl TransactionSigned {
                 value: Decodable::decode(data)?,
                 input: Bytes(Decodable::decode(data)?),
                 access_list: Decodable::decode(data)?,
+            }),
+            3 => Transaction::Eip4844(TxEip4844 {
+                chain_id: Decodable::decode(data)?,
+                nonce: Decodable::decode(data)?,
+                max_priority_fee_per_gas: Decodable::decode(data)?,
+                max_fee_per_gas: Decodable::decode(data)?,
+                gas_limit: Decodable::decode(data)?,
+                to: Decodable::decode(data)?,
+                value: Decodable::decode(data)?,
+                input: Bytes(Decodable::decode(data)?),
+                access_list: Decodable::decode(data)?,
+                max_fee_per_blob_gas: Decodable::decode(data)?,
+                blob_versioned_hashes: Decodable::decode(data)?,
             }),
             _ => return Err(DecodeError::Custom("unsupported typed transaction type")),
         };

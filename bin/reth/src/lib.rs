@@ -34,6 +34,7 @@ pub mod init;
 pub mod node;
 pub mod p2p;
 pub mod prometheus_exporter;
+pub mod recover;
 pub mod runner;
 pub mod stage;
 pub mod test_vectors;

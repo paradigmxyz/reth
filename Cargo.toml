@@ -143,6 +143,8 @@ jsonrpsee-types = { version = "0.19" }
 
 ## crypto
 secp256k1 = { version = "0.27.0", default-features = false, features = ["global-context", "rand-std", "recovery"] }
+# for eip-4844
+c-kzg = { git = "https://github.com/ethereum/c-kzg-4844" }
 
 ### misc-testing
 proptest = "1.0"
