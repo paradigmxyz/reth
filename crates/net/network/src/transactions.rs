@@ -996,8 +996,9 @@ mod tests {
             *handle1.peer_id(),
             transactions.transactions_by_peers.get(&signed_tx.hash()).unwrap()[0]
         );
-        // assert!(!pool.is_empty()); This fails - since pool_imports doesnt make progress on adding
-        // the tx to the pool (?)
+        // This fails - since pool_imports doesnt make progress on adding the tx the pool, nothing
+        // is calling poll()
+        assert!(!pool.is_empty());
         handle.terminate().await;
     }
 
