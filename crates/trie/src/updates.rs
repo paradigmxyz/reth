@@ -99,6 +99,11 @@ impl TrieUpdates {
         }));
     }
 
+    /// Extend the updates with deletes.
+    pub fn extend_with_deletes(&mut self, keys: impl Iterator<Item = TrieKey>) {
+        self.extend(keys.map(|key| (key, TrieOp::Delete)));
+    }
+
     /// Flush updates all aggregated updates to the database.
     pub fn flush<'a, 'tx, TX>(self, tx: &'a TX) -> Result<(), reth_db::DatabaseError>
     where

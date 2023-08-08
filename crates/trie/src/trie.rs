@@ -16,7 +16,10 @@ use reth_primitives::{
     Address, BlockNumber, StorageEntry, H256,
 };
 use reth_rlp::Encodable;
-use std::{collections::HashMap, ops::RangeInclusive};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::RangeInclusive,
+};
 
 /// StateRoot is used to compute the root node of a state trie.
 pub struct StateRoot<'a, 'b, TX, H> {
@@ -29,6 +32,8 @@ pub struct StateRoot<'a, 'b, TX, H> {
     /// A map containing storage changes with the hashed address as key and a set of storage key
     /// prefixes as the value.
     pub changed_storage_prefixes: HashMap<H256, PrefixSet>,
+    /// A map containing keys of accounts that were destroyed.
+    pub destroyed_accounts: HashSet<H256>,
     /// Previous intermediate state.
     previous_state: Option<IntermediateStateRootState>,
     /// The number of updates after which the intermediate progress should be returned.
@@ -45,6 +50,12 @@ impl<'a, 'b, TX, H> StateRoot<'a, 'b, TX, H> {
     /// Set the changed storage prefixes.
     pub fn with_changed_storage_prefixes(mut self, prefixes: HashMap<H256, PrefixSet>) -> Self {
         self.changed_storage_prefixes = prefixes;
+        self
+    }
+
+    /// Set the destroyed accounts.
+    pub fn with_destroyed_accounts(mut self, accounts: HashSet<H256>) -> Self {
+        self.destroyed_accounts = accounts;
         self
     }
 
@@ -75,6 +86,7 @@ impl<'a, 'b, TX, H> StateRoot<'a, 'b, TX, H> {
             tx: self.tx,
             changed_account_prefixes: self.changed_account_prefixes,
             changed_storage_prefixes: self.changed_storage_prefixes,
+            destroyed_accounts: self.destroyed_accounts,
             threshold: self.threshold,
             previous_state: self.previous_state,
             hashed_cursor_factory,
@@ -92,6 +104,7 @@ where
             tx,
             changed_account_prefixes: PrefixSetMut::default().freeze(),
             changed_storage_prefixes: HashMap::default(),
+            destroyed_accounts: HashSet::default(),
             previous_state: None,
             threshold: 100_000,
             hashed_cursor_factory: tx,
@@ -108,12 +121,17 @@ where
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError> {
-        let (account_prefixes, storage_prefixes) = PrefixSetLoader::new(tx).load(range)?;
+        let loaded_prefix_sets = PrefixSetLoader::new(tx).load(range)?;
         Ok(Self::new(tx)
-            .with_changed_account_prefixes(account_prefixes.freeze())
+            .with_changed_account_prefixes(loaded_prefix_sets.account_prefix_set.freeze())
             .with_changed_storage_prefixes(
-                storage_prefixes.into_iter().map(|(k, v)| (k, v.freeze())).collect(),
-            ))
+                loaded_prefix_sets
+                    .storage_prefix_sets
+                    .into_iter()
+                    .map(|(k, v)| (k, v.freeze()))
+                    .collect(),
+            )
+            .with_destroyed_accounts(loaded_prefix_sets.destroyed_accounts))
     }
 
     /// Computes the state root of the trie with the changed account and storage prefixes and
@@ -342,6 +360,8 @@ where
 
         trie_updates.extend(walker_updates.into_iter());
         trie_updates.extend_with_account_updates(hash_builder_updates);
+        trie_updates
+            .extend_with_deletes(self.destroyed_accounts.into_iter().map(TrieKey::StorageTrie));
 
         Ok(StateRootProgress::Complete(root, hashed_entries_walked, trie_updates))
     }
