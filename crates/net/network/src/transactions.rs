@@ -248,7 +248,7 @@ where
             let mut hashes = PooledTransactionsHashesBuilder::new(peer.version);
             let mut full_transactions = FullTransactionsBuilder::default();
 
-            // Iterate throught the transactions to propagate and fill the hashes and full
+            // Iterate through the transactions to propagate and fill the hashes and full
             // transaction lists, before deciding whether or not to send full transactions to the
             // peer.
             for tx in to_propagate.iter() {
