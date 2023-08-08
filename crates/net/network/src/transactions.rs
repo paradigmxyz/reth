@@ -255,8 +255,14 @@ where
                 if peer.transactions.insert(tx.hash()) {
                     hashes.push(tx);
 
-                    // Do not send full 4844 transaction hashes to peers. See EIP-4844:
-                    //  * <https://eips.ethereum.org/EIPS/eip-4844#networking>
+                    // Do not send full 4844 transaction hashes to peers.
+                    //
+                    //  Nodes MUST NOT automatically broadcast blob transactions to their peers.
+                    //  Instead, those transactions are only announced using
+                    //  `NewPooledTransactionHashes` messages, and can then be manually requested
+                    //  via `GetPooledTransactions`.
+                    //
+                    // From: <https://eips.ethereum.org/EIPS/eip-4844#networking>
                     if tx.tx_type() != TxType::EIP4844 {
                         full_transactions.push(tx);
                     }
