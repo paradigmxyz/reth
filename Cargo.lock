@@ -5820,7 +5820,6 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
- "rayon",
  "reth-codecs",
  "reth-rlp",
  "reth-rlp-derive",
