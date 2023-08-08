@@ -349,8 +349,10 @@ impl StorageInner {
 
         let block = Block { header, body: transactions, ommers: vec![], withdrawals: None };
 
-        let senders = TransactionSigned::recover_signers(block.body.iter(), block.body.len())
-            .ok_or(BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError))?;
+        let senders =
+            block.body.iter().map(|tx| tx.recover_signer()).collect::<Option<Vec<_>>>().ok_or(
+                BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError),
+            )?;
 
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
