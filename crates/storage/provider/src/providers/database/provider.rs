@@ -431,15 +431,13 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         let mut senders =
             self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)?;
 
-        let mut tx_iter = transactions.iter();
         let mut sender_iter = senders.iter().peekable();
-
         let mut merged_senders = Vec::new();
 
-        while let Some((tx_id, tx_signed)) = tx_iter.next() {
+        for (tx_id, tx_signed) in transactions.iter() {
             match sender_iter.peek() {
                 Some((sender_id, _)) if sender_id == tx_id => {
-                    merged_senders.push(sender_iter.next().unwrap().clone());
+                    merged_senders.push(*sender_iter.next().unwrap());
                 }
                 _ => {
                     merged_senders.push((*tx_id, tx_signed.recover_signer().unwrap()));
