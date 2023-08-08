@@ -20,6 +20,7 @@ impl PruningArgs {
     /// Returns pruning configuration.
     pub fn prune_config(&self, chain_spec: Arc<ChainSpec>) -> Option<PruneConfig> {
         if self.full {
+            eyre::bail!("full node is not supported yet, keep an eye on next releases");
             Some(PruneConfig {
                 block_interval: 5,
                 parts: PruneModes {
