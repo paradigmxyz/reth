@@ -18,7 +18,7 @@ pub struct PruningArgs {
 
 impl PruningArgs {
     /// Returns pruning configuration.
-    pub fn prune_config(&self, chain_spec: Arc<ChainSpec>) -> eyre::Result<Option<PruneConfig>> {
+    pub fn prune_config(&self, _chain_spec: Arc<ChainSpec>) -> eyre::Result<Option<PruneConfig>> {
         Ok(if self.full {
             eyre::bail!("full node is not supported yet, keep an eye on next releases");
             #[allow(unreachable_code)]
@@ -27,7 +27,7 @@ impl PruningArgs {
                 parts: PruneModes {
                     sender_recovery: Some(PruneMode::Distance(128)),
                     transaction_lookup: None,
-                    receipts: chain_spec
+                    receipts: _chain_spec
                         .deposit_contract
                         .as_ref()
                         .map(|contract| PruneMode::Before(contract.block)),
