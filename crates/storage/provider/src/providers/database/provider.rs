@@ -431,9 +431,9 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         let mut senders =
             self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)?;
 
+        // Recover senders manually if not found in db
         let mut sender_iter = senders.iter().peekable();
         let mut merged_senders = Vec::new();
-
         for (tx_id, tx_signed) in transactions.iter() {
             match sender_iter.peek() {
                 Some((sender_id, _)) if sender_id == tx_id => {
