@@ -266,7 +266,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
     }
 }
 
-/// State provider for a given transition
+/// State provider for a given block number
 pub struct HistoricalStateProvider<'a, TX: DbTx<'a>> {
     /// Database transaction
     tx: TX,
@@ -506,7 +506,10 @@ mod tests {
 
         // run
         assert_eq!(HistoricalStateProviderRef::new(&tx, 0).storage(ADDRESS, STORAGE), Ok(None));
-        assert_eq!(HistoricalStateProviderRef::new(&tx, 3).storage(ADDRESS, STORAGE), Ok(None));
+        assert_eq!(
+            HistoricalStateProviderRef::new(&tx, 3).storage(ADDRESS, STORAGE),
+            Ok(Some(U256::ZERO))
+        );
         assert_eq!(
             HistoricalStateProviderRef::new(&tx, 4).storage(ADDRESS, STORAGE),
             Ok(Some(entry_at7.value))
