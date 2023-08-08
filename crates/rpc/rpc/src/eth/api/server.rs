@@ -16,8 +16,8 @@ use reth_primitives::{
     AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes, H256, H64, U256, U64,
 };
 use reth_provider::{
-    BlockIdReader, BlockReader, BlockReaderIdExt, EvmEnvProvider, HeaderProvider,
-    StateProviderFactory,
+    BlockIdReader, BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider,
+    HeaderProvider, StateProviderFactory,
 };
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
@@ -37,6 +37,7 @@ where
     Provider: BlockReader
         + BlockIdReader
         + BlockReaderIdExt
+        + ChainSpecProvider
         + HeaderProvider
         + StateProviderFactory
         + EvmEnvProvider
@@ -410,12 +411,12 @@ mod tests {
     use reth_interfaces::test_utils::{generators, generators::Rng};
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{
-        basefee::calculate_next_block_base_fee, constants::ETHEREUM_BLOCK_GAS_LIMIT, Block,
-        BlockNumberOrTag, Header, TransactionSigned, H256, U256,
+        basefee::calculate_next_block_base_fee, constants::ETHEREUM_BLOCK_GAS_LIMIT, BaseFeeParams,
+        Block, BlockNumberOrTag, Header, TransactionSigned, H256, U256,
     };
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
-        BlockReader, BlockReaderIdExt, EvmEnvProvider, StateProviderFactory,
+        BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory,
     };
     use reth_rpc_api::EthApiServer;
     use reth_rpc_types::FeeHistory;
@@ -424,6 +425,7 @@ mod tests {
     fn build_test_eth_api<
         P: BlockReaderIdExt
             + BlockReader
+            + ChainSpecProvider
             + EvmEnvProvider
             + StateProviderFactory
             + Unpin
@@ -538,6 +540,7 @@ mod tests {
             last_header.gas_used,
             last_header.gas_limit,
             last_header.base_fee_per_gas.unwrap_or_default(),
+            BaseFeeParams::ethereum(),
         )));
 
         let eth_api = build_test_eth_api(mock_provider);

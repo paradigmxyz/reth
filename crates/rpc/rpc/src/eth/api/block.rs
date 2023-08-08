@@ -9,13 +9,16 @@ use crate::{
 };
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockId, BlockNumberOrTag, TransactionMeta};
-use reth_provider::{BlockReaderIdExt, EvmEnvProvider, StateProviderFactory};
-use reth_rpc_types::{ Index, RichBlock, TransactionReceipt};
+
+use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
+use reth_rpc_types::{Block, Index, RichBlock, TransactionReceipt};
+
 use reth_transaction_pool::TransactionPool;
 use reth_rpc_types_compat::block::{uncle_block_from_header,from_block};
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
-    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider:
+        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
