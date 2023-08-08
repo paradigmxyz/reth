@@ -141,9 +141,9 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
             // Get the rank of the first entry after our block.
             let rank = chunk.rank(self.block_number as usize);
 
-            // If our block is before the first entry in the index chunk, it might be before
-            // the first write ever. To check, we look at the previous entry and check if the
-            // key is the same.
+            // If our block is before the first entry in the index chunk and this first entry
+            // doesn't equal to our block, it might be before the first write ever. To check, we
+            // look at the previous entry and check if the key is the same.
             // This check is worth it, the `cursor.prev()` check is rarely triggered (the if will
             // short-circuit) and when it passes we save a full seek into the changeset/plain state
             // table.
@@ -151,8 +151,14 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
                 chunk.select(rank) as u64 != self.block_number &&
                 !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key))
             {
-                // The key is written to, but only after our block.
-                return Ok(HistoryInfo::NotYetWritten)
+                return if lowest_available_block_number.is_some() {
+                    // The key may have been written, but due to pruning we may not have changesets
+                    // and history, so we need to make a changeset lookup.
+                    Ok(HistoryInfo::InChangeset(chunk.select(rank) as u64))
+                } else {
+                    // The key is written to, but only after our block.
+                    Ok(HistoryInfo::NotYetWritten)
+                }
             }
             if rank < chunk.len() {
                 // The chunk contains an entry for a write after our block, return it.
