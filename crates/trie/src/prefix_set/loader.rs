@@ -13,6 +13,17 @@ use std::{
     ops::RangeInclusive,
 };
 
+/// Loaded prefix sets.
+#[derive(Debug, Default)]
+pub struct LoadedPrefixSets {
+    /// The account prefix set
+    pub account_prefix_set: PrefixSetMut,
+    /// The mapping of hashed account key to the corresponding storage prefix set
+    pub storage_prefix_sets: HashMap<H256, PrefixSetMut>,
+    /// The account keys of destroyed accounts
+    pub destroyed_accounts: HashSet<H256>,
+}
+
 /// A wrapper around a database transaction that loads prefix sets within a given block range.
 #[derive(Deref)]
 pub struct PrefixSetLoader<'a, TX>(&'a TX);
@@ -32,11 +43,9 @@ where
     pub fn load(
         self,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<(PrefixSetMut, HashMap<H256, PrefixSetMut>, HashSet<H256>), DatabaseError> {
+    ) -> Result<LoadedPrefixSets, DatabaseError> {
         // Initialize prefix sets.
-        let mut account_prefix_set = PrefixSetMut::default();
-        let mut storage_prefix_set: HashMap<H256, PrefixSetMut> = HashMap::default();
-        let mut destroyed_accounts = HashSet::new();
+        let mut loaded_prefix_sets = LoadedPrefixSets::default();
 
         // Walk account changeset and insert account prefixes.
         let mut account_changeset_cursor = self.cursor_read::<tables::AccountChangeSet>()?;
@@ -44,10 +53,10 @@ where
         for account_entry in account_changeset_cursor.walk_range(range.clone())? {
             let (_, AccountBeforeTx { address, .. }) = account_entry?;
             let hashed_address = keccak256(address);
-            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            loaded_prefix_sets.account_prefix_set.insert(Nibbles::unpack(hashed_address));
 
             if account_plain_state_cursor.seek_exact(address)?.is_none() {
-                destroyed_accounts.insert(hashed_address);
+                loaded_prefix_sets.destroyed_accounts.insert(hashed_address);
             }
         }
 
@@ -58,13 +67,14 @@ where
         for storage_entry in storage_cursor.walk_range(storage_range)? {
             let (BlockNumberAddress((_, address)), StorageEntry { key, .. }) = storage_entry?;
             let hashed_address = keccak256(address);
-            account_prefix_set.insert(Nibbles::unpack(hashed_address));
-            storage_prefix_set
+            loaded_prefix_sets.account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            loaded_prefix_sets
+                .storage_prefix_sets
                 .entry(hashed_address)
                 .or_default()
                 .insert(Nibbles::unpack(keccak256(key)));
         }
 
-        Ok((account_prefix_set, storage_prefix_set, destroyed_accounts))
+        Ok(loaded_prefix_sets)
     }
 }

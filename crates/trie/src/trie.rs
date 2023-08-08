@@ -121,14 +121,17 @@ where
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError> {
-        let (account_prefixes, storage_prefixes, destroyed_accounts) =
-            PrefixSetLoader::new(tx).load(range)?;
+        let loaded_prefix_sets = PrefixSetLoader::new(tx).load(range)?;
         Ok(Self::new(tx)
-            .with_changed_account_prefixes(account_prefixes.freeze())
+            .with_changed_account_prefixes(loaded_prefix_sets.account_prefix_set.freeze())
             .with_changed_storage_prefixes(
-                storage_prefixes.into_iter().map(|(k, v)| (k, v.freeze())).collect(),
+                loaded_prefix_sets
+                    .storage_prefix_sets
+                    .into_iter()
+                    .map(|(k, v)| (k, v.freeze()))
+                    .collect(),
             )
-            .with_destroyed_accounts(destroyed_accounts))
+            .with_destroyed_accounts(loaded_prefix_sets.destroyed_accounts))
     }
 
     /// Computes the state root of the trie with the changed account and storage prefixes and
