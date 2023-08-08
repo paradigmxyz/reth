@@ -270,15 +270,10 @@ impl NetworkSyncUpdater for NetworkHandle {
     fn update_sync_state(&self, state: SyncState) {
         let future_state = state.is_syncing();
         let prev_state = self.inner.is_syncing.swap(future_state, Ordering::Relaxed);
-        // explicitly throw this error away since we expect it to error every time after it's been
-        // set to true, i.e after every live sync
-        let _ = self.inner.initial_sync_done.compare_exchange(
-            false,
-            // on first move back from Syncing->Idle - swap and set init_sync_done to true
-            prev_state && !future_state,
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        );
+        let syncing_to_idle_state_transition = prev_state && !future_state;
+        if syncing_to_idle_state_transition {
+            self.inner.initial_sync_done.store(true, Ordering::Relaxed);
+        }
     }
 
     /// Update the status of the node.

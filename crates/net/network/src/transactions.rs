@@ -832,6 +832,41 @@ mod tests {
         assert!(pool.is_empty());
     }
 
+    // this test fails - because the transaction doesn't actually get propagated to the pool.
+    #[tokio::test(flavor = "multi_thread")]
+    #[cfg_attr(not(feature = "geth-tests"), ignore)]
+    async fn test_tx_broadcast_in_network_idle() {
+        reth_tracing::init_test_tracing();
+
+        let secret_key = SecretKey::new(&mut rand::thread_rng());
+
+        let client = NoopProvider::default();
+        let pool = testing_pool();
+        let config = NetworkConfigBuilder::new(secret_key)
+            .disable_discovery()
+            .listener_port(0)
+            .build(client);
+        let (handle, network, mut transactions, _) = NetworkManager::new(config)
+            .await
+            .unwrap()
+            .into_builder()
+            .transactions(pool.clone())
+            .split_with_handle();
+
+        tokio::task::spawn(network);
+
+        handle.update_sync_state(SyncState::Idle);
+        assert!(NetworkInfo::is_syncing(&handle));
+
+        let peer_id = PeerId::random();
+
+        transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
+            peer_id,
+            msg: Transactions(vec![TransactionSigned::default()]),
+        });
+        assert!(!pool.is_empty());
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     #[cfg_attr(not(feature = "geth-tests"), ignore)]
     async fn test_tx_broadcasts_through_two_syncs() {
@@ -869,7 +904,7 @@ mod tests {
         });
         assert!(!NetworkInfo::is_initially_syncing(&handle));
         assert!(NetworkInfo::is_syncing(&handle));
-        // assert!(!pool.is_empty()); this keeps failing - indicating that there's a bug with these
+        assert!(!pool.is_empty());
         // tests
 
         // if we attempt to modify the initial test above with SyncState::Idle, the same assert
