@@ -428,19 +428,25 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             .map(|(id, tx)| (id, tx.into()))
             .collect::<Vec<(u64, TransactionSigned)>>();
 
-        let senders = match self
-            .get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)
-        {
-            Ok(senders) => senders,
-            // with SenderRecovery prune part enabled, not all senders are in database anymore
-            Err(DatabaseError::Read(_)) => transactions
-                .clone()
-                .into_iter()
-                // I suppose signatures are valid since taken from db
-                .map(|(id, tx_signed)| (id, tx_signed.recover_signer().unwrap()))
-                .collect(),
-            Err(err) => return Err(err.into()),
-        };
+        let mut senders =
+            self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)?;
+
+        let mut tx_iter = transactions.iter();
+        let mut sender_iter = senders.iter().peekable();
+
+        let mut merged_senders = Vec::new();
+
+        while let Some((tx_id, tx_signed)) = tx_iter.next() {
+            match sender_iter.peek() {
+                Some((sender_id, _)) if sender_id == tx_id => {
+                    merged_senders.push(sender_iter.next().unwrap().clone());
+                }
+                _ => {
+                    merged_senders.push((*tx_id, tx_signed.recover_signer().unwrap()));
+                }
+            }
+        }
+        senders = merged_senders;
 
         if TAKE {
             // Remove TxHashNumber
