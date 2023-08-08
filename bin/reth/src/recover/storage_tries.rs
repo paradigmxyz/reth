@@ -45,7 +45,8 @@ pub struct Command {
     )]
     chain: Arc<ChainSpec>,
 
-    #[arg(long, default_value_t)]
+    /// The number of blocks in the past to look through.
+    #[arg(long, default_value_t = 100)]
     lookback: u64,
 }
 
@@ -82,12 +83,13 @@ impl Command {
             let hashed_address = keccak256(address);
             if storage_trie_cursor.seek_exact(hashed_address)?.is_some() {
                 deleted_tries += 1;
+                trace!(target: "reth::cli", ?address, ?hashed_address, "Deleting storage trie");
                 storage_trie_cursor.delete_current_duplicates()?;
             }
         }
 
+        provider.commit()?;
         info!(target: "reth::cli", deleted = deleted_tries, "Finished recovery");
-        // provider.commit()?;
 
         Ok(())
     }
