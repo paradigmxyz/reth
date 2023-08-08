@@ -10,8 +10,9 @@ use reth_db::{
     init_db, tables,
     transaction::DbTx,
 };
-use reth_primitives::{keccak256, ChainSpec};
-use reth_provider::{AccountExtReader, BlockNumReader, ProviderFactory};
+use reth_primitives::ChainSpec;
+use reth_provider::{BlockNumReader, HeaderProvider, ProviderError, ProviderFactory};
+use reth_trie::StateRoot;
 use std::{fs, sync::Arc};
 use tracing::*;
 
@@ -44,10 +45,6 @@ pub struct Command {
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
-
-    /// The number of blocks in the past to look through.
-    #[arg(long, default_value_t = 100)]
-    lookback: u64,
 }
 
 impl Command {
@@ -63,29 +60,34 @@ impl Command {
 
         let factory = ProviderFactory::new(&db, self.chain.clone());
         let mut provider = factory.provider_rw()?;
-
         let best_block = provider.best_block_number()?;
-
-        let block_range = best_block.saturating_sub(self.lookback)..=best_block;
-        let changed_accounts = provider.changed_accounts_with_range(block_range)?;
-        let destroyed_accounts = provider
-            .basic_accounts(changed_accounts)?
-            .into_iter()
-            .filter_map(|(address, acc)| acc.is_none().then_some(address))
-            .collect::<Vec<_>>();
-
-        info!(target: "reth::cli", destroyed = destroyed_accounts.len(), "Starting recovery of storage tries");
+        let best_header = provider
+            .sealed_header(best_block)?
+            .ok_or(ProviderError::HeaderNotFound(best_block.into()))?;
 
         let mut deleted_tries = 0;
         let tx_mut = provider.tx_mut();
+        let mut hashed_account_cursor = tx_mut.cursor_read::<tables::HashedAccount>()?;
         let mut storage_trie_cursor = tx_mut.cursor_dup_read::<tables::StoragesTrie>()?;
-        for address in destroyed_accounts {
-            let hashed_address = keccak256(address);
-            if storage_trie_cursor.seek_exact(hashed_address)?.is_some() {
+        let mut entry = storage_trie_cursor.first()?;
+
+        info!(target: "reth::cli", "Starting pruning of storage tries");
+        while let Some((hashed_address, _)) = entry {
+            if hashed_account_cursor.seek_exact(hashed_address)?.is_none() {
                 deleted_tries += 1;
-                trace!(target: "reth::cli", ?address, ?hashed_address, "Deleting storage trie");
                 storage_trie_cursor.delete_current_duplicates()?;
             }
+
+            entry = storage_trie_cursor.next()?;
+        }
+
+        let state_root = StateRoot::new(tx_mut).root()?;
+        if state_root != best_header.state_root {
+            eyre::bail!(
+                "Recovery failed. Incorrect state root. Expected: {:?}. Received: {:?}",
+                best_header.state_root,
+                state_root
+            );
         }
 
         provider.commit()?;
