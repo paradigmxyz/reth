@@ -151,7 +151,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
                 chunk.select(rank) as u64 != self.block_number &&
                 !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key))
             {
-                return if lowest_available_block_number.is_some() {
+                if lowest_available_block_number.is_some() {
                     // The key may have been written, but due to pruning we may not have changesets
                     // and history, so we need to make a changeset lookup.
                     Ok(HistoryInfo::InChangeset(chunk.select(rank) as u64))
@@ -159,8 +159,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
                     // The key is written to, but only after our block.
                     Ok(HistoryInfo::NotYetWritten)
                 }
-            }
-            if rank < chunk.len() {
+            } else if rank < chunk.len() {
                 // The chunk contains an entry for a write after our block, return it.
                 Ok(HistoryInfo::InChangeset(chunk.select(rank) as u64))
             } else {
@@ -168,15 +167,13 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
                 // happen if this is the last chunk and so we need to look in the plain state.
                 Ok(HistoryInfo::InPlainState)
             }
+        } else if lowest_available_block_number.is_some() {
+            // The key may have been written, but due to pruning we may not have changesets and
+            // history, so we need to make a plain state lookup.
+            Ok(HistoryInfo::MaybeInPlainState)
         } else {
-            if lowest_available_block_number.is_some() {
-                // The key may have been written, but due to pruning we may not have changesets and
-                // history, so we need to make a plain state lookup.
-                Ok(HistoryInfo::MaybeInPlainState)
-            } else {
-                // The key has not been written to at all.
-                Ok(HistoryInfo::NotYetWritten)
-            }
+            // The key has not been written to at all.
+            Ok(HistoryInfo::NotYetWritten)
         }
     }
 }
