@@ -33,6 +33,9 @@ mod signature;
 mod tx_type;
 pub(crate) mod util;
 
+// Expected number of transactions where we can expect a speed-up by recovering the senders in parallel.
+const PARALLEL_SENDER_RECOVERY_THRESHOLD: usize = 10;
+
 /// A raw transaction.
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
@@ -858,10 +861,8 @@ impl TransactionSigned {
         txes: impl Iterator<Item = &'a Self> + Send,
         num_txes: usize,
     ) -> Option<Vec<Address>> {
-        // Arbitrary value.
-        let threshold = 10;
 
-        if num_txes < threshold {
+        if num_txes < PARALLEL_SENDER_RECOVERY_THRESHOLD {
             txes.map(|tx| tx.recover_signer()).collect()
         } else {
             txes.cloned().par_bridge().map(|tx| tx.recover_signer()).collect()
