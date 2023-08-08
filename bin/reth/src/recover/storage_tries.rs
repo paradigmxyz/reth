@@ -5,9 +5,14 @@ use crate::{
     runner::CliContext,
 };
 use clap::Parser;
-use reth_db::{cursor::DbCursorRO, init_db, tables, transaction::DbTx};
+use reth_db::{
+    cursor::{DbCursorRO, DbDupCursorRW},
+    init_db, tables,
+    transaction::DbTx,
+};
 use reth_primitives::ChainSpec;
-use reth_provider::ProviderFactory;
+use reth_provider::{BlockNumReader, HeaderProvider, ProviderError, ProviderFactory};
+use reth_trie::StateRoot;
 use std::{fs, sync::Arc};
 use tracing::*;
 
@@ -55,6 +60,10 @@ impl Command {
 
         let factory = ProviderFactory::new(&db, self.chain.clone());
         let mut provider = factory.provider_rw()?;
+        let best_block = provider.best_block_number()?;
+        let best_header = provider
+            .sealed_header(best_block)?
+            .ok_or(ProviderError::HeaderNotFound(best_block.into()))?;
 
         let mut deleted_tries = 0;
         let tx_mut = provider.tx_mut();
@@ -66,13 +75,22 @@ impl Command {
         while let Some((hashed_address, _)) = entry {
             if hashed_account_cursor.seek_exact(hashed_address)?.is_none() {
                 deleted_tries += 1;
-                // storage_trie_cursor.delete_current_duplicates()?;
+                storage_trie_cursor.delete_current_duplicates()?;
             }
 
             entry = storage_trie_cursor.next()?;
         }
 
-        // provider.commit()?;
+        let state_root = StateRoot::new(tx_mut).root()?;
+        if state_root != best_header.state_root {
+            eyre::bail!(
+                "Recovery failed. Incorrect state root. Expected: {:?}. Received: {:?}",
+                best_header.state_root,
+                state_root
+            );
+        }
+
+        provider.commit()?;
         info!(target: "reth::cli", deleted = deleted_tries, "Finished recovery");
 
         Ok(())
