@@ -33,7 +33,8 @@ mod signature;
 mod tx_type;
 pub(crate) mod util;
 
-// Expected number of transactions where we can expect a speed-up by recovering the senders in parallel.
+// Expected number of transactions where we can expect a speed-up by recovering the senders in
+// parallel.
 const PARALLEL_SENDER_RECOVERY_THRESHOLD: usize = 10;
 
 /// A raw transaction.
@@ -861,7 +862,6 @@ impl TransactionSigned {
         txes: impl Iterator<Item = &'a Self> + Send,
         num_txes: usize,
     ) -> Option<Vec<Address>> {
-
         if num_txes < PARALLEL_SENDER_RECOVERY_THRESHOLD {
             txes.map(|tx| tx.recover_signer()).collect()
         } else {
