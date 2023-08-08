@@ -1,14 +1,11 @@
 
 use reth_primitives::{
-    AccessListItem, Address, BlockNumber, Bytes, Transaction as PrimitiveTransaction,
+    AccessListItem,  BlockNumber, Transaction as PrimitiveTransaction,
     TransactionKind as PrimitiveTransactionKind, TransactionSignedEcRecovered, TxType, H256, U128,
     U256, U64,
 };
 
-
-
-use serde::{Deserialize, Serialize};
-
+use reth_rpc_types::{Signature,Transaction};
     /// Create a new rpc transaction result for a mined transaction, using the given block hash,
     /// number, and tx index fields to populate the corresponding fields in the rpc result.
     ///

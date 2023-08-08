@@ -19,7 +19,7 @@ use reth_primitives::{
     TransactionKind::{Call, Create},
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, H256, U128, U256, U64,
 };
-use reth_rpc_types_compat::from_recovered_with_block_contextd;
+use reth_rpc_types_compat::from_recovered_with_block_context;
 use reth_provider::{BlockReaderIdExt, EvmEnvProvider, StateProviderBox, StateProviderFactory};
 use reth_revm::{
     database::{State, SubState},
