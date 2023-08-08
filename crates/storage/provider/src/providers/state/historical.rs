@@ -15,6 +15,7 @@ use reth_primitives::{
     Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, H256,
 };
 use std::marker::PhantomData;
+use tracing::log::error;
 
 /// State provider for a given transition id which takes a tx reference.
 ///
@@ -147,8 +148,12 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
             // This check is worth it, the `cursor.prev()` check is rarely triggered (the if will
             // short-circuit) and when it passes we save a full seek into the changeset/plain state
             // table.
-            if rank == 0 && !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key)) {
+            if rank == 0 &&
+                chunk.select(rank) as u64 != self.block_number &&
+                !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key))
+            {
                 // The key is written to, but only after our block.
+                error!("rank == 0 && !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key))");
                 return Ok(HistoryInfo::NotYetWritten)
             }
             if rank < chunk.len() {
@@ -166,6 +171,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
                 Ok(HistoryInfo::MaybeInPlainState)
             } else {
                 // The key has not been written to at all.
+                error!("lowest_available_block_number.is_none()");
                 Ok(HistoryInfo::NotYetWritten)
             }
         }
