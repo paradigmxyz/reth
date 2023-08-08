@@ -30,8 +30,10 @@ pub struct HistoricalStateProviderRef<'a, 'b, TX: DbTx<'a>> {
     /// Block number is main index for the history state of accounts and storages.
     block_number: BlockNumber,
     /// Lowest block number at which the account history is available.
+    /// [Option::None] means all history is available.
     lowest_account_history_block_number: Option<BlockNumber>,
     /// Lowest block number at which the storage history is available.
+    /// [Option::None] means all history is available.
     lowest_storage_history_block_number: Option<BlockNumber>,
     /// Phantom lifetime `'a`
     _phantom: PhantomData<&'a TX>,
@@ -41,6 +43,7 @@ pub enum HistoryInfo {
     NotYetWritten,
     InChangeset(u64),
     InPlainState,
+    MaybeInPlainState,
 }
 
 impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
@@ -86,7 +89,11 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
 
         // history key to search IntegerList of block number changesets.
         let history_key = ShardedKey::new(address, self.block_number);
-        self.history_info::<tables::AccountHistory, _>(history_key, |key| key.key == address)
+        self.history_info::<tables::AccountHistory, _>(
+            history_key,
+            |key| key.key == address,
+            self.lowest_account_history_block_number,
+        )
     }
 
     /// Lookup a storage key in the StorageHistory table
@@ -107,12 +114,19 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
 
         // history key to search IntegerList of block number changesets.
         let history_key = StorageShardedKey::new(address, storage_key, self.block_number);
-        self.history_info::<tables::StorageHistory, _>(history_key, |key| {
-            key.address == address && key.sharded_key.key == storage_key
-        })
+        self.history_info::<tables::StorageHistory, _>(
+            history_key,
+            |key| key.address == address && key.sharded_key.key == storage_key,
+            self.lowest_storage_history_block_number,
+        )
     }
 
-    fn history_info<T, K>(&self, key: K, key_filter: impl Fn(&K) -> bool) -> Result<HistoryInfo>
+    fn history_info<T, K>(
+        &self,
+        key: K,
+        key_filter: impl Fn(&K) -> bool,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> Result<HistoryInfo>
     where
         T: Table<Key = K, Value = BlockNumberList>,
     {
@@ -146,8 +160,14 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
                 Ok(HistoryInfo::InPlainState)
             }
         } else {
-            // The key has not been written to at all.
-            Ok(HistoryInfo::NotYetWritten)
+            if lowest_available_block_number.is_some() {
+                // The key may have been written, but due to pruning we may not have changesets and
+                // history, so we need to make a plain state lookup.
+                Ok(HistoryInfo::MaybeInPlainState)
+            } else {
+                // The key has not been written to at all.
+                Ok(HistoryInfo::NotYetWritten)
+            }
         }
     }
 }
@@ -155,20 +175,23 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
 impl<'a, 'b, TX: DbTx<'a>> AccountReader for HistoricalStateProviderRef<'a, 'b, TX> {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
-        match self.account_history_lookup(address)? {
-            HistoryInfo::NotYetWritten => Ok(None),
-            HistoryInfo::InChangeset(changeset_block_number) => Ok(self
-                .tx
-                .cursor_dup_read::<tables::AccountChangeSet>()?
-                .seek_by_key_subkey(changeset_block_number, address)?
-                .filter(|acc| acc.address == address)
-                .ok_or(ProviderError::AccountChangesetNotFound {
-                    block_number: changeset_block_number,
-                    address,
-                })?
-                .info),
-            HistoryInfo::InPlainState => Ok(self.tx.get::<tables::PlainAccountState>(address)?),
-        }
+        Ok(match self.account_history_lookup(address)? {
+            HistoryInfo::NotYetWritten => None,
+            HistoryInfo::InChangeset(changeset_block_number) => {
+                self.tx
+                    .cursor_dup_read::<tables::AccountChangeSet>()?
+                    .seek_by_key_subkey(changeset_block_number, address)?
+                    .filter(|acc| acc.address == address)
+                    .ok_or(ProviderError::AccountChangesetNotFound {
+                        block_number: changeset_block_number,
+                        address,
+                    })?
+                    .info
+            }
+            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
+                self.tx.get::<tables::PlainAccountState>(address)?
+            }
+        })
     }
 }
 
@@ -201,9 +224,9 @@ impl<'a, 'b, TX: DbTx<'a>> StateRootProvider for HistoricalStateProviderRef<'a, 
 impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, TX> {
     /// Get storage.
     fn storage(&self, address: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
-        match self.storage_history_lookup(address, storage_key)? {
-            HistoryInfo::NotYetWritten => Ok(None),
-            HistoryInfo::InChangeset(changeset_block_number) => Ok(Some(
+        Ok(match self.storage_history_lookup(address, storage_key)? {
+            HistoryInfo::NotYetWritten => None,
+            HistoryInfo::InChangeset(changeset_block_number) => Some(
                 self.tx
                     .cursor_dup_read::<tables::StorageChangeSet>()?
                     .seek_by_key_subkey((changeset_block_number, address).into(), storage_key)?
@@ -214,15 +237,15 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
                         storage_key,
                     })?
                     .value,
-            )),
-            HistoryInfo::InPlainState => Ok(self
+            ),
+            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => self
                 .tx
                 .cursor_dup_read::<tables::PlainStorageState>()?
                 .seek_by_key_subkey(address, storage_key)?
                 .filter(|entry| entry.key == storage_key)
                 .map(|entry| entry.value)
-                .or(Some(StorageValue::ZERO))),
-        }
+                .or(Some(StorageValue::ZERO)),
+        })
     }
 
     /// Get account code by its hash
