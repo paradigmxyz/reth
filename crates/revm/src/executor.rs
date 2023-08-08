@@ -84,7 +84,7 @@ where
                 Err(BlockValidationError::SenderRecoveryError.into())
             }
         } else {
-            TransactionSigned::recover_signers(body.iter(), body.len())
+            TransactionSigned::recover_signers(body, body.len())
                 .ok_or(BlockValidationError::SenderRecoveryError.into())
         }
     }
