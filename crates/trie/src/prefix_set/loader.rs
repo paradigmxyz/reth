@@ -8,7 +8,10 @@ use reth_db::{
     DatabaseError,
 };
 use reth_primitives::{keccak256, trie::Nibbles, BlockNumber, StorageEntry, H256};
-use std::{collections::HashMap, ops::RangeInclusive};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::RangeInclusive,
+};
 
 /// A wrapper around a database transaction that loads prefix sets within a given block range.
 #[derive(Deref)]
@@ -29,16 +32,23 @@ where
     pub fn load(
         self,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<(PrefixSetMut, HashMap<H256, PrefixSetMut>), DatabaseError> {
+    ) -> Result<(PrefixSetMut, HashMap<H256, PrefixSetMut>, HashSet<H256>), DatabaseError> {
         // Initialize prefix sets.
         let mut account_prefix_set = PrefixSetMut::default();
         let mut storage_prefix_set: HashMap<H256, PrefixSetMut> = HashMap::default();
+        let mut destroyed_accounts = HashSet::new();
 
         // Walk account changeset and insert account prefixes.
-        let mut account_cursor = self.cursor_read::<tables::AccountChangeSet>()?;
-        for account_entry in account_cursor.walk_range(range.clone())? {
+        let mut account_changeset_cursor = self.cursor_read::<tables::AccountChangeSet>()?;
+        let mut account_plain_state_cursor = self.cursor_read::<tables::PlainAccountState>()?;
+        for account_entry in account_changeset_cursor.walk_range(range.clone())? {
             let (_, AccountBeforeTx { address, .. }) = account_entry?;
-            account_prefix_set.insert(Nibbles::unpack(keccak256(address)));
+            let hashed_address = keccak256(address);
+            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+
+            if account_plain_state_cursor.seek_exact(address)?.is_none() {
+                destroyed_accounts.insert(hashed_address);
+            }
         }
 
         // Walk storage changeset and insert storage prefixes as well as account prefixes if missing
@@ -55,6 +65,6 @@ where
                 .insert(Nibbles::unpack(keccak256(key)));
         }
 
-        Ok((account_prefix_set, storage_prefix_set))
+        Ok((account_prefix_set, storage_prefix_set, destroyed_accounts))
     }
 }
