@@ -209,7 +209,7 @@ where
     /// Handler for `eth_getLogs`
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>> {
         trace!(target: "rpc::eth", "Serving eth_getLogs");
-        Ok(EthFilter::logs(self, filter).await?)
+        Ok(self.inner.logs_for_filter(filter).await?)
     }
 }
 
