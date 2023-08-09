@@ -203,6 +203,9 @@ where
 ///   `tip` for `max_priority_fee_per_gas`
 #[derive(thiserror::Error, Debug)]
 pub enum RpcInvalidTransactionError {
+    /// Returned when an access list is provided for blocks before Berlin hardfork.
+    #[error("access lists are not supported")]
+    AccessListNotSupported,
     /// returned if the nonce of a transaction is lower than the one present in the local chain.
     #[error("nonce too low")]
     NonceTooLow,
@@ -336,6 +339,9 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
     fn from(err: revm::primitives::InvalidTransaction) -> Self {
         use revm::primitives::InvalidTransaction;
         match err {
+            InvalidTransaction::AccessListNotSupported => {
+                RpcInvalidTransactionError::AccessListNotSupported
+            }
             InvalidTransaction::InvalidChainId => RpcInvalidTransactionError::InvalidChainId,
             InvalidTransaction::GasMaxFeeGreaterThanPriorityFee => {
                 RpcInvalidTransactionError::TipAboveFeeCap
@@ -348,7 +354,7 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
                 RpcInvalidTransactionError::GasTooHigh
             }
             InvalidTransaction::RejectCallerWithCode => RpcInvalidTransactionError::SenderNoEOA,
-            InvalidTransaction::LackOfFundForGasLimit { .. } => {
+            InvalidTransaction::LackOfFundForMaxFee { .. } => {
                 RpcInvalidTransactionError::InsufficientFunds
             }
             InvalidTransaction::OverflowPaymentInTransaction => {

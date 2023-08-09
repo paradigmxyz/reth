@@ -48,13 +48,7 @@ impl<DB: StateProvider> DatabaseRef for State<DB> {
     }
 
     fn code_by_hash(&self, code_hash: H256) -> Result<Bytecode, Self::Error> {
-        let bytecode = self.0.bytecode_by_hash(code_hash)?;
-
-        if let Some(bytecode) = bytecode {
-            Ok(bytecode.with_code_hash(code_hash).0)
-        } else {
-            Ok(Bytecode::new())
-        }
+        self.0.bytecode_by_hash(code_hash).map(|b| b.unwrap_or_default().0)
     }
 
     fn storage(&self, address: H160, index: U256) -> Result<U256, Self::Error> {

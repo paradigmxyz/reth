@@ -105,10 +105,9 @@ where
         &mut self,
         interpreter: &mut Interpreter,
         data: &mut EVMData<'_, DB>,
-        is_static: bool,
     ) -> InstructionResult {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
-            let status = inspector.initialize_interp(interpreter, data, is_static);
+            let status = inspector.initialize_interp(interpreter, data);
 
             // Allow inspectors to exit early
             if status != InstructionResult::Continue {
@@ -123,10 +122,9 @@ where
         &mut self,
         interpreter: &mut Interpreter,
         data: &mut EVMData<'_, DB>,
-        is_static: bool,
     ) -> InstructionResult {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
-            let status = inspector.step(interpreter, data, is_static);
+            let status = inspector.step(interpreter, data);
 
             // Allow inspectors to exit early
             if status != InstructionResult::Continue {
@@ -153,11 +151,10 @@ where
         &mut self,
         interpreter: &mut Interpreter,
         data: &mut EVMData<'_, DB>,
-        is_static: bool,
         eval: InstructionResult,
     ) -> InstructionResult {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
-            let status = inspector.step_end(interpreter, data, is_static, eval);
+            let status = inspector.step_end(interpreter, data, eval);
 
             // Allow inspectors to exit early
             if status != InstructionResult::Continue {
@@ -172,10 +169,9 @@ where
         &mut self,
         data: &mut EVMData<'_, DB>,
         inputs: &mut CallInputs,
-        is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
-            let (status, gas, retdata) = inspector.call(data, inputs, is_static);
+            let (status, gas, retdata) = inspector.call(data, inputs);
 
             // Allow inspectors to exit early
             if status != InstructionResult::Continue {
@@ -193,11 +189,10 @@ where
         remaining_gas: Gas,
         ret: InstructionResult,
         out: Bytes,
-        is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
             let (new_ret, new_gas, new_out) =
-                inspector.call_end(data, inputs, remaining_gas, ret, out.clone(), is_static);
+                inspector.call_end(data, inputs, remaining_gas, ret, out.clone());
 
             // If the inspector returns a different ret or a revert with a non-empty message,
             // we assume it wants to tell us something

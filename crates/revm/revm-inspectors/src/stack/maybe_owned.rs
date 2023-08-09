@@ -72,11 +72,10 @@ where
         &mut self,
         interp: &mut Interpreter,
         data: &mut EVMData<'_, DB>,
-        is_static: bool,
     ) -> InstructionResult {
         match self {
             MaybeOwnedInspector::Owned(insp) => {
-                return insp.borrow_mut().initialize_interp(interp, data, is_static)
+                return insp.borrow_mut().initialize_interp(interp, data)
             }
             MaybeOwnedInspector::Stacked(_) => {}
         }
@@ -84,16 +83,9 @@ where
         InstructionResult::Continue
     }
 
-    fn step(
-        &mut self,
-        interp: &mut Interpreter,
-        data: &mut EVMData<'_, DB>,
-        is_static: bool,
-    ) -> InstructionResult {
+    fn step(&mut self, interp: &mut Interpreter, data: &mut EVMData<'_, DB>) -> InstructionResult {
         match self {
-            MaybeOwnedInspector::Owned(insp) => {
-                return insp.borrow_mut().step(interp, data, is_static)
-            }
+            MaybeOwnedInspector::Owned(insp) => return insp.borrow_mut().step(interp, data),
             MaybeOwnedInspector::Stacked(_) => {}
         }
 
@@ -119,12 +111,11 @@ where
         &mut self,
         interp: &mut Interpreter,
         data: &mut EVMData<'_, DB>,
-        is_static: bool,
         eval: InstructionResult,
     ) -> InstructionResult {
         match self {
             MaybeOwnedInspector::Owned(insp) => {
-                return insp.borrow_mut().step_end(interp, data, is_static, eval)
+                return insp.borrow_mut().step_end(interp, data, eval)
             }
             MaybeOwnedInspector::Stacked(_) => {}
         }
@@ -136,12 +127,9 @@ where
         &mut self,
         data: &mut EVMData<'_, DB>,
         inputs: &mut CallInputs,
-        is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
         match self {
-            MaybeOwnedInspector::Owned(insp) => {
-                return insp.borrow_mut().call(data, inputs, is_static)
-            }
+            MaybeOwnedInspector::Owned(insp) => return insp.borrow_mut().call(data, inputs),
             MaybeOwnedInspector::Stacked(_) => {}
         }
 
@@ -155,11 +143,10 @@ where
         remaining_gas: Gas,
         ret: InstructionResult,
         out: Bytes,
-        is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
         match self {
             MaybeOwnedInspector::Owned(insp) => {
-                return insp.borrow_mut().call_end(data, inputs, remaining_gas, ret, out, is_static)
+                return insp.borrow_mut().call_end(data, inputs, remaining_gas, ret, out)
             }
             MaybeOwnedInspector::Stacked(_) => {}
         }

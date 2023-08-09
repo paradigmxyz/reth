@@ -406,7 +406,7 @@ pub fn commit_state_changes<DB>(
 {
     // iterate over all changed accounts
     for (address, account) in changes {
-        if account.is_destroyed {
+        if account.is_selfdestructed() {
             // get old account that we are destroying.
             let db_account = match db.accounts.entry(address) {
                 Entry::Occupied(entry) => entry.into_mut(),
@@ -495,7 +495,7 @@ pub fn commit_state_changes<DB>(
                 }
             };
 
-            cached_account.account_state = if account.storage_cleared {
+            cached_account.account_state = if account.is_created() {
                 cached_account.storage.clear();
                 AccountState::StorageCleared
             } else if cached_account.account_state.is_storage_cleared() {
@@ -657,15 +657,13 @@ mod tests {
         AccountReader, BlockHashReader, StateProvider, StateRootProvider,
     };
     use reth_rlp::Decodable;
+    use revm::primitives::AccountStatus;
     use std::{collections::HashMap, str::FromStr};
 
     static DEFAULT_REVM_ACCOUNT: Lazy<RevmAccount> = Lazy::new(|| RevmAccount {
         info: AccountInfo::default(),
         storage: hash_map::HashMap::default(),
-        is_destroyed: false,
-        is_touched: false,
-        storage_cleared: false,
-        is_not_existing: false,
+        status: AccountStatus::empty(),
     });
 
     #[derive(Debug, Default, Clone, Eq, PartialEq)]
@@ -1132,8 +1130,7 @@ mod tests {
             hash_map::HashMap::from([(
                 account,
                 RevmAccount {
-                    is_destroyed: true,
-                    is_touched: true,
+                    status: AccountStatus::SelfDestructed | AccountStatus::Touched,
                     ..DEFAULT_REVM_ACCOUNT.clone()
                 },
             )]),
@@ -1146,8 +1143,7 @@ mod tests {
             hash_map::HashMap::from([(
                 account,
                 RevmAccount {
-                    is_touched: true,
-                    storage_cleared: true,
+                    status: AccountStatus::Created | AccountStatus::Touched,
                     ..DEFAULT_REVM_ACCOUNT.clone()
                 },
             )]),
@@ -1186,8 +1182,7 @@ mod tests {
             hash_map::HashMap::from([(
                 address,
                 RevmAccount {
-                    is_destroyed: true,
-                    storage_cleared: true,
+                    status: AccountStatus::Created | AccountStatus::SelfDestructed,
                     ..DEFAULT_REVM_ACCOUNT.clone()
                 },
             )]),
@@ -1214,7 +1209,7 @@ mod tests {
             1,
             hash_map::HashMap::from([(
                 address,
-                RevmAccount { is_touched: true, ..DEFAULT_REVM_ACCOUNT.clone() },
+                RevmAccount { status: AccountStatus::Touched, ..DEFAULT_REVM_ACCOUNT.clone() },
             )]),
             true,
             &mut post_state,
@@ -1225,7 +1220,7 @@ mod tests {
             1,
             hash_map::HashMap::from([(
                 address,
-                RevmAccount { is_touched: true, ..DEFAULT_REVM_ACCOUNT.clone() },
+                RevmAccount { status: AccountStatus::Touched, ..DEFAULT_REVM_ACCOUNT.clone() },
             )]),
             true,
             &mut post_state,
@@ -1251,7 +1246,7 @@ mod tests {
             1,
             hash_map::HashMap::from([(
                 address,
-                RevmAccount { is_touched: true, ..DEFAULT_REVM_ACCOUNT.clone() },
+                RevmAccount { status: AccountStatus::Touched, ..DEFAULT_REVM_ACCOUNT.clone() },
             )]),
             false,
             &mut post_state,
@@ -1264,7 +1259,7 @@ mod tests {
             2,
             hash_map::HashMap::from([(
                 address,
-                RevmAccount { is_touched: true, ..DEFAULT_REVM_ACCOUNT.clone() },
+                RevmAccount { status: AccountStatus::Touched, ..DEFAULT_REVM_ACCOUNT.clone() },
             )]),
             true,
             &mut post_state,
@@ -1298,8 +1293,14 @@ mod tests {
         executor.commit_changes(
             1,
             hash_map::HashMap::from([
-                (address1, RevmAccount { is_touched: true, ..DEFAULT_REVM_ACCOUNT.clone() }),
-                (address2, RevmAccount { is_touched: true, ..DEFAULT_REVM_ACCOUNT.clone() }),
+                (
+                    address1,
+                    RevmAccount { status: AccountStatus::Touched, ..DEFAULT_REVM_ACCOUNT.clone() },
+                ),
+                (
+                    address2,
+                    RevmAccount { status: AccountStatus::Touched, ..DEFAULT_REVM_ACCOUNT.clone() },
+                ),
             ]),
             false,
             &mut post_state_before_state_clear,
@@ -1324,8 +1325,14 @@ mod tests {
         executor.commit_changes(
             2,
             hash_map::HashMap::from([
-                (address3, RevmAccount { is_touched: true, ..DEFAULT_REVM_ACCOUNT.clone() }),
-                (address4, RevmAccount { is_touched: true, ..DEFAULT_REVM_ACCOUNT.clone() }),
+                (
+                    address3,
+                    RevmAccount { status: AccountStatus::Touched, ..DEFAULT_REVM_ACCOUNT.clone() },
+                ),
+                (
+                    address4,
+                    RevmAccount { status: AccountStatus::Touched, ..DEFAULT_REVM_ACCOUNT.clone() },
+                ),
             ]),
             true,
             &mut post_state_after_state_clear,

@@ -91,9 +91,10 @@ pub fn insert_genesis_state<DB: Database>(
         let mut bytecode_hash = None;
         if let Some(code) = &account.code {
             let bytecode = Bytecode::new_raw(code.0.clone());
+            let hash = bytecode.hash_slow();
             // FIXME: Can bytecode_hash be Some(Bytes::new()) here?
-            bytecode_hash = Some(bytecode.hash);
-            state.add_bytecode(bytecode.hash, bytecode);
+            bytecode_hash = Some(hash);
+            state.add_bytecode(hash, bytecode);
         }
         state.create_account(
             0,
