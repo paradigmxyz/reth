@@ -1779,9 +1779,8 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockExecutionWriter for DatabaseP
             // Unwind account hashes. Add changed accounts to account prefix set.
             let hashed_addresses = self.unwind_account_hashing(range.clone())?;
             for (hashed_address, account) in hashed_addresses {
-                if account.is_some() {
-                    account_prefix_set.insert(Nibbles::unpack(hashed_address));
-                } else {
+                account_prefix_set.insert(Nibbles::unpack(hashed_address));
+                if account.is_none() {
                     destroyed_accounts.insert(hashed_address);
                 }
             }
