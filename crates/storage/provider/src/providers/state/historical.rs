@@ -529,6 +529,8 @@ mod tests {
         let db = create_test_rw_db();
         let tx = db.tx().unwrap();
 
+        // provider block_number < lowest available block number,
+        // i.e. state at provider block is pruned
         let provider = HistoricalStateProviderRef::new_with_lowest_available_blocks(
             &tx,
             2,
@@ -546,6 +548,8 @@ mod tests {
             Err(ProviderError::StateAtBlockPruned(provider.block_number).into())
         );
 
+        // provider block_number == lowest available block number,
+        // i.e. state at provider block is available
         let provider = HistoricalStateProviderRef::new_with_lowest_available_blocks(
             &tx,
             2,
@@ -560,6 +564,8 @@ mod tests {
             Ok(HistoryInfo::NotYetWritten)
         );
 
+        // provider block_number == lowest available block number,
+        // i.e. state at provider block is available
         let provider = HistoricalStateProviderRef::new_with_lowest_available_blocks(
             &tx,
             2,
