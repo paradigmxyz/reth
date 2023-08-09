@@ -593,10 +593,10 @@ mod tests {
                 storage_history_block_number: Some(2),
             },
         );
-        assert_eq!(provider.account_history_lookup(ADDRESS), Ok(HistoryInfo::NotYetWritten));
+        assert_eq!(provider.account_history_lookup(ADDRESS), Ok(HistoryInfo::MaybeInPlainState));
         assert_eq!(
             provider.storage_history_lookup(ADDRESS, STORAGE),
-            Ok(HistoryInfo::NotYetWritten)
+            Ok(HistoryInfo::MaybeInPlainState)
         );
 
         // provider block_number == lowest available block number,
@@ -609,10 +609,10 @@ mod tests {
                 storage_history_block_number: Some(1),
             },
         );
-        assert_eq!(provider.account_history_lookup(ADDRESS), Ok(HistoryInfo::NotYetWritten));
+        assert_eq!(provider.account_history_lookup(ADDRESS), Ok(HistoryInfo::MaybeInPlainState));
         assert_eq!(
             provider.storage_history_lookup(ADDRESS, STORAGE),
-            Ok(HistoryInfo::NotYetWritten)
+            Ok(HistoryInfo::MaybeInPlainState)
         );
     }
 }
