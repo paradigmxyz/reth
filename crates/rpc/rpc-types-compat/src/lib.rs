@@ -1,5 +1,4 @@
-
-pub mod transaction;
 pub mod block;
-pub use transaction::*;
+pub mod transaction;
 pub use block::*;
+pub use transaction::*;

@@ -1,8 +1,8 @@
 //! Contains types that represent ethereum types in [reth_primitives] when used in RPC
 use crate::Transaction;
 use reth_primitives::{
-    Address, Bloom, Bytes, Header as PrimitiveHeader, SealedHeader,
-    Withdrawal, H256, H64, U256, U64,
+    Address, Bloom, Bytes, Header as PrimitiveHeader, SealedHeader, Withdrawal, H256, H64, U256,
+    U64,
 };
 use serde::{ser::Error, Deserialize, Serialize, Serializer};
 use std::{collections::BTreeMap, ops::Deref};
@@ -81,7 +81,6 @@ pub struct Block {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub withdrawals: Option<Vec<Withdrawal>>,
 }
-
 
 /// Block header representation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
