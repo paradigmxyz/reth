@@ -47,8 +47,8 @@ pub fn from_block_with_tx_hashes(
 /// Create a new [Block] response from a [primitive block](reth_primitives::Block), using the
 /// total difficulty to populate its field in the rpc response.
 ///
-/// This will populate the `transactions` field with the _full_ [Transaction] objects:
-/// [BlockTransactions::Full]
+/// This will populate the `transactions` field with the _full_
+/// [Transaction](reth_rpc_types::Transaction) objects: [BlockTransactions::Full]
 pub fn from_block_full(
     block: PrimitiveBlock,
     total_difficulty: U256,
