@@ -1435,9 +1435,8 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
             let accounts = self.basic_accounts(lists)?;
             let hashed_addresses = self.insert_account_for_hashing(accounts)?;
             for (hashed_address, account) in hashed_addresses {
-                if account.is_some() {
-                    account_prefix_set.insert(Nibbles::unpack(hashed_address));
-                } else {
+                account_prefix_set.insert(Nibbles::unpack(hashed_address));
+                if account.is_none() {
                     destroyed_accounts.insert(hashed_address);
                 }
             }
