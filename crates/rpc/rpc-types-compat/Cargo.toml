@@ -1,0 +1,16 @@
+[package]
+name = "reth-rpc-types-compat"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = """
+Compatibility layer for reth-primitives and ethereum RPC types
+"""
+
+[dependencies]
+reth-primitives.workspace = true
+reth-rpc-types.workspace = true
+reth-rlp.workspace = true

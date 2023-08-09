@@ -129,9 +129,10 @@ where
 
                     // execute the new block
                     let substate = SubState::new(State::new(client.latest().unwrap()));
-                    let mut executor = Executor::new(chain_spec, substate);
+                    let mut executor = Executor::new(Arc::clone(&chain_spec), substate);
 
-                    match storage.build_and_execute(transactions.clone(), &mut executor) {
+                    match storage.build_and_execute(transactions.clone(), &mut executor, chain_spec)
+                    {
                         Ok((new_header, post_state)) => {
                             // clear all transactions from pool
                             pool.remove_transactions(transactions.iter().map(|tx| tx.hash()));

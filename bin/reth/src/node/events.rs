@@ -66,7 +66,7 @@ impl NodeState {
                         stage = %stage_id,
                         from = self.current_checkpoint.block_number,
                         checkpoint = %self.current_checkpoint,
-                        eta = %self.eta,
+                        eta = %self.eta.fmt_for_stage(stage_id),
                         "Executing stage",
                     );
                 }
@@ -85,7 +85,7 @@ impl NodeState {
                     stage = %stage_id,
                     block = checkpoint.block_number,
                     %checkpoint,
-                    eta = %self.eta,
+                    eta = %self.eta.fmt_for_stage(stage_id),
                     "{}",
                     if done {
                         "Stage finished executing"
@@ -226,13 +226,13 @@ where
         let mut this = self.project();
 
         while this.info_interval.poll_tick(cx).is_ready() {
-            if let Some(stage) = this.state.current_stage.map(|id| id.to_string()) {
+            if let Some(stage_id) = this.state.current_stage {
                 info!(
                     target: "reth::cli",
                     connected_peers = this.state.num_connected_peers(),
-                    %stage,
+                    stage = %stage_id.to_string(),
                     checkpoint = %this.state.current_checkpoint,
-                    eta = %this.state.eta,
+                    eta = %this.state.eta.fmt_for_stage(stage_id),
                     "Status"
                 );
             } else {
@@ -298,6 +298,18 @@ impl Eta {
 
         self.last_checkpoint = current;
         self.last_checkpoint_time = Some(Instant::now());
+    }
+
+    /// Format ETA for a given stage.
+    ///
+    /// NOTE: Currently ETA is disabled for Headers and Bodies stages until we find better
+    /// heuristics for calculation.
+    fn fmt_for_stage(&self, stage: StageId) -> String {
+        if matches!(stage, StageId::Headers | StageId::Bodies) {
+            String::from("unknown")
+        } else {
+            format!("{}", self)
+        }
     }
 }
 

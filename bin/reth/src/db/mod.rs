@@ -15,7 +15,10 @@ use reth_db::{
     Tables,
 };
 use reth_primitives::ChainSpec;
-use std::sync::Arc;
+use std::{
+    io::{self, Write},
+    sync::Arc,
+};
 
 mod clear;
 mod diff;
@@ -74,7 +77,11 @@ pub enum Subcommands {
     /// Gets the content of a table for the given key
     Get(get::Command),
     /// Deletes all database entries
-    Drop,
+    Drop {
+        /// Bypasses the interactive confirmation and drops the database directly
+        #[arg(short, long)]
+        force: bool,
+    },
     /// Deletes all table entries
     Clear(clear::Command),
     /// Lists current and local database versions
@@ -178,7 +185,22 @@ impl Command {
                 let tool = DbTool::new(&db, self.chain.clone())?;
                 command.execute(&tool)?;
             }
-            Subcommands::Drop => {
+            Subcommands::Drop { force } => {
+                if !force {
+                    // Ask for confirmation
+                    print!("Are you sure you want to drop the database? This cannot be undone. (y/N): ");
+                    // Flush the buffer to ensure the message is printed immediately
+                    io::stdout().flush().unwrap();
+
+                    let mut input = String::new();
+                    io::stdin().read_line(&mut input).expect("Failed to read line");
+
+                    if !input.trim().eq_ignore_ascii_case("y") {
+                        println!("Database drop aborted!");
+                        return Ok(())
+                    }
+                }
+
                 let db = open_db(&db_path, self.db.log_level)?;
                 let mut tool = DbTool::new(&db, self.chain.clone())?;
                 tool.drop(db_path)?;

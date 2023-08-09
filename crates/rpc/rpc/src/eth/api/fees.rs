@@ -8,7 +8,7 @@ use reth_network_api::NetworkInfo;
 use reth_primitives::{
     basefee::calculate_next_block_base_fee, BlockNumberOrTag, SealedHeader, U256,
 };
-use reth_provider::{BlockReaderIdExt, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
 use tracing::debug;
@@ -16,7 +16,8 @@ use tracing::debug;
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider:
+        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Returns a suggestion for a gas price for legacy transactions.
@@ -115,10 +116,12 @@ where
         //
         // The unwrap is safe since we checked earlier that we got at least 1 header.
         let last_header = headers.last().unwrap();
+        let chain_spec = self.provider().chain_spec();
         base_fee_per_gas.push(U256::from(calculate_next_block_base_fee(
             last_header.gas_used,
             last_header.gas_limit,
             last_header.base_fee_per_gas.unwrap_or_default(),
+            chain_spec.base_fee_params,
         )));
 
         Ok(FeeHistory {
