@@ -29,14 +29,13 @@ pub struct HistoricalStateProviderRef<'a, 'b, TX: DbTx<'a>> {
     tx: &'b TX,
     /// Block number is main index for the history state of accounts and storages.
     block_number: BlockNumber,
-    /// Lowest block number at which the account history is available.
-    lowest_account_history_block_number: Option<BlockNumber>,
-    /// Lowest block number at which the storage history is available.
-    lowest_storage_history_block_number: Option<BlockNumber>,
+    /// Lowest blocks at which different parts of the state are available.
+    lowest_available_blocks: LowestAvailableBlocks,
     /// Phantom lifetime `'a`
     _phantom: PhantomData<&'a TX>,
 }
 
+#[derive(Debug, Eq, PartialEq)]
 pub enum HistoryInfo {
     NotYetWritten,
     InChangeset(u64),
@@ -49,38 +48,24 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
         Self {
             tx,
             block_number,
-            lowest_account_history_block_number: None,
-            lowest_storage_history_block_number: None,
+            lowest_available_blocks: Default::default(),
             _phantom: PhantomData {},
         }
     }
 
     /// Create new StateProvider for historical block number and lowest block numbers at which
     /// account & storage histories are available.
-    pub fn new_with_lowest_history_block_numbers(
+    pub fn new_with_lowest_available_blocks(
         tx: &'b TX,
-        lowest_account_history_block_number: Option<BlockNumber>,
-        lowest_storage_history_block_number: Option<BlockNumber>,
         block_number: BlockNumber,
+        lowest_available_blocks: LowestAvailableBlocks,
     ) -> Self {
-        Self {
-            tx,
-            block_number,
-            lowest_account_history_block_number,
-            lowest_storage_history_block_number,
-            _phantom: PhantomData {},
-        }
+        Self { tx, block_number, lowest_available_blocks, _phantom: PhantomData {} }
     }
 
     /// Lookup an account in the AccountHistory table
     pub fn account_history_lookup(&self, address: Address) -> Result<HistoryInfo> {
-        // Check if lowest available block number for storage history is more than the requested
-        // block number for this historical provider instance.
-        if self
-            .lowest_account_history_block_number
-            .map(|block_number| block_number > self.block_number)
-            .unwrap_or(false)
-        {
+        if !self.lowest_available_blocks.is_account_history_available(self.block_number) {
             return Err(ProviderError::StateAtBlockPruned(self.block_number).into())
         }
 
@@ -95,13 +80,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
         address: Address,
         storage_key: StorageKey,
     ) -> Result<HistoryInfo> {
-        // Check if lowest available block number for account history is more than the requested
-        // block number for this historical provider instance.
-        if self
-            .lowest_storage_history_block_number
-            .map(|block_number| block_number > self.block_number)
-            .unwrap_or(false)
-        {
+        if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
             return Err(ProviderError::StateAtBlockPruned(self.block_number).into())
         }
 
@@ -246,10 +225,8 @@ pub struct HistoricalStateProvider<'a, TX: DbTx<'a>> {
     tx: TX,
     /// State at the block number is the main indexer of the state.
     block_number: BlockNumber,
-    /// Lowest block number at which the account history is available.
-    lowest_account_history_block_number: Option<BlockNumber>,
-    /// Lowest block number at which the storage history is available.
-    lowest_storage_history_block_number: Option<BlockNumber>,
+    /// Lowest blocks at which different parts of the state are available.
+    lowest_available_blocks: LowestAvailableBlocks,
     /// Phantom lifetime `'a`
     _phantom: PhantomData<&'a TX>,
 }
@@ -260,32 +237,36 @@ impl<'a, TX: DbTx<'a>> HistoricalStateProvider<'a, TX> {
         Self {
             tx,
             block_number,
-            lowest_account_history_block_number: None,
-            lowest_storage_history_block_number: None,
+            lowest_available_blocks: Default::default(),
             _phantom: PhantomData {},
         }
     }
 
     /// Set the lowest block number at which the account history is available.
-    pub fn with_lowest_account_history_block_number(mut self, block_number: BlockNumber) -> Self {
-        self.lowest_account_history_block_number = Some(block_number);
+    pub fn with_lowest_available_account_history_block_number(
+        mut self,
+        block_number: BlockNumber,
+    ) -> Self {
+        self.lowest_available_blocks.account_history_block_number = Some(block_number);
         self
     }
 
     /// Set the lowest block number at which the storage history is available.
-    pub fn with_lowest_storage_history_block_number(mut self, block_number: BlockNumber) -> Self {
-        self.lowest_storage_history_block_number = Some(block_number);
+    pub fn with_lowest_available_storage_history_block_number(
+        mut self,
+        block_number: BlockNumber,
+    ) -> Self {
+        self.lowest_available_blocks.storage_history_block_number = Some(block_number);
         self
     }
 
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
     fn as_ref<'b>(&'b self) -> HistoricalStateProviderRef<'a, 'b, TX> {
-        HistoricalStateProviderRef::new_with_lowest_history_block_numbers(
+        HistoricalStateProviderRef::new_with_lowest_available_blocks(
             &self.tx,
-            self.lowest_account_history_block_number,
-            self.lowest_storage_history_block_number,
             self.block_number,
+            self.lowest_available_blocks,
         )
     }
 }
@@ -293,9 +274,36 @@ impl<'a, TX: DbTx<'a>> HistoricalStateProvider<'a, TX> {
 // Delegates all provider impls to [HistoricalStateProviderRef]
 delegate_provider_impls!(HistoricalStateProvider<'a, TX> where [TX: DbTx<'a>]);
 
+/// Lowest blocks at which different parts of the state are available.
+/// They may be [Some] if pruning is enabled.
+#[derive(Default, Copy, Clone)]
+pub struct LowestAvailableBlocks {
+    /// Lowest block number at which the account history is available. It may not be available if
+    /// [reth_primitives::PrunePart::AccountHistory] was pruned.
+    pub account_history_block_number: Option<BlockNumber>,
+    /// Lowest block number at which the storage history is available. It may not be available if
+    /// [reth_primitives::PrunePart::StorageHistory] was pruned.
+    pub storage_history_block_number: Option<BlockNumber>,
+}
+
+impl LowestAvailableBlocks {
+    /// Check if account history is available at the provided block number, i.e. lowest available
+    /// block number for account history is less than or equal to the provided block number.
+    pub fn is_account_history_available(&self, at: BlockNumber) -> bool {
+        self.account_history_block_number.map(|block_number| block_number <= at).unwrap_or(true)
+    }
+
+    /// Check if storage history is available at the provided block number, i.e. lowest available
+    /// block number for storage history is less than or equal to the provided block number.
+    pub fn is_storage_history_available(&self, at: BlockNumber) -> bool {
+        self.storage_history_block_number.map(|block_number| block_number <= at).unwrap_or(true)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
+        providers::state::historical::{HistoryInfo, LowestAvailableBlocks},
         AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, StateProvider,
     };
     use reth_db::{
@@ -306,6 +314,7 @@ mod tests {
         transaction::{DbTx, DbTxMut},
         BlockNumberList,
     };
+    use reth_interfaces::provider::ProviderError;
     use reth_primitives::{hex_literal::hex, Account, StorageEntry, H160, H256, U256};
 
     const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));
@@ -512,6 +521,57 @@ mod tests {
         assert_eq!(
             HistoricalStateProviderRef::new(&tx, 1000).storage(HIGHER_ADDRESS, STORAGE),
             Ok(Some(higher_entry_plain.value))
+        );
+    }
+
+    #[test]
+    fn history_provider_unavailable() {
+        let db = create_test_rw_db();
+        let tx = db.tx().unwrap();
+
+        let provider = HistoricalStateProviderRef::new_with_lowest_available_blocks(
+            &tx,
+            2,
+            LowestAvailableBlocks {
+                account_history_block_number: Some(3),
+                storage_history_block_number: Some(3),
+            },
+        );
+        assert_eq!(
+            provider.account_history_lookup(ADDRESS),
+            Err(ProviderError::StateAtBlockPruned(provider.block_number).into())
+        );
+        assert_eq!(
+            provider.storage_history_lookup(ADDRESS, STORAGE),
+            Err(ProviderError::StateAtBlockPruned(provider.block_number).into())
+        );
+
+        let provider = HistoricalStateProviderRef::new_with_lowest_available_blocks(
+            &tx,
+            2,
+            LowestAvailableBlocks {
+                account_history_block_number: Some(2),
+                storage_history_block_number: Some(2),
+            },
+        );
+        assert_eq!(provider.account_history_lookup(ADDRESS), Ok(HistoryInfo::NotYetWritten));
+        assert_eq!(
+            provider.storage_history_lookup(ADDRESS, STORAGE),
+            Ok(HistoryInfo::NotYetWritten)
+        );
+
+        let provider = HistoricalStateProviderRef::new_with_lowest_available_blocks(
+            &tx,
+            2,
+            LowestAvailableBlocks {
+                account_history_block_number: Some(1),
+                storage_history_block_number: Some(1),
+            },
+        );
+        assert_eq!(provider.account_history_lookup(ADDRESS), Ok(HistoryInfo::NotYetWritten));
+        assert_eq!(
+            provider.storage_history_lookup(ADDRESS, STORAGE),
+            Ok(HistoryInfo::NotYetWritten)
         );
     }
 }
