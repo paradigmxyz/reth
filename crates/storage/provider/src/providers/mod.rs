@@ -209,12 +209,12 @@ where
     fn find_block_by_hash(&self, hash: H256, source: BlockSource) -> Result<Option<Block>> {
         let block = match source {
             BlockSource::Any => {
-                // check pending source first
-                // Note: it's fine to return the unsealed block because the caller already has the
-                // hash
-                let mut block = self.tree.block_by_hash(hash).map(|block| block.unseal());
+                // check database first
+                let mut block = self.database.provider()?.block_by_hash(hash)?;
                 if block.is_none() {
-                    block = self.database.provider()?.block_by_hash(hash)?;
+                    // Note: it's fine to return the unsealed block because the caller already has
+                    // the hash
+                    block = self.tree.block_by_hash(hash).map(|block| block.unseal());
                 }
                 block
             }
@@ -541,14 +541,17 @@ where
 
     fn state_by_block_hash(&self, block: BlockHash) -> Result<StateProviderBox<'_>> {
         trace!(target: "providers::blockchain", ?block, "Getting state by block hash");
+        let mut state = self.history_by_block_hash(block);
 
-        // check tree first
-        if let Some(pending) = self.tree.find_pending_state_provider(block) {
-            trace!(target: "providers::blockchain", "Returning pending state provider");
-            return self.pending_with_provider(pending)
+        // we failed to get the state by hash, from disk, hash block be the pending block
+        if state.is_err() {
+            if let Ok(Some(pending)) = self.pending_state_by_hash(block) {
+                // we found pending block by hash
+                state = Ok(pending)
+            }
         }
-        // not found in tree, check database
-        self.history_by_block_hash(block)
+
+        state
     }
 
     /// Storage provider for pending state.
@@ -658,16 +661,16 @@ where
         self.tree.find_canonical_ancestor(hash)
     }
 
+    fn is_canonical(&self, hash: BlockHash) -> std::result::Result<bool, Error> {
+        self.tree.is_canonical(hash)
+    }
+
     fn lowest_buffered_ancestor(&self, hash: BlockHash) -> Option<SealedBlockWithSenders> {
         self.tree.lowest_buffered_ancestor(hash)
     }
 
     fn canonical_tip(&self) -> BlockNumHash {
         self.tree.canonical_tip()
-    }
-
-    fn is_canonical(&self, hash: BlockHash) -> std::result::Result<bool, Error> {
-        self.tree.is_canonical(hash)
     }
 
     fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {

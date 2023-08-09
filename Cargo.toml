@@ -45,7 +45,7 @@ members = [
     "crates/transaction-pool",
     "crates/trie",
     "testing/ef-tests",
-
+    "crates/rpc/rpc-types-compat",
     "examples",
     "examples/additional-rpc-namespace-in-cli",
 ]
@@ -56,7 +56,7 @@ default-members = ["bin/reth"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.6"
 edition = "2021"
 rust-version = "1.70" # Remember to update .clippy.toml and README.md
 license = "MIT OR Apache-2.0"
@@ -102,6 +102,8 @@ reth-transaction-pool = { path = "./crates/transaction-pool" }
 reth-tasks = { path = "./crates/tasks" }
 reth-network = { path = "./crates/net/network" }
 reth-network-api = { path = "./crates/net/network-api" }
+reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat"}
+
 
 ## eth
 ethers-core = { version = "2.0.8", default-features = false }
@@ -143,6 +145,8 @@ jsonrpsee-types = { version = "0.19" }
 
 ## crypto
 secp256k1 = { version = "0.27.0", default-features = false, features = ["global-context", "rand-std", "recovery"] }
+# for eip-4844
+c-kzg = { git = "https://github.com/ethereum/c-kzg-4844" }
 
 ### misc-testing
 proptest = "1.0"

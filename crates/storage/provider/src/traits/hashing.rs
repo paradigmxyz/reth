@@ -3,7 +3,7 @@ use reth_db::models::BlockNumberAddress;
 use reth_interfaces::Result;
 use reth_primitives::{Account, Address, BlockNumber, StorageEntry, H256};
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     ops::{Range, RangeInclusive},
 };
 
@@ -15,7 +15,10 @@ pub trait HashingWriter: Send + Sync {
     /// # Returns
     ///
     /// Set of hashed keys of updated accounts.
-    fn unwind_account_hashing(&self, range: RangeInclusive<BlockNumber>) -> Result<BTreeSet<H256>>;
+    fn unwind_account_hashing(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<BTreeMap<H256, Option<Account>>>;
 
     /// Inserts all accounts into [reth_db::tables::AccountHistory] table.
     ///
@@ -25,7 +28,7 @@ pub trait HashingWriter: Send + Sync {
     fn insert_account_for_hashing(
         &self,
         accounts: impl IntoIterator<Item = (Address, Option<Account>)>,
-    ) -> Result<BTreeSet<H256>>;
+    ) -> Result<BTreeMap<H256, Option<Account>>>;
 
     /// Unwind and clear storage hashing
     ///
