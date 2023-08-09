@@ -11,7 +11,7 @@ use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockId, BlockNumberOrTag, TransactionMeta};
 
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
-use reth_rpc_types::{Block, Index, RichBlock, TransactionReceipt};
+use reth_rpc_types::{Index, RichBlock, TransactionReceipt};
 
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 use reth_transaction_pool::TransactionPool;

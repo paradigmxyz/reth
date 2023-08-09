@@ -822,7 +822,7 @@ impl From<TransactionSource> for TransactionSignedEcRecovered {
 impl From<TransactionSource> for Transaction {
     fn from(value: TransactionSource) -> Self {
         match value {
-            TransactionSource::Pool(tx) => Transaction::from_recovered(tx),
+            TransactionSource::Pool(tx) => reth_rpc_types_compat::transaction::from_recovered(tx),
             TransactionSource::Block { transaction, index, block_hash, block_number, base_fee } => {
                 from_recovered_with_block_context(
                     transaction,
