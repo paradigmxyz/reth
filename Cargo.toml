@@ -45,7 +45,7 @@ members = [
     "crates/transaction-pool",
     "crates/trie",
     "testing/ef-tests",
-
+    "crates/rpc/rpc-types-compat",
     "examples",
     "examples/additional-rpc-namespace-in-cli",
 ]
@@ -102,6 +102,8 @@ reth-transaction-pool = { path = "./crates/transaction-pool" }
 reth-tasks = { path = "./crates/tasks" }
 reth-network = { path = "./crates/net/network" }
 reth-network-api = { path = "./crates/net/network-api" }
+reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat"}
+
 
 ## eth
 ethers-core = { version = "2.0.8", default-features = false }
