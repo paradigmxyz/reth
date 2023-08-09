@@ -49,6 +49,9 @@ pub trait NetworkInfo: Send + Sync {
 
     /// Returns `true` if the network is undergoing sync.
     fn is_syncing(&self) -> bool;
+
+    /// Returns `true` when the node is undergoing the very first Pipeline sync.
+    fn is_initially_syncing(&self) -> bool;
 }
 
 /// Provides general purpose information about Peers in the network.

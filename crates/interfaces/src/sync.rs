@@ -7,6 +7,9 @@ use reth_primitives::Head;
 pub trait SyncStateProvider: Send + Sync {
     /// Returns `true` if the network is undergoing sync.
     fn is_syncing(&self) -> bool;
+
+    /// Returns `true` if the network is undergoing an initial (pipeline) sync.
+    fn is_initially_syncing(&self) -> bool;
 }
 
 /// An updater for updating the [SyncState] and status of the network.
@@ -52,6 +55,9 @@ pub struct NoopSyncStateUpdater;
 
 impl SyncStateProvider for NoopSyncStateUpdater {
     fn is_syncing(&self) -> bool {
+        false
+    }
+    fn is_initially_syncing(&self) -> bool {
         false
     }
 }
