@@ -216,7 +216,7 @@ impl Account {
         Tx: DbTx<'a>,
     {
         let account = tx.get::<tables::PlainAccountState>(address)?.ok_or_else(|| {
-            Error::Assertion(format!("Account is missing ({address}) expected: {:?}", self))
+            Error::Assertion(format!("Expected account ({address:?}) is missing from DB: {self:?}"))
         })?;
 
         assert_equal(self.balance.into(), account.balance, "Balance does not match")?;
