@@ -873,7 +873,17 @@ mod tests {
     #[cfg_attr(not(feature = "geth-tests"), ignore)]
     async fn test_tx_broadcasts_through_two_syncs() {
         reth_tracing::init_test_tracing();
+        let net = Testnet::create(3).await;
 
+        let mut handles = net.handles();
+        let handle0 = handles.next().unwrap();
+        let handle1 = handles.next().unwrap();
+
+        drop(handles);
+        let handle = net.spawn();
+
+        let listener0 = handle0.event_listener();
+        handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
         let client = NoopProvider::default();
@@ -882,7 +892,7 @@ mod tests {
             .disable_discovery()
             .listener_port(0)
             .build(client);
-        let (handle, network, mut transactions, _) = NetworkManager::new(config)
+        let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
             .await
             .unwrap()
             .into_builder()
@@ -892,34 +902,59 @@ mod tests {
         tokio::task::spawn(network);
 
         // go to syncing (pipline sync) to idle and then to syncing (live)
-        handle.update_sync_state(SyncState::Syncing);
-        assert!(NetworkInfo::is_syncing(&handle));
-        handle.update_sync_state(SyncState::Idle);
-        assert!(!NetworkInfo::is_syncing(&handle));
-        handle.update_sync_state(SyncState::Syncing);
-        assert!(NetworkInfo::is_syncing(&handle));
+        network_handle.update_sync_state(SyncState::Syncing);
+        assert!(NetworkInfo::is_syncing(&network_handle));
+        network_handle.update_sync_state(SyncState::Idle);
+        assert!(!NetworkInfo::is_syncing(&network_handle));
+        network_handle.update_sync_state(SyncState::Syncing);
+        assert!(NetworkInfo::is_syncing(&network_handle));
 
-        let peer_id = PeerId::random();
+        // wait for all initiator connections
+        let mut established = listener0.take(2);
+        while let Some(ev) = established.next().await {
+            match ev {
+                NetworkEvent::SessionEstablished {
+                    peer_id,
+                    remote_addr,
+                    client_version,
+                    capabilities,
+                    messages,
+                    status,
+                    version,
+                } => {
+                    // to insert a new peer in transactions peerset
+                    transactions.on_network_event(NetworkEvent::SessionEstablished {
+                        peer_id,
+                        remote_addr,
+                        client_version,
+                        capabilities,
+                        messages,
+                        status,
+                        version,
+                    })
+                }
+                NetworkEvent::PeerAdded(_peer_id) => continue,
+                ev => {
+                    panic!("unexpected event {ev:?}")
+                }
+            }
+        }
+        // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
+        let input = hex::decode("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76").unwrap();
+        let signed_tx = TransactionSigned::decode(&mut &input[..]).unwrap();
         transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
-            peer_id,
-            msg: Transactions(vec![TransactionSigned::default()]),
+            peer_id: *handle1.peer_id(),
+            msg: Transactions(vec![signed_tx.clone()]),
         });
-        assert!(!NetworkInfo::is_initially_syncing(&handle));
-        assert!(NetworkInfo::is_syncing(&handle));
+        poll_fn(|cx| {
+            let _ = transactions.poll_unpin(cx);
+            Poll::Ready(())
+        })
+        .await;
+        assert!(!NetworkInfo::is_initially_syncing(&network_handle));
+        assert!(NetworkInfo::is_syncing(&network_handle));
         assert!(!pool.is_empty());
-        // tests
-
-        // if we attempt to modify the initial test above with SyncState::Idle, the same assert
-        // fails.
-
-        // this is because the tx doesn't actually make its way to the pool with a
-        // Rand PeerId because there is no matching peer in the TM's peerset
-
-        // so lets say we fix that by implementing the boiler plate SessionEstablished logic from
-        // the below tests - the assert !pool.empty() still fails because there doesn't seem
-        // to be anything polling the TM future to make progress on draining the pool_import
-        // futures to make progress on adding the txs to the pool
-        // The same can be seen in the tests below, try assert !pool.empty() and they will fail!
+        handle.terminate().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
