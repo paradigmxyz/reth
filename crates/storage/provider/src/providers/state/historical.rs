@@ -18,6 +18,9 @@ use std::marker::PhantomData;
 
 /// State provider for a given block number which takes a tx reference.
 ///
+/// Historical state provider accesses the state at the start of the provided block number.
+/// It means that all changes made in the provided block number are not included.
+///
 /// Historical state provider reads the following tables:
 /// - [tables::AccountHistory]
 /// - [tables::Bytecodes]
@@ -268,7 +271,8 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
     }
 }
 
-/// State provider for a given block number
+/// State provider for a given block number.
+/// For more detailed description, see [HistoricalStateProviderRef].
 pub struct HistoricalStateProvider<'a, TX: DbTx<'a>> {
     /// Database transaction
     tx: TX,
