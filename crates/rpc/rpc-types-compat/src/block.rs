@@ -1,3 +1,5 @@
+//! Compatibility functions for rpc `Block` type.
+
 use crate::transaction::from_recovered_with_block_context;
 use reth_primitives::{Block as PrimitiveBlock, Header as PrimitiveHeader, H256, U256};
 use reth_rlp::Encodable;

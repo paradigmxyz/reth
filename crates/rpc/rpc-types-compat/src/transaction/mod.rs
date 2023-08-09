@@ -1,3 +1,5 @@
+//! Compatibility functions for rpc `Transaction` type.
+
 use reth_primitives::{
     AccessListItem, BlockNumber, Transaction as PrimitiveTransaction,
     TransactionKind as PrimitiveTransactionKind, TransactionSignedEcRecovered, TxType, H256, U128,
