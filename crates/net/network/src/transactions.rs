@@ -19,7 +19,8 @@ use reth_interfaces::{
 use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{Peers, ReputationChangeKind};
 use reth_primitives::{
-    FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, TransactionSigned, TxHash, H256,
+    FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, TransactionSigned, TxHash, TxType,
+    H256,
 };
 use reth_rlp::Encodable;
 use reth_transaction_pool::{
@@ -247,10 +248,24 @@ where
             let mut hashes = PooledTransactionsHashesBuilder::new(peer.version);
             let mut full_transactions = FullTransactionsBuilder::default();
 
+            // Iterate through the transactions to propagate and fill the hashes and full
+            // transaction lists, before deciding whether or not to send full transactions to the
+            // peer.
             for tx in to_propagate.iter() {
                 if peer.transactions.insert(tx.hash()) {
                     hashes.push(tx);
-                    full_transactions.push(tx);
+
+                    // Do not send full 4844 transaction hashes to peers.
+                    //
+                    //  Nodes MUST NOT automatically broadcast blob transactions to their peers.
+                    //  Instead, those transactions are only announced using
+                    //  `NewPooledTransactionHashes` messages, and can then be manually requested
+                    //  via `GetPooledTransactions`.
+                    //
+                    // From: <https://eips.ethereum.org/EIPS/eip-4844#networking>
+                    if tx.tx_type() != TxType::EIP4844 {
+                        full_transactions.push(tx);
+                    }
                 }
             }
             let mut new_pooled_hashes = hashes.build();
@@ -612,7 +627,6 @@ where
 
 /// A transaction that's about to be propagated to multiple peers.
 struct PropagateTransaction {
-    tx_type: u8,
     size: usize,
     transaction: Arc<TransactionSigned>,
 }
@@ -624,8 +638,12 @@ impl PropagateTransaction {
         self.transaction.hash()
     }
 
+    fn tx_type(&self) -> TxType {
+        self.transaction.tx_type()
+    }
+
     fn new(transaction: Arc<TransactionSigned>) -> Self {
-        Self { tx_type: transaction.tx_type().into(), size: transaction.length(), transaction }
+        Self { size: transaction.length(), transaction }
     }
 }
 
@@ -685,7 +703,7 @@ impl PooledTransactionsHashesBuilder {
             PooledTransactionsHashesBuilder::Eth68(msg) => {
                 msg.hashes.push(tx.hash());
                 msg.sizes.push(tx.size);
-                msg.types.push(tx.tx_type);
+                msg.types.push(tx.transaction.tx_type().into());
             }
         }
     }

@@ -84,6 +84,13 @@ name = "rustls-webpki"
 expression = "LicenseRef-rustls-webpki"
 license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
 
+[[licenses.clarify]]
+name = "c-kzg"
+expression = "Apache-2.0"
+# The crate is in `bindings/rust` so we have to go up two directories for the
+# license
+license-files = [{ path = "../../LICENSE", hash = 0x13cec820 }]
+
 # This section is considered when running `cargo deny check sources`.
 # More documentation about the 'sources' section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/sources/cfg.html

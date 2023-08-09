@@ -65,127 +65,18 @@ pub enum Transaction {
     /// transaction, incentivizing miners to include transactions with higher priority fees per
     /// gas.
     Eip1559(TxEip1559),
-}
-
-impl Transaction {
-    /// This encodes the transaction _without_ the signature, and is only suitable for creating a
-    /// hash intended for signing.
-    pub fn encode_without_signature(&self, out: &mut dyn bytes::BufMut) {
-        Encodable::encode(self, out);
-    }
-
-    /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
-    /// hash that for eip2718 does not require rlp header
-    pub fn encode_with_signature(
-        &self,
-        signature: &Signature,
-        out: &mut dyn bytes::BufMut,
-        with_header: bool,
-    ) {
-        match self {
-            Transaction::Legacy(TxLegacy { chain_id, .. }) => {
-                // do nothing w/ with_header
-                let payload_length =
-                    self.fields_len() + signature.payload_len_with_eip155_chain_id(*chain_id);
-                let header = Header { list: true, payload_length };
-                header.encode(out);
-                self.encode_fields(out);
-                signature.encode_with_eip155_chain_id(out, *chain_id);
-            }
-            _ => {
-                let payload_length = self.fields_len() + signature.payload_len();
-                if with_header {
-                    Header {
-                        list: false,
-                        payload_length: 1 + length_of_length(payload_length) + payload_length,
-                    }
-                    .encode(out);
-                }
-                out.put_u8(self.tx_type() as u8);
-                let header = Header { list: true, payload_length };
-                header.encode(out);
-                self.encode_fields(out);
-                signature.encode(out);
-            }
-        }
-    }
-
-    /// This sets the transaction's nonce.
-    pub fn set_nonce(&mut self, nonce: u64) {
-        match self {
-            Transaction::Legacy(tx) => tx.nonce = nonce,
-            Transaction::Eip2930(tx) => tx.nonce = nonce,
-            Transaction::Eip1559(tx) => tx.nonce = nonce,
-        }
-    }
-
-    /// This sets the transaction's value.
-    pub fn set_value(&mut self, value: u128) {
-        match self {
-            Transaction::Legacy(tx) => tx.value = value,
-            Transaction::Eip2930(tx) => tx.value = value,
-            Transaction::Eip1559(tx) => tx.value = value,
-        }
-    }
-
-    /// This sets the transaction's input field.
-    pub fn set_input(&mut self, input: Bytes) {
-        match self {
-            Transaction::Legacy(tx) => tx.input = input,
-            Transaction::Eip2930(tx) => tx.input = input,
-            Transaction::Eip1559(tx) => tx.input = input,
-        }
-    }
-
-    /// Calculates a heuristic for the in-memory size of the [Transaction].
-    #[inline]
-    fn size(&self) -> usize {
-        match self {
-            Transaction::Legacy(tx) => tx.size(),
-            Transaction::Eip2930(tx) => tx.size(),
-            Transaction::Eip1559(tx) => tx.size(),
-        }
-    }
-}
-
-impl Compact for Transaction {
-    fn to_compact<B>(self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
-        match self {
-            Transaction::Legacy(tx) => {
-                tx.to_compact(buf);
-                0
-            }
-            Transaction::Eip2930(tx) => {
-                tx.to_compact(buf);
-                1
-            }
-            Transaction::Eip1559(tx) => {
-                tx.to_compact(buf);
-                2
-            }
-        }
-    }
-
-    fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
-        match identifier {
-            0 => {
-                let (tx, buf) = TxLegacy::from_compact(buf, buf.len());
-                (Transaction::Legacy(tx), buf)
-            }
-            1 => {
-                let (tx, buf) = TxEip2930::from_compact(buf, buf.len());
-                (Transaction::Eip2930(tx), buf)
-            }
-            2 => {
-                let (tx, buf) = TxEip1559::from_compact(buf, buf.len());
-                (Transaction::Eip1559(tx), buf)
-            }
-            _ => unreachable!("Junk data in database: unknown Transaction variant"),
-        }
-    }
+    /// Shard Blob Transactions ([EIP-4844](https://eips.ethereum.org/EIPS/eip-4844)), type `0x3`.
+    ///
+    /// Shard Blob Transactions introduce a new transaction type called a blob-carrying transaction
+    /// to reduce gas costs. These transactions are similar to regular Ethereum transactions but
+    /// include additional data called a blob.
+    ///
+    /// Blobs are larger (~125 kB) and cheaper than the current calldata, providing an immutable
+    /// and read-only memory for storing transaction data.
+    ///
+    /// EIP-4844, also known as proto-danksharding, implements the framework and logic of
+    /// danksharding, introducing new transaction formats and verification rules.
+    Eip4844(TxEip4844),
 }
 
 // === impl Transaction ===
@@ -205,6 +96,7 @@ impl Transaction {
             Transaction::Legacy(TxLegacy { chain_id, .. }) => *chain_id,
             Transaction::Eip2930(TxEip2930 { chain_id, .. }) => Some(*chain_id),
             Transaction::Eip1559(TxEip1559 { chain_id, .. }) => Some(*chain_id),
+            Transaction::Eip4844(TxEip4844 { chain_id, .. }) => Some(*chain_id),
         }
     }
 
@@ -214,6 +106,7 @@ impl Transaction {
             Transaction::Legacy(TxLegacy { chain_id: ref mut c, .. }) => *c = Some(chain_id),
             Transaction::Eip2930(TxEip2930 { chain_id: ref mut c, .. }) => *c = chain_id,
             Transaction::Eip1559(TxEip1559 { chain_id: ref mut c, .. }) => *c = chain_id,
+            Transaction::Eip4844(TxEip4844 { chain_id: ref mut c, .. }) => *c = chain_id,
         }
     }
 
@@ -223,7 +116,8 @@ impl Transaction {
         match self {
             Transaction::Legacy(TxLegacy { to, .. }) |
             Transaction::Eip2930(TxEip2930 { to, .. }) |
-            Transaction::Eip1559(TxEip1559 { to, .. }) => to,
+            Transaction::Eip1559(TxEip1559 { to, .. }) |
+            Transaction::Eip4844(TxEip4844 { to, .. }) => to,
         }
     }
 
@@ -238,6 +132,7 @@ impl Transaction {
             Transaction::Legacy { .. } => TxType::Legacy,
             Transaction::Eip2930 { .. } => TxType::EIP2930,
             Transaction::Eip1559 { .. } => TxType::EIP1559,
+            Transaction::Eip4844 { .. } => TxType::EIP4844,
         }
     }
 
@@ -247,6 +142,7 @@ impl Transaction {
             Transaction::Legacy(TxLegacy { value, .. }) => value,
             Transaction::Eip2930(TxEip2930 { value, .. }) => value,
             Transaction::Eip1559(TxEip1559 { value, .. }) => value,
+            Transaction::Eip4844(TxEip4844 { value, .. }) => value,
         }
     }
 
@@ -256,6 +152,7 @@ impl Transaction {
             Transaction::Legacy(TxLegacy { nonce, .. }) => *nonce,
             Transaction::Eip2930(TxEip2930 { nonce, .. }) => *nonce,
             Transaction::Eip1559(TxEip1559 { nonce, .. }) => *nonce,
+            Transaction::Eip4844(TxEip4844 { nonce, .. }) => *nonce,
         }
     }
 
@@ -264,7 +161,8 @@ impl Transaction {
         match self {
             Transaction::Legacy(TxLegacy { gas_limit, .. }) |
             Transaction::Eip2930(TxEip2930 { gas_limit, .. }) |
-            Transaction::Eip1559(TxEip1559 { gas_limit, .. }) => *gas_limit,
+            Transaction::Eip1559(TxEip1559 { gas_limit, .. }) |
+            Transaction::Eip4844(TxEip4844 { gas_limit, .. }) => *gas_limit,
         }
     }
 
@@ -275,7 +173,8 @@ impl Transaction {
         match self {
             Transaction::Legacy(TxLegacy { gas_price, .. }) |
             Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
-            Transaction::Eip1559(TxEip1559 { max_fee_per_gas, .. }) => *max_fee_per_gas,
+            Transaction::Eip1559(TxEip1559 { max_fee_per_gas, .. }) |
+            Transaction::Eip4844(TxEip4844 { max_fee_per_gas, .. }) => *max_fee_per_gas,
         }
     }
 
@@ -287,9 +186,24 @@ impl Transaction {
         match self {
             Transaction::Legacy(_) => None,
             Transaction::Eip2930(_) => None,
-            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) => {
+            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) |
+            Transaction::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. }) => {
                 Some(*max_priority_fee_per_gas)
             }
+        }
+    }
+
+    /// Max fee per blob gas for eip4844 transaction [TxEip4844].
+    ///
+    /// Returns `None` for non-eip4844 transactions.
+    ///
+    /// This is also commonly referred to as the "Blob Gas Fee Cap" (`BlobGasFeeCap`).
+    pub fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        match self {
+            Transaction::Eip4844(TxEip4844 { max_fee_per_blob_gas, .. }) => {
+                Some(*max_fee_per_blob_gas)
+            }
+            _ => None,
         }
     }
 
@@ -304,7 +218,8 @@ impl Transaction {
         match self {
             Transaction::Legacy(TxLegacy { gas_price, .. }) |
             Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
-            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) => {
+            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) |
+            Transaction::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. }) => {
                 *max_priority_fee_per_gas
             }
         }
@@ -318,6 +233,7 @@ impl Transaction {
             Transaction::Legacy(tx) => tx.gas_price,
             Transaction::Eip2930(tx) => tx.gas_price,
             Transaction::Eip1559(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
+            Transaction::Eip4844(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
         }
     }
 
@@ -373,6 +289,7 @@ impl Transaction {
             Transaction::Legacy(TxLegacy { input, .. }) => input,
             Transaction::Eip2930(TxEip2930 { input, .. }) => input,
             Transaction::Eip1559(TxEip1559 { input, .. }) => input,
+            Transaction::Eip4844(TxEip4844 { input, .. }) => input,
         }
     }
 
@@ -469,6 +386,33 @@ impl Transaction {
                 len += access_list.length();
                 len
             }
+            Transaction::Eip4844(TxEip4844 {
+                chain_id,
+                nonce,
+                gas_limit,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                to,
+                value,
+                access_list,
+                blob_versioned_hashes,
+                max_fee_per_blob_gas,
+                input,
+            }) => {
+                let mut len = 0;
+                len += chain_id.length();
+                len += nonce.length();
+                len += gas_limit.length();
+                len += max_fee_per_gas.length();
+                len += max_priority_fee_per_gas.length();
+                len += to.length();
+                len += value.length();
+                len += access_list.length();
+                len += blob_versioned_hashes.length();
+                len += max_fee_per_blob_gas.length();
+                len += input.0.length();
+                len
+            }
         }
     }
 
@@ -531,6 +475,162 @@ impl Transaction {
                 input.0.encode(out);
                 access_list.encode(out);
             }
+            Transaction::Eip4844(TxEip4844 {
+                chain_id,
+                nonce,
+                gas_limit,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                to,
+                value,
+                access_list,
+                blob_versioned_hashes,
+                max_fee_per_blob_gas,
+                input,
+            }) => {
+                chain_id.encode(out);
+                nonce.encode(out);
+                max_priority_fee_per_gas.encode(out);
+                max_fee_per_gas.encode(out);
+                gas_limit.encode(out);
+                to.encode(out);
+                value.encode(out);
+                input.0.encode(out);
+                access_list.encode(out);
+                max_fee_per_blob_gas.encode(out);
+                blob_versioned_hashes.encode(out);
+            }
+        }
+    }
+
+    /// This encodes the transaction _without_ the signature, and is only suitable for creating a
+    /// hash intended for signing.
+    pub fn encode_without_signature(&self, out: &mut dyn bytes::BufMut) {
+        Encodable::encode(self, out);
+    }
+
+    /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
+    /// hash that for eip2718 does not require rlp header
+    pub fn encode_with_signature(
+        &self,
+        signature: &Signature,
+        out: &mut dyn bytes::BufMut,
+        with_header: bool,
+    ) {
+        match self {
+            Transaction::Legacy(TxLegacy { chain_id, .. }) => {
+                // do nothing w/ with_header
+                let payload_length =
+                    self.fields_len() + signature.payload_len_with_eip155_chain_id(*chain_id);
+                let header = Header { list: true, payload_length };
+                header.encode(out);
+                self.encode_fields(out);
+                signature.encode_with_eip155_chain_id(out, *chain_id);
+            }
+            _ => {
+                let payload_length = self.fields_len() + signature.payload_len();
+                if with_header {
+                    Header {
+                        list: false,
+                        payload_length: 1 + length_of_length(payload_length) + payload_length,
+                    }
+                    .encode(out);
+                }
+                out.put_u8(self.tx_type() as u8);
+                let header = Header { list: true, payload_length };
+                header.encode(out);
+                self.encode_fields(out);
+                signature.encode(out);
+            }
+        }
+    }
+
+    /// This sets the transaction's nonce.
+    pub fn set_nonce(&mut self, nonce: u64) {
+        match self {
+            Transaction::Legacy(tx) => tx.nonce = nonce,
+            Transaction::Eip2930(tx) => tx.nonce = nonce,
+            Transaction::Eip1559(tx) => tx.nonce = nonce,
+            Transaction::Eip4844(tx) => tx.nonce = nonce,
+        }
+    }
+
+    /// This sets the transaction's value.
+    pub fn set_value(&mut self, value: u128) {
+        match self {
+            Transaction::Legacy(tx) => tx.value = value,
+            Transaction::Eip2930(tx) => tx.value = value,
+            Transaction::Eip1559(tx) => tx.value = value,
+            Transaction::Eip4844(tx) => tx.value = value,
+        }
+    }
+
+    /// This sets the transaction's input field.
+    pub fn set_input(&mut self, input: Bytes) {
+        match self {
+            Transaction::Legacy(tx) => tx.input = input,
+            Transaction::Eip2930(tx) => tx.input = input,
+            Transaction::Eip1559(tx) => tx.input = input,
+            Transaction::Eip4844(tx) => tx.input = input,
+        }
+    }
+
+    /// Calculates a heuristic for the in-memory size of the [Transaction].
+    #[inline]
+    fn size(&self) -> usize {
+        match self {
+            Transaction::Legacy(tx) => tx.size(),
+            Transaction::Eip2930(tx) => tx.size(),
+            Transaction::Eip1559(tx) => tx.size(),
+            Transaction::Eip4844(tx) => tx.size(),
+        }
+    }
+}
+
+impl Compact for Transaction {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        match self {
+            Transaction::Legacy(tx) => {
+                tx.to_compact(buf);
+                0
+            }
+            Transaction::Eip2930(tx) => {
+                tx.to_compact(buf);
+                1
+            }
+            Transaction::Eip1559(tx) => {
+                tx.to_compact(buf);
+                2
+            }
+            Transaction::Eip4844(tx) => {
+                tx.to_compact(buf);
+                3
+            }
+        }
+    }
+
+    fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+        match identifier {
+            0 => {
+                let (tx, buf) = TxLegacy::from_compact(buf, buf.len());
+                (Transaction::Legacy(tx), buf)
+            }
+            1 => {
+                let (tx, buf) = TxEip2930::from_compact(buf, buf.len());
+                (Transaction::Eip2930(tx), buf)
+            }
+            2 => {
+                let (tx, buf) = TxEip1559::from_compact(buf, buf.len());
+                (Transaction::Eip1559(tx), buf)
+            }
+            3 => {
+                let (tx, buf) = TxEip4844::from_compact(buf, buf.len());
+                (Transaction::Eip4844(tx), buf)
+            }
+            _ => unreachable!("Junk data in database: unknown Transaction variant"),
         }
     }
 }
@@ -571,26 +671,6 @@ impl Encodable for Transaction {
                 let payload_length = self.fields_len();
                 // 'transaction type byte length' + 'header length' + 'payload length'
                 1 + length_of_length(payload_length) + payload_length
-            }
-        }
-    }
-}
-
-impl TxEip1559 {
-    /// Returns the effective gas price for the given `base_fee`.
-    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
-        match base_fee {
-            None => self.max_fee_per_gas,
-            Some(base_fee) => {
-                // if the tip is greater than the max priority fee per gas, set it to the max
-                // priority fee per gas + base fee
-                let tip = self.max_fee_per_gas.saturating_sub(base_fee as u128);
-                if tip > self.max_priority_fee_per_gas {
-                    self.max_priority_fee_per_gas + base_fee as u128
-                } else {
-                    // otherwise return the max fee per gas
-                    self.max_fee_per_gas
-                }
             }
         }
     }
@@ -1011,6 +1091,19 @@ impl TransactionSigned {
                 value: Decodable::decode(data)?,
                 input: Bytes(Decodable::decode(data)?),
                 access_list: Decodable::decode(data)?,
+            }),
+            3 => Transaction::Eip4844(TxEip4844 {
+                chain_id: Decodable::decode(data)?,
+                nonce: Decodable::decode(data)?,
+                max_priority_fee_per_gas: Decodable::decode(data)?,
+                max_fee_per_gas: Decodable::decode(data)?,
+                gas_limit: Decodable::decode(data)?,
+                to: Decodable::decode(data)?,
+                value: Decodable::decode(data)?,
+                input: Bytes(Decodable::decode(data)?),
+                access_list: Decodable::decode(data)?,
+                max_fee_per_blob_gas: Decodable::decode(data)?,
+                blob_versioned_hashes: Decodable::decode(data)?,
             }),
             _ => return Err(DecodeError::Custom("unsupported typed transaction type")),
         };

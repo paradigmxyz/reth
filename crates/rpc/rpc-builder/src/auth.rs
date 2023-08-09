@@ -12,7 +12,8 @@ use jsonrpsee::{
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockReaderIdExt, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt, StateProviderFactory,
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt,
+    StateProviderFactory,
 };
 use reth_rpc::{
     eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
@@ -40,10 +41,11 @@ pub async fn launch<Provider, Pool, Network, Tasks, EngineApi>(
 ) -> Result<AuthServerHandle, RpcError>
 where
     Provider: BlockReaderIdExt
-        + ReceiptProviderIdExt
-        + HeaderProvider
-        + StateProviderFactory
+        + ChainSpecProvider
         + EvmEnvProvider
+        + HeaderProvider
+        + ReceiptProviderIdExt
+        + StateProviderFactory
         + Clone
         + Unpin
         + 'static,
@@ -86,9 +88,10 @@ pub async fn launch_with_eth_api<Provider, Pool, Network, EngineApi>(
 ) -> Result<AuthServerHandle, RpcError>
 where
     Provider: BlockReaderIdExt
+        + ChainSpecProvider
+        + EvmEnvProvider
         + HeaderProvider
         + StateProviderFactory
-        + EvmEnvProvider
         + Clone
         + Unpin
         + 'static,
@@ -215,6 +218,11 @@ impl AuthServerConfigBuilder {
                     // payload bodies limit for `engine_getPayloadBodiesByRangeV`
                     // ~750MB per response should be enough
                     .max_response_body_size(750 * 1024 * 1024)
+                    // Connections to this server are always authenticated, hence this only affects
+                    // connections from the CL or any other client that uses JWT, this should be
+                    // more than enough so that the CL (or multiple CL nodes) will never get rate
+                    // limited
+                    .max_connections(500)
                     // bump the default request size slightly, there aren't any methods exposed with
                     // dynamic request params that can exceed this
                     .max_request_body_size(25 * 1024 * 1024)

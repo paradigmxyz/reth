@@ -232,7 +232,7 @@ impl RpcServerArgs {
         events: Events,
         engine_api: Engine,
         jwt_secret: JwtSecret,
-        ext: &Ext,
+        ext: &mut Ext,
     ) -> eyre::Result<(RpcServerHandle, AuthServerHandle)>
     where
         Provider: BlockReaderIdExt
@@ -339,9 +339,10 @@ impl RpcServerArgs {
     ) -> Result<AuthServerHandle, RpcError>
     where
         Provider: BlockReaderIdExt
+            + ChainSpecProvider
+            + EvmEnvProvider
             + HeaderProvider
             + StateProviderFactory
-            + EvmEnvProvider
             + Clone
             + Unpin
             + 'static,

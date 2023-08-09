@@ -1,13 +1,11 @@
 //! Contains types that represent ethereum types in [reth_primitives] when used in RPC
 use crate::Transaction;
 use reth_primitives::{
-    Address, Block as PrimitiveBlock, Bloom, Bytes, Header as PrimitiveHeader, SealedHeader,
-    Withdrawal, H256, H64, U256, U64,
+    Address, Bloom, Bytes, Header as PrimitiveHeader, SealedHeader, Withdrawal, H256, H64, U256,
+    U64,
 };
-use reth_rlp::Encodable;
 use serde::{ser::Error, Deserialize, Serialize, Serializer};
 use std::{collections::BTreeMap, ops::Deref};
-
 /// Block Transactions depending on the boolean attribute of `eth_getBlockBy*`,
 /// or if used by `eth_getUncle*`
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -82,118 +80,6 @@ pub struct Block {
     /// Withdrawals in the block
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub withdrawals: Option<Vec<Withdrawal>>,
-}
-
-impl Block {
-    /// Converts the given primitive block into a [Block] response with the given
-    /// [BlockTransactionsKind]
-    ///
-    /// If a `block_hash` is provided, then this is used, otherwise the block hash is computed.
-    pub fn from_block(
-        block: PrimitiveBlock,
-        total_difficulty: U256,
-        kind: BlockTransactionsKind,
-        block_hash: Option<H256>,
-    ) -> Result<Self, BlockError> {
-        match kind {
-            BlockTransactionsKind::Hashes => {
-                Ok(Self::from_block_with_tx_hashes(block, total_difficulty, block_hash))
-            }
-            BlockTransactionsKind::Full => {
-                Self::from_block_full(block, total_difficulty, block_hash)
-            }
-        }
-    }
-
-    /// Create a new [Block] response from a [primitive block](reth_primitives::Block), using the
-    /// total difficulty to populate its field in the rpc response.
-    ///
-    /// This will populate the `transactions` field with only the hashes of the transactions in the
-    /// block: [BlockTransactions::Hashes]
-    pub fn from_block_with_tx_hashes(
-        block: PrimitiveBlock,
-        total_difficulty: U256,
-        block_hash: Option<H256>,
-    ) -> Self {
-        let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
-        let transactions = block.body.iter().map(|tx| tx.hash()).collect();
-
-        Self::from_block_with_transactions(
-            block_hash,
-            block,
-            total_difficulty,
-            BlockTransactions::Hashes(transactions),
-        )
-    }
-
-    /// Create a new [Block] response from a [primitive block](reth_primitives::Block), using the
-    /// total difficulty to populate its field in the rpc response.
-    ///
-    /// This will populate the `transactions` field with the _full_ [Transaction] objects:
-    /// [BlockTransactions::Full]
-    pub fn from_block_full(
-        block: PrimitiveBlock,
-        total_difficulty: U256,
-        block_hash: Option<H256>,
-    ) -> Result<Self, BlockError> {
-        let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
-        let block_number = block.number;
-        let mut transactions = Vec::with_capacity(block.body.len());
-        for (idx, tx) in block.body.iter().enumerate() {
-            let signed_tx = tx.clone().into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
-            transactions.push(Transaction::from_recovered_with_block_context(
-                signed_tx,
-                block_hash,
-                block_number,
-                block.base_fee_per_gas,
-                U256::from(idx),
-            ))
-        }
-
-        Ok(Self::from_block_with_transactions(
-            block_hash,
-            block,
-            total_difficulty,
-            BlockTransactions::Full(transactions),
-        ))
-    }
-
-    fn from_block_with_transactions(
-        block_hash: H256,
-        block: PrimitiveBlock,
-        total_difficulty: U256,
-        transactions: BlockTransactions,
-    ) -> Self {
-        let block_length = block.length();
-        let uncles = block.ommers.into_iter().map(|h| h.hash_slow()).collect();
-        let header = Header::from_primitive_with_hash(block.header.seal(block_hash));
-        let withdrawals = if header.withdrawals_root.is_some() { block.withdrawals } else { None };
-        Self {
-            header,
-            uncles,
-            transactions,
-            total_difficulty: Some(total_difficulty),
-            size: Some(U256::from(block_length)),
-            withdrawals,
-        }
-    }
-
-    /// Build an RPC block response representing
-    /// an Uncle from its header.
-    pub fn uncle_block_from_header(header: PrimitiveHeader) -> Self {
-        let hash = header.hash_slow();
-        let rpc_header = Header::from_primitive_with_hash(header.clone().seal(hash));
-        let uncle_block = PrimitiveBlock { header, ..Default::default() };
-        let size = Some(U256::from(uncle_block.length()));
-        Self {
-            uncles: vec![],
-            header: rpc_header,
-            transactions: BlockTransactions::Uncle,
-            withdrawals: Some(vec![]),
-            size,
-            total_difficulty: None,
-        }
-    }
 }
 
 /// Block header representation.

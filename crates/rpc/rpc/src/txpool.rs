@@ -39,7 +39,7 @@ where
             let entry = content.entry(tx.sender()).or_default();
             let key = tx.nonce().to_string();
             let tx = tx.to_recovered_transaction();
-            let tx = Transaction::from_recovered(tx);
+            let tx = reth_rpc_types_compat::transaction::from_recovered(tx);
             entry.insert(key, tx);
         }
 
