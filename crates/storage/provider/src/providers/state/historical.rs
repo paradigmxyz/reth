@@ -78,7 +78,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
         self.history_info::<tables::AccountHistory, _>(
             history_key,
             |key| key.key == address,
-            self.lowest_account_history_block_number,
+            self.lowest_available_blocks.account_history_block_number,
         )
     }
 
@@ -97,7 +97,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
         self.history_info::<tables::StorageHistory, _>(
             history_key,
             |key| key.address == address && key.sharded_key.key == storage_key,
-            self.lowest_storage_history_block_number,
+            self.lowest_available_blocks.storage_history_block_number,
         )
     }
 
