@@ -260,9 +260,10 @@ impl SyncStateProvider for NetworkHandle {
     }
     // used to guard the txpool
     fn is_initially_syncing(&self) -> bool {
-        let init_sync_done = self.inner.initial_sync_done.load(Ordering::Relaxed);
-        let is_currently_syncing = self.inner.is_syncing.load(Ordering::Relaxed);
-        is_currently_syncing && !init_sync_done
+        if self.inner.initial_sync_done.load(Ordering::Relaxed) {
+            return false
+        }
+        self.inner.is_syncing.load(Ordering::Relaxed)
     }
 }
 

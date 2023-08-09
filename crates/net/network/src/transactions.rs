@@ -594,11 +594,12 @@ where
                     this.on_good_import(hash);
                 }
                 Err(err) => {
-                    // if we're initially syncing and the transaction is bad we ignore it, otherwise
-                    // we penalize the peer that sent the bad transaction with
-                    // the assumption that the peer should have known that this
-                    // transaction is bad. (e.g. consensus rules)
-                    if err.is_bad_transaction() && !this.network.is_initially_syncing() {
+                    // if we're _currently_ syncing and the transaction is bad we ignore it,
+                    // otherwise we penalize the peer that sent the bad
+                    // transaction with the assumption that the peer should have
+                    // known that this transaction is bad. (e.g. consensus
+                    // rules)
+                    if err.is_bad_transaction() && !this.network.is_syncing() {
                         trace!(target: "net::tx", ?err, "Bad transaction import");
                         this.on_bad_import(*err.hash());
                         continue
@@ -794,6 +795,7 @@ mod tests {
     use reth_rlp::Decodable;
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};
     use secp256k1::SecretKey;
+    use std::future::poll_fn;
 
     #[tokio::test(flavor = "multi_thread")]
     #[cfg_attr(not(feature = "geth-tests"), ignore)]
@@ -996,9 +998,16 @@ mod tests {
             *handle1.peer_id(),
             transactions.transactions_by_peers.get(&signed_tx.hash()).unwrap()[0]
         );
-        // This fails - since pool_imports doesnt make progress on adding the tx the pool, nothing
-        // is calling poll()
+
+        // advance the transaction manager future
+        poll_fn(|cx| {
+            let _ = transactions.poll_unpin(cx);
+            Poll::Ready(())
+        })
+        .await;
+
         assert!(!pool.is_empty());
+        assert!(pool.get(&signed_tx.hash).is_some());
         handle.terminate().await;
     }
 
