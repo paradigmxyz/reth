@@ -377,6 +377,7 @@ where
     ///
     /// If this is invoked after a new block has been downloaded, the downloaded block could be the
     /// (missing) finalized block.
+    #[instrument(level = "trace", skip(self), fields(canonical_tip_num, target_block_number, downloaded_block = ?downloaded_block), target = "consensus::engine", ret)]
     fn can_pipeline_sync_to_finalized(
         &self,
         canonical_tip_num: u64,
@@ -671,7 +672,8 @@ where
                 if let Error::Execution(ref err) = error {
                     if err.is_fatal() {
                         tracing::error!(target: "consensus::engine", ?err, "Encountered fatal error");
-                        return Err(error)
+                        panic!("FATAL");
+                        // return Err(error)
                     }
                 }
 
@@ -1279,10 +1281,13 @@ where
         // check if the block's parent is already marked as invalid
         if self.check_invalid_ancestor_with_head(block.parent_hash, block.hash).is_some() {
             // can skip this invalid block
+            println!(">>>>>> ENDED UP HERE parent: {} hash: {:?}", block.parent_hash, block.hash);
             return
         }
 
-        match self.blockchain.insert_block_without_senders(block) {
+        let status = self.blockchain.insert_block_without_senders(block);
+        println!(">>>> INSERT STATUS {status:?}");
+        match status {
             Ok(status) => {
                 match status {
                     InsertPayloadOk::Inserted(BlockStatus::Valid) => {
@@ -1333,11 +1338,15 @@ where
         // compare the missing parent with the canonical tip
         let canonical_tip_num = self.blockchain.canonical_tip().number;
 
-        if let Some(target) = self.can_pipeline_sync_to_finalized(
+        let maybe_can = self.can_pipeline_sync_to_finalized(
             canonical_tip_num,
             missing_parent.number,
             Some(downloaded_block),
-        ) {
+        );
+        println!(
+            "canonical_tip_num {canonical_tip_num} missing_parent.number {} downloaded_block {downloaded_block:?} can_pipeline_sync_to_finalized {maybe_can:?}", missing_parent.number
+        );
+        if let Some(target) = maybe_can {
             // we don't have the block yet and the distance exceeds the allowed
             // threshold
             self.sync.set_pipeline_sync_target(target);
@@ -1354,6 +1363,11 @@ where
         //  * the missing parent block num >= canonical tip num, but the number of missing blocks is
         //    less than the pipeline threshold
         //    * this case represents a potentially long range of blocks to download and execute
+        println!(
+            "canonical tip {canonical_tip_num} missing_parent.number {} distance {:?}",
+            missing_parent.number,
+            self.distance_from_local_tip(canonical_tip_num, missing_parent.number)
+        );
         if let Some(distance) =
             self.distance_from_local_tip(canonical_tip_num, missing_parent.number)
         {
@@ -1378,7 +1392,12 @@ where
             // optimistically try to make the head of the current FCU target canonical, the sync
             // target might have changed since the block download request was issued
             // (new FCU received)
-            match self.blockchain.make_canonical(&target.head_block_hash) {
+            let result = self.blockchain.make_canonical(&target.head_block_hash);
+            println!(
+                "inserted {inserted:?} target {target:?} tree.canonical_tip {:?} make_canonical.result {result:?}",
+                self.blockchain.canonical_tip()
+            );
+            match result {
                 Ok(outcome) => {
                     let new_head = outcome.into_header();
                     debug!(target: "consensus::engine", hash=?new_head.hash, number=new_head.number, "canonicalized new head");
