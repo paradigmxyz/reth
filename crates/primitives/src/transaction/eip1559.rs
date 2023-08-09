@@ -64,6 +64,24 @@ pub struct TxEip1559 {
 }
 
 impl TxEip1559 {
+    /// Returns the effective gas price for the given `base_fee`.
+    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        match base_fee {
+            None => self.max_fee_per_gas,
+            Some(base_fee) => {
+                // if the tip is greater than the max priority fee per gas, set it to the max
+                // priority fee per gas + base fee
+                let tip = self.max_fee_per_gas.saturating_sub(base_fee as u128);
+                if tip > self.max_priority_fee_per_gas {
+                    self.max_priority_fee_per_gas + base_fee as u128
+                } else {
+                    // otherwise return the max fee per gas
+                    self.max_fee_per_gas
+                }
+            }
+        }
+    }
+
     /// Calculates a heuristic for the in-memory size of the [TxEip1559] transaction.
     #[inline]
     pub fn size(&self) -> usize {
