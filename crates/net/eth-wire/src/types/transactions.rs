@@ -1,7 +1,10 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{TransactionSigned, H256};
-use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+use reth_primitives::{
+    kzg::{self, Blob, Bytes48, KzgProof, KzgSettings},
+    TransactionSigned, H256,
+};
+use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -48,6 +51,46 @@ impl From<Vec<TransactionSigned>> for PooledTransactions {
 impl From<PooledTransactions> for Vec<TransactionSigned> {
     fn from(txs: PooledTransactions) -> Self {
         txs.0
+    }
+}
+
+/// A response to [`GetPooledTransactions`] that includes blob data, their commitments, and their
+/// corresponding proofs.
+///
+/// This is defined in [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#networking) as an element
+/// of a [PooledTransactions] response.
+// TODO: derive_arbitrary
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
+pub struct BlobTransaction {
+    /// The transaction payload.
+    pub transaction: TransactionSigned,
+    /// The transaction's blob data.
+    pub blobs: Vec<Blob>,
+    /// The transaction's blob commitments.
+    pub commitments: Vec<Bytes48>,
+    /// The transaction's blob proofs.
+    pub proofs: Vec<Bytes48>,
+}
+
+impl BlobTransaction {
+    /// Verifies that the transaction's blob data, commitments, and proofs are all valid.
+    ///
+    /// Takes as input the [KzgSettings], which should contain the the parameters derived from the
+    /// KZG trusted setup.
+    ///
+    /// This ensures that the blob transaction payload has the same number of blob data elements,
+    /// commitments, and proofs. Each blob data element is verified against its commitment and
+    /// proof.
+    ///
+    /// Returns `false` if any blob KZG proof in the response fails to verify.
+    pub fn validate(&self, proof_settings: &KzgSettings) -> Result<bool, kzg::Error> {
+        // Verify as a batch
+        KzgProof::verify_blob_kzg_proof_batch(
+            self.blobs.as_slice(),
+            self.commitments.as_slice(),
+            self.proofs.as_slice(),
+            proof_settings,
+        )
     }
 }
 
