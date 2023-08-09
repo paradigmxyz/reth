@@ -79,139 +79,6 @@ pub enum Transaction {
     Eip4844(TxEip4844),
 }
 
-impl Transaction {
-    /// This encodes the transaction _without_ the signature, and is only suitable for creating a
-    /// hash intended for signing.
-    pub fn encode_without_signature(&self, out: &mut dyn bytes::BufMut) {
-        Encodable::encode(self, out);
-    }
-
-    /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
-    /// hash that for eip2718 does not require rlp header
-    pub fn encode_with_signature(
-        &self,
-        signature: &Signature,
-        out: &mut dyn bytes::BufMut,
-        with_header: bool,
-    ) {
-        match self {
-            Transaction::Legacy(TxLegacy { chain_id, .. }) => {
-                // do nothing w/ with_header
-                let payload_length =
-                    self.fields_len() + signature.payload_len_with_eip155_chain_id(*chain_id);
-                let header = Header { list: true, payload_length };
-                header.encode(out);
-                self.encode_fields(out);
-                signature.encode_with_eip155_chain_id(out, *chain_id);
-            }
-            _ => {
-                let payload_length = self.fields_len() + signature.payload_len();
-                if with_header {
-                    Header {
-                        list: false,
-                        payload_length: 1 + length_of_length(payload_length) + payload_length,
-                    }
-                    .encode(out);
-                }
-                out.put_u8(self.tx_type() as u8);
-                let header = Header { list: true, payload_length };
-                header.encode(out);
-                self.encode_fields(out);
-                signature.encode(out);
-            }
-        }
-    }
-
-    /// This sets the transaction's nonce.
-    pub fn set_nonce(&mut self, nonce: u64) {
-        match self {
-            Transaction::Legacy(tx) => tx.nonce = nonce,
-            Transaction::Eip2930(tx) => tx.nonce = nonce,
-            Transaction::Eip1559(tx) => tx.nonce = nonce,
-            Transaction::Eip4844(tx) => tx.nonce = nonce,
-        }
-    }
-
-    /// This sets the transaction's value.
-    pub fn set_value(&mut self, value: u128) {
-        match self {
-            Transaction::Legacy(tx) => tx.value = value,
-            Transaction::Eip2930(tx) => tx.value = value,
-            Transaction::Eip1559(tx) => tx.value = value,
-            Transaction::Eip4844(tx) => tx.value = value,
-        }
-    }
-
-    /// This sets the transaction's input field.
-    pub fn set_input(&mut self, input: Bytes) {
-        match self {
-            Transaction::Legacy(tx) => tx.input = input,
-            Transaction::Eip2930(tx) => tx.input = input,
-            Transaction::Eip1559(tx) => tx.input = input,
-            Transaction::Eip4844(tx) => tx.input = input,
-        }
-    }
-
-    /// Calculates a heuristic for the in-memory size of the [Transaction].
-    #[inline]
-    fn size(&self) -> usize {
-        match self {
-            Transaction::Legacy(tx) => tx.size(),
-            Transaction::Eip2930(tx) => tx.size(),
-            Transaction::Eip1559(tx) => tx.size(),
-            Transaction::Eip4844(tx) => tx.size(),
-        }
-    }
-}
-
-impl Compact for Transaction {
-    fn to_compact<B>(self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
-        match self {
-            Transaction::Legacy(tx) => {
-                tx.to_compact(buf);
-                0
-            }
-            Transaction::Eip2930(tx) => {
-                tx.to_compact(buf);
-                1
-            }
-            Transaction::Eip1559(tx) => {
-                tx.to_compact(buf);
-                2
-            }
-            Transaction::Eip4844(tx) => {
-                tx.to_compact(buf);
-                3
-            }
-        }
-    }
-
-    fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
-        match identifier {
-            0 => {
-                let (tx, buf) = TxLegacy::from_compact(buf, buf.len());
-                (Transaction::Legacy(tx), buf)
-            }
-            1 => {
-                let (tx, buf) = TxEip2930::from_compact(buf, buf.len());
-                (Transaction::Eip2930(tx), buf)
-            }
-            2 => {
-                let (tx, buf) = TxEip1559::from_compact(buf, buf.len());
-                (Transaction::Eip1559(tx), buf)
-            }
-            3 => {
-                let (tx, buf) = TxEip4844::from_compact(buf, buf.len());
-                (Transaction::Eip4844(tx), buf)
-            }
-            _ => unreachable!("Junk data in database: unknown Transaction variant"),
-        }
-    }
-}
-
 // === impl Transaction ===
 
 impl Transaction {
@@ -323,6 +190,20 @@ impl Transaction {
             Transaction::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. }) => {
                 Some(*max_priority_fee_per_gas)
             }
+        }
+    }
+
+    /// Max fee per blob gas for eip4844 transaction [TxEip4844].
+    ///
+    /// Returns `None` for non-eip4844 transactions.
+    ///
+    /// This is also commonly referred to as the "Blob Gas Fee Cap" (`BlobGasFeeCap`).
+    pub fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        match self {
+            Transaction::Eip4844(TxEip4844 { max_fee_per_blob_gas, .. }) => {
+                Some(*max_fee_per_blob_gas)
+            }
+            _ => None,
         }
     }
 
@@ -621,6 +502,137 @@ impl Transaction {
             }
         }
     }
+
+    /// This encodes the transaction _without_ the signature, and is only suitable for creating a
+    /// hash intended for signing.
+    pub fn encode_without_signature(&self, out: &mut dyn bytes::BufMut) {
+        Encodable::encode(self, out);
+    }
+
+    /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
+    /// hash that for eip2718 does not require rlp header
+    pub fn encode_with_signature(
+        &self,
+        signature: &Signature,
+        out: &mut dyn bytes::BufMut,
+        with_header: bool,
+    ) {
+        match self {
+            Transaction::Legacy(TxLegacy { chain_id, .. }) => {
+                // do nothing w/ with_header
+                let payload_length =
+                    self.fields_len() + signature.payload_len_with_eip155_chain_id(*chain_id);
+                let header = Header { list: true, payload_length };
+                header.encode(out);
+                self.encode_fields(out);
+                signature.encode_with_eip155_chain_id(out, *chain_id);
+            }
+            _ => {
+                let payload_length = self.fields_len() + signature.payload_len();
+                if with_header {
+                    Header {
+                        list: false,
+                        payload_length: 1 + length_of_length(payload_length) + payload_length,
+                    }
+                    .encode(out);
+                }
+                out.put_u8(self.tx_type() as u8);
+                let header = Header { list: true, payload_length };
+                header.encode(out);
+                self.encode_fields(out);
+                signature.encode(out);
+            }
+        }
+    }
+
+    /// This sets the transaction's nonce.
+    pub fn set_nonce(&mut self, nonce: u64) {
+        match self {
+            Transaction::Legacy(tx) => tx.nonce = nonce,
+            Transaction::Eip2930(tx) => tx.nonce = nonce,
+            Transaction::Eip1559(tx) => tx.nonce = nonce,
+            Transaction::Eip4844(tx) => tx.nonce = nonce,
+        }
+    }
+
+    /// This sets the transaction's value.
+    pub fn set_value(&mut self, value: u128) {
+        match self {
+            Transaction::Legacy(tx) => tx.value = value,
+            Transaction::Eip2930(tx) => tx.value = value,
+            Transaction::Eip1559(tx) => tx.value = value,
+            Transaction::Eip4844(tx) => tx.value = value,
+        }
+    }
+
+    /// This sets the transaction's input field.
+    pub fn set_input(&mut self, input: Bytes) {
+        match self {
+            Transaction::Legacy(tx) => tx.input = input,
+            Transaction::Eip2930(tx) => tx.input = input,
+            Transaction::Eip1559(tx) => tx.input = input,
+            Transaction::Eip4844(tx) => tx.input = input,
+        }
+    }
+
+    /// Calculates a heuristic for the in-memory size of the [Transaction].
+    #[inline]
+    fn size(&self) -> usize {
+        match self {
+            Transaction::Legacy(tx) => tx.size(),
+            Transaction::Eip2930(tx) => tx.size(),
+            Transaction::Eip1559(tx) => tx.size(),
+            Transaction::Eip4844(tx) => tx.size(),
+        }
+    }
+}
+
+impl Compact for Transaction {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        match self {
+            Transaction::Legacy(tx) => {
+                tx.to_compact(buf);
+                0
+            }
+            Transaction::Eip2930(tx) => {
+                tx.to_compact(buf);
+                1
+            }
+            Transaction::Eip1559(tx) => {
+                tx.to_compact(buf);
+                2
+            }
+            Transaction::Eip4844(tx) => {
+                tx.to_compact(buf);
+                3
+            }
+        }
+    }
+
+    fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+        match identifier {
+            0 => {
+                let (tx, buf) = TxLegacy::from_compact(buf, buf.len());
+                (Transaction::Legacy(tx), buf)
+            }
+            1 => {
+                let (tx, buf) = TxEip2930::from_compact(buf, buf.len());
+                (Transaction::Eip2930(tx), buf)
+            }
+            2 => {
+                let (tx, buf) = TxEip1559::from_compact(buf, buf.len());
+                (Transaction::Eip1559(tx), buf)
+            }
+            3 => {
+                let (tx, buf) = TxEip4844::from_compact(buf, buf.len());
+                (Transaction::Eip4844(tx), buf)
+            }
+            _ => unreachable!("Junk data in database: unknown Transaction variant"),
+        }
+    }
 }
 
 impl Default for Transaction {
@@ -659,26 +671,6 @@ impl Encodable for Transaction {
                 let payload_length = self.fields_len();
                 // 'transaction type byte length' + 'header length' + 'payload length'
                 1 + length_of_length(payload_length) + payload_length
-            }
-        }
-    }
-}
-
-impl TxEip1559 {
-    /// Returns the effective gas price for the given `base_fee`.
-    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
-        match base_fee {
-            None => self.max_fee_per_gas,
-            Some(base_fee) => {
-                // if the tip is greater than the max priority fee per gas, set it to the max
-                // priority fee per gas + base fee
-                let tip = self.max_fee_per_gas.saturating_sub(base_fee as u128);
-                if tip > self.max_priority_fee_per_gas {
-                    self.max_priority_fee_per_gas + base_fee as u128
-                } else {
-                    // otherwise return the max fee per gas
-                    self.max_fee_per_gas
-                }
             }
         }
     }

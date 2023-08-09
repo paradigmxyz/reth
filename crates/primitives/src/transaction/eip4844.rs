@@ -63,7 +63,7 @@ pub struct TxEip4844 {
 
     /// Max fee per data gas
     ///
-    /// aka BlobFeeCap
+    /// aka BlobFeeCap or blobGasFeeCap
     pub max_fee_per_blob_gas: u128,
 
     /// Input has two uses depending if transaction is Create or Call (if `to` field is None or
