@@ -5831,6 +5831,7 @@ dependencies = [
  "serde_with",
  "strum 0.25.0",
  "sucds",
+ "tempfile",
  "test-fuzz",
  "thiserror",
  "tiny-keccak",
