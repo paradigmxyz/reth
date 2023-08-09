@@ -197,7 +197,7 @@ impl Transaction {
     ///
     /// Returns `None` for non-eip4844 transactions.
     ///
-    /// This is also commonly referred to as the "Gas Gas Fee Cap" (`BlobGasFeeCap`).
+    /// This is also commonly referred to as the "Blob Gas Fee Cap" (`BlobGasFeeCap`).
     pub fn max_fee_per_blob_gas(&self) -> Option<u128> {
         match self {
             Transaction::Eip4844(TxEip4844 { max_fee_per_blob_gas, .. }) => {
