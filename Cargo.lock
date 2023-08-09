@@ -933,7 +933,7 @@ dependencies = [
 [[package]]
 name = "c-kzg"
 version = "0.1.0"
-source = "git+https://github.com/ethereum/c-kzg-4844#13cec820c08f45318f82ed4e0da0300042758b92"
+source = "git+https://github.com/ethereum/c-kzg-4844#6353f689e5d2802bbaf221253b3acafe4228331c"
 dependencies = [
  "bindgen 0.64.0 (git+https://github.com/rust-lang/rust-bindgen?rev=0de11f0a521611ac8738b7b01d19dddaf3899e66)",
  "cc",
