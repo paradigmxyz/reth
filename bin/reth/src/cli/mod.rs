@@ -3,9 +3,9 @@ use crate::{
     args::utils::genesis_value_parser,
     chain,
     cli::ext::RethCliExt,
-    config, db, debug_cmd,
+    db, debug_cmd,
     dirs::{LogsDir, PlatformPath},
-    node, p2p,
+    node, p2p, recover,
     runner::CliRunner,
     stage, test_vectors,
     version::{LONG_VERSION, SHORT_VERSION},
@@ -19,6 +19,7 @@ use reth_tracing::{
 };
 use std::sync::Arc;
 
+pub mod config;
 pub mod ext;
 
 /// The main reth cli interface.
@@ -76,6 +77,7 @@ impl<Ext: RethCliExt> Cli<Ext> {
             Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Debug(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
+            Commands::Recover(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
         }
     }
 
@@ -106,7 +108,7 @@ pub fn run() -> eyre::Result<()> {
 pub enum Commands<Ext: RethCliExt = ()> {
     /// Start the node
     #[command(name = "node")]
-    Node(node::Command<Ext>),
+    Node(node::NodeCommand<Ext>),
     /// Initialize the database from a genesis file.
     #[command(name = "init")]
     Init(chain::InitCommand),
@@ -127,10 +129,13 @@ pub enum Commands<Ext: RethCliExt = ()> {
     TestVectors(test_vectors::Command),
     /// Write config to stdout
     #[command(name = "config")]
-    Config(config::Command),
+    Config(crate::config::Command),
     /// Various debug routines
     #[command(name = "debug")]
     Debug(debug_cmd::Command),
+    /// Scripts for node recovery
+    #[command(name = "recover")]
+    Recover(recover::Command),
 }
 
 /// The log configuration.

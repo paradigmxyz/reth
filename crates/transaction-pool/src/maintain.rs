@@ -10,7 +10,9 @@ use futures_util::{
     FutureExt, Stream, StreamExt,
 };
 use reth_primitives::{Address, BlockHash, BlockNumberOrTag, FromRecoveredTransaction};
-use reth_provider::{BlockReaderIdExt, CanonStateNotification, PostState, StateProviderFactory};
+use reth_provider::{
+    BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, PostState, StateProviderFactory,
+};
 use reth_tasks::TaskSpawner;
 use std::{
     borrow::Borrow,
@@ -49,7 +51,7 @@ pub fn maintain_transaction_pool_future<Client, P, St, Tasks>(
     config: MaintainPoolConfig,
 ) -> BoxFuture<'static, ()>
 where
-    Client: StateProviderFactory + BlockReaderIdExt + Clone + Send + 'static,
+    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Send + 'static,
     P: TransactionPoolExt + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
@@ -70,7 +72,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
     task_spawner: Tasks,
     config: MaintainPoolConfig,
 ) where
-    Client: StateProviderFactory + BlockReaderIdExt + Clone + Send + 'static,
+    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Send + 'static,
     P: TransactionPoolExt + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
@@ -80,10 +82,13 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
     // ensure the pool points to latest state
     if let Ok(Some(latest)) = client.block_by_number_or_tag(BlockNumberOrTag::Latest) {
         let latest = latest.seal_slow();
+        let chain_spec = client.chain_spec();
         let info = BlockInfo {
             last_seen_block_hash: latest.hash,
             last_seen_block_number: latest.number,
-            pending_basefee: latest.next_block_base_fee().unwrap_or_default(),
+            pending_basefee: latest
+                .next_block_base_fee(chain_spec.base_fee_params)
+                .unwrap_or_default(),
         };
         pool.set_block_info(info);
     }
@@ -204,8 +209,11 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     maintained_state = MaintainedPoolState::Drifted;
                 }
 
+                let chain_spec = client.chain_spec();
+
                 // base fee for the next block: `new_tip+1`
-                let pending_block_base_fee = new_tip.next_block_base_fee().unwrap_or_default();
+                let pending_block_base_fee =
+                    new_tip.next_block_base_fee(chain_spec.base_fee_params).unwrap_or_default();
 
                 // we know all changed account in the new chain
                 let new_changed_accounts: HashSet<_> =
@@ -279,9 +287,11 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
             CanonStateNotification::Commit { new } => {
                 let (blocks, state) = new.inner();
                 let tip = blocks.tip();
+                let chain_spec = client.chain_spec();
 
                 // base fee for the next block: `tip+1`
-                let pending_block_base_fee = tip.next_block_base_fee().unwrap_or_default();
+                let pending_block_base_fee =
+                    tip.next_block_base_fee(chain_spec.base_fee_params).unwrap_or_default();
 
                 let first_block = blocks.first();
                 trace!(

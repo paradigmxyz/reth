@@ -20,21 +20,23 @@ pub struct PruningArgs {
 
 impl PruningArgs {
     /// Returns pruning configuration.
-    pub fn prune_config(&self, chain_spec: Arc<ChainSpec>) -> Option<PruneConfig> {
-        if self.full {
+    pub fn prune_config(&self, _chain_spec: Arc<ChainSpec>) -> eyre::Result<Option<PruneConfig>> {
+        Ok(if self.full {
+            eyre::bail!("full node is not supported yet, keep an eye on next releases");
+            #[allow(unreachable_code)]
             Some(PruneConfig {
                 block_interval: 5,
                 parts: PruneModes {
                     sender_recovery: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                     transaction_lookup: None,
-                    receipts: chain_spec
+                    receipts: _chain_spec
                         .deposit_contract
                         .as_ref()
                         .map(|contract| PruneMode::Before(contract.block)),
                     account_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                     storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                     contract_logs_filter: ContractLogsPruneConfig(
-                        chain_spec
+                        _chain_spec
                             .deposit_contract
                             .as_ref()
                             .map(|contract| (contract.address, PruneMode::Before(contract.block)))
@@ -45,6 +47,6 @@ impl PruningArgs {
             })
         } else {
             None
-        }
+        })
     }
 }

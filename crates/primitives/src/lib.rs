@@ -60,8 +60,8 @@ pub use block::{
 };
 pub use bloom::Bloom;
 pub use chain::{
-    AllGenesisFormats, Chain, ChainInfo, ChainSpec, ChainSpecBuilder, DisplayHardforks,
-    ForkCondition, ForkTimestamps, DEV, GOERLI, MAINNET, SEPOLIA,
+    AllGenesisFormats, BaseFeeParams, Chain, ChainInfo, ChainSpec, ChainSpecBuilder,
+    DisplayHardforks, ForkCondition, ForkTimestamps, DEV, GOERLI, MAINNET, SEPOLIA,
 };
 pub use compression::*;
 pub use constants::{
@@ -143,6 +143,11 @@ pub use __reexport::*;
 /// Various utilities
 pub mod utils {
     pub use ethers_core::types::serde_helpers;
+}
+
+/// EIP-4844 + KZG helpers
+pub mod kzg {
+    pub use c_kzg::*;
 }
 
 /// Helpers for working with serde

@@ -51,6 +51,18 @@ impl ForkchoiceStateTracker {
         self.latest_status().map(|s| s.is_valid()).unwrap_or(false)
     }
 
+    /// Returns whether the latest received FCU is syncing: [ForkchoiceStatus::Syncing]
+    #[allow(unused)]
+    pub(crate) fn is_latest_syncing(&self) -> bool {
+        self.latest_status().map(|s| s.is_syncing()).unwrap_or(false)
+    }
+
+    /// Returns whether the latest received FCU is syncing: [ForkchoiceStatus::Invalid]
+    #[allow(unused)]
+    pub(crate) fn is_latest_invalid(&self) -> bool {
+        self.latest_status().map(|s| s.is_invalid()).unwrap_or(false)
+    }
+
     /// Returns the last valid head hash.
     #[allow(unused)]
     pub(crate) fn last_valid_head(&self) -> Option<H256> {
@@ -96,6 +108,10 @@ pub enum ForkchoiceStatus {
 impl ForkchoiceStatus {
     pub(crate) fn is_valid(&self) -> bool {
         matches!(self, ForkchoiceStatus::Valid)
+    }
+
+    pub(crate) fn is_invalid(&self) -> bool {
+        matches!(self, ForkchoiceStatus::Invalid)
     }
 
     pub(crate) fn is_syncing(&self) -> bool {

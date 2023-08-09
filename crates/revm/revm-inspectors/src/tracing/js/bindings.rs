@@ -491,7 +491,6 @@ pub(crate) struct EvmContext {
     pub(crate) output: Bytes,
     /// Number, block number
     pub(crate) time: String,
-    // TODO more fields
     pub(crate) block_hash: Option<H256>,
     pub(crate) tx_index: Option<usize>,
     pub(crate) tx_hash: Option<H256>,

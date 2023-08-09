@@ -260,21 +260,13 @@ impl CallTraceNode {
             let mut item = CallTraceStepStackItem { trace_node: self, step, call_child_id: None };
 
             // If the opcode is a call, put the child trace on the stack
-            match step.op.u8() {
-                opcode::CREATE |
-                opcode::CREATE2 |
-                opcode::DELEGATECALL |
-                opcode::CALL |
-                opcode::STATICCALL |
-                opcode::CALLCODE => {
-                    // The opcode of this step is a call but it's possible that this step resulted
-                    // in a revert or out of gas error in which case there's no actual child call executed and recorded: <https://github.com/paradigmxyz/reth/issues/3915>
-                    if let Some(call_id) = self.children.get(child_id).copied() {
-                        item.call_child_id = Some(call_id);
-                        child_id += 1;
-                    }
+            if step.is_calllike_op() {
+                // The opcode of this step is a call but it's possible that this step resulted
+                // in a revert or out of gas error in which case there's no actual child call executed and recorded: <https://github.com/paradigmxyz/reth/issues/3915>
+                if let Some(call_id) = self.children.get(child_id).copied() {
+                    item.call_child_id = Some(call_id);
+                    child_id += 1;
                 }
-                _ => {}
             }
             stack.push(item);
         }
@@ -546,8 +538,8 @@ pub(crate) struct CallTraceStep {
     pub(crate) contract: Address,
     /// Stack before step execution
     pub(crate) stack: Stack,
-    /// The new stack item placed by this step if any
-    pub(crate) new_stack: Option<U256>,
+    /// The new stack items placed by this step if any
+    pub(crate) push_stack: Option<Vec<U256>>,
     /// All allocated memory in a step
     ///
     /// This will be empty if memory capture is disabled
@@ -605,6 +597,21 @@ impl CallTraceStep {
         }
 
         log
+    }
+
+    /// Returns true if the step is a call operation, any of
+    /// CALL, CALLCODE, DELEGATECALL, STATICCALL, CREATE, CREATE2
+    #[inline]
+    pub(crate) fn is_calllike_op(&self) -> bool {
+        matches!(
+            self.op.u8(),
+            opcode::CALL |
+                opcode::DELEGATECALL |
+                opcode::STATICCALL |
+                opcode::CREATE |
+                opcode::CALLCODE |
+                opcode::CREATE2
+        )
     }
 
     // Returns true if the status code is an error or revert, See [InstructionResult::Revert]

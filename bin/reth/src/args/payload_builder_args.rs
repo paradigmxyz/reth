@@ -1,11 +1,13 @@
-use crate::{args::utils::parse_duration_from_secs, version::default_extradata};
+use crate::{
+    args::utils::parse_duration_from_secs, cli::config::PayloadBuilderConfig,
+    version::default_extradata,
+};
 use clap::{
     builder::{RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
 };
-use reth_primitives::{bytes::BytesMut, constants::MAXIMUM_EXTRA_DATA_SIZE};
-use reth_rlp::Encodable;
-use std::{ffi::OsStr, time::Duration};
+use reth_primitives::constants::MAXIMUM_EXTRA_DATA_SIZE;
+use std::{borrow::Cow, ffi::OsStr, time::Duration};
 
 /// Parameters for configuring the Payload Builder
 #[derive(Debug, Args, PartialEq, Default)]
@@ -36,12 +38,25 @@ pub struct PayloadBuilderArgs {
     pub max_payload_tasks: usize,
 }
 
-impl PayloadBuilderArgs {
-    /// Returns the rlp-encoded extradata bytes.
-    pub fn extradata_bytes(&self) -> reth_primitives::bytes::Bytes {
-        let mut extradata = BytesMut::new();
-        self.extradata.as_bytes().encode(&mut extradata);
-        extradata.freeze()
+impl PayloadBuilderConfig for PayloadBuilderArgs {
+    fn extradata(&self) -> Cow<'_, str> {
+        self.extradata.as_str().into()
+    }
+
+    fn interval(&self) -> Duration {
+        self.interval
+    }
+
+    fn deadline(&self) -> Duration {
+        self.deadline
+    }
+
+    fn max_gas_limit(&self) -> u64 {
+        self.max_gas_limit
+    }
+
+    fn max_payload_tasks(&self) -> usize {
+        self.max_payload_tasks
     }
 }
 
