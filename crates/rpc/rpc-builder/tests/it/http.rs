@@ -14,10 +14,11 @@ use reth_primitives::{
 };
 use reth_rpc_api::{
     clients::{AdminApiClient, EthApiClient},
-    DebugApiClient, NetApiClient, OtterscanClient, TraceApiClient, Web3ApiClient,
+    DebugApiClient, EthFilterApiClient, NetApiClient, OtterscanClient, TraceApiClient,
+    Web3ApiClient,
 };
 use reth_rpc_builder::RethRpcModule;
-use reth_rpc_types::{trace::filter::TraceFilter, CallRequest, Index, TransactionRequest};
+use reth_rpc_types::{trace::filter::TraceFilter, CallRequest, Filter, Index, TransactionRequest};
 use std::collections::HashSet;
 
 fn is_unimplemented(err: Error) -> bool {
@@ -28,6 +29,20 @@ fn is_unimplemented(err: Error) -> bool {
         }
         _ => false,
     }
+}
+
+async fn test_filter_calls<C>(client: &C)
+where
+    C: ClientT + SubscriptionClientT + Sync,
+{
+    EthFilterApiClient::new_filter(client, Filter::default()).await.unwrap();
+    EthFilterApiClient::new_pending_transaction_filter(client).await.unwrap();
+    let id = EthFilterApiClient::new_block_filter(client).await.unwrap();
+    EthFilterApiClient::filter_changes(client, id.clone()).await.unwrap();
+    EthFilterApiClient::logs(client, Filter::default()).await.unwrap();
+    let id = EthFilterApiClient::new_filter(client, Filter::default()).await.unwrap();
+    EthFilterApiClient::filter_logs(client, id.clone()).await.unwrap();
+    EthFilterApiClient::uninstall_filter(client, id).await.unwrap();
 }
 
 async fn test_basic_admin_calls<C>(client: &C)
@@ -238,6 +253,15 @@ where
     assert!(is_unimplemented(
         OtterscanClient::get_contract_creator(client, address).await.err().unwrap()
     ));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_call_filter_functions_http() {
+    reth_tracing::init_test_tracing();
+
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+    test_filter_calls(&client).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

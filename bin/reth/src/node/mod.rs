@@ -337,7 +337,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             None
         };
 
-        let prune_config = self.pruning.prune_config(Arc::clone(&self.chain)).or(config.prune);
+        let prune_config = self.pruning.prune_config(Arc::clone(&self.chain))?.or(config.prune);
 
         // Configure the pipeline
         let (mut pipeline, client) = if self.dev.dev {
