@@ -327,7 +327,7 @@ impl<DB: Database> Pruner<DB> {
             let end_block =
                 blocks_iter.peek().map(|next_block| *next_block - 1).unwrap_or(to_block);
 
-            // Addresses in lower block ranges, are still included in the list for future ranges.
+            // Addresses in lower block ranges, are still included in the inclusion list for future ranges.
             block_ranges.push((*start_block, end_block, filtered_addresses.len()));
         }
 
