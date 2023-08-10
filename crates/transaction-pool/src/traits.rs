@@ -7,7 +7,8 @@ use crate::{
 use futures_util::{ready, Stream};
 use reth_primitives::{
     Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
-    TransactionKind, TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, H256, U256,
+    TransactionKind, TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
+    H256, U256,
 };
 use reth_rlp::Encodable;
 use std::{
@@ -552,6 +553,11 @@ pub trait PoolTransaction:
     /// Returns true if the transaction is an EIP-1559 transaction.
     fn is_eip1559(&self) -> bool {
         self.tx_type() == EIP1559_TX_TYPE_ID
+    }
+
+    /// Returns true if the transaction is an EIP-4844 transaction.
+    fn is_eip4844(&self) -> bool {
+        self.tx_type() == EIP4844_TX_TYPE_ID
     }
 
     /// Returns the length of the rlp encoded object
