@@ -360,14 +360,10 @@ impl<DB: Database> Pruner<DB> {
                     );
                 },
                 |receipt| {
-                    if num_addresses > 0 &&
+                    num_addresses > 0 &&
                         receipt.logs.iter().any(|log| {
                             filtered_addresses[..num_addresses].contains(&&log.address)
                         })
-                    {
-                        return true
-                    }
-                    false
                 },
             )?;
 
