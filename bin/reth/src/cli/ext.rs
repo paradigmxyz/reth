@@ -41,7 +41,7 @@ pub trait RethNodeCommandExt: fmt::Debug + clap::Args {
         &mut self,
         _config: &Conf,
         _registry: &mut RethModuleRegistry<Provider, Pool, Network, Tasks, Events>,
-        _modules: &mut TransportRpcModules<()>,
+        _modules: &mut TransportRpcModules,
     ) -> eyre::Result<()>
     where
         Conf: RethRpcConfig,
