@@ -55,7 +55,7 @@ impl RethNodeCommandExt for RethCliTxpoolExt {
         &mut self,
         _config: &Conf,
         registry: &mut RethModuleRegistry<Provider, Pool, Network, Tasks, Events>,
-        modules: &mut TransportRpcModules<()>,
+        modules: &mut TransportRpcModules,
     ) -> eyre::Result<()>
     where
         Conf: RethRpcConfig,
