@@ -374,12 +374,13 @@ impl<DB: Database> Pruner<DB> {
             // If this is the last block range, avoid writing an unused checkpoint
             if end_block != to_block {
                 // This allows us to query for the transactions in the next block range with
-                // [`get_next_tx_num_range_from_checkpoint`].
+                // [`get_next_tx_num_range_from_checkpoint`]. It's just a temporary intermediate
+                // checkpoint, which should be adjusted in the end.
                 provider.save_prune_checkpoint(
                     PrunePart::ContractLogs,
                     PruneCheckpoint {
-                        block_number: end_block - 1,
-                        prune_mode: PruneMode::Before(end_block),
+                        block_number: end_block,
+                        prune_mode: PruneMode::Before(end_block + 1),
                     },
                 )?;
             }
