@@ -440,7 +440,7 @@ where
 
         let code_hash = if db_acc.code_hash != KECCAK_EMPTY { db_acc.code_hash } else { continue };
 
-        curr_ref.code = db.code_by_hash(code_hash)?.bytecode.into();
+        curr_ref.code = db.code_by_hash(code_hash)?.original_bytes().into();
     }
 
     Ok(())
