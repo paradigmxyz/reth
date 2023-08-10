@@ -168,6 +168,14 @@ impl Transaction {
         }
     }
 
+    /// Returns true if the tx supports dynamic fees
+    pub fn is_dynamic_fee(&self) -> bool {
+        match self {
+            Transaction::Legacy(_) | Transaction::Eip2930(_) => false,
+            Transaction::Eip1559(_) | Transaction::Eip4844(_) => true,
+        }
+    }
+
     /// Max fee per gas for eip1559 transaction, for legacy transactions this is gas_price.
     ///
     /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
