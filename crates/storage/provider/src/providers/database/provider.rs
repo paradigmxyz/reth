@@ -632,7 +632,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     /// Prune the table for the specified pre-sorted key iterator, calling `chunk_callback` after
     /// every `batch_size` pruned rows.
     ///
-    /// `keep_filter` can be used to skip pruning certain elements.
+    /// `skip_filter` can be used to skip pruning certain elements.
     ///
     /// Returns number of rows pruned.
     pub fn prune_table_with_iterator_in_batches<T: Table>(
@@ -640,14 +640,14 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         keys: impl IntoIterator<Item = T::Key>,
         batch_size: usize,
         mut batch_callback: impl FnMut(usize),
-        keep_filter: impl Fn(&T::Value) -> bool,
+        skip_filter: impl Fn(&T::Value) -> bool,
     ) -> std::result::Result<usize, DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut deleted = 0;
 
         for key in keys {
             if let Some((_, value)) = cursor.seek_exact(key)? {
-                if !keep_filter(&value) {
+                if !skip_filter(&value) {
                     cursor.delete_current()?;
                 }
             }
