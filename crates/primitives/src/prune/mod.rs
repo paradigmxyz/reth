@@ -48,4 +48,26 @@ impl ContractLogsPruneConfig {
         }
         Ok(map)
     }
+
+    /// Returns the lowest block where we start filtering logs which use `PruneMode::Distance(_)`.
+    pub fn lowest_block_with_distance(
+        &self,
+        tip: BlockNumber,
+        pruned_block: Option<BlockNumber>,
+    ) -> Result<Option<BlockNumber>, PrunePartError> {
+        let pruned_block = pruned_block.unwrap_or_default();
+        let mut lowest = None;
+
+        for (_, mode) in self.0.iter() {
+            if let PruneMode::Distance(_) = mode {
+                if let Some((block, _)) =
+                    mode.prune_target_block(tip, MINIMUM_PRUNING_DISTANCE, PrunePart::ContractLogs)?
+                {
+                    lowest = Some(lowest.unwrap_or(u64::MAX).min(block));
+                }
+            }
+        }
+
+        Ok(lowest.map(|lowest| lowest.max(pruned_block)))
+    }
 }

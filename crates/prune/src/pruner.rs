@@ -386,17 +386,23 @@ impl<DB: Database> Pruner<DB> {
             }
         }
 
-        // We must store the **absolute** pruned checkpoint, set to
-        // `PruneMode::Before(_first_block_)`. Here, _first_block_ denotes the first appearance
-        // of contract filtering. This ensures that in future pruner runs, if set up to do so, we
-        // can prune all receipts between the previous `_first_block_` and the new one using
-        // `get_next_tx_num_range_from_checkpoint`.
-        let first_block = address_filter.first_key_value().expect("qed").0;
+        // If there are contracts using `PruneMode::Distance(_)` there will be receipts before
+        // `to_block` that become eligible to be pruned in future runs. Therefore, our
+        // checkpoint is not actually `to_block`, but the `lowest_block_with_distance` from any
+        // contract. This ensures that in future pruner runs we can
+        // prune all these receipts between the previous `lowest_block_with_distance` and the new
+        // one using `get_next_tx_num_range_from_checkpoint`.
+        let checkpoint_block = self
+            .modes
+            .contract_logs_filter
+            .lowest_block_with_distance(tip_block_number, Some(pruned))?
+            .unwrap_or(to_block);
+
         provider.save_prune_checkpoint(
             PrunePart::ContractLogs,
             PruneCheckpoint {
-                block_number: *first_block - 1,
-                prune_mode: PruneMode::Before(*first_block),
+                block_number: checkpoint_block - 1,
+                prune_mode: PruneMode::Before(checkpoint_block),
             },
         )?;
 
