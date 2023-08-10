@@ -10,7 +10,7 @@ use crate::{
     stage, test_vectors,
     version::{LONG_VERSION, SHORT_VERSION},
 };
-use clap::{ArgAction, Args, Parser, Subcommand};
+use clap::{builder::PossibleValuesParser, ArgAction, Args, Parser, Subcommand};
 use reth_primitives::ChainSpec;
 use reth_tracing::{
     tracing::{metadata::LevelFilter, Level, Subscriber},
@@ -84,8 +84,7 @@ impl<Ext: RethCliExt> Cli<Ext> {
     /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
     /// that all logs are flushed to disk.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
-        let mut layers =
-            vec![reth_tracing::stdout(self.verbosity.directive(), self.logs.not_coloured)];
+        let mut layers = vec![reth_tracing::stdout(self.verbosity.directive(), &self.logs.color)];
         let guard = self.logs.layer()?.map(|(layer, guard)| {
             layers.push(layer);
             guard
@@ -160,9 +159,16 @@ pub struct Logs {
     #[arg(long = "log.filter", value_name = "FILTER", global = true, default_value = "error")]
     filter: String,
 
-    /// The flag to disable colour coding of console output.
-    #[arg(long = "log.not-coloured", global = true)]
-    not_coloured: bool,
+    /// Sets whether or not the formatter emits ANSI terminal escape codes for colors and other
+    /// text formatting.
+    #[arg(
+        long = "color", 
+        value_name = "COLOR",
+        value_parser = PossibleValuesParser::new(["always", "auto", "never"]), 
+        global = true,
+        default_value = "always"
+    )]
+    color: String,
 }
 
 impl Logs {

@@ -43,14 +43,14 @@ pub fn init(layers: Vec<BoxedLayer<Registry>>) {
 ///
 /// Colors can be disabled with `RUST_LOG_STYLE=never`, and event targets can be displayed with
 /// `RUST_LOG_TARGET=1`.
-pub fn stdout<S>(default_directive: impl Into<Directive>, not_coloured: bool) -> BoxedLayer<S>
+pub fn stdout<S>(default_directive: impl Into<Directive>, color: &str) -> BoxedLayer<S>
 where
     S: Subscriber,
     for<'a> S: LookupSpan<'a>,
 {
     // TODO: Auto-detect
     let with_ansi =
-        std::env::var("RUST_LOG_STYLE").map(|val| val != "never").unwrap_or(!not_coloured);
+        std::env::var("RUST_LOG_STYLE").map(|val| val != "never").unwrap_or(color != "never");
     let with_target = std::env::var("RUST_LOG_TARGET").map(|val| val != "0").unwrap_or(true);
 
     let filter =
