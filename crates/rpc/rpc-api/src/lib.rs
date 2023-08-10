@@ -19,6 +19,7 @@
 //!
 //! - `client`: Enables JSON-RPC client support.
 
+mod address;
 mod admin;
 mod debug;
 mod engine;
@@ -39,6 +40,7 @@ pub use servers::*;
 /// Aggregates all server traits.
 pub mod servers {
     pub use crate::{
+        address::AddressApiServer,
         admin::AdminApiServer,
         debug::DebugApiServer,
         engine::{EngineApiServer, EngineEthApiServer},
@@ -63,6 +65,7 @@ pub use clients::*;
 #[cfg(feature = "client")]
 pub mod clients {
     pub use crate::{
+        address::AddressApiClient,
         admin::AdminApiClient,
         debug::DebugApiClient,
         engine::{EngineApiClient, EngineEthApiClient},

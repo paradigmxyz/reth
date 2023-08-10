@@ -30,6 +30,7 @@
 //! lot of handlers make use of async functions, caching for example, but are also using blocking
 //! disk-io, hence these calls are spawned as futures to a blocking task manually.
 
+mod address;
 mod admin;
 mod debug;
 mod engine;
@@ -44,6 +45,7 @@ pub mod tracing_call;
 mod txpool;
 mod web3;
 
+pub use address::AddressApi;
 pub use admin::AdminApi;
 pub use debug::DebugApi;
 pub use engine::{EngineApi, EngineEthApi};

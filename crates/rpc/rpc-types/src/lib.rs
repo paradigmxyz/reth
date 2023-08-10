@@ -15,11 +15,13 @@
 //!
 //! Provides all relevant types for the various RPC endpoints, grouped by namespace.
 
+mod address;
 mod admin;
 mod eth;
 mod otterscan;
 mod rpc;
 
+pub use address::*;
 pub use admin::*;
 pub use eth::*;
 pub use otterscan::*;

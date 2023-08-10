@@ -121,9 +121,9 @@ use reth_rpc::{
         cache::{cache_new_blocks_task, EthStateCache},
         gas_oracle::GasPriceOracle,
     },
-    AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider,
-    NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TracingCallGuard, TracingCallPool, TxPoolApi,
-    Web3Api,
+    AddressApi, AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub,
+    EthSubscriptionIdProvider, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TracingCallGuard,
+    TracingCallPool, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -641,6 +641,8 @@ impl fmt::Display for RpcModuleSelection {
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "kebab-case")]
 pub enum RethRpcModule {
+    /// `address_` module
+    Address,
     /// `admin_` module
     Admin,
     /// `debug_` module
@@ -797,6 +799,13 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
 {
+    /// Register Address Namespace
+    pub fn register_address(&mut self) -> &mut Self {
+        let eth_api = self.eth_api();
+        self.modules.insert(RethRpcModule::Address, OtterscanApi::new(eth_api).into_rpc().into());
+        self
+    }
+
     /// Register Eth Namespace
     pub fn register_eth(&mut self) -> &mut Self {
         let eth_api = self.eth_api();
@@ -924,6 +933,9 @@ where
                 self.modules
                     .entry(namespace)
                     .or_insert_with(|| match namespace {
+                        RethRpcModule::Address => {
+                            AddressApi::new(eth_api.clone()).into_rpc().into()
+                        }
                         RethRpcModule::Admin => {
                             AdminApi::new(self.network.clone()).into_rpc().into()
                         }
@@ -1864,6 +1876,7 @@ mod tests {
         }
         assert_rpc_module!
         (
+                "address" =>  RethRpcModule::Address,
                 "admin" =>  RethRpcModule::Admin,
                 "debug" =>  RethRpcModule::Debug,
                 "eth" =>  RethRpcModule::Eth,
