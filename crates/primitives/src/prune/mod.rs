@@ -24,7 +24,18 @@ impl ContractLogsPruneConfig {
     /// Given the `tip` block number, consolidates the structure so it can easily be queried for
     /// filtering across a range of blocks.
     ///
-    /// The [`BlockNumber`] key of the map should be viewed as `PruneMode::Before(block)`.
+    /// Example:
+    ///
+    /// `{ addrA: Before(872), addrB: Before(500), addrC: Distance(128) }`
+    ///  
+    ///    for `tip: 100`, gets transformed to a map such as:
+    ///
+    /// `{ 500: [addrB], 872: [addrA, addrC] }`
+    ///
+    /// The [`BlockNumber`] key of the new map should be viewed as `PruneMode::Before(block)`, which
+    /// makes the previous result equivalent to
+    ///
+    /// `{ Before(500): [addrB], Before(872): [addrA, addrC] }`
     pub fn group_by_block(
         &self,
         tip: BlockNumber,
