@@ -28,7 +28,7 @@ impl ContractLogsPruneConfig {
     ///
     /// `{ addrA: Before(872), addrB: Before(500), addrC: Distance(128) }`
     ///  
-    ///    for `tip: 100`, gets transformed to a map such as:
+    ///    for `tip: 1000`, gets transformed to a map such as:
     ///
     /// `{ 500: [addrB], 872: [addrA, addrC] }`
     ///
