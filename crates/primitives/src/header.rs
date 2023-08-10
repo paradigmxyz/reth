@@ -1,6 +1,6 @@
 use crate::{
     basefee::calculate_next_block_base_fee,
-    blobfee::calculate_excess_blob_gas,
+    eip4844::calculate_excess_blob_gas,
     keccak256,
     proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
     BaseFeeParams, BlockBodyRoots, BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes, H160, H256,
