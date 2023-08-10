@@ -22,10 +22,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     BlockNumberList, DatabaseError,
 };
-use reth_interfaces::{
-    executor::{BlockExecutionError, BlockValidationError},
-    Result,
-};
+use reth_interfaces::Result;
 use reth_primitives::{
     keccak256,
     stage::{StageCheckpoint, StageId},
@@ -1449,9 +1446,8 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
             let accounts = self.basic_accounts(lists)?;
             let hashed_addresses = self.insert_account_for_hashing(accounts)?;
             for (hashed_address, account) in hashed_addresses {
-                if account.is_some() {
-                    account_prefix_set.insert(Nibbles::unpack(hashed_address));
-                } else {
+                account_prefix_set.insert(Nibbles::unpack(hashed_address));
+                if account.is_none() {
                     destroyed_accounts.insert(hashed_address);
                 }
             }
@@ -1794,9 +1790,8 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockExecutionWriter for DatabaseP
             // Unwind account hashes. Add changed accounts to account prefix set.
             let hashed_addresses = self.unwind_account_hashing(range.clone())?;
             for (hashed_address, account) in hashed_addresses {
-                if account.is_some() {
-                    account_prefix_set.insert(Nibbles::unpack(hashed_address));
-                } else {
+                account_prefix_set.insert(Nibbles::unpack(hashed_address));
+                if account.is_none() {
                     destroyed_accounts.insert(hashed_address);
                 }
             }
@@ -1924,12 +1919,14 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
         let tx_iter = if Some(block.body.len()) == senders_len {
             block.body.into_iter().zip(senders.unwrap()).collect::<Vec<(_, _)>>()
         } else {
-            let senders = TransactionSigned::recover_signers(block.body.iter(), block.body.len())
-                .ok_or(BlockExecutionError::Validation(
-                BlockValidationError::SenderRecoveryError,
-            ))?;
-
-            block.body.into_iter().zip(senders).collect()
+            block
+                .body
+                .into_iter()
+                .map(|tx| {
+                    let signer = tx.recover_signer();
+                    (tx, signer.unwrap_or_default())
+                })
+                .collect::<Vec<(_, _)>>()
         };
 
         for (transaction, sender) in tx_iter {
