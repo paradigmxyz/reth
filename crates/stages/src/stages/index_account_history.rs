@@ -1,9 +1,6 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
-use reth_primitives::{
-    stage::{StageCheckpoint, StageId},
-    PruneModes,
-};
+use reth_primitives::stage::{StageCheckpoint, StageId};
 use reth_provider::{AccountExtReader, DatabaseProviderRW, HistoryWriter};
 use std::fmt::Debug;
 
@@ -15,20 +12,18 @@ pub struct IndexAccountHistoryStage {
     /// Number of blocks after which the control
     /// flow will be returned to the pipeline for commit.
     pub commit_threshold: u64,
-    /// Pruning configuration.
-    pub prune_modes: PruneModes,
 }
 
 impl IndexAccountHistoryStage {
     /// Create new instance of [IndexAccountHistoryStage].
     pub fn new(commit_threshold: u64) -> Self {
-        Self { commit_threshold, prune_modes: PruneModes::default() }
+        Self { commit_threshold }
     }
 }
 
 impl Default for IndexAccountHistoryStage {
     fn default() -> Self {
-        Self { commit_threshold: 100_000, prune_modes: PruneModes::default() }
+        Self { commit_threshold: 100_000 }
     }
 }
 
@@ -43,16 +38,8 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
     async fn execute(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
-        mut input: ExecInput,
+        input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        if let Some((target_prunable_block, _)) =
-            self.prune_modes.prune_target_block_account_history(input.target())?
-        {
-            if target_prunable_block > input.checkpoint().block_number {
-                input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
-            }
-        }
-
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
@@ -105,7 +92,7 @@ mod tests {
     };
     use reth_interfaces::test_utils::{
         generators,
-        generators::{random_block_range, random_contract_account_range, random_transition_range},
+        generators::{random_block_range, random_changeset_range, random_contract_account_range},
     };
     use reth_primitives::{hex_literal::hex, Address, BlockNumber, H160, H256, MAINNET};
 
@@ -385,16 +372,11 @@ mod tests {
     struct IndexAccountHistoryTestRunner {
         pub(crate) tx: TestTransaction,
         commit_threshold: u64,
-        prune_modes: PruneModes,
     }
 
     impl Default for IndexAccountHistoryTestRunner {
         fn default() -> Self {
-            Self {
-                tx: TestTransaction::default(),
-                commit_threshold: 1000,
-                prune_modes: PruneModes::default(),
-            }
+            Self { tx: TestTransaction::default(), commit_threshold: 1000 }
         }
     }
 
@@ -406,7 +388,7 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            Self::S { commit_threshold: self.commit_threshold, prune_modes: self.prune_modes }
+            Self::S { commit_threshold: self.commit_threshold }
         }
     }
 
@@ -426,7 +408,7 @@ mod tests {
 
             let blocks = random_block_range(&mut rng, start..=end, H256::zero(), 0..3);
 
-            let (transitions, _) = random_transition_range(
+            let (transitions, _) = random_changeset_range(
                 &mut rng,
                 blocks.iter(),
                 accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
@@ -435,7 +417,7 @@ mod tests {
             );
 
             // add block changeset from block 1.
-            self.tx.insert_transitions(transitions, Some(start))?;
+            self.tx.insert_changesets(transitions, Some(start))?;
 
             Ok(())
         }

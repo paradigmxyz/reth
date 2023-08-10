@@ -2,8 +2,8 @@ use once_cell::sync::Lazy;
 use quote::{quote, ToTokens};
 use regex::Regex;
 use syn::{
-    punctuated::Punctuated, Attribute, Data, DeriveInput, Error, Expr, Lit, LitBool, LitStr,
-    MetaNameValue, Result, Token,
+    punctuated::Punctuated, Attribute, Data, DeriveInput, Error, Expr, Field, Lit, LitBool, LitStr,
+    Meta, MetaNameValue, Result, Token,
 };
 
 use crate::{metric::Metric, with_attrs::WithAttrs};
@@ -16,6 +16,19 @@ static METRIC_NAME_RE: Lazy<Regex> =
 
 /// Supported metrics separators
 const SUPPORTED_SEPARATORS: &[&str] = &[".", "_", ":"];
+
+enum MetricField<'a> {
+    Included(Metric<'a>),
+    Skipped(&'a Field),
+}
+
+impl<'a> MetricField<'a> {
+    fn field(&self) -> &'a Field {
+        match self {
+            MetricField::Included(Metric { field, .. }) | MetricField::Skipped(field) => field,
+        }
+    }
+}
 
 pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
     let ty = &node.ident;
@@ -36,30 +49,49 @@ pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
             let (defaults, labeled_defaults, describes): (Vec<_>, Vec<_>, Vec<_>) = metric_fields
                 .iter()
                 .map(|metric| {
-                    let field_name = &metric.field.ident;
-                    let metric_name =
-                        format!("{}{}{}", scope.value(), metrics_attr.separator(), metric.name());
-                    let registrar = metric.register_stmt()?;
-                    let describe = metric.describe_stmt()?;
-                    let description = &metric.description;
-                    Ok((
-                        quote! {
-                            #field_name: #registrar(#metric_name),
-                        },
-                        quote! {
-                            #field_name: #registrar(#metric_name, labels.clone()),
-                        },
-                        quote! {
-                            #describe(#metric_name, #description);
-                        },
-                    ))
+                    let field_name = &metric.field().ident;
+                    match metric {
+                        MetricField::Included(metric) => {
+                            let metric_name = format!(
+                                "{}{}{}",
+                                scope.value(),
+                                metrics_attr.separator(),
+                                metric.name()
+                            );
+                            let registrar = metric.register_stmt()?;
+                            let describe = metric.describe_stmt()?;
+                            let description = &metric.description;
+                            Ok((
+                                quote! {
+                                    #field_name: #registrar(#metric_name),
+                                },
+                                quote! {
+                                    #field_name: #registrar(#metric_name, labels.clone()),
+                                },
+                                Some(quote! {
+                                    #describe(#metric_name, #description);
+                                }),
+                            ))
+                        }
+                        MetricField::Skipped(_) => Ok((
+                            quote! {
+                                #field_name: Default::default(),
+                            },
+                            quote! {
+                                #field_name: Default::default(),
+                            },
+                            None,
+                        )),
+                    }
                 })
                 .collect::<Result<Vec<_>>>()?
                 .into_iter()
                 .fold((vec![], vec![], vec![]), |mut acc, x| {
                     acc.0.push(x.0);
                     acc.1.push(x.1);
-                    acc.2.push(x.2);
+                    if let Some(describe) = x.2 {
+                        acc.2.push(describe);
+                    }
                     acc
                 });
 
@@ -93,35 +125,50 @@ pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
             let (defaults, labeled_defaults, describes): (Vec<_>, Vec<_>, Vec<_>) = metric_fields
                 .iter()
                 .map(|metric| {
-                    let name = metric.name();
-                    let separator = metrics_attr.separator();
-                    let metric_name = quote! {
-                        format!("{}{}{}", scope, #separator, #name)
-                    };
-                    let field_name = &metric.field.ident;
+                    let field_name = &metric.field().ident;
+                    match metric {
+                        MetricField::Included(metric) => {
+                            let name = metric.name();
+                            let separator = metrics_attr.separator();
+                            let metric_name = quote! {
+                                format!("{}{}{}", scope, #separator, #name)
+                            };
 
-                    let registrar = metric.register_stmt()?;
-                    let describe = metric.describe_stmt()?;
-                    let description = &metric.description;
+                            let registrar = metric.register_stmt()?;
+                            let describe = metric.describe_stmt()?;
+                            let description = &metric.description;
 
-                    Ok((
-                        quote! {
-                            #field_name: #registrar(#metric_name),
-                        },
-                        quote! {
-                            #field_name: #registrar(#metric_name, labels.clone()),
-                        },
-                        quote! {
-                            #describe(#metric_name, #description);
-                        },
-                    ))
+                            Ok((
+                                quote! {
+                                    #field_name: #registrar(#metric_name),
+                                },
+                                quote! {
+                                    #field_name: #registrar(#metric_name, labels.clone()),
+                                },
+                                Some(quote! {
+                                    #describe(#metric_name, #description);
+                                }),
+                            ))
+                        }
+                        MetricField::Skipped(_) => Ok((
+                            quote! {
+                                #field_name: Default::default(),
+                            },
+                            quote! {
+                                #field_name: Default::default(),
+                            },
+                            None,
+                        )),
+                    }
                 })
                 .collect::<Result<Vec<_>>>()?
                 .into_iter()
                 .fold((vec![], vec![], vec![]), |mut acc, x| {
                     acc.0.push(x.0);
                     acc.1.push(x.1);
-                    acc.2.push(x.2);
+                    if let Some(describe) = x.2 {
+                        acc.2.push(describe);
+                    }
                     acc
                 });
 
@@ -246,38 +293,55 @@ fn parse_metrics_attr(node: &DeriveInput) -> Result<MetricsAttr> {
     Ok(MetricsAttr { scope, separator })
 }
 
-fn parse_metric_fields(node: &DeriveInput) -> Result<Vec<Metric<'_>>> {
+fn parse_metric_fields(node: &DeriveInput) -> Result<Vec<MetricField<'_>>> {
     let Data::Struct(ref data) = node.data else {
         return Err(Error::new_spanned(node, "Only structs are supported."))
     };
 
     let mut metrics = Vec::with_capacity(data.fields.len());
     for field in data.fields.iter() {
-        let (mut describe, mut rename) = (None, None);
+        let (mut describe, mut rename, mut skip) = (None, None, false);
         if let Some(metric_attr) = parse_single_attr(field, "metric")? {
-            let parsed = metric_attr
-                .parse_args_with(Punctuated::<MetaNameValue, Token![,]>::parse_terminated)?;
-            for kv in parsed {
-                let lit = match kv.value {
-                    Expr::Lit(ref expr) => &expr.lit,
-                    _ => continue,
-                };
-                if kv.path.is_ident("describe") {
-                    if describe.is_some() {
-                        return Err(Error::new_spanned(kv, "Duplicate `describe` value provided."))
+            let parsed =
+                metric_attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
+            for meta in parsed {
+                match meta {
+                    Meta::Path(path) if path.is_ident("skip") => skip = true,
+                    Meta::NameValue(kv) => {
+                        let lit = match kv.value {
+                            Expr::Lit(ref expr) => &expr.lit,
+                            _ => continue,
+                        };
+                        if kv.path.is_ident("describe") {
+                            if describe.is_some() {
+                                return Err(Error::new_spanned(
+                                    kv,
+                                    "Duplicate `describe` value provided.",
+                                ))
+                            }
+                            describe = Some(parse_str_lit(lit)?);
+                        } else if kv.path.is_ident("rename") {
+                            if rename.is_some() {
+                                return Err(Error::new_spanned(
+                                    kv,
+                                    "Duplicate `rename` value provided.",
+                                ))
+                            }
+                            let rename_lit = parse_str_lit(lit)?;
+                            validate_metric_name(&rename_lit)?;
+                            rename = Some(rename_lit)
+                        } else {
+                            return Err(Error::new_spanned(kv, "Unsupported attribute entry."))
+                        }
                     }
-                    describe = Some(parse_str_lit(lit)?);
-                } else if kv.path.is_ident("rename") {
-                    if rename.is_some() {
-                        return Err(Error::new_spanned(kv, "Duplicate `rename` value provided."))
-                    }
-                    let rename_lit = parse_str_lit(lit)?;
-                    validate_metric_name(&rename_lit)?;
-                    rename = Some(rename_lit)
-                } else {
-                    return Err(Error::new_spanned(kv, "Unsupported attribute entry."))
+                    _ => return Err(Error::new_spanned(meta, "Unsupported attribute entry.")),
                 }
             }
+        }
+
+        if skip {
+            metrics.push(MetricField::Skipped(field));
+            continue
         }
 
         let description = match describe {
@@ -294,7 +358,7 @@ fn parse_metric_fields(node: &DeriveInput) -> Result<Vec<Metric<'_>>> {
             },
         };
 
-        metrics.push(Metric::new(field, description, rename));
+        metrics.push(MetricField::Included(Metric::new(field, description, rename)));
     }
 
     Ok(metrics)

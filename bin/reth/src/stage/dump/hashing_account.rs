@@ -9,7 +9,7 @@ use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
 pub(crate) async fn dump_hashing_account_stage<DB: Database>(
-    db_tool: &mut DbTool<'_, DB>,
+    db_tool: &DbTool<'_, DB>,
     from: BlockNumber,
     to: BlockNumber,
     output_db: &PathBuf,
@@ -33,7 +33,7 @@ pub(crate) async fn dump_hashing_account_stage<DB: Database>(
 
 /// Dry-run an unwind to FROM block and copy the necessary table data to the new database.
 async fn unwind_and_copy<DB: Database>(
-    db_tool: &mut DbTool<'_, DB>,
+    db_tool: &DbTool<'_, DB>,
     from: u64,
     tip_block_number: u64,
     output_db: &DatabaseEnv,

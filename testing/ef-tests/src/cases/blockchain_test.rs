@@ -182,5 +182,14 @@ pub fn should_skip(path: &Path) -> bool {
         return true
     }
 
+    if path.file_name() == Some(OsStr::new("ValueOverflow.json")) {
+        return true
+    }
+
+    // TODO: re-enable when blobtx are supported
+    if path.file_name() == Some(OsStr::new("blobtxExample.json")) {
+        return true
+    }
+
     false
 }

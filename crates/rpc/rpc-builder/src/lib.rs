@@ -1530,7 +1530,7 @@ impl TransportRpcModules<()> {
         let other = other.into();
         self.merge_http(other.clone())?;
         self.merge_ws(other.clone())?;
-        self.merge_ipc(other.clone())?;
+        self.merge_ipc(other)?;
         Ok(())
     }
 

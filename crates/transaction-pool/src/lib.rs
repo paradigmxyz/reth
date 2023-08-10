@@ -92,10 +92,10 @@
 //!
 //! ```
 //! use reth_primitives::MAINNET;
-//! use reth_provider::StateProviderFactory;
+//! use reth_provider::{ChainSpecProvider, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::{EthTransactionValidator, Pool, TransactionPool};
-//!  async fn t<C>(client: C)  where C: StateProviderFactory + Clone + 'static{
+//!  async fn t<C>(client: C)  where C: StateProviderFactory + ChainSpecProvider + Clone + 'static{
 //!     let pool = Pool::eth_pool(
 //!         EthTransactionValidator::new(client, MAINNET.clone(), TokioTaskExecutor::default()),
 //!         Default::default(),
@@ -117,12 +117,12 @@
 //! ```
 //! use futures_util::Stream;
 //! use reth_primitives::MAINNET;
-//! use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
+//! use reth_provider::{BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::{EthTransactionValidator, Pool};
 //! use reth_transaction_pool::maintain::maintain_transaction_pool_future;
 //!  async fn t<C, St>(client: C, stream: St)
-//!    where C: StateProviderFactory + BlockReaderIdExt + Clone + 'static,
+//!    where C: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
 //!     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 //!     {
 //!     let pool = Pool::eth_pool(
@@ -165,8 +165,9 @@ pub use crate::{
     },
     traits::{
         AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
-        NewTransactionEvent, PoolSize, PoolTransaction, PooledTransaction, PropagateKind,
-        PropagatedTransactions, TransactionOrigin, TransactionPool, TransactionPoolExt,
+        NewTransactionEvent, PendingTransactionListenerKind, PoolSize, PoolTransaction,
+        PooledTransaction, PropagateKind, PropagatedTransactions, TransactionOrigin,
+        TransactionPool, TransactionPoolExt,
     },
     validate::{
         EthTransactionValidator, TransactionValidationOutcome, TransactionValidator,
@@ -343,8 +344,11 @@ where
         self.pool.add_all_transactions_event_listener()
     }
 
-    fn pending_transactions_listener(&self) -> Receiver<TxHash> {
-        self.pool.add_pending_listener()
+    fn pending_transactions_listener_for(
+        &self,
+        kind: PendingTransactionListenerKind,
+    ) -> Receiver<TxHash> {
+        self.pool.add_pending_listener(kind)
     }
 
     fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {

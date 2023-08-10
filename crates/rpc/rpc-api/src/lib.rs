@@ -67,6 +67,7 @@ pub mod clients {
         debug::DebugApiClient,
         engine::{EngineApiClient, EngineEthApiClient},
         eth::EthApiClient,
+        eth_filter::EthFilterApiClient,
         net::NetApiClient,
         otterscan::OtterscanClient,
         rpc::RpcApiServer,

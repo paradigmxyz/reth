@@ -13,7 +13,7 @@ use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
 pub(crate) async fn dump_execution_stage<DB: Database>(
-    db_tool: &mut DbTool<'_, DB>,
+    db_tool: &DbTool<'_, DB>,
     from: u64,
     to: u64,
     output_db: &PathBuf,
@@ -90,7 +90,7 @@ fn import_tables_with_range<DB: Database>(
 /// PlainAccountState safely. There might be some state dependency from an address
 /// which hasn't been changed in the given range.
 async fn unwind_and_copy<DB: Database>(
-    db_tool: &mut DbTool<'_, DB>,
+    db_tool: &DbTool<'_, DB>,
     from: u64,
     tip_block_number: u64,
     output_db: &DatabaseEnv,

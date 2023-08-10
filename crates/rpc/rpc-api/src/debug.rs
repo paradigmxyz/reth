@@ -1,11 +1,12 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, H256};
 use reth_rpc_types::{
+    state::StateOverride,
     trace::geth::{
         BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
         TraceResult,
     },
-    CallRequest, RichBlock,
+    Bundle, CallRequest, RichBlock, StateContext,
 };
 
 /// Debug rpc interface.
@@ -102,4 +103,24 @@ pub trait DebugApi {
         block_number: Option<BlockId>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<GethTrace>;
+
+    /// The `debug_traceCallMany` method lets you run an `eth_callmany` within the context of the
+    /// given block execution using the final state of parent block as the base followed by n
+    /// transactions
+    ///
+    /// The first argument is a list of bundles. Each bundle can overwrite the block headers. This
+    /// will affect all transaction in that bundle.
+    /// BlockNumber and transaction_index are optinal. Transaction_index
+    /// specifys the number of tx in the block to replay and -1 means all transactions should be
+    /// replayed.
+    /// The trace can be configured similar to `debug_traceTransaction`.
+    /// State override apply to all bundles.
+    #[method(name = "traceCallMany")]
+    async fn debug_trace_call_many(
+        &self,
+        bundles: Vec<Bundle>,
+        state_context: Option<StateContext>,
+        opts: Option<GethDebugTracingOptions>,
+        state_override: Option<StateOverride>,
+    ) -> RpcResult<Vec<GethTrace>>;
 }

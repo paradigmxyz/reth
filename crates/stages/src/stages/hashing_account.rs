@@ -15,7 +15,6 @@ use reth_primitives::{
         AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, StageCheckpoint,
         StageId,
     },
-    PruneModes,
 };
 use reth_provider::{AccountExtReader, DatabaseProviderRW, HashingWriter};
 use std::{
@@ -35,25 +34,18 @@ pub struct AccountHashingStage {
     pub clean_threshold: u64,
     /// The maximum number of accounts to process before committing.
     pub commit_threshold: u64,
-    /// Prune mode configuration. Required to know if we can actually make an incremental
-    /// update based on how many changesets exist.
-    pub prune_modes: PruneModes,
 }
 
 impl AccountHashingStage {
     /// Create new instance of [AccountHashingStage].
-    pub fn new(clean_threshold: u64, commit_threshold: u64, prune_modes: PruneModes) -> Self {
-        Self { clean_threshold, commit_threshold, prune_modes }
+    pub fn new(clean_threshold: u64, commit_threshold: u64) -> Self {
+        Self { clean_threshold, commit_threshold }
     }
 }
 
 impl Default for AccountHashingStage {
     fn default() -> Self {
-        Self {
-            clean_threshold: 500_000,
-            commit_threshold: 100_000,
-            prune_modes: PruneModes::default(),
-        }
+        Self { clean_threshold: 500_000, commit_threshold: 100_000 }
     }
 }
 
@@ -151,19 +143,12 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         }
 
         let (from_block, to_block) = input.next_block_range().into_inner();
-        let has_enough_changesets = self
-            .prune_modes
-            .prune_target_block_account_history(to_block)?
-            .map(|(block_number, _)| block_number)
-            .unwrap_or_default() <
-            from_block;
 
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
         // account otherwise take changesets aggregate the sets and apply hashing to
         // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
         // genesis accounts are not in changeset.
-        if to_block - from_block > self.clean_threshold || from_block == 1 || !has_enough_changesets
-        {
+        if to_block - from_block > self.clean_threshold || from_block == 1 {
             let tx = provider.tx_ref();
             let stage_checkpoint = input
                 .checkpoint
@@ -463,7 +448,6 @@ mod tests {
             pub(crate) tx: TestTransaction,
             commit_threshold: u64,
             clean_threshold: u64,
-            prune_modes: PruneModes,
         }
 
         impl AccountHashingTestRunner {
@@ -527,7 +511,6 @@ mod tests {
                     tx: TestTransaction::default(),
                     commit_threshold: 1000,
                     clean_threshold: 1000,
-                    prune_modes: PruneModes::default(),
                 }
             }
         }
@@ -543,7 +526,6 @@ mod tests {
                 Self::S {
                     commit_threshold: self.commit_threshold,
                     clean_threshold: self.clean_threshold,
-                    prune_modes: self.prune_modes,
                 }
             }
         }

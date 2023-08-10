@@ -10,6 +10,7 @@ use revm::{
         opcode, return_ok, CallInputs, CallScheme, CreateInputs, Gas, InstructionResult,
         Interpreter, OpCode,
     },
+    primitives::SpecId,
     Database, EVMData, Inspector, JournalEntry,
 };
 use types::{CallTrace, CallTraceStep};
@@ -59,6 +60,10 @@ pub struct TracingInspector {
     last_call_return_data: Option<Bytes>,
     /// The gas inspector used to track remaining gas.
     gas_inspector: GasInspector,
+    /// The spec id of the EVM.
+    ///
+    /// This is filled during execution.
+    spec_id: Option<SpecId>,
 }
 
 // === impl TracingInspector ===
@@ -73,12 +78,13 @@ impl TracingInspector {
             step_stack: vec![],
             last_call_return_data: None,
             gas_inspector: Default::default(),
+            spec_id: None,
         }
     }
 
     /// Consumes the Inspector and returns a [ParityTraceBuilder].
     pub fn into_parity_builder(self) -> ParityTraceBuilder {
-        ParityTraceBuilder::new(self.traces.arena, self.config)
+        ParityTraceBuilder::new(self.traces.arena, self.spec_id, self.config)
     }
 
     /// Consumes the Inspector and returns a [GethTraceBuilder].
@@ -170,6 +176,10 @@ impl TracingInspector {
             // this is the root call which should get the original gas limit of the transaction,
             // because initialization costs are already subtracted from gas_limit
             gas_limit = data.env.tx.gas_limit;
+
+            // we set the spec id here because we only need to do this once and this condition is
+            // hit exactly once
+            self.spec_id = Some(data.env.cfg.spec_id);
         }
 
         self.trace_stack.push(self.traces.push_trace(
@@ -265,7 +275,7 @@ impl TracingInspector {
             op,
             contract: interp.contract.address,
             stack,
-            new_stack: None,
+            push_stack: None,
             memory,
             memory_size: interp.memory.len(),
             gas_remaining: self.gas_inspector.gas_remaining(),
@@ -292,7 +302,8 @@ impl TracingInspector {
         let step = &mut self.traces.arena[trace_idx].trace.steps[step_idx];
 
         if interp.stack.len() > step.stack.len() {
-            step.new_stack = interp.stack.data().last().copied();
+            // if the stack grew, we need to record the new values
+            step.push_stack = Some(interp.stack.data()[step.stack.len()..].to_vec());
         }
 
         if self.config.record_memory_snapshots {
