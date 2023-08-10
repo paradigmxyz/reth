@@ -32,7 +32,7 @@ secp256k1 = { workspace = true, default-features = false, features = [
 ] }
 
 # for eip-4844
-c-kzg = { git = "https://github.com/ethereum/c-kzg-4844" }
+c-kzg = { workspace = true }
 
 # used for forkid
 crc = "3"
@@ -60,6 +60,7 @@ impl-serde = "0.4.0"
 once_cell = "1.17.0"
 zstd = { version = "0.12", features = ["experimental"] }
 paste = "1.0"
+tempfile = "3.3"
 sha2 = "0.10.7"
 
 # proof related
