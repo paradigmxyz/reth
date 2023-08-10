@@ -13,6 +13,7 @@ use reth_db::{
 };
 use reth_primitives::{
     BlockNumber, ChainSpec, PruneCheckpoint, PruneMode, PruneModes, PrunePart, TxNumber,
+    MINIMUM_PRUNING_DISTANCE,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
@@ -98,6 +99,15 @@ impl<DB: Database> Pruner<DB> {
             self.prune_receipts(&provider, to_block, prune_mode)?;
             self.metrics
                 .get_prune_part_metrics(PrunePart::Receipts)
+                .duration_seconds
+                .record(part_start.elapsed())
+        }
+
+        if !self.modes.contract_logs_filter.is_empty() {
+            let part_start = Instant::now();
+            self.prune_receipts_by_logs(&provider, tip_block_number)?;
+            self.metrics
+                .get_prune_part_metrics(PrunePart::ContractLogs)
                 .duration_seconds
                 .record(part_start.elapsed())
         }
@@ -253,11 +263,140 @@ impl<DB: Database> Pruner<DB> {
                     "Pruned receipts"
                 );
             },
+            |_| false,
         )?;
 
         provider.save_prune_checkpoint(
             PrunePart::Receipts,
             PruneCheckpoint { block_number: to_block, prune_mode },
+        )?;
+
+        // `PrunePart::Receipts` overrides `PrunePart::ContractLogs`, so we can preemptively
+        // limit their pruning start point.
+        provider.save_prune_checkpoint(
+            PrunePart::ContractLogs,
+            PruneCheckpoint { block_number: to_block, prune_mode },
+        )?;
+
+        Ok(())
+    }
+
+    /// Prune receipts up to the provided block by filtering logs. Works as in inclusion list, and
+    /// removes every receipt not belonging to it.
+    #[instrument(level = "trace", skip(self, provider), target = "pruner")]
+    fn prune_receipts_by_logs(
+        &self,
+        provider: &DatabaseProviderRW<'_, DB>,
+        tip_block_number: BlockNumber,
+    ) -> PrunerResult {
+        // Contract log filtering removes every receipt possible except the ones in the list. So,
+        // for the other receipts it's as if they had a `PruneMode::Distance()` of 128.
+        let to_block = PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)
+            .prune_target_block(
+                tip_block_number,
+                MINIMUM_PRUNING_DISTANCE,
+                PrunePart::ContractLogs,
+            )?
+            .map(|(bn, _)| bn)
+            .unwrap_or_default();
+
+        // Figure out what receipts have already been pruned, so we can have an accurate
+        // `address_filter`
+        let pruned = provider
+            .get_prune_checkpoint(PrunePart::ContractLogs)?
+            .map(|checkpoint| checkpoint.block_number)
+            .unwrap_or(0);
+
+        let address_filter =
+            self.modes.contract_logs_filter.group_by_block(tip_block_number, Some(pruned))?;
+
+        // Split all transactions in different block ranges. Each block range will have its own
+        // filter address list.
+        let mut block_ranges = vec![];
+        let mut blocks_iter = address_filter.keys().peekable();
+        let mut filtered_addresses = vec![];
+
+        while let Some(start_block) = blocks_iter.next() {
+            filtered_addresses.extend_from_slice(address_filter.get(start_block).expect("qed"));
+
+            // This will clear all receipts before the first  appearance of a contract log
+            if block_ranges.is_empty() {
+                block_ranges.push((0, *start_block, 0));
+            }
+
+            let end_block =
+                blocks_iter.peek().map(|next_block| *next_block - 1).unwrap_or(to_block);
+
+            // Addresses in lower block ranges, are still included in the list for future ranges.
+            block_ranges.push((*start_block, end_block, filtered_addresses.len()));
+        }
+
+        for (start_block, end_block, num_addresses) in block_ranges {
+            let range = match self.get_next_tx_num_range_from_checkpoint(
+                provider,
+                PrunePart::ContractLogs,
+                end_block,
+            )? {
+                Some(range) => range,
+                None => {
+                    trace!(target: "pruner", "No receipts to filter and prune between {start_block} and {end_block} blocks.");
+                    continue
+                }
+            };
+
+            let total = range.clone().count();
+            let mut processed = 0;
+
+            provider.prune_table_with_iterator_in_batches::<tables::Receipts>(
+                range,
+                self.batch_sizes.receipts,
+                |rows| {
+                    processed += rows;
+                    trace!(
+                        target: "pruner",
+                        %rows,
+                        progress = format!("{:.1}%", 100.0 * processed as f64 / total as f64),
+                        "Filtered or pruned receipts"
+                    );
+                },
+                |receipt| {
+                    if num_addresses > 0 &&
+                        receipt.logs.iter().any(|log| {
+                            filtered_addresses[..num_addresses].contains(&&log.address)
+                        })
+                    {
+                        return true
+                    }
+                    false
+                },
+            )?;
+
+            // If this is the last block range, avoid writing an unused checkpoint
+            if end_block != to_block {
+                // This allows us to query for the transactions in the next block range with
+                // [`get_next_tx_num_range_from_checkpoint`].
+                provider.save_prune_checkpoint(
+                    PrunePart::ContractLogs,
+                    PruneCheckpoint {
+                        block_number: end_block - 1,
+                        prune_mode: PruneMode::Before(end_block),
+                    },
+                )?;
+            }
+        }
+
+        // We must store the **absolute** pruned checkpoint, set to
+        // `PruneMode::Before(_first_block_)`. Here, _first_block_ denotes the first appearance
+        // of contract filtering. This ensures that in future pruner runs, if set up to do so, we
+        // can prune all receipts between the previous `_first_block_` and the new one using
+        // `get_next_tx_num_range_from_checkpoint`.
+        let first_block = address_filter.first_key_value().expect("qed").0;
+        provider.save_prune_checkpoint(
+            PrunePart::ContractLogs,
+            PruneCheckpoint {
+                block_number: *first_block - 1,
+                prune_mode: PruneMode::Before(*first_block),
+            },
         )?;
 
         Ok(())

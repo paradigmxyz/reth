@@ -28,17 +28,21 @@ impl ContractLogsPruneConfig {
     pub fn group_by_block(
         &self,
         tip: BlockNumber,
+        pruned_block: Option<BlockNumber>,
     ) -> Result<BTreeMap<BlockNumber, Vec<&Address>>, PrunePartError> {
         let mut map = BTreeMap::new();
+        let pruned_block = pruned_block.unwrap_or_default();
+
         for (address, mode) in self.0.iter() {
             // Getting `None`, means that there is nothing to prune yet, so we need it to include in
             // the BTreeMap (block = 0), otherwise it will be excluded.
             // Reminder that this BTreeMap works as an inclusion list that excludes (prunes) all
             // other receipts.
-            let block = mode
-                .prune_target_block(tip, MINIMUM_PRUNING_DISTANCE, PrunePart::ContractLogs)?
-                .map(|(block, _)| block)
-                .unwrap_or_default();
+            let block = (pruned_block + 1).max(
+                mode.prune_target_block(tip, MINIMUM_PRUNING_DISTANCE, PrunePart::ContractLogs)?
+                    .map(|(block, _)| block)
+                    .unwrap_or_default(),
+            );
 
             map.entry(block).or_insert_with(Vec::new).push(address)
         }
