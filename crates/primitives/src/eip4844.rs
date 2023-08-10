@@ -1,6 +1,10 @@
 //! Helpers for working with EIP-4844 blob fee
-use crate::{kzg::KzgCommitment, H256, constants::eip4844::{TARGET_DATA_GAS_PER_BLOCK, VERSIONED_HASH_VERSION_KZG}};
-use sha2::{Sha256, Digest};
+use crate::{
+    constants::eip4844::{TARGET_DATA_GAS_PER_BLOCK, VERSIONED_HASH_VERSION_KZG},
+    kzg::KzgCommitment,
+    H256,
+};
+use sha2::{Digest, Sha256};
 
 /// Calculates the versioned hash for a KzgCommitment
 ///
