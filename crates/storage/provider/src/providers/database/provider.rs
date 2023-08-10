@@ -30,8 +30,8 @@ use reth_primitives::{
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
     ChainInfo, ChainSpec, Hardfork, Head, Header, PruneCheckpoint, PrunePart, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta, TransactionSigned,
-    TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H160,
-    H256, U256,
+    TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256,
+    U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
@@ -432,15 +432,13 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)?;
 
         // Recover senders manually if not found in db
-        let start_index = senders.len();
-        let end_index = transactions.len();
-        let missing_senders = end_index - start_index;
-        senders.extend((start_index..end_index).zip((0..missing_senders).map(|_| {
-            TransactionSigned::recover_signers(
-                transactions.iter().skip(start_index),
-                missing_senders,
-            )
-        })));
+        senders.extend(
+            transactions
+                .iter()
+                .skip(senders.len())
+                // I suppose every signature is valid sice taken from db
+                .map(|(id, tx_signed)| (id.to_owned(), tx_signed.recover_signer().unwrap())),
+        );
 
         if TAKE {
             // Remove TxHashNumber
