@@ -438,7 +438,7 @@ impl CallTraceNode {
             gas: U256::from(self.trace.gas_limit),
             gas_used: U256::from(self.trace.gas_used),
             input: self.trace.data.clone().into(),
-            output: Some(self.trace.output.clone().into()),
+            output: (!self.trace.output.is_empty()).then(|| self.trace.output.clone().into()),
             error: None,
             revert_reason: None,
             calls: Default::default(),
