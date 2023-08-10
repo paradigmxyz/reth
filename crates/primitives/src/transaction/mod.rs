@@ -7,6 +7,7 @@ use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
 pub use error::InvalidTransactionError;
 pub use meta::TransactionMeta;
+use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
 use reth_rlp::{
@@ -35,7 +36,12 @@ pub(crate) mod util;
 
 // Expected number of transactions where we can expect a speed-up by recovering the senders in
 // parallel.
-const PARALLEL_SENDER_RECOVERY_THRESHOLD: usize = 10;
+pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: Lazy<usize> =
+    Lazy::new(|| match rayon::current_num_threads() {
+        0..=1 => usize::MAX,
+        2..=8 => 10,
+        _ => 5,
+    });
 
 /// A raw transaction.
 ///
@@ -942,7 +948,7 @@ impl TransactionSigned {
     where
         T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
     {
-        if num_txes < PARALLEL_SENDER_RECOVERY_THRESHOLD {
+        if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
             txes.into_iter().map(|tx| tx.recover_signer()).collect()
         } else {
             txes.into_par_iter().map(|tx| tx.recover_signer()).collect()
@@ -1584,7 +1590,7 @@ mod tests {
         #![proptest_config(proptest::prelude::ProptestConfig::with_cases(1))]
 
         #[test]
-        fn test_parallel_recovery_order(txes in proptest::collection::vec(proptest::prelude::any::<Transaction>(), PARALLEL_SENDER_RECOVERY_THRESHOLD * 5)) {
+        fn test_parallel_recovery_order(txes in proptest::collection::vec(proptest::prelude::any::<Transaction>(), *PARALLEL_SENDER_RECOVERY_THRESHOLD * 5)) {
             let mut rng =rand::thread_rng();
             let secp = Secp256k1::new();
             let txes: Vec<TransactionSigned> = txes.into_iter().map(|mut tx| {
