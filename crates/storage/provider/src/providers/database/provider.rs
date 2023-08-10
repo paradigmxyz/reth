@@ -649,9 +649,9 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             if let Some((_, value)) = cursor.seek_exact(key)? {
                 if !skip_filter(&value) {
                     cursor.delete_current()?;
+                    deleted += 1;
                 }
             }
-            deleted += 1;
 
             if deleted % batch_size == 0 {
                 batch_callback(batch_size);
