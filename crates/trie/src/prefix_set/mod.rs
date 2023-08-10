@@ -2,7 +2,7 @@ use reth_primitives::trie::Nibbles;
 use std::rc::Rc;
 
 mod loader;
-pub use loader::PrefixSetLoader;
+pub use loader::{LoadedPrefixSets, PrefixSetLoader};
 
 /// A container for efficiently storing and checking for the presence of key prefixes.
 ///

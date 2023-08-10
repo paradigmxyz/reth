@@ -9,13 +9,16 @@ use crate::{
 };
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockId, BlockNumberOrTag, TransactionMeta};
-use reth_provider::{BlockReaderIdExt, EvmEnvProvider, StateProviderFactory};
-use reth_rpc_types::{Block, Index, RichBlock, TransactionReceipt};
-use reth_transaction_pool::TransactionPool;
 
+use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
+use reth_rpc_types::{Index, RichBlock, TransactionReceipt};
+
+use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
+use reth_transaction_pool::TransactionPool;
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
-    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider:
+        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
@@ -46,10 +49,8 @@ where
         .unwrap_or_default();
 
         let index = usize::from(index);
-        let uncle = uncles
-            .into_iter()
-            .nth(index)
-            .map(|header| Block::uncle_block_from_header(header).into());
+        let uncle =
+            uncles.into_iter().nth(index).map(|header| uncle_block_from_header(header).into());
         Ok(uncle)
     }
 
@@ -159,8 +160,7 @@ where
             .provider()
             .header_td_by_number(block.number)?
             .ok_or(EthApiError::UnknownBlockNumber)?;
-        let block =
-            Block::from_block(block.into(), total_difficulty, full.into(), Some(block_hash))?;
+        let block = from_block(block.into(), total_difficulty, full.into(), Some(block_hash))?;
         Ok(Some(block.into()))
     }
 }

@@ -10,32 +10,52 @@ use std::{collections::HashMap, sync::Mutex};
 #[derive(Metrics)]
 #[metrics(scope = "metrics_custom")]
 struct CustomMetrics {
+    #[metric(skip)]
+    skipped_field_a: u8,
     /// A gauge with doc comment description.
     gauge: Gauge,
     #[metric(rename = "second_gauge", describe = "A gauge with metric attribute description.")]
     gauge2: Gauge,
+    #[metric(skip)]
+    skipped_field_b: u16,
     /// Some doc comment
     #[metric(describe = "Metric attribute description will be preferred over doc comment.")]
     counter: Counter,
+    #[metric(skip)]
+    skipped_field_c: u32,
+    #[metric(skip)]
+    skipped_field_d: u64,
     /// A renamed histogram.
     #[metric(rename = "histogram")]
     histo: Histogram,
+    #[metric(skip)]
+    skipped_field_e: u128,
 }
 
 #[allow(dead_code)]
 #[derive(Metrics)]
 #[metrics(dynamic = true)]
 struct DynamicScopeMetrics {
+    #[metric(skip)]
+    skipped_field_a: u8,
     /// A gauge with doc comment description.
     gauge: Gauge,
     #[metric(rename = "second_gauge", describe = "A gauge with metric attribute description.")]
     gauge2: Gauge,
+    #[metric(skip)]
+    skipped_field_b: u16,
     /// Some doc comment
     #[metric(describe = "Metric attribute description will be preferred over doc comment.")]
     counter: Counter,
+    #[metric(skip)]
+    skipped_field_c: u32,
+    #[metric(skip)]
+    skipped_field_d: u64,
     /// A renamed histogram.
     #[metric(rename = "histogram")]
     histo: Histogram,
+    #[metric(skip)]
+    skipped_field_e: u128,
 }
 
 static RECORDER: Lazy<TestRecorder> = Lazy::new(TestRecorder::new);

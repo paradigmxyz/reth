@@ -52,7 +52,7 @@ struct RethCliTxpoolExt {
 impl RethNodeCommandExt for RethCliTxpoolExt {
     // This is the entrypoint for the CLI to extend the RPC server with custom rpc namespaces.
     fn extend_rpc_modules<Conf, Provider, Pool, Network, Tasks, Events>(
-        &self,
+        &mut self,
         _config: &Conf,
         registry: &mut RethModuleRegistry<Provider, Pool, Network, Tasks, Events>,
         modules: &mut TransportRpcModules<()>,

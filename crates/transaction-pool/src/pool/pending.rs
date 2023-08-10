@@ -10,6 +10,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
+use tokio::sync::broadcast;
 
 /// A pool of validated and gapless transactions that are ready to be executed on the current state
 /// and are waiting to be included in a block.
@@ -42,6 +43,9 @@ pub(crate) struct PendingPool<T: TransactionOrdering> {
     ///
     /// See also [`PoolTransaction::size`](crate::traits::PoolTransaction::size).
     size_of: SizeTracker,
+    /// Used to broadcast new transactions that have been added to the PendingPool to existing
+    /// snapshots of this pool.
+    new_transaction_notifier: broadcast::Sender<PendingTransaction<T>>,
 }
 
 // === impl PendingPool ===
@@ -49,6 +53,7 @@ pub(crate) struct PendingPool<T: TransactionOrdering> {
 impl<T: TransactionOrdering> PendingPool<T> {
     /// Create a new pool instance.
     pub(crate) fn new(ordering: T) -> Self {
+        let (new_transaction_notifier, _) = broadcast::channel(200);
         Self {
             ordering,
             submission_id: 0,
@@ -56,6 +61,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             all: Default::default(),
             independent_transactions: Default::default(),
             size_of: Default::default(),
+            new_transaction_notifier,
         }
     }
 
@@ -82,6 +88,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             all: self.by_id.clone(),
             independent: self.independent_transactions.clone(),
             invalid: Default::default(),
+            new_transaction_reciever: self.new_transaction_notifier.subscribe(),
         }
     }
 
@@ -223,6 +230,11 @@ impl<T: TransactionOrdering> PendingPool<T> {
         }
         self.all.insert(tx.clone());
 
+        // send the new transaction to any existing pendingpool snapshot iterators
+        if self.new_transaction_notifier.receiver_count() > 0 {
+            let _ = self.new_transaction_notifier.send(tx.clone());
+        }
+
         self.by_id.insert(tx_id, tx);
     }
 
@@ -262,7 +274,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
     /// Removes the worst transaction from this pool.
     pub(crate) fn pop_worst(&mut self) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let worst = self.all.iter().next_back().map(|tx| *tx.transaction.id())?;
+        let worst = self.all.iter().next().map(|tx| *tx.transaction.id())?;
         self.remove_transaction(&worst)
     }
 
@@ -338,7 +350,10 @@ impl<T: TransactionOrdering> Ord for PendingTransaction<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{MockOrdering, MockTransaction, MockTransactionFactory};
+    use crate::{
+        test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
+        PoolTransaction,
+    };
 
     #[test]
     fn test_enforce_basefee() {
@@ -394,5 +409,20 @@ mod tests {
         let removed = pool.update_base_fee((root_tx.max_fee_per_gas() + 1) as u64);
         assert_eq!(removed.len(), 2);
         assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn evict_worst() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        let t = MockTransaction::eip1559();
+        pool.add_transaction(f.validated_arc(t.clone()), 0);
+
+        let t2 = MockTransaction::eip1559().inc_price_by(10);
+        pool.add_transaction(f.validated_arc(t2), 0);
+
+        // First transaction should be evicted.
+        assert_eq!(pool.pop_worst().map(|tx| *tx.hash()), Some(*t.hash()));
     }
 }

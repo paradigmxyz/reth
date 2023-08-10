@@ -19,7 +19,11 @@ use reth_primitives::{
     TransactionKind::{Call, Create},
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, H256, U128, U256, U64,
 };
-use reth_provider::{BlockReaderIdExt, EvmEnvProvider, StateProviderBox, StateProviderFactory};
+use reth_rpc_types_compat::from_recovered_with_block_context;
+
+use reth_provider::{
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
+};
 use reth_revm::{
     database::{State, SubState},
     env::{fill_block_env_with_coinbase, tx_env_with_recovered},
@@ -236,7 +240,8 @@ pub trait EthTransactions: Send + Sync {
 impl<Provider, Pool, Network> EthTransactions for EthApi<Provider, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider:
+        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
     fn call_gas_limit(&self) -> u64 {
@@ -668,7 +673,8 @@ where
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
-    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider:
+        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: 'static,
 {
     /// Helper function for `eth_getTransactionReceipt`
@@ -692,7 +698,8 @@ where
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Pool: TransactionPool + 'static,
-    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider:
+        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
     pub(crate) fn sign_request(
@@ -727,7 +734,7 @@ where
             if let Some(tx_signed) = block.body.into_iter().nth(index.into()) {
                 let tx =
                     tx_signed.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
-                return Ok(Some(Transaction::from_recovered_with_block_context(
+                return Ok(Some(from_recovered_with_block_context(
                     tx,
                     block_hash,
                     block.header.number,
@@ -815,9 +822,9 @@ impl From<TransactionSource> for TransactionSignedEcRecovered {
 impl From<TransactionSource> for Transaction {
     fn from(value: TransactionSource) -> Self {
         match value {
-            TransactionSource::Pool(tx) => Transaction::from_recovered(tx),
+            TransactionSource::Pool(tx) => reth_rpc_types_compat::transaction::from_recovered(tx),
             TransactionSource::Block { transaction, index, block_hash, block_number, base_fee } => {
-                Transaction::from_recovered_with_block_context(
+                from_recovered_with_block_context(
                     transaction,
                     block_hash,
                     block_number,

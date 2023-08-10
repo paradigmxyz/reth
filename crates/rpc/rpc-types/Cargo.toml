@@ -14,7 +14,6 @@ Reth RPC types
 # reth
 reth-primitives.workspace = true
 reth-rlp.workspace = true
-
 # errors
 thiserror.workspace = true
 

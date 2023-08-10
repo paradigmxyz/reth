@@ -12,13 +12,12 @@ use crate::{
     peers::{PeerAction, PeersManager},
     FetchClient,
 };
-
 use reth_eth_wire::{
     capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
 };
 use reth_network_api::PeerKind;
 use reth_primitives::{ForkId, PeerId, H256};
-use reth_provider::BlockReader;
+use reth_provider::BlockNumReader;
 use std::{
     collections::{HashMap, VecDeque},
     net::{IpAddr, SocketAddr},
@@ -70,7 +69,7 @@ pub struct NetworkState<C> {
 
 impl<C> NetworkState<C>
 where
-    C: BlockReader,
+    C: BlockNumReader,
 {
     /// Create a new state instance with the given params
     pub(crate) fn new(
