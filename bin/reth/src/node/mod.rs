@@ -28,7 +28,7 @@ use reth_blockchain_tree::{
 };
 use reth_config::{config::PruneConfig, Config};
 use reth_db::{database::Database, init_db, DatabaseEnv};
-use reth_discv4::{DEFAULT_DISCOVERY_PORT, SECONDARY_DISCOVERY_PORT};
+use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -54,7 +54,6 @@ use reth_provider::{
 use reth_prune::BatchSizes;
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
-use reth_rpc_builder::constants;
 use reth_rpc_engine_api::EngineApi;
 use reth_stages::{
     prelude::*,
@@ -122,18 +121,18 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     #[arg(long, value_name = "SOCKET", value_parser = parse_socket_address, help_heading = "Metrics")]
     pub metrics: Option<SocketAddr>,
 
-    /// Add a secondary node
+    /// Add a new instance of a node.
     ///
     /// Configures the ports of the node to avoid conflicts with the defaults.
     /// This is useful for running multiple nodes on the same machine.
     ///
     /// Changes to the following port numbers:
-    /// - DISCOVERY_PORT: 30304
-    /// - AUTH_PORT: 8552
-    /// - HTTP_RPC_PORT: 8544
-    /// - WS_RPC_PORT: 8547
-    #[arg(long)]
-    secondary: bool,
+    /// - DISCOVERY_PORT: default + `instance` - 1
+    /// - AUTH_PORT: default + `instance` * 100 - 100
+    /// - HTTP_RPC_PORT: default - `instance` + 1
+    /// - WS_RPC_PORT: default + `instance` * 2 - 2
+    #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1)]
+    instance: u16,
 
     /// All networking related arguments
     #[clap(flatten)]
@@ -180,6 +179,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             config,
             chain,
             metrics,
+            instance,
             network,
             rpc,
             txpool,
@@ -195,6 +195,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             config,
             chain,
             metrics,
+            instance,
             network,
             rpc,
             txpool,
@@ -490,8 +491,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let default_jwt_path = data_dir.jwt_path();
         let jwt_secret = self.rpc.jwt_secret(default_jwt_path)?;
 
-        // Check if --secondary flag is enabled and if so change rpc port numbers
-        self.change_rpc_ports_if_secondary();
+        // Check instance to properly set rpc port numbers
+        self.check_instance();
 
         // Start RPC servers
         let (_rpc_server, _auth_server) = self
@@ -727,19 +728,13 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .set_head(head)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::UNSPECIFIED,
-                self.network.port.unwrap_or(if self.secondary {
-                    SECONDARY_DISCOVERY_PORT
-                } else {
-                    DEFAULT_DISCOVERY_PORT
-                }),
+                // set discovery port based on instance number
+                self.network.port.unwrap_or(DEFAULT_DISCOVERY_PORT + self.instance - 1),
             )))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::UNSPECIFIED,
-                self.network.discovery.port.unwrap_or(if self.secondary {
-                    SECONDARY_DISCOVERY_PORT
-                } else {
-                    DEFAULT_DISCOVERY_PORT
-                }),
+                // set discovery port based on instance number
+                self.network.discovery.port.unwrap_or(DEFAULT_DISCOVERY_PORT + self.instance - 1),
             )))
             .build(ProviderFactory::new(db, self.chain.clone()))
     }
@@ -848,13 +843,16 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         Ok(pipeline)
     }
 
-    /// Change rpc port numbers if `--secondary` flag is enabled.
-    fn change_rpc_ports_if_secondary(&mut self) {
-        if self.secondary {
-            self.rpc.auth_port = constants::SECONDARY_AUTH_PORT;
-            self.rpc.http_port = constants::SECONDARY_HTTP_RPC_PORT;
-            self.rpc.ws_port = constants::SECONDARY_WS_RPC_PORT;
-        }
+    /// Change rpc port numbers based on the instance number.
+    ///
+    /// Port numbers are chosen in a way that it's very rare that they conflict with each other.
+    fn check_instance(&mut self) {
+        // auth port is scaled by a factor of instance * 100
+        self.rpc.auth_port += self.instance * 100 - 100;
+        // http port is scaled by a factor of -instance
+        self.rpc.http_port -= self.instance - 1;
+        // ws port is scaled by a factor of instance * 2
+        self.rpc.ws_port += self.instance * 2 - 2;
     }
 }
 
@@ -989,20 +987,35 @@ mod tests {
     }
 
     #[test]
-    fn parse_secondary() {
-        let mut cmd = Command::<()>::parse_from(["reth", "--secondary"]);
-        cmd.change_rpc_ports_if_secondary();
-        cmd.network.port = if cmd.secondary {
-            Some(SECONDARY_DISCOVERY_PORT)
-        } else {
-            Some(DEFAULT_DISCOVERY_PORT)
-        };
-
+    fn parse_instance() {
+        let mut cmd = NodeCommand::<()>::parse_from(["reth"]);
+        cmd.check_instance();
+        cmd.network.port = Some(DEFAULT_DISCOVERY_PORT + cmd.instance - 1);
         // check rpc port numbers
-        assert_eq!(cmd.rpc.auth_port, constants::SECONDARY_AUTH_PORT);
-        assert_eq!(cmd.rpc.http_port, constants::SECONDARY_HTTP_RPC_PORT);
-        assert_eq!(cmd.rpc.ws_port, constants::SECONDARY_WS_RPC_PORT);
+        assert_eq!(cmd.rpc.auth_port, 8551);
+        assert_eq!(cmd.rpc.http_port, 8545);
+        assert_eq!(cmd.rpc.ws_port, 8546);
         // check network listening port number
-        assert_eq!(cmd.network.port.unwrap(), SECONDARY_DISCOVERY_PORT);
+        assert_eq!(cmd.network.port.unwrap(), 30303);
+
+        let mut cmd = NodeCommand::<()>::parse_from(["reth", "--instance", "2"]);
+        cmd.check_instance();
+        cmd.network.port = Some(DEFAULT_DISCOVERY_PORT + cmd.instance - 1);
+        // check rpc port numbers
+        assert_eq!(cmd.rpc.auth_port, 8651);
+        assert_eq!(cmd.rpc.http_port, 8544);
+        assert_eq!(cmd.rpc.ws_port, 8548);
+        // check network listening port number
+        assert_eq!(cmd.network.port.unwrap(), 30304);
+
+        let mut cmd = NodeCommand::<()>::parse_from(["reth", "--instance", "3"]);
+        cmd.check_instance();
+        cmd.network.port = Some(DEFAULT_DISCOVERY_PORT + cmd.instance - 1);
+        // check rpc port numbers
+        assert_eq!(cmd.rpc.auth_port, 8751);
+        assert_eq!(cmd.rpc.http_port, 8543);
+        assert_eq!(cmd.rpc.ws_port, 8550);
+        // check network listening port number
+        assert_eq!(cmd.network.port.unwrap(), 30305);
     }
 }

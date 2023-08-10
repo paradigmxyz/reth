@@ -32,19 +32,6 @@ pub struct Cli<Ext: RethCliExt = ()> {
     #[clap(subcommand)]
     command: Commands<Ext>,
 
-    /// Add a secondary node
-    ///
-    /// Configures the ports of the node to avoid conflicts with the defaults.
-    /// This is useful for running multiple nodes on the same machine.
-    ///
-    /// Changes to the following port numbers:
-    /// - DISCOVERY_PORT: 30304
-    /// - AUTH_PORT: 8552
-    /// - HTTP_RPC_PORT: 8544
-    /// - WS_RPC_PORT: 8547
-    #[arg(long, global = true)]
-    secondary: bool,
-
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -63,6 +50,19 @@ pub struct Cli<Ext: RethCliExt = ()> {
         global = true,
     )]
     chain: Arc<ChainSpec>,
+
+    /// Add a new instance of a node.
+    ///
+    /// Configures the ports of the node to avoid conflicts with the defaults.
+    /// This is useful for running multiple nodes on the same machine.
+    ///
+    /// Changes to the following port numbers:
+    /// - DISCOVERY_PORT: default + `instance` - 1
+    /// - AUTH_PORT: default + `instance` * 100 - 100
+    /// - HTTP_RPC_PORT: default - `instance` + 1
+    /// - WS_RPC_PORT: default + `instance` * 2 - 2
+    #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1)]
+    instance: u16,
 
     #[clap(flatten)]
     logs: Logs,
