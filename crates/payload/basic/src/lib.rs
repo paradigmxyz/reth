@@ -312,12 +312,15 @@ where
                     // acquire the permit for executing the task
                     let _permit = guard.0.acquire().await;
                     build_payload(
-                        client,
-                        pool,
-                        cached_reads,
-                        payload_config,
-                        cancel,
-                        best_payload,
+                        DefaultPayloadBuilder,
+                        BuildArguments {
+                            client,
+                            pool,
+                            cached_reads,
+                            config: payload_config,
+                            cancel,
+                            best_payload,
+                        },
                         tx,
                     )
                 }));
@@ -535,32 +538,36 @@ enum BuildOutcome {
     Cancelled,
 }
 
-/// Builds the payload and sends the result to the given channel.
-fn build_payload<Pool, Client>(
+struct BuildArguments<Pool, Client> {
     client: Client,
     pool: Pool,
     cached_reads: CachedReads,
     config: PayloadConfig,
     cancel: Cancelled,
     best_payload: Option<Arc<BuiltPayload>>,
-    to_job: oneshot::Sender<Result<BuildOutcome, PayloadBuilderError>>,
-) where
+}
+
+trait PayloadBuilder<Pool, Client> {
+    fn try_build(
+        &self,
+        args: BuildArguments<Pool, Client>,
+    ) -> Result<BuildOutcome, PayloadBuilderError>;
+}
+
+struct DefaultPayloadBuilder;
+
+impl<Pool, Client> PayloadBuilder<Pool, Client> for DefaultPayloadBuilder
+where
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {
-    #[inline(always)]
-    fn try_build<Pool, Client>(
-        client: Client,
-        pool: Pool,
-        mut cached_reads: CachedReads,
-        config: PayloadConfig,
-        cancel: Cancelled,
-        best_payload: Option<Arc<BuiltPayload>>,
-    ) -> Result<BuildOutcome, PayloadBuilderError>
-    where
-        Client: StateProviderFactory,
-        Pool: TransactionPool,
-    {
+    fn try_build(
+        &self,
+        args: BuildArguments<Pool, Client>,
+    ) -> Result<BuildOutcome, PayloadBuilderError> {
+        // Appel de la logique de try_build existante
+        let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
+
         let PayloadConfig {
             initialized_block_env,
             initialized_cfg,
@@ -727,7 +734,18 @@ fn build_payload<Pool, Client>(
             cached_reads,
         })
     }
-    let _ = to_job.send(try_build(client, pool, cached_reads, config, cancel, best_payload));
+}
+
+fn build_payload<Pool, Client>(
+    builder: impl PayloadBuilder<Pool, Client>,
+    args: BuildArguments<Pool, Client>,
+    to_job: oneshot::Sender<Result<BuildOutcome, PayloadBuilderError>>,
+) where
+    Client: StateProviderFactory,
+    Pool: TransactionPool,
+{
+    let result = builder.try_build(args);
+    let _ = to_job.send(result);
 }
 
 /// Builds an empty payload without any transactions.
