@@ -731,7 +731,7 @@ impl<Provider, Pool, Network, Tasks, Events>
         }
     }
 
-    /// Returns a reference to the provider
+    /// Returns a reference to the pool
     pub fn pool(&self) -> &Pool {
         &self.pool
     }
@@ -744,6 +744,11 @@ impl<Provider, Pool, Network, Tasks, Events>
     /// Returns a reference to the tasks type
     pub fn tasks(&self) -> &Tasks {
         &self.executor
+    }
+
+    /// Returns a reference to the provider
+    pub fn provider(&self) -> &Provider {
+        &self.provider
     }
 
     /// Returns all installed methods
