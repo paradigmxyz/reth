@@ -39,7 +39,7 @@ pub(crate) fn from_typed_primitive_signature(signature: PrimitiveSignature) -> S
 /// If the transaction is a legacy transaction, it will use the `chain_id` to compute the
 /// signature's recovery id. If the transaction is a typed transaction, it will set the `v`
 /// value to `0` or `1` depending on the signature's `odd_y_parity`.
-pub fn from_primitive_signature(
+pub(crate) fn from_primitive_signature(
     signature: PrimitiveSignature,
     tx_type: TxType,
     chain_id: Option<u64>,
