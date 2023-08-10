@@ -1914,7 +1914,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
             let senders = TransactionSigned::recover_signers(&block.body, block.body.len()).ok_or(
                 BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError),
             )?;
-
+            debug_assert_eq!(senders.len(), block.body.len(), "missing one or more senders");
             block.body.into_iter().zip(senders).collect()
         };
 
