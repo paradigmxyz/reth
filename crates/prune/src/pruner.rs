@@ -304,11 +304,10 @@ impl<DB: Database> Pruner<DB> {
         // `address_filter`
         let pruned = provider
             .get_prune_checkpoint(PrunePart::ContractLogs)?
-            .map(|checkpoint| checkpoint.block_number)
-            .unwrap_or(0);
+            .map(|checkpoint| checkpoint.block_number);
 
         let address_filter =
-            self.modes.contract_logs_filter.group_by_block(tip_block_number, Some(pruned))?;
+            self.modes.contract_logs_filter.group_by_block(tip_block_number, pruned)?;
 
         // Split all transactions in different block ranges. Each block range will have its own
         // filter address list.
@@ -396,7 +395,7 @@ impl<DB: Database> Pruner<DB> {
         let checkpoint_block = self
             .modes
             .contract_logs_filter
-            .lowest_block_with_distance(tip_block_number, Some(pruned))?
+            .lowest_block_with_distance(tip_block_number, pruned)?
             .unwrap_or(to_block);
 
         provider.save_prune_checkpoint(
