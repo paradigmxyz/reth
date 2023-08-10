@@ -2,7 +2,7 @@
 
 use crate::{
     args::GasPriceOracleArgs,
-    cli::{config::RethRpcConfig, ext::RethNodeCommandExt},
+    cli::{config::RethRpcConfig, ext::RethNodeCommandConfig},
 };
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
@@ -249,7 +249,7 @@ impl RpcServerArgs {
         Tasks: TaskSpawner + Clone + 'static,
         Events: CanonStateSubscriptions + Clone + 'static,
         Engine: EngineApiServer,
-        Ext: RethNodeCommandExt,
+        Ext: RethNodeCommandConfig,
     {
         let auth_config = self.auth_server_config(jwt_secret)?;
 

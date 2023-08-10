@@ -32,7 +32,7 @@ impl RethCliExt for () {
 }
 
 /// A trait that allows for extending parts of the CLI with additional functionality.
-pub trait RethNodeCommandExt: fmt::Debug + clap::Args {
+pub trait RethNodeCommandConfig {
     /// Allows for registering additional RPC modules for the transports.
     ///
     /// This is expected to call the merge functions of [TransportRpcModules], for example
@@ -101,9 +101,11 @@ pub trait RethNodeCommandExt: fmt::Debug + clap::Args {
 
     // TODO move network related functions here
 }
-
+/// A trait that allows for extending parts of the CLI with additional functionality.
+pub trait RethNodeCommandExt: RethNodeCommandConfig + clap::Args + fmt::Debug {}
 /// The default configuration for the reth node command [Command](crate::node::NodeCommand).
 #[derive(Debug, Clone, Copy, Default, Args)]
 pub struct DefaultRethNodeCommandConfig;
 
+impl RethNodeCommandConfig for DefaultRethNodeCommandConfig {}
 impl RethNodeCommandExt for DefaultRethNodeCommandConfig {}
