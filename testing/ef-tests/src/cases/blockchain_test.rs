@@ -170,9 +170,6 @@ pub fn should_skip(path: &Path) -> bool {
         | "loopMul.json"
         | "CALLBlake2f_MaxRounds.json"
         | "shiftCombinations.json"
-
-        // TODO: re-enable when blobtx are supported
-        | "blobtxExample.json"
     )
     // Ignore outdated EOF tests that haven't been updated for Cancun yet.
     || path_contains(path_str, &["EIPTests", "stEOF"])
