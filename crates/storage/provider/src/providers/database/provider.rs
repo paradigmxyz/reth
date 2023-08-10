@@ -632,6 +632,8 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     /// Prune the table for the specified pre-sorted key iterator, calling `chunk_callback` after
     /// every `batch_size` pruned rows.
     ///
+    /// `keep_filter` can be used to skip pruning certain elements.
+    ///
     /// Returns number of rows pruned.
     pub fn prune_table_with_iterator_in_batches<T: Table>(
         &self,
