@@ -14,7 +14,9 @@ use reth_rlp::{
 use serde::{Deserialize, Serialize};
 pub use signature::Signature;
 use std::mem;
-pub use tx_type::{TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID};
+pub use tx_type::{
+    TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+};
 
 pub use eip1559::TxEip1559;
 pub use eip2930::TxEip2930;
