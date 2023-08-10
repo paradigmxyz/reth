@@ -309,8 +309,26 @@ impl<DB: Database> Pruner<DB> {
         let address_filter =
             self.modes.contract_logs_filter.group_by_block(tip_block_number, pruned)?;
 
-        // Split all transactions in different block ranges. Each block range will have its own
-        // filter address list.
+        // Splits all transactions in different block ranges. Each block range will have its own
+        // filter address list and will check it while going through the table
+        //
+        // Example:
+        // For an `address_filter` such as:
+        // { block9: [a1, a2], block20: [a3, a4, a5] }
+        //
+        // The following structures will be created in the exact order as showed:
+        // `block_ranges`: [
+        //    (block0, block8, 0 addresses),
+        //    (block9, block19, 2 addresses),
+        //    (block20, to_block, 5 addresses)
+        //  ]
+        // `filtered_addresses`: [a1, a2, a3, a4, a5]
+        //
+        // The first range will delete all receipts between block0 - block8
+        // The second range will delete all receipts between block9 - 19, except the ones with
+        //     emitter logs from these addresses: [a1, a2].
+        // The third range will delete all receipts between block20 - to_block, except the ones with
+        //     emitter logs from these addresses: [a1, a2, a3, a4, a5]
         let mut block_ranges = vec![];
         let mut blocks_iter = address_filter.iter().peekable();
         let mut filtered_addresses = vec![];
@@ -320,11 +338,11 @@ impl<DB: Database> Pruner<DB> {
 
             // This will clear all receipts before the first  appearance of a contract log
             if block_ranges.is_empty() {
-                block_ranges.push((0, *start_block, 0));
+                block_ranges.push((0, *start_block - 1, 0));
             }
 
             let end_block =
-                blocks_iter.peek().map(|next_block| *next_block - 1).unwrap_or(to_block);
+                blocks_iter.peek().map(|(next_block, _)| *next_block - 1).unwrap_or(to_block);
 
             // Addresses in lower block ranges, are still included in the inclusion list for future
             // ranges.
