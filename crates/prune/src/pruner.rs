@@ -312,11 +312,11 @@ impl<DB: Database> Pruner<DB> {
         // Split all transactions in different block ranges. Each block range will have its own
         // filter address list.
         let mut block_ranges = vec![];
-        let mut blocks_iter = address_filter.keys().peekable();
+        let mut blocks_iter = address_filter.iter().peekable();
         let mut filtered_addresses = vec![];
 
-        while let Some(start_block) = blocks_iter.next() {
-            filtered_addresses.extend_from_slice(address_filter.get(start_block).expect("qed"));
+        while let Some((start_block, addresses)) = blocks_iter.next() {
+            filtered_addresses.extend_from_slice(addresses);
 
             // This will clear all receipts before the first  appearance of a contract log
             if block_ranges.is_empty() {
