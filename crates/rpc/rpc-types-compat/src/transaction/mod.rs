@@ -1,12 +1,12 @@
 //! Compatibility functions for rpc `Transaction` type.
-
+mod signature;
 use reth_primitives::{
     AccessListItem, BlockNumber, Transaction as PrimitiveTransaction,
     TransactionKind as PrimitiveTransactionKind, TransactionSignedEcRecovered, TxType, H256, U128,
     U256, U64,
 };
-use reth_rpc_types::{Signature, Transaction};
-
+use reth_rpc_types::Transaction;
+use signature::from_primitive_signature;
 /// Create a new rpc transaction result for a mined transaction, using the given block hash,
 /// number, and tx index fields to populate the corresponding fields in the rpc result.
 ///
@@ -96,11 +96,8 @@ fn fill(
         ),
     };
 
-    let signature = Signature::from_primitive_signature(
-        *signed_tx.signature(),
-        signed_tx.tx_type(),
-        signed_tx.chain_id(),
-    );
+    let signature =
+        from_primitive_signature(*signed_tx.signature(), signed_tx.tx_type(), signed_tx.chain_id());
 
     Transaction {
         hash: signed_tx.hash(),
