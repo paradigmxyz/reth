@@ -519,8 +519,9 @@ struct PayloadConfig {
     chain_spec: Arc<ChainSpec>,
 }
 
+/// The possible outcomes of a payload building attempt.
 #[derive(Debug)]
-enum BuildOutcome {
+pub enum BuildOutcome {
     /// Successfully built a better block.
     Better {
         /// The new payload that was built.
@@ -530,6 +531,7 @@ enum BuildOutcome {
     },
     /// Aborted payload building because resulted in worse block wrt. fees.
     Aborted {
+        /// The total fees associated with the attempted payload.
         fees: U256,
         /// The cached reads that were used to build the payload.
         cached_reads: CachedReads,
@@ -538,7 +540,12 @@ enum BuildOutcome {
     Cancelled,
 }
 
-struct BuildArguments<Pool, Client> {
+/// A collection of arguments used for building payloads.
+///
+/// This struct encapsulates the essential components and configuration required for the payload
+/// building process. It holds references to the Ethereum client, transaction pool, cached reads,
+/// payload configuration, cancellation status, and the best payload achieved so far.
+pub struct BuildArguments<Pool, Client> {
     client: Client,
     pool: Pool,
     cached_reads: CachedReads,
@@ -547,7 +554,27 @@ struct BuildArguments<Pool, Client> {
     best_payload: Option<Arc<BuiltPayload>>,
 }
 
-trait PayloadBuilder<Pool, Client> {
+/// A trait for building payloads that encapsulate Ethereum transactions.
+///
+/// This trait provides the `try_build` method to construct a transaction payload
+/// using `BuildArguments`. It returns a `Result` indicating success or a
+/// `PayloadBuilderError` if building fails.
+///
+/// Generic parameters `Pool` and `Client` represent the transaction pool and
+/// Ethereum client types.
+pub trait PayloadBuilder<Pool, Client> {
+    /// Tries to build a transaction payload using provided arguments.
+    ///
+    /// Constructs a transaction payload based on the given arguments,
+    /// returning a `Result` indicating success or an error if building fails.
+    ///
+    /// # Arguments
+    ///
+    /// - `args`: Build arguments containing necessary components.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` indicating the build outcome or an error.
     fn try_build(
         &self,
         args: BuildArguments<Pool, Client>,
@@ -566,7 +593,22 @@ where
     }
 }
 
-fn default_payload_builder<Pool, Client>(
+/// Constructs an Ethereum transaction payload using the best transactions from the pool.
+///
+/// Given build arguments including an Ethereum client, transaction pool,
+/// and configuration, this function creates a transaction payload. Returns
+/// a result indicating success with the payload or an error in case of failure.
+///
+/// # Examples
+///
+/// ```rust
+/// let build_args = BuildArguments { /* ... */ };
+/// match default_payload_builder(build_args) {
+///     Ok(BuildOutcome::Better { payload, cached_reads }) => { /* ... */ }
+///     Err(err) => { /* ... */ }
+/// }
+/// ```
+pub fn default_payload_builder<Pool, Client>(
     args: BuildArguments<Pool, Client>,
 ) -> Result<BuildOutcome, PayloadBuilderError>
 where
