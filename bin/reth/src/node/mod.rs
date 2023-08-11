@@ -17,7 +17,7 @@ use crate::{
     utils::get_single_header,
     version::SHORT_VERSION,
 };
-use clap::Parser;
+use clap::{value_parser, Parser};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{future::Either, pin_mut, stream, stream_select, StreamExt};
@@ -126,12 +126,15 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     /// Configures the ports of the node to avoid conflicts with the defaults.
     /// This is useful for running multiple nodes on the same machine.
     ///
+    /// Max number of instances is 200. It is chosen in a way so that it's not possible to have
+    /// port numbers that conflict with each other.
+    ///
     /// Changes to the following port numbers:
     /// - DISCOVERY_PORT: default + `instance` - 1
     /// - AUTH_PORT: default + `instance` * 100 - 100
     /// - HTTP_RPC_PORT: default - `instance` + 1
     /// - WS_RPC_PORT: default + `instance` * 2 - 2
-    #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1)]
+    #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
     instance: u16,
 
     /// All networking related arguments
@@ -491,8 +494,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let default_jwt_path = data_dir.jwt_path();
         let jwt_secret = self.rpc.jwt_secret(default_jwt_path)?;
 
-        // Check instance to properly set rpc port numbers
-        self.check_instance();
+        // adjust rpc port numbers based on instance number
+        self.adjust_instance_ports();
 
         // Start RPC servers
         let (_rpc_server, _auth_server) = self
@@ -729,12 +732,18 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::UNSPECIFIED,
                 // set discovery port based on instance number
-                self.network.port.unwrap_or(DEFAULT_DISCOVERY_PORT + self.instance - 1),
+                match self.network.port {
+                    Some(port) => port + self.instance - 1,
+                    None => DEFAULT_DISCOVERY_PORT + self.instance - 1,
+                },
             )))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::UNSPECIFIED,
                 // set discovery port based on instance number
-                self.network.discovery.port.unwrap_or(DEFAULT_DISCOVERY_PORT + self.instance - 1),
+                match self.network.port {
+                    Some(port) => port + self.instance - 1,
+                    None => DEFAULT_DISCOVERY_PORT + self.instance - 1,
+                },
             )))
             .build(ProviderFactory::new(db, self.chain.clone()))
     }
@@ -844,9 +853,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     }
 
     /// Change rpc port numbers based on the instance number.
-    ///
-    /// Port numbers are chosen in a way that it's very rare that they conflict with each other.
-    fn check_instance(&mut self) {
+    fn adjust_instance_ports(&mut self) {
         // auth port is scaled by a factor of instance * 100
         self.rpc.auth_port += self.instance * 100 - 100;
         // http port is scaled by a factor of -instance
@@ -989,7 +996,7 @@ mod tests {
     #[test]
     fn parse_instance() {
         let mut cmd = NodeCommand::<()>::parse_from(["reth"]);
-        cmd.check_instance();
+        cmd.adjust_instance_ports();
         cmd.network.port = Some(DEFAULT_DISCOVERY_PORT + cmd.instance - 1);
         // check rpc port numbers
         assert_eq!(cmd.rpc.auth_port, 8551);
@@ -999,7 +1006,7 @@ mod tests {
         assert_eq!(cmd.network.port.unwrap(), 30303);
 
         let mut cmd = NodeCommand::<()>::parse_from(["reth", "--instance", "2"]);
-        cmd.check_instance();
+        cmd.adjust_instance_ports();
         cmd.network.port = Some(DEFAULT_DISCOVERY_PORT + cmd.instance - 1);
         // check rpc port numbers
         assert_eq!(cmd.rpc.auth_port, 8651);
@@ -1009,7 +1016,7 @@ mod tests {
         assert_eq!(cmd.network.port.unwrap(), 30304);
 
         let mut cmd = NodeCommand::<()>::parse_from(["reth", "--instance", "3"]);
-        cmd.check_instance();
+        cmd.adjust_instance_ports();
         cmd.network.port = Some(DEFAULT_DISCOVERY_PORT + cmd.instance - 1);
         // check rpc port numbers
         assert_eq!(cmd.rpc.auth_port, 8751);
