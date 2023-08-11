@@ -5230,6 +5230,7 @@ dependencies = [
  "eyre",
  "fdlimit",
  "futures",
+ "futures-util",
  "hex",
  "human_bytes",
  "humantime",

@@ -1,14 +1,41 @@
 //! Unwinding a certain block range
 
 use crate::{
-    args::{utils::genesis_value_parser, DatabaseArgs},
+    args::{utils::genesis_value_parser, DatabaseArgs, StageEnum},
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::{Parser, Subcommand};
+use futures_util::Stream;
+use reth_beacon_consensus::BeaconConsensus;
 use reth_db::{cursor::DbCursorRO, database::Database, open_db, tables, transaction::DbTx};
-use reth_primitives::{BlockHashOrNumber, ChainSpec};
-use reth_provider::{BlockExecutionWriter, ProviderFactory};
-use std::{ops::RangeInclusive, sync::Arc};
+use reth_interfaces::p2p::{
+    bodies::downloader::{BodyDownloader, BodyDownloaderResult},
+    error::DownloadResult,
+    headers::{
+        downloader::{HeaderDownloader, SyncTarget},
+        error::HeadersDownloaderResult,
+    },
+};
+use reth_primitives::{BlockHashOrNumber, BlockNumber, ChainSpec, PruneModes, SealedHeader};
+use reth_provider::{
+    BlockExecutionWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
+};
+use reth_stages::{
+    stages::{
+        AccountHashingStage, BodyStage, ExecutionStage, ExecutionStageThresholds, HeaderStage,
+        HeaderSyncMode, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
+        SenderRecoveryStage, StorageHashingStage, TransactionLookupStage,
+        MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+    },
+    Stage, UnwindInput,
+};
+use std::{
+    ops::RangeInclusive,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
+use tracing::*;
 
 /// `reth stage unwind` command
 #[derive(Debug, Parser)]
@@ -41,6 +68,9 @@ pub struct Command {
     )]
     chain: Arc<ChainSpec>,
 
+    #[arg(value_enum)]
+    stage: Option<StageEnum>,
+
     #[clap(flatten)]
     db: DatabaseArgs,
 
@@ -67,15 +97,77 @@ impl Command {
         }
 
         let factory = ProviderFactory::new(&db, self.chain.clone());
-        let provider = factory.provider_rw()?;
+        let mut provider_rw = factory.provider_rw()?;
 
-        let blocks_and_execution = provider
-            .take_block_and_execution_range(&self.chain, range)
-            .map_err(|err| eyre::eyre!("Transaction error on unwind: {err:?}"))?;
+        let stage = match self.stage {
+            Some(stage) => stage,
+            None => {
+                let blocks_and_execution = provider_rw
+                    .take_block_and_execution_range(&self.chain, range)
+                    .map_err(|err| eyre::eyre!("Transaction error on unwind: {err:?}"))?;
 
-        provider.commit()?;
+                provider_rw.commit()?;
+                info!(target: "reth::cli", "Unwind {:?} blocks", blocks_and_execution.len());
 
-        println!("Unwound {} blocks", blocks_and_execution.len());
+                return Ok(())
+            }
+        };
+
+        let mut unwind_stage: Box<dyn Stage<_>> = match stage {
+            StageEnum::Headers => {
+                let stage = HeaderStage::new(MockHeaderDownloader, HeaderSyncMode::Continuous);
+                Box::new(stage)
+            }
+            StageEnum::Bodies => {
+                let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
+                let stage = BodyStage { downloader: MockBodyDownloader, consensus };
+                Box::new(stage)
+            }
+            StageEnum::Senders => Box::new(SenderRecoveryStage::new(u64::MAX)),
+            StageEnum::Execution => {
+                let factory = reth_revm::Factory::new(self.chain.clone());
+                Box::new(ExecutionStage::new(
+                    factory,
+                    ExecutionStageThresholds { max_blocks: None, max_changes: None },
+                    MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+                    PruneModes::all(),
+                ))
+            }
+            StageEnum::TxLookup => Box::new(TransactionLookupStage::new(u64::MAX)),
+            StageEnum::AccountHashing => Box::new(AccountHashingStage::new(1, u64::MAX)),
+            StageEnum::StorageHashing => Box::new(StorageHashingStage::new(1, u64::MAX)),
+            StageEnum::Merkle => Box::new(MerkleStage::default_execution()),
+            StageEnum::AccountHistory => Box::<IndexAccountHistoryStage>::default(),
+            StageEnum::StorageHistory => Box::<IndexStorageHistoryStage>::default(),
+            _ => return Ok(()),
+        };
+
+        let to = *range.start();
+        let stage_id = unwind_stage.id();
+        let mut checkpoint = provider_rw.get_stage_checkpoint(stage_id)?.unwrap_or_default();
+        if checkpoint.block_number < to {
+            info!(target: "reth::cli", "No need to unwind this stage, checkpoint.block_number: {:?}, unwind_to: {:?}", checkpoint.block_number, to);
+            return Ok(())
+        }
+
+        while checkpoint.block_number > to {
+            let input = UnwindInput { checkpoint, unwind_to: to, bad_block: None };
+
+            let output = unwind_stage.unwind(&provider_rw, input).await;
+            match output {
+                Ok(unwind_output) => {
+                    checkpoint = unwind_output.checkpoint;
+                    provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
+
+                    provider_rw.commit()?;
+                    provider_rw = factory.provider_rw()?
+                }
+                Err(err) => {
+                    error!(target: "reth::cli", "Unwind stage error: {:?}", err);
+                    break
+                }
+            }
+        }
 
         Ok(())
     }
@@ -111,6 +203,40 @@ impl Subcommands {
             Subcommands::NumBlocks { amount } => last.0.saturating_sub(*amount),
         } + 1;
         Ok(target..=last.0)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct MockHeaderDownloader;
+
+impl HeaderDownloader for MockHeaderDownloader {
+    fn update_local_head(&mut self, _head: SealedHeader) {}
+
+    fn update_sync_target(&mut self, _target: SyncTarget) {}
+
+    fn set_batch_size(&mut self, _limit: usize) {}
+}
+
+impl Stream for MockHeaderDownloader {
+    type Item = HeadersDownloaderResult<Vec<SealedHeader>>;
+
+    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Poll::Ready(None)
+    }
+}
+#[derive(Debug, Clone)]
+struct MockBodyDownloader;
+
+impl BodyDownloader for MockBodyDownloader {
+    fn set_download_range(&mut self, _range: RangeInclusive<BlockNumber>) -> DownloadResult<()> {
+        Ok(())
+    }
+}
+
+impl Stream for MockBodyDownloader {
+    type Item = BodyDownloaderResult;
+    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Poll::Ready(None)
     }
 }
 

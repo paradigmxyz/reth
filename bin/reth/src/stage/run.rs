@@ -187,7 +187,7 @@ impl Command {
                                     config.stages.bodies.downloader_max_concurrent_requests,
                             )
                             .build(fetch_client, consensus.clone(), db.clone()),
-                        consensus: consensus.clone(),
+                        consensus,
                     };
 
                     (Box::new(stage), None)
