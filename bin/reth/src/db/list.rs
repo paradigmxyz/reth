@@ -22,7 +22,10 @@ pub struct Command {
     /// How many items to take from the walker
     #[arg(long, short, default_value = DEFAULT_NUM_ITEMS)]
     len: usize,
-    /// Search parameter. Prefix it with `0x` to search for binary data.
+    /// Search parameter for both keys and values. Prefix it with `0x` to search for binary data, and text otherwise.
+    ///
+    /// ATTENTION! For compressed tables (`Transactions` and `Receipts`), there might be
+    /// missing results since the search uses the raw uncompressed value from the database.
     #[arg(long)]
     search: Option<String>,
     /// Returns the number of rows found.
