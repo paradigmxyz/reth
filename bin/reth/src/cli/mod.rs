@@ -231,7 +231,7 @@ impl Verbosity {
 }
 
 /// The color mode for the cli.
-#[derive(Debug, Copy, Clone, ValueEnum)]
+#[derive(Debug, Copy, Clone, ValueEnum, Eq, PartialEq)]
 pub enum ColorMode {
     /// Colors on
     Always,
@@ -255,6 +255,12 @@ impl Display for ColorMode {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn parse_color_mode() {
+        let reth = Cli::<()>::try_parse_from(["reth", "node", "--color", "always"]).unwrap();
+        assert_eq!(reth.logs.color, ColorMode::Always);
+    }
 
     /// Tests that the help message is parsed correctly. This ensures that clap args are configured
     /// correctly and no conflicts are introduced via attributes that would result in a panic at
