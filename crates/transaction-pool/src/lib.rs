@@ -414,10 +414,7 @@ where
         self.inner().get(tx_hash)
     }
 
-    fn get_all(
-        &self,
-        txs: Vec<TxHash>,
-    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+    fn get_all(&self, txs: Vec<TxHash>) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.inner().get_all(txs)
     }
 

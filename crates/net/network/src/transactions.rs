@@ -372,9 +372,7 @@ where
     /// Handles a command received from a detached [`TransactionsHandle`]
     fn on_command(&mut self, cmd: TransactionsCommand) {
         match cmd {
-            TransactionsCommand::PropagateHash(hash) => {
-                self.on_new_transactions(vec![hash])
-            }
+            TransactionsCommand::PropagateHash(hash) => self.on_new_transactions(vec![hash]),
         }
     }
 

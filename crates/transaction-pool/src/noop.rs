@@ -146,10 +146,7 @@ impl TransactionPool for NoopTransactionPool {
         None
     }
 
-    fn get_all(
-        &self,
-        _txs: Vec<TxHash>,
-    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+    fn get_all(&self, _txs: Vec<TxHash>) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         vec![]
     }
 
