@@ -247,10 +247,10 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Returns transactions for the multiple given hashes, if they exist.
-    pub(crate) fn get_all<'a>(
-        &'a self,
+    pub(crate) fn get_all(
+        &self,
         txs: Vec<TxHash>,
-    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + 'a {
+    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
         txs.into_iter().filter_map(|tx| self.get(&tx))
     }
 
