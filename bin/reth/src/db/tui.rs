@@ -296,7 +296,7 @@ where
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(outer_chunks[0]);
 
-        let key_length = format!("{}", app.skip + app.count - 1).len();
+        let key_length = format!("{}", (app.skip + app.count).saturating_sub(1)).len();
 
         let entries: Vec<_> = app.entries.iter().map(|(k, _)| k).collect();
 
@@ -312,7 +312,7 @@ where
             .block(Block::default().borders(Borders::ALL).title(format!(
                 "Keys (Showing entries {}-{} out of {} entries)",
                 app.skip,
-                app.skip + app.entries.len() - 1,
+                (app.skip + app.entries.len()).saturating_sub(1),
                 app.total_entries
             )))
             .style(Style::default().fg(Color::White))
