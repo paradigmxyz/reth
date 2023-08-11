@@ -227,7 +227,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Consumer: Block production
     fn remove_transactions(
         &self,
-        hashes: impl IntoIterator<Item = TxHash>,
+        hashes: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Retains only those hashes that are unknown to the pool.
@@ -250,10 +250,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// This adheres to the expected behavior of [`GetPooledTransactions`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09):
     /// The transactions must be in same order as in the request, but it is OK to skip transactions
     /// which are not available.
-    fn get_all(
-        &self,
-        txs: impl IntoIterator<Item = TxHash>,
-    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+    fn get_all(&self, txs: Vec<TxHash>) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Notify the pool about transactions that are propagated to peers.
     ///
