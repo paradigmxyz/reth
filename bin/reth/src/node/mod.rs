@@ -751,12 +751,13 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let factory = reth_revm::Factory::new(self.chain.clone());
 
         let stack_config = InspectorStackConfig {
+            use_address_tracer: todo!("get 'address' namespace argument"),
             use_printer_tracer: self.debug.print_inspector,
             hook: if let Some(hook_block) = self.debug.hook_block {
                 Hook::Block(hook_block)
             } else if let Some(tx) = self.debug.hook_transaction {
                 Hook::Transaction(tx)
-            } else if self.debug.hook_all {
+            } else if self.debug.hook_all /* || address_namespace_used */ {
                 Hook::All
             } else {
                 Hook::None

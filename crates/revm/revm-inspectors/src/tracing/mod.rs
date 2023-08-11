@@ -15,6 +15,7 @@ use revm::{
 };
 use types::{CallTrace, CallTraceStep};
 
+mod address;
 mod arena;
 mod builder;
 mod config;
@@ -32,6 +33,7 @@ pub use builder::{
     parity::{self, ParityTraceBuilder},
 };
 pub use config::TracingInspectorConfig;
+pub use address::AddressInspector;
 pub use fourbyte::FourByteInspector;
 pub use opcount::OpcodeCountInspector;
 

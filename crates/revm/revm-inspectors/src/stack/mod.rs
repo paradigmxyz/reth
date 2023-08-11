@@ -12,6 +12,8 @@ use revm::{
 mod maybe_owned;
 pub use maybe_owned::MaybeOwnedInspector;
 
+use crate::tracing::AddressInspector;
+
 /// One can hook on inspector execution in 3 ways:
 /// - Block: Hook on block execution
 /// - BlockWithIndex: Hook on block execution transaction index
@@ -35,6 +37,8 @@ pub enum Hook {
 /// equivalent) the remaining inspectors are not called.
 #[derive(Default, Clone)]
 pub struct InspectorStack {
+    /// An inspector for the `address` namespace that finds addresses during the Execution stage.
+    pub address_tracer: Option<AddressInspector>,
     /// An inspector that prints the opcode traces to the console.
     pub custom_print_tracer: Option<CustomPrintTracer>,
     /// The provided hook
@@ -59,6 +63,10 @@ impl InspectorStack {
             stack.custom_print_tracer = Some(CustomPrintTracer::default());
         }
 
+        if config.use_address_tracer {
+            stack.address_tracer = Some(AddressInspector::default());
+        }
+
         stack
     }
 
@@ -76,6 +84,10 @@ impl InspectorStack {
 #[derive(Default)]
 /// Configuration for the inspectors.
 pub struct InspectorStackConfig {
+    /// Enable revm inspector address tracer. Used by `address` namespace indexer.
+    /// In execution this will look for addresses that appear.
+    pub use_address_tracer: bool,
+
     /// Enable revm inspector printer.
     /// In execution this will print opcode level traces directly to console.
     pub use_printer_tracer: bool,
@@ -107,7 +119,7 @@ where
         data: &mut EVMData<'_, DB>,
         is_static: bool,
     ) -> InstructionResult {
-        call_inspectors!(inspector, [&mut self.custom_print_tracer], {
+        call_inspectors!(inspector, [&mut self.custom_print_tracer, &mut self.address_tracer], {
             let status = inspector.initialize_interp(interpreter, data, is_static);
 
             // Allow inspectors to exit early
@@ -125,7 +137,7 @@ where
         data: &mut EVMData<'_, DB>,
         is_static: bool,
     ) -> InstructionResult {
-        call_inspectors!(inspector, [&mut self.custom_print_tracer], {
+        call_inspectors!(inspector, [&mut self.custom_print_tracer, &mut self.address_tracer], {
             let status = inspector.step(interpreter, data, is_static);
 
             // Allow inspectors to exit early
@@ -144,7 +156,7 @@ where
         topics: &[H256],
         data: &Bytes,
     ) {
-        call_inspectors!(inspector, [&mut self.custom_print_tracer], {
+        call_inspectors!(inspector, [&mut self.custom_print_tracer, &mut self.address_tracer], {
             inspector.log(evm_data, address, topics, data);
         });
     }
@@ -156,7 +168,7 @@ where
         is_static: bool,
         eval: InstructionResult,
     ) -> InstructionResult {
-        call_inspectors!(inspector, [&mut self.custom_print_tracer], {
+        call_inspectors!(inspector, [&mut self.custom_print_tracer, &mut self.address_tracer], {
             let status = inspector.step_end(interpreter, data, is_static, eval);
 
             // Allow inspectors to exit early
@@ -174,7 +186,7 @@ where
         inputs: &mut CallInputs,
         is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
-        call_inspectors!(inspector, [&mut self.custom_print_tracer], {
+        call_inspectors!(inspector, [&mut self.custom_print_tracer, &mut self.address_tracer], {
             let (status, gas, retdata) = inspector.call(data, inputs, is_static);
 
             // Allow inspectors to exit early
@@ -195,7 +207,7 @@ where
         out: Bytes,
         is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
-        call_inspectors!(inspector, [&mut self.custom_print_tracer], {
+        call_inspectors!(inspector, [&mut self.custom_print_tracer, &mut self.address_tracer], {
             let (new_ret, new_gas, new_out) =
                 inspector.call_end(data, inputs, remaining_gas, ret, out.clone(), is_static);
 
@@ -214,7 +226,7 @@ where
         data: &mut EVMData<'_, DB>,
         inputs: &mut CreateInputs,
     ) -> (InstructionResult, Option<Address>, Gas, Bytes) {
-        call_inspectors!(inspector, [&mut self.custom_print_tracer], {
+        call_inspectors!(inspector, [&mut self.custom_print_tracer, &mut self.address_tracer], {
             let (status, addr, gas, retdata) = inspector.create(data, inputs);
 
             // Allow inspectors to exit early
@@ -235,7 +247,7 @@ where
         remaining_gas: Gas,
         out: Bytes,
     ) -> (InstructionResult, Option<Address>, Gas, Bytes) {
-        call_inspectors!(inspector, [&mut self.custom_print_tracer], {
+        call_inspectors!(inspector, [&mut self.custom_print_tracer, &mut self.address_tracer], {
             let (new_ret, new_address, new_gas, new_retdata) =
                 inspector.create_end(data, inputs, ret, address, remaining_gas, out.clone());
 
@@ -248,7 +260,7 @@ where
     }
 
     fn selfdestruct(&mut self, contract: Address, target: Address) {
-        call_inspectors!(inspector, [&mut self.custom_print_tracer], {
+        call_inspectors!(inspector, [&mut self.custom_print_tracer, &mut self.address_tracer], {
             Inspector::<DB>::selfdestruct(inspector, contract, target);
         });
     }
