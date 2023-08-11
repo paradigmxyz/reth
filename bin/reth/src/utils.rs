@@ -1,5 +1,6 @@
 //! Common CLI utility functions.
 
+use boyer_moore_magiclen::BMByte;
 use eyre::Result;
 use reth_consensus_common::validation::validate_block_standalone;
 use reth_db::{
@@ -7,6 +8,7 @@ use reth_db::{
     database::Database,
     table::Table,
     transaction::{DbTx, DbTxMut},
+    DatabaseError, RawKey, RawTable, RawValue,
 };
 use reth_interfaces::p2p::{
     bodies::client::BodiesClient,
@@ -19,6 +21,7 @@ use reth_primitives::{
 use std::{
     env::VarError,
     path::{Path, PathBuf},
+    rc::Rc,
     sync::Arc,
 };
 use tracing::info;
@@ -108,18 +111,65 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         skip: usize,
         len: usize,
         reverse: bool,
-    ) -> Result<Vec<(T::Key, T::Value)>> {
+        search: Vec<u8>,
+        only_count: bool,
+    ) -> Result<(Vec<(T::Key, T::Value)>, usize)> {
+        let has_search = !search.is_empty();
+        let bmb = Rc::new(BMByte::from(search));
+        if bmb.is_none() && has_search {
+            eyre::bail!("Invalid search.")
+        }
+
+        let mut hits = 0;
+
         let data = self.db.view(|tx| {
-            let mut cursor = tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
+            let mut cursor =
+                tx.cursor_read::<RawTable<T>>().expect("Was not able to obtain a cursor.");
+
+            let filter = |res: Result<(RawKey<T::Key>, RawValue<T::Value>), _>| {
+                if let Ok((k, v)) = res {
+                    let result = || {
+                        if only_count {
+                            return None
+                        }
+                        Some((k.key().unwrap(), v.value().unwrap()))
+                    };
+                    match &*bmb {
+                        Some(searcher) => {
+                            if searcher.find_first_in(&v.value).is_some() ||
+                                searcher.find_first_in(&k.key).is_some()
+                            {
+                                hits += 1;
+                                return result()
+                            }
+                        }
+                        None => {
+                            hits += 1;
+                            return result()
+                        }
+                    }
+                }
+                None
+            };
 
             if reverse {
-                cursor.walk_back(None)?.skip(skip).take(len).collect::<Result<_, _>>()
+                Ok(cursor
+                    .walk_back(None)?
+                    .skip(skip)
+                    .filter_map(filter)
+                    .take(len)
+                    .collect::<Vec<(_, _)>>())
             } else {
-                cursor.walk(None)?.skip(skip).take(len).collect::<Result<_, _>>()
+                Ok(cursor
+                    .walk(None)?
+                    .skip(skip)
+                    .filter_map(filter)
+                    .take(len)
+                    .collect::<Vec<(_, _)>>())
             }
         })?;
 
-        data.map_err(|e| eyre::eyre!(e))
+        Ok((data.map_err(|e: DatabaseError| eyre::eyre!(e))?, hits))
     }
 
     /// Grabs the content of the table for the given key

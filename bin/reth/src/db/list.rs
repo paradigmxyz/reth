@@ -22,6 +22,12 @@ pub struct Command {
     /// How many items to take from the walker
     #[arg(long, short, default_value = DEFAULT_NUM_ITEMS)]
     len: usize,
+    /// Search parameter. Prefix it with `0x` to search for binary data.
+    #[arg(long)]
+    search: Option<String>,
+    /// Returns the number of rows found.
+    #[arg(long, short)]
+    count: bool,
     /// Dump as JSON instead of using TUI.
     #[arg(long, short)]
     json: bool,
@@ -64,13 +70,29 @@ impl TableViewer<()> for ListTableViewer<'_> {
                 return Ok(());
             }
 
-            if self.args.json {
-                let list_result = self.tool.list::<T>(self.args.skip, self.args.len, self.args.reverse)?.into_iter().collect::<Vec<_>>();
-                println!("{}", serde_json::to_string_pretty(&list_result)?);
+            let search = self.args.search.as_ref()
+                .map(|search|
+                    if search.starts_with("0x") {
+                        hex::decode(search.split_at(2).1).unwrap()
+                    } else {
+                        search.as_bytes().to_vec()
+                    })
+                .unwrap_or_default();
+
+
+            if self.args.json || self.args.count {
+                let (list, count) = self.tool.list::<T>(self.args.skip, self.args.len, self.args.reverse, search.clone() , self.args.count)?;
+
+                if self.args.count {
+                    println!("{count} entries found.")
+                }else {
+                    println!("{}", serde_json::to_string_pretty(&list)?);
+                }
                 Ok(())
+
             } else {
                 DbListTUI::<_, T>::new(|skip, count| {
-                    self.tool.list::<T>(skip, count, self.args.reverse).unwrap()
+                    self.tool.list::<T>(skip, count, self.args.reverse, search.clone(), self.args.count).unwrap().0
                 }, self.args.skip, self.args.len, total_entries).run()
             }
         })??;
