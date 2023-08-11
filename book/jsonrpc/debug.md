@@ -57,7 +57,7 @@ The `debug_traceBlock` method will return a full stack trace of all invoked opco
 This expects an RLP-encoded block.
 
 > **Note**
-> 
+>
 > The parent of this block must be present, or it will fail.
 
 | Client | Method invocation                                       |

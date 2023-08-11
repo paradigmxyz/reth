@@ -22,6 +22,7 @@
    1. [trace](./jsonrpc/trace.md)
    1. [admin](./jsonrpc/admin.md)
    1. [rpc](./jsonrpc/rpc.md)
+   1. [address](./jsonrpc/address.md)
 1. [CLI Reference](./cli/cli.md)
    1. [reth node](./cli/node.md)
    1. [reth init](./cli/init.md)

@@ -12,16 +12,17 @@ Each namespace must be explicitly enabled.
 
 The methods are grouped into namespaces, which are listed below:
 
-| Namespace               | Description                                                                                            | Sensitive |
-|-------------------------|--------------------------------------------------------------------------------------------------------|-----------|
-| [`eth`](./eth.md)       | The `eth` API allows you to interact with Ethereum.                                                    | Maybe     |
-| [`web3`](./web3.md)     | The `web3` API provides utility functions for the web3 client.                                         | No        |
-| [`net`](./net.md)       | The `net` API provides access to network information of the node.                                      | No        |
-| [`txpool`](./txpool.md) | The `txpool` API allows you to inspect the transaction pool.                                           | No        |
-| [`debug`](./debug.md)   | The `debug` API provides several methods to inspect the Ethereum state, including Geth-style traces.   | No        |
-| [`trace`](./trace.md)   | The `trace` API provides several methods to inspect the Ethereum state, including Parity-style traces. | No        |
-| [`admin`](./admin.md)   | The `admin` API allows you to configure your node.                                                     | **Yes**   |
-| [`rpc`](./rpc.md)       | The `rpc` API provides information about the RPC server and its modules.                               | No        |
+| Namespace                 | Description                                                                                            | Sensitive |
+|---------------------------|--------------------------------------------------------------------------------------------------------|-----------|
+| [`eth`](./eth.md)         | The `eth` API allows you to interact with Ethereum.                                                    | Maybe     |
+| [`web3`](./web3.md)       | The `web3` API provides utility functions for the web3 client.                                         | No        |
+| [`net`](./net.md)         | The `net` API provides access to network information of the node.                                      | No        |
+| [`txpool`](./txpool.md)   | The `txpool` API allows you to inspect the transaction pool.                                           | No        |
+| [`debug`](./debug.md)     | The `debug` API provides several methods to inspect the Ethereum state, including Geth-style traces.   | No        |
+| [`trace`](./trace.md)     | The `trace` API provides several methods to inspect the Ethereum state, including Parity-style traces. | No        |
+| [`admin`](./admin.md)     | The `admin` API allows you to configure your node.                                                     | **Yes**   |
+| [`rpc`](./rpc.md)         | The `rpc` API provides information about the RPC server and its modules.                               | No        |
+| [`address`](./address.md) | The `address` API provides methods for finding transactions relevant to address. Increases node size.  | No        |
 
 Note that some APIs are sensitive, since they can be used to configure your node (`admin`), or access accounts stored on the node (`eth`).
 
@@ -114,7 +115,7 @@ You can use `curl`, a programming language with a low-level library, or a tool l
 As a reminder, you need to run the command below to enable all of these APIs using an HTTP transport:
 
 ```bash
-RUST_LOG=info reth node --http --http.api "admin,debug,eth,net,trace,txpool,web3,rpc"
+RUST_LOG=info reth node --http --http.api "address,admin,debug,eth,net,trace,txpool,web3,rpc"
 ```
 
 This allows you to then call:
