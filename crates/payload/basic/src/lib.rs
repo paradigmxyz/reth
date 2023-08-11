@@ -598,17 +598,7 @@ where
 /// Given build arguments including an Ethereum client, transaction pool,
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
-///
-/// # Examples
-///
-/// ```rust
-/// let build_args = BuildArguments { /* ... */ };
-/// match default_payload_builder(build_args) {
-///     Ok(BuildOutcome::Better { payload, cached_reads }) => { /* ... */ }
-///     Err(err) => { /* ... */ }
-/// }
-/// ```
-pub fn default_payload_builder<Pool, Client>(
+fn default_payload_builder<Pool, Client>(
     args: BuildArguments<Pool, Client>,
 ) -> Result<BuildOutcome, PayloadBuilderError>
 where
