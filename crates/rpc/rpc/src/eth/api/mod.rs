@@ -299,7 +299,7 @@ where
             let pending_block = match pending.build_block(this.provider(), this.pool()) {
                 Ok(block) => block,
                 Err(err) => {
-                    tracing::debug!(target = "rpc", "Failed to build pending block: {:?}", err);
+                    tracing::debug!(target: "rpc", "Failed to build pending block: {:?}", err);
                     return Ok(None)
                 }
             };
