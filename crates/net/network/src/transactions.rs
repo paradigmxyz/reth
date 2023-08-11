@@ -204,7 +204,7 @@ where
     /// complete transaction object if it is unknown to them. The dissemination of complete
     /// transactions to a fraction of peers usually ensures that all nodes receive the transaction
     /// and won't need to request it.
-    fn on_new_transactions(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
+    fn on_new_transactions(&mut self, hashes: Vec<TxHash>) {
         // Nothing to propagate while initially syncing
         if self.network.is_initially_syncing() {
             return
@@ -372,9 +372,7 @@ where
     /// Handles a command received from a detached [`TransactionsHandle`]
     fn on_command(&mut self, cmd: TransactionsCommand) {
         match cmd {
-            TransactionsCommand::PropagateHash(hash) => {
-                self.on_new_transactions(std::iter::once(hash))
-            }
+            TransactionsCommand::PropagateHash(hash) => self.on_new_transactions(vec![hash]),
         }
     }
 
