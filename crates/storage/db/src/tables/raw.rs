@@ -41,7 +41,8 @@ impl<T: DupSort> DupSort for RawDupSort<T> {
 /// Raw table key.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct RawKey<K: Key> {
-    key: Vec<u8>,
+    /// Inner encoded key
+    pub key: Vec<u8>,
     _phantom: std::marker::PhantomData<K>,
 }
 
@@ -87,7 +88,8 @@ impl<K: Key> Decode for RawKey<K> {
 /// Raw table value.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Serialize, Ord, Hash)]
 pub struct RawValue<V: Value> {
-    value: Vec<u8>,
+    /// Inner compressed value
+    pub value: Vec<u8>,
     _phantom: std::marker::PhantomData<V>,
 }
 
