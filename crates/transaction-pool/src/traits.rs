@@ -227,7 +227,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Consumer: Block production
     fn remove_transactions(
         &self,
-        hashes: impl IntoIterator<Item = TxHash>,
+        hashes: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Retains only those hashes that are unknown to the pool.
@@ -252,7 +252,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// which are not available.
     fn get_all(
         &self,
-        txs: impl IntoIterator<Item = TxHash>,
+        txs: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Notify the pool about transactions that are propagated to peers.
