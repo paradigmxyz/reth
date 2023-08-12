@@ -127,7 +127,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Returns a new stream that yields new valid transactions added to the pool.
     fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>>;
 
-    /// Returns a new Stream that yields new transactions added to the basefee-pool.
+    /// Returns a new Stream that yields new transactions added to the pending sub-pool.
     ///
     /// This is a convenience wrapper around [Self::new_transactions_listener] that filters for
     /// [SubPool::Pending](crate::SubPool).
