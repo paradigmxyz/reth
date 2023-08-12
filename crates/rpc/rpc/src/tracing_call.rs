@@ -8,9 +8,46 @@ use std::{
     task::{ready, Context, Poll},
     thread,
 };
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit, Semaphore};
+
+/// RPC Tracing call guard semaphore.
+///
+/// This is used to restrict the number of concurrent RPC requests to tracing methods like
+/// `debug_traceTransaction` because they can consume a lot of memory and CPU.
+///
+/// This types serves as an entry guard for the [TracingCallPool] and is used to rate limit parallel
+/// tracing calls on the pool.
+#[derive(Clone, Debug)]
+pub struct TracingCallGuard(Arc<Semaphore>);
+
+impl TracingCallGuard {
+    /// Create a new `TracingCallGuard` with the given maximum number of tracing calls in parallel.
+    pub fn new(max_tracing_requests: u32) -> Self {
+        Self(Arc::new(Semaphore::new(max_tracing_requests as usize)))
+    }
+
+    /// See also [Semaphore::acquire_owned]
+    pub async fn acquire_owned(self) -> Result<OwnedSemaphorePermit, AcquireError> {
+        self.0.acquire_owned().await
+    }
+
+    /// See also [Semaphore::acquire_many_owned]
+    pub async fn acquire_many_owned(self, n: u32) -> Result<OwnedSemaphorePermit, AcquireError> {
+        self.0.acquire_many_owned(n).await
+    }
+}
 
 /// Used to execute tracing calls on a rayon threadpool from within a tokio runtime.
+///
+/// This is a dedicated threadpool for tracing calls which are CPU bound.
+/// RPC calls that perform blocking IO (disk lookups) are not executed on this pool but on the tokio
+/// runtime's blocking pool, which performs poorly with CPU bound tasks. Once the tokio blocking
+/// pool is saturated it is converted into a queue, tracing calls could then interfere with the
+/// queue and block other RPC calls.
+///
+/// See also [tokio-docs] for more information.
+///
+/// [tokio-docs]: https://docs.rs/tokio/latest/tokio/index.html#cpu-bound-tasks-and-blocking-code
 #[derive(Clone, Debug)]
 pub struct TracingCallPool {
     pool: Arc<rayon::ThreadPool>,

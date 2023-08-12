@@ -16,8 +16,8 @@ use reth_primitives::{
     AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes, H256, H64, U256, U64,
 };
 use reth_provider::{
-    BlockIdReader, BlockReader, BlockReaderIdExt, EvmEnvProvider, HeaderProvider,
-    StateProviderFactory,
+    BlockIdReader, BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider,
+    HeaderProvider, StateProviderFactory,
 };
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
@@ -37,6 +37,7 @@ where
     Provider: BlockReader
         + BlockIdReader
         + BlockReaderIdExt
+        + ChainSpecProvider
         + HeaderProvider
         + StateProviderFactory
         + EvmEnvProvider
@@ -404,7 +405,7 @@ where
 mod tests {
     use crate::{
         eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
-        EthApi,
+        EthApi, TracingCallPool,
     };
     use jsonrpsee::types::error::INVALID_PARAMS_CODE;
     use reth_interfaces::test_utils::{generators, generators::Rng};
@@ -424,6 +425,7 @@ mod tests {
     fn build_test_eth_api<
         P: BlockReaderIdExt
             + BlockReader
+            + ChainSpecProvider
             + EvmEnvProvider
             + StateProviderFactory
             + Unpin
@@ -440,6 +442,7 @@ mod tests {
             cache.clone(),
             GasPriceOracle::new(provider, Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
+            TracingCallPool::build().expect("failed to build tracing pool"),
         )
     }
 

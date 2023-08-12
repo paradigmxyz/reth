@@ -4,7 +4,7 @@ use crate::{
     Bloom, Log, TxType,
 };
 use bytes::{Buf, BufMut, BytesMut};
-use reth_codecs::{add_arbitrary_tests, main_codec, Compact, CompactZstd};
+use reth_codecs::{main_codec, Compact, CompactZstd};
 use reth_rlp::{length_of_length, Decodable, Encodable};
 use std::cmp::Ordering;
 
@@ -12,8 +12,7 @@ use std::cmp::Ordering;
 use proptest::strategy::Strategy;
 
 /// Receipt containing result of transaction execution.
-#[main_codec(no_arbitrary, zstd)]
-#[add_arbitrary_tests]
+#[main_codec(zstd)]
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Receipt {
     /// Receipt type.
@@ -25,6 +24,12 @@ pub struct Receipt {
     /// Gas used
     pub cumulative_gas_used: u64,
     /// Log send from contracts.
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(
+            strategy = "proptest::collection::vec(proptest::arbitrary::any::<Log>(), 0..=20)"
+        )
+    )]
     pub logs: Vec<Log>,
     /// Deposit nonce for Optimism deposited transactions
     #[cfg(feature = "optimism")]
@@ -186,67 +191,6 @@ impl Decodable for ReceiptWithBloom {
     }
 }
 
-#[cfg(any(test, feature = "arbitrary"))]
-impl proptest::arbitrary::Arbitrary for Receipt {
-    type Parameters = ();
-
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::{any, prop_compose};
-
-        prop_compose! {
-            fn arbitrary_receipt()(tx_type in any::<TxType>(),
-                        success in any::<bool>(),
-                        cumulative_gas_used in any::<u64>(),
-                        logs in proptest::collection::vec(proptest::arbitrary::any::<Log>(), 0..=20),
-                        deposit_nonce in any::<Option<u64>>()) -> Receipt
-            {
-
-                // Only reecipts for deposit transactions may contain a deposit nonce
-                #[cfg(feature = "optimism")]
-                let deposit_nonce = if tx_type == TxType::DEPOSIT {
-                    deposit_nonce
-                } else {
-                    None
-                };
-
-                Receipt { tx_type,
-                    success,
-                    cumulative_gas_used,
-                    logs,
-                    #[cfg(feature = "optimism")]
-                    deposit_nonce
-                }
-            }
-        };
-        arbitrary_receipt().boxed()
-    }
-
-    type Strategy = proptest::strategy::BoxedStrategy<Receipt>;
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for Receipt {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let tx_type = TxType::arbitrary(u)?;
-        let success = bool::arbitrary(u)?;
-        let cumulative_gas_used = u64::arbitrary(u)?;
-        let logs = Vec::<Log>::arbitrary(u)?;
-
-        #[cfg(feature = "optimism")]
-        let deposit_nonce =
-            if tx_type == TxType::DEPOSIT { Option::<u64>::arbitrary(u)? } else { None };
-
-        Ok(Self {
-            tx_type,
-            success,
-            cumulative_gas_used,
-            logs,
-            #[cfg(feature = "optimism")]
-            deposit_nonce,
-        })
-    }
-}
-
 /// [`Receipt`] reference type with calculated bloom filter.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReceiptWithBloomRef<'a> {
@@ -376,7 +320,7 @@ impl<'a> Encodable for ReceiptWithBloomEncoder<'a> {
     fn length(&self) -> usize {
         let mut payload_len = self.receipt_length();
         // account for eip-2718 type prefix and set the list
-        if matches!(self.receipt.tx_type, TxType::EIP1559 | TxType::EIP2930) {
+        if matches!(self.receipt.tx_type, TxType::EIP1559 | TxType::EIP2930 | TxType::EIP4844) {
             payload_len += 1;
             // we include a string header for typed receipts, so include the length here
             payload_len += length_of_length(payload_len);

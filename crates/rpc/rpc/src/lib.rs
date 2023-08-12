@@ -41,11 +41,11 @@ mod otterscan;
 mod reth;
 mod rpc;
 mod trace;
+pub mod tracing_call;
 mod txpool;
 mod web3;
 
 pub use admin::AdminApi;
-pub use call_guard::TracingCallGuard;
 pub use debug::DebugApi;
 pub use engine::{EngineApi, EngineEthApi};
 pub use eth::{EthApi, EthApiSpec, EthFilter, EthPubSub, EthSubscriptionIdProvider};
@@ -55,6 +55,7 @@ pub use otterscan::OtterscanApi;
 pub use reth::RethApi;
 pub use rpc::RPCApi;
 pub use trace::TraceApi;
+pub use tracing_call::{TracingCallGuard, TracingCallPool};
 pub use txpool::TxPoolApi;
 pub use web3::Web3Api;
 
