@@ -89,7 +89,7 @@
 //!     let builder = RpcModuleBuilder::new(provider, pool, network, TokioTaskExecutor::default(), events);
 //!
 //!   // configure the server modules
-//!    let (modules, auth_module) = builder.build_with_auth_server(transports, engine_api);
+//!    let (modules, auth_module, _registry) = builder.build_with_auth_server(transports, engine_api);
 //!
 //!   // start the servers
 //!   let auth_config = AuthServerConfig::builder(JwtSecret::random()).build();
@@ -122,7 +122,8 @@ use reth_rpc::{
         gas_oracle::GasPriceOracle,
     },
     AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider,
-    NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TracingCallGuard, TxPoolApi, Web3Api,
+    NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TracingCallGuard, TracingCallPool, TxPoolApi,
+    Web3Api,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -153,9 +154,6 @@ mod eth;
 
 /// Common RPC constants.
 pub mod constants;
-
-/// Additional support for tracing related rpc calls
-pub mod tracing_pool;
 
 // Rpc server metrics
 mod metrics;
@@ -375,7 +373,7 @@ where
 
         let auth_module = registry.create_auth_module(engine);
 
-        (modules, auth_module)
+        (modules, auth_module, registry)
     }
 
     /// Configures all [RpcModule]s specific to the given [TransportRpcModuleConfig] which can be
@@ -913,8 +911,13 @@ where
         &mut self,
         namespaces: impl Iterator<Item = RethRpcModule>,
     ) -> Vec<Methods> {
-        let EthHandlers { api: eth_api, cache: eth_cache, filter: eth_filter, pubsub: eth_pubsub } =
-            self.with_eth(|eth| eth.clone());
+        let EthHandlers {
+            api: eth_api,
+            filter: eth_filter,
+            pubsub: eth_pubsub,
+            cache: _,
+            tracing_call_pool: _,
+        } = self.with_eth(|eth| eth.clone());
 
         // Create a copy, so we can list out all the methods for rpc_ api
         let namespaces: Vec<_> = namespaces.collect();
@@ -951,8 +954,6 @@ where
                         RethRpcModule::Trace => TraceApi::new(
                             self.provider.clone(),
                             eth_api.clone(),
-                            eth_cache.clone(),
-                            Box::new(self.executor.clone()),
                             self.tracing_call_guard.clone(),
                         )
                         .into_rpc()
@@ -1015,6 +1016,7 @@ where
             );
 
             let executor = Box::new(self.executor.clone());
+            let tracing_call_pool = TracingCallPool::build().expect("failed to build tracing pool");
             let api = EthApi::with_spawner(
                 self.provider.clone(),
                 self.pool.clone(),
@@ -1023,6 +1025,7 @@ where
                 gas_oracle,
                 self.config.eth.rpc_gas_cap,
                 executor.clone(),
+                tracing_call_pool.clone(),
             );
             let filter = EthFilter::new(
                 self.provider.clone(),
@@ -1040,19 +1043,19 @@ where
                 executor,
             );
 
-            let eth = EthHandlers { api, cache, filter, pubsub };
+            let eth = EthHandlers { api, cache, filter, pubsub, tracing_call_pool };
             self.eth = Some(eth);
         }
         f(self.eth.as_ref().expect("exists; qed"))
     }
 
     /// Returns the configured [EthHandlers] or creates it if it does not exist yet
-    fn eth_handlers(&mut self) -> EthHandlers<Provider, Pool, Network, Events> {
+    pub fn eth_handlers(&mut self) -> EthHandlers<Provider, Pool, Network, Events> {
         self.with_eth(|handlers| handlers.clone())
     }
 
     /// Returns the configured [EthApi] or creates it if it does not exist yet
-    fn eth_api(&mut self) -> EthApi<Provider, Pool, Network> {
+    pub fn eth_api(&mut self) -> EthApi<Provider, Pool, Network> {
         self.with_eth(|handlers| handlers.api.clone())
     }
 }
@@ -1577,7 +1580,7 @@ impl WsHttpServers {
                 config.ensure_ws_http_identical()?;
 
                 if let Some(module) = http_module.or(ws_module) {
-                    let handle = both.start(module).await?;
+                    let handle = both.start(module).await;
                     http_handle = Some(handle.clone());
                     ws_handle = Some(handle);
                 }
@@ -1586,12 +1589,12 @@ impl WsHttpServers {
                 if let Some((server, module)) =
                     http.and_then(|server| http_module.map(|module| (server, module)))
                 {
-                    http_handle = Some(server.start(module).await?);
+                    http_handle = Some(server.start(module).await);
                 }
                 if let Some((server, module)) =
                     ws.and_then(|server| ws_module.map(|module| (server, module)))
                 {
-                    ws_handle = Some(server.start(module).await?);
+                    ws_handle = Some(server.start(module).await);
                 }
             }
         }
@@ -1618,10 +1621,10 @@ enum WsHttpServerKind {
 
 impl WsHttpServerKind {
     /// Starts the server and returns the handle
-    async fn start(self, module: RpcModule<()>) -> Result<ServerHandle, RpcError> {
+    async fn start(self, module: RpcModule<()>) -> ServerHandle {
         match self {
-            WsHttpServerKind::Plain(server) => Ok(server.start(module)?),
-            WsHttpServerKind::WithCors(server) => Ok(server.start(module)?),
+            WsHttpServerKind::Plain(server) => server.start(module),
+            WsHttpServerKind::WithCors(server) => server.start(module),
         }
     }
 

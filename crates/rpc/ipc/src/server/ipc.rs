@@ -6,7 +6,7 @@ use jsonrpsee::{
         tracing::{rx_log_from_json, tx_log_from_str},
         JsonRawValue,
     },
-    helpers::batch_response_error,
+    helpers::{batch_response_error, MethodResponseResult},
     server::{
         logger,
         logger::{Logger, TransportProtocol},
@@ -219,14 +219,20 @@ pub(crate) async fn execute_call<L: Logger>(
     };
 
     tx_log_from_str(&response.as_response().result, max_log_length);
-    logger.on_result(name, response.as_response().success, request_start, TransportProtocol::Http);
+    logger.on_result(
+        name,
+        response.as_response().success_or_error,
+        request_start,
+        TransportProtocol::Http,
+    );
     response
 }
 
 #[instrument(name = "notification", fields(method = notif.method.as_ref()), skip(notif, max_log_length), level = "TRACE")]
 fn execute_notification(notif: Notif<'_>, max_log_length: u32) -> MethodResponse {
     rx_log_from_json(&notif, max_log_length);
-    let response = MethodResponse { result: String::new(), success: true };
+    let response =
+        MethodResponse { result: String::new(), success_or_error: MethodResponseResult::Success };
     tx_log_from_str(&response.result, max_log_length);
     response
 }

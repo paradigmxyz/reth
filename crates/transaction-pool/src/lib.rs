@@ -10,8 +10,7 @@
     rust_2018_idioms,
     unreachable_pub,
     missing_debug_implementations,
-    rustdoc::broken_intra_doc_links,
-    unused_crate_dependencies
+    rustdoc::broken_intra_doc_links
 )]
 #![doc(test(
     no_crate_inject,
@@ -93,10 +92,10 @@
 //!
 //! ```
 //! use reth_primitives::MAINNET;
-//! use reth_provider::StateProviderFactory;
+//! use reth_provider::{ChainSpecProvider, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::{EthTransactionValidator, Pool, TransactionPool};
-//!  async fn t<C>(client: C)  where C: StateProviderFactory + Clone + 'static{
+//!  async fn t<C>(client: C)  where C: StateProviderFactory + ChainSpecProvider + Clone + 'static{
 //!     let pool = Pool::eth_pool(
 //!         EthTransactionValidator::new(client, MAINNET.clone(), TokioTaskExecutor::default()),
 //!         Default::default(),
@@ -118,12 +117,12 @@
 //! ```
 //! use futures_util::Stream;
 //! use reth_primitives::MAINNET;
-//! use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
+//! use reth_provider::{BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::{EthTransactionValidator, Pool};
 //! use reth_transaction_pool::maintain::maintain_transaction_pool_future;
 //!  async fn t<C, St>(client: C, stream: St)
-//!    where C: StateProviderFactory + BlockReaderIdExt + Clone + 'static,
+//!    where C: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
 //!     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 //!     {
 //!     let pool = Pool::eth_pool(
@@ -154,11 +153,12 @@ use tracing::{instrument, trace};
 
 pub use crate::{
     config::{
-        PoolConfig, SubPoolLimit, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
-        TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
+        PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP, REPLACE_BLOB_PRICE_BUMP,
+        TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER, TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
+        TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
     },
     error::PoolResult,
-    ordering::{GasCostOrdering, TransactionOrdering},
+    ordering::{CoinbaseTipOrdering, Priority, TransactionOrdering},
     pool::{
         state::SubPool, AllTransactionsEvents, FullTransactionEvent, TransactionEvent,
         TransactionEvents,
@@ -190,27 +190,6 @@ mod traits;
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking a pool
 pub mod test_utils;
-
-// TX_SLOT_SIZE is used to calculate how many data slots a single transaction
-// takes up based on its size. The slots are used as DoS protection, ensuring
-// that validating a new transaction remains a constant operation (in reality
-// O(maxslots), where max slots are 4 currently).
-pub(crate) const TX_SLOT_SIZE: usize = 32 * 1024;
-
-// TX_MAX_SIZE is the maximum size a single transaction can have. This field has
-// non-trivial consequences: larger transactions are significantly harder and
-// more expensive to propagate; larger transactions also take more resources
-// to validate whether they fit into the pool or not.
-pub(crate) const TX_MAX_SIZE: usize = 4 * TX_SLOT_SIZE; //128KB
-
-// Maximum bytecode to permit for a contract
-pub(crate) const MAX_CODE_SIZE: usize = 24576;
-
-// Maximum initcode to permit in a creation transaction and create instructions
-pub(crate) const MAX_INIT_CODE_SIZE: usize = 2 * MAX_CODE_SIZE;
-
-// Price bump (in %) for the transaction pool underpriced check
-pub(crate) const PRICE_BUMP: u128 = 10;
 
 /// A shareable, generic, customizable `TransactionPool` implementation.
 #[derive(Debug)]
@@ -282,12 +261,12 @@ where
 }
 
 impl<Client>
-    Pool<EthTransactionValidator<Client, PooledTransaction>, GasCostOrdering<PooledTransaction>>
+    Pool<EthTransactionValidator<Client, PooledTransaction>, CoinbaseTipOrdering<PooledTransaction>>
 where
     Client: StateProviderFactory + Clone + 'static,
 {
     /// Returns a new [Pool] that uses the default [EthTransactionValidator] when validating
-    /// [PooledTransaction]s and ords via [GasCostOrdering]
+    /// [PooledTransaction]s and ords via [CoinbaseTipOrdering]
     ///
     /// # Example
     ///
@@ -307,7 +286,7 @@ where
         validator: EthTransactionValidator<Client, PooledTransaction>,
         config: PoolConfig,
     ) -> Self {
-        Self::new(validator, GasCostOrdering::default(), config)
+        Self::new(validator, CoinbaseTipOrdering::default(), config)
     }
 }
 

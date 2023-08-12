@@ -95,7 +95,7 @@ impl ReceiptWithBloom {
         let b = &mut &**buf;
         let rlp_head = reth_rlp::Header::decode(b)?;
         if !rlp_head.list {
-            return Err(reth_rlp::DecodeError::UnexpectedString);
+            return Err(reth_rlp::DecodeError::UnexpectedString)
         }
         let started_len = b.len();
 
@@ -130,7 +130,7 @@ impl ReceiptWithBloom {
             return Err(reth_rlp::DecodeError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            });
+            })
         }
         *buf = *b;
         Ok(this)
@@ -162,20 +162,25 @@ impl Decodable for ReceiptWithBloom {
                 let receipt_type = *buf.first().ok_or(reth_rlp::DecodeError::Custom(
                     "typed receipt cannot be decoded from an empty slice",
                 ))?;
-                if receipt_type == 0x01 {
-                    buf.advance(1);
-                    Self::decode_receipt(buf, TxType::EIP2930)
-                } else if receipt_type == 0x02 {
-                    buf.advance(1);
-                    Self::decode_receipt(buf, TxType::EIP1559)
-                } else if receipt_type == 0x03 {
-                    buf.advance(1);
-                    Self::decode_receipt(buf, TxType::EIP4844)
-                } else if receipt_type == 0x7E {
-                    buf.advance(1);
-                    Self::decode_receipt(buf, TxType::DEPOSIT)
-                } else {
-                    Err(reth_rlp::DecodeError::Custom("invalid receipt type"))
+                match receipt_type {
+                    0x01 => {
+                        buf.advance(1);
+                        Self::decode_receipt(buf, TxType::EIP2930)
+                    }
+                    0x02 => {
+                        buf.advance(1);
+                        Self::decode_receipt(buf, TxType::EIP1559)
+                    }
+                    0x03 => {
+                        buf.advance(1);
+                        Self::decode_receipt(buf, TxType::EIP4844)
+                    }
+                    #[cfg(feature = "optimism")]
+                    0x7E => {
+                        buf.advance(1);
+                        Self::decode_receipt(buf, TxType::DEPOSIT)
+                    }
+                    _ => Err(reth_rlp::DecodeError::Custom("invalid receipt type")),
                 }
             }
             Ordering::Equal => {
@@ -323,7 +328,9 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
         self.receipt.logs.encode(out);
         #[cfg(feature = "optimism")]
         if self.receipt.tx_type == TxType::DEPOSIT {
-            self.receipt.deposit_nonce.map(|deposit_nonce| deposit_nonce.encode(out));
+            if let Some(deposit_nonce) = self.receipt.deposit_nonce {
+                deposit_nonce.encode(out)
+            }
         }
     }
 
@@ -331,7 +338,7 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
     fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
         if matches!(self.receipt.tx_type, TxType::Legacy) {
             self.encode_fields(out);
-            return;
+            return
         }
 
         let mut payload = BytesMut::new();
@@ -376,7 +383,7 @@ impl<'a> Encodable for ReceiptWithBloomEncoder<'a> {
     fn length(&self) -> usize {
         let mut payload_len = self.receipt_length();
         // account for eip-2718 type prefix and set the list
-        if matches!(self.receipt.tx_type, TxType::EIP1559 | TxType::EIP2930) {
+        if !matches!(self.receipt.tx_type, TxType::Legacy) {
             payload_len += 1;
             // we include a string header for typed receipts, so include the length here
             payload_len += length_of_length(payload_len);

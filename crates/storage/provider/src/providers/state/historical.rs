@@ -5,8 +5,10 @@ use crate::{
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+    table::Table,
     tables,
     transaction::DbTx,
+    BlockNumberList,
 };
 use reth_interfaces::Result;
 use reth_primitives::{
@@ -20,11 +22,11 @@ use std::marker::PhantomData;
 /// It means that all changes made in the provided block number are not included.
 ///
 /// Historical state provider reads the following tables:
-/// [tables::AccountHistory]
-/// [tables::Bytecodes]
-/// [tables::StorageHistory]
-/// [tables::AccountChangeSet]
-/// [tables::StorageChangeSet]
+/// - [tables::AccountHistory]
+/// - [tables::Bytecodes]
+/// - [tables::StorageHistory]
+/// - [tables::AccountChangeSet]
+/// - [tables::StorageChangeSet]
 pub struct HistoricalStateProviderRef<'a, 'b, TX: DbTx<'a>> {
     /// Transaction
     tx: &'b TX,
@@ -38,7 +40,7 @@ pub struct HistoricalStateProviderRef<'a, 'b, TX: DbTx<'a>> {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum HistoryInfo {
-    NotWritten,
+    NotYetWritten,
     InChangeset(u64),
     InPlainState,
     MaybeInPlainState,
@@ -115,6 +117,8 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
         // have a different key.
         if let Some(chunk) = cursor.seek(key)?.filter(|(key, _)| key_filter(key)).map(|x| x.1 .0) {
             let chunk = chunk.enable_rank();
+
+            // Get the rank of the first entry after our block.
             let rank = chunk.rank(self.block_number as usize);
 
             // If our block is before the first entry in the index chunk and this first entry
@@ -139,6 +143,8 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
                 // The chunk contains an entry for a write after our block, return it.
                 Ok(HistoryInfo::InChangeset(chunk.select(rank) as u64))
             } else {
+                // The chunk does not contain an entry for a write after our block. This can only
+                // happen if this is the last chunk and so we need to look in the plain state.
                 Ok(HistoryInfo::InPlainState)
             }
         } else if lowest_available_block_number.is_some() {
@@ -146,7 +152,8 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
             // history, so we need to make a plain state lookup.
             Ok(HistoryInfo::MaybeInPlainState)
         } else {
-            Ok(HistoryInfo::NotWritten)
+            // The key has not been written to at all.
+            Ok(HistoryInfo::NotYetWritten)
         }
     }
 }
@@ -155,7 +162,7 @@ impl<'a, 'b, TX: DbTx<'a>> AccountReader for HistoricalStateProviderRef<'a, 'b, 
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
         match self.account_history_lookup(address)? {
-            HistoryInfo::NotWritten => Ok(None),
+            HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => Ok(self
                 .tx
                 .cursor_dup_read::<tables::AccountChangeSet>()?
@@ -203,7 +210,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
     /// Get storage.
     fn storage(&self, address: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
         match self.storage_history_lookup(address, storage_key)? {
-            HistoryInfo::NotWritten => Ok(None),
+            HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => Ok(Some(
                 self.tx
                     .cursor_dup_read::<tables::StorageChangeSet>()?

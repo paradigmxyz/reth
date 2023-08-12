@@ -21,6 +21,7 @@ reth-interfaces = { workspace = true, features = ["test-utils", "clap"] }
 reth-transaction-pool.workspace = true
 reth-beacon-consensus = { path = "../../crates/consensus/beacon" }
 reth-auto-seal-consensus = { path = "../../crates/consensus/auto-seal" }
+reth-consensus-common = { path = "../../crates/consensus/common" }
 reth-blockchain-tree = { path = "../../crates/blockchain-tree" }
 reth-rpc-engine-api = { path = "../../crates/rpc/rpc-engine-api" }
 reth-rpc-builder = { path = "../../crates/rpc/rpc-builder" }
@@ -39,6 +40,7 @@ reth-basic-payload-builder = { path = "../../crates/payload/basic" }
 reth-discv4 = { path = "../../crates/net/discv4" }
 reth-metrics.workspace = true
 reth-prune = { path = "../../crates/prune" }
+reth-trie = { path = "../../crates/trie" }
 
 # crypto
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
@@ -94,7 +96,6 @@ jemalloc-ctl = { version = "0.5.0", optional = true }
 
 [features]
 default = ["jemalloc"]
-#default = ["jemalloc", "optimism"]
 jemalloc = ["dep:jemallocator", "dep:jemalloc-ctl"]
 jemalloc-prof = ["jemalloc", "jemallocator?/profiling"]
 min-error-logs = ["tracing/release_max_level_error"]
@@ -112,6 +113,8 @@ optimism = [
   "reth-provider/optimism",
   "reth-beacon-consensus/optimism",
   "reth-basic-payload-builder/optimism",
+  "reth-network/optimism",
+  "reth-network-api/optimism"
 ]
 
 [build-dependencies]

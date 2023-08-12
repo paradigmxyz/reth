@@ -92,7 +92,7 @@ impl<DB: Database> Pruner<DB> {
         let provider = self.provider_factory.provider_rw()?;
 
         if let Some((to_block, prune_mode)) =
-            self.modes.prune_target_block_receipts(tip_block_number)
+            self.modes.prune_target_block_receipts(tip_block_number)?
         {
             let part_start = Instant::now();
             self.prune_receipts(&provider, to_block, prune_mode)?;
@@ -103,7 +103,7 @@ impl<DB: Database> Pruner<DB> {
         }
 
         if let Some((to_block, prune_mode)) =
-            self.modes.prune_target_block_transaction_lookup(tip_block_number)
+            self.modes.prune_target_block_transaction_lookup(tip_block_number)?
         {
             let part_start = Instant::now();
             self.prune_transaction_lookup(&provider, to_block, prune_mode)?;
@@ -238,6 +238,7 @@ impl<DB: Database> Pruner<DB> {
                 return Ok(())
             }
         };
+        let total = range.clone().count();
 
         let mut processed = 0;
         provider.prune_table_with_iterator_in_batches::<tables::Receipts>(
@@ -282,6 +283,8 @@ impl<DB: Database> Pruner<DB> {
             }
         };
         let last_tx_num = *range.end();
+        let total = range.clone().count();
+        let mut processed = 0;
 
         for i in range.step_by(self.batch_sizes.transaction_lookup) {
             // The `min` ensures that the transaction range doesn't exceed the last transaction
@@ -304,7 +307,7 @@ impl<DB: Database> Pruner<DB> {
             }
 
             // Pre-sort hashes to prune them in order
-            hashes.sort();
+            hashes.sort_unstable();
 
             let rows = provider.prune_table_with_iterator::<tables::TxHashNumber>(hashes)?;
             processed += rows;

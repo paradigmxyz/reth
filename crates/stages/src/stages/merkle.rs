@@ -172,7 +172,6 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let target_block_root = target_block.state_root;
 
         let mut checkpoint = self.get_execution_checkpoint(provider)?;
-
         let (trie_root, entities_checkpoint) = if range.is_empty() {
             (target_block_root, input.checkpoint().entities_stage_checkpoint().unwrap_or_default())
         } else if to_block - from_block > threshold || from_block == 1 {

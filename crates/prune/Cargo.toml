@@ -21,8 +21,8 @@ reth-metrics.workspace = true
 # misc
 tracing.workspace = true
 thiserror.workspace = true
-itertools = "0.10"
-rayon = "1.6.0"
+itertools.workspace = true
+rayon.workspace = true
 
 [dev-dependencies]
 # reth

@@ -1,7 +1,5 @@
 //! Helpers for working with EIP-1559 base fee
 
-use crate::constants;
-
 /// Calculate base fee for next block. [EIP-1559](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1559.md) spec
 pub fn calculate_next_block_base_fee(
     gas_used: u64,

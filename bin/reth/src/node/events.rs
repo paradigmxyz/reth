@@ -290,9 +290,10 @@ impl Eta {
             let elapsed = last_checkpoint_time.elapsed();
             let per_second = processed_since_last as f64 / elapsed.as_secs_f64();
 
-            self.eta = Some(Duration::from_secs_f64(
-                (current.total - current.processed) as f64 / per_second,
-            ));
+            self.eta = Duration::try_from_secs_f64(
+                ((current.total - current.processed) as f64) / per_second,
+            )
+            .ok();
         }
 
         self.last_checkpoint = current;

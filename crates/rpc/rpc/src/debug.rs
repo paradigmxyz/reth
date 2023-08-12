@@ -41,8 +41,8 @@ use revm_primitives::{
     db::{DatabaseCommit, DatabaseRef},
     BlockEnv, CfgEnv,
 };
-use std::{future::Future, sync::Arc};
-use tokio::sync::{mpsc, oneshot, AcquireError, OwnedSemaphorePermit};
+use std::sync::Arc;
+use tokio::sync::{mpsc, AcquireError, OwnedSemaphorePermit};
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
 /// `debug` API implementation.
@@ -75,61 +75,9 @@ where
     Provider: BlockReaderIdExt + HeaderProvider + 'static,
     Eth: EthTransactions + 'static,
 {
-    /// Executes the future on a new blocking task.
-    async fn on_blocking_task<C, F, R>(&self, c: C) -> EthResult<R>
-    where
-        C: FnOnce(Self) -> F,
-        F: Future<Output = EthResult<R>> + Send + 'static,
-        R: Send + 'static,
-    {
-        let (tx, rx) = oneshot::channel();
-        let this = self.clone();
-        let f = c(this);
-        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
-            let res = f.await;
-            let _ = tx.send(res);
-        }));
-        rx.await.map_err(|_| EthApiError::InternalTracingError)?
-    }
-
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
         self.inner.tracing_call_guard.clone().acquire_owned().await
-    }
-
-    /// Trace the entire block
-    fn trace_block_with_sync(
-        &self,
-        at: BlockId,
-        transactions: Vec<TransactionSigned>,
-        cfg: CfgEnv,
-        block_env: BlockEnv,
-        opts: GethDebugTracingOptions,
-    ) -> EthResult<Vec<TraceResult>> {
-        // replay all transactions of the block
-        let this = self.clone();
-        self.inner.eth_api.with_state_at_block(at, move |state| {
-            let mut results = Vec::with_capacity(transactions.len());
-            let mut db = SubState::new(State::new(state));
-
-            let mut transactions = transactions.into_iter().peekable();
-            while let Some(tx) = transactions.next() {
-                let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
-                let tx = tx_env_with_recovered(&tx);
-                let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
-                let (result, state_changes) =
-                    this.trace_transaction(opts.clone(), env, at, &mut db)?;
-                results.push(TraceResult::Success { result });
-
-                if transactions.peek().is_some() {
-                    // need to apply the state changes of this transaction before executing the next
-                    // transaction
-                    db.commit(state_changes)
-                }
-            }
-
-            Ok(results)
-        })
     }
 
     /// Trace the entire block asynchronously
@@ -141,10 +89,33 @@ where
         block_env: BlockEnv,
         opts: GethDebugTracingOptions,
     ) -> EthResult<Vec<TraceResult>> {
-        self.on_blocking_task(|this| async move {
-            this.trace_block_with_sync(at, transactions, cfg, block_env, opts)
-        })
-        .await
+        // replay all transactions of the block
+        let this = self.clone();
+        self.inner
+            .eth_api
+            .spawn_with_state_at_block(at, move |state| {
+                let mut results = Vec::with_capacity(transactions.len());
+                let mut db = SubState::new(State::new(state));
+
+                let mut transactions = transactions.into_iter().peekable();
+                while let Some(tx) = transactions.next() {
+                    let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
+                    let tx = tx_env_with_recovered(&tx);
+                    let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                    let (result, state_changes) =
+                        this.trace_transaction(opts.clone(), env, at, &mut db)?;
+                    results.push(TraceResult::Success { result });
+
+                    if transactions.peek().is_some() {
+                        // need to apply the state changes of this transaction before executing the
+                        // next transaction
+                        db.commit(state_changes)
+                    }
+                }
+
+                Ok(results)
+            })
+            .await
     }
 
     /// Replays the given block and returns the trace of each transaction.
@@ -173,17 +144,6 @@ where
         block_id: BlockId,
         opts: GethDebugTracingOptions,
     ) -> EthResult<Vec<TraceResult>> {
-        self.on_blocking_task(
-            |this| async move { this.try_debug_trace_block(block_id, opts).await },
-        )
-        .await
-    }
-
-    async fn try_debug_trace_block(
-        &self,
-        block_id: BlockId,
-        opts: GethDebugTracingOptions,
-    ) -> EthResult<Vec<TraceResult>> {
         let block_hash = self
             .inner
             .provider
@@ -200,7 +160,7 @@ where
         // its parent block's state
         let state_at = block.parent_hash;
 
-        self.trace_block_with_sync(state_at.into(), block.body, cfg, block_env, opts)
+        self.trace_block_with(state_at.into(), block.body, cfg, block_env, opts).await
     }
 
     /// Trace the transaction according to the provided options.
@@ -222,8 +182,10 @@ where
         let state_at: BlockId = block.parent_hash.into();
         let block_txs = block.body;
 
-        self.on_blocking_task(|this| async move {
-            this.inner.eth_api.with_state_at_block(state_at, |state| {
+        let this = self.clone();
+        self.inner
+            .eth_api
+            .spawn_with_state_at_block(state_at, move |state| {
                 // configure env for the target transaction
                 let tx = transaction.into_recovered();
 
@@ -240,29 +202,12 @@ where
                 let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
                 this.trace_transaction(opts, env, state_at, &mut db).map(|(trace, _)| trace)
             })
-        })
-        .await
+            .await
     }
 
     /// The debug_traceCall method lets you run an `eth_call` within the context of the given block
     /// execution using the final state of parent block as the base.
     pub async fn debug_trace_call(
-        &self,
-        call: CallRequest,
-        block_id: Option<BlockId>,
-        opts: GethDebugTracingCallOptions,
-    ) -> EthResult<GethTrace> {
-        self.on_blocking_task(|this| async move {
-            this.try_debug_trace_call(call, block_id, opts).await
-        })
-        .await
-    }
-
-    /// The debug_traceCall method lets you run an `eth_call` within the context of the given block
-    /// execution using the final state of parent block as the base.
-    ///
-    /// Caution: while this is async, this may still be blocking on necessary DB io.
-    async fn try_debug_trace_call(
         &self,
         call: CallRequest,
         block_id: Option<BlockId>,
@@ -279,10 +224,13 @@ where
                 GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
                     GethDebugBuiltInTracerType::FourByteTracer => {
                         let mut inspector = FourByteInspector::default();
-                        let (_res, _) = self
+                        let inspector = self
                             .inner
                             .eth_api
-                            .inspect_call_at(call, at, overrides, &mut inspector)
+                            .spawn_with_call_at(call, at, overrides, move |db, env| {
+                                inspect(db, env, &mut inspector)?;
+                                Ok(inspector)
+                            })
                             .await?;
                         return Ok(FourByteFrame::from(inspector).into())
                     }
@@ -296,18 +244,39 @@ where
                                 .set_record_logs(call_config.with_log.unwrap_or_default()),
                         );
 
-                        let _ = self
+                        let frame = self
                             .inner
                             .eth_api
-                            .inspect_call_at(call, at, overrides, &mut inspector)
+                            .spawn_with_call_at(call, at, overrides, move |db, env| {
+                                inspect(db, env, &mut inspector)?;
+                                let frame =
+                                    inspector.into_geth_builder().geth_call_traces(call_config);
+                                Ok(frame.into())
+                            })
                             .await?;
-
-                        let frame = inspector.into_geth_builder().geth_call_traces(call_config);
-
-                        return Ok(frame.into())
+                        return Ok(frame)
                     }
                     GethDebugBuiltInTracerType::PreStateTracer => {
-                        Err(EthApiError::Unsupported("pre state tracer currently unsupported."))
+                        let prestate_config = tracer_config
+                            .into_pre_state_config()
+                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
+                        let mut inspector = TracingInspector::new(
+                            TracingInspectorConfig::from_geth_config(&config),
+                        );
+
+                        let frame =
+                            self.inner
+                                .eth_api
+                                .spawn_with_call_at(call, at, overrides, move |db, env| {
+                                    let (res, _, db) =
+                                        inspect_and_return_db(db, env, &mut inspector)?;
+                                    let frame = inspector
+                                        .into_geth_builder()
+                                        .geth_prestate_traces(&res, prestate_config, &db)?;
+                                    Ok(frame)
+                                })
+                                .await?;
+                        return Ok(frame.into())
                     }
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
                 },
@@ -316,18 +285,10 @@ where
 
                     // for JS tracing we need to setup all async work before we can start tracing
                     // because JSTracer and all JS types are not Send
-                    let (cfg, block_env, at) = self.inner.eth_api.evm_env_at(at).await?;
+                    let (_, _, at) = self.inner.eth_api.evm_env_at(at).await?;
                     let state = self.inner.eth_api.state_at(at)?;
-                    let mut db = SubState::new(State::new(state));
+                    let db = SubState::new(State::new(state));
                     let has_state_overrides = overrides.has_state();
-                    let env = prepare_call_env(
-                        cfg,
-                        block_env,
-                        call,
-                        self.inner.eth_api.call_gas_limit(),
-                        &mut db,
-                        overrides,
-                    )?;
 
                     // If the caller provided state overrides we need to clone the DB so the js
                     // service has access these modifications
@@ -338,11 +299,17 @@ where
 
                     let to_db_service = self.spawn_js_trace_service(at, maybe_override_db)?;
 
-                    let mut inspector = JsInspector::new(code, config, to_db_service)?;
-                    let (res, env) = inspect(db, env, &mut inspector)?;
+                    let res = self
+                        .inner
+                        .eth_api
+                        .spawn_with_call_at(call, at, overrides, move |db, env| {
+                            let mut inspector = JsInspector::new(code, config, to_db_service)?;
+                            let (res, _) = inspect(db, env.clone(), &mut inspector)?;
+                            Ok(inspector.json_result(res, &env)?)
+                        })
+                        .await?;
 
-                    let result = inspector.json_result(res, &env)?;
-                    Ok(GethTrace::JS(result))
+                    Ok(GethTrace::JS(res))
                 }
             }
         }
@@ -352,8 +319,14 @@ where
 
         let mut inspector = TracingInspector::new(inspector_config);
 
-        let (res, _) =
-            self.inner.eth_api.inspect_call_at(call, at, overrides, &mut inspector).await?;
+        let (res, inspector) = self
+            .inner
+            .eth_api
+            .spawn_with_call_at(call, at, overrides, move |db, env| {
+                let (res, _) = inspect(db, env, &mut inspector)?;
+                Ok((res, inspector))
+            })
+            .await?;
         let gas_used = res.result.gas_used();
         let return_value = result_output(&res.result).unwrap_or_default().into();
         let frame = inspector.into_geth_builder().geth_traces(gas_used, return_value, config);
@@ -463,6 +436,8 @@ where
     /// Returns the trace frame and the state that got updated after executing the transaction.
     ///
     /// Note: this does not apply any state overrides if they're configured in the `opts`.
+    ///
+    /// Caution: this is blocking and should be performed on a blocking task.
     fn trace_transaction(
         &self,
         opts: GethDebugTracingOptions,
@@ -497,7 +472,22 @@ where
                         return Ok((frame.into(), res.state))
                     }
                     GethDebugBuiltInTracerType::PreStateTracer => {
-                        Err(EthApiError::Unsupported("prestate tracer is unimplemented yet."))
+                        let prestate_config = tracer_config
+                            .into_pre_state_config()
+                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
+
+                        let mut inspector = TracingInspector::new(
+                            TracingInspectorConfig::from_geth_config(&config),
+                        );
+                        let (res, _) = inspect(&mut *db, env, &mut inspector)?;
+
+                        let frame = inspector.into_geth_builder().geth_prestate_traces(
+                            &res,
+                            prestate_config,
+                            &*db,
+                        )?;
+
+                        return Ok((frame.into(), res.state))
                     }
                     GethDebugBuiltInTracerType::NoopTracer => {
                         Ok((NoopFrame::default().into(), Default::default()))

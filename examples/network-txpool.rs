@@ -10,7 +10,7 @@
 use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::{
-    GasCostOrdering, PoolTransaction, PooledTransaction, TransactionOrigin, TransactionPool,
+    CoinbaseTipOrdering, PoolTransaction, PooledTransaction, TransactionOrigin, TransactionPool,
     TransactionValidationOutcome, TransactionValidator,
 };
 
@@ -24,7 +24,7 @@ async fn main() -> eyre::Result<()> {
 
     let pool = reth_transaction_pool::Pool::new(
         OkValidator::default(),
-        GasCostOrdering::default(),
+        CoinbaseTipOrdering::default(),
         Default::default(),
     );
 

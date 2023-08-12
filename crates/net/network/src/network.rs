@@ -269,7 +269,7 @@ impl SyncStateProvider for NetworkHandle {
     // used to guard the txpool
     fn is_initially_syncing(&self) -> bool {
         if self.inner.initial_sync_done.load(Ordering::Relaxed) {
-            return false;
+            return false
         }
         self.inner.is_syncing.load(Ordering::Relaxed)
     }
@@ -313,8 +313,8 @@ struct NetworkInner {
     initial_sync_done: Arc<AtomicBool>,
     /// The chain id
     chain_id: Arc<AtomicU64>,
-    #[cfg(feature = "optimism")]
     /// The sequencer HTTP Endpoint
+    #[cfg(feature = "optimism")]
     sequencer_endpoint: Option<String>,
 }
 

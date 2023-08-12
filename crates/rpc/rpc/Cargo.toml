@@ -36,7 +36,7 @@ ethers-core = { workspace = true, features = ["eip712"] }
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # rpc
-jsonrpsee = { version = "0.18" }
+jsonrpsee.workspace = true
 http = "0.2.8"
 http-body = "0.4.5"
 hyper = "0.14.24"
@@ -49,6 +49,7 @@ tower = "0.4"
 tokio-stream = { workspace = true, features = ["sync"] }
 tokio-util = "0.7"
 pin-project.workspace = true
+rayon.workspace = true
 
 bytes.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
@@ -63,10 +64,10 @@ schnellru = "0.2"
 futures.workspace = true
 
 [dev-dependencies]
-jsonrpsee = { version = "0.18", features = ["client"] }
+jsonrpsee = { workspace = true, features = ["client"] }
 assert_matches = "1.5.0"
 tempfile = "3.5.0"
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 
 [features]
-optimism = ["reth-primitives/optimism"]
+optimism = ["reth-primitives/optimism", "reth-rpc-types-compat/optimism", "reth-network-api/optimism"]

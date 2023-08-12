@@ -18,6 +18,11 @@ use std::{
     sync::Arc,
 };
 
+#[cfg(feature = "optimism")]
+use crate::constants::{
+    OP_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR, OP_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
+};
+
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
@@ -111,7 +116,7 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         ..Default::default()
     }
     .into()
-})
+});
 
 /// The Sepolia spec
 pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
@@ -218,6 +223,15 @@ impl BaseFeeParams {
             elasticity_multiplier: EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
         }
     }
+
+    /// Get the base fee parameters for optimism mainnet
+    #[cfg(feature = "optimism")]
+    pub const fn optimism() -> BaseFeeParams {
+        BaseFeeParams {
+            max_change_denominator: OP_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
+            elasticity_multiplier: OP_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
+        }
+    }
 }
 
 /// The Optimism Goerli spec
@@ -246,7 +260,9 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Regolith, ForkCondition::Timestamp(1679079600)),
         ]),
+        base_fee_params: BaseFeeParams::optimism(),
         optimism: Some(OptimismConfig { eip_1559_elasticity: 10, eip_1559_denominator: 50 }),
+        ..Default::default()
     }
     .into()
 });
@@ -285,6 +301,7 @@ pub struct ChainSpec {
 
     /// The active hard forks and their activation conditions
     pub hardforks: BTreeMap<Hardfork, ForkCondition>,
+
     /// The deposit contract deployed for PoS.
     #[serde(skip, default)]
     pub deposit_contract: Option<DepositContract>,
@@ -293,6 +310,7 @@ pub struct ChainSpec {
     pub base_fee_params: BaseFeeParams,
 
     /// Optimism configuration
+    /// TODO(clabby): Roberto upstreamed the base fee params, we should change this to a bool.
     #[cfg(feature = "optimism")]
     pub optimism: Option<OptimismConfig>,
 }
@@ -308,6 +326,8 @@ impl Default for ChainSpec {
             hardforks: Default::default(),
             deposit_contract: Default::default(),
             base_fee_params: BaseFeeParams::ethereum(),
+            #[cfg(feature = "optimism")]
+            optimism: Default::default(),
         }
     }
 }
@@ -425,6 +445,15 @@ impl ChainSpec {
             .unwrap_or_else(|| self.is_fork_active_at_timestamp(Hardfork::Shanghai, timestamp))
     }
 
+    /// Convenience method to check if [Hardfork::Cancun] is active at a given timestamp.
+    #[inline]
+    pub fn is_cancun_activated_at_timestamp(&self, timestamp: u64) -> bool {
+        self.fork_timestamps
+            .cancun
+            .map(|cancun| timestamp >= cancun)
+            .unwrap_or_else(|| self.is_fork_active_at_timestamp(Hardfork::Cancun, timestamp))
+    }
+
     /// Creates a [`ForkFilter`](crate::ForkFilter) for the block described by [Head].
     pub fn fork_filter(&self, head: Head) -> ForkFilter {
         let forks = self.forks_iter().filter_map(|(_, condition)| {
@@ -450,8 +479,8 @@ impl ChainSpec {
         for (_, cond) in self.forks_iter() {
             // handle block based forks and the sepolia merge netsplit block edge case (TTD
             // ForkCondition with Some(block))
-            if let ForkCondition::Block(block)
-            | ForkCondition::TTD { fork_block: Some(block), .. } = cond
+            if let ForkCondition::Block(block) |
+            ForkCondition::TTD { fork_block: Some(block), .. } = cond
             {
                 if cond.active_at_head(head) {
                     if block != current_applied {
@@ -461,7 +490,7 @@ impl ChainSpec {
                 } else {
                     // we can return here because this block fork is not active, so we set the
                     // `next` value
-                    return ForkId { hash: forkhash, next: block };
+                    return ForkId { hash: forkhash, next: block }
                 }
             }
         }
@@ -478,7 +507,7 @@ impl ChainSpec {
                     // can safely return here because we have already handled all block forks and
                     // have handled all active timestamp forks, and set the next value to the
                     // timestamp that is known but not active yet
-                    return ForkId { hash: forkhash, next: timestamp };
+                    return ForkId { hash: forkhash, next: timestamp }
                 }
             }
         }
@@ -556,6 +585,8 @@ impl From<Genesis> for ChainSpec {
 pub struct ForkTimestamps {
     /// The timestamp of the shanghai fork
     pub shanghai: Option<u64>,
+    /// The timestamp of the cancun fork
+    pub cancun: Option<u64>,
 }
 
 impl ForkTimestamps {
@@ -565,12 +596,21 @@ impl ForkTimestamps {
         if let Some(shanghai) = forks.get(&Hardfork::Shanghai).and_then(|f| f.as_timestamp()) {
             timestamps = timestamps.shanghai(shanghai);
         }
+        if let Some(cancun) = forks.get(&Hardfork::Cancun).and_then(|f| f.as_timestamp()) {
+            timestamps = timestamps.cancun(cancun);
+        }
         timestamps
     }
 
     /// Sets the given shanghai timestamp
     pub fn shanghai(mut self, shanghai: u64) -> Self {
         self.shanghai = Some(shanghai);
+        self
+    }
+
+    /// Sets the given cancun timestamp
+    pub fn cancun(mut self, cancun: u64) -> Self {
+        self.cancun = Some(cancun);
         self
     }
 }
@@ -741,6 +781,13 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable Cancun at genesis.
+    pub fn cancun_activated(mut self) -> Self {
+        self = self.paris_activated();
+        self.hardforks.insert(Hardfork::Cancun, ForkCondition::Timestamp(0));
+        self
+    }
+
     /// Enable Bedrock at genesis
     #[cfg(feature = "optimism")]
     pub fn bedrock_activated(mut self) -> Self {
@@ -880,9 +927,9 @@ impl ForkCondition {
     /// - The condition is satisfied by the timestamp;
     /// - or the condition is satisfied by the total difficulty
     pub fn active_at_head(&self, head: &Head) -> bool {
-        self.active_at_block(head.number)
-            || self.active_at_timestamp(head.timestamp)
-            || self.active_at_ttd(head.total_difficulty, head.difficulty)
+        self.active_at_block(head.number) ||
+            self.active_at_timestamp(head.timestamp) ||
+            self.active_at_ttd(head.total_difficulty, head.difficulty)
     }
 
     /// Get the total terminal difficulty for this fork condition.

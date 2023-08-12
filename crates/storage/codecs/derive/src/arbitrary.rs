@@ -26,7 +26,7 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
                     let mut buf = vec![];
                     let len = field.clone().to_compact(&mut buf);
                     let (decoded, _) = super::#type_ident::from_compact(&buf, len);
-                    assert_eq!(field, decoded);
+                    assert!(field == decoded);
                 }
             });
         } else if arg.to_string() == "rlp" {

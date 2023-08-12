@@ -1001,9 +1001,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                     old: Arc::new(old_canon_chain.clone()),
                     new: Arc::new(new_canon_chain.clone()),
                 };
+                let reorg_depth = old_canon_chain.len();
+
                 // insert old canon chain
                 self.insert_chain(AppendableChain::new(old_canon_chain));
-                self.metrics.reorgs.increment(1);
+
+                self.update_reorg_metrics(reorg_depth as f64);
             } else {
                 // error here to confirm that we are reverting nothing from db.
                 error!(target: "blockchain_tree", "Reverting nothing from db on block: #{:?}", block_hash);
@@ -1092,6 +1095,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         } else {
             Ok(Some(Chain::new(blocks_and_execution)))
         }
+    }
+
+    fn update_reorg_metrics(&mut self, reorg_depth: f64) {
+        self.metrics.reorgs.increment(1);
+        self.metrics.latest_reorg_depth.set(reorg_depth);
     }
 
     /// Update blockchain tree chains (canonical and sidechains) and sync metrics.

@@ -10,7 +10,6 @@ on:
 env:
   REPO_NAME: ${{ github.repository_owner }}/reth
   IMAGE_NAME: ${{ github.repository_owner }}/reth
-  RUSTFLAGS: -D warnings
   CARGO_TERM_COLOR: always
 
 jobs:

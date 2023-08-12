@@ -4,7 +4,6 @@ on:
     - cron: '0 0 * * *'
 
 env:
-  RUSTFLAGS: -D warnings
   CARGO_TERM_COLOR: always
 
 concurrency:
@@ -14,8 +13,7 @@ concurrency:
 name: hive
 jobs:
   prepare:
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-20.04
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -105,8 +103,7 @@ jobs:
       fail-fast: false
     needs: prepare
     name: run
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-20.04
 
     steps:
       - name: Download artifacts

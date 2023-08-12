@@ -5,7 +5,6 @@ on:
     branches: [main]
 
 env:
-  RUSTFLAGS: -D warnings
   CARGO_TERM_COLOR: always
   SEED: rustethereumethereumrust
 
@@ -17,8 +16,7 @@ name: unit
 jobs:
   test:
     name: test (partition ${{ matrix.partition }}/${{ strategy.job-total }})
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-20.04
     strategy:
       matrix:
         partition: [1, 2]
@@ -54,8 +52,7 @@ jobs:
 
   eth-blockchain:
     name: ethereum / state tests (stable)
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-20.04
     env:
       RUST_LOG: info,sync=error
     steps:
@@ -87,8 +84,7 @@ jobs:
 
   doc-test:
     name: rustdoc
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v3
       - name: Install toolchain

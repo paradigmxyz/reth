@@ -46,6 +46,10 @@ pub struct ExecutionPayloadEnvelope {
     /// The expected value to be received by the feeRecipient in wei
     #[serde(rename = "blockValue")]
     pub block_value: U256,
+    //
+    // // TODO(mattsse): for V3
+    // #[serde(rename = "blobsBundle", skip_serializing_if = "Option::is_none")]
+    // pub blobs_bundle: Option<BlobsBundleV1>,
 }
 
 impl ExecutionPayloadEnvelope {
@@ -131,11 +135,11 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
 
     fn try_from(payload: ExecutionPayload) -> Result<Self, Self::Error> {
         if payload.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
-            return Err(PayloadError::ExtraData(payload.extra_data));
+            return Err(PayloadError::ExtraData(payload.extra_data))
         }
 
         if payload.base_fee_per_gas < MIN_PROTOCOL_BASE_FEE_U256 {
-            return Err(PayloadError::BaseFee(payload.base_fee_per_gas));
+            return Err(PayloadError::BaseFee(payload.base_fee_per_gas))
         }
 
         let transactions = payload
@@ -183,7 +187,7 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
             return Err(PayloadError::BlockHash {
                 execution: header.hash(),
                 consensus: payload.block_hash,
-            });
+            })
         }
 
         Ok(SealedBlock {
@@ -193,6 +197,14 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
             ommers: Default::default(),
         })
     }
+}
+
+/// This includes all bundled blob related data of an executed payload.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlobsBundleV1 {
+    pub commitments: Vec<Bytes>,
+    pub proofs: Vec<Bytes>,
+    pub blobs: Vec<Bytes>,
 }
 
 /// Error that can occur when handling payloads.
@@ -368,25 +380,25 @@ impl From<PayloadError> for PayloadStatusEnum {
 #[serde(tag = "status", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PayloadStatusEnum {
     /// VALID is returned by the engine API in the following calls:
-    ///   - newPayloadV1:       if the payload was already known or was just validated and executed
-    ///   - forkchoiceUpdateV1: if the chain accepted the reorg (might ignore if it's stale)
+    ///   - newPayload:       if the payload was already known or was just validated and executed
+    ///   - forkchoiceUpdate: if the chain accepted the reorg (might ignore if it's stale)
     Valid,
 
     /// INVALID is returned by the engine API in the following calls:
-    ///   - newPayloadV1:       if the payload failed to execute on top of the local chain
-    ///   - forkchoiceUpdateV1: if the new head is unknown, pre-merge, or reorg to it fails
+    ///   - newPayload:       if the payload failed to execute on top of the local chain
+    ///   - forkchoiceUpdate: if the new head is unknown, pre-merge, or reorg to it fails
     Invalid {
         #[serde(rename = "validationError")]
         validation_error: String,
     },
 
     /// SYNCING is returned by the engine API in the following calls:
-    ///   - newPayloadV1:       if the payload was accepted on top of an active sync
-    ///   - forkchoiceUpdateV1: if the new head was seen before, but not part of the chain
+    ///   - newPayload:       if the payload was accepted on top of an active sync
+    ///   - forkchoiceUpdate: if the new head was seen before, but not part of the chain
     Syncing,
 
     /// ACCEPTED is returned by the engine API in the following calls:
-    ///   - newPayloadV1: if the payload was accepted, but not processed (side chain)
+    ///   - newPayload: if the payload was accepted, but not processed (side chain)
     Accepted,
 }
 
@@ -462,130 +474,6 @@ pub enum PayloadValidationError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::generators::{
-        self, random_block, random_block_range, random_header,
-    };
-    use reth_primitives::{
-        bytes::{Bytes, BytesMut},
-        TransactionSigned, H256,
-    };
-    use reth_rlp::{Decodable, DecodeError};
-
-    fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> ExecutionPayload {
-        let unsealed = src.unseal();
-        let mut transformed: Block = f(unsealed);
-        // Recalculate roots
-        transformed.header.transactions_root =
-            proofs::calculate_transaction_root(&transformed.body);
-        transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.ommers);
-        SealedBlock {
-            header: transformed.header.seal_slow(),
-            body: transformed.body,
-            ommers: transformed.ommers,
-            withdrawals: transformed.withdrawals,
-        }
-        .into()
-    }
-
-    #[test]
-    fn payload_body_roundtrip() {
-        let mut rng = generators::rng();
-        for block in random_block_range(&mut rng, 0..=99, H256::default(), 0..2) {
-            let unsealed = block.clone().unseal();
-            let payload_body: ExecutionPayloadBodyV1 = unsealed.into();
-
-            assert_eq!(
-                Ok(block.body),
-                payload_body
-                    .transactions
-                    .iter()
-                    .map(|x| TransactionSigned::decode(&mut &x[..]))
-                    .collect::<Result<Vec<_>, _>>(),
-            );
-
-            assert_eq!(block.withdrawals, payload_body.withdrawals);
-        }
-    }
-
-    #[test]
-    fn payload_validation() {
-        let mut rng = generators::rng();
-        let block = random_block(&mut rng, 100, Some(H256::random()), Some(3), Some(0));
-
-        // Valid extra data
-        let block_with_valid_extra_data = transform_block(block.clone(), |mut b| {
-            b.header.extra_data = BytesMut::zeroed(32).freeze().into();
-            b
-        });
-        assert_matches!(TryInto::<SealedBlock>::try_into(block_with_valid_extra_data), Ok(_));
-
-        // Invalid extra data
-        let block_with_invalid_extra_data: Bytes = BytesMut::zeroed(33).freeze();
-        let invalid_extra_data_block = transform_block(block.clone(), |mut b| {
-            b.header.extra_data = block_with_invalid_extra_data.clone().into();
-            b
-        });
-        assert_matches!(
-            TryInto::<SealedBlock>::try_into(invalid_extra_data_block),
-            Err(PayloadError::ExtraData(data)) if data == block_with_invalid_extra_data
-        );
-
-        // Zero base fee
-        let block_with_zero_base_fee = transform_block(block.clone(), |mut b| {
-            b.header.base_fee_per_gas = Some(0);
-            b
-        });
-        assert_matches!(
-            TryInto::<SealedBlock>::try_into(block_with_zero_base_fee),
-            Err(PayloadError::BaseFee(val)) if val == U256::ZERO
-        );
-
-        // Invalid encoded transactions
-        let mut payload_with_invalid_txs: ExecutionPayload = block.clone().into();
-        payload_with_invalid_txs.transactions.iter_mut().for_each(|tx| {
-            *tx = Bytes::new().into();
-        });
-        assert_matches!(
-            TryInto::<SealedBlock>::try_into(payload_with_invalid_txs),
-            Err(PayloadError::Decode(DecodeError::InputTooShort))
-        );
-
-        // Non empty ommers
-        let block_with_ommers = transform_block(block.clone(), |mut b| {
-            b.ommers.push(random_header(&mut rng, 100, None).unseal());
-            b
-        });
-        assert_matches!(
-            TryInto::<SealedBlock>::try_into(block_with_ommers.clone()),
-            Err(PayloadError::BlockHash { consensus, .. })
-                if consensus == block_with_ommers.block_hash
-        );
-
-        // None zero difficulty
-        let block_with_difficulty = transform_block(block.clone(), |mut b| {
-            b.header.difficulty = U256::from(1);
-            b
-        });
-        assert_matches!(
-            TryInto::<SealedBlock>::try_into(block_with_difficulty.clone()),
-            Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_difficulty.block_hash
-        );
-
-        // None zero nonce
-        let block_with_nonce = transform_block(block.clone(), |mut b| {
-            b.header.nonce = 1;
-            b
-        });
-        assert_matches!(
-            TryInto::<SealedBlock>::try_into(block_with_nonce.clone()),
-            Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_nonce.block_hash
-        );
-
-        // Valid block
-        let valid_block = block;
-        assert_matches!(TryInto::<SealedBlock>::try_into(valid_block), Ok(_));
-    }
 
     #[test]
     fn serde_payload_status() {

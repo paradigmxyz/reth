@@ -135,6 +135,27 @@ pub enum ConsensusError {
     WithdrawalIndexInvalid { got: u64, expected: u64 },
     #[error("Missing withdrawals")]
     BodyWithdrawalsMissing,
+    #[error("Missing blob gas used")]
+    BlobGasUsedMissing,
+    #[error("Unexpected blob gas used")]
+    BlobGasUsedUnexpected,
+    #[error("Missing excess blob gas")]
+    ExcessBlobGasMissing,
+    #[error("Unexpected excess blob gas")]
+    ExcessBlobGasUnexpected,
+    #[error("Blob gas used {blob_gas_used} exceeds maximum allowance {max_blob_gas_per_block}")]
+    BlobGasUsedExceedsMaxBlobGasPerBlock { blob_gas_used: u64, max_blob_gas_per_block: u64 },
+    #[error(
+        "Blob gas used {blob_gas_used} is not a multiple of blob gas per blob {blob_gas_per_blob}"
+    )]
+    BlobGasUsedNotMultipleOfBlobGasPerBlob { blob_gas_used: u64, blob_gas_per_blob: u64 },
+    #[error("Invalid excess blob gas. Expected: {expected}, got: {got}. Parent excess blob gas: {parent_excess_blob_gas}, parent blob gas used: {parent_blob_gas_used}.")]
+    ExcessBlobGasDiff {
+        expected: u64,
+        got: u64,
+        parent_excess_blob_gas: u64,
+        parent_blob_gas_used: u64,
+    },
     /// Error for a transaction that violates consensus.
     #[error(transparent)]
     InvalidTransaction(#[from] InvalidTransactionError),

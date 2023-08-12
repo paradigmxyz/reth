@@ -16,7 +16,9 @@ use reth_network_api::NetworkInfo;
 use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, H256, U256, U64,
 };
-use reth_provider::{BlockReaderIdExt, EvmEnvProvider, StateProviderBox, StateProviderFactory};
+use reth_provider::{
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
+};
 use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
@@ -37,6 +39,7 @@ mod sign;
 mod state;
 mod transactions;
 
+use crate::TracingCallPool;
 pub use transactions::{EthTransactions, TransactionSource};
 
 /// `Eth` API trait.
@@ -78,7 +81,7 @@ pub struct EthApi<Provider, Pool, Network> {
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
-    Provider: BlockReaderIdExt,
+    Provider: BlockReaderIdExt + ChainSpecProvider,
 {
     /// Creates a new, shareable instance using the default tokio task spawner.
     pub fn new(
@@ -88,6 +91,7 @@ where
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: impl Into<GasCap>,
+        tracing_call_pool: TracingCallPool,
     ) -> Self {
         Self::with_spawner(
             provider,
@@ -97,10 +101,12 @@ where
             gas_oracle,
             gas_cap.into().into(),
             Box::<TokioTaskExecutor>::default(),
+            tracing_call_pool,
         )
     }
 
     /// Creates a new, shareable instance.
+    #[allow(clippy::too_many_arguments)]
     pub fn with_spawner(
         provider: Provider,
         pool: Pool,
@@ -109,6 +115,7 @@ where
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: u64,
         task_spawner: Box<dyn TaskSpawner>,
+        tracing_call_pool: TracingCallPool,
     ) -> Self {
         // get the block number of the latest block
         let latest_block = provider
@@ -129,6 +136,7 @@ where
             starting_block: U256::from(latest_block),
             task_spawner,
             pending_block: Default::default(),
+            tracing_call_pool,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -188,7 +196,8 @@ where
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
-    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider:
+        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
 {
     /// Returns the state at the given [BlockId] enum.
     pub fn state_at_block_id(&self, at: BlockId) -> EthResult<StateProviderBox<'_>> {
@@ -222,7 +231,8 @@ where
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
-    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider:
+        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
@@ -322,7 +332,8 @@ impl<Provider, Pool, Events> Clone for EthApi<Provider, Pool, Events> {
 impl<Provider, Pool, Network> EthApiSpec for EthApi<Provider, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider:
+        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + 'static,
 {
     /// Returns the current ethereum protocol version.
@@ -422,4 +433,6 @@ struct EthApiInner<Provider, Pool, Network> {
     task_spawner: Box<dyn TaskSpawner>,
     /// Cached pending block if any
     pending_block: Mutex<Option<PendingBlock>>,
+    /// A pool dedicated to tracing calls
+    tracing_call_pool: TracingCallPool,
 }

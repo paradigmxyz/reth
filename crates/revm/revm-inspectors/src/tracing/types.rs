@@ -3,7 +3,7 @@
 use crate::tracing::{config::TraceStyle, utils::convert_memory};
 use reth_primitives::{abi::decode_revert_reason, bytes::Bytes, Address, H256, U256};
 use reth_rpc_types::trace::{
-    geth::{CallFrame, CallLogFrame, GethDefaultTracingOptions, StructLog},
+    geth::{AccountState, CallFrame, CallLogFrame, GethDefaultTracingOptions, StructLog},
     parity::{
         Action, ActionType, CallAction, CallOutput, CallType, ChangedType, CreateAction,
         CreateOutput, Delta, SelfdestructAction, StateDiff, TraceOutput, TransactionTrace,
@@ -13,7 +13,7 @@ use revm::interpreter::{
     opcode, CallContext, CallScheme, CreateScheme, InstructionResult, Memory, OpCode, Stack,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{btree_map::Entry, VecDeque};
+use std::collections::{btree_map::Entry, BTreeMap, VecDeque};
 
 /// A unified representation of a call
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -555,7 +555,9 @@ pub(crate) struct CallTraceStep {
     pub(crate) gas_cost: u64,
     /// Change of the contract state after step execution (effect of the SLOAD/SSTORE instructions)
     pub(crate) storage_change: Option<StorageChange>,
-    /// Final status of the call
+    /// Final status of the step
+    ///
+    /// This is set after the step was executed.
     pub(crate) status: InstructionResult,
 }
 

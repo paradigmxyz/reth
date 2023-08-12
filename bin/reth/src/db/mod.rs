@@ -20,6 +20,8 @@ use std::{
     sync::Arc,
 };
 
+mod clear;
+mod diff;
 mod get;
 mod list;
 /// DB List TUI
@@ -70,6 +72,8 @@ pub enum Subcommands {
     Stats,
     /// Lists the contents of a table
     List(list::Command),
+    /// Create a diff between two database tables or two entire databases.
+    Diff(diff::Command),
     /// Gets the content of a table for the given key
     Get(get::Command),
     /// Deletes all database entries
@@ -171,6 +175,11 @@ impl Command {
                 let tool = DbTool::new(&db, self.chain.clone())?;
                 command.execute(&tool)?;
             }
+            Subcommands::Diff(command) => {
+                let db = open_db_read_only(&db_path, self.db.log_level)?;
+                let tool = DbTool::new(&db, self.chain.clone())?;
+                command.execute(&tool)?;
+            }
             Subcommands::Get(command) => {
                 let db = open_db_read_only(&db_path, self.db.log_level)?;
                 let tool = DbTool::new(&db, self.chain.clone())?;
@@ -195,6 +204,10 @@ impl Command {
                 let db = open_db(&db_path, self.db.log_level)?;
                 let mut tool = DbTool::new(&db, self.chain.clone())?;
                 tool.drop(db_path)?;
+            }
+            Subcommands::Clear(command) => {
+                let db = open_db(&db_path, self.db.log_level)?;
+                command.execute(&db)?;
             }
             Subcommands::Version => {
                 let local_db_version = match get_db_version(&db_path) {

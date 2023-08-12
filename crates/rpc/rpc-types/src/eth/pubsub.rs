@@ -97,7 +97,7 @@ pub enum SubscriptionKind {
 }
 
 /// Any additional parameters for a subscription.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Params {
     /// No parameters passed.
     #[default]

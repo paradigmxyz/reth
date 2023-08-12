@@ -59,6 +59,8 @@ fn fill(
 
             (Some(U128::from(gas_price)), Some(U128::from(signed_tx.max_fee_per_gas())))
         }
+        #[cfg(feature = "optimism")]
+        TxType::DEPOSIT => (None, None),
     };
 
     let chain_id = signed_tx.chain_id().map(U64::from);
@@ -94,6 +96,8 @@ fn fill(
                 })
                 .collect(),
         ),
+        #[cfg(feature = "optimism")]
+        PrimitiveTransaction::Deposit(_) => None,
     };
 
     let signature =

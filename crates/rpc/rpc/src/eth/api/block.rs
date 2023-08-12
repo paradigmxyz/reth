@@ -17,7 +17,8 @@ use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 use reth_transaction_pool::TransactionPool;
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
-    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider:
+        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {

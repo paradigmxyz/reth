@@ -11,11 +11,13 @@ use crate::{
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{ArgAction, Args, Parser, Subcommand};
+use reth_primitives::ChainSpec;
 use reth_tracing::{
     tracing::{metadata::LevelFilter, Level, Subscriber},
     tracing_subscriber::{filter::Directive, registry::LookupSpan, EnvFilter},
     BoxedLayer, FileWorkerGuard,
 };
+use std::sync::Arc;
 
 pub mod config;
 pub mod ext;
@@ -103,7 +105,7 @@ pub fn run() -> eyre::Result<()> {
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
-pub enum Commands {
+pub enum Commands<Ext: RethCliExt = ()> {
     /// Start the node
     #[command(name = "node")]
     Node(node::NodeCommand<Ext>),
@@ -134,20 +136,6 @@ pub enum Commands {
     /// Scripts for node recovery
     #[command(name = "recover")]
     Recover(recover::Command),
-}
-
-#[derive(Debug, Parser)]
-#[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
-struct Cli {
-    /// The command to run
-    #[clap(subcommand)]
-    command: Commands,
-
-    #[clap(flatten)]
-    logs: Logs,
-
-    #[clap(flatten)]
-    verbosity: Verbosity,
 }
 
 /// The log configuration.
@@ -246,9 +234,9 @@ mod tests {
     /// runtime
     #[test]
     fn test_parse_help_all_subcommands() {
-        let reth = Cli::command();
+        let reth = Cli::<()>::command();
         for sub_command in reth.get_subcommands() {
-            let err = Cli::try_parse_from(["reth", sub_command.get_name(), "--help"])
+            let err = Cli::<()>::try_parse_from(["reth", sub_command.get_name(), "--help"])
                 .err()
                 .unwrap_or_else(|| {
                     panic!("Failed to parse help message {}", sub_command.get_name())
@@ -258,5 +246,22 @@ mod tests {
             // > Not a true "error" as it means --help or similar was used. The help message will be sent to stdout.
             assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
         }
+    }
+
+    /// Tests that the log directory is parsed correctly. It's always tied to the specific chain's
+    /// name
+    #[test]
+    fn parse_logs_path() {
+        let mut reth = Cli::<()>::try_parse_from(["reth", "node", "--log.persistent"]).unwrap();
+        reth.logs.log_directory = reth.logs.log_directory.join(reth.chain.chain.to_string());
+        let log_dir = reth.logs.log_directory;
+        assert!(log_dir.as_ref().ends_with("reth/logs/mainnet"), "{:?}", log_dir);
+
+        let mut reth =
+            Cli::<()>::try_parse_from(["reth", "node", "--chain", "sepolia", "--log.persistent"])
+                .unwrap();
+        reth.logs.log_directory = reth.logs.log_directory.join(reth.chain.chain.to_string());
+        let log_dir = reth.logs.log_directory;
+        assert!(log_dir.as_ref().ends_with("reth/logs/sepolia"), "{:?}", log_dir);
     }
 }

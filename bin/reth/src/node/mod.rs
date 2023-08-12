@@ -11,6 +11,7 @@ use crate::{
     cli::ext::{RethCliExt, RethNodeCommandExt},
     dirs::{DataDirPath, MaybePlatformPath},
     init::init_genesis,
+    node::cl_events::ConsensusLayerHealthEvents,
     prometheus_exporter,
     runner::CliContext,
     utils::get_single_header,
@@ -37,26 +38,29 @@ use reth_interfaces::{
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
         either::EitherDownloader,
-        headers::downloader::HeaderDownloader,
+        headers::{client::HeadersClient, downloader::HeaderDownloader},
     },
 };
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, H256,
+    stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head,
+    SealedHeader, H256,
 };
 use reth_provider::{
-    BlockHashReader, BlockReader, CanonStateSubscriptions, HeaderProvider, ProviderFactory,
-    StageCheckpointReader,
+    providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
+    HeaderProvider, ProviderFactory, StageCheckpointReader,
 };
+use reth_prune::BatchSizes;
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
 use reth_stages::{
     prelude::*,
     stages::{
-        ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
-        TotalDifficultyStage,
+        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, HeaderSyncMode,
+        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
+        StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
     },
     MetricEventsSender, MetricsListener,
 };
@@ -70,24 +74,6 @@ use std::{
 };
 use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
-
-use crate::{
-    args::{
-        utils::{genesis_value_parser, parse_socket_address},
-        DatabaseArgs, PayloadBuilderArgs,
-    },
-    dirs::MaybePlatformPath,
-    node::cl_events::ConsensusLayerHealthEvents,
-};
-use reth_interfaces::p2p::headers::client::HeadersClient;
-use reth_payload_builder::PayloadBuilderService;
-use reth_primitives::DisplayHardforks;
-use reth_provider::providers::BlockchainProvider;
-use reth_prune::BatchSizes;
-use reth_stages::stages::{
-    AccountHashingStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
-    StorageHashingStage, TransactionLookupStage,
-};
 
 pub mod cl_events;
 pub mod events;
@@ -192,6 +178,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             db,
             dev,
             pruning,
+            #[cfg(feature = "optimism")]
+            rollup,
             ..
         } = self;
         NodeCommand {
@@ -208,6 +196,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             dev,
             pruning,
             ext,
+            #[cfg(feature = "optimism")]
+            rollup,
         }
     }
 
@@ -696,7 +686,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // try to look up the header in the database
         if let Some(header) = header {
             info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.seal_slow());
+            return Ok(header.seal_slow())
         }
 
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
@@ -704,7 +694,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
-                    return Ok(tip_header);
+                    return Ok(tip_header)
                 }
                 Err(error) => {
                     error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
@@ -882,9 +872,8 @@ async fn run_network_until_shutdown<C>(
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::DEV;
-
     use super::*;
+    use reth_primitives::DEV;
     use std::{net::IpAddr, path::Path};
 
     #[test]

@@ -73,14 +73,20 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::test_utils::TestTransaction;
+    use crate::test_utils::{
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        TestTransaction, UnwindStageTestRunner,
+    };
+    use itertools::Itertools;
     use reth_db::{
+        cursor::DbCursorRO,
         models::{
+            sharded_key,
             storage_sharded_key::{StorageShardedKey, NUM_OF_INDICES_IN_SHARD},
             BlockNumberAddress, ShardedKey, StoredBlockBodyIndices,
         },
         tables,
-        transaction::DbTxMut,
+        transaction::{DbTx, DbTxMut},
         BlockNumberList,
     };
     use reth_interfaces::test_utils::{
