@@ -21,7 +21,7 @@ async-trait.workspace = true
 futures.workspace = true
 
 # misc
-jsonrpsee = { version = "0.18", features = ["client", "async-client"] }
+jsonrpsee = { workspace = true, features = ["client", "async-client"] }
 serde_json.workspace = true
 
 [dev-dependencies]

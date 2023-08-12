@@ -21,6 +21,17 @@ pub trait EngineApi {
     #[method(name = "newPayloadV2")]
     async fn new_payload_v2(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus>;
 
+    /// Post Cancun payload handler
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_newpayloadv3>
+    #[method(name = "newPayloadV3")]
+    async fn new_payload_v3(
+        &self,
+        payload: ExecutionPayload,
+        versioned_hashes: Vec<H256>,
+        parent_beacon_block_root: H256,
+    ) -> RpcResult<PayloadStatus>;
+
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
     /// Caution: This should not accept the `withdrawals` field
@@ -34,6 +45,16 @@ pub trait EngineApi {
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#engine_forkchoiceupdatedv2>
     #[method(name = "forkchoiceUpdatedV2")]
     async fn fork_choice_updated_v2(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated>;
+
+    /// Same as `forkchoiceUpdatedV2` but supports additional [PayloadAttributes] field.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
+    #[method(name = "forkchoiceUpdatedV3")]
+    async fn fork_choice_updated_v3(
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<PayloadAttributes>,
@@ -58,6 +79,16 @@ pub trait EngineApi {
     /// > Provider software MAY stop the corresponding build process after serving this call.
     #[method(name = "getPayloadV2")]
     async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelope>;
+
+    /// Post Cancun payload handler which also returns a blobs bundle.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_getpayloadv3>
+    ///
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call. Note:
+    /// > Provider software MAY stop the corresponding build process after serving this call.
+    #[method(name = "getPayloadV3")]
+    async fn get_payload_v3(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelope>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
     #[method(name = "getPayloadBodiesByHashV1")]
@@ -86,6 +117,12 @@ pub trait EngineApi {
     ) -> RpcResult<ExecutionPayloadBodiesV1>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_exchangetransitionconfigurationv1>
+    ///
+    /// Note: This method will be deprecated after the cancun hardfork:
+    ///
+    /// > Consensus and execution layer clients MAY remove support of this method after Cancun. If
+    /// > no longer supported, this method MUST be removed from the engine_exchangeCapabilities
+    /// > request or response list depending on whether it is consensus or execution layer client.
     #[method(name = "exchangeTransitionConfigurationV1")]
     async fn exchange_transition_configuration(
         &self,

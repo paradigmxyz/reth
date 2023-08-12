@@ -18,13 +18,13 @@ reth-revm-inspectors = { path = "./revm-inspectors" }
 reth-consensus-common = { path = "../consensus/common" }
 
 # revm
-revm = { workspace = true }
+revm.workspace = true
 
 # common
-tracing = { workspace = true }
+tracing.workspace = true
 
 [dev-dependencies]
-reth-rlp = { workspace = true }
+reth-rlp.workspace = true
 once_cell = "1.17.0"
 
 [features]

@@ -29,3 +29,10 @@ pub use message::EngineApiMessageVersion;
 
 // re-export server trait for convenience
 pub use reth_rpc_api::EngineApiServer;
+
+#[cfg(test)]
+#[allow(unused_imports)]
+mod tests {
+    // silence unused import warning
+    use reth_rlp as _;
+}
