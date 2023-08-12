@@ -1,7 +1,7 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
 use std::ops::Deref;
 
-use bytes::Buf;
+use bytes::{Buf, Bytes};
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{
     kzg::{self, KzgCommitment, KzgProof, KzgSettings},
@@ -10,6 +10,7 @@ use reth_primitives::{
 };
 use reth_rlp::{
     Decodable, DecodeError, Encodable, Header, RlpDecodableWrapper, RlpEncodableWrapper,
+    EMPTY_LIST_CODE,
 };
 
 #[cfg(feature = "serde")]
@@ -83,6 +84,57 @@ pub enum PooledTransactionResponse {
     BlobTransaction(BlobTransaction),
     /// A non-4844 signed transaction.
     Transaction(TransactionSigned),
+}
+
+impl PooledTransactionResponse {
+    /// Decodes the "raw" format of transaction (e.g. `eth_sendRawTransaction`).
+    ///
+    /// The raw transaction is either a legacy transaction or EIP-2718 typed transaction
+    /// For legacy transactions, the format is encoded as: `rlp(tx)`
+    /// For EIP-2718 typed transaction, the format is encoded as the type of the transaction
+    /// followed by the rlp of the transaction: `type` + `rlp(tx)`
+    ///
+    /// For encoded EIP-4844 transactions, the blob sidecar _must_ be included.
+    pub fn decode_enveloped(tx: Bytes) -> Result<Self, DecodeError> {
+        let mut data = tx.as_ref();
+
+        if data.is_empty() {
+            return Err(DecodeError::InputTooShort)
+        }
+
+        // Check if the tx is a list - tx types are less than EMPTY_LIST_CODE (0xc0)
+        if data[0] >= EMPTY_LIST_CODE {
+            // decode as legacy transaction
+            Ok(Self::Transaction(TransactionSigned::decode_rlp_legacy_transaction(&mut data)?))
+        } else {
+            // decode the type byte, only decode BlobTransaction if it is a 4844 transaction
+            let tx_type = *data.first().ok_or(DecodeError::InputTooShort)?;
+
+            if tx_type == EIP4844_TX_TYPE_ID {
+                // Recall that the blob transaction response `TranactionPayload` is encoded like
+                // this: `rlp([tx_payload_body, blobs, commitments, proofs])`
+                //
+                // Note that `tx_payload_body` is a list:
+                // `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
+                //
+                // This makes the full encoding:
+                // `tx_type (0x03) || rlp([[chain_id, nonce, ...], blobs, commitments, proofs])`
+                //
+                // First, we advance the buffer past the type byte
+                data.advance(1);
+
+                // Now, we decode the inner blob transaction:
+                // `rlp([[chain_id, nonce, ...], blobs, commitments, proofs])`
+                let blob_tx = BlobTransaction::decode_inner(&mut data)?;
+                Ok(PooledTransactionResponse::BlobTransaction(blob_tx))
+            } else {
+                // DO NOT advance the buffer for the type, since we want the enveloped decoding to
+                // decode it again and advance the buffer on its own.
+                let typed_tx = TransactionSigned::decode_enveloped_typed_transaction(&mut data)?;
+                Ok(PooledTransactionResponse::Transaction(typed_tx))
+            }
+        }
+    }
 }
 
 impl Encodable for PooledTransactionResponse {
@@ -170,8 +222,8 @@ impl Decodable for PooledTransactionResponse {
                 let blob_tx = BlobTransaction::decode_inner(buf)?;
                 Ok(PooledTransactionResponse::BlobTransaction(blob_tx))
             } else {
-                // DO NOT advance the buffer, since we want the enveloped decoding to decode it
-                // again and advance the buffer on its own.
+                // DO NOT advance the buffer for the type, since we want the enveloped decoding to
+                // decode it again and advance the buffer on its own.
                 let typed_tx = TransactionSigned::decode_enveloped_typed_transaction(buf)?;
                 Ok(PooledTransactionResponse::Transaction(typed_tx))
             }
@@ -272,6 +324,11 @@ impl BlobTransaction {
             proof_settings,
         )
         .map_err(Into::into)
+    }
+
+    /// Splits the [BlobTransaction] into its [TransactionSigned] and [BlobSidecar] components.
+    pub fn into_parts(self) -> (TransactionSigned, BlobSidecar) {
+        (self.transaction, self.sidecar)
     }
 
     /// Encodes the [BlobTransaction] fields as RLP, with a tx type. If `with_header` is `false`,
