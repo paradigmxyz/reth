@@ -269,7 +269,9 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
         self.receipt.logs.encode(out);
         #[cfg(feature = "optimism")]
         if self.receipt.tx_type == TxType::DEPOSIT {
-            self.receipt.deposit_nonce.map(|deposit_nonce| deposit_nonce.encode(out));
+            if let Some(deposit_nonce) = self.receipt.deposit_nonce {
+                deposit_nonce.encode(out)
+            }
         }
     }
 
