@@ -401,7 +401,7 @@ where
 
     fn remove_transactions(
         &self,
-        hashes: impl IntoIterator<Item = TxHash>,
+        hashes: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.remove_transactions(hashes)
     }
@@ -414,10 +414,7 @@ where
         self.inner().get(tx_hash)
     }
 
-    fn get_all(
-        &self,
-        txs: impl IntoIterator<Item = TxHash>,
-    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+    fn get_all(&self, txs: Vec<TxHash>) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.inner().get_all(txs)
     }
 
