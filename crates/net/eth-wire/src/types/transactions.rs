@@ -4,9 +4,9 @@ use std::ops::Deref;
 use bytes::Buf;
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{
-    kzg::{self, KzgCommitment, Blob, Bytes48, KzgProof, KzgSettings},
-    Signature, Transaction, TransactionSigned, TransactionSignedNoHash, TxEip4844,
-    EIP4844_TX_TYPE_ID, H256, kzg_to_versioned_hash,
+    kzg::{self, KzgCommitment, KzgProof, KzgSettings},
+    kzg_to_versioned_hash, BlobSidecar, Signature, Transaction, TransactionSigned,
+    TransactionSignedNoHash, TxEip4844, TxType, EIP4844_TX_TYPE_ID, H256,
 };
 use reth_rlp::{
     Decodable, DecodeError, Encodable, Header, RlpDecodableWrapper, RlpEncodableWrapper,
@@ -25,7 +25,7 @@ use proptest::{
 #[cfg(any(test, feature = "arbitrary"))]
 use reth_primitives::{
     constants::eip4844::{FIELD_ELEMENTS_PER_BLOB, KZG_TRUSTED_SETUP},
-    kzg::{BYTES_PER_BLOB, BYTES_PER_FIELD_ELEMENT},
+    kzg::{Blob, Bytes48, BYTES_PER_BLOB, BYTES_PER_FIELD_ELEMENT},
 };
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
@@ -179,6 +179,21 @@ impl Decodable for PooledTransactionResponse {
     }
 }
 
+/// An error that can occur when validating a [BlobTransaction].
+#[derive(Debug)]
+pub enum BlobTransactionValidationError {
+    /// An error returned by the [kzg] library
+    KZGError(kzg::Error),
+    /// The inner transaction is not a blob transaction
+    NotBlobTransaction(TxType),
+}
+
+impl From<kzg::Error> for BlobTransactionValidationError {
+    fn from(value: kzg::Error) -> Self {
+        Self::KZGError(value)
+    }
+}
+
 /// A response to [`GetPooledTransactions`] that includes blob data, their commitments, and their
 /// corresponding proofs.
 ///
@@ -192,12 +207,8 @@ impl Decodable for PooledTransactionResponse {
 pub struct BlobTransaction {
     /// The transaction payload.
     pub transaction: TransactionSigned,
-    /// The transaction's blob data.
-    pub blobs: Vec<Blob>,
-    /// The transaction's blob commitments.
-    pub commitments: Vec<Bytes48>,
-    /// The transaction's blob proofs.
-    pub proofs: Vec<Bytes48>,
+    /// The transaction's blob sidecar.
+    pub sidecar: BlobSidecar,
 }
 
 impl BlobTransaction {
@@ -212,27 +223,32 @@ impl BlobTransaction {
     ///
     /// Returns `false` if any blob KZG proof in the response fails to verify, or if the versioned
     /// hashes in the transaction do not match the actual commitment versioned hashes.
-    pub fn validate(&self, proof_settings: &KzgSettings) -> Result<bool, kzg::Error> {
+    pub fn validate(
+        &self,
+        proof_settings: &KzgSettings,
+    ) -> Result<bool, BlobTransactionValidationError> {
         let inner_tx = match &self.transaction.transaction {
             Transaction::Eip4844(blob_tx) => blob_tx,
-            _ => {
-                todo!()
-                // return Err()
+            non_blob_tx => {
+                return Err(BlobTransactionValidationError::NotBlobTransaction(
+                    non_blob_tx.tx_type(),
+                ))
             }
         };
 
         // Ensure the versioned hashes and commitments have the same length
-        if inner_tx.blob_versioned_hashes.len() != self.commitments.len() {
+        if inner_tx.blob_versioned_hashes.len() != self.sidecar.commitments.len() {
             return Err(kzg::Error::MismatchLength(format!(
                 "There are {} versioned commitment hashes and {} commitments",
                 inner_tx.blob_versioned_hashes.len(),
-                self.commitments.len()
-            )))
+                self.sidecar.commitments.len()
+            ))
+            .into())
         }
 
         // zip and iterate, calculating versioned hashes
         for (versioned_hash, commitment) in
-            inner_tx.blob_versioned_hashes.iter().zip(self.commitments.iter())
+            inner_tx.blob_versioned_hashes.iter().zip(self.sidecar.commitments.iter())
         {
             // convert to KzgCommitment
             let commitment = KzgCommitment::from(*commitment.deref());
@@ -244,17 +260,18 @@ impl BlobTransaction {
             // validation failed?
             let calculated_versioned_hash = kzg_to_versioned_hash(commitment);
             if *versioned_hash != calculated_versioned_hash {
-                return Ok(false);
+                return Ok(false)
             }
         }
 
         // Verify as a batch
         KzgProof::verify_blob_kzg_proof_batch(
-            self.blobs.as_slice(),
-            self.commitments.as_slice(),
-            self.proofs.as_slice(),
+            self.sidecar.blobs.as_slice(),
+            self.sidecar.commitments.as_slice(),
+            self.sidecar.proofs.as_slice(),
             proof_settings,
         )
+        .map_err(Into::into)
     }
 
     /// Encodes the [BlobTransaction] fields as RLP, with a tx type. If `with_header` is `false`,
@@ -308,8 +325,7 @@ impl BlobTransaction {
 
         // The payload length is the length of the `tranascation_payload_body` list, plus the
         // length of the blobs, commitments, and proofs.
-        let payload_length =
-            tx_length + self.blobs.length() + self.commitments.length() + self.proofs.length();
+        let payload_length = tx_length + self.sidecar.fields_len();
 
         // First we use the payload len to construct the first list header
         let blob_tx_header = Header { list: true, payload_length };
@@ -322,9 +338,7 @@ impl BlobTransaction {
         self.transaction.encode_fields(out);
 
         // Encode the blobs, commitments, and proofs
-        self.blobs.encode(out);
-        self.commitments.encode(out);
-        self.proofs.encode(out);
+        self.sidecar.encode_inner(out);
     }
 
     /// Ouputs the length of the RLP encoding of the blob transaction, including the tx type byte,
@@ -373,7 +387,7 @@ impl BlobTransaction {
 
         // The payload length is the length of the `tranascation_payload_body` list, plus the
         // length of the blobs, commitments, and proofs.
-        tx_length + self.blobs.length() + self.commitments.length() + self.proofs.length()
+        tx_length + self.sidecar.fields_len()
     }
 
     /// Decodes a [BlobTransaction] from RLP. This expects the encoding to be:
@@ -411,9 +425,7 @@ impl BlobTransaction {
         let tx_no_hash = TransactionSignedNoHash { transaction, signature };
 
         // All that's left are the blobs, commitments, and proofs
-        let blobs = <Vec<Blob> as Decodable>::decode(data)?;
-        let commitments = <Vec<Bytes48> as Decodable>::decode(data)?;
-        let proofs = <Vec<Bytes48> as Decodable>::decode(data)?;
+        let sidecar = BlobSidecar::decode_inner(data)?;
 
         // # Calculating the hash
         //
@@ -432,7 +444,7 @@ impl BlobTransaction {
         // Instead, we use [TransactionSignedNoHash] which will encode the transaction internally.
         let signed_tx = tx_no_hash.with_hash();
 
-        Ok(Self { transaction: signed_tx, blobs, commitments, proofs })
+        Ok(Self { transaction: signed_tx, sidecar })
     }
 }
 
@@ -509,7 +521,9 @@ fn generate_blob_transaction(blobs: Vec<Blob>, transaction: TransactionSigned) -
         .map(|proof| proof.to_bytes())
         .collect();
 
-    BlobTransaction { transaction, blobs, commitments, proofs }
+    let sidecar = BlobSidecar { blobs, commitments, proofs };
+
+    BlobTransaction { transaction, sidecar }
 }
 #[cfg(test)]
 mod test {

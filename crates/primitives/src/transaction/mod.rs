@@ -22,7 +22,7 @@ pub use tx_type::{
 
 pub use eip1559::TxEip1559;
 pub use eip2930::TxEip2930;
-pub use eip4844::TxEip4844;
+pub use eip4844::{BlobSidecar, TxEip4844};
 pub use legacy::TxLegacy;
 
 mod access_list;
