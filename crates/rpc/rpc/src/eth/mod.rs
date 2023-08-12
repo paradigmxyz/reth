@@ -8,11 +8,11 @@ pub mod gas_oracle;
 mod id_provider;
 mod logs_utils;
 mod pubsub;
-pub(crate) mod revm_utils;
+pub mod revm_utils;
 mod signer;
 pub(crate) mod utils;
 
-pub use api::{EthApi, EthApiSpec, EthTransactions, TransactionSource};
+pub use api::{EthApi, EthApiSpec, EthTransactions, TransactionSource, RPC_DEFAULT_GAS_CAP};
 pub use filter::EthFilter;
 pub use id_provider::EthSubscriptionIdProvider;
 pub use pubsub::EthPubSub;

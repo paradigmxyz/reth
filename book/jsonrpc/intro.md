@@ -58,6 +58,16 @@ To enable JSON-RPC namespaces on the HTTP server, pass each namespace separated 
 reth node --http --http.api eth,net,trace
 ```
 
+You can pass the `all` option, which is a convenient wrapper for the all the JSON-RPC namespaces `admin,debug,eth,net,trace,txpool,web3,rpc` on the HTTP server:
+
+```bash
+reth node --http --http.api all
+```
+
+```bash
+reth node --http --http.api All
+```
+
 You can also restrict who can access the HTTP server by specifying a domain for Cross-Origin requests. This is important, since any application local to your node will be able to access the RPC server:
 
 ```bash

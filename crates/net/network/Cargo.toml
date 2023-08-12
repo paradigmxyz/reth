@@ -18,27 +18,27 @@ normal = [
 
 [dependencies]
 # reth
-reth-interfaces = { workspace = true }
-reth-primitives = { workspace = true }
+reth-interfaces.workspace = true
+reth-primitives.workspace = true
 reth-net-common = { path = "../common" }
-reth-network-api = { workspace = true }
+reth-network-api.workspace = true
 reth-discv4 = { path = "../discv4" }
 reth-dns-discovery = { path = "../dns" }
 reth-eth-wire = { path = "../eth-wire" }
 reth-ecies = { path = "../ecies" }
-reth-rlp = { workspace = true }
+reth-rlp.workspace = true
 reth-rlp-derive = { path = "../../rlp/rlp-derive" }
-reth-tasks = { workspace = true }
-reth-transaction-pool = { workspace = true }
-reth-provider = { workspace = true }
+reth-tasks.workspace = true
+reth-transaction-pool.workspace = true
+reth-provider.workspace = true
 reth-metrics = { workspace = true, features = ["common"] }
-reth-rpc-types = { workspace = true }
+reth-rpc-types.workspace = true
 
 # async/futures
-futures = { workspace = true }
-pin-project = { workspace = true }
+futures.workspace = true
+pin-project.workspace = true
 tokio = { workspace = true, features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
-tokio-stream = { workspace = true }
+tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["codec"] }
 
 # io
@@ -49,14 +49,14 @@ serde_json = { workspace = true, optional = true }
 # misc
 auto_impl = "1"
 aquamarine = "0.3.0"
-tracing = { workspace = true }
+tracing.workspace = true
 fnv = "1.0"
-thiserror = { workspace = true }
+thiserror.workspace = true
 parking_lot = "0.12"
-async-trait = { workspace = true }
+async-trait.workspace = true
 linked_hash_set = "0.1"
 linked-hash-map = "0.5.6"
-rand = { workspace = true }
+rand.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
 enr = { version = "0.8.1", features = ["rust-secp256k1"], optional = true }

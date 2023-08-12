@@ -1,0 +1,14 @@
+[package]
+name = "additional-rpc-namespace-in-cli"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth.workspace = true
+reth-transaction-pool.workspace = true
+
+clap = { version = "4", features = ["derive"] }
+jsonrpsee = { workspace = true, features = ["server", "macros"] }
+eyre = "0.6"

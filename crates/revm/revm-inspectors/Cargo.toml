@@ -10,10 +10,10 @@ description = "revm inspector implementations used by reth"
 
 [dependencies]
 # reth 
-reth-primitives = { workspace = true }
-reth-rpc-types = { workspace = true }
+reth-primitives.workspace = true
+reth-rpc-types.workspace = true
 
-revm = { workspace = true }
+revm.workspace = true
 # remove from reth and reexport from revm
 hashbrown = "0.13"
 

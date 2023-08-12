@@ -1,5 +1,5 @@
 use super::BlockHashReader;
-use reth_interfaces::Result;
+use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, ChainInfo, H256};
 
 /// Client trait for getting important block numbers (such as the latest block number), converting
@@ -61,8 +61,14 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
                     .map(|res_opt| res_opt.map(|num_hash| num_hash.number))
             }
             BlockNumberOrTag::Number(num) => num,
-            BlockNumberOrTag::Finalized => return self.finalized_block_number(),
-            BlockNumberOrTag::Safe => return self.safe_block_number(),
+            BlockNumberOrTag::Finalized => match self.finalized_block_number()? {
+                Some(block_number) => block_number,
+                None => return Err(ProviderError::FinalizedBlockNotFound.into()),
+            },
+            BlockNumberOrTag::Safe => match self.safe_block_number()? {
+                Some(block_number) => block_number,
+                None => return Err(ProviderError::SafeBlockNotFound.into()),
+            },
         };
         Ok(Some(num))
     }

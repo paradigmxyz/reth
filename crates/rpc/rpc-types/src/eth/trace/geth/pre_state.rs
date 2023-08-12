@@ -1,4 +1,4 @@
-use reth_primitives::{serde_helper::num::from_int_or_hex_opt, Address, H256, U256};
+use reth_primitives::{serde_helper::num::from_int_or_hex_opt, Address, Bytes, H256, U256};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -29,7 +29,7 @@ pub struct AccountState {
     )]
     pub balance: Option<U256>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub code: Option<String>,
+    pub code: Option<Bytes>,
     #[serde(
         default,
         deserialize_with = "from_int_or_hex_opt",
@@ -45,6 +45,12 @@ pub struct AccountState {
 pub struct PreStateConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diff_mode: Option<bool>,
+}
+
+impl PreStateConfig {
+    pub fn is_diff_mode(&self) -> bool {
+        self.diff_mode.unwrap_or_default()
+    }
 }
 
 #[cfg(test)]
@@ -85,5 +91,12 @@ mod tests {
             PreStateFrame::Diff(DiffMode { pre: _pre, post: _post }) => {}
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn test_is_diff_mode() {
+        assert!(PreStateConfig { diff_mode: Some(true) }.is_diff_mode());
+        assert!(!PreStateConfig { diff_mode: Some(false) }.is_diff_mode());
+        assert!(!PreStateConfig { diff_mode: None }.is_diff_mode());
     }
 }

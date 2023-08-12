@@ -14,7 +14,10 @@ use reth_primitives::PeerId;
 use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::{
     net::TcpStream,
-    sync::{mpsc, oneshot},
+    sync::{
+        mpsc::{self, error::SendError},
+        oneshot,
+    },
 };
 
 /// A handler attached to a peer session that's not authenticated yet, pending Handshake and hello
@@ -22,7 +25,7 @@ use tokio::{
 ///
 /// This session needs to wait until it is authenticated.
 #[derive(Debug)]
-pub(crate) struct PendingSessionHandle {
+pub struct PendingSessionHandle {
     /// Can be used to tell the session to disconnect the connection/abort the handshake process.
     pub(crate) disconnect_tx: Option<oneshot::Sender<()>>,
     /// The direction of the session
@@ -33,10 +36,15 @@ pub(crate) struct PendingSessionHandle {
 
 impl PendingSessionHandle {
     /// Sends a disconnect command to the pending session.
-    pub(crate) fn disconnect(&mut self) {
+    pub fn disconnect(&mut self) {
         if let Some(tx) = self.disconnect_tx.take() {
             let _ = tx.send(());
         }
+    }
+
+    /// Returns the direction of the pending session (inbound or outbound).
+    pub fn direction(&self) -> Direction {
+        self.direction
     }
 }
 
@@ -46,7 +54,7 @@ impl PendingSessionHandle {
 /// be performed: chain synchronization, block propagation and transaction exchange.
 #[derive(Debug)]
 #[allow(unused)]
-pub(crate) struct ActiveSessionHandle {
+pub struct ActiveSessionHandle {
     /// The direction of the session
     pub(crate) direction: Direction,
     /// The assigned id for this session
@@ -71,9 +79,58 @@ pub(crate) struct ActiveSessionHandle {
 
 impl ActiveSessionHandle {
     /// Sends a disconnect command to the session.
-    pub(crate) fn disconnect(&self, reason: Option<DisconnectReason>) {
+    pub fn disconnect(&self, reason: Option<DisconnectReason>) {
         // Note: we clone the sender which ensures the channel has capacity to send the message
         let _ = self.commands_to_session.clone().try_send(SessionCommand::Disconnect { reason });
+    }
+
+    /// Sends a disconnect command to the session, awaiting the command channel for available
+    /// capacity.
+    pub async fn try_disconnect(
+        &self,
+        reason: Option<DisconnectReason>,
+    ) -> Result<(), SendError<SessionCommand>> {
+        self.commands_to_session.clone().send(SessionCommand::Disconnect { reason }).await
+    }
+
+    /// Returns the direction of the active session (inbound or outbound).
+    pub fn direction(&self) -> Direction {
+        self.direction
+    }
+
+    /// Returns the assigned session id for this session.
+    pub fn session_id(&self) -> SessionId {
+        self.session_id
+    }
+
+    /// Returns the negotiated eth version for this session.
+    pub fn version(&self) -> EthVersion {
+        self.version
+    }
+
+    /// Returns the identifier of the remote peer.
+    pub fn remote_id(&self) -> PeerId {
+        self.remote_id
+    }
+
+    /// Returns the timestamp when the session has been established.
+    pub fn established(&self) -> Instant {
+        self.established
+    }
+
+    /// Returns the announced capabilities of the peer.
+    pub fn capabilities(&self) -> Arc<Capabilities> {
+        self.capabilities.clone()
+    }
+
+    /// Returns the client's name and version.
+    pub fn client_version(&self) -> Arc<String> {
+        self.client_version.clone()
+    }
+
+    /// Returns the address we're connected to.
+    pub fn remote_addr(&self) -> SocketAddr {
+        self.remote_addr
     }
 }
 
@@ -98,46 +155,66 @@ pub struct PeerInfo {
 ///
 /// A session starts with a `Handshake`, followed by a `Hello` message which
 #[derive(Debug)]
-pub(crate) enum PendingSessionEvent {
+pub enum PendingSessionEvent {
     /// Represents a successful `Hello` and `Status` exchange: <https://github.com/ethereum/devp2p/blob/6b0abc3d956a626c28dce1307ee9f546db17b6bd/rlpx.md#hello-0x00>
     Established {
+        /// An internal identifier for the established session
         session_id: SessionId,
+        /// The remote node's socket address
         remote_addr: SocketAddr,
         /// The remote node's public key
         peer_id: PeerId,
+        /// All capabilities the peer announced
         capabilities: Arc<Capabilities>,
+        /// The Status message the peer sent for the `eth` handshake
         status: Status,
+        /// The actual connection stream which can be used to send and receive `eth` protocol
+        /// messages
         conn: EthStream<P2PStream<ECIESStream<MeteredStream<TcpStream>>>>,
+        /// The direction of the session, either `Inbound` or `Outgoing`
         direction: Direction,
+        /// The remote node's user agent, usually containing the client name and version
         client_id: String,
     },
     /// Handshake unsuccessful, session was disconnected.
     Disconnected {
+        /// The remote node's socket address
         remote_addr: SocketAddr,
+        /// The internal identifier for the disconnected session
         session_id: SessionId,
+        /// The direction of the session, either `Inbound` or `Outgoing`
         direction: Direction,
+        /// The error that caused the disconnect
         error: Option<EthStreamError>,
     },
 
     /// Thrown when unable to establish a [`TcpStream`].
     OutgoingConnectionError {
+        /// The remote node's socket address
         remote_addr: SocketAddr,
+        /// The internal identifier for the disconnected session
         session_id: SessionId,
+        /// The remote node's public key
         peer_id: PeerId,
+        /// The error that caused the outgoing connection failure
         error: io::Error,
     },
-    /// Thrown when authentication via Ecies failed.
+    /// Thrown when authentication via ECIES failed.
     EciesAuthError {
+        /// The remote node's socket address
         remote_addr: SocketAddr,
+        /// The internal identifier for the disconnected session
         session_id: SessionId,
+        /// The error that caused the ECIES session to fail
         error: ECIESError,
+        /// The direction of the session, either `Inbound` or `Outgoing`
         direction: Direction,
     },
 }
 
 /// Commands that can be sent to the spawned session.
 #[derive(Debug)]
-pub(crate) enum SessionCommand {
+pub enum SessionCommand {
     /// Disconnect the connection
     Disconnect {
         /// Why the disconnect was initiated
@@ -150,12 +227,19 @@ pub(crate) enum SessionCommand {
 /// Message variants an active session can produce and send back to the
 /// [`SessionManager`](crate::session::SessionManager)
 #[derive(Debug)]
-pub(crate) enum ActiveSessionMessage {
+pub enum ActiveSessionMessage {
     /// Session was gracefully disconnected.
-    Disconnected { peer_id: PeerId, remote_addr: SocketAddr },
+    Disconnected {
+        /// The remote node's public key
+        peer_id: PeerId,
+        /// The remote node's socket address
+        remote_addr: SocketAddr,
+    },
     /// Session was closed due an error
     ClosedOnConnectionError {
+        /// The remote node's public key
         peer_id: PeerId,
+        /// The remote node's socket address
         remote_addr: SocketAddr,
         /// The error that caused the session to close
         error: EthStreamError,

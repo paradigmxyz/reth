@@ -1,6 +1,9 @@
 //! Discovery support for the network.
 
-use crate::error::{NetworkError, ServiceKind};
+use crate::{
+    error::{NetworkError, ServiceKind},
+    manager::DiscoveredEvent,
+};
 use futures::StreamExt;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry};
 use reth_dns_discovery::{
@@ -14,12 +17,14 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::task::JoinHandle;
+use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_stream::wrappers::ReceiverStream;
 
 /// An abstraction over the configured discovery protocol.
 ///
-/// Listens for new discovered nodes and emits events for discovered nodes and their address.
+/// Listens for new discovered nodes and emits events for discovered nodes and their
+/// address.#[derive(Debug, Clone)]
+
 pub struct Discovery {
     /// All nodes discovered via discovery protocol.
     ///
@@ -41,6 +46,8 @@ pub struct Discovery {
     _dns_disc_service: Option<JoinHandle<()>>,
     /// Events buffered until polled.
     queued_events: VecDeque<DiscoveryEvent>,
+    /// List of listeners subscribed to discovery events.
+    discovery_listeners: Vec<mpsc::UnboundedSender<DiscoveryEvent>>,
 }
 
 impl Discovery {
@@ -84,6 +91,7 @@ impl Discovery {
             };
 
         Ok(Self {
+            discovery_listeners: Default::default(),
             local_enr,
             discv4,
             discv4_updates,
@@ -94,6 +102,17 @@ impl Discovery {
             _dns_discovery,
             dns_discovery_updates,
         })
+    }
+
+    /// Registers a listener for receiving [DiscoveryEvent] updates.
+    pub(crate) fn add_listener(&mut self, tx: mpsc::UnboundedSender<DiscoveryEvent>) {
+        self.discovery_listeners.push(tx);
+    }
+
+    /// Notifies all registered listeners with the provided `event`.
+    #[inline]
+    fn notify_listeners(&mut self, event: &DiscoveryEvent) {
+        self.discovery_listeners.retain_mut(|listener| listener.send(event.clone()).is_ok());
     }
 
     /// Updates the `eth:ForkId` field in discv4.
@@ -139,11 +158,9 @@ impl Discovery {
             Entry::Occupied(_entry) => {}
             Entry::Vacant(entry) => {
                 entry.insert(addr);
-                self.queued_events.push_back(DiscoveryEvent::Discovered {
-                    peer_id: id,
-                    socket_addr: addr,
-                    fork_id,
-                });
+                self.queued_events.push_back(DiscoveryEvent::NewNode(
+                    DiscoveredEvent::EventQueued { peer_id: id, socket_addr: addr, fork_id },
+                ));
             }
         }
     }
@@ -174,6 +191,7 @@ impl Discovery {
         loop {
             // Drain all buffered events first
             if let Some(event) = self.queued_events.pop_front() {
+                self.notify_listeners(&event);
                 return Poll::Ready(event)
             }
 
@@ -204,6 +222,9 @@ impl Discovery {
     ///
     /// NOTE: This instance does nothing
     pub(crate) fn noop() -> Self {
+        let (_discovery_listeners, _): (mpsc::UnboundedSender<DiscoveryEvent>, _) =
+            mpsc::unbounded_channel();
+
         Self {
             discovered_nodes: Default::default(),
             local_enr: NodeRecord {
@@ -219,14 +240,16 @@ impl Discovery {
             _dns_discovery: None,
             dns_discovery_updates: None,
             _dns_disc_service: None,
+            discovery_listeners: Default::default(),
         }
     }
 }
 
 /// Events produced by the [`Discovery`] manager.
+#[derive(Debug, Clone)]
 pub enum DiscoveryEvent {
-    /// A new node was discovered
-    Discovered { peer_id: PeerId, socket_addr: SocketAddr, fork_id: Option<ForkId> },
+    /// Discovered a node
+    NewNode(DiscoveredEvent),
     /// Retrieved a [`ForkId`] from the peer via ENR request, See <https://eips.ethereum.org/EIPS/eip-868>
     EnrForkId(PeerId, ForkId),
 }

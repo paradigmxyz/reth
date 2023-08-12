@@ -1,9 +1,10 @@
 on:
   pull_request:
   merge_group:
+  push:
+    branches: [main]
 
 env:
-  RUSTFLAGS: -D warnings
   CARGO_TERM_COLOR: always
   SEED: rustethereumethereumrust
 
@@ -15,10 +16,11 @@ name: unit
 jobs:
   test:
     name: test (partition ${{ matrix.partition }}/${{ strategy.job-total }})
-    runs-on: ubuntu-latest
+    runs-on:
+      group: Reth
     strategy:
       matrix:
-        partition: [1, 2, 3, 4]
+        partition: [1, 2]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -38,7 +40,7 @@ jobs:
       - name: Run tests
         run: |
           cargo llvm-cov nextest --lcov --output-path lcov.info \
-            --locked --workspace --all-features \
+            --locked --all-features --workspace --exclude examples --exclude ef-tests  \
             --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
             -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
 
@@ -51,7 +53,8 @@ jobs:
 
   eth-blockchain:
     name: ethereum / state tests (stable)
-    runs-on: ubuntu-latest
+    runs-on:
+      group: Reth
     env:
       RUST_LOG: info,sync=error
     steps:
@@ -83,7 +86,8 @@ jobs:
 
   doc-test:
     name: rustdoc
-    runs-on: ubuntu-latest
+    runs-on:
+      group: Reth
     steps:
       - uses: actions/checkout@v3
       - name: Install toolchain
@@ -95,7 +99,7 @@ jobs:
   unit-success:
     if: always()
     name: unit success
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [test, eth-blockchain, doc-test]
     steps:
       - name: Decide whether the needed jobs succeeded or failed

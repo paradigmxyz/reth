@@ -1,3 +1,4 @@
+use reth_prune::PrunerError;
 use reth_rpc_types::engine::ForkchoiceUpdateError;
 use reth_stages::PipelineError;
 
@@ -16,6 +17,12 @@ pub enum BeaconConsensusEngineError {
     /// Pipeline error.
     #[error(transparent)]
     Pipeline(#[from] Box<PipelineError>),
+    /// Pruner channel closed.
+    #[error("Pruner channel closed")]
+    PrunerChannelClosed,
+    /// Pruner error.
+    #[error(transparent)]
+    Pruner(#[from] PrunerError),
     /// Common error. Wrapper around [reth_interfaces::Error].
     #[error(transparent)]
     Common(#[from] reth_interfaces::Error),

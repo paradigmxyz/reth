@@ -7,7 +7,7 @@ use reth_codecs::{main_codec, Compact};
 #[cfg_attr(test, derive(Default))]
 pub struct PruneCheckpoint {
     /// Highest pruned block number.
-    block_number: BlockNumber,
+    pub block_number: BlockNumber,
     /// Prune mode.
-    prune_mode: PruneMode,
+    pub prune_mode: PruneMode,
 }

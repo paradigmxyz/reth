@@ -37,8 +37,8 @@ use crate::{
 use reth_primitives::{
     stage::StageCheckpoint,
     trie::{BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey},
-    Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, Receipt, StorageEntry,
-    TransactionSignedNoHash, TxHash, TxNumber, H256,
+    Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, PruneCheckpoint,
+    PrunePart, Receipt, StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, H256,
 };
 
 /// Enum for the types of tables present in libmdbx.
@@ -51,7 +51,7 @@ pub enum TableType {
 }
 
 /// Number of tables that should be present inside database.
-pub const NUM_TABLES: usize = 27;
+pub const NUM_TABLES: usize = 28;
 
 /// The general purpose of this is to use with a combination of Tables enum,
 /// by implementing a `TableViewer` trait you can operate on db tables in an abstract way.
@@ -185,7 +185,8 @@ tables!([
     (LogAddressHistory, TableType::Table),
     (LogTopicHistory, TableType::Table),
     (SyncStage, TableType::Table),
-    (SyncStageProgress, TableType::Table)
+    (SyncStageProgress, TableType::Table),
+    (PruneCheckpoints, TableType::Table)
 ]);
 
 #[macro_export]
@@ -437,6 +438,11 @@ table!(
     ( SyncStageProgress ) StageId | Vec<u8>
 );
 
+table!(
+    /// Stores the highest pruned block number and prune mode of each prune part.
+    ( PruneCheckpoints ) PrunePart | PruneCheckpoint
+);
+
 /// Alias Types
 
 /// List with transaction numbers.
@@ -478,6 +484,7 @@ mod tests {
         (TableType::Table, LogTopicHistory::const_name()),
         (TableType::Table, SyncStage::const_name()),
         (TableType::Table, SyncStageProgress::const_name()),
+        (TableType::Table, PruneCheckpoints::const_name()),
     ];
 
     #[test]

@@ -34,6 +34,20 @@ Options:
   -h, --help
           Print help (see a summary with '-h')
 
+Database:
+      --db.log-level <LOG_LEVEL>
+          Database logging level. Levels higher than "notice" require a debug build
+
+          Possible values:
+          - fatal:   Enables logging for critical conditions, i.e. assertion failures
+          - error:   Enables logging for error conditions
+          - warn:    Enables logging for warning conditions
+          - notice:  Enables logging for normal but significant condition
+          - verbose: Enables logging for verbose informational
+          - debug:   Enables logging for debug-level messages
+          - trace:   Enables logging for trace debug-level messages
+          - extra:   Enables logging for extra debug-level messages
+
 Logging:
       --log.persistent
           The flag to enable persistent logs

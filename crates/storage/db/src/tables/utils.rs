@@ -1,16 +1,14 @@
-//! Small database table utilities and helper functions
+//! Small database table utilities and helper functions.
 use crate::{
     table::{Decode, Decompress, Table},
     DatabaseError,
 };
-
 use std::borrow::Cow;
 
 #[macro_export]
-/// Implements the `Arbitrary` trait for types with fixed array
-/// types.
+/// Implements the `Arbitrary` trait for types with fixed array types.
 macro_rules! impl_fixed_arbitrary {
-    ($name:tt, $size:tt) => {
+    ($name:ident, $size:tt) => {
         #[cfg(any(test, feature = "arbitrary"))]
         use arbitrary::{Arbitrary, Unstructured};
 
@@ -25,16 +23,17 @@ macro_rules! impl_fixed_arbitrary {
         }
 
         #[cfg(any(test, feature = "arbitrary"))]
-        use proptest::strategy::Strategy;
-        #[cfg(any(test, feature = "arbitrary"))]
         impl proptest::prelude::Arbitrary for $name {
             type Parameters = ();
-            type Strategy = proptest::prelude::BoxedStrategy<$name>;
+            type Strategy = proptest::strategy::Map<
+                proptest::collection::VecStrategy<<u8 as proptest::arbitrary::Arbitrary>::Strategy>,
+                fn(Vec<u8>) -> Self,
+            >;
 
             fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+                use proptest::strategy::Strategy;
                 proptest::collection::vec(proptest::arbitrary::any_with::<u8>(args), $size)
                     .prop_map(move |vec| Decode::decode(vec).unwrap())
-                    .boxed()
             }
         }
     };

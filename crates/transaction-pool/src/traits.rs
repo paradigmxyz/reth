@@ -4,12 +4,20 @@ use crate::{
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
+use futures_util::{ready, Stream};
 use reth_primitives::{
     Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
-    TransactionKind, TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, H256, U256,
+    TransactionKind, TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
+    H256, U256,
 };
 use reth_rlp::Encodable;
-use std::{collections::HashMap, fmt, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
 use tokio::sync::mpsc::Receiver;
 
 #[cfg(feature = "serde")]
@@ -96,15 +104,56 @@ pub trait TransactionPool: Send + Sync + Clone {
     fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents>;
 
     /// Returns a new transaction change event stream for _all_ transactions in the pool.
-    fn all_transactions_event_listener(&self) -> AllTransactionsEvents;
+    fn all_transactions_event_listener(&self) -> AllTransactionsEvents<Self::Transaction>;
 
-    /// Returns a new Stream that yields transactions hashes for new ready transactions.
+    /// Returns a new Stream that yields transactions hashes for new __pending__ transactions
+    /// inserted into the pool that are allowed to be propagated.
     ///
-    /// Consumer: RPC
-    fn pending_transactions_listener(&self) -> Receiver<TxHash>;
+    /// Note: This is intended for networking and will __only__ yield transactions that are allowed
+    /// to be propagated over the network.
+    ///
+    /// Consumer: RPC/P2P
+    fn pending_transactions_listener(&self) -> Receiver<TxHash> {
+        self.pending_transactions_listener_for(PendingTransactionListenerKind::PropagateOnly)
+    }
+
+    /// Returns a new Stream that yields transactions hashes for new __pending__ transactions
+    /// inserted into the pool depending on the given [PendingTransactionListenerKind] argument.
+    fn pending_transactions_listener_for(
+        &self,
+        kind: PendingTransactionListenerKind,
+    ) -> Receiver<TxHash>;
 
     /// Returns a new stream that yields new valid transactions added to the pool.
     fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>>;
+
+    /// Returns a new Stream that yields new transactions added to the basefee-pool.
+    ///
+    /// This is a convenience wrapper around [Self::new_transactions_listener] that filters for
+    /// [SubPool::Pending](crate::SubPool).
+    fn new_pending_pool_transactions_listener(
+        &self,
+    ) -> NewSubpoolTransactionStream<Self::Transaction> {
+        NewSubpoolTransactionStream::new(self.new_transactions_listener(), SubPool::Pending)
+    }
+
+    /// Returns a new Stream that yields new transactions added to the basefee sub-pool.
+    ///
+    /// This is a convenience wrapper around [Self::new_transactions_listener] that filters for
+    /// [SubPool::BaseFee](crate::SubPool).
+    fn new_basefee_pool_transactions_listener(
+        &self,
+    ) -> NewSubpoolTransactionStream<Self::Transaction> {
+        NewSubpoolTransactionStream::new(self.new_transactions_listener(), SubPool::BaseFee)
+    }
+
+    /// Returns a new Stream that yields new transactions added to the queued-pool.
+    ///
+    /// This is a convenience wrapper around [Self::new_transactions_listener] that filters for
+    /// [SubPool::Queued](crate::SubPool).
+    fn new_queued_transactions_listener(&self) -> NewSubpoolTransactionStream<Self::Transaction> {
+        NewSubpoolTransactionStream::new(self.new_transactions_listener(), SubPool::Queued)
+    }
 
     /// Returns the _hashes_ of all transactions in the pool.
     ///
@@ -138,6 +187,15 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Consumer: Block production
     fn best_transactions(
         &self,
+    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
+
+    /// Returns an iterator that yields transactions that are ready for block production with the
+    /// given base fee.
+    ///
+    /// Consumer: Block production
+    fn best_transactions_with_base_fee(
+        &self,
+        base_fee: u64,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
 
     /// Returns all transactions that can be included in the next block.
@@ -207,6 +265,9 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns a set of all senders of transactions in the pool
+    fn unique_senders(&self) -> HashSet<Address>;
 }
 
 /// Extension for [TransactionPool] trait that allows to set the current block info.
@@ -221,6 +282,31 @@ pub trait TransactionPoolExt: TransactionPool {
     /// For example the base fee of the pending block is determined after a block is mined which
     /// affects the dynamic fee requirement of pending transactions in the pool.
     fn on_canonical_state_change(&self, update: CanonicalStateUpdate);
+
+    /// Updates the accounts in the pool
+    fn update_accounts(&self, accounts: Vec<ChangedAccount>);
+}
+
+/// Determines what kind of new pending transactions should be emitted by a stream of pending
+/// transactions.
+///
+/// This gives control whether to include transactions that are allowed to be propagated.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum PendingTransactionListenerKind {
+    /// Any new pending transactions
+    All,
+    /// Only transactions that are allowed to be propagated.
+    ///
+    /// See also [ValidPoolTransaction]
+    PropagateOnly,
+}
+
+impl PendingTransactionListenerKind {
+    /// Returns true if we're only interested in transactions that are allowed to be propagated.
+    #[inline]
+    pub fn is_propagate_only(&self) -> bool {
+        matches!(self, Self::PropagateOnly)
+    }
 }
 
 /// A Helper type that bundles all transactions in the pool.
@@ -319,6 +405,11 @@ pub enum TransactionOrigin {
     /// This is usually considered an "untrusted" source, for example received from another in the
     /// network.
     External,
+    /// Transaction is originated locally and is intended to remain private.
+    ///
+    /// This type of transaction should not be propagated to the network. It's meant for
+    /// private usage within the local node only.
+    Private,
 }
 
 // === impl TransactionOrigin ===
@@ -347,11 +438,20 @@ pub struct CanonicalStateUpdate {
     /// EIP-1559 Base fee of the _next_ (pending) block
     ///
     /// The base fee of a block depends on the utilization of the last block and its base fee.
-    pub pending_block_base_fee: u128,
+    pub pending_block_base_fee: u64,
     /// A set of changed accounts across a range of blocks.
     pub changed_accounts: Vec<ChangedAccount>,
     /// All mined transactions in the block range.
     pub mined_transactions: Vec<H256>,
+    /// Timestamp of the latest chain update
+    pub timestamp: u64,
+}
+
+impl fmt::Display for CanonicalStateUpdate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{{ hash: {}, number: {}, pending_block_base_fee: {}, changed_accounts: {}, mined_transactions: {} }}",
+            self.hash, self.number, self.pending_block_base_fee, self.changed_accounts.len(), self.mined_transactions.len())
+    }
 }
 
 /// Represents a changed account
@@ -378,6 +478,10 @@ impl ChangedAccount {
 ///
 /// This makes no assumptions about the order of the transactions, but expects that _all_
 /// transactions are valid (no nonce gaps.) for the tracked state of the pool.
+///
+/// Note: this iterator will always return the best transaction that it currently knows.
+/// There is no guarantee transactions will be returned sequentially in decreasing
+/// priority order.
 pub trait BestTransactions: Iterator + Send {
     /// Mark the transaction as invalid.
     ///
@@ -411,12 +515,6 @@ pub trait PoolTransaction:
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     fn cost(&self) -> U256;
 
-    /// Returns the gas cost for this transaction.
-    ///
-    /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit`.
-    /// For legacy transactions: `gas_price * gas_limit`.
-    fn gas_cost(&self) -> U256;
-
     /// Amount of gas that should be used in executing this transaction. This is paid up-front.
     fn gas_limit(&self) -> u64;
 
@@ -432,6 +530,16 @@ pub trait PoolTransaction:
     /// This will return `None` for non-EIP1559 transactions
     fn max_priority_fee_per_gas(&self) -> Option<u128>;
 
+    /// Returns the effective tip for this transaction.
+    ///
+    /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
+    /// For legacy transactions: `gas_price - base_fee`.
+    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128>;
+
+    /// Returns the max priority fee per gas if the transaction is an EIP-1559 transaction, and
+    /// otherwise returns the gas price.
+    fn priority_fee_or_price(&self) -> u128;
+
     /// Returns the transaction's [`TransactionKind`], which is the address of the recipient or
     /// [`TransactionKind::Create`] if the transaction is a contract creation.
     fn kind(&self) -> &TransactionKind;
@@ -445,6 +553,11 @@ pub trait PoolTransaction:
     /// Returns true if the transaction is an EIP-1559 transaction.
     fn is_eip1559(&self) -> bool {
         self.tx_type() == EIP1559_TX_TYPE_ID
+    }
+
+    /// Returns true if the transaction is an EIP-4844 transaction.
+    fn is_eip4844(&self) -> bool {
+        self.tx_type() == EIP4844_TX_TYPE_ID
     }
 
     /// Returns the length of the rlp encoded object
@@ -466,13 +579,22 @@ pub struct PooledTransaction {
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     pub(crate) cost: U256,
-
-    /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit`.
-    /// For legacy transactions: `gas_price * gas_limit`.
-    pub(crate) gas_cost: U256,
 }
 
 impl PooledTransaction {
+    /// Create new instance of [Self].
+    pub fn new(transaction: TransactionSignedEcRecovered) -> Self {
+        let gas_cost = match &transaction.transaction {
+            Transaction::Legacy(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
+            Transaction::Eip2930(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
+            Transaction::Eip1559(t) => U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit),
+            Transaction::Eip4844(t) => U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit),
+        };
+        let cost = gas_cost + U256::from(transaction.value());
+
+        Self { transaction, cost }
+    }
+
     /// Return the reference to the underlying transaction.
     pub fn transaction(&self) -> &TransactionSignedEcRecovered {
         &self.transaction
@@ -503,14 +625,6 @@ impl PoolTransaction for PooledTransaction {
         self.cost
     }
 
-    /// Returns the gas cost for this transaction.
-    ///
-    /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
-    /// For legacy transactions: `gas_price * gas_limit + tx_value`.
-    fn gas_cost(&self) -> U256 {
-        self.gas_cost
-    }
-
     /// Amount of gas that should be used in executing this transaction. This is paid up-front.
     fn gas_limit(&self) -> u64 {
         self.transaction.gas_limit()
@@ -526,6 +640,7 @@ impl PoolTransaction for PooledTransaction {
             Transaction::Legacy(tx) => tx.gas_price,
             Transaction::Eip2930(tx) => tx.gas_price,
             Transaction::Eip1559(tx) => tx.max_fee_per_gas,
+            Transaction::Eip4844(tx) => tx.max_fee_per_gas,
         }
     }
 
@@ -537,7 +652,22 @@ impl PoolTransaction for PooledTransaction {
             Transaction::Legacy(_) => None,
             Transaction::Eip2930(_) => None,
             Transaction::Eip1559(tx) => Some(tx.max_priority_fee_per_gas),
+            Transaction::Eip4844(tx) => Some(tx.max_priority_fee_per_gas),
         }
+    }
+
+    /// Returns the effective tip for this transaction.
+    ///
+    /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
+    /// For legacy transactions: `gas_price - base_fee`.
+    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
+        self.transaction.effective_tip_per_gas(base_fee)
+    }
+
+    /// Returns the max priority fee per gas if the transaction is an EIP-1559 transaction, and
+    /// otherwise returns the gas price.
+    fn priority_fee_or_price(&self) -> u128 {
+        self.transaction.priority_fee_or_price()
     }
 
     /// Returns the transaction's [`TransactionKind`], which is the address of the recipient or
@@ -569,14 +699,7 @@ impl PoolTransaction for PooledTransaction {
 
 impl FromRecoveredTransaction for PooledTransaction {
     fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
-        let gas_cost = match &tx.transaction {
-            Transaction::Legacy(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
-            Transaction::Eip2930(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
-            Transaction::Eip1559(t) => U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit),
-        };
-        let cost = gas_cost + U256::from(tx.value());
-
-        PooledTransaction { transaction: tx, cost, gas_cost }
+        PooledTransaction::new(tx)
     }
 }
 
@@ -618,5 +741,39 @@ pub struct BlockInfo {
     ///
     /// Note: this is the derived base fee of the _next_ block that builds on the clock the pool is
     /// currently tracking.
-    pub pending_basefee: u128,
+    pub pending_basefee: u64,
+}
+
+/// A Stream that yields full transactions the subpool
+#[must_use = "streams do nothing unless polled"]
+#[derive(Debug)]
+pub struct NewSubpoolTransactionStream<Tx: PoolTransaction> {
+    st: Receiver<NewTransactionEvent<Tx>>,
+    subpool: SubPool,
+}
+
+// === impl NewSubpoolTransactionStream ===
+
+impl<Tx: PoolTransaction> NewSubpoolTransactionStream<Tx> {
+    /// Create a new stream that yields full transactions from the subpool
+    pub fn new(st: Receiver<NewTransactionEvent<Tx>>, subpool: SubPool) -> Self {
+        Self { st, subpool }
+    }
+}
+
+impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
+    type Item = NewTransactionEvent<Tx>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        loop {
+            match ready!(self.st.poll_recv(cx)) {
+                Some(event) => {
+                    if event.subpool == self.subpool {
+                        return Poll::Ready(Some(event))
+                    }
+                }
+                None => return Poll::Ready(None),
+            }
+        }
+    }
 }

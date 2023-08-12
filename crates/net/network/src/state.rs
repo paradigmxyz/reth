@@ -4,6 +4,7 @@ use crate::{
     cache::LruCache,
     discovery::{Discovery, DiscoveryEvent},
     fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
+    manager::DiscoveredEvent,
     message::{
         BlockRequest, NewBlockMessage, PeerRequest, PeerRequestSender, PeerResponse,
         PeerResponseResult,
@@ -16,7 +17,7 @@ use reth_eth_wire::{
 };
 use reth_network_api::PeerKind;
 use reth_primitives::{ForkId, PeerId, H256};
-use reth_provider::BlockReader;
+use reth_provider::BlockNumReader;
 use std::{
     collections::{HashMap, VecDeque},
     net::{IpAddr, SocketAddr},
@@ -51,6 +52,9 @@ pub struct NetworkState<C> {
     /// Buffered messages until polled.
     queued_messages: VecDeque<StateAction>,
     /// The client type that can interact with the chain.
+    ///
+    /// This type is used to fetch the block number after we established a session and received the
+    /// [Status] block hash.
     client: C,
     /// Network discovery.
     discovery: Discovery,
@@ -65,7 +69,7 @@ pub struct NetworkState<C> {
 
 impl<C> NetworkState<C>
 where
-    C: BlockReader,
+    C: BlockNumReader,
 {
     /// Create a new state instance with the given params
     pub(crate) fn new(
@@ -90,6 +94,11 @@ where
     /// Returns mutable access to the [`PeersManager`]
     pub(crate) fn peers_mut(&mut self) -> &mut PeersManager {
         &mut self.peers_manager
+    }
+
+    /// Returns mutable access to the [`Discovery`]
+    pub(crate) fn discovery_mut(&mut self) -> &mut Discovery {
+        &mut self.discovery
     }
 
     /// Returns access to the [`PeersManager`]
@@ -274,7 +283,11 @@ where
     /// Event hook for events received from the discovery service.
     fn on_discovery_event(&mut self, event: DiscoveryEvent) {
         match event {
-            DiscoveryEvent::Discovered { peer_id, socket_addr, fork_id } => {
+            DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
+                peer_id,
+                socket_addr,
+                fork_id,
+            }) => {
                 self.queued_messages.push_back(StateAction::DiscoveredNode {
                     peer_id,
                     socket_addr,

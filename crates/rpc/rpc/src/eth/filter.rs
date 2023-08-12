@@ -20,11 +20,8 @@ use reth_rpc_types::{
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
-use std::{
-    collections::HashMap, future::Future, iter::StepBy, ops::RangeInclusive, sync::Arc,
-    time::Instant,
-};
-use tokio::sync::{oneshot, Mutex};
+use std::{collections::HashMap, iter::StepBy, ops::RangeInclusive, sync::Arc, time::Instant};
+use tokio::sync::Mutex;
 use tracing::trace;
 
 /// The maximum number of headers we read at once when handling a range filter.
@@ -74,26 +71,6 @@ where
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + LogIndexProvider + 'static,
     Pool: TransactionPool + 'static,
 {
-    /// Executes the given filter on a new task.
-    ///
-    /// All the filter handles are implemented asynchronously. However, filtering is still a bit CPU
-    /// intensive.
-    async fn spawn_filter_task<C, F, R>(&self, c: C) -> Result<R, FilterError>
-    where
-        C: FnOnce(Self) -> F,
-        F: Future<Output = Result<R, FilterError>> + Send + 'static,
-        R: Send + 'static,
-    {
-        let (tx, rx) = oneshot::channel();
-        let this = self.clone();
-        let f = c(this);
-        self.inner.task_spawner.spawn(Box::pin(async move {
-            let res = f.await;
-            let _ = tx.send(res);
-        }));
-        rx.await.map_err(|_| FilterError::InternalError)?
-    }
-
     /// Returns all the filter changes for the given id, if any
     pub async fn filter_changes(&self, id: FilterId) -> Result<FilterChanges, FilterError> {
         let info = self.inner.provider.chain_info()?;
@@ -207,7 +184,7 @@ where
     /// Handler for `eth_getFilterChanges`
     async fn filter_changes(&self, id: FilterId) -> RpcResult<FilterChanges> {
         trace!(target: "rpc::eth", "Serving eth_getFilterChanges");
-        Ok(self.spawn_filter_task(|this| async move { this.filter_changes(id).await }).await?)
+        Ok(EthFilter::filter_changes(self, id).await?)
     }
 
     /// Returns an array of all logs matching filter with given id.
@@ -217,7 +194,7 @@ where
     /// Handler for `eth_getFilterLogs`
     async fn filter_logs(&self, id: FilterId) -> RpcResult<Vec<Log>> {
         trace!(target: "rpc::eth", "Serving eth_getFilterLogs");
-        Ok(self.spawn_filter_task(|this| async move { this.filter_logs(id).await }).await?)
+        Ok(EthFilter::filter_logs(self, id).await?)
     }
 
     /// Handler for `eth_uninstallFilter`
@@ -237,9 +214,7 @@ where
     /// Handler for `eth_getLogs`
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>> {
         trace!(target: "rpc::eth", "Serving eth_getLogs");
-        Ok(self
-            .spawn_filter_task(|this| async move { this.inner.logs_for_filter(filter).await })
-            .await?)
+        Ok(self.inner.logs_for_filter(filter).await?)
     }
 }
 
@@ -274,6 +249,7 @@ struct EthFilterInner<Provider, Pool> {
     /// maximum number of headers to read at once for range filter
     max_headers_range: u64,
     /// The type that can spawn tasks.
+    #[allow(unused)]
     task_spawner: Box<dyn TaskSpawner>,
 }
 
@@ -369,16 +345,21 @@ where
         let mut all_logs = Vec::new();
         let filter_params = FilteredParams::new(Some(filter.clone()));
 
-        let topics = filter.has_topics().then(|| filter_params.flat_topics.clone());
+        // TODO:
+        // let topics = filter.has_topics().then(|| filter_params.flat_topics.clone());
+        // derive bloom filters from filter input
+        // let address_filter = FilteredParams::address_filter(&filter.address);
+        // let topics_filter = FilteredParams::topics_filter(&filter.topics);
 
         // Create log index filter
         let mut log_index_filter =
             LogIndexFilter::new(from_block..=to_block, self.max_headers_range);
-        if let Some(filter_address) = filter.address.as_ref() {
-            log_index_filter.install_address_filter(&self.provider, filter_address)?;
+        if let Some(filter_address) = filter.address.to_value_or_array() {
+            log_index_filter.install_address_filter(&self.provider, &filter_address)?;
         }
-        if let Some(topics) = topics.as_ref() {
-            log_index_filter.install_topic_filter(&self.provider, topics)?;
+        let topics = filter.topics.clone().into_iter().filter_map(|t| t.to_value_or_array()).collect::<Vec<_>>();
+        if !topics.is_empty() {
+            log_index_filter.install_topic_filter(&self.provider, &topics)?;
         }
 
         let is_multi_block_range = from_block != to_block;
@@ -422,6 +403,7 @@ where
     }
 }
 
+// TODO: fix topic filtering
 #[derive(Debug)]
 struct LogIndexFilter {
     /// Full block range.
@@ -505,13 +487,13 @@ impl LogIndexFilter {
     fn install_topic_filter(
         &mut self,
         provider: &impl LogIndexProvider,
-        topic_filters: &[ValueOrArray<Option<H256>>],
+        topic_filters: &[ValueOrArray<H256>],
     ) -> Result<(), FilterError> {
         let topics = topic_filters
             .iter()
             .flat_map(|topic| match topic {
-                ValueOrArray::Value(topic) => topic.map(|t| Vec::from([t])).unwrap_or_default(),
-                ValueOrArray::Array(topics) => topics.iter().flatten().copied().collect(),
+                ValueOrArray::Value(topic) => Vec::from([*topic]),
+                ValueOrArray::Array(topics) => topics.iter().copied().collect(),
             })
             .collect::<Vec<H256>>();
         for topic in topics {

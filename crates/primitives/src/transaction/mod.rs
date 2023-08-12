@@ -1,172 +1,38 @@
 use crate::{
     compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR},
-    keccak256, Address, Bytes, ChainId, TxHash, H256,
+    keccak256, Address, Bytes, TxHash, H256,
 };
 pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
 pub use error::InvalidTransactionError;
 pub use meta::TransactionMeta;
-use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
+use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
 use reth_rlp::{
     length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
 use serde::{Deserialize, Serialize};
 pub use signature::Signature;
-pub use tx_type::{TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID};
+use std::mem;
+pub use tx_type::{
+    TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+};
+
+pub use eip1559::TxEip1559;
+pub use eip2930::TxEip2930;
+pub use eip4844::TxEip4844;
+pub use legacy::TxLegacy;
 
 mod access_list;
+mod eip1559;
+mod eip2930;
+mod eip4844;
 mod error;
+mod legacy;
 mod meta;
 mod signature;
 mod tx_type;
 pub(crate) mod util;
-
-/// Legacy transaction.
-#[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct TxLegacy {
-    /// Added as EIP-155: Simple replay attack protection
-    pub chain_id: Option<ChainId>,
-    /// A scalar value equal to the number of transactions sent by the sender; formally Tn.
-    pub nonce: u64,
-    /// A scalar value equal to the number of
-    /// Wei to be paid per unit of gas for all computation
-    /// costs incurred as a result of the execution of this transaction; formally Tp.
-    ///
-    /// As ethereum circulation is around 120mil eth as of 2022 that is around
-    /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
-    /// 340282366920938463463374607431768211455
-    pub gas_price: u128,
-    /// A scalar value equal to the maximum
-    /// amount of gas that should be used in executing
-    /// this transaction. This is paid up-front, before any
-    /// computation is done and may not be increased
-    /// later; formally Tg.
-    pub gas_limit: u64,
-    /// The 160-bit address of the message call’s recipient or, for a contract creation
-    /// transaction, ∅, used here to denote the only member of B0 ; formally Tt.
-    pub to: TransactionKind,
-    /// A scalar value equal to the number of Wei to
-    /// be transferred to the message call’s recipient or,
-    /// in the case of contract creation, as an endowment
-    /// to the newly created account; formally Tv.
-    ///
-    /// As ethereum circulation is around 120mil eth as of 2022 that is around
-    /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
-    /// 340282366920938463463374607431768211455
-    pub value: u128,
-    /// Input has two uses depending if transaction is Create or Call (if `to` field is None or
-    /// Some). pub init: An unlimited size byte array specifying the
-    /// EVM-code for the account initialisation procedure CREATE,
-    /// data: An unlimited size byte array specifying the
-    /// input data of the message call, formally Td.
-    pub input: Bytes,
-}
-
-/// Transaction with an [`AccessList`] ([EIP-2930](https://eips.ethereum.org/EIPS/eip-2930)).
-#[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct TxEip2930 {
-    /// Added as EIP-pub 155: Simple replay attack protection
-    pub chain_id: ChainId,
-    /// A scalar value equal to the number of transactions sent by the sender; formally Tn.
-    pub nonce: u64,
-    /// A scalar value equal to the number of
-    /// Wei to be paid per unit of gas for all computation
-    /// costs incurred as a result of the execution of this transaction; formally Tp.
-    ///
-    /// As ethereum circulation is around 120mil eth as of 2022 that is around
-    /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
-    /// 340282366920938463463374607431768211455
-    pub gas_price: u128,
-    /// A scalar value equal to the maximum
-    /// amount of gas that should be used in executing
-    /// this transaction. This is paid up-front, before any
-    /// computation is done and may not be increased
-    /// later; formally Tg.
-    pub gas_limit: u64,
-    /// The 160-bit address of the message call’s recipient or, for a contract creation
-    /// transaction, ∅, used here to denote the only member of B0 ; formally Tt.
-    pub to: TransactionKind,
-    /// A scalar value equal to the number of Wei to
-    /// be transferred to the message call’s recipient or,
-    /// in the case of contract creation, as an endowment
-    /// to the newly created account; formally Tv.
-    ///
-    /// As ethereum circulation is around 120mil eth as of 2022 that is around
-    /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
-    /// 340282366920938463463374607431768211455
-    pub value: u128,
-    /// The accessList specifies a list of addresses and storage keys;
-    /// these addresses and storage keys are added into the `accessed_addresses`
-    /// and `accessed_storage_keys` global sets (introduced in EIP-2929).
-    /// A gas cost is charged, though at a discount relative to the cost of
-    /// accessing outside the list.
-    pub access_list: AccessList,
-    /// Input has two uses depending if transaction is Create or Call (if `to` field is None or
-    /// Some). pub init: An unlimited size byte array specifying the
-    /// EVM-code for the account initialisation procedure CREATE,
-    /// data: An unlimited size byte array specifying the
-    /// input data of the message call, formally Td.
-    pub input: Bytes,
-}
-
-/// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
-#[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct TxEip1559 {
-    /// Added as EIP-pub 155: Simple replay attack protection
-    pub chain_id: u64,
-    /// A scalar value equal to the number of transactions sent by the sender; formally Tn.
-    pub nonce: u64,
-    /// A scalar value equal to the maximum
-    /// amount of gas that should be used in executing
-    /// this transaction. This is paid up-front, before any
-    /// computation is done and may not be increased
-    /// later; formally Tg.
-    pub gas_limit: u64,
-    /// A scalar value equal to the maximum
-    /// amount of gas that should be used in executing
-    /// this transaction. This is paid up-front, before any
-    /// computation is done and may not be increased
-    /// later; formally Tg.
-    ///
-    /// As ethereum circulation is around 120mil eth as of 2022 that is around
-    /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
-    /// 340282366920938463463374607431768211455
-    pub max_fee_per_gas: u128,
-    /// Max Priority fee that transaction is paying
-    ///
-    /// As ethereum circulation is around 120mil eth as of 2022 that is around
-    /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
-    /// 340282366920938463463374607431768211455
-    pub max_priority_fee_per_gas: u128,
-    /// The 160-bit address of the message call’s recipient or, for a contract creation
-    /// transaction, ∅, used here to denote the only member of B0 ; formally Tt.
-    pub to: TransactionKind,
-    /// A scalar value equal to the number of Wei to
-    /// be transferred to the message call’s recipient or,
-    /// in the case of contract creation, as an endowment
-    /// to the newly created account; formally Tv.
-    ///
-    /// As ethereum circulation is around 120mil eth as of 2022 that is around
-    /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
-    /// 340282366920938463463374607431768211455
-    pub value: u128,
-    /// The accessList specifies a list of addresses and storage keys;
-    /// these addresses and storage keys are added into the `accessed_addresses`
-    /// and `accessed_storage_keys` global sets (introduced in EIP-2929).
-    /// A gas cost is charged, though at a discount relative to the cost of
-    /// accessing outside the list.
-    pub access_list: AccessList,
-    /// Input has two uses depending if transaction is Create or Call (if `to` field is None or
-    /// Some). pub init: An unlimited size byte array specifying the
-    /// EVM-code for the account initialisation procedure CREATE,
-    /// data: An unlimited size byte array specifying the
-    /// input data of the message call, formally Td.
-    pub input: Bytes,
-}
 
 /// A raw transaction.
 ///
@@ -174,123 +40,45 @@ pub struct TxEip1559 {
 #[derive_arbitrary(compact)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Transaction {
-    /// Legacy transaction.
+    /// Legacy transaction (type `0x0`).
+    ///
+    /// Traditional Ethereum transactions, containing parameters `nonce`, `gasPrice`, `gasLimit`,
+    /// `to`, `value`, `data`, `v`, `r`, and `s`.
+    ///
+    /// These transactions do not utilize access lists nor do they incorporate EIP-1559 fee market
+    /// changes.
     Legacy(TxLegacy),
-    /// Transaction with an [`AccessList`] ([EIP-2930](https://eips.ethereum.org/EIPS/eip-2930)).
+    /// Transaction with an [`AccessList`] ([EIP-2930](https://eips.ethereum.org/EIPS/eip-2930)), type `0x1`.
+    ///
+    /// The `accessList` specifies an array of addresses and storage keys that the transaction
+    /// plans to access, enabling gas savings on cross-contract calls by pre-declaring the accessed
+    /// contract and storage slots.
     Eip2930(TxEip2930),
-    /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
+    /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)), type `0x2`.
+    ///
+    /// Unlike traditional transactions, EIP-1559 transactions use an in-protocol, dynamically
+    /// changing base fee per gas, adjusted at each block to manage network congestion.
+    ///
+    /// - `maxPriorityFeePerGas`, specifying the maximum fee above the base fee the sender is
+    ///   willing to pay
+    /// - `maxFeePerGas`, setting the maximum total fee the sender is willing to pay.
+    ///
+    /// The base fee is burned, while the priority fee is paid to the miner who includes the
+    /// transaction, incentivizing miners to include transactions with higher priority fees per
+    /// gas.
     Eip1559(TxEip1559),
-}
-
-impl Transaction {
-    /// This encodes the transaction _without_ the signature, and is only suitable for creating a
-    /// hash intended for signing.
-    pub fn encode_without_signature(&self, out: &mut dyn bytes::BufMut) {
-        Encodable::encode(self, out);
-    }
-
-    /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
-    /// hash that for eip2718 does not require rlp header
-    pub fn encode_with_signature(
-        &self,
-        signature: &Signature,
-        out: &mut dyn bytes::BufMut,
-        with_header: bool,
-    ) {
-        match self {
-            Transaction::Legacy(TxLegacy { chain_id, .. }) => {
-                // do nothing w/ with_header
-                let payload_length =
-                    self.fields_len() + signature.payload_len_with_eip155_chain_id(*chain_id);
-                let header = Header { list: true, payload_length };
-                header.encode(out);
-                self.encode_fields(out);
-                signature.encode_with_eip155_chain_id(out, *chain_id);
-            }
-            _ => {
-                let payload_length = self.fields_len() + signature.payload_len();
-                if with_header {
-                    Header {
-                        list: false,
-                        payload_length: 1 + length_of_length(payload_length) + payload_length,
-                    }
-                    .encode(out);
-                }
-                out.put_u8(self.tx_type() as u8);
-                let header = Header { list: true, payload_length };
-                header.encode(out);
-                self.encode_fields(out);
-                signature.encode(out);
-            }
-        }
-    }
-
-    /// This sets the transaction's nonce.
-    pub fn set_nonce(&mut self, nonce: u64) {
-        match self {
-            Transaction::Legacy(tx) => tx.nonce = nonce,
-            Transaction::Eip2930(tx) => tx.nonce = nonce,
-            Transaction::Eip1559(tx) => tx.nonce = nonce,
-        }
-    }
-
-    /// This sets the transaction's value.
-    pub fn set_value(&mut self, value: u128) {
-        match self {
-            Transaction::Legacy(tx) => tx.value = value,
-            Transaction::Eip2930(tx) => tx.value = value,
-            Transaction::Eip1559(tx) => tx.value = value,
-        }
-    }
-
-    /// This sets the transaction's input field.
-    pub fn set_input(&mut self, input: Bytes) {
-        match self {
-            Transaction::Legacy(tx) => tx.input = input,
-            Transaction::Eip2930(tx) => tx.input = input,
-            Transaction::Eip1559(tx) => tx.input = input,
-        }
-    }
-}
-
-impl Compact for Transaction {
-    fn to_compact<B>(self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
-        match self {
-            Transaction::Legacy(tx) => {
-                tx.to_compact(buf);
-                0
-            }
-            Transaction::Eip2930(tx) => {
-                tx.to_compact(buf);
-                1
-            }
-            Transaction::Eip1559(tx) => {
-                tx.to_compact(buf);
-                2
-            }
-        }
-    }
-
-    fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
-        match identifier {
-            0 => {
-                let (tx, buf) = TxLegacy::from_compact(buf, buf.len());
-                (Transaction::Legacy(tx), buf)
-            }
-            1 => {
-                let (tx, buf) = TxEip2930::from_compact(buf, buf.len());
-                (Transaction::Eip2930(tx), buf)
-            }
-            2 => {
-                let (tx, buf) = TxEip1559::from_compact(buf, buf.len());
-                (Transaction::Eip1559(tx), buf)
-            }
-            _ => unreachable!("Junk data in database: unknown Transaction variant"),
-        }
-    }
+    /// Shard Blob Transactions ([EIP-4844](https://eips.ethereum.org/EIPS/eip-4844)), type `0x3`.
+    ///
+    /// Shard Blob Transactions introduce a new transaction type called a blob-carrying transaction
+    /// to reduce gas costs. These transactions are similar to regular Ethereum transactions but
+    /// include additional data called a blob.
+    ///
+    /// Blobs are larger (~125 kB) and cheaper than the current calldata, providing an immutable
+    /// and read-only memory for storing transaction data.
+    ///
+    /// EIP-4844, also known as proto-danksharding, implements the framework and logic of
+    /// danksharding, introducing new transaction formats and verification rules.
+    Eip4844(TxEip4844),
 }
 
 // === impl Transaction ===
@@ -310,6 +98,7 @@ impl Transaction {
             Transaction::Legacy(TxLegacy { chain_id, .. }) => *chain_id,
             Transaction::Eip2930(TxEip2930 { chain_id, .. }) => Some(*chain_id),
             Transaction::Eip1559(TxEip1559 { chain_id, .. }) => Some(*chain_id),
+            Transaction::Eip4844(TxEip4844 { chain_id, .. }) => Some(*chain_id),
         }
     }
 
@@ -319,6 +108,7 @@ impl Transaction {
             Transaction::Legacy(TxLegacy { chain_id: ref mut c, .. }) => *c = Some(chain_id),
             Transaction::Eip2930(TxEip2930 { chain_id: ref mut c, .. }) => *c = chain_id,
             Transaction::Eip1559(TxEip1559 { chain_id: ref mut c, .. }) => *c = chain_id,
+            Transaction::Eip4844(TxEip4844 { chain_id: ref mut c, .. }) => *c = chain_id,
         }
     }
 
@@ -328,7 +118,8 @@ impl Transaction {
         match self {
             Transaction::Legacy(TxLegacy { to, .. }) |
             Transaction::Eip2930(TxEip2930 { to, .. }) |
-            Transaction::Eip1559(TxEip1559 { to, .. }) => to,
+            Transaction::Eip1559(TxEip1559 { to, .. }) |
+            Transaction::Eip4844(TxEip4844 { to, .. }) => to,
         }
     }
 
@@ -343,6 +134,7 @@ impl Transaction {
             Transaction::Legacy { .. } => TxType::Legacy,
             Transaction::Eip2930 { .. } => TxType::EIP2930,
             Transaction::Eip1559 { .. } => TxType::EIP1559,
+            Transaction::Eip4844 { .. } => TxType::EIP4844,
         }
     }
 
@@ -352,6 +144,7 @@ impl Transaction {
             Transaction::Legacy(TxLegacy { value, .. }) => value,
             Transaction::Eip2930(TxEip2930 { value, .. }) => value,
             Transaction::Eip1559(TxEip1559 { value, .. }) => value,
+            Transaction::Eip4844(TxEip4844 { value, .. }) => value,
         }
     }
 
@@ -361,6 +154,7 @@ impl Transaction {
             Transaction::Legacy(TxLegacy { nonce, .. }) => *nonce,
             Transaction::Eip2930(TxEip2930 { nonce, .. }) => *nonce,
             Transaction::Eip1559(TxEip1559 { nonce, .. }) => *nonce,
+            Transaction::Eip4844(TxEip4844 { nonce, .. }) => *nonce,
         }
     }
 
@@ -369,7 +163,16 @@ impl Transaction {
         match self {
             Transaction::Legacy(TxLegacy { gas_limit, .. }) |
             Transaction::Eip2930(TxEip2930 { gas_limit, .. }) |
-            Transaction::Eip1559(TxEip1559 { gas_limit, .. }) => *gas_limit,
+            Transaction::Eip1559(TxEip1559 { gas_limit, .. }) |
+            Transaction::Eip4844(TxEip4844 { gas_limit, .. }) => *gas_limit,
+        }
+    }
+
+    /// Returns true if the tx supports dynamic fees
+    pub fn is_dynamic_fee(&self) -> bool {
+        match self {
+            Transaction::Legacy(_) | Transaction::Eip2930(_) => false,
+            Transaction::Eip1559(_) | Transaction::Eip4844(_) => true,
         }
     }
 
@@ -380,7 +183,8 @@ impl Transaction {
         match self {
             Transaction::Legacy(TxLegacy { gas_price, .. }) |
             Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
-            Transaction::Eip1559(TxEip1559 { max_fee_per_gas, .. }) => *max_fee_per_gas,
+            Transaction::Eip1559(TxEip1559 { max_fee_per_gas, .. }) |
+            Transaction::Eip4844(TxEip4844 { max_fee_per_gas, .. }) => *max_fee_per_gas,
         }
     }
 
@@ -392,9 +196,24 @@ impl Transaction {
         match self {
             Transaction::Legacy(_) => None,
             Transaction::Eip2930(_) => None,
-            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) => {
+            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) |
+            Transaction::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. }) => {
                 Some(*max_priority_fee_per_gas)
             }
+        }
+    }
+
+    /// Max fee per blob gas for eip4844 transaction [TxEip4844].
+    ///
+    /// Returns `None` for non-eip4844 transactions.
+    ///
+    /// This is also commonly referred to as the "Blob Gas Fee Cap" (`BlobGasFeeCap`).
+    pub fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        match self {
+            Transaction::Eip4844(TxEip4844 { max_fee_per_blob_gas, .. }) => {
+                Some(*max_fee_per_blob_gas)
+            }
+            _ => None,
         }
     }
 
@@ -405,11 +224,12 @@ impl Transaction {
     ///
     /// This is different than the `max_priority_fee_per_gas` method, which returns `None` for
     /// non-EIP-1559 transactions.
-    pub(crate) fn priority_fee_or_price(&self) -> u128 {
+    pub fn priority_fee_or_price(&self) -> u128 {
         match self {
             Transaction::Legacy(TxLegacy { gas_price, .. }) |
             Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
-            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) => {
+            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) |
+            Transaction::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. }) => {
                 *max_priority_fee_per_gas
             }
         }
@@ -423,6 +243,7 @@ impl Transaction {
             Transaction::Legacy(tx) => tx.gas_price,
             Transaction::Eip2930(tx) => tx.gas_price,
             Transaction::Eip1559(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
+            Transaction::Eip4844(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
         }
     }
 
@@ -478,6 +299,7 @@ impl Transaction {
             Transaction::Legacy(TxLegacy { input, .. }) => input,
             Transaction::Eip2930(TxEip2930 { input, .. }) => input,
             Transaction::Eip1559(TxEip1559 { input, .. }) => input,
+            Transaction::Eip4844(TxEip4844 { input, .. }) => input,
         }
     }
 
@@ -574,6 +396,33 @@ impl Transaction {
                 len += access_list.length();
                 len
             }
+            Transaction::Eip4844(TxEip4844 {
+                chain_id,
+                nonce,
+                gas_limit,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                to,
+                value,
+                access_list,
+                blob_versioned_hashes,
+                max_fee_per_blob_gas,
+                input,
+            }) => {
+                let mut len = 0;
+                len += chain_id.length();
+                len += nonce.length();
+                len += gas_limit.length();
+                len += max_fee_per_gas.length();
+                len += max_priority_fee_per_gas.length();
+                len += to.length();
+                len += value.length();
+                len += access_list.length();
+                len += blob_versioned_hashes.length();
+                len += max_fee_per_blob_gas.length();
+                len += input.0.length();
+                len
+            }
         }
     }
 
@@ -636,6 +485,162 @@ impl Transaction {
                 input.0.encode(out);
                 access_list.encode(out);
             }
+            Transaction::Eip4844(TxEip4844 {
+                chain_id,
+                nonce,
+                gas_limit,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                to,
+                value,
+                access_list,
+                blob_versioned_hashes,
+                max_fee_per_blob_gas,
+                input,
+            }) => {
+                chain_id.encode(out);
+                nonce.encode(out);
+                max_priority_fee_per_gas.encode(out);
+                max_fee_per_gas.encode(out);
+                gas_limit.encode(out);
+                to.encode(out);
+                value.encode(out);
+                input.0.encode(out);
+                access_list.encode(out);
+                max_fee_per_blob_gas.encode(out);
+                blob_versioned_hashes.encode(out);
+            }
+        }
+    }
+
+    /// This encodes the transaction _without_ the signature, and is only suitable for creating a
+    /// hash intended for signing.
+    pub fn encode_without_signature(&self, out: &mut dyn bytes::BufMut) {
+        Encodable::encode(self, out);
+    }
+
+    /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
+    /// hash that for eip2718 does not require rlp header
+    pub fn encode_with_signature(
+        &self,
+        signature: &Signature,
+        out: &mut dyn bytes::BufMut,
+        with_header: bool,
+    ) {
+        match self {
+            Transaction::Legacy(TxLegacy { chain_id, .. }) => {
+                // do nothing w/ with_header
+                let payload_length =
+                    self.fields_len() + signature.payload_len_with_eip155_chain_id(*chain_id);
+                let header = Header { list: true, payload_length };
+                header.encode(out);
+                self.encode_fields(out);
+                signature.encode_with_eip155_chain_id(out, *chain_id);
+            }
+            _ => {
+                let payload_length = self.fields_len() + signature.payload_len();
+                if with_header {
+                    Header {
+                        list: false,
+                        payload_length: 1 + length_of_length(payload_length) + payload_length,
+                    }
+                    .encode(out);
+                }
+                out.put_u8(self.tx_type() as u8);
+                let header = Header { list: true, payload_length };
+                header.encode(out);
+                self.encode_fields(out);
+                signature.encode(out);
+            }
+        }
+    }
+
+    /// This sets the transaction's nonce.
+    pub fn set_nonce(&mut self, nonce: u64) {
+        match self {
+            Transaction::Legacy(tx) => tx.nonce = nonce,
+            Transaction::Eip2930(tx) => tx.nonce = nonce,
+            Transaction::Eip1559(tx) => tx.nonce = nonce,
+            Transaction::Eip4844(tx) => tx.nonce = nonce,
+        }
+    }
+
+    /// This sets the transaction's value.
+    pub fn set_value(&mut self, value: u128) {
+        match self {
+            Transaction::Legacy(tx) => tx.value = value,
+            Transaction::Eip2930(tx) => tx.value = value,
+            Transaction::Eip1559(tx) => tx.value = value,
+            Transaction::Eip4844(tx) => tx.value = value,
+        }
+    }
+
+    /// This sets the transaction's input field.
+    pub fn set_input(&mut self, input: Bytes) {
+        match self {
+            Transaction::Legacy(tx) => tx.input = input,
+            Transaction::Eip2930(tx) => tx.input = input,
+            Transaction::Eip1559(tx) => tx.input = input,
+            Transaction::Eip4844(tx) => tx.input = input,
+        }
+    }
+
+    /// Calculates a heuristic for the in-memory size of the [Transaction].
+    #[inline]
+    fn size(&self) -> usize {
+        match self {
+            Transaction::Legacy(tx) => tx.size(),
+            Transaction::Eip2930(tx) => tx.size(),
+            Transaction::Eip1559(tx) => tx.size(),
+            Transaction::Eip4844(tx) => tx.size(),
+        }
+    }
+}
+
+impl Compact for Transaction {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        match self {
+            Transaction::Legacy(tx) => {
+                tx.to_compact(buf);
+                0
+            }
+            Transaction::Eip2930(tx) => {
+                tx.to_compact(buf);
+                1
+            }
+            Transaction::Eip1559(tx) => {
+                tx.to_compact(buf);
+                2
+            }
+            Transaction::Eip4844(tx) => {
+                tx.to_compact(buf);
+                3
+            }
+        }
+    }
+
+    fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+        match identifier {
+            0 => {
+                let (tx, buf) = TxLegacy::from_compact(buf, buf.len());
+                (Transaction::Legacy(tx), buf)
+            }
+            1 => {
+                let (tx, buf) = TxEip2930::from_compact(buf, buf.len());
+                (Transaction::Eip2930(tx), buf)
+            }
+            2 => {
+                let (tx, buf) = TxEip1559::from_compact(buf, buf.len());
+                (Transaction::Eip1559(tx), buf)
+            }
+            3 => {
+                let (tx, buf) = TxEip4844::from_compact(buf, buf.len());
+                (Transaction::Eip4844(tx), buf)
+            }
+            _ => unreachable!("Junk data in database: unknown Transaction variant"),
         }
     }
 }
@@ -681,26 +686,6 @@ impl Encodable for Transaction {
     }
 }
 
-impl TxEip1559 {
-    /// Returns the effective gas price for the given `base_fee`.
-    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
-        match base_fee {
-            None => self.max_fee_per_gas,
-            Some(base_fee) => {
-                // if the tip is greater than the max priority fee per gas, set it to the max
-                // priority fee per gas + base fee
-                let tip = self.max_fee_per_gas - base_fee as u128;
-                if tip > self.max_priority_fee_per_gas {
-                    self.max_priority_fee_per_gas + base_fee as u128
-                } else {
-                    // otherwise return the max fee per gas
-                    self.max_fee_per_gas
-                }
-            }
-        }
-    }
-}
-
 /// Whether or not the transaction is a contract creation.
 #[derive_arbitrary(compact, rlp)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
@@ -719,6 +704,12 @@ impl TransactionKind {
             TransactionKind::Create => None,
             TransactionKind::Call(to) => Some(to),
         }
+    }
+
+    /// Calculates a heuristic for the in-memory size of the [TransactionKind].
+    #[inline]
+    fn size(self) -> usize {
+        mem::size_of::<Self>()
     }
 }
 
@@ -780,6 +771,8 @@ impl Decodable for TransactionKind {
 }
 
 /// Signed transaction without its Hash. Used type for inserting into the DB.
+///
+/// This can by converted to [`TransactionSigned`] by calling [`TransactionSignedNoHash::hash`].
 #[derive_arbitrary(compact)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
 pub struct TransactionSignedNoHash {
@@ -798,6 +791,14 @@ impl TransactionSignedNoHash {
         let mut buf = Vec::new();
         self.transaction.encode_with_signature(&self.signature, &mut buf, false);
         keccak256(&buf)
+    }
+
+    /// Recover signer from signature and hash.
+    ///
+    /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
+    pub fn recover_signer(&self) -> Option<Address> {
+        let signature_hash = self.signature_hash();
+        self.signature.recover_signer(signature_hash)
     }
 
     /// Converts into a transaction type with its hash: [`TransactionSigned`].
@@ -938,7 +939,7 @@ impl TransactionSigned {
         self.signature.recover_signer(signature_hash)
     }
 
-    /// Devour Self, recover signer and return [`TransactionSignedEcRecovered`]
+    /// Consumes the type, recover signer and return [`TransactionSignedEcRecovered`]
     ///
     /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
     pub fn into_ecrecovered(self) -> Option<TransactionSignedEcRecovered> {
@@ -946,10 +947,21 @@ impl TransactionSigned {
         Some(TransactionSignedEcRecovered { signed_transaction: self, signer })
     }
 
-    /// try to recover signer and return [`TransactionSignedEcRecovered`]
+    /// Tries to recover signer and return [`TransactionSignedEcRecovered`] by cloning the type.
     pub fn try_ecrecovered(&self) -> Option<TransactionSignedEcRecovered> {
         let signer = self.recover_signer()?;
         Some(TransactionSignedEcRecovered { signed_transaction: self.clone(), signer })
+    }
+
+    /// Tries to recover signer and return [`TransactionSignedEcRecovered`].
+    ///
+    /// Returns `Err(Self)` if the transaction's signature is invalid, see also
+    /// [Self::recover_signer].
+    pub fn try_into_ecrecovered(self) -> Result<TransactionSignedEcRecovered, Self> {
+        match self.recover_signer() {
+            None => Err(self),
+            Some(signer) => Ok(TransactionSignedEcRecovered { signed_transaction: self, signer }),
+        }
     }
 
     /// Returns the enveloped encoded transactions.
@@ -1010,6 +1022,12 @@ impl TransactionSigned {
         let mut initial_tx = Self { transaction, hash: Default::default(), signature };
         initial_tx.hash = initial_tx.recalculate_hash();
         initial_tx
+    }
+
+    /// Calculate a heuristic for the in-memory size of the [TransactionSigned].
+    #[inline]
+    pub fn size(&self) -> usize {
+        mem::size_of::<TxHash>() + self.transaction.size() + self.signature.size()
     }
 
     /// Decodes legacy transaction from the data buffer.
@@ -1083,6 +1101,19 @@ impl TransactionSigned {
                 value: Decodable::decode(data)?,
                 input: Bytes(Decodable::decode(data)?),
                 access_list: Decodable::decode(data)?,
+            }),
+            3 => Transaction::Eip4844(TxEip4844 {
+                chain_id: Decodable::decode(data)?,
+                nonce: Decodable::decode(data)?,
+                max_priority_fee_per_gas: Decodable::decode(data)?,
+                max_fee_per_gas: Decodable::decode(data)?,
+                gas_limit: Decodable::decode(data)?,
+                to: Decodable::decode(data)?,
+                value: Decodable::decode(data)?,
+                input: Bytes(Decodable::decode(data)?),
+                access_list: Decodable::decode(data)?,
+                max_fee_per_blob_gas: Decodable::decode(data)?,
+                blob_versioned_hashes: Decodable::decode(data)?,
             }),
             _ => return Err(DecodeError::Custom("unsupported typed transaction type")),
         };
@@ -1292,9 +1323,8 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
 #[cfg(test)]
 mod tests {
     use crate::{
-        transaction::{signature::Signature, TransactionKind, TxEip1559, TxEip2930, TxLegacy},
-        AccessList, Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered,
-        H256, U256,
+        transaction::{signature::Signature, TransactionKind, TxEip1559, TxLegacy},
+        Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered, H256, U256,
     };
     use bytes::BytesMut;
     use ethers_core::utils::hex;
@@ -1306,30 +1336,6 @@ mod tests {
         let input = [0x80u8];
         let res = TransactionSigned::decode(&mut &input[..]).unwrap_err();
         assert_eq!(DecodeError::InputTooShort, res);
-    }
-
-    #[test]
-    fn test_decode_create() {
-        // tests that a contract creation tx encodes and decodes properly
-        let request = Transaction::Eip2930(TxEip2930 {
-            chain_id: 1u64,
-            nonce: 0,
-            gas_price: 1,
-            gas_limit: 2,
-            to: TransactionKind::Create,
-            value: 3,
-            input: Bytes::from(vec![1, 2]),
-            access_list: Default::default(),
-        });
-        let signature = Signature { odd_y_parity: true, r: U256::default(), s: U256::default() };
-        let tx = TransactionSigned::from_transaction_and_signature(request, signature);
-
-        let mut encoded = BytesMut::new();
-        tx.encode(&mut encoded);
-        assert_eq!(encoded.len(), tx.length());
-
-        let decoded = TransactionSigned::decode(&mut &*encoded).unwrap();
-        assert_eq!(decoded, tx);
     }
 
     #[test]
@@ -1346,31 +1352,6 @@ mod tests {
         decoded.encode(&mut encoded);
 
         assert_eq!(tx_bytes, encoded);
-    }
-
-    #[test]
-    fn test_decode_call() {
-        let request = Transaction::Eip2930(TxEip2930 {
-            chain_id: 1u64,
-            nonce: 0,
-            gas_price: 1,
-            gas_limit: 2,
-            to: TransactionKind::Call(Address::default()),
-            value: 3,
-            input: Bytes::from(vec![1, 2]),
-            access_list: Default::default(),
-        });
-
-        let signature = Signature { odd_y_parity: true, r: U256::default(), s: U256::default() };
-
-        let tx = TransactionSigned::from_transaction_and_signature(request, signature);
-
-        let mut encoded = BytesMut::new();
-        tx.encode(&mut encoded);
-        assert_eq!(encoded.len(), tx.length());
-
-        let decoded = TransactionSigned::decode(&mut &*encoded).unwrap();
-        assert_eq!(decoded, tx);
     }
 
     #[test]
@@ -1532,72 +1513,6 @@ mod tests {
         let tx = TransactionSigned::decode(&mut pointer).unwrap();
         assert_eq!(tx.hash(), hash, "Expected same hash");
         assert_eq!(tx.recover_signer(), Some(signer), "Recovering signer should pass.");
-    }
-
-    #[test]
-    fn recover_signer_legacy() {
-        use crate::hex_literal::hex;
-
-        let signer: Address = hex!("398137383b3d25c92898c656696e41950e47316b").into();
-        let hash: H256 =
-            hex!("bb3a336e3f823ec18197f1e13ee875700f08f03e2cab75f0d0b118dabb44cba0").into();
-
-        let tx = Transaction::Legacy(TxLegacy {
-            chain_id: Some(1),
-            nonce: 0x18,
-            gas_price: 0xfa56ea00,
-            gas_limit: 119902,
-            to: TransactionKind::Call( hex!("06012c8cf97bead5deae237070f9587f8e7a266d").into()),
-            value: 0x1c6bf526340000u64.into(),
-            input:  hex!("f7d8c88300000000000000000000000000000000000000000000000000000000000cee6100000000000000000000000000000000000000000000000000000000000ac3e1").into(),
-        });
-
-        let sig = Signature {
-            r: U256::from_be_bytes(hex!(
-                "2a378831cf81d99a3f06a18ae1b6ca366817ab4d88a70053c41d7a8f0368e031"
-            )),
-            s: U256::from_be_bytes(hex!(
-                "450d831a05b6e418724436c05c155e0a1b7b921015d0fbc2f667aed709ac4fb5"
-            )),
-            odd_y_parity: false,
-        };
-
-        let signed_tx = TransactionSigned::from_transaction_and_signature(tx, sig);
-        assert_eq!(signed_tx.hash(), hash, "Expected same hash");
-        assert_eq!(signed_tx.recover_signer(), Some(signer), "Recovering signer should pass.");
-    }
-
-    #[test]
-    fn recover_signer_eip1559() {
-        use crate::hex_literal::hex;
-
-        let signer: Address = hex!("dd6b8b3dc6b7ad97db52f08a275ff4483e024cea").into();
-        let hash: H256 =
-            hex!("0ec0b6a2df4d87424e5f6ad2a654e27aaeb7dac20ae9e8385cc09087ad532ee0").into();
-
-        let tx = Transaction::Eip1559( TxEip1559 {
-            chain_id: 1,
-            nonce: 0x42,
-            gas_limit: 44386,
-            to: TransactionKind::Call( hex!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into()),
-            value: 0,
-            input:  hex!("a22cb4650000000000000000000000005eee75727d804a2b13038928d36f8b188945a57a0000000000000000000000000000000000000000000000000000000000000000").into(),
-            max_fee_per_gas: 0x4a817c800,
-            max_priority_fee_per_gas: 0x3b9aca00,
-            access_list: AccessList::default(),
-        });
-
-        let sig = Signature {
-            r: U256::from_str("0x840cfc572845f5786e702984c2a582528cad4b49b2a10b9db1be7fca90058565")
-                .unwrap(),
-            s: U256::from_str("0x25e7109ceb98168d95b09b18bbf6b685130e0562f233877d492b94eee0c5b6d1")
-                .unwrap(),
-            odd_y_parity: false,
-        };
-
-        let signed_tx = TransactionSigned::from_transaction_and_signature(tx, sig);
-        assert_eq!(signed_tx.hash(), hash, "Expected same hash");
-        assert_eq!(signed_tx.recover_signer(), Some(signer), "Recovering signer should pass.");
     }
 
     #[test]

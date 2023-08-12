@@ -1,28 +1,18 @@
 # Binaries
 
-Precompiled binaries are available from the [GitHub releases page](https://github.com/paradigmxyz/reth/releases).
+[**Archives of precompiled binaries of reth are available for Windows, macOS and Linux.**](https://github.com/paradigmxyz/reth/releases) They are static executables. Users of platforms not explicitly listed below should download one of these archives.
 
-Binaries are supplied for 5 platforms:
+If you use **macOS Homebrew** or **Linuxbrew**, you can install Reth from Paradigm's homebrew tap:
 
-- Linux x86_64: AMD and Intel 64-bit processors (most desktops, laptops, and servers)
-- Linux ARM64: 64-bit arm processors
-- macOS x86_64: macOS with Intel chips
-- macOS ARM64: macOS with Apple Silicon
-- Windows x86_64: AMD and Intel 64-bit processors
+```text
+brew install paradigmxyz/brew/reth
+```
 
-Each binary is contained in a tarball.
+If you use **Arch Linux** you can install stable Reth from the AUR using an [AUR helper](https://wiki.archlinux.org/title/AUR_helpers) ([paru][paru] as an example here):
 
-As an example, you could install the Linux x86_64 version like so:
+```text
+paru -S reth # Stable
+paru -S reth-git # Unstable (git)
+```
 
-1. Go to the [Releases](https://github.com/paradigmxyz/reth/releases) page and select the latest release.
-1. Download the `reth-${VERSION}-x86_64-unknown-linux-gnu.tar.gz` tarball.  
-
-   For example, to obtain the binary file for v0.0.1-alpha, you can run the following commands in a Linux terminal:
-   ```bash
-   cd ~
-   curl -LO https://github.com/paradigmxyz/reth/releases/download/v0.1.0-alpha.1/reth-v0.1.0-alpha.1-x86_64-unknown-linux-gnu.tar.gz
-   tar -xvf reth-v0.1.0-alpha.1-x86_64-unknown-linux-gnu.tar.gz
-   ```
-1. Test the binary with `./reth --version` (it should print the version).
-2. (Optional) Move the `reth` binary to a location in your `PATH`, so the `reth` command can be called from anywhere.  
-   For most Linux distros, you can move the binary to `/usr/local/bin`: `sudo cp ./reth /usr/local/bin`.
+[paru]: https://github.com/Morganamilo/paru

@@ -62,7 +62,17 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     ///
     /// This finalizes `last_finalized_block` prior to reading the canonical hashes (using
     /// [`BlockchainTreeEngine::finalize_block`]).
-    fn restore_canonical_hashes(&self, last_finalized_block: BlockNumber) -> Result<(), Error>;
+    fn restore_canonical_hashes_and_finalize(
+        &self,
+        last_finalized_block: BlockNumber,
+    ) -> Result<(), Error>;
+
+    /// Reads the last `N` canonical hashes from the database and updates the block indices of the
+    /// tree.
+    ///
+    /// `N` is the `max_reorg_depth` plus the number of block hashes needed to satisfy the
+    /// `BLOCKHASH` opcode in the EVM.
+    fn restore_canonical_hashes(&self) -> Result<(), Error>;
 
     /// Make a block and its parent chain part of the canonical chain by committing it to the
     /// database.
@@ -134,8 +144,8 @@ pub enum BlockStatus {
     Accepted,
     /// If blocks is not connected to canonical chain.
     Disconnected {
-        /// The lowest parent block that is not connected to the canonical chain.
-        missing_parent: BlockNumHash,
+        /// The lowest ancestor block that is not connected to the canonical chain.
+        missing_ancestor: BlockNumHash,
     },
 }
 
@@ -206,6 +216,9 @@ pub trait BlockchainTreeViewer: Send + Sync {
     ///
     /// Note: this could be the given `parent_hash` if it's already canonical.
     fn find_canonical_ancestor(&self, parent_hash: BlockHash) -> Option<BlockHash>;
+
+    /// Return whether or not the block is known and in the canonical chain.
+    fn is_canonical(&self, hash: BlockHash) -> Result<bool, Error>;
 
     /// Given the hash of a block, this checks the buffered blocks for the lowest ancestor in the
     /// buffer.

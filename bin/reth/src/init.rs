@@ -109,7 +109,7 @@ pub fn insert_genesis_state<DB: Database>(
             state.change_storage(0, *address, storage_changes);
         }
     }
-    state.write_to_db(tx)?;
+    state.write_to_db(tx, 0)?;
 
     Ok(())
 }
@@ -190,6 +190,7 @@ mod tests {
     };
     use std::collections::HashMap;
 
+    #[allow(clippy::type_complexity)]
     fn collect_table_entries<DB, T>(
         tx: &<DB as DatabaseGAT<'_>>::TX,
     ) -> Result<Vec<(T::Key, T::Value)>, InitDatabaseError>
@@ -268,9 +269,11 @@ mod tests {
                 ..Default::default()
             },
             hardforks: BTreeMap::default(),
-            fork_timestamps: ForkTimestamps { shanghai: None },
+            fork_timestamps: ForkTimestamps::default(),
             genesis_hash: None,
             paris_block_and_final_difficulty: None,
+            deposit_contract: None,
+            ..Default::default()
         });
 
         let db = create_test_rw_db();

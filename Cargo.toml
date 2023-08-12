@@ -21,6 +21,7 @@ members = [
     "crates/net/downloaders",
     "crates/payload/basic",
     "crates/primitives",
+    "crates/prune",
     "crates/revm",
     "crates/revm/revm-primitives",
     "crates/revm/revm-inspectors",
@@ -44,8 +45,9 @@ members = [
     "crates/transaction-pool",
     "crates/trie",
     "testing/ef-tests",
-
+    "crates/rpc/rpc-types-compat",
     "examples",
+    "examples/additional-rpc-namespace-in-cli",
 ]
 default-members = ["bin/reth"]
 
@@ -54,7 +56,7 @@ default-members = ["bin/reth"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.6"
 edition = "2021"
 rust-version = "1.70" # Remember to update .clippy.toml and README.md
 license = "MIT OR Apache-2.0"
@@ -76,9 +78,6 @@ codegen-units = 1
 incremental = false
 
 [patch.crates-io]
-# patched for quantity U256 responses <https://github.com/recmo/uint/issues/224>
-ruint = { git = "https://github.com/paradigmxyz/uint" }
-
 revm = { git = "https://github.com/bluealloy/revm/", branch = "release/v25" }
 revm-primitives = { git = "https://github.com/bluealloy/revm/", branch = "release/v25" }
 
@@ -86,6 +85,7 @@ revm-primitives = { git = "https://github.com/bluealloy/revm/", branch = "releas
 ## reth
 revm = { version = "3" }
 revm-primitives = "1.1"
+reth = { path = "./bin/reth" }
 reth-primitives = { path = "./crates/primitives" }
 reth-interfaces = { path = "./crates/interfaces" }
 reth-provider = { path = "./crates/storage/provider" }
@@ -100,21 +100,28 @@ reth-revm = { path = "./crates/revm" }
 reth-payload-builder = { path = "./crates/payload/builder" }
 reth-transaction-pool = { path = "./crates/transaction-pool" }
 reth-tasks = { path = "./crates/tasks" }
+reth-network = { path = "./crates/net/network" }
 reth-network-api = { path = "./crates/net/network-api" }
+reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat"}
+
 
 ## eth
-ethers-core = { version = "2.0.7", default-features = false }
-ethers-providers = { version = "2.0.7", default-features = false }
-ethers-signers = { version = "2.0.7", default-features = false }
-ethers-middleware = { version = "2.0.7", default-features = false }
+ethers-core = { version = "2.0.8", default-features = false }
+ethers-providers = { version = "2.0.8", default-features = false }
+ethers-signers = { version = "2.0.8", default-features = false }
+ethers-middleware = { version = "2.0.8", default-features = false }
 
 ## misc
 bytes = "1.4"
 tracing = "0.1.0"
+tracing-appender = "0.2"
 thiserror = "1.0.37"
 serde_json = "1.0.94"
 serde = { version = "1.0", default-features = false }
 rand = "0.8.5"
+strum = "0.25"
+rayon = "1.7"
+itertools = "0.11"
 
 ### proc-macros
 proc-macro2 = "1.0"
@@ -131,5 +138,16 @@ futures = "0.3.26"
 pin-project = "1.0.12"
 futures-util = "0.3.25"
 
+## json
+jsonrpsee = { version = "0.19" }
+jsonrpsee-core = { version = "0.19" }
+jsonrpsee-types = { version = "0.19" }
+
 ## crypto
 secp256k1 = { version = "0.27.0", default-features = false, features = ["global-context", "rand-std", "recovery"] }
+# for eip-4844
+c-kzg = { git = "https://github.com/ethereum/c-kzg-4844" }
+
+### misc-testing
+proptest = "1.0"
+arbitrary = "1.1"

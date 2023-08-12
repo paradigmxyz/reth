@@ -43,9 +43,9 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
 {
     fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
         let mut tree = self.tree.write();
-        let res = tree.buffer_block(block);
-        tree.update_metrics();
-        res
+        // Blockchain tree metrics shouldn't be updated here, see
+        // `BlockchainTree::update_chains_metrics` documentation.
+        tree.buffer_block(block)
     }
 
     fn insert_block(
@@ -55,7 +55,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
         trace!(target: "blockchain_tree", hash=?block.hash, number=block.number, parent_hash=?block.parent_hash, "Inserting block");
         let mut tree = self.tree.write();
         let res = tree.insert_block(block);
-        tree.update_metrics();
+        tree.update_chains_metrics();
         res
     }
 
@@ -63,14 +63,25 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
         trace!(target: "blockchain_tree", ?finalized_block, "Finalizing block");
         let mut tree = self.tree.write();
         tree.finalize_block(finalized_block);
-        tree.update_metrics();
+        tree.update_chains_metrics();
     }
 
-    fn restore_canonical_hashes(&self, last_finalized_block: BlockNumber) -> Result<(), Error> {
+    fn restore_canonical_hashes_and_finalize(
+        &self,
+        last_finalized_block: BlockNumber,
+    ) -> Result<(), Error> {
         trace!(target: "blockchain_tree", ?last_finalized_block, "Restoring canonical hashes for last finalized block");
         let mut tree = self.tree.write();
-        let res = tree.restore_canonical_hashes(last_finalized_block);
-        tree.update_metrics();
+        let res = tree.restore_canonical_hashes_and_finalize(last_finalized_block);
+        tree.update_chains_metrics();
+        res
+    }
+
+    fn restore_canonical_hashes(&self) -> Result<(), Error> {
+        trace!(target: "blockchain_tree", "Restoring canonical hashes");
+        let mut tree = self.tree.write();
+        let res = tree.restore_canonical_hashes();
+        tree.update_chains_metrics();
         res
     }
 
@@ -78,7 +89,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
         trace!(target: "blockchain_tree", ?block_hash, "Making block canonical");
         let mut tree = self.tree.write();
         let res = tree.make_canonical(block_hash);
-        tree.update_metrics();
+        tree.update_chains_metrics();
         res
     }
 
@@ -86,7 +97,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
         trace!(target: "blockchain_tree", ?unwind_to, "Unwinding to block number");
         let mut tree = self.tree.write();
         let res = tree.unwind(unwind_to);
-        tree.update_metrics();
+        tree.update_chains_metrics();
         res
     }
 }
@@ -145,6 +156,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
     fn canonical_tip(&self) -> BlockNumHash {
         trace!(target: "blockchain_tree", "Returning canonical tip");
         self.tree.read().block_indices().canonical_tip()
+    }
+
+    fn is_canonical(&self, hash: BlockHash) -> Result<bool, Error> {
+        trace!(target: "blockchain_tree", ?hash, "Checking if block is canonical");
+        self.tree.read().is_block_hash_canonical(&hash)
     }
 
     fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {

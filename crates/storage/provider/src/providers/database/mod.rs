@@ -2,16 +2,17 @@ use crate::{
     providers::state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, EvmEnvProvider,
-    HeaderProvider, ProviderError, StageCheckpointReader, StateProviderBox, TransactionsProvider,
-    WithdrawalsProvider,
+    HeaderProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
+    TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_interfaces::Result;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
-    ChainSpec, Header, Receipt, SealedBlock, SealedHeader, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256, U256,
+    ChainSpec, Header, PruneCheckpoint, PrunePart, Receipt, SealedBlock, SealedHeader,
+    TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal,
+    H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::{ops::RangeBounds, sync::Arc};
@@ -86,7 +87,7 @@ impl<DB: Database> ProviderFactory<DB> {
     }
 
     /// Storage provider for state at that given block
-    pub fn history_by_block_number(
+    fn state_provider_by_block_number(
         &self,
         mut block_number: BlockNumber,
     ) -> Result<StateProviderBox<'_>> {
@@ -101,30 +102,49 @@ impl<DB: Database> ProviderFactory<DB> {
         // +1 as the changeset that we want is the one that was applied after this block.
         block_number += 1;
 
+        let account_history_prune_checkpoint =
+            provider.get_prune_checkpoint(PrunePart::AccountHistory)?;
+        let storage_history_prune_checkpoint =
+            provider.get_prune_checkpoint(PrunePart::StorageHistory)?;
+
+        let mut state_provider = HistoricalStateProvider::new(provider.into_tx(), block_number);
+
+        // If we pruned account or storage history, we can't return state on every historical block.
+        // Instead, we should cap it at the latest prune checkpoint for corresponding prune part.
+        if let Some(prune_checkpoint) = account_history_prune_checkpoint {
+            state_provider = state_provider.with_lowest_available_account_history_block_number(
+                prune_checkpoint.block_number + 1,
+            );
+        }
+        if let Some(prune_checkpoint) = storage_history_prune_checkpoint {
+            state_provider = state_provider.with_lowest_available_storage_history_block_number(
+                prune_checkpoint.block_number + 1,
+            );
+        }
+
+        Ok(Box::new(state_provider))
+    }
+
+    /// Storage provider for state at that given block
+    pub fn history_by_block_number(
+        &self,
+        block_number: BlockNumber,
+    ) -> Result<StateProviderBox<'_>> {
+        let state_provider = self.state_provider_by_block_number(block_number)?;
         trace!(target: "providers::db", ?block_number, "Returning historical state provider for block number");
-        Ok(Box::new(HistoricalStateProvider::new(provider.into_tx(), block_number)))
+        Ok(state_provider)
     }
 
     /// Storage provider for state at that given block hash
     pub fn history_by_block_hash(&self, block_hash: BlockHash) -> Result<StateProviderBox<'_>> {
-        let provider = self.provider()?;
-
-        let mut block_number = provider
+        let block_number = self
+            .provider()?
             .block_number(block_hash)?
             .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
 
-        if block_number == provider.best_block_number().unwrap_or_default() &&
-            block_number == provider.last_block_number().unwrap_or_default()
-        {
-            return Ok(Box::new(LatestStateProvider::new(provider.into_tx())))
-        }
-
-        // +1 as the changeset that we want is the one that was applied after this block.
-        // as the  changeset contains old values.
-        block_number += 1;
-
-        trace!(target: "providers::db", ?block_hash, "Returning historical state provider for block hash");
-        Ok(Box::new(HistoricalStateProvider::new(provider.into_tx(), block_number)))
+        let state_provider = self.state_provider_by_block_number(block_number)?;
+        trace!(target: "providers::db", ?block_number, "Returning historical state provider for block hash");
+        Ok(state_provider)
     }
 }
 
@@ -234,6 +254,10 @@ impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
 
     fn transaction_by_id(&self, id: TxNumber) -> Result<Option<TransactionSigned>> {
         self.provider()?.transaction_by_id(id)
+    }
+
+    fn transaction_by_id_no_hash(&self, id: TxNumber) -> Result<Option<TransactionSignedNoHash>> {
+        self.provider()?.transaction_by_id_no_hash(id)
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> Result<Option<TransactionSigned>> {
@@ -361,6 +385,12 @@ where
 {
     fn chain_spec(&self) -> Arc<ChainSpec> {
         self.chain_spec.clone()
+    }
+}
+
+impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
+    fn get_prune_checkpoint(&self, part: PrunePart) -> Result<Option<PruneCheckpoint>> {
+        self.provider()?.get_prune_checkpoint(part)
     }
 }
 

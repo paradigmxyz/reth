@@ -119,27 +119,25 @@ where
         // reverse from there. Else, it should use whatever the forkchoice state reports.
         let target = match next_header {
             Some(header) if checkpoint + 1 != header.number => SyncTarget::Gap(header),
-            None => self.next_sync_target(head_num).await,
+            None => self
+                .next_sync_target(head_num)
+                .await
+                .ok_or(StageError::StageCheckpoint(checkpoint))?,
             _ => return Err(StageError::StageCheckpoint(checkpoint)),
         };
 
         Ok(SyncGap { local_head, target })
     }
 
-    async fn next_sync_target(&mut self, head: BlockNumber) -> SyncTarget {
+    async fn next_sync_target(&mut self, head: BlockNumber) -> Option<SyncTarget> {
         match self.mode {
             HeaderSyncMode::Tip(ref mut rx) => {
-                loop {
-                    let _ = rx.changed().await; // TODO: remove this await?
-                    let tip = rx.borrow();
-                    if !tip.is_zero() {
-                        return SyncTarget::Tip(*tip)
-                    }
-                }
+                let tip = rx.wait_for(|tip| !tip.is_zero()).await.ok()?;
+                Some(SyncTarget::Tip(*tip))
             }
             HeaderSyncMode::Continuous => {
-                tracing::trace!(target: "sync::stages::headers", head, "No next header found, using continuous sync strategy");
-                SyncTarget::TipNum(head + 1)
+                trace!(target: "sync::stages::headers", head, "No next header found, using continuous sync strategy");
+                Some(SyncTarget::TipNum(head + 1))
             }
         }
     }

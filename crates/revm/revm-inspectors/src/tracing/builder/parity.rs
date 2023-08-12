@@ -1,11 +1,16 @@
-use crate::tracing::{types::CallTraceNode, TracingInspectorConfig};
+use super::walker::CallTraceNodeWalkerBF;
+use crate::tracing::{
+    types::{CallTraceNode, CallTraceStep},
+    TracingInspectorConfig,
+};
 use reth_primitives::{Address, U64};
 use reth_rpc_types::{trace::parity::*, TransactionInfo};
 use revm::{
     db::DatabaseRef,
-    primitives::{AccountInfo, ExecutionResult, ResultAndState},
+    interpreter::opcode::spec_opcode_gas,
+    primitives::{AccountInfo, ExecutionResult, ResultAndState, SpecId, KECCAK_EMPTY},
 };
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 /// A type for creating parity style traces
 ///
@@ -14,14 +19,21 @@ use std::collections::HashSet;
 pub struct ParityTraceBuilder {
     /// Recorded trace nodes
     nodes: Vec<CallTraceNode>,
+    /// The spec id of the EVM.
+    spec_id: Option<SpecId>,
+
     /// How the traces were recorded
     _config: TracingInspectorConfig,
 }
 
 impl ParityTraceBuilder {
     /// Returns a new instance of the builder
-    pub(crate) fn new(nodes: Vec<CallTraceNode>, _config: TracingInspectorConfig) -> Self {
-        Self { nodes, _config }
+    pub(crate) fn new(
+        nodes: Vec<CallTraceNode>,
+        spec_id: Option<SpecId>,
+        _config: TracingInspectorConfig,
+    ) -> Self {
+        Self { nodes, spec_id, _config }
     }
 
     /// Returns a list of all addresses that appeared as callers.
@@ -132,7 +144,12 @@ impl ParityTraceBuilder {
 
         let (trace, vm_trace, state_diff) = self.into_trace_type_traces(trace_types);
 
-        TraceResults { output: output.into(), trace, vm_trace, state_diff }
+        TraceResults {
+            output: output.into(),
+            trace: trace.unwrap_or_default(),
+            vm_trace,
+            state_diff,
+        }
     }
 
     /// Consumes the inspector and returns the trace results according to the configured trace
@@ -154,7 +171,18 @@ impl ParityTraceBuilder {
         DB: DatabaseRef,
     {
         let ResultAndState { result, state } = res;
+
+        let breadth_first_addresses = if trace_types.contains(&TraceType::VmTrace) {
+            CallTraceNodeWalkerBF::new(&self.nodes)
+                .map(|node| node.trace.address)
+                .collect::<Vec<_>>()
+        } else {
+            vec![]
+        };
+
         let mut trace_res = self.into_trace_results(result, trace_types);
+
+        // check the state diff case
         if let Some(ref mut state_diff) = trace_res.state_diff {
             populate_account_balance_nonce_diffs(
                 state_diff,
@@ -162,6 +190,12 @@ impl ParityTraceBuilder {
                 state.into_iter().map(|(addr, acc)| (addr, acc.info)),
             )?;
         }
+
+        // check the vm trace case
+        if let Some(ref mut vm_trace) = trace_res.vm_trace {
+            populate_vm_trace_bytecodes(&db, vm_trace, breadth_first_addresses)?;
+        }
+
         Ok(trace_res)
     }
 
@@ -177,11 +211,8 @@ impl ParityTraceBuilder {
         let with_traces = trace_types.contains(&TraceType::Trace);
         let with_diff = trace_types.contains(&TraceType::StateDiff);
 
-        let vm_trace = if trace_types.contains(&TraceType::VmTrace) {
-            Some(vm_trace(&self.nodes))
-        } else {
-            None
-        };
+        let vm_trace =
+            if trace_types.contains(&TraceType::VmTrace) { Some(self.vm_trace()) } else { None };
 
         let mut traces = Vec::with_capacity(if with_traces { self.nodes.len() } else { 0 });
         let mut diff = StateDiff::default();
@@ -192,6 +223,25 @@ impl ParityTraceBuilder {
             if with_traces {
                 let trace = node.parity_transaction_trace(trace_address);
                 traces.push(trace);
+
+                // check if the trace node is a selfdestruct
+                if node.is_selfdestruct() {
+                    // selfdestructs are not recorded as individual call traces but are derived from
+                    // the call trace and are added as additional `TransactionTrace` objects in the
+                    // trace array
+                    let addr = {
+                        let last = traces.last_mut().expect("exists");
+                        let mut addr = last.trace_address.clone();
+                        addr.push(last.subtraces);
+                        // need to account for the additional selfdestruct trace
+                        last.subtraces += 1;
+                        addr
+                    };
+
+                    if let Some(trace) = node.parity_selfdestruct_trace(addr) {
+                        traces.push(trace);
+                    }
+                }
             }
             if with_diff {
                 node.parity_update_state_diff(&mut diff);
@@ -207,24 +257,215 @@ impl ParityTraceBuilder {
     /// Returns an iterator over all recorded traces  for `trace_transaction`
     pub fn into_transaction_traces_iter(self) -> impl Iterator<Item = TransactionTrace> {
         let trace_addresses = self.trace_addresses();
-        self.nodes
-            .into_iter()
-            .zip(trace_addresses)
-            .filter(|(node, _)| !node.is_precompile())
-            .map(|(node, trace_address)| node.parity_transaction_trace(trace_address))
+        TransactionTraceIter {
+            next_selfdestruct: None,
+            iter: self
+                .nodes
+                .into_iter()
+                .zip(trace_addresses)
+                .filter(|(node, _)| !node.is_precompile())
+                .map(|(node, trace_address)| (node.parity_transaction_trace(trace_address), node)),
+        }
     }
 
     /// Returns the raw traces of the transaction
     pub fn into_transaction_traces(self) -> Vec<TransactionTrace> {
         self.into_transaction_traces_iter().collect()
     }
+
+    /// Returns the last recorded step
+    #[inline]
+    fn last_step(&self) -> Option<&CallTraceStep> {
+        self.nodes.last().and_then(|node| node.trace.steps.last())
+    }
+
+    /// Returns true if the last recorded step is a STOP
+    #[inline]
+    fn is_last_step_stop_op(&self) -> bool {
+        self.last_step().map(|step| step.is_stop()).unwrap_or(false)
+    }
+
+    /// Creates a VM trace by walking over `CallTraceNode`s
+    ///
+    /// does not have the code fields filled in
+    pub fn vm_trace(&self) -> VmTrace {
+        match self.nodes.get(0) {
+            Some(current) => self.make_vm_trace(current),
+            None => VmTrace { code: Default::default(), ops: Vec::new() },
+        }
+    }
+
+    /// Returns a VM trace without the code filled in
+    ///
+    /// Iteratively creates a VM trace by traversing the recorded nodes in the arena
+    fn make_vm_trace(&self, start: &CallTraceNode) -> VmTrace {
+        let mut child_idx_stack = Vec::with_capacity(self.nodes.len());
+        let mut sub_stack = VecDeque::with_capacity(self.nodes.len());
+
+        let mut current = start;
+        let mut child_idx: usize = 0;
+
+        // finds the deepest nested calls of each call frame and fills them up bottom to top
+        let instructions = 'outer: loop {
+            match current.children.get(child_idx) {
+                Some(child) => {
+                    child_idx_stack.push(child_idx + 1);
+
+                    child_idx = 0;
+                    current = self.nodes.get(*child).expect("there should be a child");
+                }
+                None => {
+                    let mut instructions = Vec::with_capacity(current.trace.steps.len());
+
+                    for step in &current.trace.steps {
+                        let maybe_sub_call = if step.is_calllike_op() {
+                            sub_stack.pop_front().flatten()
+                        } else {
+                            None
+                        };
+
+                        if step.is_stop() && instructions.is_empty() && self.is_last_step_stop_op()
+                        {
+                            // This is a special case where there's a single STOP which is
+                            // "optimised away", transfers for example
+                            break 'outer instructions
+                        }
+
+                        instructions.push(self.make_instruction(step, maybe_sub_call));
+                    }
+
+                    match current.parent {
+                        Some(parent) => {
+                            sub_stack.push_back(Some(VmTrace {
+                                code: Default::default(),
+                                ops: instructions,
+                            }));
+
+                            child_idx = child_idx_stack.pop().expect("there should be a child idx");
+
+                            current = self.nodes.get(parent).expect("there should be a parent");
+                        }
+                        None => break instructions,
+                    }
+                }
+            }
+        };
+
+        VmTrace { code: Default::default(), ops: instructions }
+    }
+
+    /// Creates a VM instruction from a [CallTraceStep] and a [VmTrace] for the subcall if there is
+    /// one
+    fn make_instruction(
+        &self,
+        step: &CallTraceStep,
+        maybe_sub_call: Option<VmTrace>,
+    ) -> VmInstruction {
+        let maybe_storage = step.storage_change.map(|storage_change| StorageDelta {
+            key: storage_change.key,
+            val: storage_change.value,
+        });
+
+        let maybe_memory = match step.memory.len() {
+            0 => None,
+            _ => {
+                Some(MemoryDelta { off: step.memory_size, data: step.memory.data().clone().into() })
+            }
+        };
+
+        let maybe_execution = Some(VmExecutedOperation {
+            used: step.gas_remaining,
+            push: step.push_stack.clone().unwrap_or_default(),
+            mem: maybe_memory,
+            store: maybe_storage,
+        });
+
+        let cost = self
+            .spec_id
+            .and_then(|spec_id| {
+                spec_opcode_gas(spec_id).get(step.op.u8() as usize).map(|op| op.get_gas())
+            })
+            .unwrap_or_default();
+
+        VmInstruction {
+            pc: step.pc,
+            cost: cost as u64,
+            ex: maybe_execution,
+            sub: maybe_sub_call,
+            op: Some(step.op.to_string()),
+            idx: None,
+        }
+    }
 }
 
-/// Construct the vmtrace for the entire callgraph
-fn vm_trace(nodes: &[CallTraceNode]) -> VmTrace {
-    // TODO: populate vm trace
+/// An iterator for [TransactionTrace]s
+///
+/// This iterator handles additional selfdestruct actions based on the last emitted
+/// [TransactionTrace], since selfdestructs are not recorded as individual call traces but are
+/// derived from recorded call
+struct TransactionTraceIter<Iter> {
+    iter: Iter,
+    next_selfdestruct: Option<TransactionTrace>,
+}
 
-    VmTrace { code: nodes[0].trace.data.clone().into(), ops: vec![] }
+impl<Iter> Iterator for TransactionTraceIter<Iter>
+where
+    Iter: Iterator<Item = (TransactionTrace, CallTraceNode)>,
+{
+    type Item = TransactionTrace;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(selfdestruct) = self.next_selfdestruct.take() {
+            return Some(selfdestruct)
+        }
+        let (mut trace, node) = self.iter.next()?;
+        if node.is_selfdestruct() {
+            // since selfdestructs are emitted as additional trace, increase the trace count
+            let mut addr = trace.trace_address.clone();
+            addr.push(trace.subtraces);
+            // need to account for the additional selfdestruct trace
+            trace.subtraces += 1;
+            self.next_selfdestruct = node.parity_selfdestruct_trace(addr);
+        }
+        Some(trace)
+    }
+}
+
+/// addresses are presorted via breadth first walk thru [CallTraceNode]s, this  can be done by a
+/// walker in [crate::tracing::builder::walker]
+///
+/// iteratively fill the [VmTrace] code fields
+pub(crate) fn populate_vm_trace_bytecodes<DB, I>(
+    db: &DB,
+    trace: &mut VmTrace,
+    breadth_first_addresses: I,
+) -> Result<(), DB::Error>
+where
+    DB: DatabaseRef,
+    I: IntoIterator<Item = Address>,
+{
+    let mut stack: VecDeque<&mut VmTrace> = VecDeque::new();
+    stack.push_back(trace);
+
+    let mut addrs = breadth_first_addresses.into_iter();
+
+    while let Some(curr_ref) = stack.pop_front() {
+        for op in curr_ref.ops.iter_mut() {
+            if let Some(sub) = op.sub.as_mut() {
+                stack.push_back(sub);
+            }
+        }
+
+        let addr = addrs.next().expect("there should be an address");
+
+        let db_acc = db.basic(addr)?.unwrap_or_default();
+
+        let code_hash = if db_acc.code_hash != KECCAK_EMPTY { db_acc.code_hash } else { continue };
+
+        curr_ref.code = db.code_by_hash(code_hash)?.original_bytes().into();
+    }
+
+    Ok(())
 }
 
 /// Loops over all state accounts in the accounts diff that contains all accounts that are included

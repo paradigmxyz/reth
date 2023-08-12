@@ -9,7 +9,7 @@ repository.workspace = true
 description = "tracing helpers"
 
 [dependencies]
-tracing = { workspace = true }
+tracing.workspace = true
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt"] }
-tracing-appender = "0.2"
+tracing-appender.workspace = true
 tracing-journald = "0.3"

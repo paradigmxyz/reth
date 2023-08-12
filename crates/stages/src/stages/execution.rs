@@ -1,4 +1,8 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::{
+    stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD, ExecInput, ExecOutput, MetricEvent,
+    MetricEventsSender, Stage, StageError, UnwindInput, UnwindOutput,
+};
+use num_traits::Zero;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
@@ -7,16 +11,11 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::db::DatabaseError;
-use reth_metrics::{
-    metrics::{self, Gauge},
-    Metrics,
-};
 use reth_primitives::{
-    constants::MGAS_TO_GAS,
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
     },
-    BlockNumber, Header, U256,
+    BlockNumber, Header, PruneModes, U256,
 };
 use reth_provider::{
     post_state::PostState, BlockExecutor, BlockReader, DatabaseProviderRW, ExecutorFactory,
@@ -24,14 +23,6 @@ use reth_provider::{
 };
 use std::{ops::RangeInclusive, time::Instant};
 use tracing::*;
-
-/// Execution stage metrics.
-#[derive(Metrics)]
-#[metrics(scope = "sync.execution")]
-pub struct ExecutionStageMetrics {
-    /// The total amount of gas processed (in millions)
-    mgas_processed_total: Gauge,
-}
 
 /// The execution stage executes all transactions and
 /// update history indexes.
@@ -64,29 +55,58 @@ pub struct ExecutionStageMetrics {
 // false positive, we cannot derive it if !DB: Debug.
 #[allow(missing_debug_implementations)]
 pub struct ExecutionStage<EF: ExecutorFactory> {
-    metrics: ExecutionStageMetrics,
+    metrics_tx: Option<MetricEventsSender>,
     /// The stage's internal executor
     executor_factory: EF,
     /// The commit thresholds of the execution stage.
     thresholds: ExecutionStageThresholds,
+    /// The highest threshold (in number of blocks) for switching between incremental
+    /// and full calculations across [`super::MerkleStage`], [`super::AccountHashingStage`] and
+    /// [`super::StorageHashingStage`]. This is required to figure out if can prune or not
+    /// changesets on subsequent pipeline runs.
+    external_clean_threshold: u64,
+    /// Pruning configuration.
+    prune_modes: PruneModes,
 }
 
 impl<EF: ExecutorFactory> ExecutionStage<EF> {
     /// Create new execution stage with specified config.
-    pub fn new(executor_factory: EF, thresholds: ExecutionStageThresholds) -> Self {
-        Self { metrics: ExecutionStageMetrics::default(), executor_factory, thresholds }
+    pub fn new(
+        executor_factory: EF,
+        thresholds: ExecutionStageThresholds,
+        external_clean_threshold: u64,
+        prune_modes: PruneModes,
+    ) -> Self {
+        Self {
+            metrics_tx: None,
+            external_clean_threshold,
+            executor_factory,
+            thresholds,
+            prune_modes,
+        }
     }
 
     /// Create an execution stage with the provided  executor factory.
     ///
     /// The commit threshold will be set to 10_000.
     pub fn new_with_factory(executor_factory: EF) -> Self {
-        Self::new(executor_factory, ExecutionStageThresholds::default())
+        Self::new(
+            executor_factory,
+            ExecutionStageThresholds::default(),
+            MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+            PruneModes::default(),
+        )
+    }
+
+    /// Set the metric events sender.
+    pub fn with_metrics_tx(mut self, metrics_tx: MetricEventsSender) -> Self {
+        self.metrics_tx = Some(metrics_tx);
+        self
     }
 
     /// Execute the stage.
     pub fn execute_inner<DB: Database>(
-        &self,
+        &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
@@ -96,6 +116,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         let start_block = input.next_block();
         let max_block = input.target();
+        let prune_modes = self.adjust_prune_modes(provider, start_block, max_block)?;
 
         // Build executor
         let mut executor =
@@ -108,6 +129,8 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // Execute block range
         let mut state = PostState::default();
+        state.add_prune_modes(prune_modes);
+
         for block_number in start_block..=max_block {
             let td = provider
                 .header_td_by_number(block_number)?
@@ -129,9 +152,10 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 })?;
 
             // Gas metrics
-            self.metrics
-                .mgas_processed_total
-                .increment(block.header.gas_used as f64 / MGAS_TO_GAS as f64);
+            if let Some(metrics_tx) = &mut self.metrics_tx {
+                let _ =
+                    metrics_tx.send(MetricEvent::ExecutionStageGas { gas: block.header.gas_used });
+            }
 
             // Merge state changes
             state.extend(block_state);
@@ -148,7 +172,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         // Write remaining changes
         trace!(target: "sync::stages::execution", accounts = state.accounts().len(), "Writing updated state to database");
         let start = Instant::now();
-        state.write_to_db(provider.tx_ref())?;
+        state.write_to_db(provider.tx_ref(), max_block)?;
         trace!(target: "sync::stages::execution", took = ?start.elapsed(), "Wrote state");
 
         let done = stage_progress == max_block;
@@ -157,6 +181,35 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 .with_execution_stage_checkpoint(stage_checkpoint),
             done,
         })
+    }
+
+    /// Adjusts the prune modes related to changesets.
+    ///
+    /// This function verifies whether the [`super::MerkleStage`] or Hashing stages will run from
+    /// scratch. If at least one stage isn't starting anew, it implies that pruning of
+    /// changesets cannot occur. This is determined by checking the highest clean threshold
+    /// (`self.external_clean_threshold`) across the stages.
+    ///
+    /// Given that `start_block` changes with each checkpoint, it's necessary to inspect
+    /// [`tables::AccountsTrie`] to ensure that [`super::MerkleStage`] hasn't
+    /// been previously executed.
+    fn adjust_prune_modes<DB: Database>(
+        &self,
+        provider: &DatabaseProviderRW<'_, &DB>,
+        start_block: u64,
+        max_block: u64,
+    ) -> Result<PruneModes, StageError> {
+        let mut prune_modes = self.prune_modes;
+
+        // If we're not executing MerkleStage from scratch (by threshold or first-sync), then erase
+        // changeset related pruning configurations
+        if !(max_block - start_block > self.external_clean_threshold ||
+            provider.tx_ref().entries::<tables::AccountsTrie>()?.is_zero())
+        {
+            prune_modes.account_history = None;
+            prune_modes.storage_history = None;
+        }
+        Ok(prune_modes)
     }
 }
 
@@ -420,7 +473,7 @@ mod tests {
     use reth_db::{models::AccountBeforeTx, test_utils::create_test_rw_db};
     use reth_primitives::{
         hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Bytecode,
-        ChainSpecBuilder, SealedBlock, StorageEntry, H160, H256, MAINNET, U256,
+        ChainSpecBuilder, PruneModes, SealedBlock, StorageEntry, H160, H256, MAINNET, U256,
     };
     use reth_provider::{AccountReader, BlockWriter, ProviderFactory, ReceiptProvider};
     use reth_revm::Factory;
@@ -433,6 +486,8 @@ mod tests {
         ExecutionStage::new(
             factory,
             ExecutionStageThresholds { max_blocks: Some(100), max_changes: None },
+            MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+            PruneModes::none(),
         )
     }
 

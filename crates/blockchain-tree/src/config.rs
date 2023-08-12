@@ -1,7 +1,7 @@
 //! Blockchain tree configuration
 
 /// The configuration for the blockchain tree.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct BlockchainTreeConfig {
     /// Number of blocks after the last finalized block that we are storing.
     ///

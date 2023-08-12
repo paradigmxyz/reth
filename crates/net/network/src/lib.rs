@@ -17,7 +17,7 @@
 //! Ethereum's networking protocol is specified in [devp2p](https://github.com/ethereum/devp2p).
 //!
 //! In order for a node to join the ethereum p2p network it needs to know what nodes are already
-//! port of that network. This includes public identities (public key) and addresses (where to reach
+//! part of that network. This includes public identities (public key) and addresses (where to reach
 //! them).
 //!
 //! ## Bird's Eye View
@@ -151,6 +151,10 @@ pub use manager::{NetworkEvent, NetworkManager};
 pub use message::PeerRequest;
 pub use network::NetworkHandle;
 pub use peers::PeersConfig;
-pub use session::{PeerInfo, SessionsConfig};
+pub use session::{
+    ActiveSessionHandle, ActiveSessionMessage, Direction, PeerInfo, PendingSessionEvent,
+    PendingSessionHandle, PendingSessionHandshakeError, SessionCommand, SessionEvent, SessionId,
+    SessionLimits, SessionManager, SessionsConfig,
+};
 
 pub use reth_eth_wire::{DisconnectReason, HelloBuilder, HelloMessage};

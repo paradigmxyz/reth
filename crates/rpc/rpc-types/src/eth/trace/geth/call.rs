@@ -1,6 +1,8 @@
 use reth_primitives::{serde_helper::num::from_int_or_hex, Address, Bytes, H256, U256};
 use serde::{Deserialize, Serialize};
 
+/// The response object for `debug_traceTransaction` with `"tracer": "callTracer"`
+///
 /// <https://github.com/ethereum/go-ethereum/blob/91cb6f863a965481e51d5d9c0e5ccd54796fd967/eth/tracers/native/call.go#L44>
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CallFrame {
@@ -16,7 +18,7 @@ pub struct CallFrame {
     pub output: Option<Bytes>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, rename = "revertReason", skip_serializing_if = "Option::is_none")]
     pub revert_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub calls: Vec<CallFrame>,

@@ -12,16 +12,15 @@ repository.workspace = true
 ef-tests = []
 
 [dependencies]
-reth-primitives = { workspace = true }
+reth-primitives.workspace = true
 reth-db = { path = "../../crates/storage/db", features = ["mdbx", "test-utils"] }
-reth-provider = { workspace = true }
+reth-provider.workspace = true
 reth-stages = { path = "../../crates/stages" }
-reth-rlp = { workspace = true }
-reth-interfaces = { workspace = true }
+reth-rlp.workspace = true
+reth-interfaces.workspace = true
 reth-revm = { path = "../../crates/revm" }
 tokio = "1.28.1"
 walkdir = "2.3.3"
 serde = "1.0.163"
-serde_json = { workspace = true }
-thiserror = { workspace = true }
-serde_bytes = "0.11.9"
+serde_json.workspace = true
+thiserror.workspace = true

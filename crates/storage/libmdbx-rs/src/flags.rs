@@ -41,14 +41,16 @@ pub enum SyncMode {
     /// keeps untouched pages within B-tree of the last transaction "steady" which was synced to
     /// disk completely. This has big implications for both data durability and (unfortunately)
     /// performance:
+    /// - A system crash can't corrupt the database, but you will lose the last transactions;
+    ///   because MDBX will rollback to last steady commit since it kept explicitly.
+    /// - The last steady transaction makes an effect similar to "long-lived" read transaction
+    ///   since prevents reuse of pages freed by newer write transactions, thus the any data
+    ///   changes will be placed in newly allocated pages.
+    /// - To avoid rapid database growth, the system will sync data and issue a steady commit-point
+    ///   to resume reuse pages, each time there is insufficient space and before increasing the
+    ///   size of the file on disk.
     ///
-    /// A system crash can't corrupt the database, but you will lose the last transactions; because
-    /// MDBX will rollback to last steady commit since it kept explicitly. The last steady
-    /// transaction makes an effect similar to "long-lived" read transaction since prevents reuse
-    /// of pages freed by newer write transactions, thus the any data changes will be placed in
-    /// newly allocated pages. To avoid rapid database growth, the system will sync data and
-    /// issue a steady commit-point to resume reuse pages, each time there is insufficient space
-    /// and before increasing the size of the file on disk. In other words, with
+    /// In other words, with
     /// [SyncMode::SafeNoSync] flag MDBX protects you from the whole database corruption, at the
     /// cost increasing database size and/or number of disk IOPs. So, [SyncMode::SafeNoSync]
     /// flag could be used with [Environment::sync()](crate::Environment::sync) as alternatively
@@ -81,15 +83,16 @@ pub enum SyncMode {
     /// expect the corrupted database after a system crash.
     ///
     /// So, most important thing about [SyncMode::UtterlyNoSync]:
+    /// - A system crash immediately after commit the write transaction high likely lead to
+    ///   database corruption.
+    /// - Successful completion of [Environment::sync(force=true)](crate::Environment::sync) after
+    ///   one or more committed transactions guarantees consistency and durability.
+    /// - BUT by committing two or more transactions you back database into a weak state, in which
+    ///   a system crash may lead to database corruption! In case single transaction after
+    ///   [Environment::sync()](crate::Environment::sync), you may lose transaction itself, but not
+    ///   a whole database.
     ///
-    /// A system crash immediately after commit the write transaction high likely lead to database
-    /// corruption. Successful completion of
-    /// [Environment::sync(force=true)](crate::Environment::sync) after one or more committed
-    /// transactions guarantees consistency and durability. BUT by committing two or more
-    /// transactions you back database into a weak state, in which a system crash may lead to
-    /// database corruption! In case single transaction after
-    /// [Environment::sync()](crate::Environment::sync), you may lose transaction itself, but not a
-    /// whole database. Nevertheless, [SyncMode::UtterlyNoSync] provides "weak" durability in
+    /// Nevertheless, [SyncMode::UtterlyNoSync] provides "weak" durability in
     /// case of an application crash (but no durability on system failure), and therefore may
     /// be very useful in scenarios where data durability is not required over a system failure
     /// (e.g for short-lived data), or if you can take such risk.

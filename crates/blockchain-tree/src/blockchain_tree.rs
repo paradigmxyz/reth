@@ -201,7 +201,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         // check if block is disconnected
         if let Some(block) = self.buffered_blocks.block(block) {
-            return Ok(Some(BlockStatus::Disconnected { missing_parent: block.parent_num_hash() }))
+            return Ok(Some(BlockStatus::Disconnected { missing_ancestor: block.parent_num_hash() }))
         }
 
         Ok(None)
@@ -360,7 +360,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 )
             })?;
 
-        Ok(BlockStatus::Disconnected { missing_parent: lowest_ancestor.parent_num_hash() })
+        Ok(BlockStatus::Disconnected { missing_ancestor: lowest_ancestor.parent_num_hash() })
     }
 
     /// This tries to append the given block to the canonical chain.
@@ -750,12 +750,21 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     ///
     /// This finalizes `last_finalized_block` prior to reading the canonical hashes (using
     /// [`BlockchainTree::finalize_block`]).
-    pub fn restore_canonical_hashes(
+    pub fn restore_canonical_hashes_and_finalize(
         &mut self,
         last_finalized_block: BlockNumber,
     ) -> Result<(), Error> {
         self.finalize_block(last_finalized_block);
 
+        self.restore_canonical_hashes()
+    }
+
+    /// Reads the last `N` canonical hashes from the database and updates the block indices of the
+    /// tree.
+    ///
+    /// `N` is the `max_reorg_depth` plus the number of block hashes needed to satisfy the
+    /// `BLOCKHASH` opcode in the EVM.
+    pub fn restore_canonical_hashes(&mut self) -> Result<(), Error> {
         let num_of_canonical_hashes =
             self.config.max_reorg_depth() + self.config.num_of_additional_canonical_block_hashes();
 
@@ -992,8 +1001,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                     old: Arc::new(old_canon_chain.clone()),
                     new: Arc::new(new_canon_chain.clone()),
                 };
+                let reorg_depth = old_canon_chain.len();
+
                 // insert old canon chain
                 self.insert_chain(AppendableChain::new(old_canon_chain));
+
+                self.update_reorg_metrics(reorg_depth as f64);
             } else {
                 // error here to confirm that we are reverting nothing from db.
                 error!(target: "blockchain_tree", "Reverting nothing from db on block: #{:?}", block_hash);
@@ -1084,9 +1097,23 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
     }
 
-    /// Update blockchain tree and sync metrics
-    pub(crate) fn update_metrics(&mut self) {
+    fn update_reorg_metrics(&mut self, reorg_depth: f64) {
+        self.metrics.reorgs.increment(1);
+        self.metrics.latest_reorg_depth.set(reorg_depth);
+    }
+
+    /// Update blockchain tree chains (canonical and sidechains) and sync metrics.
+    ///
+    /// NOTE: this method should not be called during the pipeline sync, because otherwise the sync
+    /// checkpoint metric will get overwritten. Buffered blocks metrics are updated in
+    /// [BlockBuffer] during the pipeline sync.
+    pub(crate) fn update_chains_metrics(&mut self) {
         let height = self.canonical_chain().tip().number;
+
+        let longest_sidechain_height = self.chains.values().map(|chain| chain.tip().number).max();
+        if let Some(longest_sidechain_height) = longest_sidechain_height {
+            self.metrics.longest_sidechain_height.set(longest_sidechain_height as f64);
+        }
 
         self.metrics.sidechains.set(self.chains.len() as f64);
         self.metrics.canonical_chain_height.set(height as f64);
@@ -1261,7 +1288,7 @@ mod tests {
         assert_eq!(
             tree.insert_block(block2.clone()).unwrap(),
             InsertPayloadOk::Inserted(BlockStatus::Disconnected {
-                missing_parent: block2.parent_num_hash()
+                missing_ancestor: block2.parent_num_hash()
             })
         );
 
@@ -1280,7 +1307,7 @@ mod tests {
 
         assert_eq!(
             tree.is_block_known(block2.num_hash()).unwrap(),
-            Some(BlockStatus::Disconnected { missing_parent: block2.parent_num_hash() })
+            Some(BlockStatus::Disconnected { missing_ancestor: block2.parent_num_hash() })
         );
 
         // check if random block is known
@@ -1562,7 +1589,7 @@ mod tests {
         assert_eq!(
             tree.insert_block(block2b.clone()).unwrap(),
             InsertPayloadOk::Inserted(BlockStatus::Disconnected {
-                missing_parent: block2b.parent_num_hash()
+                missing_ancestor: block2b.parent_num_hash()
             })
         );
 
@@ -1574,7 +1601,7 @@ mod tests {
             .assert(&tree);
 
         // update canonical block to b2, this would make b2a be removed
-        assert_eq!(tree.restore_canonical_hashes(12), Ok(()));
+        assert_eq!(tree.restore_canonical_hashes_and_finalize(12), Ok(()));
 
         assert_eq!(tree.is_block_known(block2.num_hash()).unwrap(), Some(BlockStatus::Valid));
 

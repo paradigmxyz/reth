@@ -48,24 +48,43 @@ impl TxState {
     }
 }
 
-/// Identifier for the used Sub-pool
+/// Identifier for the transaction Sub-pool
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 #[repr(u8)]
 pub enum SubPool {
+    /// The queued sub-pool contains transactions that are not ready to be included in the next
+    /// block because they have missing or queued ancestors.
     Queued = 0,
-    Pending,
+    /// The base-fee sub-pool contains transactions that are not ready to be included in the next
+    /// block because they don't meet the base fee requirement.
     BaseFee,
+    /// The pending sub-pool contains transactions that are ready to be included in the next block.
+    Pending,
 }
 
-// === impl PoolDestination ===
+// === impl SubPool ===
 
 impl SubPool {
     /// Whether this transaction is to be moved to the pending sub-pool.
+    #[inline]
     pub fn is_pending(&self) -> bool {
         matches!(self, SubPool::Pending)
     }
 
+    /// Whether this transaction is in the queued pool.
+    #[inline]
+    pub fn is_queued(&self) -> bool {
+        matches!(self, SubPool::Queued)
+    }
+
+    /// Whether this transaction is in the base fee pool.
+    #[inline]
+    pub fn is_base_fee(&self) -> bool {
+        matches!(self, SubPool::BaseFee)
+    }
+
     /// Returns whether this is a promotion depending on the current sub-pool location.
+    #[inline]
     pub fn is_promoted(&self, other: SubPool) -> bool {
         self > &other
     }
@@ -86,6 +105,15 @@ impl From<TxState> for SubPool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_promoted() {
+        assert!(SubPool::BaseFee.is_promoted(SubPool::Queued));
+        assert!(SubPool::Pending.is_promoted(SubPool::BaseFee));
+        assert!(SubPool::Pending.is_promoted(SubPool::Queued));
+        assert!(!SubPool::BaseFee.is_promoted(SubPool::Pending));
+        assert!(!SubPool::Queued.is_promoted(SubPool::BaseFee));
+    }
 
     #[test]
     fn test_tx_state() {

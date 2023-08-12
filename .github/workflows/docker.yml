@@ -1,6 +1,7 @@
 name: docker
 
 on:
+  workflow_dispatch: {}
   push:
     tags:
       - v*
@@ -8,7 +9,6 @@ on:
 env:
   REPO_NAME: ${{ github.repository_owner }}/reth
   IMAGE_NAME: ${{ github.repository_owner }}/reth
-  RUSTFLAGS: -D warnings
   CARGO_TERM_COLOR: always
   DOCKER_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/reth
   DOCKER_USERNAME: ${{ github.actor }}
@@ -16,7 +16,7 @@ env:
 jobs:
   build:
     name: build and push
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     permissions:
       packages: write
       contents: read

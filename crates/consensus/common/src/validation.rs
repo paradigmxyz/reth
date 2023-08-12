@@ -1,14 +1,16 @@
 //! Collection of methods for block validation.
 use reth_interfaces::{consensus::ConsensusError, Result as RethResult};
 use reth_primitives::{
-    constants, BlockNumber, ChainSpec, Hardfork, Header, InvalidTransactionError, SealedBlock,
-    SealedHeader, Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy,
+    constants::{
+        self,
+        eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
+    },
+    eip4844::calculate_excess_blob_gas,
+    BlockNumber, ChainSpec, Hardfork, Header, InvalidTransactionError, SealedBlock, SealedHeader,
+    Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxLegacy,
 };
 use reth_provider::{AccountReader, HeaderProvider, WithdrawalsProvider};
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    time::SystemTime,
-};
+use std::collections::{hash_map::Entry, HashMap};
 
 /// Validate header standalone
 pub fn validate_header_standalone(
@@ -20,16 +22,6 @@ pub fn validate_header_standalone(
         return Err(ConsensusError::HeaderGasUsedExceedsGasLimit {
             gas_used: header.gas_used,
             gas_limit: header.gas_limit,
-        })
-    }
-
-    // Check if timestamp is in future. Clock can drift but this can be consensus issue.
-    let present_timestamp =
-        SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
-    if header.timestamp > present_timestamp {
-        return Err(ConsensusError::TimestampIsInFuture {
-            timestamp: header.timestamp,
-            present_timestamp,
         })
     }
 
@@ -49,6 +41,15 @@ pub fn validate_header_standalone(
         header.withdrawals_root.is_some()
     {
         return Err(ConsensusError::WithdrawalsRootUnexpected)
+    }
+
+    // Ensures that EIP-4844 fields are valid once cancun is active.
+    if chain_spec.fork(Hardfork::Cancun).active_at_timestamp(header.timestamp) {
+        validate_4844_header_standalone(header)?;
+    } else if header.blob_gas_used.is_some() {
+        return Err(ConsensusError::BlobGasUsedUnexpected)
+    } else if header.excess_blob_gas.is_some() {
+        return Err(ConsensusError::ExcessBlobGasUnexpected)
     }
 
     Ok(())
@@ -91,6 +92,20 @@ pub fn validate_transaction_regarding_header(
                 return Err(InvalidTransactionError::Eip1559Disabled.into())
             }
 
+            // EIP-1559: add more constraints to the tx validation
+            // https://github.com/ethereum/EIPs/pull/3594
+            if max_priority_fee_per_gas > max_fee_per_gas {
+                return Err(InvalidTransactionError::TipAboveFeeCap.into())
+            }
+
+            Some(*chain_id)
+        }
+        Transaction::Eip4844(TxEip4844 {
+            chain_id,
+            max_fee_per_gas,
+            max_priority_fee_per_gas,
+            ..
+        }) => {
             // EIP-1559: add more constraints to the tx validation
             // https://github.com/ethereum/EIPs/pull/3594
             if max_priority_fee_per_gas > max_fee_per_gas {
@@ -270,7 +285,7 @@ pub fn validate_header_regarding_parent(
     // By consensus, gas_limit is multiplied by elasticity (*2) on
     // on exact block that hardfork happens.
     if chain_spec.fork(Hardfork::London).transitions_at_block(child.number) {
-        parent_gas_limit = parent.gas_limit * constants::EIP1559_ELASTICITY_MULTIPLIER;
+        parent_gas_limit = parent.gas_limit * chain_spec.base_fee_params.elasticity_multiplier;
     }
 
     // Check gas limit, max diff between child/parent gas_limit should be  max_diff=parent_gas/1024
@@ -297,11 +312,18 @@ pub fn validate_header_regarding_parent(
                 constants::EIP1559_INITIAL_BASE_FEE
             } else {
                 // This BaseFeeMissing will not happen as previous blocks are checked to have them.
-                parent.next_block_base_fee().ok_or(ConsensusError::BaseFeeMissing)?
+                parent
+                    .next_block_base_fee(chain_spec.base_fee_params)
+                    .ok_or(ConsensusError::BaseFeeMissing)?
             };
         if expected_base_fee != base_fee {
             return Err(ConsensusError::BaseFeeDiff { expected: expected_base_fee, got: base_fee })
         }
+    }
+
+    // ensure that the blob gas fields for this block
+    if chain_spec.fork(Hardfork::Cancun).active_at_timestamp(child.timestamp) {
+        validate_4844_header_with_parent(parent, child)?;
     }
 
     Ok(())
@@ -386,6 +408,72 @@ pub fn full_validation<Provider: HeaderProvider + AccountReader + WithdrawalsPro
         provider,
         chain_spec,
     )?;
+    Ok(())
+}
+
+/// Validates that the EIP-4844 header fields are correct with respect to the parent block. This
+/// ensures that the `blob_gas_used` and `excess_blob_gas` fields exist in the child header, and
+/// that the `excess_blob_gas` field matches the expected `excess_blob_gas` calculated from the
+/// parent header fields.
+pub fn validate_4844_header_with_parent(
+    parent: &SealedHeader,
+    child: &SealedHeader,
+) -> Result<(), ConsensusError> {
+    // From [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#header-extension):
+    //
+    // > For the first post-fork block, both parent.blob_gas_used and parent.excess_blob_gas
+    // > are evaluated as 0.
+    //
+    // This means in the first post-fork block, calculate_excess_blob_gas will return 0.
+    let parent_blob_gas_used = parent.blob_gas_used.unwrap_or(0);
+    let parent_excess_blob_gas = parent.excess_blob_gas.unwrap_or(0);
+
+    if child.blob_gas_used.is_none() {
+        return Err(ConsensusError::BlobGasUsedMissing)
+    }
+    let excess_blob_gas = child.excess_blob_gas.ok_or(ConsensusError::ExcessBlobGasMissing)?;
+
+    let expected_excess_blob_gas =
+        calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used);
+    if expected_excess_blob_gas != excess_blob_gas {
+        return Err(ConsensusError::ExcessBlobGasDiff {
+            expected: expected_excess_blob_gas,
+            got: excess_blob_gas,
+            parent_excess_blob_gas,
+            parent_blob_gas_used,
+        })
+    }
+
+    Ok(())
+}
+
+/// Validates that the EIP-4844 header fields exist and conform to the spec. This ensures that:
+///
+///  * `blob_gas_used` exists as a header field
+///  * `excess_blob_gas` exists as a header field
+///  * `blob_gas_used` is less than or equal to `MAX_DATA_GAS_PER_BLOCK`
+///  * `blob_gas_used` is a multiple of `DATA_GAS_PER_BLOB`
+pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), ConsensusError> {
+    let blob_gas_used = header.blob_gas_used.ok_or(ConsensusError::BlobGasUsedMissing)?;
+
+    if header.excess_blob_gas.is_none() {
+        return Err(ConsensusError::ExcessBlobGasMissing)
+    }
+
+    if blob_gas_used > MAX_DATA_GAS_PER_BLOCK {
+        return Err(ConsensusError::BlobGasUsedExceedsMaxBlobGasPerBlock {
+            blob_gas_used,
+            max_blob_gas_per_block: MAX_DATA_GAS_PER_BLOCK,
+        })
+    }
+
+    if blob_gas_used % DATA_GAS_PER_BLOB != 0 {
+        return Err(ConsensusError::BlobGasUsedNotMultipleOfBlobGasPerBlob {
+            blob_gas_used,
+            blob_gas_per_blob: DATA_GAS_PER_BLOB,
+        })
+    }
+
     Ok(())
 }
 
@@ -547,6 +635,8 @@ mod tests {
             nonce: 0x0000000000000000,
             base_fee_per_gas: 0x28f0001df.into(),
             withdrawals_root: None,
+            blob_gas_used: None,
+            excess_blob_gas: None,
         };
         // size: 0x9b5
 

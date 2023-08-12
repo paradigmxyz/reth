@@ -10,9 +10,9 @@ description = "Support for EIP-1459 Node Discovery via DNS"
 
 [dependencies]
 # reth
-reth-primitives = { workspace = true }
+reth-primitives.workspace = true
 reth-net-common = { path = "../common" }
-reth-rlp = { workspace = true }
+reth-rlp.workspace = true
 
 # ethereum
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery", "serde"] }
@@ -20,18 +20,18 @@ enr = { version = "0.8.1", default-features = false, features = ["rust-secp256k1
 
 # async/futures
 tokio = { workspace = true, features = ["io-util", "net", "time"] }
-tokio-stream = { workspace = true }
+tokio-stream.workspace = true
 
 # trust-dns
 trust-dns-resolver = "0.22"
 
 # misc
 data-encoding = "2"
-async-trait = { workspace = true }
+async-trait.workspace = true
 linked_hash_set = "0.1"
 schnellru = "0.2"
-thiserror = { workspace = true }
-tracing = { workspace = true }
+thiserror.workspace = true
+tracing.workspace = true
 parking_lot = "0.12"
 serde = { workspace = true, optional = true }
 serde_with = { version = "2.1.0", optional = true }

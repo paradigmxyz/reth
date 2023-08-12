@@ -14,12 +14,12 @@ The hardware requirements for running Reth depend on the node configuration and 
 
 The most important requirement is by far the disk, whereas CPU and RAM requirements are relatively flexible.
 
-|           | Archive Node                           | Full Node                           |
-|-----------|----------------------------------------|-------------------------------------|
-| Disk      | At least 2TB (TLC NVMe recommended)    | TBD                                 |
-| Memory    | 8GB+                                   | 8GB+                                |
-| CPU       | Higher clock speed over core count     | Higher clock speeds over core count |
-| Bandwidth | Stable 24Mbps+                         | Stable 24Mbps+                      |
+|           | Archive Node                          | Full Node                           |
+|-----------|---------------------------------------|-------------------------------------|
+| Disk      | At least 2.1TB (TLC NVMe recommended) | TBD                                 |
+| Memory    | 8GB+                                  | 8GB+                                |
+| CPU       | Higher clock speed over core count    | Higher clock speeds over core count |
+| Bandwidth | Stable 24Mbps+                        | Stable 24Mbps+                      |
 
 #### QLC and TLC
 
@@ -35,12 +35,12 @@ Prior to purchasing an NVMe drive, it is advisable to research and determine whe
 
 There are multiple types of disks to sync Reth, with varying size requirements, depending on the syncing mode:
 
-* Archive Node: At least 2TB is required to store
+* Archive Node: At least 2.1TB is required (as of July 2023, at block number 17.7M)
 * Full Node: TBD
 
 NVMe drives are recommended for the best performance, with SSDs being a cheaper alternative. HDDs are the cheapest option, but they will take the longest to sync, and are not recommended.
 
-At the time of writing, syncing an Ethereum mainnet node to block 17.4M on NVMe drives takes about 50 hours, while on a GCP "Persistent SSD" it takes around 5 days.
+As of July 2023, syncing an Ethereum mainnet node to block 17.7M on NVMe drives takes about 50 hours, while on a GCP "Persistent SSD" it takes around 5 days.
 
 > **Note**
 >

@@ -40,11 +40,20 @@ impl<T: DebugApiClient + Sync> DebugApiExt for T {
 /// A helper type that can be used to build a javascript tracer.
 #[derive(Debug, Clone, Default)]
 pub struct JsTracerBuilder {
+    /// `setup_body` is invoked once at the beginning, during the construction of a given
+    /// transaction.
     setup_body: Option<String>,
+    /// `fault_body` is invoked when an error happens during the execution of an opcode which
+    /// wasn't reported in step.
     fault_body: Option<String>,
+    /// `result_body` returns a JSON-serializable value to the RPC caller.
     result_body: Option<String>,
+    /// `enter_body` is invoked on stepping in of an internal call.
     enter_body: Option<String>,
+    /// `step_body` is called for each step of the EVM, or when an error occurs, as the specified
+    /// transaction is traced.
     step_body: Option<String>,
+    /// `exit_body` is invoked on stepping out of an internal call.
     exit_body: Option<String>,
 }
 

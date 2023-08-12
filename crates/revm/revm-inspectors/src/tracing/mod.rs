@@ -10,6 +10,7 @@ use revm::{
         opcode, return_ok, CallInputs, CallScheme, CreateInputs, Gas, InstructionResult,
         Interpreter, OpCode,
     },
+    primitives::SpecId,
     Database, EVMData, Inspector, JournalEntry,
 };
 use types::{CallTrace, CallTraceStep};
@@ -59,6 +60,10 @@ pub struct TracingInspector {
     last_call_return_data: Option<Bytes>,
     /// The gas inspector used to track remaining gas.
     gas_inspector: GasInspector,
+    /// The spec id of the EVM.
+    ///
+    /// This is filled during execution.
+    spec_id: Option<SpecId>,
 }
 
 // === impl TracingInspector ===
@@ -73,12 +78,13 @@ impl TracingInspector {
             step_stack: vec![],
             last_call_return_data: None,
             gas_inspector: Default::default(),
+            spec_id: None,
         }
     }
 
     /// Consumes the Inspector and returns a [ParityTraceBuilder].
     pub fn into_parity_builder(self) -> ParityTraceBuilder {
-        ParityTraceBuilder::new(self.traces.arena, self.config)
+        ParityTraceBuilder::new(self.traces.arena, self.spec_id, self.config)
     }
 
     /// Consumes the Inspector and returns a [GethTraceBuilder].
@@ -146,15 +152,15 @@ impl TracingInspector {
     ///
     /// Invoked on [Inspector::call].
     #[allow(clippy::too_many_arguments)]
-    fn start_trace_on_call(
+    fn start_trace_on_call<DB: Database>(
         &mut self,
-        depth: usize,
+        data: &EVMData<'_, DB>,
         address: Address,
-        data: Bytes,
+        input_data: Bytes,
         value: U256,
         kind: CallKind,
         caller: Address,
-        gas_limit: u64,
+        mut gas_limit: u64,
         maybe_precompile: Option<bool>,
     ) {
         // This will only be true if the inspector is configured to exclude precompiles and the call
@@ -166,14 +172,24 @@ impl TracingInspector {
             PushTraceKind::PushAndAttachToParent
         };
 
+        if self.trace_stack.is_empty() {
+            // this is the root call which should get the original gas limit of the transaction,
+            // because initialization costs are already subtracted from gas_limit
+            gas_limit = data.env.tx.gas_limit;
+
+            // we set the spec id here because we only need to do this once and this condition is
+            // hit exactly once
+            self.spec_id = Some(data.env.cfg.spec_id);
+        }
+
         self.trace_stack.push(self.traces.push_trace(
             0,
             push_kind,
             CallTrace {
-                depth,
+                depth: data.journaled_state.depth() as usize,
                 address,
                 kind,
-                data,
+                data: input_data,
                 value,
                 status: InstructionResult::Continue,
                 caller,
@@ -230,7 +246,7 @@ impl TracingInspector {
     ///
     /// This expects an existing [CallTrace], in other words, this panics if not within the context
     /// of a call.
-    fn start_step<DB: Database>(&mut self, interp: &mut Interpreter, data: &mut EVMData<'_, DB>) {
+    fn start_step<DB: Database>(&mut self, interp: &Interpreter, data: &EVMData<'_, DB>) {
         let trace_idx = self.last_trace_idx();
         let trace = &mut self.traces.arena[trace_idx];
 
@@ -259,6 +275,7 @@ impl TracingInspector {
             op,
             contract: interp.contract.address,
             stack,
+            push_stack: None,
             memory,
             memory_size: interp.memory.len(),
             gas_remaining: self.gas_inspector.gas_remaining(),
@@ -276,13 +293,18 @@ impl TracingInspector {
     /// Invoked on [Inspector::step_end].
     fn fill_step_on_step_end<DB: Database>(
         &mut self,
-        interp: &mut Interpreter,
-        data: &mut EVMData<'_, DB>,
+        interp: &Interpreter,
+        data: &EVMData<'_, DB>,
         status: InstructionResult,
     ) {
         let StackStep { trace_idx, step_idx } =
             self.step_stack.pop().expect("can't fill step without starting a step first");
         let step = &mut self.traces.arena[trace_idx].trace.steps[step_idx];
+
+        if interp.stack.len() > step.stack.len() {
+            // if the stack grew, we need to record the new values
+            step.push_stack = Some(interp.stack.data()[step.stack.len()..].to_vec());
+        }
 
         if self.config.record_memory_snapshots {
             // resize memory so opcodes that allocated memory is correctly displayed
@@ -384,7 +406,6 @@ where
         if self.config.record_steps {
             self.gas_inspector.step_end(interp, data, is_static, eval);
             self.fill_step_on_step_end(interp, data, eval);
-            return eval
         }
         InstructionResult::Continue
     }
@@ -421,7 +442,7 @@ where
             self.config.exclude_precompile_calls.then(|| self.is_precompile_call(data, &to, value));
 
         self.start_trace_on_call(
-            data.journaled_state.depth() as usize,
+            data,
             to,
             inputs.input.clone(),
             value,
@@ -460,7 +481,7 @@ where
         let _ = data.journaled_state.load_account(inputs.caller, data.db);
         let nonce = data.journaled_state.account(inputs.caller).info.nonce;
         self.start_trace_on_call(
-            data.journaled_state.depth() as usize,
+            data,
             get_create_address(inputs, nonce),
             inputs.init_code.clone(),
             inputs.value,

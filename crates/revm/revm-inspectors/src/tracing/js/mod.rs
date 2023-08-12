@@ -16,6 +16,7 @@ use revm::{
     interpreter::{
         return_revert, CallInputs, CallScheme, CreateInputs, Gas, InstructionResult, Interpreter,
     },
+    precompile::Precompiles,
     primitives::{Env, ExecutionResult, Output, ResultAndState, TransactTo, B160, B256},
     Database, EVMData, Inspector,
 };
@@ -48,6 +49,8 @@ pub struct JsInspector {
     call_stack: Vec<CallStackItem>,
     /// sender half of a channel to communicate with the database service.
     to_db_service: mpsc::Sender<JsDbRequest>,
+    /// Marker to track whether the precompiles have been registered.
+    precompiles_registered: bool,
 }
 
 impl JsInspector {
@@ -130,6 +133,7 @@ impl JsInspector {
             step_fn,
             call_stack: Default::default(),
             to_db_service,
+            precompiles_registered: false,
         })
     }
 
@@ -264,26 +268,25 @@ impl JsInspector {
     fn pop_call(&mut self) {
         self.call_stack.pop();
     }
+
+    /// Registers the precompiles in the JS context
+    fn register_precompiles(&mut self, precompiles: &Precompiles) {
+        if !self.precompiles_registered {
+            return
+        }
+        let precompiles =
+            PrecompileList(precompiles.addresses().into_iter().map(Into::into).collect());
+
+        let _ = precompiles.register_callable(&mut self.ctx);
+
+        self.precompiles_registered = true
+    }
 }
 
 impl<DB> Inspector<DB> for JsInspector
 where
     DB: Database,
 {
-    fn initialize_interp(
-        &mut self,
-        _interp: &mut Interpreter,
-        data: &mut EVMData<'_, DB>,
-        _is_static: bool,
-    ) -> InstructionResult {
-        let precompiles =
-            PrecompileList(data.precompiles.addresses().into_iter().map(Into::into).collect());
-
-        let _ = precompiles.register_callable(&mut self.ctx);
-
-        InstructionResult::Continue
-    }
-
     fn step(
         &mut self,
         interp: &mut Interpreter,
@@ -361,10 +364,12 @@ where
 
     fn call(
         &mut self,
-        _data: &mut EVMData<'_, DB>,
+        data: &mut EVMData<'_, DB>,
         inputs: &mut CallInputs,
         _is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
+        self.register_precompiles(&data.precompiles);
+
         // determine correct `from` and `to` based on the call scheme
         let (from, to) = match inputs.context.scheme {
             CallScheme::DelegateCall | CallScheme::CallCode => {
@@ -425,6 +430,8 @@ where
         data: &mut EVMData<'_, DB>,
         inputs: &mut CreateInputs,
     ) -> (InstructionResult, Option<B160>, Gas, Bytes) {
+        self.register_precompiles(&data.precompiles);
+
         let _ = data.journaled_state.load_account(inputs.caller, data.db);
         let nonce = data.journaled_state.account(inputs.caller).info.nonce;
         let address = get_create_address(inputs, nonce);

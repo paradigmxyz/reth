@@ -1,0 +1,3 @@
+mod payload;
+
+fn main() {}

@@ -19,6 +19,10 @@ use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress};
 use std::fmt::Debug;
 use tracing::*;
 
+/// The default threshold (in number of blocks) for switching from incremental trie building
+/// of changes to whole rebuild.
+pub const MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD: u64 = 50_000;
+
 /// The merkle hashing stage uses input from
 /// [`AccountHashingStage`][crate::stages::AccountHashingStage] and
 /// [`StorageHashingStage`][crate::stages::AccountHashingStage] to calculate intermediate hashes
@@ -60,7 +64,7 @@ pub enum MerkleStage {
 impl MerkleStage {
     /// Stage default for the [MerkleStage::Execution].
     pub fn default_execution() -> Self {
-        Self::Execution { clean_threshold: 50_000 }
+        Self::Execution { clean_threshold: MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD }
     }
 
     /// Stage default for the [MerkleStage::Unwind].
@@ -168,7 +172,6 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let target_block_root = target_block.state_root;
 
         let mut checkpoint = self.get_execution_checkpoint(provider)?;
-
         let (trie_root, entities_checkpoint) = if range.is_empty() {
             (target_block_root, input.checkpoint().entities_stage_checkpoint().unwrap_or_default())
         } else if to_block - from_block > threshold || from_block == 1 {
@@ -349,8 +352,7 @@ mod tests {
     use reth_interfaces::test_utils::{
         generators,
         generators::{
-            random_block, random_block_range, random_contract_account_range,
-            random_transition_range,
+            random_block, random_block_range, random_changeset_range, random_contract_account_range,
         },
     };
     use reth_primitives::{
@@ -501,7 +503,7 @@ mod tests {
             blocks.extend(random_block_range(&mut rng, start..=end, head_hash, 0..3));
             self.tx.insert_blocks(blocks.iter(), None)?;
 
-            let (transitions, final_state) = random_transition_range(
+            let (transitions, final_state) = random_changeset_range(
                 &mut rng,
                 blocks.iter(),
                 accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
@@ -509,7 +511,7 @@ mod tests {
                 0..256,
             );
             // add block changeset from block 1.
-            self.tx.insert_transitions(transitions, Some(start))?;
+            self.tx.insert_changesets(transitions, Some(start))?;
             self.tx.insert_accounts_and_storages(final_state)?;
 
             // Calculate state root

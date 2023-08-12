@@ -10,25 +10,25 @@ description = "reth payload builder"
 
 [dependencies]
 ## reth
-reth-primitives = { workspace = true }
-reth-rpc-types = { workspace = true }
-reth-rlp = { workspace = true }
-reth-interfaces = { workspace = true }
+reth-primitives.workspace = true
+reth-rpc-types.workspace = true
+reth-rlp.workspace = true
+reth-interfaces.workspace = true
 reth-revm-primitives = { path = "../../revm/revm-primitives" }
-reth-metrics = { workspace = true }
+reth-metrics.workspace = true
 
 ## ethereum
-revm-primitives = { workspace = true }
+revm-primitives.workspace = true
 
 ## async
 tokio = { workspace = true, features = ["sync"] }
-tokio-stream = { workspace = true }
-futures-util = { workspace = true }
+tokio-stream.workspace = true
+futures-util.workspace = true
 
 ## misc
-thiserror = { workspace = true }
+thiserror.workspace = true
 sha2 = { version = "0.10", default-features = false }
-tracing = { workspace = true }
+tracing.workspace = true
 
 [features]
 test-utils = []

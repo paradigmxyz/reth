@@ -4,6 +4,9 @@ use crate::{H256, U256};
 use hex_literal::hex;
 use std::time::Duration;
 
+/// [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#parameters) constants.
+pub mod eip4844;
+
 /// The client version: `reth/v{major}.{minor}.{patch}`
 pub const RETH_CLIENT_VERSION: &str = concat!("reth/v", env!("CARGO_PKG_VERSION"));
 
@@ -34,12 +37,16 @@ pub const BEACON_NONCE: u64 = 0u64;
 /// See <https://github.com/paradigmxyz/reth/issues/3233>.
 pub const ETHEREUM_BLOCK_GAS_LIMIT: u64 = 30_000_000;
 
-/// The minimal value the basefee can decrease to.
+/// The minimum tx fee below which the txpool will reject the transaction.
 ///
-/// The `BASE_FEE_MAX_CHANGE_DENOMINATOR` <https://eips.ethereum.org/EIPS/eip-1559> is `8`, or 12.5%.
-/// Once the base fee has dropped to `7` WEI it cannot decrease further because 12.5% of 7 is less
-/// than 1.
-pub const MIN_PROTOCOL_BASE_FEE: u128 = 7;
+/// Configured to `7` WEI which is the lowest possible value of base fee under mainnet EIP-1559
+/// parameters. `BASE_FEE_MAX_CHANGE_DENOMINATOR` <https://eips.ethereum.org/EIPS/eip-1559>
+/// is `8`, or 12.5%. Once the base fee has dropped to `7` WEI it cannot decrease further because
+/// 12.5% of 7 is less than 1.
+///
+/// Note that min base fee under different 1559 parameterizations may differ, but there's no
+/// signifant harm in leaving this setting as is.
+pub const MIN_PROTOCOL_BASE_FEE: u64 = 7;
 
 /// Same as [MIN_PROTOCOL_BASE_FEE] but as a U256.
 pub const MIN_PROTOCOL_BASE_FEE_U256: U256 = U256::from_limbs([7u64, 0, 0, 0]);
@@ -48,10 +55,10 @@ pub const MIN_PROTOCOL_BASE_FEE_U256: U256 = U256::from_limbs([7u64, 0, 0, 0]);
 pub const EIP1559_INITIAL_BASE_FEE: u64 = 1_000_000_000;
 
 /// Base fee max change denominator as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)
-pub const EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR: u64 = 8;
+pub const EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR: u64 = 8;
 
 /// Elasticity multiplier as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)
-pub const EIP1559_ELASTICITY_MULTIPLIER: u64 = 2;
+pub const EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u64 = 2;
 
 /// Multiplier for converting gwei to wei.
 pub const GWEI_TO_WEI: u64 = 1_000_000_000;
@@ -76,6 +83,10 @@ pub const GOERLI_GENESIS: H256 =
 /// Sepolia genesis hash.
 pub const SEPOLIA_GENESIS: H256 =
     H256(hex!("25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9"));
+
+/// Testnet genesis hash.
+pub const DEV_GENESIS: H256 =
+    H256(hex!("2f980576711e3617a5e4d83dd539548ec0f7792007d505a3d2e9674833af2d7c"));
 
 /// Keccak256 over empty array.
 pub const KECCAK_EMPTY: H256 =
@@ -108,12 +119,21 @@ pub const EMPTY_WITHDRAWALS: H256 = EMPTY_SET_HASH;
 /// the database.
 pub const BEACON_CONSENSUS_REORG_UNWIND_DEPTH: u64 = 3;
 
+/// Max seconds from current time allowed for blocks, before they're considered future blocks.
+///
+/// This is only used when checking whether or not the timestamp for pre-merge blocks is in the
+/// future.
+///
+/// See:
+/// <https://github.com/ethereum/go-ethereum/blob/a196f3e8a22b6ad22ced5c2e3baf32bc3ebd4ec9/consensus/ethash/consensus.go#L227-L229>
+pub const ALLOWED_FUTURE_BLOCK_TIME_SECONDS: u64 = 15;
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn min_protocol_sanity() {
-        assert_eq!(MIN_PROTOCOL_BASE_FEE_U256.to::<u128>(), MIN_PROTOCOL_BASE_FEE);
+        assert_eq!(MIN_PROTOCOL_BASE_FEE_U256.to::<u64>(), MIN_PROTOCOL_BASE_FEE);
     }
 }

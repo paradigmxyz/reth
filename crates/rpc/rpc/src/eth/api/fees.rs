@@ -8,7 +8,7 @@ use reth_network_api::NetworkInfo;
 use reth_primitives::{
     basefee::calculate_next_block_base_fee, BlockNumberOrTag, SealedHeader, U256,
 };
-use reth_provider::{BlockReaderIdExt, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
 use tracing::debug;
@@ -16,7 +16,8 @@ use tracing::debug;
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider:
+        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Returns a suggestion for a gas price for legacy transactions.
@@ -67,9 +68,11 @@ where
             return Err(EthApiError::UnknownBlockNumber)
         };
 
-        // Check that we would not be querying outside of genesis
-        if end_block < block_count {
-            return Err(EthApiError::InvalidBlockRange)
+        // need to add 1 to the end block to get the correct (inclusive) range
+        let end_block_plus = end_block + 1;
+        // Ensure that we would not be querying outside of genesis
+        if end_block_plus < block_count {
+            block_count = end_block_plus;
         }
 
         // If reward percentiles were specified, we need to validate that they are monotonically
@@ -86,7 +89,8 @@ where
         //
         // Treat a request for 1 block as a request for `newest_block..=newest_block`,
         // otherwise `newest_block - 2
-        let start_block = end_block - block_count + 1;
+        // SAFETY: We ensured that block count is capped
+        let start_block = end_block_plus - block_count;
         let headers = self.provider().sealed_headers_range(start_block..=end_block)?;
         if headers.len() != block_count as usize {
             return Err(EthApiError::InvalidBlockRange)
@@ -112,10 +116,12 @@ where
         //
         // The unwrap is safe since we checked earlier that we got at least 1 header.
         let last_header = headers.last().unwrap();
+        let chain_spec = self.provider().chain_spec();
         base_fee_per_gas.push(U256::from(calculate_next_block_base_fee(
             last_header.gas_used,
             last_header.gas_limit,
             last_header.base_fee_per_gas.unwrap_or_default(),
+            chain_spec.base_fee_params,
         )));
 
         Ok(FeeHistory {

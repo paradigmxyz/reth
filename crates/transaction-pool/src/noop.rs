@@ -4,13 +4,14 @@
 //! to be generic over it.
 
 use crate::{
-    error::PoolError, AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo,
-    NewTransactionEvent, PoolResult, PoolSize, PoolTransaction, PooledTransaction,
-    PropagatedTransactions, TransactionEvents, TransactionOrigin, TransactionPool,
-    TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
+    error::PoolError, traits::PendingTransactionListenerKind, AllPoolTransactions,
+    AllTransactionsEvents, BestTransactions, BlockInfo, NewTransactionEvent, PoolResult, PoolSize,
+    PoolTransaction, PooledTransaction, PropagatedTransactions, TransactionEvents,
+    TransactionOrigin, TransactionPool, TransactionValidationOutcome, TransactionValidator,
+    ValidPoolTransaction,
 };
 use reth_primitives::{Address, TxHash};
-use std::{marker::PhantomData, sync::Arc};
+use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
 /// A [`TransactionPool`] implementation that does nothing.
@@ -73,11 +74,14 @@ impl TransactionPool for NoopTransactionPool {
         None
     }
 
-    fn all_transactions_event_listener(&self) -> AllTransactionsEvents {
+    fn all_transactions_event_listener(&self) -> AllTransactionsEvents<Self::Transaction> {
         AllTransactionsEvents { events: mpsc::channel(1).1 }
     }
 
-    fn pending_transactions_listener(&self) -> Receiver<TxHash> {
+    fn pending_transactions_listener_for(
+        &self,
+        _kind: PendingTransactionListenerKind,
+    ) -> Receiver<TxHash> {
         mpsc::channel(1).1
     }
 
@@ -106,6 +110,13 @@ impl TransactionPool for NoopTransactionPool {
 
     fn best_transactions(
         &self,
+    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
+        Box::new(std::iter::empty())
+    }
+
+    fn best_transactions_with_base_fee(
+        &self,
+        _: u64,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
         Box::new(std::iter::empty())
     }
@@ -150,33 +161,53 @@ impl TransactionPool for NoopTransactionPool {
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         vec![]
     }
+
+    fn unique_senders(&self) -> HashSet<Address> {
+        Default::default()
+    }
 }
 
 /// A [`TransactionValidator`] that does nothing.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct NoopTransactionValidator<T>(PhantomData<T>);
+pub struct MockTransactionValidator<T> {
+    propagate_local: bool,
+    _marker: PhantomData<T>,
+}
 
 #[async_trait::async_trait]
-impl<T: PoolTransaction> TransactionValidator for NoopTransactionValidator<T> {
+impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
     type Transaction = T;
 
     async fn validate_transaction(
         &self,
-        _origin: TransactionOrigin,
+        origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
         TransactionValidationOutcome::Valid {
             balance: Default::default(),
             state_nonce: 0,
             transaction,
+            propagate: match origin {
+                TransactionOrigin::External => true,
+                TransactionOrigin::Local => self.propagate_local,
+                TransactionOrigin::Private => false,
+            },
         }
     }
 }
 
-impl<T> Default for NoopTransactionValidator<T> {
+impl<T> MockTransactionValidator<T> {
+    /// Creates a new [`MockTransactionValidator`] that does not allow local transactions to be
+    /// propagated.
+    pub fn no_propagate_local() -> Self {
+        Self { propagate_local: false, _marker: Default::default() }
+    }
+}
+
+impl<T> Default for MockTransactionValidator<T> {
     fn default() -> Self {
-        NoopTransactionValidator(PhantomData)
+        MockTransactionValidator { propagate_local: true, _marker: Default::default() }
     }
 }
 

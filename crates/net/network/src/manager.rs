@@ -41,8 +41,8 @@ use reth_eth_wire::{
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::ReputationChangeKind;
-use reth_primitives::{listener::EventListeners, NodeRecord, PeerId, H256};
-use reth_provider::BlockReader;
+use reth_primitives::{listener::EventListeners, ForkId, NodeRecord, PeerId, H256};
+use reth_provider::{BlockNumReader, BlockReader};
 use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
 use std::{
     net::SocketAddr,
@@ -156,7 +156,7 @@ impl<C> NetworkManager<C> {
 
 impl<C> NetworkManager<C>
 where
-    C: BlockReader,
+    C: BlockNumReader,
 {
     /// Creates the manager of a new network.
     ///
@@ -514,6 +514,9 @@ where
         match msg {
             NetworkHandleMessage::EventListener(tx) => {
                 self.event_listeners.push_listener(tx);
+            }
+            NetworkHandleMessage::DiscoveryListener(tx) => {
+                self.swarm.state_mut().discovery_mut().add_listener(tx);
             }
             NetworkHandleMessage::AnnounceBlock(block, hash) => {
                 if self.handle.mode().is_stake() {
@@ -918,4 +921,9 @@ pub enum NetworkEvent {
     PeerAdded(PeerId),
     /// Event emitted when a new peer is removed
     PeerRemoved(PeerId),
+}
+
+#[derive(Debug, Clone)]
+pub enum DiscoveredEvent {
+    EventQueued { peer_id: PeerId, socket_addr: SocketAddr, fork_id: Option<ForkId> },
 }

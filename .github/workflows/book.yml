@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     name: test
 
     steps:
@@ -30,7 +30,7 @@ jobs:
         run: mdbook test
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     name: lint
 
     steps:
@@ -48,7 +48,7 @@ jobs:
         run: mdbook-linkcheck --standalone
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v3
         with:
@@ -108,7 +108,7 @@ jobs:
   deploy:
     # Only deploy if a push to main
     if: github.ref_name == 'main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [test, lint, build]
 
     # Grant GITHUB_TOKEN the permissions required to make a Pages deployment

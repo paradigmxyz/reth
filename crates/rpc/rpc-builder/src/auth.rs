@@ -2,6 +2,7 @@ use crate::{
     constants,
     error::{RpcError, ServerKind},
     eth::DEFAULT_MAX_LOGS_PER_RESPONSE,
+    EthConfig,
 };
 use hyper::header::AUTHORIZATION;
 pub use jsonrpsee::server::ServerBuilder;
@@ -11,13 +12,13 @@ use jsonrpsee::{
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockReaderIdExt, EvmEnvProvider, HeaderProvider, LogIndexProvider, ReceiptProviderIdExt,
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider,LogIndexProvider, HeaderProvider, ReceiptProviderIdExt,
     StateProviderFactory,
 };
 use reth_rpc::{
     eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
     AuthLayer, Claims, EngineEthApi, EthApi, EthFilter, EthSubscriptionIdProvider,
-    JwtAuthValidator, JwtSecret,
+    JwtAuthValidator, JwtSecret, TracingCallPool,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::TaskSpawner;
@@ -40,11 +41,12 @@ pub async fn launch<Provider, Pool, Network, Tasks, EngineApi>(
 ) -> Result<AuthServerHandle, RpcError>
 where
     Provider: BlockReaderIdExt
-        + ReceiptProviderIdExt
-        + HeaderProvider
-        + StateProviderFactory
+        + ChainSpecProvider
         + EvmEnvProvider
         + LogIndexProvider
+        + HeaderProvider
+        + ReceiptProviderIdExt
+        + StateProviderFactory
         + Clone
         + Unpin
         + 'static,
@@ -63,7 +65,9 @@ where
         network,
         eth_cache.clone(),
         gas_oracle,
+        EthConfig::default().rpc_gas_cap,
         Box::new(executor.clone()),
+        TracingCallPool::build().expect("failed to build tracing pool"),
     );
     let eth_filter = EthFilter::new(
         provider,
@@ -85,6 +89,8 @@ pub async fn launch_with_eth_api<Provider, Pool, Network, EngineApi>(
 ) -> Result<AuthServerHandle, RpcError>
 where
     Provider: BlockReaderIdExt
+        + ChainSpecProvider
+        + EvmEnvProvider
         + HeaderProvider
         + StateProviderFactory
         + EvmEnvProvider
@@ -115,7 +121,7 @@ where
 
     let local_addr = server.local_addr()?;
 
-    let handle = server.start(module)?;
+    let handle = server.start(module);
     Ok(AuthServerHandle { handle, local_addr, secret })
 }
 
@@ -154,7 +160,7 @@ impl AuthServerConfig {
 
         let local_addr = server.local_addr()?;
 
-        let handle = server.start(module.inner)?;
+        let handle = server.start(module.inner);
         Ok(AuthServerHandle { handle, local_addr, secret })
     }
 }
@@ -215,6 +221,11 @@ impl AuthServerConfigBuilder {
                     // payload bodies limit for `engine_getPayloadBodiesByRangeV`
                     // ~750MB per response should be enough
                     .max_response_body_size(750 * 1024 * 1024)
+                    // Connections to this server are always authenticated, hence this only affects
+                    // connections from the CL or any other client that uses JWT, this should be
+                    // more than enough so that the CL (or multiple CL nodes) will never get rate
+                    // limited
+                    .max_connections(500)
                     // bump the default request size slightly, there aren't any methods exposed with
                     // dynamic request params that can exceed this
                     .max_request_body_size(25 * 1024 * 1024)

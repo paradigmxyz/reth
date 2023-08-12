@@ -578,12 +578,12 @@ fn build_payload<Pool, Client>(
 
         let mut cumulative_gas_used = 0;
         let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
+        let base_fee = initialized_block_env.basefee.to::<u64>();
 
         let mut executed_txs = Vec::new();
-        let mut best_txs = pool.best_transactions();
+        let mut best_txs = pool.best_transactions_with_base_fee(base_fee);
 
         let mut total_fees = U256::ZERO;
-        let base_fee = initialized_block_env.basefee.to::<u64>();
 
         let block_number = initialized_block_env.number.to::<u64>();
 
@@ -714,6 +714,8 @@ fn build_payload<Pool, Client>(
             difficulty: U256::ZERO,
             gas_used: cumulative_gas_used,
             extra_data: extra_data.into(),
+            blob_gas_used: None,
+            excess_blob_gas: None,
         };
 
         // seal the block
@@ -784,6 +786,8 @@ where
         gas_limit: block_gas_limit,
         difficulty: U256::ZERO,
         gas_used: 0,
+        blob_gas_used: None,
+        excess_blob_gas: None,
         extra_data: extra_data.into(),
     };
 

@@ -11,7 +11,9 @@ use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_ecies::util::pk2id;
 use reth_eth_wire::{HelloMessage, Status};
-use reth_primitives::{ChainSpec, ForkFilter, Head, NodeRecord, PeerId, MAINNET};
+use reth_primitives::{
+    mainnet_nodes, sepolia_nodes, ChainSpec, ForkFilter, Head, NodeRecord, PeerId, MAINNET,
+};
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::SECP256K1;
@@ -31,6 +33,9 @@ pub fn rng_secret_key() -> SecretKey {
 /// All network related initialization settings.
 pub struct NetworkConfig<C> {
     /// The client type that can interact with the chain.
+    ///
+    /// This type is used to fetch the block number after we established a session and received the
+    /// [Status] block hash.
     pub client: C,
     /// The node's secret key, from which the node's identity is derived.
     pub secret_key: SecretKey,
@@ -278,6 +283,16 @@ impl NetworkConfigBuilder {
         self
     }
 
+    /// Convenience function for setting [Self::boot_nodes] to the mainnet boot nodes.
+    pub fn mainnet_boot_nodes(self) -> Self {
+        self.boot_nodes(mainnet_nodes())
+    }
+
+    /// Convenience function for setting [Self::boot_nodes] to the sepolia boot nodes.
+    pub fn sepolia_boot_nodes(self) -> Self {
+        self.boot_nodes(sepolia_nodes())
+    }
+
     /// Sets the boot nodes.
     pub fn boot_nodes(mut self, nodes: impl IntoIterator<Item = NodeRecord>) -> Self {
         self.boot_nodes = nodes.into_iter().collect();
@@ -330,6 +345,10 @@ impl NetworkConfigBuilder {
 
     /// Consumes the type and creates the actual [`NetworkConfig`]
     /// for the given client type that can interact with the chain.
+    ///
+    /// The given client is to be used for interacting with the chain, for example fetching the
+    /// corresponding block for a given block hash we receive from a peer in the status message when
+    /// establishing a connection.
     pub fn build<C>(self, client: C) -> NetworkConfig<C> {
         let peer_id = self.get_peer_id();
         let Self {

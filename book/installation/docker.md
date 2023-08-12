@@ -63,14 +63,17 @@ To run Reth with Docker, run:
 docker run \
     -v rethdata:/root/.local/share/reth/db \
     -d \
-    -p 9000:9000 \
+    -p 9001:9001 \
+    -p 30303:30303 \
+    -p 30303:30303/udp \
     --name reth \
     reth:local \
     node \
-    --metrics 0.0.0.0:9000
+    --metrics 0.0.0.0:9001
 ```
 
 The above command will create a container named `reth` and a named volume called `rethdata` for data persistence.
+It will also expose the `30303` port (TCP and UDP) for peering with other nodes and the `9001` port for metrics.
 
 It will use the local image `reth:local`. If you want to use the GitHub Container Registry remote image, use `ghcr.io/paradigmxyz/reth` with your preferred tag.
 
@@ -121,14 +124,4 @@ docker exec -it reth bash
 
 **If Reth is running with Docker Compose, replace `reth` with `reth-reth-1` in the above command**
 
-### Listing the tables
-
-```bash
-reth db stats
-```
-
-### Viewing some records
-
-```bash
-reth db list --start=1 --len=2 Headers
-```
+Refer to the [CLI docs](../cli/cli.md) to interact with Reth once inside the Reth container.

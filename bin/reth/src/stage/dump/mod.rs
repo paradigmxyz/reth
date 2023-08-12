@@ -104,20 +104,20 @@ impl Command {
         let db = Arc::new(init_db(db_path, self.db.log_level)?);
         info!(target: "reth::cli", "Database opened");
 
-        let mut tool = DbTool::new(&db, self.chain.clone())?;
+        let tool = DbTool::new(&db, self.chain.clone())?;
 
         match &self.command {
             Stages::Execution(StageCommand { output_db, from, to, dry_run, .. }) => {
-                dump_execution_stage(&mut tool, *from, *to, output_db, *dry_run).await?
+                dump_execution_stage(&tool, *from, *to, output_db, *dry_run).await?
             }
             Stages::StorageHashing(StageCommand { output_db, from, to, dry_run, .. }) => {
-                dump_hashing_storage_stage(&mut tool, *from, *to, output_db, *dry_run).await?
+                dump_hashing_storage_stage(&tool, *from, *to, output_db, *dry_run).await?
             }
             Stages::AccountHashing(StageCommand { output_db, from, to, dry_run, .. }) => {
-                dump_hashing_account_stage(&mut tool, *from, *to, output_db, *dry_run).await?
+                dump_hashing_account_stage(&tool, *from, *to, output_db, *dry_run).await?
             }
             Stages::Merkle(StageCommand { output_db, from, to, dry_run, .. }) => {
-                dump_merkle_stage(&mut tool, *from, *to, output_db, *dry_run).await?
+                dump_merkle_stage(&tool, *from, *to, output_db, *dry_run).await?
             }
         }
 
@@ -131,7 +131,7 @@ pub(crate) fn setup<DB: Database>(
     from: u64,
     to: u64,
     output_db: &PathBuf,
-    db_tool: &mut DbTool<'_, DB>,
+    db_tool: &DbTool<'_, DB>,
 ) -> eyre::Result<(DatabaseEnv, u64)> {
     assert!(from < to, "FROM block should be bigger than TO block.");
 

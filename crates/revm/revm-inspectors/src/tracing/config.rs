@@ -1,5 +1,24 @@
 use reth_rpc_types::trace::geth::GethDefaultTracingOptions;
 
+/// What kind of tracing style this is.
+///
+/// This affects things like error messages.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum TraceStyle {
+    /// Parity style tracer
+    Parity,
+    /// Geth style tracer
+    #[allow(unused)]
+    Geth,
+}
+
+impl TraceStyle {
+    /// Returns true if this is a parity style tracer.
+    pub(crate) const fn is_parity(self) -> bool {
+        matches!(self, Self::Parity)
+    }
+}
+
 /// Gives guidance to the [TracingInspector](crate::tracing::TracingInspector).
 ///
 /// Use [TracingInspectorConfig::default_parity] or [TracingInspectorConfig::default_geth] to get

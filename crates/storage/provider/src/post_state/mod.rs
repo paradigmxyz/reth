@@ -8,7 +8,7 @@ use reth_db::{
 };
 use reth_primitives::{
     bloom::logs_bloom, keccak256, proofs::calculate_receipt_root_ref, Account, Address,
-    BlockNumber, Bloom, Bytecode, Log, Receipt, StorageEntry, H256, U256,
+    BlockNumber, Bloom, Bytecode, Log, PruneMode, PruneModes, Receipt, StorageEntry, H256, U256,
 };
 use reth_trie::{
     hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
@@ -78,6 +78,8 @@ pub struct PostState {
     bytecode: BTreeMap<H256, Bytecode>,
     /// The receipt(s) of the executed transaction(s).
     receipts: BTreeMap<BlockNumber, Vec<Receipt>>,
+    /// Pruning configuration.
+    prune_modes: PruneModes,
 }
 
 impl PostState {
@@ -89,6 +91,11 @@ impl PostState {
     /// Create an empty [PostState] with pre-allocated space for a certain amount of transactions.
     pub fn with_tx_capacity(block: BlockNumber, txs: usize) -> Self {
         Self { receipts: BTreeMap::from([(block, Vec::with_capacity(txs))]), ..Default::default() }
+    }
+
+    /// Add a pruning configuration.
+    pub fn add_prune_modes(&mut self, prune_modes: PruneModes) {
+        self.prune_modes = prune_modes;
     }
 
     /// Return the current size of the poststate.
@@ -319,6 +326,7 @@ impl PostState {
         }
 
         self.receipts.extend(other.receipts);
+
         self.bytecode.extend(other.bytecode);
     }
 
@@ -510,6 +518,7 @@ impl PostState {
     pub fn write_history_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         &mut self,
         tx: &TX,
+        tip: BlockNumber,
     ) -> Result<(), DbError> {
         // Write storage changes
         tracing::trace!(target: "provider::post_state", "Writing storage changes");
@@ -519,6 +528,10 @@ impl PostState {
             std::mem::take(&mut self.storage_changes).inner.into_iter()
         {
             for (address, mut storage) in storage_changes.into_iter() {
+                if self.prune_modes.should_prune_storage_history(block_number, tip) {
+                    continue
+                }
+
                 let storage_id = BlockNumberAddress((block_number, address));
 
                 // If the account was created and wiped at the same block, skip all storage changes
@@ -568,6 +581,10 @@ impl PostState {
         for (block_number, account_changes) in
             std::mem::take(&mut self.account_changes).inner.into_iter()
         {
+            if self.prune_modes.should_prune_account_history(block_number, tip) {
+                continue
+            }
+
             for (address, info) in account_changes.into_iter() {
                 tracing::trace!(target: "provider::post_state", block_number, ?address, old = ?info, "Account changed");
                 account_changeset_cursor
@@ -579,8 +596,12 @@ impl PostState {
     }
 
     /// Write the post state to the database.
-    pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(mut self, tx: &TX) -> Result<(), DbError> {
-        self.write_history_to_db(tx)?;
+    pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
+        mut self,
+        tx: &TX,
+        tip: BlockNumber,
+    ) -> Result<(), DbError> {
+        self.write_history_to_db(tx, tip)?;
 
         // Write new storage state
         tracing::trace!(target: "provider::post_state", len = self.storage.len(), "Writing new storage state");
@@ -630,16 +651,24 @@ impl PostState {
             bytecodes_cursor.upsert(hash, bytecode)?;
         }
 
-        // Write the receipts of the transactions
+        // Write the receipts of the transactions if not pruned
         tracing::trace!(target: "provider::post_state", len = self.receipts.len(), "Writing receipts");
-        let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
-        let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
-        for (block, receipts) in self.receipts {
-            let (_, body_indices) = bodies_cursor.seek_exact(block)?.expect("body indices exist");
-            let tx_range = body_indices.tx_num_range();
-            assert_eq!(receipts.len(), tx_range.clone().count(), "Receipt length mismatch");
-            for (tx_num, receipt) in tx_range.zip(receipts) {
-                receipts_cursor.append(tx_num, receipt)?;
+        if !self.receipts.is_empty() && self.prune_modes.receipts != Some(PruneMode::Full) {
+            let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
+            let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
+
+            for (block, receipts) in self.receipts {
+                if self.prune_modes.should_prune_receipts(block, tip) {
+                    continue
+                }
+
+                let (_, body_indices) =
+                    bodies_cursor.seek_exact(block)?.expect("body indices exist");
+                let tx_range = body_indices.tx_num_range();
+                assert_eq!(receipts.len(), tx_range.clone().count(), "Receipt length mismatch");
+                for (tx_num, receipt) in tx_range.zip(receipts) {
+                    receipts_cursor.append(tx_num, receipt)?;
+                }
             }
         }
 
@@ -1091,7 +1120,7 @@ mod tests {
         post_state.create_account(1, address_a, account_a);
         // 0x11.. is changed (balance + 1, nonce + 1)
         post_state.change_account(1, address_b, account_b, account_b_changed);
-        post_state.write_to_db(provider.tx_ref()).expect("Could not write post state to DB");
+        post_state.write_to_db(provider.tx_ref(), 0).expect("Could not write post state to DB");
 
         // Check plain state
         assert_eq!(
@@ -1124,7 +1153,9 @@ mod tests {
         let mut post_state = PostState::new();
         // 0x11.. is destroyed
         post_state.destroy_account(2, address_b, account_b_changed);
-        post_state.write_to_db(provider.tx_ref()).expect("Could not write second post state to DB");
+        post_state
+            .write_to_db(provider.tx_ref(), 0)
+            .expect("Could not write second post state to DB");
 
         // Check new plain state for account B
         assert_eq!(
@@ -1163,7 +1194,7 @@ mod tests {
 
         post_state.change_storage(1, address_a, storage_a_changeset);
         post_state.change_storage(1, address_b, storage_b_changeset);
-        post_state.write_to_db(&tx).expect("Could not write post state to DB");
+        post_state.write_to_db(&tx, 0).expect("Could not write post state to DB");
 
         // Check plain storage state
         let mut storage_cursor = tx
@@ -1246,7 +1277,7 @@ mod tests {
         // Delete account A
         let mut post_state = PostState::new();
         post_state.destroy_account(2, address_a, Account::default());
-        post_state.write_to_db(&tx).expect("Could not write post state to DB");
+        post_state.write_to_db(&tx, 0).expect("Could not write post state to DB");
 
         assert_eq!(
             storage_cursor.seek_exact(address_a).unwrap(),
@@ -1296,7 +1327,7 @@ mod tests {
                 (U256::from(1), (U256::ZERO, U256::from(2))),
             ]),
         );
-        init_state.write_to_db(&tx).expect("Could not write init state to DB");
+        init_state.write_to_db(&tx, 0).expect("Could not write init state to DB");
 
         let mut post_state = PostState::new();
         post_state.change_storage(
@@ -1339,7 +1370,7 @@ mod tests {
             BTreeMap::from([(U256::from(0), (U256::ZERO, U256::from(9)))]),
         );
 
-        post_state.write_to_db(&tx).expect("Could not write post state to DB");
+        post_state.write_to_db(&tx, 0).expect("Could not write post state to DB");
 
         let mut storage_changeset_cursor = tx
             .cursor_dup_read::<tables::StorageChangeSet>()

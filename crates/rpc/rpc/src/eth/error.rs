@@ -1,12 +1,16 @@
 //! Implementation specific Errors for the `eth_` namespace.
 
 use crate::result::{internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code};
-use jsonrpsee::{core::Error as RpcError, types::ErrorObject};
+use jsonrpsee::{
+    core::Error as RpcError,
+    types::{error::CALL_EXECUTION_FAILED_CODE, ErrorObject},
+};
 use reth_primitives::{abi::decode_revert_reason, Address, Bytes, U256};
 use reth_revm::tracing::js::JsInspectorError;
-use reth_rpc_types::{error::EthRpcErrorCode, BlockError};
+use reth_rpc_types::{error::EthRpcErrorCode, BlockError, CallInputError};
 use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolError};
 use revm::primitives::{EVMError, ExecutionResult, Halt, OutOfGasError};
+use std::time::Duration;
 
 /// Result alias
 pub type EthResult<T> = Result<T, EthApiError>;
@@ -26,6 +30,10 @@ pub enum EthApiError {
     PoolError(RpcPoolError),
     #[error("Unknown block number")]
     UnknownBlockNumber,
+    /// Thrown when querying for `finalized` or `safe` block before the merge transition is
+    /// finalized, <https://github.com/ethereum/execution-apis/blob/6d17705a875e52c26826124c2a8a15ed542aeca2/src/schemas/block.yaml#L109>
+    #[error("Unknown block")]
+    UnknownSafeOrFinalizedBlock,
     #[error("Unknown block or tx index")]
     UnknownBlockOrTxIndex,
     #[error("Invalid block range")]
@@ -76,9 +84,14 @@ pub enum EthApiError {
     /// Error thrown when a spawned blocking task failed to deliver an anticipated response.
     #[error("internal eth error")]
     InternalEthError,
+    /// Error thrown when a (tracing) call exceeded the configured timeout.
+    #[error("execution aborted (timeout = {0:?})")]
+    ExecutionTimedOut(Duration),
     /// Internal Error thrown by the javascript tracer
     #[error("{0}")]
     InternalJsTracerError(String),
+    #[error(transparent)]
+    CallInputError(#[from] CallInputError),
 }
 
 impl From<EthApiError> for ErrorObject<'static> {
@@ -101,12 +114,19 @@ impl From<EthApiError> for ErrorObject<'static> {
             EthApiError::UnknownBlockNumber | EthApiError::UnknownBlockOrTxIndex => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
+            EthApiError::UnknownSafeOrFinalizedBlock => {
+                rpc_error_with_code(EthRpcErrorCode::UnknownBlock.code(), error.to_string())
+            }
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
             EthApiError::InternalJsTracerError(msg) => internal_rpc_err(msg),
             EthApiError::InvalidParams(msg) => invalid_params_rpc_err(msg),
             EthApiError::InvalidRewardPercentiles => internal_rpc_err(error.to_string()),
+            err @ EthApiError::ExecutionTimedOut(_) => {
+                rpc_error_with_code(CALL_EXECUTION_FAILED_CODE, err.to_string())
+            }
             err @ EthApiError::InternalTracingError => internal_rpc_err(err.to_string()),
             err @ EthApiError::InternalEthError => internal_rpc_err(err.to_string()),
+            err @ EthApiError::CallInputError(_) => invalid_params_rpc_err(err.to_string()),
         }
     }
 }
@@ -143,11 +163,12 @@ impl From<reth_interfaces::provider::ProviderError> for EthApiError {
             ProviderError::HeaderNotFound(_) |
             ProviderError::BlockHashNotFound(_) |
             ProviderError::BestBlockNotFound |
-            ProviderError::FinalizedBlockNotFound |
-            ProviderError::SafeBlockNotFound |
             ProviderError::BlockNumberForTransactionIndexNotFound |
             ProviderError::TotalDifficultyNotFound { .. } |
             ProviderError::UnknownBlockHash(_) => EthApiError::UnknownBlockNumber,
+            ProviderError::FinalizedBlockNotFound | ProviderError::SafeBlockNotFound => {
+                EthApiError::UnknownSafeOrFinalizedBlock
+            }
             err => EthApiError::Internal(err.into()),
         }
     }
@@ -522,5 +543,16 @@ pub(crate) fn ensure_success(result: ExecutionResult) -> EthResult<Bytes> {
         ExecutionResult::Halt { reason, gas_used } => {
             Err(RpcInvalidTransactionError::halt(reason, gas_used).into())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timed_out_error() {
+        let err = EthApiError::ExecutionTimedOut(Duration::from_secs(10));
+        assert_eq!(err.to_string(), "execution aborted (timeout = 10s)");
     }
 }

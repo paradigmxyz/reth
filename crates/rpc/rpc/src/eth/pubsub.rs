@@ -1,24 +1,22 @@
 //! `eth_` PubSub RPC handler implementation
-use crate::eth::logs_utils;
+use crate::{eth::logs_utils, result::invalid_params_rpc_err};
 use futures::StreamExt;
 use jsonrpsee::{server::SubscriptionMessage, PendingSubscriptionSink, SubscriptionSink};
 use reth_network_api::NetworkInfo;
-use reth_primitives::TxHash;
+use reth_primitives::{IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider};
 use reth_rpc_api::EthPubSubApiServer;
-use reth_rpc_types::FilteredParams;
-use std::sync::Arc;
-
 use reth_rpc_types::{
     pubsub::{
         Params, PubSubSyncStatus, SubscriptionKind, SubscriptionResult as EthSubscriptionResult,
         SyncStatusMetadata,
     },
-    Header, Log,
+    FilteredParams, Header, Log,
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
-use reth_transaction_pool::TransactionPool;
+use reth_transaction_pool::{NewTransactionEvent, TransactionPool};
 use serde::Serialize;
+use std::sync::Arc;
 use tokio_stream::{
     wrappers::{BroadcastStream, ReceiverStream},
     Stream,
@@ -114,6 +112,9 @@ where
             // if no params are provided, used default filter params
             let filter = match params {
                 Some(Params::Logs(filter)) => FilteredParams::new(Some(*filter)),
+                Some(Params::Bool(_)) => {
+                    return Err(invalid_params_rpc_err("Invalid params for logs").into())
+                }
                 _ => FilteredParams::default(),
             };
             let stream =
@@ -121,8 +122,34 @@ where
             pipe_from_stream(accepted_sink, stream).await
         }
         SubscriptionKind::NewPendingTransactions => {
-            let stream =
-                pubsub.pending_transaction_stream().map(EthSubscriptionResult::TransactionHash);
+            if let Some(params) = params {
+                match params {
+                    Params::Bool(true) => {
+                        // full transaction objects requested
+                        let stream = pubsub.full_pending_transaction_stream().map(|tx| {
+                            EthSubscriptionResult::FullTransaction(Box::new(
+                                reth_rpc_types_compat::transaction::from_recovered(
+                                    tx.transaction.to_recovered_transaction(),
+                                ),
+                            ))
+                        });
+                        return pipe_from_stream(accepted_sink, stream).await
+                    }
+                    Params::Bool(false) | Params::None => {
+                        // only hashes requested
+                    }
+                    Params::Logs(_) => {
+                        return Err(invalid_params_rpc_err(
+                            "Invalid params for newPendingTransactions",
+                        )
+                        .into())
+                    }
+                }
+            }
+
+            let stream = pubsub
+                .pending_transaction_hashes_stream()
+                .map(EthSubscriptionResult::TransactionHash);
             pipe_from_stream(accepted_sink, stream).await
         }
         SubscriptionKind::Syncing => {
@@ -241,8 +268,15 @@ where
     Pool: TransactionPool + 'static,
 {
     /// Returns a stream that yields all transactions emitted by the txpool.
-    fn pending_transaction_stream(&self) -> impl Stream<Item = TxHash> {
+    fn pending_transaction_hashes_stream(&self) -> impl Stream<Item = TxHash> {
         ReceiverStream::new(self.pool.pending_transactions_listener())
+    }
+
+    /// Returns a stream that yields all transactions emitted by the txpool.
+    fn full_pending_transaction_stream(
+        &self,
+    ) -> impl Stream<Item = NewTransactionEvent<<Pool as TransactionPool>::Transaction>> {
+        self.pool.new_pending_pool_transactions_listener()
     }
 }
 
@@ -255,22 +289,13 @@ where
 {
     /// Returns a stream that yields all new RPC blocks.
     fn new_headers_stream(&self) -> impl Stream<Item = Header> {
-        BroadcastStream::new(self.chain_events.subscribe_to_canonical_state())
-            .map(|new_block| {
-                let new_chain = new_block.expect("new block subscription never ends; qed");
-                new_chain
-                    .committed()
-                    .map(|c| {
-                        c.blocks()
-                            .iter()
-                            .map(|(_, block)| {
-                                Header::from_primitive_with_hash(block.header.clone())
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default()
-            })
-            .flat_map(futures::stream::iter)
+        self.chain_events.canonical_state_stream().flat_map(|new_chain| {
+            let headers = new_chain
+                .committed()
+                .map(|chain| chain.headers().collect::<Vec<_>>())
+                .unwrap_or_default();
+            futures::stream::iter(headers.into_iter().map(Header::from_primitive_with_hash))
+        })
     }
 
     /// Returns a stream that yields all logs that match the given filter.

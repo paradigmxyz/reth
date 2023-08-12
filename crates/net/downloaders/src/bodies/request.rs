@@ -1,4 +1,4 @@
-use crate::metrics::BodyDownloaderMetrics;
+use crate::metrics::{BodyDownloaderMetrics, ResponseMetrics};
 use futures::{Future, FutureExt};
 use reth_interfaces::{
     consensus::{Consensus as ConsensusTrait, Consensus},
@@ -11,6 +11,7 @@ use reth_interfaces::{
 use reth_primitives::{BlockBody, PeerId, SealedBlock, SealedHeader, WithPeerId, H256};
 use std::{
     collections::VecDeque,
+    mem,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
@@ -39,6 +40,9 @@ pub(crate) struct BodiesRequestFuture<B: BodiesClient> {
     client: Arc<B>,
     consensus: Arc<dyn Consensus>,
     metrics: BodyDownloaderMetrics,
+    /// Metrics for individual responses. This can be used to observe how the size (in bytes) of
+    /// responses change while bodies are being downloaded.
+    response_metrics: ResponseMetrics,
     // Headers to download. The collection is shrunk as responses are buffered.
     pending_headers: VecDeque<SealedHeader>,
     /// Internal buffer for all blocks
@@ -62,6 +66,7 @@ where
             client,
             consensus,
             metrics,
+            response_metrics: Default::default(),
             pending_headers: Default::default(),
             buffer: Default::default(),
             last_request_len: None,
@@ -119,11 +124,11 @@ where
         // Increment total downloaded metric
         self.metrics.total_downloaded.increment(response_len as u64);
 
-        // Malicious peers often return a single block. Mark responses with single
-        // block when more than 1 were requested invalid.
-        // TODO: Instead of marking single block responses invalid, calculate
-        // soft response size lower limit and use that for filtering.
-        if bodies.is_empty() || (request_len != 1 && response_len == 1) {
+        // TODO: Malicious peers often return a single block even if it does not exceed the soft
+        // response limit (2MB).  this could be penalized by checking if this block and the
+        // next one exceed the soft response limit, if not then peer either does not have the next
+        // block or deliberately sent a single block.
+        if bodies.is_empty() {
             return Err(DownloadError::EmptyResponse)
         }
 
@@ -153,8 +158,11 @@ where
     /// This method removes headers from the internal collection.
     /// If the response fails validation, then the header will be put back.
     fn try_buffer_blocks(&mut self, bodies: Vec<BlockBody>) -> DownloadResult<()> {
+        let bodies_capacity = bodies.capacity();
+        let bodies_len = bodies.len();
         let mut bodies = bodies.into_iter().peekable();
 
+        let mut total_size = bodies_capacity * mem::size_of::<BlockBody>();
         while bodies.peek().is_some() {
             let next_header = match self.pending_headers.pop_front() {
                 Some(header) => header,
@@ -162,15 +170,16 @@ where
             };
 
             if next_header.is_empty() {
+                // increment empty block body metric
+                total_size += mem::size_of::<BlockBody>();
                 self.buffer.push(BlockResponse::Empty(next_header));
             } else {
                 let next_body = bodies.next().unwrap();
-                let block = SealedBlock {
-                    header: next_header,
-                    body: next_body.transactions,
-                    ommers: next_body.ommers,
-                    withdrawals: next_body.withdrawals,
-                };
+
+                // increment full block body metric
+                total_size += next_body.size();
+
+                let block = SealedBlock::new(next_header, next_body);
 
                 if let Err(error) = self.consensus.validate_block(&block) {
                     // Body is invalid, put the header back and return an error
@@ -182,6 +191,10 @@ where
                 self.buffer.push(BlockResponse::Full(block));
             }
         }
+
+        // Increment per-response metric
+        self.response_metrics.response_size_bytes.set(total_size as f64);
+        self.response_metrics.response_length.set(bodies_len as f64);
 
         Ok(())
     }

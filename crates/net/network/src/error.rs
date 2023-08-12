@@ -177,8 +177,18 @@ impl SessionError for EthStreamError {
             return match err {
                 DisconnectReason::TooManyPeers |
                 DisconnectReason::AlreadyConnected |
+                DisconnectReason::PingTimeout |
+                DisconnectReason::DisconnectRequested |
                 DisconnectReason::TcpSubsystemError => Some(BackoffKind::Low),
-                _ => {
+
+                DisconnectReason::ProtocolBreach |
+                DisconnectReason::UselessPeer |
+                DisconnectReason::IncompatibleP2PProtocolVersion |
+                DisconnectReason::NullNodeIdentity |
+                DisconnectReason::ClientQuitting |
+                DisconnectReason::UnexpectedHandshakeIdentity |
+                DisconnectReason::ConnectedToSelf |
+                DisconnectReason::SubprotocolSpecific => {
                     // These are considered fatal, and are handled by the
                     // [`SessionError::is_fatal_protocol_error`]
                     Some(BackoffKind::High)
@@ -245,8 +255,10 @@ impl SessionError for io::Error {
             // these usually happen when the remote instantly drops the connection, for example
             // if the previous connection isn't properly cleaned up yet and the peer is temp.
             // banned.
-            ErrorKind::ConnectionRefused | ErrorKind::ConnectionReset | ErrorKind::BrokenPipe => {
-                Some(BackoffKind::Low)
+            ErrorKind::ConnectionReset | ErrorKind::BrokenPipe => Some(BackoffKind::Low),
+            ErrorKind::ConnectionRefused => {
+                // peer is unreachable, e.g. port not open or down
+                Some(BackoffKind::High)
             }
             _ => Some(BackoffKind::Medium),
         }

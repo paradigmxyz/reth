@@ -2,12 +2,11 @@
 
 #![allow(missing_docs)]
 
-mod error;
 mod forkchoice;
 mod payload;
 mod transition;
 
-pub use self::{error::*, forkchoice::*, payload::*, transition::*};
+pub use self::{forkchoice::*, payload::*, transition::*};
 
 /// The list of supported Engine capabilities
 pub const CAPABILITIES: [&str; 9] = [

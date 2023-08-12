@@ -5,8 +5,10 @@ use crate::{
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+    table::Table,
     tables,
     transaction::DbTx,
+    BlockNumberList,
 };
 use reth_interfaces::Result;
 use reth_primitives::{
@@ -14,57 +16,70 @@ use reth_primitives::{
 };
 use std::marker::PhantomData;
 
-/// State provider for a given transition id which takes a tx reference.
+/// State provider for a given block number which takes a tx reference.
+///
+/// Historical state provider accesses the state at the start of the provided block number.
+/// It means that all changes made in the provided block number are not included.
 ///
 /// Historical state provider reads the following tables:
-/// [tables::AccountHistory]
-/// [tables::Bytecodes]
-/// [tables::StorageHistory]
-/// [tables::AccountChangeSet]
-/// [tables::StorageChangeSet]
+/// - [tables::AccountHistory]
+/// - [tables::Bytecodes]
+/// - [tables::StorageHistory]
+/// - [tables::AccountChangeSet]
+/// - [tables::StorageChangeSet]
 pub struct HistoricalStateProviderRef<'a, 'b, TX: DbTx<'a>> {
     /// Transaction
     tx: &'b TX,
     /// Block number is main index for the history state of accounts and storages.
     block_number: BlockNumber,
+    /// Lowest blocks at which different parts of the state are available.
+    lowest_available_blocks: LowestAvailableBlocks,
     /// Phantom lifetime `'a`
     _phantom: PhantomData<&'a TX>,
 }
 
+#[derive(Debug, Eq, PartialEq)]
 pub enum HistoryInfo {
-    NotWritten,
+    NotYetWritten,
     InChangeset(u64),
     InPlainState,
+    MaybeInPlainState,
 }
 
 impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
-    /// Create new StateProvider from history transaction number
+    /// Create new StateProvider for historical block number
     pub fn new(tx: &'b TX, block_number: BlockNumber) -> Self {
-        Self { tx, block_number, _phantom: PhantomData {} }
+        Self {
+            tx,
+            block_number,
+            lowest_available_blocks: Default::default(),
+            _phantom: PhantomData {},
+        }
+    }
+
+    /// Create new StateProvider for historical block number and lowest block numbers at which
+    /// account & storage histories are available.
+    pub fn new_with_lowest_available_blocks(
+        tx: &'b TX,
+        block_number: BlockNumber,
+        lowest_available_blocks: LowestAvailableBlocks,
+    ) -> Self {
+        Self { tx, block_number, lowest_available_blocks, _phantom: PhantomData {} }
     }
 
     /// Lookup an account in the AccountHistory table
     pub fn account_history_lookup(&self, address: Address) -> Result<HistoryInfo> {
+        if !self.lowest_available_blocks.is_account_history_available(self.block_number) {
+            return Err(ProviderError::StateAtBlockPruned(self.block_number).into())
+        }
+
         // history key to search IntegerList of block number changesets.
         let history_key = ShardedKey::new(address, self.block_number);
-        let mut cursor = self.tx.cursor_read::<tables::AccountHistory>()?;
-
-        if let Some(chunk) =
-            cursor.seek(history_key)?.filter(|(key, _)| key.key == address).map(|x| x.1 .0)
-        {
-            let chunk = chunk.enable_rank();
-            let rank = chunk.rank(self.block_number as usize);
-            if rank == 0 && !cursor.prev()?.is_some_and(|(key, _)| key.key == address) {
-                return Ok(HistoryInfo::NotWritten)
-            }
-            if rank < chunk.len() {
-                Ok(HistoryInfo::InChangeset(chunk.select(rank) as u64))
-            } else {
-                Ok(HistoryInfo::InPlainState)
-            }
-        } else {
-            Ok(HistoryInfo::NotWritten)
-        }
+        self.history_info::<tables::AccountHistory, _>(
+            history_key,
+            |key| key.key == address,
+            self.lowest_available_blocks.account_history_block_number,
+        )
     }
 
     /// Lookup a storage key in the StorageHistory table
@@ -73,31 +88,72 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
         address: Address,
         storage_key: StorageKey,
     ) -> Result<HistoryInfo> {
+        if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
+            return Err(ProviderError::StateAtBlockPruned(self.block_number).into())
+        }
+
         // history key to search IntegerList of block number changesets.
         let history_key = StorageShardedKey::new(address, storage_key, self.block_number);
-        let mut cursor = self.tx.cursor_read::<tables::StorageHistory>()?;
+        self.history_info::<tables::StorageHistory, _>(
+            history_key,
+            |key| key.address == address && key.sharded_key.key == storage_key,
+            self.lowest_available_blocks.storage_history_block_number,
+        )
+    }
 
-        if let Some(chunk) = cursor
-            .seek(history_key)?
-            .filter(|(key, _)| key.address == address && key.sharded_key.key == storage_key)
-            .map(|x| x.1 .0)
-        {
+    fn history_info<T, K>(
+        &self,
+        key: K,
+        key_filter: impl Fn(&K) -> bool,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> Result<HistoryInfo>
+    where
+        T: Table<Key = K, Value = BlockNumberList>,
+    {
+        let mut cursor = self.tx.cursor_read::<T>()?;
+
+        // Lookup the history chunk in the history index. If they key does not appear in the
+        // index, the first chunk for the next key will be returned so we filter out chunks that
+        // have a different key.
+        if let Some(chunk) = cursor.seek(key)?.filter(|(key, _)| key_filter(key)).map(|x| x.1 .0) {
             let chunk = chunk.enable_rank();
+
+            // Get the rank of the first entry after our block.
             let rank = chunk.rank(self.block_number as usize);
+
+            // If our block is before the first entry in the index chunk and this first entry
+            // doesn't equal to our block, it might be before the first write ever. To check, we
+            // look at the previous entry and check if the key is the same.
+            // This check is worth it, the `cursor.prev()` check is rarely triggered (the if will
+            // short-circuit) and when it passes we save a full seek into the changeset/plain state
+            // table.
             if rank == 0 &&
-                !cursor.prev()?.is_some_and(|(key, _)| {
-                    key.address == address && key.sharded_key.key == storage_key
-                })
+                chunk.select(rank) as u64 != self.block_number &&
+                !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key))
             {
-                return Ok(HistoryInfo::NotWritten)
-            }
-            if rank < chunk.len() {
+                if lowest_available_block_number.is_some() {
+                    // The key may have been written, but due to pruning we may not have changesets
+                    // and history, so we need to make a changeset lookup.
+                    Ok(HistoryInfo::InChangeset(chunk.select(rank) as u64))
+                } else {
+                    // The key is written to, but only after our block.
+                    Ok(HistoryInfo::NotYetWritten)
+                }
+            } else if rank < chunk.len() {
+                // The chunk contains an entry for a write after our block, return it.
                 Ok(HistoryInfo::InChangeset(chunk.select(rank) as u64))
             } else {
+                // The chunk does not contain an entry for a write after our block. This can only
+                // happen if this is the last chunk and so we need to look in the plain state.
                 Ok(HistoryInfo::InPlainState)
             }
+        } else if lowest_available_block_number.is_some() {
+            // The key may have been written, but due to pruning we may not have changesets and
+            // history, so we need to make a plain state lookup.
+            Ok(HistoryInfo::MaybeInPlainState)
         } else {
-            Ok(HistoryInfo::NotWritten)
+            // The key has not been written to at all.
+            Ok(HistoryInfo::NotYetWritten)
         }
     }
 }
@@ -106,7 +162,7 @@ impl<'a, 'b, TX: DbTx<'a>> AccountReader for HistoricalStateProviderRef<'a, 'b, 
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
         match self.account_history_lookup(address)? {
-            HistoryInfo::NotWritten => Ok(None),
+            HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => Ok(self
                 .tx
                 .cursor_dup_read::<tables::AccountChangeSet>()?
@@ -117,7 +173,9 @@ impl<'a, 'b, TX: DbTx<'a>> AccountReader for HistoricalStateProviderRef<'a, 'b, 
                     address,
                 })?
                 .info),
-            HistoryInfo::InPlainState => Ok(self.tx.get::<tables::PlainAccountState>(address)?),
+            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
+                Ok(self.tx.get::<tables::PlainAccountState>(address)?)
+            }
         }
     }
 }
@@ -152,7 +210,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
     /// Get storage.
     fn storage(&self, address: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
         match self.storage_history_lookup(address, storage_key)? {
-            HistoryInfo::NotWritten => Ok(None),
+            HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => Ok(Some(
                 self.tx
                     .cursor_dup_read::<tables::StorageChangeSet>()?
@@ -165,7 +223,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
                     })?
                     .value,
             )),
-            HistoryInfo::InPlainState => Ok(self
+            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => Ok(self
                 .tx
                 .cursor_dup_read::<tables::PlainStorageState>()?
                 .seek_by_key_subkey(address, storage_key)?
@@ -190,35 +248,94 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
     }
 }
 
-/// State provider for a given transition
+/// State provider for a given block number.
+/// For more detailed description, see [HistoricalStateProviderRef].
 pub struct HistoricalStateProvider<'a, TX: DbTx<'a>> {
     /// Database transaction
     tx: TX,
     /// State at the block number is the main indexer of the state.
     block_number: BlockNumber,
+    /// Lowest blocks at which different parts of the state are available.
+    lowest_available_blocks: LowestAvailableBlocks,
     /// Phantom lifetime `'a`
     _phantom: PhantomData<&'a TX>,
 }
 
 impl<'a, TX: DbTx<'a>> HistoricalStateProvider<'a, TX> {
-    /// Create new StateProvider from history transaction number
+    /// Create new StateProvider for historical block number
     pub fn new(tx: TX, block_number: BlockNumber) -> Self {
-        Self { tx, block_number, _phantom: PhantomData {} }
+        Self {
+            tx,
+            block_number,
+            lowest_available_blocks: Default::default(),
+            _phantom: PhantomData {},
+        }
+    }
+
+    /// Set the lowest block number at which the account history is available.
+    pub fn with_lowest_available_account_history_block_number(
+        mut self,
+        block_number: BlockNumber,
+    ) -> Self {
+        self.lowest_available_blocks.account_history_block_number = Some(block_number);
+        self
+    }
+
+    /// Set the lowest block number at which the storage history is available.
+    pub fn with_lowest_available_storage_history_block_number(
+        mut self,
+        block_number: BlockNumber,
+    ) -> Self {
+        self.lowest_available_blocks.storage_history_block_number = Some(block_number);
+        self
     }
 
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
     fn as_ref<'b>(&'b self) -> HistoricalStateProviderRef<'a, 'b, TX> {
-        HistoricalStateProviderRef::new(&self.tx, self.block_number)
+        HistoricalStateProviderRef::new_with_lowest_available_blocks(
+            &self.tx,
+            self.block_number,
+            self.lowest_available_blocks,
+        )
     }
 }
 
 // Delegates all provider impls to [HistoricalStateProviderRef]
 delegate_provider_impls!(HistoricalStateProvider<'a, TX> where [TX: DbTx<'a>]);
 
+/// Lowest blocks at which different parts of the state are available.
+/// They may be [Some] if pruning is enabled.
+#[derive(Default, Copy, Clone)]
+pub struct LowestAvailableBlocks {
+    /// Lowest block number at which the account history is available. It may not be available if
+    /// [reth_primitives::PrunePart::AccountHistory] was pruned.
+    /// [Option::None] means all history is available.
+    pub account_history_block_number: Option<BlockNumber>,
+    /// Lowest block number at which the storage history is available. It may not be available if
+    /// [reth_primitives::PrunePart::StorageHistory] was pruned.
+    /// [Option::None] means all history is available.
+    pub storage_history_block_number: Option<BlockNumber>,
+}
+
+impl LowestAvailableBlocks {
+    /// Check if account history is available at the provided block number, i.e. lowest available
+    /// block number for account history is less than or equal to the provided block number.
+    pub fn is_account_history_available(&self, at: BlockNumber) -> bool {
+        self.account_history_block_number.map(|block_number| block_number <= at).unwrap_or(true)
+    }
+
+    /// Check if storage history is available at the provided block number, i.e. lowest available
+    /// block number for storage history is less than or equal to the provided block number.
+    pub fn is_storage_history_available(&self, at: BlockNumber) -> bool {
+        self.storage_history_block_number.map(|block_number| block_number <= at).unwrap_or(true)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
+        providers::state::historical::{HistoryInfo, LowestAvailableBlocks},
         AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, StateProvider,
     };
     use reth_db::{
@@ -229,6 +346,7 @@ mod tests {
         transaction::{DbTx, DbTxMut},
         BlockNumberList,
     };
+    use reth_interfaces::provider::ProviderError;
     use reth_primitives::{hex_literal::hex, Account, StorageEntry, H160, H256, U256};
 
     const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));
@@ -403,7 +521,10 @@ mod tests {
 
         // run
         assert_eq!(HistoricalStateProviderRef::new(&tx, 0).storage(ADDRESS, STORAGE), Ok(None));
-        assert_eq!(HistoricalStateProviderRef::new(&tx, 3).storage(ADDRESS, STORAGE), Ok(None));
+        assert_eq!(
+            HistoricalStateProviderRef::new(&tx, 3).storage(ADDRESS, STORAGE),
+            Ok(Some(U256::ZERO))
+        );
         assert_eq!(
             HistoricalStateProviderRef::new(&tx, 4).storage(ADDRESS, STORAGE),
             Ok(Some(entry_at7.value))
@@ -435,6 +556,63 @@ mod tests {
         assert_eq!(
             HistoricalStateProviderRef::new(&tx, 1000).storage(HIGHER_ADDRESS, STORAGE),
             Ok(Some(higher_entry_plain.value))
+        );
+    }
+
+    #[test]
+    fn history_provider_unavailable() {
+        let db = create_test_rw_db();
+        let tx = db.tx().unwrap();
+
+        // provider block_number < lowest available block number,
+        // i.e. state at provider block is pruned
+        let provider = HistoricalStateProviderRef::new_with_lowest_available_blocks(
+            &tx,
+            2,
+            LowestAvailableBlocks {
+                account_history_block_number: Some(3),
+                storage_history_block_number: Some(3),
+            },
+        );
+        assert_eq!(
+            provider.account_history_lookup(ADDRESS),
+            Err(ProviderError::StateAtBlockPruned(provider.block_number).into())
+        );
+        assert_eq!(
+            provider.storage_history_lookup(ADDRESS, STORAGE),
+            Err(ProviderError::StateAtBlockPruned(provider.block_number).into())
+        );
+
+        // provider block_number == lowest available block number,
+        // i.e. state at provider block is available
+        let provider = HistoricalStateProviderRef::new_with_lowest_available_blocks(
+            &tx,
+            2,
+            LowestAvailableBlocks {
+                account_history_block_number: Some(2),
+                storage_history_block_number: Some(2),
+            },
+        );
+        assert_eq!(provider.account_history_lookup(ADDRESS), Ok(HistoryInfo::MaybeInPlainState));
+        assert_eq!(
+            provider.storage_history_lookup(ADDRESS, STORAGE),
+            Ok(HistoryInfo::MaybeInPlainState)
+        );
+
+        // provider block_number == lowest available block number,
+        // i.e. state at provider block is available
+        let provider = HistoricalStateProviderRef::new_with_lowest_available_blocks(
+            &tx,
+            2,
+            LowestAvailableBlocks {
+                account_history_block_number: Some(1),
+                storage_history_block_number: Some(1),
+            },
+        );
+        assert_eq!(provider.account_history_lookup(ADDRESS), Ok(HistoryInfo::MaybeInPlainState));
+        assert_eq!(
+            provider.storage_history_lookup(ADDRESS, STORAGE),
+            Ok(HistoryInfo::MaybeInPlainState)
         );
     }
 }

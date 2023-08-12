@@ -206,6 +206,11 @@ where
     /// If any stage is unsuccessful at execution, we proceed to
     /// unwind. This will undo the progress across the entire pipeline
     /// up to the block that caused the error.
+    ///
+    /// Returns the control flow after it ran the pipeline.
+    /// This will be [ControlFlow::Continue] or [ControlFlow::NoProgress] of the _last_ stage in the
+    /// pipeline (for example the `Finish` stage). Or [ControlFlow::Unwind] of the stage that caused
+    /// the unwind.
     pub async fn run_loop(&mut self) -> Result<ControlFlow, PipelineError> {
         let mut previous_stage = None;
         for stage_index in 0..self.stages.len() {
@@ -425,6 +430,19 @@ where
                             bad_block = %block.number,
                             "Stage encountered a validation error: {error}"
                         );
+
+                        // FIXME: When handling errors, we do not commit the database transaction.
+                        // This leads to the Merkle stage not clearing its
+                        // checkpoint, and restarting from an invalid place.
+                        drop(provider_rw);
+                        provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+                        provider_rw
+                            .save_stage_checkpoint_progress(StageId::MerkleExecute, vec![])?;
+                        provider_rw.save_stage_checkpoint(
+                            StageId::MerkleExecute,
+                            prev_checkpoint.unwrap_or_default(),
+                        )?;
+                        provider_rw.commit()?;
 
                         // We unwind because of a validation error. If the unwind itself fails,
                         // we bail entirely, otherwise we restart the execution loop from the

@@ -15,17 +15,17 @@ normal = [
 
 [dependencies]
 # reth
-reth-primitives = { workspace = true }
-reth-interfaces = { workspace = true }
+reth-primitives.workspace = true
+reth-interfaces.workspace = true
 reth-db = { path = "../storage/db" }
 reth-metrics = { workspace = true, features = ["common"] }
-reth-provider = { workspace = true }
+reth-provider.workspace = true
 reth-stages = { path = "../stages" }
 
 # common
 parking_lot = { version = "0.12" }
 lru = "0.10"
-tracing = { workspace = true }
+tracing.workspace = true
 
 # mics
 aquamarine = "0.3.0"

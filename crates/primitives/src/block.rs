@@ -59,6 +59,16 @@ impl Block {
 
         BlockWithSenders { block: self, senders }
     }
+
+    /// Calculates a heuristic for the in-memory size of the [Block].
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.header.size() +
+            // take into account capacity
+            self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * std::mem::size_of::<TransactionSigned>() +
+            self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * std::mem::size_of::<Header>() +
+            self.withdrawals.as_ref().map(|w| w.iter().map(Withdrawal::size).sum::<usize>() + w.capacity() * std::mem::size_of::<Withdrawal>()).unwrap_or(std::mem::size_of::<Option<Vec<Withdrawal>>>())
+    }
 }
 
 impl Deref for Block {
@@ -139,6 +149,18 @@ impl SealedBlock {
         (self.header, self.body, self.ommers)
     }
 
+    /// Splits the [BlockBody] and [SealedHeader] into separate components
+    pub fn split_header_body(self) -> (SealedHeader, BlockBody) {
+        (
+            self.header,
+            BlockBody {
+                transactions: self.body,
+                ommers: self.ommers,
+                withdrawals: self.withdrawals,
+            },
+        )
+    }
+
     /// Expensive operation that recovers transaction signer. See [SealedBlockWithSenders].
     pub fn senders(&self) -> Option<Vec<Address>> {
         self.body.iter().map(|tx| tx.recover_signer()).collect::<Option<Vec<Address>>>()
@@ -165,6 +187,16 @@ impl SealedBlock {
             ommers: self.ommers,
             withdrawals: self.withdrawals,
         }
+    }
+
+    /// Calculates a heuristic for the in-memory size of the [SealedBlock].
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.header.size() +
+            // take into account capacity
+            self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * std::mem::size_of::<TransactionSigned>() +
+            self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * std::mem::size_of::<Header>() +
+            self.withdrawals.as_ref().map(|w| w.iter().map(Withdrawal::size).sum::<usize>() + w.capacity() * std::mem::size_of::<Withdrawal>()).unwrap_or(std::mem::size_of::<Option<Vec<Withdrawal>>>())
     }
 }
 
@@ -715,6 +747,14 @@ impl BlockNumHash {
     pub fn into_components(self) -> (BlockNumber, BlockHash) {
         (self.number, self.hash)
     }
+
+    /// Returns whether or not the block matches the given [BlockHashOrNumber].
+    pub fn matches_block_or_num(&self, block: &BlockHashOrNumber) -> bool {
+        match block {
+            BlockHashOrNumber::Hash(hash) => self.hash == *hash,
+            BlockHashOrNumber::Number(number) => self.number == *number,
+        }
+    }
 }
 
 impl From<(BlockNumber, BlockHash)> for BlockNumHash {
@@ -774,6 +814,59 @@ impl BlockBody {
             withdrawals: self.withdrawals.clone(),
         }
     }
+
+    /// Calculate the transaction root for the block body.
+    pub fn calculate_tx_root(&self) -> H256 {
+        crate::proofs::calculate_transaction_root(&self.transactions)
+    }
+
+    /// Calculate the ommers root for the block body.
+    pub fn calculate_ommers_root(&self) -> H256 {
+        crate::proofs::calculate_ommers_root(&self.ommers)
+    }
+
+    /// Calculate the withdrawals root for the block body, if withdrawals exist. If there are no
+    /// withdrawals, this will return `None`.
+    pub fn calculate_withdrawals_root(&self) -> Option<H256> {
+        self.withdrawals.as_ref().map(|w| crate::proofs::calculate_withdrawals_root(w))
+    }
+
+    /// Calculate all roots (transaction, ommers, withdrawals) for the block body.
+    pub fn calculate_roots(&self) -> BlockBodyRoots {
+        BlockBodyRoots {
+            tx_root: self.calculate_tx_root(),
+            ommers_hash: self.calculate_ommers_root(),
+            withdrawals_root: self.calculate_withdrawals_root(),
+        }
+    }
+
+    /// Calculates a heuristic for the in-memory size of the [BlockBody].
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.transactions.iter().map(TransactionSigned::size).sum::<usize>() +
+            self.transactions.capacity() * std::mem::size_of::<TransactionSigned>() +
+            self.ommers.iter().map(Header::size).sum::<usize>() +
+            self.ommers.capacity() * std::mem::size_of::<Header>() +
+            self.withdrawals
+                .as_ref()
+                .map(|w| {
+                    w.iter().map(Withdrawal::size).sum::<usize>() +
+                        w.capacity() * std::mem::size_of::<Withdrawal>()
+                })
+                .unwrap_or(std::mem::size_of::<Option<Vec<Withdrawal>>>())
+    }
+}
+
+/// A struct that represents roots associated with a block body. This can be used to correlate
+/// block body responses with headers.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Hash)]
+pub struct BlockBodyRoots {
+    /// The transaction root for the block body.
+    pub tx_root: H256,
+    /// The ommers hash for the block body.
+    pub ommers_hash: H256,
+    /// The withdrawals root for the block body, if withdrawals exist.
+    pub withdrawals_root: Option<H256>,
 }
 
 #[cfg(test)]

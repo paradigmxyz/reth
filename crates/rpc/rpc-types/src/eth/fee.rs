@@ -12,10 +12,7 @@ pub struct TxGasAndReward {
 
 impl PartialOrd for TxGasAndReward {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        // compare only the reward
-        // see:
-        // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/eth/gasprice/feehistory.go#L85>
-        self.reward.partial_cmp(&other.reward)
+        Some(self.cmp(other))
     }
 }
 

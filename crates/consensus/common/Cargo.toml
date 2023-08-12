@@ -9,9 +9,9 @@ repository.workspace = true
 
 [dependencies]
 # reth 
-reth-primitives = { workspace = true }
-reth-interfaces = { workspace = true }
-reth-provider = { workspace = true }
+reth-primitives.workspace = true
+reth-interfaces.workspace = true
+reth-provider.workspace = true
 
 [dev-dependencies]
 reth-interfaces = { workspace = true, features = ["test-utils"] }

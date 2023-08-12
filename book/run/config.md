@@ -89,7 +89,7 @@ downloader_request_limit = 200
 #
 # A lower value means more frequent disk I/O (writes), but also
 # lowers memory usage.
-downloader_stream_batch_size = 10000
+downloader_stream_batch_size = 1000
 # The size of the internal block buffer in bytes.
 #
 # A bigger buffer means that bandwidth can be saturated for longer periods,
@@ -98,8 +98,8 @@ downloader_stream_batch_size = 10000
 # If the buffer is full, no more requests will be made to peers until
 # space is made for new blocks in the buffer.
 #
-# Defaults to around 4GB.
-downloader_max_buffered_blocks_size_bytes = 4294967296
+# Defaults to around 2GB.
+downloader_max_buffered_blocks_size_bytes = 2147483648
 # The minimum and maximum number of concurrent requests to have in flight at a time.
 #
 # The downloader uses these as best effort targets, which means that the number

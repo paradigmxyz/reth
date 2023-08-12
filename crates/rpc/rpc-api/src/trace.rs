@@ -71,6 +71,11 @@ pub trait TraceApi {
     async fn trace_filter(&self, filter: TraceFilter) -> RpcResult<Vec<LocalizedTransactionTrace>>;
 
     /// Returns transaction trace at given index.
+    ///
+    /// `indices` represent the index positions of the traces.
+    ///
+    /// Note: This expects a list of indices but only one is supported since this function returns a
+    /// single [LocalizedTransactionTrace].
     #[method(name = "get")]
     async fn trace_get(
         &self,

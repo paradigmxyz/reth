@@ -15,8 +15,13 @@ use reth_db::{
     Tables,
 };
 use reth_primitives::ChainSpec;
-use std::sync::Arc;
+use std::{
+    io::{self, Write},
+    sync::Arc,
+};
 
+mod clear;
+mod diff;
 mod get;
 mod list;
 /// DB List TUI
@@ -67,10 +72,18 @@ pub enum Subcommands {
     Stats,
     /// Lists the contents of a table
     List(list::Command),
+    /// Create a diff between two database tables or two entire databases.
+    Diff(diff::Command),
     /// Gets the content of a table for the given key
     Get(get::Command),
     /// Deletes all database entries
-    Drop,
+    Drop {
+        /// Bypasses the interactive confirmation and drops the database directly
+        #[arg(short, long)]
+        force: bool,
+    },
+    /// Deletes all table entries
+    Clear(clear::Command),
     /// Lists current and local database versions
     Version,
     /// Returns the full database path
@@ -104,6 +117,7 @@ impl Command {
                     let mut tables =
                         Tables::ALL.iter().map(|table| table.name()).collect::<Vec<_>>();
                     tables.sort();
+                    let mut total_size = 0;
                     for table in tables {
                         let table_db =
                             tx.inner.open_db(Some(table)).wrap_err("Could not open db.")?;
@@ -123,6 +137,7 @@ impl Command {
                         let num_pages = leaf_pages + branch_pages + overflow_pages;
                         let table_size = page_size * num_pages;
 
+                        total_size += table_size;
                         let mut row = Row::new();
                         row.add_cell(Cell::new(table))
                             .add_cell(Cell::new(stats.entries()))
@@ -132,6 +147,24 @@ impl Command {
                             .add_cell(Cell::new(human_bytes(table_size as f64)));
                         stats_table.add_row(row);
                     }
+
+                    let max_widths = stats_table.column_max_content_widths();
+
+                    let mut seperator = Row::new();
+                    for width in max_widths {
+                        seperator.add_cell(Cell::new("-".repeat(width as usize)));
+                    }
+                    stats_table.add_row(seperator);
+
+                    let mut row = Row::new();
+                    row.add_cell(Cell::new("Total DB size"))
+                        .add_cell(Cell::new(""))
+                        .add_cell(Cell::new(""))
+                        .add_cell(Cell::new(""))
+                        .add_cell(Cell::new(""))
+                        .add_cell(Cell::new(human_bytes(total_size as f64)));
+                    stats_table.add_row(row);
+
                     Ok::<(), eyre::Report>(())
                 })??;
 
@@ -142,15 +175,39 @@ impl Command {
                 let tool = DbTool::new(&db, self.chain.clone())?;
                 command.execute(&tool)?;
             }
+            Subcommands::Diff(command) => {
+                let db = open_db_read_only(&db_path, self.db.log_level)?;
+                let tool = DbTool::new(&db, self.chain.clone())?;
+                command.execute(&tool)?;
+            }
             Subcommands::Get(command) => {
                 let db = open_db_read_only(&db_path, self.db.log_level)?;
                 let tool = DbTool::new(&db, self.chain.clone())?;
                 command.execute(&tool)?;
             }
-            Subcommands::Drop => {
+            Subcommands::Drop { force } => {
+                if !force {
+                    // Ask for confirmation
+                    print!("Are you sure you want to drop the database? This cannot be undone. (y/N): ");
+                    // Flush the buffer to ensure the message is printed immediately
+                    io::stdout().flush().unwrap();
+
+                    let mut input = String::new();
+                    io::stdin().read_line(&mut input).expect("Failed to read line");
+
+                    if !input.trim().eq_ignore_ascii_case("y") {
+                        println!("Database drop aborted!");
+                        return Ok(())
+                    }
+                }
+
                 let db = open_db(&db_path, self.db.log_level)?;
                 let mut tool = DbTool::new(&db, self.chain.clone())?;
                 tool.drop(db_path)?;
+            }
+            Subcommands::Clear(command) => {
+                let db = open_db(&db_path, self.db.log_level)?;
+                command.execute(&db)?;
             }
             Subcommands::Version => {
                 let local_db_version = match get_db_version(&db_path) {

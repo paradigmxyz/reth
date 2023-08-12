@@ -8,8 +8,8 @@ use reth_db::{
 use reth_interfaces::test_utils::{
     generators,
     generators::{
-        random_block_range, random_contract_account_range, random_eoa_account_range,
-        random_transition_range,
+        random_block_range, random_changeset_range, random_contract_account_range,
+        random_eoa_account_range,
     },
 };
 use reth_primitives::{Account, Address, SealedBlock, H256, MAINNET};
@@ -119,7 +119,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
 
         let mut blocks = random_block_range(&mut rng, 0..=num_blocks, H256::zero(), txs_range);
 
-        let (transitions, start_state) = random_transition_range(
+        let (transitions, start_state) = random_changeset_range(
             &mut rng,
             blocks.iter().take(2),
             accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
@@ -139,10 +139,10 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
 
         let offset = transitions.len() as u64;
 
-        tx.insert_transitions(transitions, None).unwrap();
+        tx.insert_changesets(transitions, None).unwrap();
         tx.commit(|tx| updates.flush(tx)).unwrap();
 
-        let (transitions, final_state) = random_transition_range(
+        let (transitions, final_state) = random_changeset_range(
             &mut rng,
             blocks.iter().skip(2),
             start_state,
@@ -150,7 +150,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
             key_range,
         );
 
-        tx.insert_transitions(transitions, Some(offset)).unwrap();
+        tx.insert_changesets(transitions, Some(offset)).unwrap();
 
         tx.insert_accounts_and_storages(final_state).unwrap();
 

@@ -10,7 +10,7 @@ use thiserror::Error;
 /// # Note
 ///
 /// `Error::Skipped` should not be treated as a test failure.
-#[derive(Error, Debug, Clone)]
+#[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
     /// The test was skipped
@@ -22,7 +22,8 @@ pub enum Error {
         /// The path to the file or directory
         path: PathBuf,
         /// The specific error
-        error: String,
+        #[source]
+        error: std::io::Error,
     },
     /// A deserialization error occurred
     #[error("An error occurred deserializing the test at {path}: {error}")]
@@ -30,7 +31,8 @@ pub enum Error {
         /// The path to the file we wanted to deserialize
         path: PathBuf,
         /// The specific error
-        error: String,
+        #[source]
+        error: serde_json::Error,
     },
     /// A database error occurred.
     #[error(transparent)]
@@ -116,8 +118,7 @@ pub(crate) fn print_results(
     }
 
     for case in failed {
-        let error = case.result.clone().unwrap_err();
-
+        let error = case.result.as_ref().unwrap_err();
         println!("[!] Case {} failed (description: {}): {}", case.path.display(), case.desc, error);
     }
 }

@@ -1,10 +1,10 @@
 use crate::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
-    CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider, HeaderProvider,LogIndexProvider,
-    PostStateDataProvider, ProviderError, ReceiptProvider, ReceiptProviderIdExt,
-    StageCheckpointReader, StateProviderBox, StateProviderFactory, TransactionsProvider,
-    WithdrawalsProvider,
+    CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider,LogIndexProvider,
+    PostStateDataProvider, ProviderError, PruneCheckpointReader, ReceiptProvider,
+    ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox, StateProviderFactory,
+    TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, models::StoredBlockBodyIndices};
 use reth_interfaces::{
@@ -15,8 +15,8 @@ use reth_interfaces::{
 use reth_primitives::{IntegerList,
     stage::{StageCheckpoint, StageId},
     Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
-    BlockNumberOrTag, BlockWithSenders, ChainInfo, ChainSpec, Header, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
+    BlockNumberOrTag, BlockWithSenders, ChainInfo, ChainSpec, Header, PruneCheckpoint, PrunePart,
+    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
@@ -39,6 +39,7 @@ mod state;
 use crate::{providers::chain_info::ChainInfoTracker, traits::BlockSource};
 pub use database::*;
 pub use post_state_provider::PostStateProvider;
+use reth_db::models::AccountBeforeTx;
 use reth_interfaces::blockchain_tree::{
     error::InsertBlockError, CanonicalOutcome, InsertPayloadOk,
 };
@@ -212,12 +213,12 @@ where
     fn find_block_by_hash(&self, hash: H256, source: BlockSource) -> Result<Option<Block>> {
         let block = match source {
             BlockSource::Any => {
-                // check pending source first
-                // Note: it's fine to return the unsealed block because the caller already has the
-                // hash
-                let mut block = self.tree.block_by_hash(hash).map(|block| block.unseal());
+                // check database first
+                let mut block = self.database.provider()?.block_by_hash(hash)?;
                 if block.is_none() {
-                    block = self.database.provider()?.block_by_hash(hash)?;
+                    // Note: it's fine to return the unsealed block because the caller already has
+                    // the hash
+                    block = self.tree.block_by_hash(hash).map(|block| block.unseal());
                 }
                 block
             }
@@ -278,6 +279,10 @@ where
 
     fn transaction_by_id(&self, id: TxNumber) -> Result<Option<TransactionSigned>> {
         self.database.provider()?.transaction_by_id(id)
+    }
+
+    fn transaction_by_id_no_hash(&self, id: TxNumber) -> Result<Option<TransactionSignedNoHash>> {
+        self.database.provider()?.transaction_by_id_no_hash(id)
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> Result<Option<TransactionSigned>> {
@@ -464,6 +469,16 @@ where
     }
 }
 
+impl<DB, Tree> PruneCheckpointReader for BlockchainProvider<DB, Tree>
+where
+    DB: Database,
+    Tree: Send + Sync,
+{
+    fn get_prune_checkpoint(&self, part: PrunePart) -> Result<Option<PruneCheckpoint>> {
+        self.database.provider()?.get_prune_checkpoint(part)
+    }
+}
+
 impl<DB, Tree> ChainSpecProvider for BlockchainProvider<DB, Tree>
 where
     DB: Send + Sync,
@@ -557,14 +572,17 @@ where
 
     fn state_by_block_hash(&self, block: BlockHash) -> Result<StateProviderBox<'_>> {
         trace!(target: "providers::blockchain", ?block, "Getting state by block hash");
+        let mut state = self.history_by_block_hash(block);
 
-        // check tree first
-        if let Some(pending) = self.tree.find_pending_state_provider(block) {
-            trace!(target: "providers::blockchain", "Returning pending state provider");
-            return self.pending_with_provider(pending)
+        // we failed to get the state by hash, from disk, hash block be the pending block
+        if state.is_err() {
+            if let Ok(Some(pending)) = self.pending_state_by_hash(block) {
+                // we found pending block by hash
+                state = Ok(pending)
+            }
         }
-        // not found in tree, check database
-        self.history_by_block_hash(block)
+
+        state
     }
 
     /// Storage provider for pending state.
@@ -621,8 +639,15 @@ where
         self.tree.finalize_block(finalized_block)
     }
 
-    fn restore_canonical_hashes(&self, last_finalized_block: BlockNumber) -> Result<()> {
-        self.tree.restore_canonical_hashes(last_finalized_block)
+    fn restore_canonical_hashes_and_finalize(
+        &self,
+        last_finalized_block: BlockNumber,
+    ) -> Result<()> {
+        self.tree.restore_canonical_hashes_and_finalize(last_finalized_block)
+    }
+
+    fn restore_canonical_hashes(&self) -> Result<()> {
+        self.tree.restore_canonical_hashes()
     }
 
     fn make_canonical(&self, block_hash: &BlockHash) -> Result<CanonicalOutcome> {
@@ -665,6 +690,10 @@ where
 
     fn find_canonical_ancestor(&self, hash: BlockHash) -> Option<BlockHash> {
         self.tree.find_canonical_ancestor(hash)
+    }
+
+    fn is_canonical(&self, hash: BlockHash) -> std::result::Result<bool, Error> {
+        self.tree.is_canonical(hash)
     }
 
     fn lowest_buffered_ancestor(&self, hash: BlockHash) -> Option<SealedBlockWithSenders> {
@@ -827,5 +856,15 @@ where
 {
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
         self.tree.subscribe_to_canonical_state()
+    }
+}
+
+impl<DB, Tree> ChangeSetReader for BlockchainProvider<DB, Tree>
+where
+    DB: Database,
+    Tree: Sync + Send,
+{
+    fn account_block_changeset(&self, block_number: BlockNumber) -> Result<Vec<AccountBeforeTx>> {
+        self.database.provider()?.account_block_changeset(block_number)
     }
 }

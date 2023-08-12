@@ -19,6 +19,7 @@ use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     cmp::Ordering,
     collections::BinaryHeap,
+    mem,
     ops::RangeInclusive,
     pin::Pin,
     sync::Arc,
@@ -225,13 +226,16 @@ where
         self.metrics.buffered_responses.decrement(1.);
         self.buffered_blocks_size_bytes -= resp.size();
         self.metrics.buffered_blocks.decrement(resp.len() as f64);
-        self.metrics.buffered_blocks_size_bytes.set(resp.size() as f64);
+        self.metrics.buffered_blocks_size_bytes.set(self.buffered_blocks_size_bytes as f64);
         Some(resp)
     }
 
     /// Adds a new response to the internal buffer
     fn buffer_bodies_response(&mut self, response: Vec<BlockResponse>) {
-        let size = response.iter().map(|b| b.size()).sum::<usize>();
+        // take into account capacity
+        let size = response.iter().map(BlockResponse::size).sum::<usize>() +
+            response.capacity() * mem::size_of::<BlockResponse>();
+
         let response = OrderedBodiesResponse { resp: response, size };
         let response_len = response.len();
 
@@ -516,7 +520,7 @@ impl Default for BodiesDownloaderBuilder {
         Self {
             request_limit: 200,
             stream_batch_size: 10_000,
-            max_buffered_blocks_size_bytes: 4 * 1024 * 1024 * 1024, // ~4GB
+            max_buffered_blocks_size_bytes: 2 * 1024 * 1024 * 1024, // ~2GB
             concurrent_requests_range: 5..=100,
         }
     }

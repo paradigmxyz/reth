@@ -121,7 +121,7 @@ pub(crate) async fn initialize(
     Ok(())
 }
 
-#[cfg(feature = "jemalloc")]
+#[cfg(all(feature = "jemalloc", unix))]
 fn collect_memory_stats() {
     use jemalloc_ctl::{epoch, stats};
     use reth_metrics::metrics::gauge;
@@ -169,7 +169,7 @@ fn collect_memory_stats() {
     }
 }
 
-#[cfg(feature = "jemalloc")]
+#[cfg(all(feature = "jemalloc", unix))]
 fn describe_memory_stats() {
     use reth_metrics::metrics::describe_gauge;
 
@@ -206,8 +206,8 @@ fn describe_memory_stats() {
     );
 }
 
-#[cfg(not(feature = "jemalloc"))]
+#[cfg(not(all(feature = "jemalloc", unix)))]
 fn collect_memory_stats() {}
 
-#[cfg(not(feature = "jemalloc"))]
+#[cfg(not(all(feature = "jemalloc", unix)))]
 fn describe_memory_stats() {}
