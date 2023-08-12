@@ -73,7 +73,8 @@ impl From<PooledTransactions> for Vec<TransactionSigned> {
 
 /// A response to [`GetPooledTransactions`]. This can include either a blob transaction, or a
 /// non-4844 signed transaction.
-// TODO: redo arbitrary for this encoding - the previous encoding was incorrect
+// TODO: redo arbitrary for this encoding - the previous encoding was incorrect. then this can be
+// replaced with `TransactionSigned` in `PooledTransactions`
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PooledTransactionResponse {
     /// A blob transaction, which includes the transaction, blob data, commitments, and proofs.
@@ -181,6 +182,10 @@ impl Decodable for PooledTransactionResponse {
 ///
 /// This is defined in [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#networking) as an element
 /// of a [PooledTransactions] response.
+///
+/// NOTE: This contains a [TransactionSigned], which could be a non-4844 transaction type, even
+/// though that would not make sense. This type is meant to be constructed using decoding methods,
+/// which should always construct the [TransactionSigned] with an EIP-4844 transaction.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct BlobTransaction {
     /// The transaction payload.
@@ -203,8 +208,34 @@ impl BlobTransaction {
     /// commitments, and proofs. Each blob data element is verified against its commitment and
     /// proof.
     ///
-    /// Returns `false` if any blob KZG proof in the response fails to verify.
+    /// Returns `false` if any blob KZG proof in the response fails to verify, or if the versioned
+    /// hashes in the transaction do not match the actual commitment versioned hashes.
     pub fn validate(&self, proof_settings: &KzgSettings) -> Result<bool, kzg::Error> {
+        let inner_tx = match &self.transaction.transaction {
+            Transaction::Eip4844(blob_tx) => blob_tx,
+            _ => {
+                todo!()
+                // return Err()
+            }
+        };
+
+        // Ensure the versioned hashes and commitments have the same length
+        if inner_tx.blob_versioned_hashes.len() != self.commitments.len() {
+            return Err(kzg::Error::MismatchLength(format!(
+                "There are {} versioned commitment hashes and {} commitments",
+                inner_tx.blob_versioned_hashes.len(),
+                self.commitments.len()
+            )))
+        }
+
+        // zip and iterate, calculating versioned hashes
+        for (versioned_hash, commitment) in
+            inner_tx.blob_versioned_hashes.iter().zip(self.commitments.iter())
+        {
+            // Calculate the versioned hash
+            todo!()
+        }
+
         // Verify as a batch
         KzgProof::verify_blob_kzg_proof_batch(
             self.blobs.as_slice(),
