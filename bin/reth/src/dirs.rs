@@ -171,6 +171,11 @@ impl<D> PlatformPath<D> {
         let platform_path = PlatformPath::<D>(path, std::marker::PhantomData);
         ChainPath::new(platform_path, chain)
     }
+
+    /// Map the inner path to a new type `T`.
+    pub fn map_to<T>(&self) -> PlatformPath<T> {
+        PlatformPath(self.0.clone(), std::marker::PhantomData)
+    }
 }
 
 /// An Optional wrapper type around [PlatformPath].

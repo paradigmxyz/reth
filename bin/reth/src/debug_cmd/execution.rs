@@ -42,7 +42,7 @@ use std::{
 use tokio::sync::watch;
 use tracing::*;
 
-/// `reth execution-debug` command
+/// `reth debug execution` command
 #[derive(Debug, Parser)]
 pub struct Command {
     /// The path to the data dir for all reth files and subdirectories.
@@ -194,7 +194,7 @@ impl Command {
             match get_single_header(&client, BlockHashOrNumber::Number(block)).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?block, "Successfully fetched block");
-                    return Ok(tip_header.hash)
+                    return Ok(tip_header.hash);
                 }
                 Err(error) => {
                     error!(target: "reth::cli", ?block, %error, "Failed to fetch the block. Retrying...");
@@ -247,7 +247,7 @@ impl Command {
             provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
         if latest_block_number.unwrap_or_default() >= self.to {
             info!(target: "reth::cli", latest = latest_block_number, "Nothing to run");
-            return Ok(())
+            return Ok(());
         }
 
         let pipeline_events = pipeline.events();
