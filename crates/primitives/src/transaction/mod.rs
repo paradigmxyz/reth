@@ -702,36 +702,38 @@ impl Transaction {
 }
 
 impl Compact for Transaction {
+    // Serializes the TxType to the buffer if necessary, returning 2 bits of the type as an
+    // identifier instead of the length.
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
+        let identifier = self.tx_type().to_compact(buf);
         match self {
             Transaction::Legacy(tx) => {
                 tx.to_compact(buf);
-                0
             }
             Transaction::Eip2930(tx) => {
                 tx.to_compact(buf);
-                1
             }
             Transaction::Eip1559(tx) => {
                 tx.to_compact(buf);
-                2
             }
             Transaction::Eip4844(tx) => {
                 tx.to_compact(buf);
-                3
             }
             #[cfg(feature = "optimism")]
             Transaction::Deposit(deposit) => {
                 deposit.to_compact(buf);
-                126
             }
         }
+        identifier
     }
 
-    fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+    // For backwards compatibility purposes, only 2 bits of the type are encoded in the identifier
+    // parameter. In the case of a 3, the full transaction type is read from the buffer as a
+    // single byte.
+    fn from_compact(mut buf: &[u8], identifier: usize) -> (Self, &[u8]) {
         match identifier {
             0 => {
                 let (tx, buf) = TxLegacy::from_compact(buf, buf.len());
@@ -746,13 +748,19 @@ impl Compact for Transaction {
                 (Transaction::Eip1559(tx), buf)
             }
             3 => {
-                let (tx, buf) = TxEip4844::from_compact(buf, buf.len());
-                (Transaction::Eip4844(tx), buf)
-            }
-            #[cfg(feature = "optimism")]
-            126 => {
-                let (tx, buf) = TxDeposit::from_compact(buf, buf.len());
-                (Transaction::Deposit(tx), buf)
+                let identifier = buf.get_u8() as usize;
+                match identifier {
+                    3 => {
+                        let (tx, buf) = TxEip4844::from_compact(buf, buf.len());
+                        (Transaction::Eip4844(tx), buf)
+                    }
+                    #[cfg(feature = "optimism")]
+                    126 => {
+                        let (tx, buf) = TxDeposit::from_compact(buf, buf.len());
+                        (Transaction::Deposit(tx), buf)
+                    }
+                    _ => unreachable!("Junk data in database: unknown Transaction variant"),
+                }
             }
             _ => unreachable!("Junk data in database: unknown Transaction variant"),
         }
