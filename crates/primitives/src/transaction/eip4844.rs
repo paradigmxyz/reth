@@ -1,6 +1,7 @@
 use super::access_list::AccessList;
 use crate::{constants::eip4844::DATA_GAS_PER_BLOB, Bytes, ChainId, TransactionKind, H256};
 use reth_codecs::{main_codec, Compact};
+use reth_rlp::{Decodable, DecodeError};
 use std::mem;
 
 /// [EIP-4844 Blob Transaction](https://eips.ethereum.org/EIPS/eip-4844#blob-transaction)
@@ -98,6 +99,38 @@ impl TxEip4844 {
     pub fn blob_gas(&self) -> u64 {
         // SAFETY: we don't expect u64::MAX / DATA_GAS_PER_BLOB hashes in a single transaction
         self.blob_versioned_hashes.len() as u64 * DATA_GAS_PER_BLOB
+    }
+
+    /// Decodes the inner [TxEip4844] fields from RLP bytes.
+    ///
+    /// NOTE: This assumes a RLP header has already been decoded, and _just_ decodes the following
+    /// RLP fields in the following order:
+    ///
+    /// - `chain_id`
+    /// - `nonce`
+    /// - `max_priority_fee_per_gas`
+    /// - `max_fee_per_gas`
+    /// - `gas_limit`
+    /// - `to`
+    /// - `value`
+    /// - `data` (`input`)
+    /// - `access_list`
+    /// - `max_fee_per_blob_gas`
+    /// - `blob_versioned_hashes`
+    pub fn decode_inner(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        Ok(Self {
+            chain_id: Decodable::decode(buf)?,
+            nonce: Decodable::decode(buf)?,
+            max_priority_fee_per_gas: Decodable::decode(buf)?,
+            max_fee_per_gas: Decodable::decode(buf)?,
+            gas_limit: Decodable::decode(buf)?,
+            to: Decodable::decode(buf)?,
+            value: Decodable::decode(buf)?,
+            input: Bytes(Decodable::decode(buf)?),
+            access_list: Decodable::decode(buf)?,
+            max_fee_per_blob_gas: Decodable::decode(buf)?,
+            blob_versioned_hashes: Decodable::decode(buf)?,
+        })
     }
 
     /// Calculates a heuristic for the in-memory size of the [TxEip4844] transaction.

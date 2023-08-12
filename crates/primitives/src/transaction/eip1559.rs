@@ -1,6 +1,7 @@
 use super::access_list::AccessList;
 use crate::{Bytes, ChainId, TransactionKind};
 use reth_codecs::{main_codec, Compact};
+use reth_rlp::{Decodable, DecodeError};
 use std::mem;
 
 /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
@@ -80,6 +81,34 @@ impl TxEip1559 {
                 }
             }
         }
+    }
+
+    /// Decodes the inner [TxEip1559] fields from RLP bytes.
+    ///
+    /// NOTE: This assumes a RLP header has already been decoded, and _just_ decodes the following
+    /// RLP fields in the following order:
+    ///
+    /// - `chain_id`
+    /// - `nonce`
+    /// - `max_priority_fee_per_gas`
+    /// - `max_fee_per_gas`
+    /// - `gas_limit`
+    /// - `to`
+    /// - `value`
+    /// - `data` (`input`)
+    /// - `access_list`
+    pub(crate) fn decode_inner(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        Ok(Self {
+            chain_id: Decodable::decode(buf)?,
+            nonce: Decodable::decode(buf)?,
+            max_priority_fee_per_gas: Decodable::decode(buf)?,
+            max_fee_per_gas: Decodable::decode(buf)?,
+            gas_limit: Decodable::decode(buf)?,
+            to: Decodable::decode(buf)?,
+            value: Decodable::decode(buf)?,
+            input: Bytes(Decodable::decode(buf)?),
+            access_list: Decodable::decode(buf)?,
+        })
     }
 
     /// Calculates a heuristic for the in-memory size of the [TxEip1559] transaction.

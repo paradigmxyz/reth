@@ -1,10 +1,15 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
-use reth_codecs::{add_arbitrary_tests, derive_arbitrary};
+use bytes::Buf;
+use reth_codecs::derive_arbitrary;
 use reth_primitives::{
     kzg::{self, Blob, Bytes48, KzgProof, KzgSettings},
-    TransactionSigned, H256,
+    Signature, Transaction, TransactionSigned, TransactionSignedNoHash, TxEip4844,
+    EIP4844_TX_TYPE_ID, H256,
 };
-use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
+use reth_rlp::{
+    Decodable, DecodeError, Encodable, Header, RlpDecodableWrapper, RlpEncodableWrapper,
+    EMPTY_LIST_CODE,
+};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -67,13 +72,107 @@ impl From<PooledTransactions> for Vec<TransactionSigned> {
     }
 }
 
+/// A response to [`GetPooledTransactions`]. This can include either a blob transaction, or a
+/// non-4844 signed transaction.
+// TODO: redo arbitrary for this encoding - the previous encoding was incorrect
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PooledTransactionResponse {
+    /// A blob transaction, which includes the transaction, blob data, commitments, and proofs.
+    BlobTransaction(BlobTransaction),
+    /// A non-4844 signed transaction.
+    Transaction(TransactionSigned),
+}
+
+impl Encodable for PooledTransactionResponse {
+    /// Encodes an enveloped post EIP-4844 [PooledTransaction] response.
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
+        match self {
+            Self::Transaction(tx) => tx.encode(out),
+            Self::BlobTransaction(blob_tx) => {
+                // The inner encoding is used with `with_header` set to true, making the final
+                // encoding:
+                // `rlp(tx_type || rlp([transaction_payload_body, blobs, commitments, proofs]))`
+                blob_tx.encode_with_type_inner(out, true);
+            }
+        }
+    }
+
+    fn length(&self) -> usize {
+        match self {
+            Self::Transaction(tx) => tx.length(),
+            Self::BlobTransaction(blob_tx) => {
+                // the encoding uses a header, so we set `with_header` to true
+                blob_tx.payload_len_with_type(true)
+            }
+        }
+    }
+}
+
+impl Decodable for PooledTransactionResponse {
+    /// Decodes an enveloped post EIP-4844 [PooledTransaction] response.
+    ///
+    /// CAUTION: this expects that `buf` is `[id, rlp(tx)]`
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        // From the EIP-4844 spec:
+        // Blob transactions have two network representations. During transaction gossip responses
+        // (`PooledTransactions`), the EIP-2718 `TransactionPayload` of the blob transaction is
+        // wrapped to become:
+        //
+        // `rlp([tx_payload_body, blobs, commitments, proofs])`
+        //
+        // Because non-4844 signed transaction payloads start with a type byte (0x01 - 0x7f), and
+        // blob transactions are encoded as a list (header starts with 0xc0 - 0xff), we can
+        // disambiguate the two types of transaction payloads by checking the first byte of the
+        // first element of the payload. If the first element is a list, we will decode the payload
+        // as a blob transaction. Otherwise, we will decode it as a non-4844 signed transaction.
+        //
+        // First, we check whether or not the transaction is a legacy transaction.
+        if buf.is_empty() {
+            return Err(DecodeError::InputTooShort)
+        }
+
+        // Check if the tx is a list
+        if buf[0] >= EMPTY_LIST_CODE {
+            // decode as legacy transaction
+            let legacy_tx = TransactionSigned::decode_rlp_legacy_transaction(buf)?;
+            Ok(PooledTransactionResponse::Transaction(legacy_tx))
+        } else {
+            // decode the type byte, only decode BlobTransaction if it is a 4844 transaction
+            let tx_type = *buf.first().ok_or(DecodeError::InputTooShort)?;
+
+            if tx_type == EIP4844_TX_TYPE_ID {
+                // Recall that the blob transaction response `TranactionPayload` is encoded like
+                // this: `rlp([tx_payload_body, blobs, commitments, proofs])`
+                //
+                // Note that `tx_payload_body` is a list:
+                // `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
+                //
+                // This makes the full encoding:
+                // `tx_type (0x03) || rlp([[chain_id, nonce, ...], blobs, commitments, proofs])`
+                //
+                // First, we advance the buffer past the type byte
+                buf.advance(1);
+
+                // Now, we decode the inner blob transaction:
+                // `rlp([[chain_id, nonce, ...], blobs, commitments, proofs])`
+                let blob_tx = BlobTransaction::decode_inner(buf)?;
+                Ok(PooledTransactionResponse::BlobTransaction(blob_tx))
+            } else {
+                // DO NOT advance the buffer, since we want the enveloped decoding to decode it
+                // again and advance the buffer on its own.
+                let typed_tx = TransactionSigned::decode_enveloped_typed_transaction(buf)?;
+                Ok(PooledTransactionResponse::Transaction(typed_tx))
+            }
+        }
+    }
+}
+
 /// A response to [`GetPooledTransactions`] that includes blob data, their commitments, and their
 /// corresponding proofs.
 ///
 /// This is defined in [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#networking) as an element
 /// of a [PooledTransactions] response.
-#[add_arbitrary_tests(rlp, 20)]
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct BlobTransaction {
     /// The transaction payload.
     pub transaction: TransactionSigned,
@@ -104,6 +203,184 @@ impl BlobTransaction {
             self.proofs.as_slice(),
             proof_settings,
         )
+    }
+
+    /// Encodes the [BlobTransaction] fields as RLP, with a tx type. If `with_header` is `false`,
+    /// the following will be encoded:
+    /// `tx_type (0x03) || rlp([transaction_payload_body, blobs, commitments, proofs])`
+    ///
+    /// If `with_header` is `true`, the following will be encoded:
+    /// `rlp(tx_type (0x03) || rlp([transaction_payload_body, blobs, commitments, proofs]))`
+    ///
+    /// NOTE: The header will be a byte string header, not a list header.
+    pub fn encode_with_type_inner(&self, out: &mut dyn bytes::BufMut, with_header: bool) {
+        // Calculate the length of:
+        // `tx_type || rlp([transaction_payload_body, blobs, commitments, proofs])`
+        //
+        // to construct and encode the string header
+        if with_header {
+            Header {
+                list: false,
+                // add one for the tx type
+                payload_length: 1 + self.payload_len(),
+            }
+            .encode(out);
+        }
+
+        out.put_u8(EIP4844_TX_TYPE_ID);
+
+        // Now we encode the inner blob transaction:
+        self.encode_inner(out);
+    }
+
+    /// Encodes the [BlobTransaction] fields as RLP, with the following format:
+    /// `rlp([transaction_payload_body, blobs, commitments, proofs])`
+    ///
+    /// where `transaction_payload_body` is a list:
+    /// `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
+    ///
+    /// Note: this should be used only when implementing other RLP encoding methods, and does not
+    /// represent the full RLP encoding of the blob transaction.
+    pub fn encode_inner(&self, out: &mut dyn bytes::BufMut) {
+        // First we construct both required list headers.
+        //
+        // The `transaction_payload_body` length is the length of the fields, plus the length of
+        // its list header.
+        let tx_header = Header {
+            list: true,
+            payload_length: self.transaction.fields_len() +
+                self.transaction.signature.payload_len(),
+        };
+
+        let tx_length = tx_header.length() + tx_header.payload_length;
+
+        // The payload length is the length of the `tranascation_payload_body` list, plus the
+        // length of the blobs, commitments, and proofs.
+        let payload_length =
+            tx_length + self.blobs.length() + self.commitments.length() + self.proofs.length();
+
+        // First we use the payload len to construct the first list header
+        let blob_tx_header = Header { list: true, payload_length };
+
+        // Encode the blob tx header first
+        blob_tx_header.encode(out);
+
+        // Encode the inner tx list header, then its fields
+        tx_header.encode(out);
+        self.transaction.encode_fields(out);
+
+        // Encode the blobs, commitments, and proofs
+        self.blobs.encode(out);
+        self.commitments.encode(out);
+        self.proofs.encode(out);
+    }
+
+    /// Ouputs the length of the RLP encoding of the blob transaction, including the tx type byte,
+    /// optionally including the length of a wrapping string header. If `with_header` is `false`,
+    /// the length of the following will be calculated:
+    /// `tx_type (0x03) || rlp([transaction_payload_body, blobs, commitments, proofs])`
+    ///
+    /// If `with_header` is `true`, the length of the following will be calculated:
+    /// `rlp(tx_type (0x03) || rlp([transaction_payload_body, blobs, commitments, proofs]))`
+    pub fn payload_len_with_type(&self, with_header: bool) -> usize {
+        if with_header {
+            // Construct a header and use that to calculate the total length
+            let wrapped_header = Header {
+                list: false,
+                // add one for the tx type byte
+                payload_length: 1 + self.payload_len(),
+            };
+
+            // The total length is now the length of the header plus the length of the payload
+            // (which includes the tx type byte)
+            wrapped_header.length() + wrapped_header.payload_length
+        } else {
+            // Just add the length of the tx type to the payload length
+            1 + self.payload_len()
+        }
+    }
+
+    /// Outputs the length of the RLP encoding of the blob transaction with the following format:
+    /// `rlp([transaction_payload_body, blobs, commitments, proofs])`
+    ///
+    /// where `transaction_payload_body` is a list:
+    /// `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
+    ///
+    /// Note: this should be used only when implementing other RLP encoding length methods, and
+    /// does not represent the full RLP encoding of the blob transaction.
+    pub fn payload_len(&self) -> usize {
+        // The `transaction_payload_body` length is the length of the fields, plus the length of
+        // its list header.
+        let tx_header = Header {
+            list: true,
+            payload_length: self.transaction.fields_len() +
+                self.transaction.signature.payload_len(),
+        };
+
+        let tx_length = tx_header.length() + tx_header.payload_length;
+
+        // The payload length is the length of the `tranascation_payload_body` list, plus the
+        // length of the blobs, commitments, and proofs.
+        tx_length + self.blobs.length() + self.commitments.length() + self.proofs.length()
+    }
+
+    /// Decodes a [BlobTransaction] from RLP. This expects the encoding to be:
+    /// `rlp([transaction_payload_body, blobs, commitments, proofs])`
+    ///
+    /// where `transaction_payload_body` is a list:
+    /// `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
+    ///
+    /// Note: this should be used only when implementing other RLP decoding methods, and does not
+    /// represent the full RLP decoding of the [PooledTransaction] type.
+    pub fn decode_inner(data: &mut &[u8]) -> Result<Self, DecodeError> {
+        // decode the _first_ list header for the rest of the transaction
+        let header = Header::decode(data)?;
+        if !header.list {
+            return Err(DecodeError::Custom("PooledTransactions blob tx must be encoded as a list"))
+        }
+
+        // Now we need to decode the inner 4844 transaction and its signature:
+        //
+        // `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
+        let header = Header::decode(data)?;
+        if !header.list {
+            return Err(DecodeError::Custom(
+                "PooledTransactions inner blob tx must be encoded as a list",
+            ))
+        }
+
+        // inner transaction
+        let transaction = Transaction::Eip4844(TxEip4844::decode_inner(data)?);
+
+        // signature
+        let signature = Signature::decode(data)?;
+
+        // construct the tx now that we've decoded the fields in order
+        let tx_no_hash = TransactionSignedNoHash { transaction, signature };
+
+        // All that's left are the blobs, commitments, and proofs
+        let blobs = <Vec<Blob> as Decodable>::decode(data)?;
+        let commitments = <Vec<Bytes48> as Decodable>::decode(data)?;
+        let proofs = <Vec<Bytes48> as Decodable>::decode(data)?;
+
+        // # Calculating the hash
+        //
+        // The full encoding of the [PooledTransaction] response is:
+        // `tx_type (0x03) || rlp([tx_payload_body, blobs, commitments, proofs])`
+        //
+        // The transaction hash however, is:
+        // `keccak256(tx_type (0x03) || rlp(tx_payload_body))`
+        //
+        // Note that this is `tx_payload_body`, not `[tx_payload_body]`, which would be
+        // `[[chain_id, nonce, max_priority_fee_per_gas, ...]]`, i.e. a list within a list.
+        //
+        // Because the pooled transaction encoding is different than the hash encoding for
+        // EIP-4844 transactions, we do not use the original buffer to calculate the hash.
+        //
+        // Instead, we use [TransactionSignedNoHash] which will encode the transaction internally.
+        let signed_tx = tx_no_hash.with_hash();
+
+        Ok(Self { transaction: signed_tx, blobs, commitments, proofs })
     }
 }
 
