@@ -95,8 +95,8 @@ impl ReceiptWithBloom {
         let b = &mut &**buf;
         let rlp_head = reth_rlp::Header::decode(b)?;
         if !rlp_head.list {
-            return Err(reth_rlp::DecodeError::UnexpectedString) 
-       }
+            return Err(reth_rlp::DecodeError::UnexpectedString)
+        }
         let started_len = b.len();
 
         let success = reth_rlp::Decodable::decode(b)?;
@@ -107,7 +107,7 @@ impl ReceiptWithBloom {
         let receipt = match tx_type {
             #[cfg(feature = "optimism")]
             TxType::DEPOSIT => {
-                    let consumed = started_len - b.len();
+                let consumed = started_len - b.len();
                 let has_nonce = rlp_head.payload_length - consumed > 0;
                 let deposit_nonce =
                     if has_nonce { Some(reth_rlp::Decodable::decode(b)?) } else { None };
@@ -130,8 +130,8 @@ impl ReceiptWithBloom {
             return Err(reth_rlp::DecodeError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            }) 
-       }
+            })
+        }
         *buf = *b;
         Ok(this)
     }
@@ -338,8 +338,8 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
     fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
         if matches!(self.receipt.tx_type, TxType::Legacy) {
             self.encode_fields(out);
-            return 
-       }
+            return
+        }
 
         let mut payload = BytesMut::new();
         self.encode_fields(&mut payload);
