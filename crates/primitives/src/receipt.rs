@@ -4,12 +4,16 @@ use crate::{
     Bloom, Log, TxType,
 };
 use bytes::{Buf, BufMut, BytesMut};
-use reth_codecs::{main_codec, Compact, CompactZstd};
+use reth_codecs::{add_arbitrary_tests, main_codec, Compact, CompactZstd};
 use reth_rlp::{length_of_length, Decodable, Encodable};
 use std::cmp::Ordering;
 
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest::strategy::Strategy;
+
 /// Receipt containing result of transaction execution.
-#[main_codec(zstd)]
+#[main_codec(no_arbitrary, zstd)]
+#[add_arbitrary_tests]
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Receipt {
     /// Receipt type.
@@ -21,12 +25,6 @@ pub struct Receipt {
     /// Gas used
     pub cumulative_gas_used: u64,
     /// Log send from contracts.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<Log>(), 0..=20)"
-        )
-    )]
     pub logs: Vec<Log>,
     /// Deposit nonce for Optimism deposited transactions
     #[cfg(feature = "optimism")]
@@ -97,8 +95,8 @@ impl ReceiptWithBloom {
         let b = &mut &**buf;
         let rlp_head = reth_rlp::Header::decode(b)?;
         if !rlp_head.list {
-            return Err(reth_rlp::DecodeError::UnexpectedString)
-        }
+            return Err(reth_rlp::DecodeError::UnexpectedString) 
+       }
         let started_len = b.len();
 
         let success = reth_rlp::Decodable::decode(b)?;
@@ -109,7 +107,7 @@ impl ReceiptWithBloom {
         let receipt = match tx_type {
             #[cfg(feature = "optimism")]
             TxType::DEPOSIT => {
-                let consumed = started_len - b.len();
+                    let consumed = started_len - b.len();
                 let has_nonce = rlp_head.payload_length - consumed > 0;
                 let deposit_nonce =
                     if has_nonce { Some(reth_rlp::Decodable::decode(b)?) } else { None };
@@ -132,8 +130,8 @@ impl ReceiptWithBloom {
             return Err(reth_rlp::DecodeError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
-        }
+            }) 
+       }
         *buf = *b;
         Ok(this)
     }
@@ -190,6 +188,67 @@ impl Decodable for ReceiptWithBloom {
             }
             Ordering::Greater => Self::decode_receipt(buf, TxType::Legacy),
         }
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::arbitrary::Arbitrary for Receipt {
+    type Parameters = ();
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::{any, prop_compose};
+
+        prop_compose! {
+            fn arbitrary_receipt()(tx_type in any::<TxType>(),
+                        success in any::<bool>(),
+                        cumulative_gas_used in any::<u64>(),
+                        logs in proptest::collection::vec(proptest::arbitrary::any::<Log>(), 0..=20),
+                        deposit_nonce in any::<Option<u64>>()) -> Receipt
+            {
+
+                // Only reecipts for deposit transactions may contain a deposit nonce
+                #[cfg(feature = "optimism")]
+                let deposit_nonce = if tx_type == TxType::DEPOSIT {
+                    deposit_nonce
+                } else {
+                    None
+                };
+
+                Receipt { tx_type,
+                    success,
+                    cumulative_gas_used,
+                    logs,
+                    #[cfg(feature = "optimism")]
+                    deposit_nonce
+                }
+            }
+        };
+        arbitrary_receipt().boxed()
+    }
+
+    type Strategy = proptest::strategy::BoxedStrategy<Receipt>;
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for Receipt {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let tx_type = TxType::arbitrary(u)?;
+        let success = bool::arbitrary(u)?;
+        let cumulative_gas_used = u64::arbitrary(u)?;
+        let logs = Vec::<Log>::arbitrary(u)?;
+
+        #[cfg(feature = "optimism")]
+        let deposit_nonce =
+            if tx_type == TxType::DEPOSIT { Option::<u64>::arbitrary(u)? } else { None };
+
+        Ok(Self {
+            tx_type,
+            success,
+            cumulative_gas_used,
+            logs,
+            #[cfg(feature = "optimism")]
+            deposit_nonce,
+        })
     }
 }
 
@@ -279,8 +338,8 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
     fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
         if matches!(self.receipt.tx_type, TxType::Legacy) {
             self.encode_fields(out);
-            return
-        }
+            return 
+       }
 
         let mut payload = BytesMut::new();
         self.encode_fields(&mut payload);
