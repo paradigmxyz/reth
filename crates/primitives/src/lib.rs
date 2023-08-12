@@ -67,6 +67,7 @@ pub use compression::*;
 pub use constants::{
     DEV_GENESIS, EMPTY_OMMER_ROOT, GOERLI_GENESIS, KECCAK_EMPTY, MAINNET_GENESIS, SEPOLIA_GENESIS,
 };
+pub use eip4844::{kzg_to_versioned_hash, calculate_excess_blob_gas};
 pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
 pub use genesis::{Genesis, GenesisAccount};
 pub use hardfork::Hardfork;

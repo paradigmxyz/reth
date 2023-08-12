@@ -1,10 +1,12 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
+use std::ops::Deref;
+
 use bytes::Buf;
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{
-    kzg::{self, Blob, Bytes48, KzgProof, KzgSettings},
+    kzg::{self, KzgCommitment, Blob, Bytes48, KzgProof, KzgSettings},
     Signature, Transaction, TransactionSigned, TransactionSignedNoHash, TxEip4844,
-    EIP4844_TX_TYPE_ID, H256,
+    EIP4844_TX_TYPE_ID, H256, kzg_to_versioned_hash,
 };
 use reth_rlp::{
     Decodable, DecodeError, Encodable, Header, RlpDecodableWrapper, RlpEncodableWrapper,
@@ -23,7 +25,7 @@ use proptest::{
 #[cfg(any(test, feature = "arbitrary"))]
 use reth_primitives::{
     constants::eip4844::{FIELD_ELEMENTS_PER_BLOB, KZG_TRUSTED_SETUP},
-    kzg::{KzgCommitment, BYTES_PER_BLOB, BYTES_PER_FIELD_ELEMENT},
+    kzg::{BYTES_PER_BLOB, BYTES_PER_FIELD_ELEMENT},
 };
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
@@ -232,8 +234,18 @@ impl BlobTransaction {
         for (versioned_hash, commitment) in
             inner_tx.blob_versioned_hashes.iter().zip(self.commitments.iter())
         {
+            // convert to KzgCommitment
+            let commitment = KzgCommitment::from(*commitment.deref());
+
             // Calculate the versioned hash
-            todo!()
+            //
+            // TODO: should this method distinguish the type of validation failure? For example
+            // whether a certain versioned hash does not match, or whether the blob proof
+            // validation failed?
+            let calculated_versioned_hash = kzg_to_versioned_hash(commitment);
+            if *versioned_hash != calculated_versioned_hash {
+                return Ok(false);
+            }
         }
 
         // Verify as a batch
