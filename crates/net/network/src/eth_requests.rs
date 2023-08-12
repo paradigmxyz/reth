@@ -106,7 +106,7 @@ where
                         if let Some(next) = (header.number + 1).checked_add(skip) {
                             block = next.into()
                         } else {
-                            break;
+                            break
                         }
                     }
                     HeadersDirection::Falling => {
@@ -118,7 +118,7 @@ where
                             {
                                 block = next.into()
                             } else {
-                                break;
+                                break
                             }
                         } else {
                             block = header.parent_hash.into()
@@ -129,16 +129,16 @@ where
                 headers.push(header);
 
                 if headers.len() >= MAX_HEADERS_SERVE {
-                    break;
+                    break
                 }
 
                 total_bytes += APPROX_HEADER_SIZE;
 
                 if total_bytes > SOFT_RESPONSE_LIMIT {
-                    break;
+                    break
                 }
             } else {
-                break;
+                break
             }
         }
 
@@ -180,14 +180,14 @@ where
                 total_bytes += APPROX_BODY_SIZE;
 
                 if total_bytes > SOFT_RESPONSE_LIMIT {
-                    break;
+                    break
                 }
 
                 if bodies.len() >= MAX_BODIES_SERVE {
-                    break;
+                    break
                 }
             } else {
-                break;
+                break
             }
         }
 
@@ -218,14 +218,14 @@ where
                 total_bytes += APPROX_RECEIPT_SIZE;
 
                 if total_bytes > SOFT_RESPONSE_LIMIT {
-                    break;
+                    break
                 }
 
                 if receipts.len() >= MAX_RECEIPTS_SERVE {
-                    break;
+                    break
                 }
             } else {
-                break;
+                break
             }
         }
 

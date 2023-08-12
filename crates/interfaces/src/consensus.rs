@@ -39,7 +39,7 @@ pub trait Consensus: Debug + Send + Sync {
     /// Note: this expects that the headers are in natural order (ascending block number)
     fn validate_header_range(&self, headers: &[SealedHeader]) -> Result<(), ConsensusError> {
         if headers.is_empty() {
-            return Ok(());
+            return Ok(())
         }
         let first = headers.first().expect("checked empty");
         self.validate_header(first)?;

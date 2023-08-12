@@ -712,7 +712,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         secret_key: SecretKey,
         default_peers_path: PathBuf,
     ) -> NetworkConfig<ProviderFactory<Arc<DatabaseEnv>>> {
-        let cfg_builder = self.network
+        let cfg_builder = self
+            .network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(executor))
             .set_head(head)
@@ -729,7 +730,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let cfg_builder = cfg_builder.sequencer_endpoint(self.rollup.sequencer_http.clone());
 
         cfg_builder.build(ProviderFactory::new(db, self.chain.clone()))
-
     }
 
     #[allow(clippy::too_many_arguments)]

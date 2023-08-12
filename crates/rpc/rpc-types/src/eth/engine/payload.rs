@@ -131,11 +131,11 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
 
     fn try_from(payload: ExecutionPayload) -> Result<Self, Self::Error> {
         if payload.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
-            return Err(PayloadError::ExtraData(payload.extra_data));
+            return Err(PayloadError::ExtraData(payload.extra_data))
         }
 
         if payload.base_fee_per_gas < MIN_PROTOCOL_BASE_FEE_U256 {
-            return Err(PayloadError::BaseFee(payload.base_fee_per_gas));
+            return Err(PayloadError::BaseFee(payload.base_fee_per_gas))
         }
 
         let transactions = payload
@@ -183,7 +183,7 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
             return Err(PayloadError::BlockHash {
                 execution: header.hash(),
                 consensus: payload.block_hash,
-            });
+            })
         }
 
         Ok(SealedBlock {

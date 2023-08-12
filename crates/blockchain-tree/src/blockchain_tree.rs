@@ -175,35 +175,33 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         if block.number <= last_finalized_block {
             // check if block is canonical
             if self.is_block_hash_canonical(&block.hash)? {
-                return Ok(Some(BlockStatus::Valid));
+                return Ok(Some(BlockStatus::Valid))
             }
 
             // check if block is inside database
             if self.externals.database().provider()?.block_number(block.hash)?.is_some() {
-                return Ok(Some(BlockStatus::Valid));
+                return Ok(Some(BlockStatus::Valid))
             }
 
             return Err(BlockchainTreeError::PendingBlockIsFinalized {
                 last_finalized: last_finalized_block,
             }
-            .into());
+            .into())
         }
 
         // check if block is part of canonical chain
         if self.is_block_hash_canonical(&block.hash)? {
-            return Ok(Some(BlockStatus::Valid));
+            return Ok(Some(BlockStatus::Valid))
         }
 
         // is block inside chain
         if let Some(status) = self.is_block_inside_chain(&block) {
-            return Ok(Some(status));
+            return Ok(Some(status))
         }
 
         // check if block is disconnected
         if let Some(block) = self.buffered_blocks.block(block) {
-            return Ok(Some(BlockStatus::Disconnected {
-                missing_ancestor: block.parent_num_hash(),
-            }));
+            return Ok(Some(BlockStatus::Disconnected { missing_ancestor: block.parent_num_hash() }))
         }
 
         Ok(None)
@@ -280,7 +278,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
             // get canonical fork.
             let canonical_fork = self.canonical_fork(chain_id)?;
-            return Some(PostStateData { state, parent_block_hashed, canonical_fork });
+            return Some(PostStateData { state, parent_block_hashed, canonical_fork })
         }
 
         // check if there is canonical block
@@ -290,7 +288,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 canonical_fork: ForkBlock { number: canonical_number, hash: block_hash },
                 state: PostState::new(),
                 parent_block_hashed: self.canonical_chain().inner().clone(),
-            });
+            })
         }
 
         None
@@ -312,7 +310,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // check if block parent can be found in Tree
         if let Some(chain_id) = self.block_indices.get_blocks_chain_id(&parent.hash) {
             // found parent in side tree, try to insert there
-            return self.try_insert_block_into_side_chain(block, chain_id);
+            return self.try_insert_block_into_side_chain(block, chain_id)
         }
 
         // if not found, check if the parent can be found inside canonical chain.
@@ -320,7 +318,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             .is_block_hash_canonical(&parent.hash)
             .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?
         {
-            return self.try_append_canonical_chain(block);
+            return self.try_append_canonical_chain(block)
         }
 
         // this is another check to ensure that if the block points to a canonical block its block
@@ -336,7 +334,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                         block_number: block.number,
                     },
                     block.block,
-                ));
+                ))
             }
         }
 
@@ -406,7 +404,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 return Err(InsertBlockError::execution_error(
                     BlockValidationError::BlockPreMerge { hash: block.hash }.into(),
                     block.block,
-                ));
+                ))
             }
 
             let parent_header = provider
@@ -559,7 +557,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             } else {
                 // if there is no fork block that point to other chains, break the loop.
                 // it means that this fork joins to canonical block.
-                break;
+                break
             }
         }
         hashes
@@ -580,9 +578,9 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             // get fork block chain
             if let Some(fork_chain_id) = self.block_indices.get_blocks_chain_id(&fork.hash) {
                 chain_id = fork_chain_id;
-                continue;
+                continue
             }
-            break;
+            break
         }
         (self.block_indices.canonical_hash(&fork.number) == Some(fork.hash)).then_some(fork)
     }
@@ -592,7 +590,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// Inserts a chain into the tree and builds the block indices.
     fn insert_chain(&mut self, chain: AppendableChain) -> Option<BlockChainId> {
         if chain.is_empty() {
-            return None;
+            return None
         }
         let chain_id = self.block_chain_id_generator;
         self.block_chain_id_generator += 1;
@@ -634,7 +632,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     pub fn buffer_block(&mut self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
         // validate block consensus rules
         if let Err(err) = self.validate_block(&block) {
-            return Err(InsertBlockError::consensus_error(err, block.block));
+            return Err(InsertBlockError::consensus_error(err, block.block))
         }
 
         self.buffered_blocks.insert_block(block);
@@ -651,17 +649,17 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 ?block,
                 "Failed to validate total difficulty for block {}: {e:?}", block.header.hash
             );
-            return Err(e);
+            return Err(e)
         }
 
         if let Err(e) = self.externals.consensus.validate_header(block) {
             error!(?block, "Failed to validate header {}: {e:?}", block.header.hash);
-            return Err(e);
+            return Err(e)
         }
 
         if let Err(e) = self.externals.consensus.validate_block(block) {
             error!(?block, "Failed to validate block {}: {e:?}", block.header.hash);
-            return Err(e);
+            return Err(e)
         }
 
         Ok(())
@@ -682,7 +680,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 Some(BlockStatus::Valid)
             } else {
                 Some(BlockStatus::Accepted)
-            };
+            }
         }
         None
     }
@@ -719,7 +717,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         // validate block consensus rules
         if let Err(err) = self.validate_block(&block) {
-            return Err(InsertBlockError::consensus_error(err, block.block));
+            return Err(InsertBlockError::consensus_error(err, block.block))
         }
 
         Ok(InsertPayloadOk::Inserted(self.try_insert_validated_block(block)?))
@@ -873,7 +871,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
 
         if header.is_none() && self.is_block_hash_inside_chain(*hash) {
-            return Ok(None);
+            return Ok(None)
         }
 
         if header.is_none() {
@@ -916,9 +914,9 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 return Err(BlockExecutionError::from(BlockValidationError::BlockPreMerge {
                     hash: *block_hash,
                 })
-                .into());
+                .into())
             }
-            return Ok(CanonicalOutcome::AlreadyCanonical { header });
+            return Ok(CanonicalOutcome::AlreadyCanonical { header })
         }
 
         let Some(chain_id) = self.block_indices.get_blocks_chain_id(block_hash) else {
@@ -1056,7 +1054,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     pub fn unwind(&mut self, unwind_to: BlockNumber) -> Result<(), Error> {
         // nothing to be done if unwind_to is higher then the tip
         if self.block_indices.canonical_tip().number <= unwind_to {
-            return Ok(());
+            return Ok(())
         }
         // revert `N` blocks from current canonical chain and put them inside BlockchanTree
         let old_canon_chain = self.revert_canonical(unwind_to)?;

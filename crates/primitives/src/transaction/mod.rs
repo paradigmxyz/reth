@@ -563,10 +563,10 @@ impl Transaction {
     /// [`TransactionKind::Create`] if the transaction is a contract creation.
     pub fn kind(&self) -> &TransactionKind {
         match self {
-            Transaction::Legacy(TxLegacy { to, .. })
-            | Transaction::Eip2930(TxEip2930 { to, .. })
-            | Transaction::Eip1559(TxEip1559 { to, .. })
-            | Transaction::Eip4844(TxEip4844 { to, .. }) => to,
+            Transaction::Legacy(TxLegacy { to, .. }) |
+            Transaction::Eip2930(TxEip2930 { to, .. }) |
+            Transaction::Eip1559(TxEip1559 { to, .. }) |
+            Transaction::Eip4844(TxEip4844 { to, .. }) => to,
             #[cfg(feature = "optimism")]
             Transaction::Deposit(TxDeposit { to, .. }) => to,
         }
@@ -617,10 +617,10 @@ impl Transaction {
     /// Get the gas limit of the transaction.
     pub fn gas_limit(&self) -> u64 {
         match self {
-            Transaction::Legacy(TxLegacy { gas_limit, .. })
-            | Transaction::Eip2930(TxEip2930 { gas_limit, .. })
-            | Transaction::Eip1559(TxEip1559 { gas_limit, .. })
-            | Transaction::Eip4844(TxEip4844 { gas_limit, .. }) => *gas_limit,
+            Transaction::Legacy(TxLegacy { gas_limit, .. }) |
+            Transaction::Eip2930(TxEip2930 { gas_limit, .. }) |
+            Transaction::Eip1559(TxEip1559 { gas_limit, .. }) |
+            Transaction::Eip4844(TxEip4844 { gas_limit, .. }) => *gas_limit,
         }
     }
 
@@ -641,10 +641,10 @@ impl Transaction {
     /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
     pub fn max_fee_per_gas(&self) -> u128 {
         match self {
-            Transaction::Legacy(TxLegacy { gas_price, .. })
-            | Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
-            Transaction::Eip1559(TxEip1559 { max_fee_per_gas, .. })
-            | Transaction::Eip4844(TxEip4844 { max_fee_per_gas, .. }) => *max_fee_per_gas,
+            Transaction::Legacy(TxLegacy { gas_price, .. }) |
+            Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
+            Transaction::Eip1559(TxEip1559 { max_fee_per_gas, .. }) |
+            Transaction::Eip4844(TxEip4844 { max_fee_per_gas, .. }) => *max_fee_per_gas,
             Transaction::Eip1559(TxEip1559 { max_fee_per_gas, .. }) => *max_fee_per_gas,
             // Deposit transactions buy their L2 gas on L1 and, as such, the L2 gas is not
             // refundable.
@@ -661,8 +661,8 @@ impl Transaction {
         match self {
             Transaction::Legacy(_) => None,
             Transaction::Eip2930(_) => None,
-            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. })
-            | Transaction::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. }) => {
+            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) |
+            Transaction::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. }) => {
                 Some(*max_priority_fee_per_gas)
             }
             #[cfg(feature = "optimism")]
@@ -693,10 +693,10 @@ impl Transaction {
     /// non-EIP-1559 transactions.
     pub fn priority_fee_or_price(&self) -> u128 {
         match self {
-            Transaction::Legacy(TxLegacy { gas_price, .. })
-            | Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
-            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. })
-            | Transaction::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. }) => {
+            Transaction::Legacy(TxLegacy { gas_price, .. }) |
+            Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
+            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) |
+            Transaction::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. }) => {
                 *max_priority_fee_per_gas
             }
             #[cfg(feature = "optimism")]
@@ -748,7 +748,7 @@ impl Transaction {
         let max_fee_per_gas = self.max_fee_per_gas();
 
         if max_fee_per_gas < base_fee {
-            return None;
+            return None
         }
 
         // the miner tip is the difference between the max fee and the base fee or the
@@ -758,7 +758,7 @@ impl Transaction {
         let fee = max_fee_per_gas - base_fee;
 
         if let Some(priority_fee) = self.max_priority_fee_per_gas() {
-            return Some(fee.min(priority_fee));
+            return Some(fee.min(priority_fee))
         }
 
         Some(fee)
@@ -1463,7 +1463,7 @@ impl TransactionSigned {
     pub fn recover_signer(&self) -> Option<Address> {
         #[cfg(feature = "optimism")]
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from.clone());
+            return Some(from.clone())
         }
         let signature_hash = self.signature_hash();
         self.signature.recover_signer(signature_hash)
@@ -1524,8 +1524,8 @@ impl TransactionSigned {
     pub(crate) fn payload_len_inner(&self) -> usize {
         match self.transaction {
             Transaction::Legacy(TxLegacy { chain_id, .. }) => {
-                let payload_length = self.transaction.fields_len()
-                    + self.signature.payload_len_with_eip155_chain_id(chain_id);
+                let payload_length = self.transaction.fields_len() +
+                    self.signature.payload_len_with_eip155_chain_id(chain_id);
                 // 'header length' + 'payload length'
                 length_of_length(payload_length) + payload_length
             }
@@ -1614,7 +1614,7 @@ impl TransactionSigned {
         if tx_type == DEPOSIT_TX_TYPE {
             let version = *data.first().ok_or(DecodeError::InputTooShort)?;
             if version != DEPOSIT_VERSION {
-                return Err(DecodeError::Custom("Deposit version mismatch"));
+                return Err(DecodeError::Custom("Deposit version mismatch"))
             }
             data.advance(1);
         }
@@ -1622,7 +1622,7 @@ impl TransactionSigned {
         // decode the list header for the rest of the transaction
         let header = Header::decode(data)?;
         if !header.list {
-            return Err(DecodeError::Custom("typed tx fields must be encoded as a list"));
+            return Err(DecodeError::Custom("typed tx fields must be encoded as a list"))
         }
 
         // length of tx encoding = tx type byte (size = 1) + length of header + payload length
@@ -1704,7 +1704,7 @@ impl TransactionSigned {
         let mut data = tx.as_ref();
 
         if data.is_empty() {
-            return Err(DecodeError::InputTooShort);
+            return Err(DecodeError::InputTooShort)
         }
 
         // Check if the tx is a list

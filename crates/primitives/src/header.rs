@@ -300,7 +300,7 @@ impl Decodable for Header {
     fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
         let rlp_head = reth_rlp::Header::decode(buf)?;
         if !rlp_head.list {
-            return Err(reth_rlp::DecodeError::UnexpectedString);
+            return Err(reth_rlp::DecodeError::UnexpectedString)
         }
         let started_len = buf.len();
         let mut this = Self {
@@ -337,7 +337,7 @@ impl Decodable for Header {
             return Err(reth_rlp::DecodeError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            });
+            })
         }
         Ok(this)
     }
