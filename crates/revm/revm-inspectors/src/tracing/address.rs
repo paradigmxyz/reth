@@ -13,10 +13,10 @@
 //! and applying heuristics as outlined in the spec.
 use std::collections::HashSet;
 
-use reth_primitives::{bytes::Bytes, Address};
+use reth_primitives::{bytes::Bytes, Address, H160};
 use revm::{
     interpreter::{CallInputs, CreateInputs, Gas, InstructionResult},
-    primitives::{db::Database, B160},
+    primitives::{db::Database, B160, B256},
     EVMData, Inspector,
 };
 
@@ -39,7 +39,7 @@ impl AddressInspector {
             return
         }
 
-        if let Some(addresses) = bytes_to_addresses(&bytes) {
+        if let Some(addresses) = bytes_to_addresses(bytes) {
             for address in addresses {
                 self.inner.insert(address);
             }
@@ -100,6 +100,26 @@ impl<DB: Database> Inspector<DB> for AddressInspector {
         (InstructionResult::Continue, None, Gas::new(0), Bytes::new())
     }
 
+    fn log(
+        &mut self,
+        _evm_data: &mut EVMData<'_, DB>,
+        address: &B160,
+        topics: &[B256],
+        data: &Bytes,
+    ) {
+        self.inner.insert(H160(address.0));
+        for topic in topics {
+            if let Some(address) = bytes32_to_address(topic) {
+                self.inner.insert(address);
+            }
+        }
+        if let Some(addresses) = bytes_to_addresses(data) {
+            for address in addresses {
+                self.inner.insert(address);
+            }
+        }
+    }
+
     fn selfdestruct(&mut self, contract: B160, target: B160) {
         self.inner.insert(contract);
         self.inner.insert(target);
@@ -110,6 +130,14 @@ impl<DB: Database> Inspector<DB> for AddressInspector {
 ///
 /// See also: <https://github.com/ethereum/execution-apis/pull/456> for the algorithm specification.
 fn bytes_to_addresses(_candidate: &[u8]) -> Option<Vec<Address>> {
+    // todo
+    None
+}
+
+/// Detects an address if present in 32 bytes.
+///
+/// See also: <https://github.com/ethereum/execution-apis/pull/456> for the algorithm specification.
+fn bytes32_to_address(_logs: &[u8; 32]) -> Option<Address> {
     // todo
     None
 }

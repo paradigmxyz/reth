@@ -28,12 +28,12 @@ use crate::tracing::{
     types::{CallTraceNode, StorageChange},
     utils::gas_used,
 };
+pub use address::AddressInspector;
 pub use builder::{
     geth::{self, GethTraceBuilder},
     parity::{self, ParityTraceBuilder},
 };
 pub use config::TracingInspectorConfig;
-pub use address::AddressInspector;
 pub use fourbyte::FourByteInspector;
 pub use opcount::OpcodeCountInspector;
 

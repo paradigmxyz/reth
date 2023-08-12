@@ -190,6 +190,10 @@ where
         let out = if self.stack.should_inspect(&self.evm.env, hash) {
             // execution with inspector.
             let output = self.evm.inspect(&mut self.stack);
+            if let Some(address_inspector) = &self.stack.address_tracer {
+                let _appearances = address_inspector.inner();
+                todo!("store the tx-based addresses in index db");
+            }
             tracing::trace!(
                 target: "evm",
                 ?hash, ?output, ?transaction, env = ?self.evm.env,
