@@ -128,6 +128,9 @@ impl Decodable for PooledTransactionResponse {
             return Err(DecodeError::InputTooShort)
         }
 
+        // keep this around for buffer advancement post-legacy decoding
+        let mut original_encoding = *buf;
+
         // If the header is a list header, it is a legacy transaction. Otherwise, it is a typed
         // transaction
         let header = Header::decode(buf)?;
@@ -135,7 +138,13 @@ impl Decodable for PooledTransactionResponse {
         // Check if the tx is a list
         if header.list {
             // decode as legacy transaction
-            let legacy_tx = TransactionSigned::decode_rlp_legacy_transaction(buf)?;
+            let legacy_tx =
+                TransactionSigned::decode_rlp_legacy_transaction(&mut original_encoding)?;
+
+            // advance the buffer based on how far `decode_rlp_legacy_transaction` advanced the
+            // buffer
+            *buf = original_encoding;
+
             Ok(PooledTransactionResponse::Transaction(legacy_tx))
         } else {
             // decode the type byte, only decode BlobTransaction if it is a 4844 transaction
