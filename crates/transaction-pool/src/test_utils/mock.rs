@@ -763,11 +763,15 @@ impl MockTransactionFactory {
 pub struct MockOrdering;
 
 impl TransactionOrdering for MockOrdering {
-    type Priority = U256;
+    type PriorityValue = U256;
     type Transaction = MockTransaction;
 
-    fn priority(&self, transaction: &Self::Transaction) -> Self::Priority {
-        transaction.gas_cost()
+    fn priority(
+        &self,
+        transaction: &Self::Transaction,
+        base_fee: u64,
+    ) -> Priority<Self::PriorityValue> {
+        transaction.effective_tip_per_gas(base_fee).map(U256::from).into()
     }
 }
 
@@ -809,5 +813,5 @@ fn test_mock_priority() {
     let o = MockOrdering;
     let lo = MockTransaction::eip1559().with_gas_limit(100_000);
     let hi = lo.next().inc_price();
-    assert!(o.priority(&hi) > o.priority(&lo));
+    assert!(o.priority(&hi, 0) > o.priority(&lo, 0));
 }
