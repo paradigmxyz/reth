@@ -17,7 +17,7 @@ pub const EIP4844_TX_TYPE_ID: u8 = 3;
 
 /// Identifier for [TxDeposit](crate::TxDeposit) transaction.
 #[cfg(feature = "optimism")]
-use crate::DEPOSIT_TX_TYPE;
+pub const DEPOSIT_TX_TYPE_ID: u8 = 126;
 
 /// Transaction Type
 ///
@@ -38,9 +38,9 @@ pub enum TxType {
     EIP1559 = 2_isize,
     /// Shard Blob Transactions - EIP-4844
     EIP4844 = 3_isize,
-    /// OP Deposit transaction.
+    /// Optimism Deposit transaction.
     #[cfg(feature = "optimism")]
-    DEPOSIT = DEPOSIT_TX_TYPE as isize,
+    DEPOSIT = 126_isize,
 }
 
 impl From<TxType> for u8 {
@@ -51,7 +51,7 @@ impl From<TxType> for u8 {
             TxType::EIP1559 => EIP1559_TX_TYPE_ID,
             TxType::EIP4844 => EIP4844_TX_TYPE_ID,
             #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => DEPOSIT_TX_TYPE,
+            TxType::DEPOSIT => DEPOSIT_TX_TYPE_ID,
         }
     }
 }

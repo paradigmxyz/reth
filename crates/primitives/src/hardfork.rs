@@ -110,7 +110,6 @@ impl Display for Hardfork {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::{Chain, Genesis};
     use std::collections::BTreeMap;
 

@@ -3,9 +3,6 @@ use reth_codecs::{main_codec, Compact};
 use reth_rlp::{Encodable, EMPTY_STRING_CODE};
 use std::mem;
 
-/// EIP-2718 transaction type selector.
-pub const DEPOSIT_TX_TYPE: u8 = 126;
-
 /// A versioned byte sequence to enable the protocol to upgrade the deposit transaction type without
 /// changing the transaction type selector.
 pub const DEPOSIT_VERSION: u8 = 0;

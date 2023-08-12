@@ -37,7 +37,9 @@ pub(crate) mod util;
 #[cfg(feature = "optimism")]
 mod optimism;
 #[cfg(feature = "optimism")]
-pub use optimism::{TxDeposit, DEPOSIT_TX_TYPE, DEPOSIT_VERSION};
+pub use optimism::{TxDeposit, DEPOSIT_VERSION};
+#[cfg(feature = "optimism")]
+pub use tx_type::DEPOSIT_TX_TYPE_ID;
 
 /// A raw transaction.
 ///
@@ -1174,7 +1176,7 @@ impl TransactionSigned {
         // If the transaction is a deposit, we need to first ensure that the version
         // byte is correct.
         #[cfg(feature = "optimism")]
-        if tx_type == DEPOSIT_TX_TYPE {
+        if tx_type == DEPOSIT_TX_TYPE_ID {
             let version = *data.first().ok_or(DecodeError::InputTooShort)?;
             if version != DEPOSIT_VERSION {
                 return Err(DecodeError::Custom("Deposit version mismatch"))
@@ -1193,7 +1195,7 @@ impl TransactionSigned {
         // If the transaction is a deposit, we need to add one to the length to account for the
         // version byte.
         #[cfg(feature = "optimism")]
-        let tx_length = if tx_type == DEPOSIT_TX_TYPE { tx_length + 1 } else { tx_length };
+        let tx_length = if tx_type == DEPOSIT_TX_TYPE_ID { tx_length + 1 } else { tx_length };
 
         // decode common fields
         let transaction = match tx_type {
@@ -1232,7 +1234,7 @@ impl TransactionSigned {
                 blob_versioned_hashes: Decodable::decode(data)?,
             }),
             #[cfg(feature = "optimism")]
-            DEPOSIT_TX_TYPE => Transaction::Deposit(TxDeposit {
+            DEPOSIT_TX_TYPE_ID => Transaction::Deposit(TxDeposit {
                 source_hash: Decodable::decode(data)?,
                 from: Decodable::decode(data)?,
                 to: Decodable::decode(data)?,

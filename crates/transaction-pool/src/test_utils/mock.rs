@@ -24,7 +24,7 @@ pub(crate) type MockTxPool = TxPool<MockOrdering>;
 pub type MockValidTx = ValidPoolTransaction<MockTransaction>;
 
 #[cfg(feature = "optimism")]
-use reth_primitives::DEPOSIT_TX_TYPE;
+use reth_primitives::DEPOSIT_TX_TYPE_ID;
 
 #[cfg(feature = "optimism")]
 use reth_primitives::TxDeposit;
