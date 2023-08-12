@@ -145,6 +145,7 @@ impl Future for PendingPayloadId {
 /// A message for the beacon engine from other components of the node (engine RPC API invoked by the
 /// consensus layer).
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum BeaconEngineMessage {
     /// Message with new payload.
     NewPayload {

@@ -19,10 +19,10 @@ pub struct Command {
 pub enum Subcommands {
     /// Debug the roundtrip execution of blocks as well as the generated data.
     Execution(execution::Command),
-    /// Debug in-memory state root calculation.
-    InMemoryMerkle(in_memory_merkle::Command),
     /// Debug the clean & incremental state root calculations.
     Merkle(merkle::Command),
+    /// Debug in-memory state root calculation.
+    InMemoryMerkle(in_memory_merkle::Command),
 }
 
 impl Command {

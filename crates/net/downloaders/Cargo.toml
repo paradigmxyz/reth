@@ -32,7 +32,7 @@ thiserror.workspace = true
 # optional deps for the test-utils feature
 reth-rlp = { workspace = true, optional = true }
 tempfile = { version = "3.3", optional = true }
-itertools = { version = "0.10", optional = true }
+itertools = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-db = { path = "../../storage/db", features = ["test-utils"] }
@@ -42,7 +42,7 @@ reth-tracing = { path = "../../tracing" }
 assert_matches = "1.5.0"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 reth-rlp.workspace = true
-itertools = "0.10"
+itertools.workspace = true
 
 tempfile = "3.3"
 

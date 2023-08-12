@@ -9,7 +9,7 @@ use crate::{
 use bytes::{Buf, BufMut, BytesMut};
 
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
-use reth_rlp::{length_of_length, Decodable, Encodable, EMPTY_STRING_CODE};
+use reth_rlp::{length_of_length, Decodable, Encodable, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
 use serde::{Deserialize, Serialize};
 use std::{
     mem,
@@ -93,6 +93,13 @@ pub struct Header {
     /// above the gas target, and decreasing when blocks are below the gas target. The base fee per
     /// gas is burned.
     pub base_fee_per_gas: Option<u64>,
+    /// The total amount of blob gas consumed by the transactions within the block, added in
+    /// EIP-4844.
+    pub blob_gas_used: Option<u64>,
+    /// A running total of blob gas consumed in excess of the target, prior to the block. Blocks
+    /// with above-target blob gas consumption increase this value, blocks with below-target blob
+    /// gas consumption decrease it (bounded at 0). This was added in EIP-4844.
+    pub excess_blob_gas: Option<u64>,
     /// An arbitrary byte array containing data relevant to this block. This must be 32 bytes or
     /// fewer; formally Hx.
     pub extra_data: Bytes,
@@ -118,6 +125,8 @@ impl Default for Header {
             nonce: 0,
             base_fee_per_gas: None,
             withdrawals_root: None,
+            blob_gas_used: None,
+            excess_blob_gas: None,
         }
     }
 }
@@ -209,6 +218,8 @@ impl Header {
         mem::size_of::<H256>() + // mix hash
         mem::size_of::<u64>() + // nonce
         mem::size_of::<Option<u64>>() + // base fee per gas
+        mem::size_of::<Option<u64>>() + // blob gas used
+        mem::size_of::<Option<u64>>() + // excess blob gas
         self.extra_data.len() // extra data
     }
 
@@ -289,7 +300,7 @@ impl Decodable for Header {
     fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
         let rlp_head = reth_rlp::Header::decode(buf)?;
         if !rlp_head.list {
-            return Err(reth_rlp::DecodeError::UnexpectedString)
+            return Err(reth_rlp::DecodeError::UnexpectedString);
         }
         let started_len = buf.len();
         let mut this = Self {
@@ -326,7 +337,7 @@ impl Decodable for Header {
             return Err(reth_rlp::DecodeError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
+            });
         }
         Ok(this)
     }

@@ -15,13 +15,17 @@ env:
   TITLE: "chore(deps): weekly `cargo update`"
   BODY: |
     Automation to keep dependencies in `Cargo.lock` current.
+
     <details><summary><strong>cargo update log</strong></summary>
     <p>
+
     ```log
     $cargo_update_log
     ```
+
     </p>
     </details>
+
 jobs:
   update:
     name: Update
@@ -38,12 +42,15 @@ jobs:
         id: msg
         run: |
           export cargo_update_log="$(cat cargo_update.log)"
+
           echo "commit_message<<EOF" >> $GITHUB_OUTPUT
           printf "$TITLE\n\n$cargo_update_log\n" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
           echo "body<<EOF" >> $GITHUB_OUTPUT
           echo "$BODY" | envsubst >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v5
         with:
