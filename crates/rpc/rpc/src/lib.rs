@@ -31,7 +31,6 @@
 //! disk-io, hence these calls are spawned as futures to a blocking task manually.
 
 mod admin;
-mod call_guard;
 mod debug;
 mod engine;
 pub mod eth;

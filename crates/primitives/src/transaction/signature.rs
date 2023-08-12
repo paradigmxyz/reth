@@ -181,7 +181,7 @@ mod tests {
         assert_eq!(27, signature.v(None));
         assert_eq!(37, signature.v(Some(1)));
 
-        let signature = Signature { r: U256::from(1), s: U256::from(1), odd_y_parity: true };
+        let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
         assert_eq!(28, signature.v(None));
         assert_eq!(38, signature.v(Some(1)));
     }

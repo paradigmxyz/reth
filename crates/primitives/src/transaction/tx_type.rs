@@ -1,5 +1,4 @@
 use crate::U8;
-use bytes::Buf;
 use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
 
