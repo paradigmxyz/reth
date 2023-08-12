@@ -5,7 +5,7 @@ use bytes::{Buf, Bytes};
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{
     kzg::{self, KzgCommitment, KzgProof, KzgSettings},
-    kzg_to_versioned_hash, BlobSidecar, Signature, Transaction, TransactionSigned,
+    kzg_to_versioned_hash, BlobTransactionSidecar, Signature, Transaction, TransactionSigned,
     TransactionSignedNoHash, TxEip4844, TxType, EIP4844_TX_TYPE_ID, H256,
 };
 use reth_rlp::{
@@ -260,7 +260,7 @@ pub struct BlobTransaction {
     /// The transaction payload.
     pub transaction: TransactionSigned,
     /// The transaction's blob sidecar.
-    pub sidecar: BlobSidecar,
+    pub sidecar: BlobTransactionSidecar,
 }
 
 impl BlobTransaction {
@@ -326,8 +326,9 @@ impl BlobTransaction {
         .map_err(Into::into)
     }
 
-    /// Splits the [BlobTransaction] into its [TransactionSigned] and [BlobSidecar] components.
-    pub fn into_parts(self) -> (TransactionSigned, BlobSidecar) {
+    /// Splits the [BlobTransaction] into its [TransactionSigned] and [BlobTransactionSidecar]
+    /// components.
+    pub fn into_parts(self) -> (TransactionSigned, BlobTransactionSidecar) {
         (self.transaction, self.sidecar)
     }
 
@@ -482,7 +483,7 @@ impl BlobTransaction {
         let tx_no_hash = TransactionSignedNoHash { transaction, signature };
 
         // All that's left are the blobs, commitments, and proofs
-        let sidecar = BlobSidecar::decode_inner(data)?;
+        let sidecar = BlobTransactionSidecar::decode_inner(data)?;
 
         // # Calculating the hash
         //
@@ -578,7 +579,7 @@ fn generate_blob_transaction(blobs: Vec<Blob>, transaction: TransactionSigned) -
         .map(|proof| proof.to_bytes())
         .collect();
 
-    let sidecar = BlobSidecar { blobs, commitments, proofs };
+    let sidecar = BlobTransactionSidecar { blobs, commitments, proofs };
 
     BlobTransaction { transaction, sidecar }
 }

@@ -153,7 +153,7 @@ impl TxEip4844 {
 
 /// This represents a set of blobs, and its corresponding commitments and proofs.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub struct BlobSidecar {
+pub struct BlobTransactionSidecar {
     /// The blob data.
     pub blobs: Vec<Blob>,
     /// The blob commitments.
@@ -162,8 +162,8 @@ pub struct BlobSidecar {
     pub proofs: Vec<Bytes48>,
 }
 
-impl BlobSidecar {
-    /// Encodes the inner [BlobSidecar] fields as RLP bytes, without a RLP header.
+impl BlobTransactionSidecar {
+    /// Encodes the inner [BlobTransactionSidecar] fields as RLP bytes, without a RLP header.
     ///
     /// This encodes the fields in the following order:
     /// - `blobs`
@@ -176,12 +176,12 @@ impl BlobSidecar {
         self.proofs.encode(out);
     }
 
-    /// Outputs the RLP length of the [BlobSidecar] fields, without a RLP header.
+    /// Outputs the RLP length of the [BlobTransactionSidecar] fields, without a RLP header.
     pub fn fields_len(&self) -> usize {
         self.blobs.len() + self.commitments.len() + self.proofs.len()
     }
 
-    /// Decodes the inner [BlobSidecar] fields from RLP bytes, without a RLP header.
+    /// Decodes the inner [BlobTransactionSidecar] fields from RLP bytes, without a RLP header.
     ///
     /// This decodes the fields in the following order:
     /// - `blobs`
