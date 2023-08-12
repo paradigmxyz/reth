@@ -8,9 +8,6 @@ use reth_codecs::{main_codec, Compact, CompactZstd};
 use reth_rlp::{length_of_length, Decodable, Encodable};
 use std::cmp::Ordering;
 
-#[cfg(any(test, feature = "arbitrary"))]
-use proptest::strategy::Strategy;
-
 /// Receipt containing result of transaction execution.
 #[main_codec(zstd)]
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -167,20 +164,25 @@ impl Decodable for ReceiptWithBloom {
                 let receipt_type = *buf.first().ok_or(reth_rlp::DecodeError::Custom(
                     "typed receipt cannot be decoded from an empty slice",
                 ))?;
-                if receipt_type == 0x01 {
-                    buf.advance(1);
-                    Self::decode_receipt(buf, TxType::EIP2930)
-                } else if receipt_type == 0x02 {
-                    buf.advance(1);
-                    Self::decode_receipt(buf, TxType::EIP1559)
-                } else if receipt_type == 0x03 {
-                    buf.advance(1);
-                    Self::decode_receipt(buf, TxType::EIP4844)
-                } else if receipt_type == 0x7E {
-                    buf.advance(1);
-                    Self::decode_receipt(buf, TxType::DEPOSIT)
-                } else {
-                    Err(reth_rlp::DecodeError::Custom("invalid receipt type"))
+                match receipt_type {
+                    0x01 => {
+                        buf.advance(1);
+                        Self::decode_receipt(buf, TxType::EIP2930)
+                    }
+                    0x02 => {
+                        buf.advance(1);
+                        Self::decode_receipt(buf, TxType::EIP1559)
+                    }
+                    0x03 => {
+                        buf.advance(1);
+                        Self::decode_receipt(buf, TxType::EIP4844)
+                    }
+                    #[cfg(feature = "optimism")]
+                    0x7E => {
+                        buf.advance(1);
+                        Self::decode_receipt(buf, TxType::DEPOSIT)
+                    }
+                    _ => Err(reth_rlp::DecodeError::Custom("invalid receipt type")),
                 }
             }
             Ordering::Equal => {

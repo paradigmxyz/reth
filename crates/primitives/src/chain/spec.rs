@@ -247,6 +247,7 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Regolith, ForkCondition::Timestamp(1679079600)),
         ]),
         optimism: Some(OptimismConfig { eip_1559_elasticity: 10, eip_1559_denominator: 50 }),
+        ..Default::default()
     }
     .into()
 });
@@ -308,6 +309,8 @@ impl Default for ChainSpec {
             hardforks: Default::default(),
             deposit_contract: Default::default(),
             base_fee_params: BaseFeeParams::ethereum(),
+            #[cfg(feature = "optimism")]
+            optimism: Default::default(),
         }
     }
 }
@@ -765,6 +768,7 @@ impl ChainSpecBuilder {
     pub fn cancun_activated(mut self) -> Self {
         self = self.paris_activated();
         self.hardforks.insert(Hardfork::Cancun, ForkCondition::Timestamp(0));
+        self
     }
 
     /// Enable Bedrock at genesis

@@ -194,10 +194,8 @@ impl Transaction {
         match self {
             Transaction::Legacy(_) | Transaction::Eip2930(_) => false,
             Transaction::Eip1559(_) | Transaction::Eip4844(_) => true,
-            Transaction::Eip1559(TxEip1559 { gas_limit, .. }) => *gas_limit,
-            Transaction::Eip1559(TxEip1559 { gas_limit, .. }) => *gas_limit,
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(TxDeposit { gas_limit, .. }) => *gas_limit,
+            Transaction::Deposit(_) => false,
         }
     }
 
@@ -210,7 +208,6 @@ impl Transaction {
             Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
             Transaction::Eip1559(TxEip1559 { max_fee_per_gas, .. }) |
             Transaction::Eip4844(TxEip4844 { max_fee_per_gas, .. }) => *max_fee_per_gas,
-            Transaction::Eip1559(TxEip1559 { max_fee_per_gas, .. }) => *max_fee_per_gas,
             // Deposit transactions buy their L2 gas on L1 and, as such, the L2 gas is not
             // refundable.
             #[cfg(feature = "optimism")]

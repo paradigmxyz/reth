@@ -418,19 +418,6 @@ impl PoolTransaction for MockTransaction {
         }
     }
 
-    fn gas_cost(&self) -> U256 {
-        match self {
-            MockTransaction::Legacy { gas_price, gas_limit, .. } => {
-                U256::from(*gas_limit) * U256::from(*gas_price)
-            }
-            MockTransaction::Eip1559 { max_fee_per_gas, gas_limit, .. } => {
-                U256::from(*gas_limit) * U256::from(*max_fee_per_gas)
-            }
-            #[cfg(feature = "optimism")]
-            MockTransaction::DepositTx { .. } => U256::ZERO,
-        }
-    }
-
     fn gas_limit(&self) -> u64 {
         self.get_gas_limit()
     }

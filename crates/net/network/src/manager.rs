@@ -180,6 +180,7 @@ where
             status,
             fork_filter,
             dns_discovery_config,
+            #[cfg(feature = "optimism")]
             sequencer_endpoint,
             ..
         } = config;
