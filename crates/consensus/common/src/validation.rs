@@ -660,6 +660,7 @@ mod tests {
         (SealedBlock { header: header.seal_slow(), body, ommers, withdrawals: None }, parent)
     }
 
+    #[cfg(not(feature = "optimism"))]
     #[test]
     fn sanity_check() {
         let (block, parent) = mock_block();
