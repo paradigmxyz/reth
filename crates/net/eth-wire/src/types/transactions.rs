@@ -8,7 +8,6 @@ use reth_primitives::{
 };
 use reth_rlp::{
     Decodable, DecodeError, Encodable, Header, RlpDecodableWrapper, RlpEncodableWrapper,
-    EMPTY_LIST_CODE,
 };
 
 #[cfg(feature = "serde")]
