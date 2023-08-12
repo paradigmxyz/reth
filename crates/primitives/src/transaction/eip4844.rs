@@ -1,7 +1,8 @@
 use super::access_list::AccessList;
 use crate::{constants::eip4844::DATA_GAS_PER_BLOB, Bytes, ChainId, TransactionKind, H256};
+use c_kzg::{Blob, Bytes48};
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::{Decodable, DecodeError};
+use reth_rlp::{Decodable, DecodeError, Encodable};
 use std::mem;
 
 /// [EIP-4844 Blob Transaction](https://eips.ethereum.org/EIPS/eip-4844#blob-transaction)
@@ -147,5 +148,50 @@ impl TxEip4844 {
         self.input.len() +  // input
         self.blob_versioned_hashes.capacity() * mem::size_of::<H256>() + // blob hashes size
         mem::size_of::<u128>() // max_fee_per_data_gas
+    }
+}
+
+/// This represents a set of blobs, and its corresponding commitments and proofs.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct BlobSidecar {
+    /// The blob data.
+    pub blobs: Vec<Blob>,
+    /// The blob commitments.
+    pub commitments: Vec<Bytes48>,
+    /// The blob proofs.
+    pub proofs: Vec<Bytes48>,
+}
+
+impl BlobSidecar {
+    /// Encodes the inner [BlobSidecar] fields as RLP bytes, without a RLP header.
+    ///
+    /// This encodes the fields in the following order:
+    /// - `blobs`
+    /// - `commitments`
+    /// - `proofs`
+    pub fn encode_inner(&self, out: &mut dyn bytes::BufMut) {
+        // Encode the blobs, commitments, and proofs
+        self.blobs.encode(out);
+        self.commitments.encode(out);
+        self.proofs.encode(out);
+    }
+
+    /// Outputs the RLP length of the [BlobSidecar] fields, without a RLP header.
+    pub fn fields_len(&self) -> usize {
+        self.blobs.len() + self.commitments.len() + self.proofs.len()
+    }
+
+    /// Decodes the inner [BlobSidecar] fields from RLP bytes, without a RLP header.
+    ///
+    /// This decodes the fields in the following order:
+    /// - `blobs`
+    /// - `commitments`
+    /// - `proofs`
+    pub fn decode_inner(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        Ok(Self {
+            blobs: Decodable::decode(buf)?,
+            commitments: Decodable::decode(buf)?,
+            proofs: Decodable::decode(buf)?,
+        })
     }
 }

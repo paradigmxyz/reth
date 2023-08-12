@@ -1059,6 +1059,8 @@ impl TransactionSigned {
     /// Decodes legacy transaction from the data buffer.
     ///
     /// This expects `rlp(legacy_tx)`
+    // TODO: make buf advancement semantics consistent with `decode_enveloped_typed_transaction`,
+    // so decoding methods do not need to manually advance the buffer
     pub fn decode_rlp_legacy_transaction(
         data: &mut &[u8],
     ) -> Result<TransactionSigned, DecodeError> {
