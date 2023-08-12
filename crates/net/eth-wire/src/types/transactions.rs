@@ -120,19 +120,20 @@ impl Decodable for PooledTransactionResponse {
         //
         // `rlp([tx_payload_body, blobs, commitments, proofs])`
         //
-        // Because non-4844 signed transaction payloads start with a type byte (0x01 - 0x7f), and
-        // blob transactions are encoded as a list (header starts with 0xc0 - 0xff), we can
-        // disambiguate the two types of transaction payloads by checking the first byte of the
-        // first element of the payload. If the first element is a list, we will decode the payload
-        // as a blob transaction. Otherwise, we will decode it as a non-4844 signed transaction.
+        // This means the full wire encoding is:
+        // `rlp(tx_type || rlp([transaction_payload_body, blobs, commitments, proofs]))`
         //
         // First, we check whether or not the transaction is a legacy transaction.
         if buf.is_empty() {
             return Err(DecodeError::InputTooShort)
         }
 
+        // If the header is a list header, it is a legacy transaction. Otherwise, it is a typed
+        // transaction
+        let header = Header::decode(buf)?;
+
         // Check if the tx is a list
-        if buf[0] >= EMPTY_LIST_CODE {
+        if header.list {
             // decode as legacy transaction
             let legacy_tx = TransactionSigned::decode_rlp_legacy_transaction(buf)?;
             Ok(PooledTransactionResponse::Transaction(legacy_tx))
