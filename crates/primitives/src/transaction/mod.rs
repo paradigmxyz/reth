@@ -188,6 +188,8 @@ impl Transaction {
             Transaction::Eip2930(TxEip2930 { gas_limit, .. }) |
             Transaction::Eip1559(TxEip1559 { gas_limit, .. }) |
             Transaction::Eip4844(TxEip4844 { gas_limit, .. }) => *gas_limit,
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(TxDeposit { gas_limit, .. }) => *gas_limit,
         }
     }
 
@@ -639,6 +641,8 @@ impl Transaction {
             Transaction::Eip2930(tx) => tx.nonce = nonce,
             Transaction::Eip1559(tx) => tx.nonce = nonce,
             Transaction::Eip4844(tx) => tx.nonce = nonce,
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(_) => { /* noop */ }
         }
     }
 
@@ -649,6 +653,8 @@ impl Transaction {
             Transaction::Eip2930(tx) => tx.value = value,
             Transaction::Eip1559(tx) => tx.value = value,
             Transaction::Eip4844(tx) => tx.value = value,
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(tx) => tx.value = value,
         }
     }
 
@@ -659,6 +665,8 @@ impl Transaction {
             Transaction::Eip2930(tx) => tx.input = input,
             Transaction::Eip1559(tx) => tx.input = input,
             Transaction::Eip4844(tx) => tx.input = input,
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(tx) => tx.input = input,
         }
     }
 
@@ -670,6 +678,8 @@ impl Transaction {
             Transaction::Eip2930(tx) => tx.size(),
             Transaction::Eip1559(tx) => tx.size(),
             Transaction::Eip4844(tx) => tx.size(),
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(tx) => tx.size(),
         }
     }
 }
@@ -696,6 +706,11 @@ impl Compact for Transaction {
                 tx.to_compact(buf);
                 3
             }
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(deposit) => {
+                deposit.to_compact(buf);
+                126
+            }
         }
     }
 
@@ -716,6 +731,11 @@ impl Compact for Transaction {
             3 => {
                 let (tx, buf) = TxEip4844::from_compact(buf, buf.len());
                 (Transaction::Eip4844(tx), buf)
+            }
+            #[cfg(feature = "optimism")]
+            126 => {
+                let (tx, buf) = TxDeposit::from_compact(buf, buf.len());
+                (Transaction::Deposit(tx), buf)
             }
             _ => unreachable!("Junk data in database: unknown Transaction variant"),
         }

@@ -25,4 +25,4 @@ tokio = { workspace = true, features = ["sync"] }
 [features]
 default = ["serde"]
 serde = ["dep:serde"]
-optimism = []
+optimism = ["reth-primitives/optimism", "reth-rpc-types/optimism", "reth-eth-wire/optimism"]

@@ -313,8 +313,8 @@ struct NetworkInner {
     initial_sync_done: Arc<AtomicBool>,
     /// The chain id
     chain_id: Arc<AtomicU64>,
-    #[cfg(feature = "optimism")]
     /// The sequencer HTTP Endpoint
+    #[cfg(feature = "optimism")]
     sequencer_endpoint: Option<String>,
 }
 
