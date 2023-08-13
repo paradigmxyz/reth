@@ -23,7 +23,7 @@ use tokio::sync::mpsc::Receiver;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// General purpose abstraction fo a transaction-pool.
+/// General purpose abstraction of a transaction-pool.
 ///
 /// This is intended to be used by API-consumers such as RPC that need inject new incoming,
 /// unverified transactions. And by block production that needs to get transactions to execute in a
