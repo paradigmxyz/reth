@@ -141,6 +141,8 @@ where
             extra_data: self.config.extradata.clone(),
             attributes,
             chain_spec: Arc::clone(&self.chain_spec),
+            #[cfg(feature = "optimism")]
+            compute_pending_block: self.config.compute_pending_block,
         };
 
         let until = tokio::time::Instant::now() + self.config.deadline;
@@ -366,7 +368,15 @@ where
                     this.metrics.inc_failed_payload_builds();
                 }
                 Poll::Pending => {
-                    this.pending_block = Some(fut);
+                    #[cfg(not(feature = "optimism"))]
+                    {
+                        this.pending_block = Some(fut);
+                    }
+
+                    #[cfg(feature = "optimism")]
+                    if this.config.compute_pending_block {
+                        this.pending_block = Some(fut);
+                    }
                 }
             }
         }
@@ -528,6 +538,9 @@ struct PayloadConfig {
     attributes: PayloadBuilderAttributes,
     /// The chain spec.
     chain_spec: Arc<ChainSpec>,
+    /// The rollup's compute pending block option
+    #[cfg(feature = "optimism")]
+    compute_pending_block: bool,
 }
 
 #[derive(Debug)]
@@ -582,6 +595,7 @@ fn build_payload<Pool, Client>(
             extra_data,
             attributes,
             chain_spec,
+            ..
         } = config;
 
         debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number, "building new payload");
