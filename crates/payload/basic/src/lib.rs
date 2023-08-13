@@ -337,7 +337,16 @@ where
                         tx,
                     )
                 }));
-                this.pending_block = Some(PendingPayload { _cancel, payload: rx });
+
+                #[cfg(not(feature = "optimism"))]
+                {
+                    this.pending_block = Some(PendingPayload { _cancel, payload: rx });
+                }
+
+                #[cfg(feature = "optimism")]
+                if this.config.compute_pending_block {
+                    this.pending_block = Some(PendingPayload { _cancel, payload: rx });
+                }
             }
         }
 
