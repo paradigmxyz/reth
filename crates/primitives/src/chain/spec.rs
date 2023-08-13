@@ -787,11 +787,13 @@ impl ChainSpecBuilder {
         self
     }
 
-    /// Enable Regolith at genesis
+    /// Enable Regolith at the timestamp of activation.
+    /// For post-bedrock op-stack chains, this will be at genesis.
+    /// For pre-bedrock op-stack chains, this will be at the timestamp of regolith activation.
     #[cfg(feature = "optimism")]
-    pub fn regolith_activated(mut self) -> Self {
+    pub fn regolith_activated(mut self, timestamp: u64) -> Self {
         self = self.bedrock_activated();
-        self.hardforks.insert(Hardfork::Regolith, ForkCondition::Block(0));
+        self.hardforks.insert(Hardfork::Regolith, ForkCondition::Timestamp(timestamp));
         self
     }
 
