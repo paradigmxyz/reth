@@ -4,6 +4,10 @@ use reth_primitives::H256;
 use revm_primitives::EVMError;
 use tokio::sync::oneshot;
 
+// Imported for rustdoc on `DepositTransactionRecoverFailed` error.
+#[allow(unused_imports)]
+use reth_primitives::TransactionSignedEcRecovered;
+
 /// Possible error variants during payload building.
 #[derive(Debug, thiserror::Error)]
 pub enum PayloadBuilderError {
