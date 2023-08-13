@@ -552,6 +552,17 @@ struct PayloadConfig {
     compute_pending_block: bool,
 }
 
+impl PayloadConfig {
+    /// Returns an owned instance of the [PayloadConfig]'s extra_data bytes.
+    pub(crate) fn extra_data(&self) -> reth_primitives::Bytes {
+        #[cfg(feature = "optimism")]
+        if self.chain_spec.optimism {
+            Default::default()
+        }
+        reth_primitives::Bytes(self.extra_data.clone())
+    }
+}
+
 #[derive(Debug)]
 enum BuildOutcome {
     /// Successfully built a better block.
@@ -597,11 +608,11 @@ fn build_payload<Pool, Client>(
         Client: StateProviderFactory,
         Pool: TransactionPool,
     {
+        let extra_data = config.extra_data();
         let PayloadConfig {
             initialized_block_env,
             initialized_cfg,
             parent_block,
-            extra_data,
             attributes,
             chain_spec,
             ..
@@ -615,21 +626,11 @@ fn build_payload<Pool, Client>(
 
         let mut cumulative_gas_used = 0;
 
-        #[cfg(not(feature = "optimism"))]
         let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
 
         #[cfg(feature = "optimism")]
-        let mut block_gas_limit: u64 =
-            initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
-
-        #[cfg(feature = "optimism")]
-        {
-            if let Some(gas_limit) = attributes.gas_limit {
-                block_gas_limit = gas_limit;
-            }
-            // TODO(clabby): configure the gas limit of pending blocks with the miner gas limit
-            // config when using optimism
-        }
+        let block_gas_limit: u64 =
+            if let Some(gas_limit) = attributes.gas_limit { gas_limit } else { block_gas_limit };
 
         let base_fee = initialized_block_env.basefee.to::<u64>();
 
@@ -834,10 +835,7 @@ fn build_payload<Pool, Client>(
             gas_limit: block_gas_limit,
             difficulty: U256::ZERO,
             gas_used: cumulative_gas_used,
-            #[cfg(not(feature = "optimism"))]
-            extra_data: extra_data.into(),
-            #[cfg(feature = "optimism")]
-            extra_data: if chain_spec.optimism { Default::default() } else { extra_data.into() },
+            extra_data,
             blob_gas_used: None,
             excess_blob_gas: None,
         };
@@ -862,14 +860,8 @@ fn build_empty_payload<Client>(
 where
     Client: StateProviderFactory,
 {
-    let PayloadConfig {
-        initialized_block_env,
-        parent_block,
-        extra_data,
-        attributes,
-        chain_spec,
-        ..
-    } = config;
+    let extra_data = config.extra_data();
+    let PayloadConfig { initialized_block_env, parent_block, attributes, chain_spec, .. } = config;
 
     debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number,  "building empty payload");
 
@@ -880,20 +872,11 @@ where
     let base_fee = initialized_block_env.basefee.to::<u64>();
     let block_number = initialized_block_env.number.to::<u64>();
 
-    #[cfg(not(feature = "optimism"))]
     let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
 
     #[cfg(feature = "optimism")]
-    let mut block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
-
-    #[cfg(feature = "optimism")]
-    {
-        if let Some(gas_limit) = attributes.gas_limit {
-            block_gas_limit = gas_limit;
-        }
-        // TODO(clabby): configure the gas limit of pending blocks with the miner gas limit config
-        // when using optimism
-    }
+    let block_gas_limit: u64 =
+        if let Some(gas_limit) = attributes.gas_limit { gas_limit } else { block_gas_limit };
 
     let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
         &mut db,
@@ -926,10 +909,7 @@ where
         gas_used: 0,
         blob_gas_used: None,
         excess_blob_gas: None,
-        #[cfg(not(feature = "optimism"))]
-        extra_data: extra_data.into(),
-        #[cfg(feature = "optimism")]
-        extra_data: if chain_spec.optimism { Default::default() } else { extra_data.into() },
+        extra_data,
     };
 
     let block = Block { header, body: vec![], ommers: vec![], withdrawals };
