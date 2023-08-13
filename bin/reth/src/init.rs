@@ -274,7 +274,7 @@ mod tests {
             paris_block_and_final_difficulty: None,
             deposit_contract: None,
             #[cfg(feature = "optimism")]
-            optimism: None,
+            optimism: false,
             ..Default::default()
         });
 
