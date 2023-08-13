@@ -59,12 +59,12 @@ pub use block::{
     BlockWithSenders, ForkBlock, SealedBlock, SealedBlockWithSenders,
 };
 pub use bloom::Bloom;
-#[cfg(feature = "optimism")]
-pub use chain::OP_GOERLI;
 pub use chain::{
     AllGenesisFormats, BaseFeeParams, Chain, ChainInfo, ChainSpec, ChainSpecBuilder,
     DisplayHardforks, ForkCondition, ForkTimestamps, DEV, GOERLI, MAINNET, SEPOLIA,
 };
+#[cfg(feature = "optimism")]
+pub use chain::{BASE_GOERLI, OP_GOERLI};
 pub use compression::*;
 pub use constants::{
     DEV_GENESIS, EMPTY_OMMER_ROOT, GOERLI_GENESIS, KECCAK_EMPTY, MAINNET_GENESIS, SEPOLIA_GENESIS,

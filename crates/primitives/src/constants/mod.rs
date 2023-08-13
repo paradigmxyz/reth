@@ -99,6 +99,11 @@ pub const DEV_GENESIS: H256 =
 pub const GOERLI_OP_GENESIS: H256 =
     H256(hex!("c1fc15cd51159b1f1e5cbc4b82e85c1447ddfa33c52cf1d98d14fba0d6354be1"));
 
+/// Base goerli genesis hash.
+#[cfg(feature = "optimism")]
+pub const GOERLI_BASE_GENESIS: H256 =
+    H256(hex!("a3ab140f15ea7f7443a4702da64c10314eb04d488e72974e02e2d728096b4f76"));
+
 /// Keccak256 over empty array.
 pub const KECCAK_EMPTY: H256 =
     H256(hex!("c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"));
