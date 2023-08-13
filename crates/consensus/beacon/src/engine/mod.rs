@@ -997,27 +997,30 @@ where
         //    forkchoiceState.headBlockHash and identified via buildProcessId value if
         //    payloadAttributes is not null and the forkchoice state has been updated successfully.
         //    The build process is specified in the Payload building section.
-        let attributes = PayloadBuilderAttributes::new(state.head_block_hash, attrs);
+        match PayloadBuilderAttributes::try_new(state.head_block_hash, attrs) {
+            Ok(attributes) => {
+                // send the payload to the builder and return the receiver for the pending payload
+                // id, initiating payload job is handled asynchronously
+                let pending_payload_id = self.payload_builder.send_new_payload(attributes);
 
-        // send the payload to the builder and return the receiver for the pending payload id,
-        // initiating payload job is handled asynchronously
-        let pending_payload_id = self.payload_builder.send_new_payload(attributes);
-
-        // Client software MUST respond to this method call in the following way:
-        // {
-        //      payloadStatus: {
-        //          status: VALID,
-        //          latestValidHash: forkchoiceState.headBlockHash,
-        //          validationError: null
-        //      },
-        //      payloadId: buildProcessId
-        // }
-        //
-        // if the payload is deemed VALID and the build process has begun.
-        OnForkChoiceUpdated::updated_with_pending_payload_id(
-            PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash)),
-            pending_payload_id,
-        )
+                // Client software MUST respond to this method call in the following way:
+                // {
+                //      payloadStatus: {
+                //          status: VALID,
+                //          latestValidHash: forkchoiceState.headBlockHash,
+                //          validationError: null
+                //      },
+                //      payloadId: buildProcessId
+                // }
+                //
+                // if the payload is deemed VALID and the build process has begun.
+                OnForkChoiceUpdated::updated_with_pending_payload_id(
+                    PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash)),
+                    pending_payload_id,
+                )
+            }
+            Err(_) => OnForkChoiceUpdated::invalid_payload_attributes(),
+        }
     }
 
     /// When the Consensus layer receives a new block via the consensus gossip protocol,

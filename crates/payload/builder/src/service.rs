@@ -242,6 +242,13 @@ where
                         if this.contains_payload(id) {
                             warn!(%id, parent = ?attr.parent, "Payload job already in progress, ignoring.");
                         } else {
+                            // Don't start the payload job if there is no tx pool to pull from.
+                            #[cfg(feature = "optimism")]
+                            if attr.no_tx_pool {
+                                let _ = tx.send(res);
+                                continue
+                            }
+
                             // no job for this payload yet, create one
                             match this.generator.new_payload_job(attr) {
                                 Ok(job) => {

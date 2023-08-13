@@ -2,11 +2,16 @@
 
 use reth_primitives::{Address, ChainSpec, Header, SealedBlock, Withdrawal, H256, U256};
 use reth_revm_primitives::config::revm_spec_by_timestamp_after_merge;
-use reth_rlp::Encodable;
+use reth_rlp::{DecodeError, Encodable};
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadEnvelope, PayloadAttributes, PayloadId,
 };
 use revm_primitives::{BlockEnv, CfgEnv};
+
+#[cfg(feature = "optimism")]
+use reth_primitives::TransactionSigned;
+#[cfg(feature = "optimism")]
+use reth_rlp::Decodable;
 
 /// Contains the built payload.
 ///
@@ -88,6 +93,15 @@ pub struct PayloadBuilderAttributes {
     pub prev_randao: H256,
     /// Withdrawals for the generated payload
     pub withdrawals: Vec<Withdrawal>,
+    /// NoTxPool option for the generated payload
+    #[cfg(feature = "optimism")]
+    pub no_tx_pool: bool,
+    /// Transactions for the generated payload
+    #[cfg(feature = "optimism")]
+    pub transactions: Vec<TransactionSigned>,
+    /// The gas limit for the generated payload
+    #[cfg(feature = "optimism")]
+    pub gas_limit: Option<u64>,
 }
 
 // === impl PayloadBuilderAttributes ===
@@ -96,18 +110,37 @@ impl PayloadBuilderAttributes {
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
     /// Derives the unique [PayloadId] for the given parent and attributes
-    pub fn new(parent: H256, attributes: PayloadAttributes) -> Self {
+    pub fn try_new(parent: H256, attributes: PayloadAttributes) -> Result<Self, DecodeError> {
+        #[cfg(feature = "optimism")]
+        let transactions = attributes
+            .transactions
+            .as_ref()
+            .unwrap_or(&Vec::default())
+            .iter()
+            .map(|tx| TransactionSigned::decode(&mut &tx[..]))
+            .collect::<Result<_, _>>()?;
+
+        #[cfg(not(feature = "optimism"))]
         let id = payload_id(&parent, &attributes);
-        Self {
+
+        #[cfg(feature = "optimism")]
+        let id = payload_id(&parent, &attributes, &transactions);
+
+        Ok(Self {
             id,
             parent,
             timestamp: attributes.timestamp.as_u64(),
             suggested_fee_recipient: attributes.suggested_fee_recipient,
             prev_randao: attributes.prev_randao,
             withdrawals: attributes.withdrawals.unwrap_or_default(),
-        }
+            #[cfg(feature = "optimism")]
+            no_tx_pool: attributes.no_tx_pool.unwrap_or_default(),
+            #[cfg(feature = "optimism")]
+            transactions,
+            #[cfg(feature = "optimism")]
+            gas_limit: attributes.gas_limit,
+        })
     }
-
     /// Returns the configured [CfgEnv] and [BlockEnv] for the targeted payload (that has the
     /// `parent` as its parent).
     ///
@@ -151,7 +184,11 @@ impl PayloadBuilderAttributes {
 /// Generates the payload id for the configured payload
 ///
 /// Returns an 8-byte identifier by hashing the payload components with sha256 hash.
-pub(crate) fn payload_id(parent: &H256, attributes: &PayloadAttributes) -> PayloadId {
+pub(crate) fn payload_id(
+    parent: &H256,
+    attributes: &PayloadAttributes,
+    #[cfg(feature = "optimism")] txs: &Vec<TransactionSigned>,
+) -> PayloadId {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
     hasher.update(parent.as_bytes());
@@ -163,6 +200,21 @@ pub(crate) fn payload_id(parent: &H256, attributes: &PayloadAttributes) -> Paylo
         withdrawals.encode(&mut buf);
         hasher.update(buf);
     }
+
+    #[cfg(feature = "optimism")]
+    {
+        let no_tx_pool = attributes.no_tx_pool.unwrap_or_default();
+        if no_tx_pool || !txs.is_empty() {
+            hasher.update([no_tx_pool as u8]);
+            hasher.update(txs.len().to_be_bytes());
+            txs.iter().for_each(|tx| hasher.update(tx.hash()));
+        }
+
+        if let Some(gas_limit) = attributes.gas_limit {
+            hasher.update(gas_limit.to_be_bytes());
+        }
+    }
+
     let out = hasher.finalize();
     PayloadId::new(out.as_slice()[..8].try_into().expect("sufficient length"))
 }
