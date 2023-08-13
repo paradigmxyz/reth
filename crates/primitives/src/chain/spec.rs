@@ -69,7 +69,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
         )),
         #[cfg(feature = "optimism")]
-        optimism: None,
+        optimism: false,
         ..Default::default()
     }
     .into()
@@ -112,7 +112,7 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
         )),
         #[cfg(feature = "optimism")]
-        optimism: None,
+        optimism: false,
         ..Default::default()
     }
     .into()
@@ -159,7 +159,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
         )),
         #[cfg(feature = "optimism")]
-        optimism: None,
+        optimism: false,
         ..Default::default()
     }
     .into()
@@ -200,7 +200,7 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         ]),
         deposit_contract: None, // TODO: do we even have?
         #[cfg(feature = "optimism")]
-        optimism: None,
+        optimism: false,
         ..Default::default()
     }
     .into()
@@ -261,7 +261,7 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Regolith, ForkCondition::Timestamp(1679079600)),
         ]),
         base_fee_params: BaseFeeParams::optimism(),
-        optimism: Some(OptimismConfig { eip_1559_elasticity: 10, eip_1559_denominator: 50 }),
+        optimism: true,
         ..Default::default()
     }
     .into()
@@ -312,7 +312,7 @@ pub struct ChainSpec {
     /// Optimism configuration
     /// TODO(clabby): Roberto upstreamed the base fee params, we should change this to a bool.
     #[cfg(feature = "optimism")]
-    pub optimism: Option<OptimismConfig>,
+    pub optimism: bool,
 }
 
 impl Default for ChainSpec {
@@ -330,16 +330,6 @@ impl Default for ChainSpec {
             optimism: Default::default(),
         }
     }
-}
-
-/// Optimism configuration.
-#[cfg(feature = "optimism")]
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct OptimismConfig {
-    /// Elasticity multiplier as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)
-    pub eip_1559_elasticity: u64,
-    /// Base fee max change denominator as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)
-    pub eip_1559_denominator: u64,
 }
 
 impl ChainSpec {
@@ -574,7 +564,7 @@ impl From<Genesis> for ChainSpec {
             paris_block_and_final_difficulty: None,
             deposit_contract: None,
             #[cfg(feature = "optimism")]
-            optimism: None,
+            optimism: false,
             ..Default::default()
         }
     }
@@ -659,7 +649,7 @@ pub struct ChainSpecBuilder {
     genesis: Option<Genesis>,
     hardforks: BTreeMap<Hardfork, ForkCondition>,
     #[cfg(feature = "optimism")]
-    optimism: Option<OptimismConfig>,
+    optimism: bool,
 }
 
 impl ChainSpecBuilder {
@@ -670,7 +660,7 @@ impl ChainSpecBuilder {
             genesis: Some(MAINNET.genesis.clone()),
             hardforks: MAINNET.hardforks.clone(),
             #[cfg(feature = "optimism")]
-            optimism: None,
+            optimism: false,
         }
     }
 

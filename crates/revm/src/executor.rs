@@ -231,7 +231,7 @@ where
         self.init_env(&block.header, total_difficulty);
 
         #[cfg(feature = "optimism")]
-        let l1_block_info = if self.chain_spec.optimism.is_some() {
+        let l1_block_info = if self.chain_spec.optimism {
             Some(optimism::L1BlockInfo::try_from(block)?)
         } else {
             None
@@ -342,7 +342,7 @@ where
                     cumulative_gas_used += result.gas_used()
                 }
 
-                if self.chain_spec.optimism.is_some() {
+                if self.chain_spec.optimism {
                     // Route the l1 cost and base fee to the appropriate optimism vaults
                     if let Some(l1_cost) = l1_cost {
                         self.increment_account_balance(

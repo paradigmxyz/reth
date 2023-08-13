@@ -36,7 +36,7 @@ pub fn validate_header_standalone(
     }
 
     #[cfg(feature = "optimism")]
-    let wd_root_missing = header.withdrawals_root.is_none() && chain_spec.optimism.is_none();
+    let wd_root_missing = header.withdrawals_root.is_none() && !chain_spec.optimism;
 
     #[cfg(not(feature = "optimism"))]
     let wd_root_missing = header.withdrawals_root.is_none();
