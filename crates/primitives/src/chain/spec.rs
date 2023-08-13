@@ -18,6 +18,11 @@ use std::{
     sync::Arc,
 };
 
+#[cfg(feature = "optimism")]
+use crate::constants::{
+    OP_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR, OP_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
+};
+
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
@@ -218,6 +223,15 @@ impl BaseFeeParams {
             elasticity_multiplier: EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
         }
     }
+
+    /// Get the base fee parameters for optimism mainnet
+    #[cfg(feature = "optimism")]
+    pub const fn optimism() -> BaseFeeParams {
+        BaseFeeParams {
+            max_change_denominator: OP_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
+            elasticity_multiplier: OP_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
+        }
+    }
 }
 
 /// The Optimism Goerli spec
@@ -246,6 +260,7 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Regolith, ForkCondition::Timestamp(1679079600)),
         ]),
+        base_fee_params: BaseFeeParams::optimism(),
         optimism: Some(OptimismConfig { eip_1559_elasticity: 10, eip_1559_denominator: 50 }),
         ..Default::default()
     }
@@ -295,6 +310,7 @@ pub struct ChainSpec {
     pub base_fee_params: BaseFeeParams,
 
     /// Optimism configuration
+    /// TODO(clabby): Roberto upstreamed the base fee params, we should change this to a bool.
     #[cfg(feature = "optimism")]
     pub optimism: Option<OptimismConfig>,
 }

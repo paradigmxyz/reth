@@ -35,9 +35,16 @@ pub fn validate_header_standalone(
         return Err(ConsensusError::BaseFeeMissing)
     }
 
+    #[cfg(feature = "optimism")]
+    let wd_root_missing = header.withdrawals_root.is_none() && chain_spec.optimism.is_none();
+
+    #[cfg(not(feature = "optimism"))]
+    let wd_root_missing = header.withdrawals_root.is_none();
+
     // EIP-4895: Beacon chain push withdrawals as operations
     if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp) &&
-        header.withdrawals_root.is_none()
+        header.withdrawals_root.is_none() &&
+        wd_root_missing
     {
         return Err(ConsensusError::WithdrawalsRootMissing)
     } else if !chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp) &&
@@ -296,7 +303,7 @@ pub fn validate_header_regarding_parent(
         // By consensus, gas_limit is multiplied by elasticity (*2) on
         // on exact block that hardfork happens.
         if chain_spec.fork(Hardfork::London).transitions_at_block(child.number) {
-            parent_gas_limit = parent.gas_limit * constants::EIP1559_DEFAULT_ELASTICITY_MULTIPLIER;
+            parent_gas_limit = parent.gas_limit * chain_spec.base_fee_params.elasticity_multiplier;
         }
 
         if child.gas_limit > parent_gas_limit {
