@@ -21,6 +21,7 @@
 //! - `test-utils`: Export utilities for testing
 pub mod abi;
 mod account;
+pub mod address;
 pub mod basefee;
 mod bits;
 pub mod blobfee;

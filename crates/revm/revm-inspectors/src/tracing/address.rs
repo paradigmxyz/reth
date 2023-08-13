@@ -13,10 +13,14 @@
 //! and applying heuristics as outlined in the spec.
 use std::collections::HashSet;
 
-use reth_primitives::{bytes::Bytes, Address, H160};
+use reth_primitives::{
+    address::{bytes32_to_possible_address, bytes_to_possible_addresses},
+    bytes::Bytes,
+    Address, H160,
+};
 use revm::{
     interpreter::{CallInputs, CreateInputs, Gas, InstructionResult},
-    primitives::{db::Database, TransactTo, TxEnv, B160, B256},
+    primitives::{db::Database, B160, B256},
     EVMData, Inspector,
 };
 
@@ -37,14 +41,8 @@ impl AddressInspector {
 
     /// Detects addresses in bytes and adds them to the current set.
     fn extract_addresses(&mut self, bytes: &[u8]) {
-        if bytes.len() < 20 {
-            return
-        }
-
-        if let Some(addresses) = bytes_to_addresses(bytes) {
-            for address in addresses {
-                self.inner.insert(address);
-            }
+        if let Some(addresses) = bytes_to_possible_addresses(bytes) {
+            self.inner.extend(&addresses);
         }
     }
 }
@@ -111,11 +109,11 @@ impl<DB: Database> Inspector<DB> for AddressInspector {
     ) {
         self.inner.insert(H160(address.0));
         for topic in topics {
-            if let Some(address) = bytes32_to_address(topic) {
+            if let Some(address) = bytes32_to_possible_address(topic) {
                 self.inner.insert(address);
             }
         }
-        if let Some(addresses) = bytes_to_addresses(data) {
+        if let Some(addresses) = bytes_to_possible_addresses(data) {
             for address in addresses {
                 self.inner.insert(address);
             }
@@ -126,40 +124,6 @@ impl<DB: Database> Inspector<DB> for AddressInspector {
         self.inner.insert(contract);
         self.inner.insert(target);
     }
-}
-
-/// Searches for and returns addresses that are present in bytes.
-///
-/// See also: <https://github.com/ethereum/execution-apis/pull/456> for the algorithm specification.
-fn bytes_to_addresses(_candidate: &[u8]) -> Option<Vec<Address>> {
-    // todo
-    None
-}
-
-/// Detects an address if present in 32 bytes.
-///
-/// See also: <https://github.com/ethereum/execution-apis/pull/456> for the algorithm specification.
-fn bytes32_to_address(_logs: &[u8; 32]) -> Option<Address> {
-    // todo
-    None
-}
-
-/// Detects an address if present in a transaction object and adds to an existing set
-pub fn get_addresses_from_tx(tx: &TxEnv)-> HashSet<Address> {
-    let mut set = HashSet::<Address>::new();
-    set.insert(tx.caller);
-    for (address, _) in &tx.access_list {
-        set.insert(*address);
-    }
-    if let Some(addresses) = bytes_to_addresses(&tx.data) {
-        for address in addresses {
-            set.insert(address);
-        }
-    }
-    if let TransactTo::Call(address) = tx.transact_to {
-        set.insert(H160(*address));
-    }
-    set
 }
 
 #[cfg(test)]

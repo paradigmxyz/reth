@@ -9,11 +9,11 @@ use crate::{
 use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
+    address::{get_addresses_from_block, get_addresses_from_tx},
     Account, Address, Block, BlockNumber, Bloom, Bytecode, ChainSpec, Hardfork, Header, Receipt,
     ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
 };
 use reth_provider::{BlockExecutor, PostState, StateProvider};
-use reth_revm_inspectors::tracing::get_addresses_from_tx;
 use revm::{
     db::{AccountState, CacheDB, DatabaseRef},
     primitives::{
@@ -277,7 +277,8 @@ where
             );
         }
         if self.stack.address_tracer.is_some() {
-            todo!("Get block-based address appearances and store in db");
+            let _block_addresses = get_addresses_from_block(block);
+            todo!("Store block-based address appearances in db");
         }
         Ok((post_state, cumulative_gas_used))
     }
