@@ -13,10 +13,16 @@ use reth_primitives::{
     constants::ETHEREUM_BLOCK_GAS_LIMIT, ChainSpec, InvalidTransactionError, EIP1559_TX_TYPE_ID,
     EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
-use reth_provider::{AccountReader, StateProviderFactory};
+use reth_provider::{AccountReader, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{marker::PhantomData, sync::Arc};
 use tokio::sync::{oneshot, Mutex};
+
+#[cfg(feature = "optimism")]
+use reth_revm::optimism::L1BlockInfo;
+
+#[cfg(feature = "optimism")]
+use reth_primitives::BlockNumberOrTag;
 
 /// A [TransactionValidator] implementation that validates ethereum transaction.
 ///
@@ -82,7 +88,7 @@ impl<Client, Tx> EthTransactionValidator<Client, Tx> {
 #[async_trait::async_trait]
 impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory + Clone + 'static,
+    Client: StateProviderFactory + reth_provider::BlockReaderIdExt + Clone + 'static,
     Tx: PoolTransaction + 'static,
 {
     type Transaction = Tx;
@@ -92,6 +98,14 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
+        #[cfg(feature = "optimism")]
+        if transaction.is_deposit() {
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidTransactionError::TxTypeNotSupported.into(),
+            )
+        }
+
         let hash = *transaction.hash();
         let (tx, rx) = oneshot::channel();
         {
@@ -316,7 +330,7 @@ impl<Client, Tx> EthTransactionValidatorInner<Client, Tx> {
 #[async_trait::async_trait]
 impl<Client, Tx> TransactionValidator for EthTransactionValidatorInner<Client, Tx>
 where
-    Client: StateProviderFactory,
+    Client: StateProviderFactory + BlockReaderIdExt,
     Tx: PoolTransaction,
 {
     type Transaction = Tx;
@@ -326,6 +340,14 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
+        #[cfg(feature = "optimism")]
+        if transaction.is_deposit() {
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidTransactionError::TxTypeNotSupported.into(),
+            )
+        }
+
         // Checks for tx_type
         match transaction.tx_type() {
             LEGACY_TX_TYPE_ID => {
@@ -442,8 +464,37 @@ where
             )
         }
 
-        // Checks for max cost
+        #[cfg(not(feature = "optimism"))]
         let cost = transaction.cost();
+
+        #[cfg(feature = "optimism")]
+        let cost = {
+            let block = match self.client.block_by_number_or_tag(BlockNumberOrTag::Latest) {
+                Ok(Some(block)) => block,
+                Ok(None) => {
+                    return TransactionValidationOutcome::Error(
+                        *transaction.hash(),
+                        "Latest block should be found".into(),
+                    )
+                }
+                Err(err) => {
+                    return TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err))
+                }
+            };
+
+            let cost_addition = match L1BlockInfo::try_from(&block) {
+                Ok(info) => {
+                    info.calculate_tx_l1_cost(transaction.input(), transaction.is_deposit())
+                }
+                Err(err) => {
+                    return TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err))
+                }
+            };
+
+            transaction.cost().saturating_add(cost_addition)
+        };
+
+        // Checks for max cost
         if cost > account.balance {
             return TransactionValidationOutcome::Invalid(
                 transaction,
@@ -467,5 +518,52 @@ where
                 TransactionOrigin::Private => false,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(feature = "optimism")]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_validate_optimism_transaction() {
+        use crate::traits::PooledTransaction;
+        use reth_primitives::{
+            Signature, Transaction, TransactionKind, TransactionSigned,
+            TransactionSignedEcRecovered, TxDeposit, MAINNET, U256,
+        };
+        use reth_provider::test_utils::MockEthProvider;
+        use reth_tasks::TokioTaskExecutor;
+
+        let client = MockEthProvider::default();
+        let validator =
+            EthTransactionValidator::new(client, MAINNET.clone(), TokioTaskExecutor::default());
+        let origin = TransactionOrigin::External;
+        let signer = Default::default();
+        let deposit_tx = Transaction::Deposit(TxDeposit {
+            source_hash: Default::default(),
+            from: signer,
+            to: TransactionKind::Create,
+            mint: None,
+            value: 0u128,
+            gas_limit: 0u64,
+            is_system_transaction: false,
+            input: Default::default(),
+        });
+        let signature = Signature { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false };
+        let signed_tx = TransactionSigned::from_transaction_and_signature(deposit_tx, signature);
+        let signed_recovered =
+            TransactionSignedEcRecovered::from_signed_transaction(signed_tx, signer);
+        let pooled_tx = PooledTransaction::new(signed_recovered);
+        let outcome = validator.validate_transaction(origin, pooled_tx).await;
+
+        let err = match outcome {
+            TransactionValidationOutcome::Invalid(_, err) => err,
+            _ => panic!("Expected invalid transaction"),
+        };
+        let expected: InvalidPoolTransactionError =
+            InvalidTransactionError::TxTypeNotSupported.into();
+        assert!(matches!(err, expected));
     }
 }

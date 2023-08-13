@@ -6,7 +6,7 @@ use crate::{
 };
 use futures_util::{ready, Stream};
 use reth_primitives::{
-    Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
+    Address, Bytes, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
     TransactionKind, TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
     H256, U256,
 };
@@ -506,6 +506,9 @@ pub trait PoolTransaction:
     /// Returns the nonce for this transaction.
     fn nonce(&self) -> u64;
 
+    /// The transaction input data.
+    fn input(&self) -> &Bytes;
+
     /// Returns the cost that this transaction is allowed to consume:
     ///
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
@@ -562,6 +565,10 @@ pub trait PoolTransaction:
 
     /// Returns chain_id
     fn chain_id(&self) -> Option<u64>;
+
+    /// Returns whether or not the transaction is an Optimism Deposited transaction.
+    #[cfg(feature = "optimism")]
+    fn is_deposit(&self) -> bool;
 }
 
 /// The default [PoolTransaction] for the [Pool](crate::Pool).
@@ -614,6 +621,11 @@ impl PoolTransaction for PooledTransaction {
     /// Returns the nonce for this transaction.
     fn nonce(&self) -> u64 {
         self.transaction.nonce()
+    }
+
+    /// The transaction input data.
+    fn input(&self) -> &Bytes {
+        self.transaction.transaction.input()
     }
 
     /// Returns the cost that this transaction is allowed to consume:
@@ -697,6 +709,12 @@ impl PoolTransaction for PooledTransaction {
     /// Returns chain_id
     fn chain_id(&self) -> Option<u64> {
         self.transaction.chain_id()
+    }
+
+    /// Returns whether or not the transaction is an Optimism Deposited transaction.
+    #[cfg(feature = "optimism")]
+    fn is_deposit(&self) -> bool {
+        matches!(self.transaction.transaction, Transaction::Deposit(_))
     }
 }
 

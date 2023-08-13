@@ -24,6 +24,7 @@ reth-interfaces.workspace = true
 reth-rlp.workspace = true
 reth-metrics.workspace = true
 reth-tasks.workspace = true
+reth-revm.workspace = true
 
 # async/futures
 async-trait.workspace = true
@@ -59,7 +60,12 @@ default = ["serde"]
 serde = ["dep:serde"]
 test-utils = ["rand", "paste", "serde"]
 arbitrary = ["proptest", "reth-primitives/arbitrary"]
-optimism = ["reth-primitives/optimism"]
+optimism = [
+    "reth-primitives/optimism",
+    "reth-revm/optimism",
+    "reth-provider/test-utils",
+    "reth-provider/optimism",
+]
 
 [[bench]]
 name = "reorder"

@@ -251,9 +251,10 @@ where
             #[cfg(feature = "optimism")]
             {
                 let db = self.db();
-                let l1_cost = l1_block_info
-                    .as_ref()
-                    .map(|l1_block_info| l1_block_info.calculate_tx_l1_cost(transaction));
+                let l1_cost = l1_block_info.as_ref().map(|l1_block_info| {
+                    l1_block_info
+                        .calculate_tx_l1_cost(transaction.input(), transaction.is_deposit())
+                });
 
                 let sender_account =
                     db.load_account(sender).map_err(|_| BlockExecutionError::ProviderError)?;

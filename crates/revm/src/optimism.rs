@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use reth_interfaces::executor;
-use reth_primitives::{Address, Block, TransactionKind, TransactionSigned, U256};
+use reth_primitives::{Address, Block, Bytes, TransactionKind, U256};
 
 const L1_FEE_RECIPIENT: &str = "0x420000000000000000000000000000000000001A";
 const BASE_FEE_RECIPIENT: &str = "0x4200000000000000000000000000000000000019";
@@ -84,12 +84,12 @@ impl TryFrom<&Block> for L1BlockInfo {
 
 impl L1BlockInfo {
     /// Calculate the gas cost of a transaction based on L1 block data posted on L2
-    pub fn calculate_tx_l1_cost(&self, tx: &TransactionSigned) -> U256 {
-        let rollup_data_gas_cost = U256::from(tx.input().iter().fold(0, |acc, byte| {
+    pub fn calculate_tx_l1_cost(&self, input: &Bytes, is_deposit: bool) -> U256 {
+        let rollup_data_gas_cost = U256::from(input.iter().fold(0, |acc, byte| {
             acc + if *byte == 0x00 { ZERO_BYTE_COST } else { NON_ZERO_BYTE_COST }
         }));
 
-        if tx.is_deposit() || rollup_data_gas_cost == U256::ZERO {
+        if is_deposit || rollup_data_gas_cost == U256::ZERO {
             return U256::ZERO
         }
 

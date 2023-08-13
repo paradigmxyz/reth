@@ -28,5 +28,10 @@ reth-rlp.workspace = true
 once_cell = "1.17.0"
 
 [features]
-optimism = ["reth-primitives/optimism", "reth-revm-primitives/optimism"]
+optimism = [
+  "reth-primitives/optimism",
+  "reth-revm-primitives/optimism",
+  "reth-consensus-common/optimism",
+  "reth-interfaces/optimism",
+]
 

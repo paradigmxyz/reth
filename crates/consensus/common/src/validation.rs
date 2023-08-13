@@ -12,9 +12,6 @@ use reth_primitives::{
 use reth_provider::{AccountReader, HeaderProvider, WithdrawalsProvider};
 use std::collections::{hash_map::Entry, HashMap};
 
-#[cfg(feature = "optimism")]
-use reth_primitives::TxDeposit;
-
 /// Validate header standalone
 pub fn validate_header_standalone(
     header: &SealedHeader,
@@ -125,7 +122,7 @@ pub fn validate_transaction_regarding_header(
             Some(*chain_id)
         }
         #[cfg(feature = "optimism")]
-        Transaction::Deposit(TxDeposit { .. }) => None,
+        Transaction::Deposit(_) => None,
     };
     if let Some(chain_id) = chain_id {
         if chain_id != chain_spec.chain().id() {
