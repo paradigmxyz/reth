@@ -268,6 +268,39 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     .into()
 });
 
+/// The Base Goerli spec
+#[cfg(feature = "optimism")]
+pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    ChainSpec {
+        chain: Chain::base_goerli(),
+        genesis: serde_json::from_str(include_str!("../../res/genesis/goerli_base.json"))
+            .expect("Can't deserialize Base Goerli genesis json"),
+        genesis_hash: Some(H256(hex!(
+            "a3ab140f15ea7f7443a4702da64c10314eb04d488e72974e02e2d728096b4f76"
+        ))),
+        fork_timestamps: ForkTimestamps::default(), // TODO: update this as well?
+        paris_block_and_final_difficulty: Some((0, U256::from(0))),
+        hardforks: BTreeMap::from([
+            (Hardfork::Byzantium, ForkCondition::Block(0)),
+            (Hardfork::Constantinople, ForkCondition::Block(0)),
+            (Hardfork::Petersburg, ForkCondition::Block(0)),
+            (Hardfork::Istanbul, ForkCondition::Block(0)),
+            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
+            (Hardfork::Berlin, ForkCondition::Block(0)),
+            (Hardfork::London, ForkCondition::Block(0)),
+            (
+                Hardfork::Paris,
+                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
+            ),
+            (Hardfork::Regolith, ForkCondition::Timestamp(1683219600)),
+        ]),
+        base_fee_params: BaseFeeParams::optimism(),
+        optimism: true,
+        ..Default::default()
+    }
+    .into()
+});
+
 /// An Ethereum chain specification.
 ///
 /// A chain specification describes:
