@@ -187,6 +187,9 @@ pub struct BasicPayloadJobGeneratorConfig {
     deadline: Duration,
     /// Maximum number of tasks to spawn for building a payload.
     max_payload_tasks: usize,
+    /// The rollup's compute pending block configuration option.
+    #[cfg(feature = "optimism")]
+    compute_pending_block: bool,
 }
 
 // === impl BasicPayloadJobGeneratorConfig ===
@@ -230,6 +233,15 @@ impl BasicPayloadJobGeneratorConfig {
         self.max_gas_limit = max_gas_limit;
         self
     }
+
+    /// Sets the compute pending block configuration option.
+    ///
+    /// Defaults to `false`.
+    #[cfg(feature = "optimism")]
+    pub fn compute_pending_block(mut self, compute_pending_block: bool) -> Self {
+        self.compute_pending_block = compute_pending_block;
+        self
+    }
 }
 
 impl Default for BasicPayloadJobGeneratorConfig {
@@ -243,6 +255,8 @@ impl Default for BasicPayloadJobGeneratorConfig {
             // 12s slot time
             deadline: SLOT_DURATION,
             max_payload_tasks: 3,
+            #[cfg(feature = "optimism")]
+            compute_pending_block: false,
         }
     }
 }
