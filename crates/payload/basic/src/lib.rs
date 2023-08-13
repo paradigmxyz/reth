@@ -577,7 +577,23 @@ fn build_payload<Pool, Client>(
         let mut post_state = PostState::default();
 
         let mut cumulative_gas_used = 0;
+
+        #[cfg(not(feature = "optimism"))]
         let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
+
+        #[cfg(feature = "optimism")]
+        let mut block_gas_limit: u64 =
+            initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
+
+        #[cfg(feature = "optimism")]
+        {
+            if let Some(gas_limit) = attributes.gas_limit {
+                block_gas_limit = gas_limit;
+            }
+            // TODO(clabby): configure the gas limit of pending blocks with the miner gas limit
+            // config when using optimism
+        }
+
         let base_fee = initialized_block_env.basefee.to::<u64>();
 
         let mut executed_txs = Vec::new();
@@ -586,6 +602,73 @@ fn build_payload<Pool, Client>(
         let mut total_fees = U256::ZERO;
 
         let block_number = initialized_block_env.number.to::<u64>();
+
+        // Deposit transactions are always inserted at the top of the block built by the payload.
+        // These transactions are pre-paid on L1 and have no signature.
+        #[cfg(feature = "optimism")]
+        {
+            for deposit_tx in attributes.transactions {
+                // Check if the job was cancelled, if so we can exit early.
+                if cancel.is_cancelled() {
+                    return Ok(BuildOutcome::Cancelled)
+                }
+
+                // Convert the deposit transaction to a [TransactionSignedEcRecovered]. This is
+                // purely for the purposes of utilizing the [tx_env_with_recovered] function,
+                // deposit transactions do not have signatures.
+                let deposit_tx = deposit_tx
+                    .clone()
+                    .try_into_ecrecovered()
+                    .map_err(|_| PayloadBuilderError::DepositTransactionRecoverFailed)?;
+
+                // Configure the environment for the block.
+                let env = Env {
+                    cfg: initialized_cfg.clone(),
+                    block: initialized_block_env.clone(),
+                    tx: tx_env_with_recovered(&deposit_tx),
+                };
+
+                let mut evm = revm::EVM::with_env(env);
+                evm.database(&mut db);
+
+                let ResultAndState { result, state } = match evm.transact() {
+                    Ok(res) => res,
+                    Err(err) => {
+                        match err {
+                            EVMError::Transaction(err) => {
+                                // if the deposit transaction is invalid, we can skip it
+                                trace!(?err, ?deposit_tx, "skipping invalid deposit transaction");
+                                continue
+                            }
+                            err => {
+                                // this is an error that we should treat as fatal for this attempt
+                                return Err(PayloadBuilderError::EvmExecutionError(err))
+                            }
+                        }
+                    }
+                };
+
+                // commit changes
+                commit_state_changes(&mut db, &mut post_state, block_number, state, true);
+
+                // Push transaction changeset and calculate header bloom filter for receipt.
+                post_state.add_receipt(
+                    block_number,
+                    Receipt {
+                        tx_type: deposit_tx.tx_type(),
+                        success: result.is_success(),
+                        cumulative_gas_used,
+                        logs: result.logs().into_iter().map(into_reth_log).collect(),
+                        // TODO(clabby): Implement effective nonce
+                        #[cfg(feature = "optimism")]
+                        deposit_nonce: None,
+                    },
+                );
+
+                // append transaction to the list of executed transactions
+                executed_txs.push(deposit_tx.into_signed());
+            }
+        }
 
         while let Some(pool_tx) = best_txs.next() {
             // ensure we still have capacity for this transaction
@@ -659,6 +742,7 @@ fn build_payload<Pool, Client>(
                     success: result.is_success(),
                     cumulative_gas_used,
                     logs: result.logs().into_iter().map(into_reth_log).collect(),
+                    // TODO(clabby): Implement effective nonce
                     #[cfg(feature = "optimism")]
                     deposit_nonce: None,
                 },
@@ -715,7 +799,10 @@ fn build_payload<Pool, Client>(
             gas_limit: block_gas_limit,
             difficulty: U256::ZERO,
             gas_used: cumulative_gas_used,
+            #[cfg(not(feature = "optimism"))]
             extra_data: extra_data.into(),
+            #[cfg(feature = "optimism")]
+            extra_data: if chain_spec.optimism { Default::default() } else { extra_data.into() },
             blob_gas_used: None,
             excess_blob_gas: None,
         };
@@ -807,7 +894,7 @@ where
         #[cfg(not(feature = "optimism"))]
         extra_data: extra_data.into(),
         #[cfg(feature = "optimism")]
-        extra_data: if chain_spec.optimism { extra_data.into() } else { Default::default() },
+        extra_data: if chain_spec.optimism { Default::default() } else { extra_data.into() },
     };
 
     let block = Block { header, body: vec![], ommers: vec![], withdrawals };

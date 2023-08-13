@@ -22,6 +22,10 @@ pub enum PayloadBuilderError {
     /// Thrown if the payload requests withdrawals before Shanghai activation.
     #[error("withdrawals set before Shanghai activation")]
     WithdrawalsBeforeShanghai,
+    /// Thrown when a deposit transaction fails to convert to a [TransactionSignedEcRecovered].
+    #[cfg(feature = "optimism")]
+    #[error("failed to convert deposit transaction to TransactionSignedEcRecovered")]
+    DepositTransactionRecoverFailed,
 }
 
 impl From<oneshot::error::RecvError> for PayloadBuilderError {

@@ -385,16 +385,6 @@ where
 
             #[cfg(not(feature = "optimism"))]
             {
-                // The sum of the transaction’s gas limit, Tg, and the gas utilised in this block
-                // prior, must be no greater than the block’s gasLimit.
-                let block_available_gas = block.header.gas_limit - cumulative_gas_used;
-                if transaction.gas_limit() > block_available_gas {
-                    return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                        transaction_gas_limit: transaction.gas_limit(),
-                        block_available_gas,
-                    }
-                    .into())
-                }
                 // Execute transaction.
                 let ResultAndState { result, state } = self.transact(transaction, sender)?;
 
