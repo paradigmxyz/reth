@@ -503,8 +503,8 @@ impl ChainSpec {
         for (_, cond) in self.forks_iter() {
             // handle block based forks and the sepolia merge netsplit block edge case (TTD
             // ForkCondition with Some(block))
-            if let ForkCondition::Block(block) |
-            ForkCondition::TTD { fork_block: Some(block), .. } = cond
+            if let ForkCondition::Block(block)
+            | ForkCondition::TTD { fork_block: Some(block), .. } = cond
             {
                 if cond.active_at_head(head) {
                     if block != current_applied {
@@ -514,7 +514,7 @@ impl ChainSpec {
                 } else {
                     // we can return here because this block fork is not active, so we set the
                     // `next` value
-                    return ForkId { hash: forkhash, next: block }
+                    return ForkId { hash: forkhash, next: block };
                 }
             }
         }
@@ -531,7 +531,7 @@ impl ChainSpec {
                     // can safely return here because we have already handled all block forks and
                     // have handled all active timestamp forks, and set the next value to the
                     // timestamp that is known but not active yet
-                    return ForkId { hash: forkhash, next: timestamp }
+                    return ForkId { hash: forkhash, next: timestamp };
                 }
             }
         }
@@ -953,9 +953,9 @@ impl ForkCondition {
     /// - The condition is satisfied by the timestamp;
     /// - or the condition is satisfied by the total difficulty
     pub fn active_at_head(&self, head: &Head) -> bool {
-        self.active_at_block(head.number) ||
-            self.active_at_timestamp(head.timestamp) ||
-            self.active_at_ttd(head.total_difficulty, head.difficulty)
+        self.active_at_block(head.number)
+            || self.active_at_timestamp(head.timestamp)
+            || self.active_at_ttd(head.total_difficulty, head.difficulty)
     }
 
     /// Get the total terminal difficulty for this fork condition.
@@ -1487,15 +1487,15 @@ Post-merge hard forks (timestamp based):
             &[
                 (
                     Head { number: 0, ..Default::default() },
-                    ForkId { hash: ForkHash([0x6d, 0x63, 0x76, 0xbe]), next: 1679079600 },
+                    ForkId { hash: ForkHash([0x6d, 0x63, 0x76, 0xbe]), next: 4061224 },
                 ),
                 (
                     Head { number: 4061224, timestamp: 1679079599, ..Default::default() },
-                    ForkId { hash: ForkHash([0x6d, 0x63, 0x76, 0xbe]), next: 1679079600 },
+                    ForkId { hash: ForkHash([0x03, 0x47, 0x85, 0x69]), next: 1679079600 },
                 ),
                 (
                     Head { number: 4061224, timestamp: 1679079600, ..Default::default() },
-                    ForkId { hash: ForkHash([0x8e, 0x32, 0xcc, 0x21]), next: 0 },
+                    ForkId { hash: ForkHash([0x6d, 0x43, 0x1d, 0x6c]), next: 0 },
                 ),
             ],
         );
