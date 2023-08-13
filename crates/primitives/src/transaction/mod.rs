@@ -122,7 +122,7 @@ impl Transaction {
             Transaction::Eip1559(TxEip1559 { chain_id: ref mut c, .. }) => *c = chain_id,
             Transaction::Eip4844(TxEip4844 { chain_id: ref mut c, .. }) => *c = chain_id,
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => (),
+            Transaction::Deposit(_) => { /* noop */ }
         }
     }
 
@@ -175,9 +175,10 @@ impl Transaction {
             Transaction::Eip2930(TxEip2930 { nonce, .. }) => *nonce,
             Transaction::Eip1559(TxEip1559 { nonce, .. }) => *nonce,
             Transaction::Eip4844(TxEip4844 { nonce, .. }) => *nonce,
-            // Deposit transactions don't have a nonce, so they default to zero.
+            // In deposit transactions, nonces are optional. They are never included in the RLP
+            // encoded deposit transaction even if they are present.
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => 0,
+            Transaction::Deposit(TxDeposit { nonce, .. }) => nonce.unwrap_or(0),
         }
     }
 
@@ -369,6 +370,19 @@ impl Transaction {
         match self {
             Transaction::Deposit(TxDeposit { is_system_transaction, .. }) => *is_system_transaction,
             _ => false,
+        }
+    }
+
+    /// Returns the nonce that was actually used as part of transaction execution
+    /// Returns None if the effective nonce is not known
+    #[cfg(feature = "optimism")]
+    pub fn effective_nonce(&self) -> Option<u64> {
+        match self {
+            // In deposit transactions, nonces are optional. They are never included in the RLP
+            // encoded deposit transaction even if they are present.
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(TxDeposit { nonce, .. }) => *nonce,
+            _ => Some(self.nonce()),
         }
     }
 
@@ -1285,6 +1299,7 @@ impl TransactionSigned {
                 source_hash: Decodable::decode(data)?,
                 from: Decodable::decode(data)?,
                 to: Decodable::decode(data)?,
+                nonce: None,
                 mint: if *data.first().ok_or(DecodeError::InputTooShort)? == EMPTY_STRING_CODE {
                     data.advance(1);
                     None
