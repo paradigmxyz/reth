@@ -322,7 +322,7 @@ where
                             success: false,
                             cumulative_gas_used,
                             logs: vec![],
-                            deposit_nonce: transaction.effective_nonce(),
+                            deposit_nonce: None,
                         },
                     );
                     continue
@@ -378,11 +378,7 @@ where
                         success: result.is_success(),
                         cumulative_gas_used,
                         logs,
-                        deposit_nonce: if transaction.is_deposit() {
-                            transaction.effective_nonce()
-                        } else {
-                            None
-                        },
+                        deposit_nonce: None,
                     },
                 );
             }
