@@ -258,6 +258,7 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
                 Hardfork::Paris,
                 ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
             ),
+            (Hardfork::Bedrock, ForkCondition::Block(4061224)),
             (Hardfork::Regolith, ForkCondition::Timestamp(1679079600)),
         ]),
         base_fee_params: BaseFeeParams::optimism(),
