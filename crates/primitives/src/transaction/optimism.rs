@@ -20,6 +20,8 @@ pub struct TxDeposit {
     /// The address of the recipient account, or the null (zero-length) address if the deposited
     /// transaction is a contract creation.
     pub to: TransactionKind,
+    /// Optional nonce field
+    pub nonce: Option<u64>,
     /// The ETH value to mint on L2.
     pub mint: Option<u128>,
     ///  The ETH value to send to the recipient account.
@@ -40,6 +42,7 @@ impl TxDeposit {
         mem::size_of::<H256>() + // source_hash
         mem::size_of::<Address>() + // from
         self.to.size() + // to
+        mem::size_of::<Option<u64>>() + // nonce
         mem::size_of::<Option<u128>>() + // mint
         mem::size_of::<u128>() + // value
         mem::size_of::<u64>() + // gas_limit
