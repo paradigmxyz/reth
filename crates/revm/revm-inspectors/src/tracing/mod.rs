@@ -28,7 +28,7 @@ use crate::tracing::{
     types::{CallTraceNode, StorageChange},
     utils::gas_used,
 };
-pub use address::AddressInspector;
+pub use address::{AddressInspector, get_addresses_from_tx};
 pub use builder::{
     geth::{self, GethTraceBuilder},
     parity::{self, ParityTraceBuilder},

@@ -13,6 +13,7 @@ use reth_primitives::{
     ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
 };
 use reth_provider::{BlockExecutor, PostState, StateProvider};
+use reth_revm_inspectors::tracing::get_addresses_from_tx;
 use revm::{
     db::{AccountState, CacheDB, DatabaseRef},
     primitives::{
@@ -190,10 +191,6 @@ where
         let out = if self.stack.should_inspect(&self.evm.env, hash) {
             // execution with inspector.
             let output = self.evm.inspect(&mut self.stack);
-            if let Some(address_inspector) = &self.stack.address_tracer {
-                let _appearances = address_inspector.inner();
-                todo!("store the tx-based addresses in index db");
-            }
             tracing::trace!(
                 target: "evm",
                 ?hash, ?output, ?transaction, env = ?self.evm.env,
@@ -247,6 +244,13 @@ where
             // Execute transaction.
             let ResultAndState { result, state } = self.transact(transaction, sender)?;
 
+            if let Some(inspector) = &self.stack.address_tracer {
+                let tx_body = get_addresses_from_tx(&self.evm.env.tx);
+                let evm_addresses = inspector.inner();
+                let _tx_appearances = tx_body.union(evm_addresses);
+
+                todo!("store the tx-based addresses in index db");
+            }
             // commit changes
             self.commit_changes(
                 block.number,
@@ -272,7 +276,9 @@ where
                 },
             );
         }
-
+        if self.stack.address_tracer.is_some() {
+            todo!("Get block-based address appearances and store in db");
+        }
         Ok((post_state, cumulative_gas_used))
     }
 

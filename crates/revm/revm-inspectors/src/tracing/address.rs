@@ -16,11 +16,13 @@ use std::collections::HashSet;
 use reth_primitives::{bytes::Bytes, Address, H160};
 use revm::{
     interpreter::{CallInputs, CreateInputs, Gas, InstructionResult},
-    primitives::{db::Database, B160, B256},
+    primitives::{db::Database, TransactTo, TxEnv, B160, B256},
     EVMData, Inspector,
 };
 
 /// Address tracing inspector that records all address that appear during execution.
+///
+/// See also: <https://github.com/ethereum/execution-apis/pull/456> for the algorithm specification.
 #[derive(Clone, Default)]
 pub struct AddressInspector {
     /// Unique addresses observed in the transaction
@@ -140,6 +142,24 @@ fn bytes_to_addresses(_candidate: &[u8]) -> Option<Vec<Address>> {
 fn bytes32_to_address(_logs: &[u8; 32]) -> Option<Address> {
     // todo
     None
+}
+
+/// Detects an address if present in a transaction object and adds to an existing set
+pub fn get_addresses_from_tx(tx: &TxEnv)-> HashSet<Address> {
+    let mut set = HashSet::<Address>::new();
+    set.insert(tx.caller);
+    for (address, _) in &tx.access_list {
+        set.insert(*address);
+    }
+    if let Some(addresses) = bytes_to_addresses(&tx.data) {
+        for address in addresses {
+            set.insert(address);
+        }
+    }
+    if let TransactTo::Call(address) = tx.transact_to {
+        set.insert(H160(*address));
+    }
+    set
 }
 
 #[cfg(test)]
