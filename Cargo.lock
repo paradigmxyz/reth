@@ -5635,7 +5635,6 @@ dependencies = [
  "reth-mdbx-sys",
  "tempfile",
  "thiserror",
- "tracing",
 ]
 
 [[package]]
