@@ -4,8 +4,9 @@ use reth_primitives::{
     Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawal,
 };
 use reth_rlp::Decodable;
-use reth_rpc_types::{engine::StandaloneWithdraw, ExecutionPayload, PayloadError};
+use reth_rpc_types::{ExecutionPayload, PayloadError};
 
+#[dead_code]
 fn try_convert_from_execution_payload_to_sealed_block(
     payload: ExecutionPayload,
 ) -> Result<SealedBlock, PayloadError> {

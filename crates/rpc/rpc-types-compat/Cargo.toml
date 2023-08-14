@@ -16,4 +16,3 @@ reth-rpc-types.workspace = true
 reth-rlp.workspace = true
 
 
-serde = { workspace = true, features = ["derive"] }

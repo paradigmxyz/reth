@@ -6105,7 +6105,6 @@ dependencies = [
  "reth-primitives",
  "reth-rlp",
  "reth-rpc-types",
- "serde",
 ]
 
 [[package]]
