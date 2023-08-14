@@ -247,6 +247,7 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Returns all transactions objects for the given hashes.
     ///
+    /// TODO(mattsse): this will no longer be accurate and we need a new function specifically for Vec<PooledTransactionResponse>
     /// This adheres to the expected behavior of [`GetPooledTransactions`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09):
     /// The transactions must be in same order as in the request, but it is OK to skip transactions
     /// which are not available.
