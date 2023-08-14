@@ -1,6 +1,6 @@
 //! Small database table utilities and helper functions.
 use crate::{
-    table::{Decode, Decompress, Table},
+    table::{Decode, Decompress, Table, TableRow},
     DatabaseError,
 };
 use std::borrow::Cow;
@@ -42,7 +42,7 @@ macro_rules! impl_fixed_arbitrary {
 /// Helper function to decode a `(key, value)` pair.
 pub(crate) fn decoder<'a, T>(
     kv: (Cow<'a, [u8]>, Cow<'a, [u8]>),
-) -> Result<(T::Key, T::Value), DatabaseError>
+) -> Result<TableRow<T>, DatabaseError>
 where
     T: Table,
     T::Key: Decode,

@@ -3,7 +3,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use reth_db::table::Table;
+use reth_db::table::{Table, TableRow};
 use std::{
     io,
     time::{Duration, Instant},
@@ -45,7 +45,7 @@ pub(crate) enum ViewMode {
 #[derive(Default)]
 pub(crate) struct DbListTUI<F, T: Table>
 where
-    F: FnMut(usize, usize) -> Vec<(T::Key, T::Value)>,
+    F: FnMut(usize, usize) -> Vec<TableRow<T>>,
 {
     /// Fetcher for the next page of items.
     ///
@@ -65,12 +65,12 @@ where
     /// The state of the key list.
     list_state: ListState,
     /// Entries to show in the TUI.
-    entries: Vec<(T::Key, T::Value)>,
+    entries: Vec<TableRow<T>>,
 }
 
 impl<F, T: Table> DbListTUI<F, T>
 where
-    F: FnMut(usize, usize) -> Vec<(T::Key, T::Value)>,
+    F: FnMut(usize, usize) -> Vec<TableRow<T>>,
 {
     /// Create a new database list TUI
     pub(crate) fn new(fetch: F, skip: usize, count: usize, total_entries: usize) -> Self {
@@ -188,7 +188,7 @@ fn event_loop<B: Backend, F, T: Table>(
     tick_rate: Duration,
 ) -> io::Result<()>
 where
-    F: FnMut(usize, usize) -> Vec<(T::Key, T::Value)>,
+    F: FnMut(usize, usize) -> Vec<TableRow<T>>,
 {
     let mut last_tick = Instant::now();
     let mut running = true;
@@ -216,7 +216,7 @@ where
 /// Handle incoming events
 fn handle_event<F, T: Table>(app: &mut DbListTUI<F, T>, event: Event) -> io::Result<bool>
 where
-    F: FnMut(usize, usize) -> Vec<(T::Key, T::Value)>,
+    F: FnMut(usize, usize) -> Vec<TableRow<T>>,
 {
     if app.mode == ViewMode::GoToPage {
         if let Event::Key(key) = event {
@@ -282,7 +282,7 @@ where
 /// Render the UI
 fn ui<B: Backend, F, T: Table>(f: &mut Frame<'_, B>, app: &mut DbListTUI<F, T>)
 where
-    F: FnMut(usize, usize) -> Vec<(T::Key, T::Value)>,
+    F: FnMut(usize, usize) -> Vec<TableRow<T>>,
 {
     let outer_chunks = Layout::default()
         .direction(Direction::Vertical)

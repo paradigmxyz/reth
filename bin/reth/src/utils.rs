@@ -6,7 +6,7 @@ use reth_consensus_common::validation::validate_block_standalone;
 use reth_db::{
     cursor::DbCursorRO,
     database::Database,
-    table::Table,
+    table::{Table, TableRow},
     transaction::{DbTx, DbTxMut},
     DatabaseError, RawTable, TableRawRow,
 };
@@ -109,7 +109,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
     ///
     /// [`ListFilter`] can be used to further
     /// filter down the desired results. (eg. List only rows which include `0xd3adbeef`)
-    pub fn list<T: Table>(&self, filter: &ListFilter) -> Result<(Vec<(T::Key, T::Value)>, usize)> {
+    pub fn list<T: Table>(&self, filter: &ListFilter) -> Result<(Vec<TableRow<T>>, usize)> {
         let bmb = Rc::new(BMByte::from(&filter.search));
         if bmb.is_none() && filter.has_search() {
             eyre::bail!("Invalid search.")
