@@ -551,15 +551,23 @@ where
         state: ForkchoiceState,
         attrs: Option<PayloadAttributes>,
         tx: oneshot::Sender<Result<OnForkChoiceUpdated, Error>>,
-    ) -> bool {
+    ) -> OnForkchoiceUpdateOutcome {
         self.metrics.forkchoice_updated_messages.increment(1);
         self.blockchain.on_forkchoice_update_received(&state);
 
         let on_updated = match self.forkchoice_updated(state, attrs) {
             Ok(response) => response,
             Err(error) => {
+                if let Error::Execution(ref err) = error {
+                    if err.is_fatal() {
+                        // FCU resulted in a fatal error from which we can't recover
+                        let err = err.clone();
+                        let _ = tx.send(Err(error));
+                        return OnForkchoiceUpdateOutcome::Fatal(err.clone())
+                    }
+                }
                 let _ = tx.send(Err(error));
-                return false
+                return OnForkchoiceUpdateOutcome::Processed
             }
         };
 
@@ -583,11 +591,11 @@ where
             // check if we reached the maximum configured block
             let tip_number = self.blockchain.canonical_tip().number;
             if self.sync.has_reached_max_block(tip_number) {
-                return true
+                return OnForkchoiceUpdateOutcome::ReachedMaxBlock
             }
         }
 
-        false
+        OnForkchoiceUpdateOutcome::Processed
     }
 
     /// Called to resolve chain forks and ensure that the Execution layer is working with the latest
@@ -1700,8 +1708,16 @@ where
             match this.engine_message_rx.poll_next_unpin(cx) {
                 Poll::Ready(Some(msg)) => match msg {
                     BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
-                        if this.on_forkchoice_updated(state, payload_attrs, tx) {
-                            return Poll::Ready(Ok(()))
+                        match this.on_forkchoice_updated(state, payload_attrs, tx) {
+                            OnForkchoiceUpdateOutcome::Processed => {}
+                            OnForkchoiceUpdateOutcome::ReachedMaxBlock => {
+                                // reached the max block, we can terminate the future
+                                return Poll::Ready(Ok(()))
+                            }
+                            OnForkchoiceUpdateOutcome::Fatal(err) => {
+                                // fatal error, we can terminate the future
+                                return Poll::Ready(Err(Error::Execution(err).into()))
+                            }
                         }
                     }
                     BeaconEngineMessage::NewPayload { payload, tx } => {
@@ -1761,6 +1777,17 @@ where
             }
         }
     }
+}
+
+/// Represents all outcomes of an applied fork choice update.
+#[derive(Debug)]
+enum OnForkchoiceUpdateOutcome {
+    /// FCU was processed successfully.
+    Processed,
+    /// FCU was processed successfully and reached max block.
+    ReachedMaxBlock,
+    /// FCU resulted in a __fatal__ block execution error from which we can't recover.
+    Fatal(BlockExecutionError),
 }
 
 #[cfg(test)]
