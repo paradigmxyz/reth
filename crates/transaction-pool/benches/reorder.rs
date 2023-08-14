@@ -1,5 +1,5 @@
 use criterion::{
-    black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
+    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
 use proptest::{
     prelude::*,
@@ -90,7 +90,7 @@ fn txpool_reordering_bench<T: BenchTxPool>(
                 let smaller_base_fee = base_fee.saturating_sub(10);
                 txpool.reorder(smaller_base_fee)
             };
-            black_box(())
+            std::hint::black_box(());
         });
     });
 }
