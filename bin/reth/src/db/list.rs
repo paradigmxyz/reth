@@ -75,12 +75,12 @@ impl TableViewer<()> for ListTableViewer<'_> {
             }
 
             let search = self.args.search.as_ref()
-                .map(|search|
-                    if search.starts_with("0x") {
-                        hex::decode(search.split_at(2).1).unwrap()
-                    } else {
-                        search.as_bytes().to_vec()
-                    })
+                .map(|search| {
+                    if let Some(search) = search.strip_prefix("0x") {
+                        return hex::decode(search).unwrap()
+                    }
+                    search.as_bytes().to_vec()
+                })
                 .unwrap_or_default();
 
 
