@@ -27,6 +27,14 @@ To determine if a specific ARM board is affected by this virtual memory limitati
 
 3. **Community Discussions:** Search online ARM and Linux forums for insights into virtual memory limitations of specific boards.
 
+### Additional Context
+
+According to MDBX documentation, changing this upper bound, which dictates the maximum size the database can reach, is a costly operation. Therefore, a reasonably large value was chosen. Given that the upper bound is currently set to 4TB, the assumption was that growth to 3TB might occur relatively soon. If the upper bound size is set to only 342GB, then "reth" cannot store more than 342GB of data, which is insufficient for a full sync.
+
+It's worth noting that on x86_64 architecture, there is a 48-bit address space divided in half between user space and the kernel, providing each with 128TB of address space. In contrast, AArch64 architecture features a user space address space of 512GB and a kernel address space of 256TB.
+
+Some newer versions of ARM architecture offer support for Large Virtual Address space, but enabling this requires running with a 64KB page size. The specifics of how to enable this functionality might vary.
+
 ### Additional Resources
 
 - [ARM developer documentation](https://developer.arm.com/documentation/ddi0406/cb/Appendixes/ARMv4-and-ARMv5-Differences/System-level-memory-model/Virtual-memory-support)
