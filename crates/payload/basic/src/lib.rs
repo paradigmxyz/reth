@@ -26,8 +26,8 @@ use reth_primitives::{
         BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
         ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
     },
-    proofs, Block, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
-    SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
+    proofs, Block, BlockNumberOrTag, ChainSpec, Hardfork, Header, IntoRecoveredTransaction,
+    Receipt, SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
 };
 use reth_provider::{BlockReaderIdExt, BlockSource, PostState, StateProviderFactory};
 use reth_revm::{
@@ -696,8 +696,20 @@ fn build_payload<Pool, Client>(
                         success: result.is_success(),
                         cumulative_gas_used,
                         logs: result.logs().into_iter().map(into_reth_log).collect(),
-                        #[cfg(feature = "optimism")]
-                        deposit_nonce: None,
+                        deposit_nonce: if chain_spec
+                            .is_fork_active_at_timestamp(Hardfork::Regolith, attributes.timestamp)
+                        {
+                            // Recovering the signer from the deposit transaction is only fetching
+                            // the `from` address. Deposit transactions have no signature.
+                            let from = deposit_tx.signer();
+                            let account = db.load_account(from)?;
+                            // TODO(clabby): Is this the nonce before or after the deposit? Might
+                            // need to be - 1, pretty sure revm increments the nonce during the
+                            // `transact` call.
+                            Some(account.info.nonce)
+                        } else {
+                            None
+                        },
                     },
                 );
 
