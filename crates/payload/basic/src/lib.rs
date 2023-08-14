@@ -312,12 +312,15 @@ where
                     // acquire the permit for executing the task
                     let _permit = guard.0.acquire().await;
                     build_payload(
-                        client,
-                        pool,
-                        cached_reads,
-                        payload_config,
-                        cancel,
-                        best_payload,
+                        default_payload_builder,
+                        BuildArguments {
+                            client,
+                            pool,
+                            cached_reads,
+                            config: payload_config,
+                            cancel,
+                            best_payload,
+                        },
                         tx,
                     )
                 }));
@@ -516,8 +519,9 @@ struct PayloadConfig {
     chain_spec: Arc<ChainSpec>,
 }
 
+/// The possible outcomes of a payload building attempt.
 #[derive(Debug)]
-enum BuildOutcome {
+pub enum BuildOutcome {
     /// Successfully built a better block.
     Better {
         /// The new payload that was built.
@@ -527,6 +531,7 @@ enum BuildOutcome {
     },
     /// Aborted payload building because resulted in worse block wrt. fees.
     Aborted {
+        /// The total fees associated with the attempted payload.
         fees: U256,
         /// The cached reads that were used to build the payload.
         cached_reads: CachedReads,
@@ -535,199 +540,245 @@ enum BuildOutcome {
     Cancelled,
 }
 
-/// Builds the payload and sends the result to the given channel.
-fn build_payload<Pool, Client>(
+/// A collection of arguments used for building payloads.
+///
+/// This struct encapsulates the essential components and configuration required for the payload
+/// building process. It holds references to the Ethereum client, transaction pool, cached reads,
+/// payload configuration, cancellation status, and the best payload achieved so far.
+pub struct BuildArguments<Pool, Client> {
     client: Client,
     pool: Pool,
     cached_reads: CachedReads,
     config: PayloadConfig,
     cancel: Cancelled,
     best_payload: Option<Arc<BuiltPayload>>,
+}
+
+/// A trait for building payloads that encapsulate Ethereum transactions.
+///
+/// This trait provides the `try_build` method to construct a transaction payload
+/// using `BuildArguments`. It returns a `Result` indicating success or a
+/// `PayloadBuilderError` if building fails.
+///
+/// Generic parameters `Pool` and `Client` represent the transaction pool and
+/// Ethereum client types.
+pub trait PayloadBuilder<Pool, Client> {
+    /// Tries to build a transaction payload using provided arguments.
+    ///
+    /// Constructs a transaction payload based on the given arguments,
+    /// returning a `Result` indicating success or an error if building fails.
+    ///
+    /// # Arguments
+    ///
+    /// - `args`: Build arguments containing necessary components.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` indicating the build outcome or an error.
+    fn try_build(
+        &self,
+        args: BuildArguments<Pool, Client>,
+    ) -> Result<BuildOutcome, PayloadBuilderError>;
+}
+
+impl<Pool, Client, F> PayloadBuilder<Pool, Client> for F
+where
+    F: Fn(BuildArguments<Pool, Client>) -> Result<BuildOutcome, PayloadBuilderError>,
+{
+    fn try_build(
+        &self,
+        args: BuildArguments<Pool, Client>,
+    ) -> Result<BuildOutcome, PayloadBuilderError> {
+        self(args)
+    }
+}
+
+/// Constructs an Ethereum transaction payload using the best transactions from the pool.
+///
+/// Given build arguments including an Ethereum client, transaction pool,
+/// and configuration, this function creates a transaction payload. Returns
+/// a result indicating success with the payload or an error in case of failure.
+fn default_payload_builder<Pool, Client>(
+    args: BuildArguments<Pool, Client>,
+) -> Result<BuildOutcome, PayloadBuilderError>
+where
+    Client: StateProviderFactory,
+    Pool: TransactionPool,
+{
+    let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
+
+    let PayloadConfig {
+        initialized_block_env,
+        initialized_cfg,
+        parent_block,
+        extra_data,
+        attributes,
+        chain_spec,
+    } = config;
+
+    debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number, "building new payload");
+
+    let state = State::new(client.state_by_block_hash(parent_block.hash)?);
+    let mut db = CacheDB::new(cached_reads.as_db(&state));
+    let mut post_state = PostState::default();
+
+    let mut cumulative_gas_used = 0;
+    let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
+    let base_fee = initialized_block_env.basefee.to::<u64>();
+
+    let mut executed_txs = Vec::new();
+    let mut best_txs = pool.best_transactions_with_base_fee(base_fee);
+
+    let mut total_fees = U256::ZERO;
+
+    let block_number = initialized_block_env.number.to::<u64>();
+
+    while let Some(pool_tx) = best_txs.next() {
+        // ensure we still have capacity for this transaction
+        if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
+            // we can't fit this transaction into the block, so we need to mark it as invalid
+            // which also removes all dependent transaction from the iterator before we can
+            // continue
+            best_txs.mark_invalid(&pool_tx);
+            continue
+        }
+
+        // check if the job was cancelled, if so we can exit early
+        if cancel.is_cancelled() {
+            return Ok(BuildOutcome::Cancelled)
+        }
+
+        // convert tx to a signed transaction
+        let tx = pool_tx.to_recovered_transaction();
+
+        // Configure the environment for the block.
+        let env = Env {
+            cfg: initialized_cfg.clone(),
+            block: initialized_block_env.clone(),
+            tx: tx_env_with_recovered(&tx),
+        };
+
+        let mut evm = revm::EVM::with_env(env);
+        evm.database(&mut db);
+
+        let ResultAndState { result, state } = match evm.transact() {
+            Ok(res) => res,
+            Err(err) => {
+                match err {
+                    EVMError::Transaction(err) => {
+                        if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
+                            // if the nonce is too low, we can skip this transaction
+                            trace!(?err, ?tx, "skipping nonce too low transaction");
+                        } else {
+                            // if the transaction is invalid, we can skip it and all of its
+                            // descendants
+                            trace!(?err, ?tx, "skipping invalid transaction and its descendants");
+                            best_txs.mark_invalid(&pool_tx);
+                        }
+                        continue
+                    }
+                    err => {
+                        // this is an error that we should treat as fatal for this attempt
+                        return Err(PayloadBuilderError::EvmExecutionError(err))
+                    }
+                }
+            }
+        };
+
+        let gas_used = result.gas_used();
+
+        // commit changes
+        commit_state_changes(&mut db, &mut post_state, block_number, state, true);
+
+        // add gas used by the transaction to cumulative gas used, before creating the receipt
+        cumulative_gas_used += gas_used;
+
+        // Push transaction changeset and calculate header bloom filter for receipt.
+        post_state.add_receipt(
+            block_number,
+            Receipt {
+                tx_type: tx.tx_type(),
+                success: result.is_success(),
+                cumulative_gas_used,
+                logs: result.logs().into_iter().map(into_reth_log).collect(),
+            },
+        );
+
+        // update add to total fees
+        let miner_fee =
+            tx.effective_tip_per_gas(base_fee).expect("fee is always valid; execution succeeded");
+        total_fees += U256::from(miner_fee) * U256::from(gas_used);
+
+        // append transaction to the list of executed transactions
+        executed_txs.push(tx.into_signed());
+    }
+
+    // check if we have a better block
+    if !is_better_payload(best_payload.as_deref(), total_fees) {
+        // can skip building the block
+        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
+    }
+
+    let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
+        &mut db,
+        &mut post_state,
+        &chain_spec,
+        block_number,
+        attributes.timestamp,
+        attributes.withdrawals,
+    )?;
+
+    let receipts_root = post_state.receipts_root(block_number);
+    let logs_bloom = post_state.logs_bloom(block_number);
+
+    // calculate the state root
+    let state_root = state.state().state_root(post_state)?;
+
+    // create the block header
+    let transactions_root = proofs::calculate_transaction_root(&executed_txs);
+
+    let header = Header {
+        parent_hash: parent_block.hash,
+        ommers_hash: EMPTY_OMMER_ROOT,
+        beneficiary: initialized_block_env.coinbase,
+        state_root,
+        transactions_root,
+        receipts_root,
+        withdrawals_root,
+        logs_bloom,
+        timestamp: attributes.timestamp,
+        mix_hash: attributes.prev_randao,
+        nonce: BEACON_NONCE,
+        base_fee_per_gas: Some(base_fee),
+        number: parent_block.number + 1,
+        gas_limit: block_gas_limit,
+        difficulty: U256::ZERO,
+        gas_used: cumulative_gas_used,
+        extra_data: extra_data.into(),
+        blob_gas_used: None,
+        excess_blob_gas: None,
+    };
+
+    // seal the block
+    let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
+
+    let sealed_block = block.seal_slow();
+    Ok(BuildOutcome::Better {
+        payload: BuiltPayload::new(attributes.id, sealed_block, total_fees),
+        cached_reads,
+    })
+}
+
+fn build_payload<Pool, Client>(
+    builder: impl PayloadBuilder<Pool, Client>,
+    args: BuildArguments<Pool, Client>,
     to_job: oneshot::Sender<Result<BuildOutcome, PayloadBuilderError>>,
 ) where
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {
-    #[inline(always)]
-    fn try_build<Pool, Client>(
-        client: Client,
-        pool: Pool,
-        mut cached_reads: CachedReads,
-        config: PayloadConfig,
-        cancel: Cancelled,
-        best_payload: Option<Arc<BuiltPayload>>,
-    ) -> Result<BuildOutcome, PayloadBuilderError>
-    where
-        Client: StateProviderFactory,
-        Pool: TransactionPool,
-    {
-        let PayloadConfig {
-            initialized_block_env,
-            initialized_cfg,
-            parent_block,
-            extra_data,
-            attributes,
-            chain_spec,
-        } = config;
-
-        debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number, "building new payload");
-
-        let state = State::new(client.state_by_block_hash(parent_block.hash)?);
-        let mut db = CacheDB::new(cached_reads.as_db(&state));
-        let mut post_state = PostState::default();
-
-        let mut cumulative_gas_used = 0;
-        let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
-        let base_fee = initialized_block_env.basefee.to::<u64>();
-
-        let mut executed_txs = Vec::new();
-        let mut best_txs = pool.best_transactions_with_base_fee(base_fee);
-
-        let mut total_fees = U256::ZERO;
-
-        let block_number = initialized_block_env.number.to::<u64>();
-
-        while let Some(pool_tx) = best_txs.next() {
-            // ensure we still have capacity for this transaction
-            if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
-                // we can't fit this transaction into the block, so we need to mark it as invalid
-                // which also removes all dependent transaction from the iterator before we can
-                // continue
-                best_txs.mark_invalid(&pool_tx);
-                continue
-            }
-
-            // check if the job was cancelled, if so we can exit early
-            if cancel.is_cancelled() {
-                return Ok(BuildOutcome::Cancelled)
-            }
-
-            // convert tx to a signed transaction
-            let tx = pool_tx.to_recovered_transaction();
-
-            // Configure the environment for the block.
-            let env = Env {
-                cfg: initialized_cfg.clone(),
-                block: initialized_block_env.clone(),
-                tx: tx_env_with_recovered(&tx),
-            };
-
-            let mut evm = revm::EVM::with_env(env);
-            evm.database(&mut db);
-
-            let ResultAndState { result, state } = match evm.transact() {
-                Ok(res) => res,
-                Err(err) => {
-                    match err {
-                        EVMError::Transaction(err) => {
-                            if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
-                                // if the nonce is too low, we can skip this transaction
-                                trace!(?err, ?tx, "skipping nonce too low transaction");
-                            } else {
-                                // if the transaction is invalid, we can skip it and all of its
-                                // descendants
-                                trace!(
-                                    ?err,
-                                    ?tx,
-                                    "skipping invalid transaction and its descendants"
-                                );
-                                best_txs.mark_invalid(&pool_tx);
-                            }
-                            continue
-                        }
-                        err => {
-                            // this is an error that we should treat as fatal for this attempt
-                            return Err(PayloadBuilderError::EvmExecutionError(err))
-                        }
-                    }
-                }
-            };
-
-            let gas_used = result.gas_used();
-
-            // commit changes
-            commit_state_changes(&mut db, &mut post_state, block_number, state, true);
-
-            // add gas used by the transaction to cumulative gas used, before creating the receipt
-            cumulative_gas_used += gas_used;
-
-            // Push transaction changeset and calculate header bloom filter for receipt.
-            post_state.add_receipt(
-                block_number,
-                Receipt {
-                    tx_type: tx.tx_type(),
-                    success: result.is_success(),
-                    cumulative_gas_used,
-                    logs: result.logs().into_iter().map(into_reth_log).collect(),
-                },
-            );
-
-            // update add to total fees
-            let miner_fee = tx
-                .effective_tip_per_gas(base_fee)
-                .expect("fee is always valid; execution succeeded");
-            total_fees += U256::from(miner_fee) * U256::from(gas_used);
-
-            // append transaction to the list of executed transactions
-            executed_txs.push(tx.into_signed());
-        }
-
-        // check if we have a better block
-        if !is_better_payload(best_payload.as_deref(), total_fees) {
-            // can skip building the block
-            return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
-        }
-
-        let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
-            &mut db,
-            &mut post_state,
-            &chain_spec,
-            block_number,
-            attributes.timestamp,
-            attributes.withdrawals,
-        )?;
-
-        let receipts_root = post_state.receipts_root(block_number);
-        let logs_bloom = post_state.logs_bloom(block_number);
-
-        // calculate the state root
-        let state_root = state.state().state_root(post_state)?;
-
-        // create the block header
-        let transactions_root = proofs::calculate_transaction_root(&executed_txs);
-
-        let header = Header {
-            parent_hash: parent_block.hash,
-            ommers_hash: EMPTY_OMMER_ROOT,
-            beneficiary: initialized_block_env.coinbase,
-            state_root,
-            transactions_root,
-            receipts_root,
-            withdrawals_root,
-            logs_bloom,
-            timestamp: attributes.timestamp,
-            mix_hash: attributes.prev_randao,
-            nonce: BEACON_NONCE,
-            base_fee_per_gas: Some(base_fee),
-            number: parent_block.number + 1,
-            gas_limit: block_gas_limit,
-            difficulty: U256::ZERO,
-            gas_used: cumulative_gas_used,
-            extra_data: extra_data.into(),
-            blob_gas_used: None,
-            excess_blob_gas: None,
-        };
-
-        // seal the block
-        let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
-
-        let sealed_block = block.seal_slow();
-        Ok(BuildOutcome::Better {
-            payload: BuiltPayload::new(attributes.id, sealed_block, total_fees),
-            cached_reads,
-        })
-    }
-    let _ = to_job.send(try_build(client, pool, cached_reads, config, cancel, best_payload));
+    let result = builder.try_build(args);
+    let _ = to_job.send(result);
 }
 
 /// Builds an empty payload without any transactions.
