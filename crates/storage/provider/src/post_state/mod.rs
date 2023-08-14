@@ -532,7 +532,7 @@ impl PostState {
                     continue
                 }
 
-                let storage_id = BlockNumberAddress((block_number, address));
+                let storage_id = BlockNumberAddress((block_number, address));   
 
                 // If the account was created and wiped at the same block, skip all storage changes
                 if storage.wipe.is_wiped() &&
@@ -1497,6 +1497,61 @@ mod tests {
             )))
         );
         assert_eq!(storage_changes.next(), None);
+    }
+
+    #[test]
+    fn storage_change_after_selfdestruct_within_block() {
+        let db: Arc<DatabaseEnv> = create_test_rw_db();
+        let tx = db.tx_mut().expect("Could not get database tx");
+
+        let address1 = Address::random();
+
+        let mut init_state = PostState::new();
+        init_state.create_account(0, address1, Account::default());
+        init_state.change_storage(
+            0,
+            address1,
+            // 0x00 => 0 => 1
+            // 0x01 => 0 => 2
+            BTreeMap::from([
+                (U256::from(0), (U256::ZERO, U256::from(1))),
+                (U256::from(1), (U256::ZERO, U256::from(2))),
+            ]),
+        );
+        init_state.write_to_db(&tx, 0).expect("Could not write init state to DB");
+
+
+        let mut post_state = PostState::new();
+        post_state.destroy_account(1, address1, Account::default());
+        post_state.create_account(1, address1, Account::default());
+        post_state.change_storage(
+            1,
+            address1,
+            // 0x01 => 0 => 5
+            BTreeMap::from([(U256::from(1), (U256::ZERO, U256::from(5)))])
+        );
+        post_state.write_to_db(&tx, 1).expect("Could not write post state to DB");
+
+        let mut storage_changeset_cursor = tx
+            .cursor_dup_read::<tables::StorageChangeSet>()
+            .expect("Could not open plain storage state cursor");
+        let range = BlockNumberAddress::range(1..=1);
+        let mut storage_changes = storage_changeset_cursor.walk_range(range).unwrap();
+
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((1, address1)),
+                StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(1) }
+            )))
+        );
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((1, address1)),
+                StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(2) }
+            )))
+        );
     }
 
     #[test]
