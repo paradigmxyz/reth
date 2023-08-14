@@ -1,9 +1,9 @@
-use crate::utils::DbTool;
-use clap::Parser;
-
 use super::tui::DbListTUI;
+use crate::utils::{DbTool, ListFilter};
+use clap::Parser;
 use eyre::WrapErr;
 use reth_db::{database::Database, table::Table, DatabaseEnvRO, TableType, TableViewer, Tables};
+use std::cell::RefCell;
 use tracing::error;
 
 const DEFAULT_NUM_ITEMS: &str = "5";
@@ -48,6 +48,28 @@ impl Command {
 
         Ok(())
     }
+
+    /// Generate [`ListFilter`] from command.
+    pub fn list_filter(&self) -> ListFilter {
+        let search = self
+            .search
+            .as_ref()
+            .map(|search| {
+                if let Some(search) = search.strip_prefix("0x") {
+                    return hex::decode(search).unwrap()
+                }
+                search.as_bytes().to_vec()
+            })
+            .unwrap_or_default();
+
+        ListFilter {
+            skip: self.skip,
+            len: self.len,
+            search,
+            reverse: self.reverse,
+            only_count: self.count,
+        }
+    }
 }
 
 struct ListTableViewer<'a> {
@@ -74,18 +96,11 @@ impl TableViewer<()> for ListTableViewer<'_> {
                 return Ok(());
             }
 
-            let search = self.args.search.as_ref()
-                .map(|search| {
-                    if let Some(search) = search.strip_prefix("0x") {
-                        return hex::decode(search).unwrap()
-                    }
-                    search.as_bytes().to_vec()
-                })
-                .unwrap_or_default();
 
+            let list_filter = self.args.list_filter();
 
             if self.args.json || self.args.count {
-                let (list, count) = self.tool.list::<T>(self.args.skip, self.args.len, self.args.reverse, search.clone() , self.args.count)?;
+                let (list, count) = self.tool.list::<T>(&list_filter)?;
 
                 if self.args.count {
                     println!("{count} entries found.")
@@ -95,8 +110,10 @@ impl TableViewer<()> for ListTableViewer<'_> {
                 Ok(())
 
             } else {
-                DbListTUI::<_, T>::new(|skip, count| {
-                    self.tool.list::<T>(skip, count, self.args.reverse, search.clone(), self.args.count).unwrap().0
+                let list_filter = RefCell::new(list_filter);
+                DbListTUI::<_, T>::new(|skip, len| {
+                    list_filter.borrow_mut().update_page(skip, len);
+                    self.tool.list::<T>(&list_filter.borrow()).unwrap().0
                 }, self.args.skip, self.args.len, total_entries).run()
             }
         })??;

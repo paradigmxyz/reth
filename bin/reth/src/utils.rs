@@ -106,17 +106,12 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
     /// Grabs the contents of the table within a certain index range and places the
     /// entries into a [`HashMap`][std::collections::HashMap].
-    pub fn list<T: Table>(
-        &self,
-        skip: usize,
-        len: usize,
-        reverse: bool,
-        search: Vec<u8>,
-        only_count: bool,
-    ) -> Result<(Vec<(T::Key, T::Value)>, usize)> {
-        let has_search = !search.is_empty();
-        let bmb = Rc::new(BMByte::from(search));
-        if bmb.is_none() && has_search {
+    ///
+    /// [`ListFilter`] can be used to further
+    /// filter down the desired results. (eg. List only rows which include `0xd3adbeef`)
+    pub fn list<T: Table>(&self, filter: &ListFilter) -> Result<(Vec<(T::Key, T::Value)>, usize)> {
+        let bmb = Rc::new(BMByte::from(&filter.search));
+        if bmb.is_none() && filter.has_search() {
             eyre::bail!("Invalid search.")
         }
 
@@ -126,18 +121,18 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             let mut cursor =
                 tx.cursor_read::<RawTable<T>>().expect("Was not able to obtain a cursor.");
 
-            let filter = |res: Result<(RawKey<T::Key>, RawValue<T::Value>), _>| {
+            let map_filter = |res: Result<(RawKey<T::Key>, RawValue<T::Value>), _>| {
                 if let Ok((k, v)) = res {
                     let result = || {
-                        if only_count {
+                        if filter.only_count {
                             return None
                         }
                         Some((k.key().unwrap(), v.value().unwrap()))
                     };
                     match &*bmb {
                         Some(searcher) => {
-                            if searcher.find_first_in(&v.raw_value()).is_some() ||
-                                searcher.find_first_in(&k.raw_key()).is_some()
+                            if searcher.find_first_in(v.raw_value()).is_some() ||
+                                searcher.find_first_in(k.raw_key()).is_some()
                             {
                                 hits += 1;
                                 return result()
@@ -152,19 +147,19 @@ impl<'a, DB: Database> DbTool<'a, DB> {
                 None
             };
 
-            if reverse {
+            if filter.reverse {
                 Ok(cursor
                     .walk_back(None)?
-                    .skip(skip)
-                    .filter_map(filter)
-                    .take(len)
+                    .skip(filter.skip)
+                    .filter_map(map_filter)
+                    .take(filter.len)
                     .collect::<Vec<(_, _)>>())
             } else {
                 Ok(cursor
                     .walk(None)?
-                    .skip(skip)
-                    .filter_map(filter)
-                    .take(len)
+                    .skip(filter.skip)
+                    .filter_map(map_filter)
+                    .take(filter.len)
                     .collect::<Vec<(_, _)>>())
             }
         })?;
@@ -196,4 +191,37 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 /// ~ for the user's home directory).
 pub fn parse_path(value: &str) -> Result<PathBuf, shellexpand::LookupError<VarError>> {
     shellexpand::full(value).map(|path| PathBuf::from(path.into_owned()))
+}
+
+/// Filters the results coming from the database.
+#[derive(Debug)]
+pub struct ListFilter {
+    /// Skip first N entries.
+    pub skip: usize,
+    /// Take N entries.
+    pub len: usize,
+    /// Sequence of bytes that will be searched on values and keys from the database.
+    pub search: Vec<u8>,
+    /// Reverse order of entries.
+    pub reverse: bool,
+    /// Only counts the number of filtered entries without decoding and returning them.
+    pub only_count: bool,
+}
+
+impl ListFilter {
+    /// Creates a new [`ListFilter`].
+    pub fn new(skip: usize, len: usize, search: Vec<u8>, reverse: bool, only_count: bool) -> Self {
+        ListFilter { skip, len, search, reverse, only_count }
+    }
+
+    /// If `search` has a list of bytes, then filter for rows that have this sequence.
+    pub fn has_search(&self) -> bool {
+        !self.search.is_empty()
+    }
+
+    /// Updates the page with new `skip` and `len` values.
+    pub fn update_page(&mut self, skip: usize, len: usize) {
+        self.skip = skip;
+        self.len = len;
+    }
 }
