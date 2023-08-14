@@ -42,7 +42,7 @@ impl<T: DupSort> DupSort for RawDupSort<T> {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct RawKey<K: Key> {
     /// Inner encoded key
-    pub key: Vec<u8>,
+    key: Vec<u8>,
     _phantom: std::marker::PhantomData<K>,
 }
 
@@ -51,9 +51,13 @@ impl<K: Key> RawKey<K> {
     pub fn new(key: K) -> Self {
         Self { key: K::encode(key).as_ref().to_vec(), _phantom: std::marker::PhantomData }
     }
-    /// Returns the raw key.
+    /// Returns the decoded value.
     pub fn key(&self) -> Result<K, DatabaseError> {
         K::decode(&self.key)
+    }
+    /// Returns the raw key as seen on the database.
+    pub fn raw_key(&self) -> &Vec<u8> {
+        &self.key
     }
 }
 
@@ -89,7 +93,7 @@ impl<K: Key> Decode for RawKey<K> {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Serialize, Ord, Hash)]
 pub struct RawValue<V: Value> {
     /// Inner compressed value
-    pub value: Vec<u8>,
+    value: Vec<u8>,
     _phantom: std::marker::PhantomData<V>,
 }
 
@@ -98,9 +102,13 @@ impl<V: Value> RawValue<V> {
     pub fn new(value: V) -> Self {
         Self { value: V::compress(value).as_ref().to_vec(), _phantom: std::marker::PhantomData }
     }
-    /// Returns the raw value.
+    /// Returns the decompressed value.
     pub fn value(&self) -> Result<V, DatabaseError> {
         V::decompress(&self.value)
+    }
+    /// Returns the raw value as seen on the database.
+    pub fn raw_value(&self) -> &Vec<u8> {
+        &self.value
     }
 }
 

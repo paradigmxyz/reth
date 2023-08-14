@@ -136,8 +136,8 @@ impl<'a, DB: Database> DbTool<'a, DB> {
                     };
                     match &*bmb {
                         Some(searcher) => {
-                            if searcher.find_first_in(&v.value).is_some() ||
-                                searcher.find_first_in(&k.key).is_some()
+                            if searcher.find_first_in(&v.raw_value()).is_some() ||
+                                searcher.find_first_in(&k.raw_key()).is_some()
                             {
                                 hits += 1;
                                 return result()
