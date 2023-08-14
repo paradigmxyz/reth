@@ -22,7 +22,6 @@ use tokio::sync::mpsc::Receiver;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use crate::blobstore::BlobStorageHandle;
 
 /// General purpose abstraction of a transaction-pool.
 ///
@@ -577,7 +576,6 @@ pub struct PooledTransaction {
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     pub(crate) cost: U256,
-
     // TODO optional sidecar
 }
 

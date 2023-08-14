@@ -182,11 +182,11 @@ pub mod noop;
 pub mod pool;
 pub mod validate;
 
+pub mod blobstore;
 mod config;
 mod identifier;
 mod ordering;
 mod traits;
-mod blobstore;
 
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking a pool
