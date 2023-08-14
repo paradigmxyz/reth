@@ -289,10 +289,7 @@ impl ParityTraceBuilder {
     ///
     /// does not have the code fields filled in
     pub fn vm_trace(&self) -> VmTrace {
-        match self.nodes.get(0) {
-            Some(current) => self.make_vm_trace(current),
-            None => VmTrace { code: Default::default(), ops: Vec::new() },
-        }
+        self.nodes.first().map(|node| self.make_vm_trace(node)).unwrap_or_default()
     }
 
     /// Returns a VM trace without the code filled in
