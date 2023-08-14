@@ -516,7 +516,7 @@ pub fn commit_state_changes<DB>(
 
             // insert storage into new db account.
             cached_account.storage.extend(account.storage.into_iter().map(|(key, value)| {
-                if value.is_changed() {
+                if value.is_changed() || account.storage_cleared {
                     storage_changeset.insert(key, (value.original_value(), value.present_value()));
                 }
                 (key, value.present_value())
