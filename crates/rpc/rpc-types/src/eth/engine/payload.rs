@@ -178,7 +178,7 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
         let withdraw = payload.withdrawals.as_ref().map(|withdrawals| {
             withdrawals
                 .iter()
-                .map(|withdrawal| Withdrawal::from(withdrawal.clone())) 
+                .map(|withdrawal| Withdrawal::from(withdrawal.clone()))
                 .collect::<Vec<_>>()
         });
         let withdrawals_root = withdraw.as_ref().map(|w| proofs::calculate_withdrawals_root(w));
