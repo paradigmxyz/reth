@@ -19,6 +19,7 @@
 //!
 //! - `arbitrary`: Adds `proptest` and `arbitrary` support for primitive types.
 //! - `test-utils`: Export utilities for testing
+pub mod address;
 pub mod abi;
 mod account;
 pub mod basefee;
