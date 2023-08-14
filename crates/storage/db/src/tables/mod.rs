@@ -17,8 +17,8 @@ pub mod models;
 mod raw;
 pub(crate) mod utils;
 
-use crate::abstraction::table::Table;
-pub use raw::{RawDupSort, RawKey, RawTable, RawValue};
+use crate::abstraction::table::{Table, TableRow};
+pub use raw::{RawDupSort, RawKey, RawTable, RawValue, TableRawRow};
 use std::{fmt::Display, str::FromStr};
 
 /// Declaration of all Database tables.

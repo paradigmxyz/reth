@@ -4,6 +4,9 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 
+/// Tuple with `RawKey<T::Key>` and `RawValue<T::Value>`.
+pub type TableRawRow<T> = (RawKey<<T as Table>::Key>, RawValue<<T as Table>::Value>);
+
 /// Raw table that can be used to access any table and its data in raw mode.
 /// This is useful for delayed decoding/encoding of data.
 #[derive(Default, Copy, Clone, Debug)]

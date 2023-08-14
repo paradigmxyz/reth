@@ -8,7 +8,7 @@ use reth_db::{
     database::Database,
     table::Table,
     transaction::{DbTx, DbTxMut},
-    DatabaseError, RawKey, RawTable, RawValue,
+    DatabaseError, RawTable, TableRawRow,
 };
 use reth_interfaces::p2p::{
     bodies::client::BodiesClient,
@@ -121,8 +121,8 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             let mut cursor =
                 tx.cursor_read::<RawTable<T>>().expect("Was not able to obtain a cursor.");
 
-            let map_filter = |res: Result<(RawKey<T::Key>, RawValue<T::Value>), _>| {
-                if let Ok((k, v)) = res {
+            let map_filter = |row: Result<TableRawRow<T>, _>| {
+                if let Ok((k, v)) = row {
                     let result = || {
                         if filter.only_count {
                             return None
