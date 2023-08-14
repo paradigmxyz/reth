@@ -182,7 +182,8 @@ where
             dns_discovery_config,
             #[cfg(feature = "optimism")]
             sequencer_endpoint,
-            ..
+            #[cfg(feature = "optimism")]
+            disable_tx_gossip,
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);
@@ -242,6 +243,8 @@ where
             Arc::new(AtomicU64::new(chain_spec.chain.id())),
             #[cfg(feature = "optimism")]
             sequencer_endpoint,
+            #[cfg(feature = "optimism")]
+            disable_tx_gossip,
         );
 
         Ok(Self {
