@@ -110,6 +110,7 @@ COV_FILE := lcov.info
 
 .PHONY: test-unit
 test-unit: ## Run unit tests.
+	cargo install cargo-nextest --locked
 	cargo nextest run $(UNIT_TEST_ARGS)
 
 .PHONY: cov-unit

@@ -23,13 +23,13 @@ pub mod abi;
 mod account;
 pub mod basefee;
 mod bits;
-pub mod blobfee;
 mod block;
 pub mod bloom;
 mod chain;
 mod compression;
 pub mod constants;
 pub mod contract;
+pub mod eip4844;
 mod forkid;
 pub mod fs;
 mod genesis;
@@ -93,7 +93,7 @@ pub use transaction::{
     IntoRecoveredTransaction, InvalidTransactionError, Signature, Transaction, TransactionKind,
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
     TxEip1559, TxEip2930, TxEip4844, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
-    LEGACY_TX_TYPE_ID,
+    EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 pub use withdrawal::Withdrawal;
 

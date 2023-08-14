@@ -11,7 +11,7 @@ use reth_rpc_types::{
         Params, PubSubSyncStatus, SubscriptionKind, SubscriptionResult as EthSubscriptionResult,
         SyncStatusMetadata,
     },
-    FilteredParams, Header, Log, Transaction,
+    FilteredParams, Header, Log,
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{NewTransactionEvent, TransactionPool};
@@ -128,7 +128,7 @@ where
                         // full transaction objects requested
                         let stream = pubsub.full_pending_transaction_stream().map(|tx| {
                             EthSubscriptionResult::FullTransaction(Box::new(
-                                Transaction::from_recovered(
+                                reth_rpc_types_compat::transaction::from_recovered(
                                     tx.transaction.to_recovered_transaction(),
                                 ),
                             ))

@@ -19,6 +19,8 @@ use reth_primitives::{
     TransactionKind::{Call, Create},
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, H256, U128, U256, U64,
 };
+use reth_rpc_types_compat::from_recovered_with_block_context;
+
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
 };
@@ -732,7 +734,7 @@ where
             if let Some(tx_signed) = block.body.into_iter().nth(index.into()) {
                 let tx =
                     tx_signed.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
-                return Ok(Some(Transaction::from_recovered_with_block_context(
+                return Ok(Some(from_recovered_with_block_context(
                     tx,
                     block_hash,
                     block.header.number,
@@ -820,9 +822,9 @@ impl From<TransactionSource> for TransactionSignedEcRecovered {
 impl From<TransactionSource> for Transaction {
     fn from(value: TransactionSource) -> Self {
         match value {
-            TransactionSource::Pool(tx) => Transaction::from_recovered(tx),
+            TransactionSource::Pool(tx) => reth_rpc_types_compat::transaction::from_recovered(tx),
             TransactionSource::Block { transaction, index, block_hash, block_number, base_fee } => {
-                Transaction::from_recovered_with_block_context(
+                from_recovered_with_block_context(
                     transaction,
                     block_hash,
                     block_number,

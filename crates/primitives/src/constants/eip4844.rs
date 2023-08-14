@@ -1,5 +1,9 @@
 //! [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#parameters) protocol constants for shard Blob Transactions.
 
+use crate::kzg::KzgSettings;
+use once_cell::sync::Lazy;
+use std::{io::Write, sync::Arc};
+
 /// Size a single field element in bytes.
 pub const FIELD_ELEMENT_BYTES: u64 = 32;
 
@@ -23,3 +27,16 @@ pub const TARGET_BLOBS_PER_BLOCK: u64 = TARGET_DATA_GAS_PER_BLOCK / DATA_GAS_PER
 
 /// Used to determine the price for next data blob
 pub const BLOB_GASPRICE_UPDATE_FRACTION: u64 = 3_338_477u64; // 3338477
+
+/// KZG Trusted setup raw
+const TRUSTED_SETUP_RAW: &str = include_str!("../../res/eip4844/trusted_setup.txt");
+
+/// KZG trusted setup
+pub static KZG_TRUSTED_SETUP: Lazy<Arc<KzgSettings>> = Lazy::new(|| {
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    file.write_all(TRUSTED_SETUP_RAW.as_bytes()).unwrap();
+    Arc::new(KzgSettings::load_trusted_setup_file(file.path().into()).unwrap())
+});
+
+/// Commitment version of a KZG commitment
+pub const VERSIONED_HASH_VERSION_KZG: u8 = 0x01;

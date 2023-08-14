@@ -279,7 +279,7 @@ pub struct LocalizedTransactionTrace {
 }
 
 /// A record of a full VM trace for a CALL/CREATE.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VmTrace {
     /// The code to be executed.
@@ -298,7 +298,6 @@ pub struct VmInstruction {
     /// The program counter.
     pub pc: usize,
     /// Subordinate trace of the CALL/CREATE if applicable.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub sub: Option<VmTrace>,
     /// Stringified opcode.
     #[serde(skip_serializing_if = "Option::is_none")]

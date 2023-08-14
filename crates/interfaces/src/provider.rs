@@ -94,4 +94,6 @@ pub enum ProviderError {
         /// Block hash
         block_hash: BlockHash,
     },
+    #[error("State at block #{0} is pruned")]
+    StateAtBlockPruned(BlockNumber),
 }

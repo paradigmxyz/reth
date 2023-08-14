@@ -78,12 +78,6 @@ pub struct Command {
     #[clap(flatten)]
     db: DatabaseArgs,
 
-    /// Set the chain tip manually for testing purposes.
-    ///
-    /// NOTE: This is a temporary flag
-    #[arg(long = "debug.tip", help_heading = "Debug")]
-    pub tip: Option<H256>,
-
     /// The maximum block height.
     #[arg(long)]
     pub to: u64,

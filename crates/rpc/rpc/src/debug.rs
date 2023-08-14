@@ -538,7 +538,9 @@ where
         let (to_db_service, rx) = mpsc::channel(1);
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let this = self.clone();
-        self.inner.task_spawner.spawn(Box::pin(async move {
+        // this needs to be on a blocking task because it only does blocking work besides waiting
+        // for db requests
+        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
             this.js_trace_db_service_task(at, rx, ready_tx, db).await
         }));
         // wait for initialization
