@@ -888,16 +888,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bstr"
-version = "1.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6798148dccfbff0fae41c7574d2fa8f1ef3492fba0face179de5d8d447d67b05"
-dependencies = [
- "memchr",
- "serde",
-]
-
-[[package]]
 name = "bumpalo"
 version = "3.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2720,19 +2710,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2fabcfbdc87f4758337ca535fb41a6d701b65693ce38287d856d1674551ec9b"
 
 [[package]]
-name = "globset"
-version = "0.4.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "759c97c1e17c55525b57192c06a267cda0ac5210b222d6b82189a2338fa1c13d"
-dependencies = [
- "aho-corasick 1.0.3",
- "bstr 1.6.0",
- "fnv",
- "log",
- "regex",
-]
-
-[[package]]
 name = "gloo-net"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3503,9 +3480,9 @@ dependencies = [
 
 [[package]]
 name = "jsonrpsee"
-version = "0.19.0"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5f3783308bddc49d0218307f66a09330c106fbd792c58bac5c8dc294fdd0f98"
+checksum = "8002beb64691edce321fc16cdba91916b10d798f9d480a05467b0ee98463c03b"
 dependencies = [
  "jsonrpsee-client-transport",
  "jsonrpsee-core",
@@ -3520,9 +3497,9 @@ dependencies = [
 
 [[package]]
 name = "jsonrpsee-client-transport"
-version = "0.19.0"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "abc5630e4fa0096f00ec7b44d520701fda4504170cb85e22dca603ae5d7ad0d7"
+checksum = "310f9566a32ec8db214805127c4f17e7e8e91015e4a1407fc1d0e84df0086a73"
 dependencies = [
  "futures-channel",
  "futures-util",
@@ -3537,14 +3514,15 @@ dependencies = [
  "tokio-rustls",
  "tokio-util",
  "tracing",
+ "url",
  "webpki-roots",
 ]
 
 [[package]]
 name = "jsonrpsee-core"
-version = "0.19.0"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5aaa4c4d5fb801dcc316d81f76422db259809037a86b3194ae538dd026b05ed7"
+checksum = "4278372ecb78ebb522c36a242209a29162f4af0997a41158c8b60450b081baf1"
 dependencies = [
  "anyhow",
  "async-lock",
@@ -3552,7 +3530,6 @@ dependencies = [
  "beef",
  "futures-timer",
  "futures-util",
- "globset",
  "hyper",
  "jsonrpsee-types",
  "parking_lot 0.12.1",
@@ -3563,16 +3540,15 @@ dependencies = [
  "soketto",
  "thiserror",
  "tokio",
- "tokio-stream",
  "tracing",
  "wasm-bindgen-futures",
 ]
 
 [[package]]
 name = "jsonrpsee-http-client"
-version = "0.19.0"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa7165efcbfbc951d180162ff28fe91b657ed81925e37a35e4a396ce12109f96"
+checksum = "2393386c97ce214851a9677568c5a38223ae4eada833617cb16d8464d1128f1b"
 dependencies = [
  "async-trait",
  "hyper",
@@ -3585,13 +3561,14 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
+ "url",
 ]
 
 [[package]]
 name = "jsonrpsee-proc-macros"
-version = "0.19.0"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21dc12b1d4f16a86e8c522823c4fab219c88c03eb7c924ec0501a64bf12e058b"
+checksum = "985d4a3753a08aaf120429924567795b2764c5c691489316a7fd076178e708b4"
 dependencies = [
  "heck",
  "proc-macro-crate",
@@ -3602,17 +3579,20 @@ dependencies = [
 
 [[package]]
 name = "jsonrpsee-server"
-version = "0.19.0"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e79d78cfd5abd8394da10753723093c3ff64391602941c9c4b1d80a3414fd53"
+checksum = "5fc6357836b1d7b1367fe6d9a9b8d6e5488d1f1db985dfca4cb4ceaa9f37679e"
 dependencies = [
  "futures-util",
+ "http",
  "hyper",
  "jsonrpsee-core",
  "jsonrpsee-types",
+ "route-recognizer",
  "serde",
  "serde_json",
  "soketto",
+ "thiserror",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -3622,9 +3602,9 @@ dependencies = [
 
 [[package]]
 name = "jsonrpsee-types"
-version = "0.19.0"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00aa7cc87bc42e04e26c8ac3e7186142f7fd2949c763d9b6a7e64a69672d8fb2"
+checksum = "bbea61f2d95b9592491228db0c4d2b1e43ea1154ed9713bb666169cf3919ea7d"
 dependencies = [
  "anyhow",
  "beef",
@@ -3636,9 +3616,9 @@ dependencies = [
 
 [[package]]
 name = "jsonrpsee-wasm-client"
-version = "0.19.0"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fe953c2801356f214d3f4051f786b3d11134512a46763ee8c39a9e3fa2cc1c0"
+checksum = "051742038473f3aaada8fc1eb19c76a5354e37e886999d60061f1f303cfc45e8"
 dependencies = [
  "jsonrpsee-client-transport",
  "jsonrpsee-core",
@@ -3647,14 +3627,15 @@ dependencies = [
 
 [[package]]
 name = "jsonrpsee-ws-client"
-version = "0.19.0"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c71b2597ec1c958c6d5bc94bb61b44d74eb28e69dc421731ab0035706f13882"
+checksum = "9590173f77867bc96b5127e4a862e2edcb7f603c83616e9302d68aab983bc023"
 dependencies = [
  "http",
  "jsonrpsee-client-transport",
  "jsonrpsee-core",
  "jsonrpsee-types",
+ "url",
 ]
 
 [[package]]
@@ -6344,6 +6325,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "route-recognizer"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "afab94fb28594581f62d981211a9a4d53cc8130bbcbbb89a0440d9b8e81a7746"
+
+[[package]]
 name = "ruint"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6975,7 +6962,7 @@ version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "420acb44afdae038210c99e69aae24109f32f15500aa708e81d46c9f29d55fcf"
 dependencies = [
- "bstr 0.2.17",
+ "bstr",
  "unicode-segmentation",
 ]
 
@@ -8259,12 +8246,9 @@ dependencies = [
 
 [[package]]
 name = "webpki-roots"
-version = "0.24.0"
+version = "0.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b291546d5d9d1eab74f069c77749f2cb8504a12caa20f0f2de93ddbf6f411888"
-dependencies = [
- "rustls-webpki",
-]
+checksum = "14247bb57be4f377dfb94c72830b8ce8fc6beac03cf4bf7b9732eadd414123fc"
 
 [[package]]
 name = "which"
