@@ -630,7 +630,7 @@ fn build_payload<Pool, Client>(
 
         #[cfg(feature = "optimism")]
         let block_gas_limit: u64 =
-            if let Some(gas_limit) = attributes.gas_limit { gas_limit } else { block_gas_limit };
+            attributes.gas_limit.unwrap_or(block_gas_limit);
 
         let base_fee = initialized_block_env.basefee.to::<u64>();
 
