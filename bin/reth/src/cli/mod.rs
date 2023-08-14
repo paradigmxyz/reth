@@ -181,6 +181,9 @@ pub struct Logs {
     color: ColorMode,
 }
 
+/// Constant to convert megabytes to bytes
+const MB_TO_BYTES: u64 = 1024 * 1024;
+
 impl Logs {
     /// Builds a tracing layer from the current log options.
     pub fn layer<S>(&self) -> eyre::Result<Option<(BoxedLayer<S>, Option<FileWorkerGuard>)>>
@@ -197,7 +200,7 @@ impl Logs {
                 filter,
                 &self.log_directory,
                 "reth.log",
-                self.log_max_size,
+                self.log_max_size * MB_TO_BYTES,
                 self.log_max_files,
             );
             Ok(Some((layer, Some(guard))))
