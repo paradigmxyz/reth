@@ -16,7 +16,8 @@ name: unit
 jobs:
   test:
     name: test (partition ${{ matrix.partition }}/${{ strategy.job-total }})
-    runs-on: ubuntu-20.04
+    runs-on:
+      group: Reth
     strategy:
       matrix:
         partition: [1, 2]
@@ -52,7 +53,8 @@ jobs:
 
   eth-blockchain:
     name: ethereum / state tests (stable)
-    runs-on: ubuntu-20.04
+    runs-on:
+      group: Reth
     env:
       RUST_LOG: info,sync=error
     steps:
@@ -96,7 +98,8 @@ jobs:
   unit-success:
     if: always()
     name: unit success
-    runs-on: ubuntu-20.04
+    runs-on:
+      group: Reth
     needs: [test, eth-blockchain, doc-test]
     steps:
       - name: Decide whether the needed jobs succeeded or failed
