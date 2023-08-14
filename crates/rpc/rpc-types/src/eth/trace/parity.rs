@@ -279,7 +279,7 @@ pub struct LocalizedTransactionTrace {
 }
 
 /// A record of a full VM trace for a CALL/CREATE.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VmTrace {
     /// The code to be executed.
