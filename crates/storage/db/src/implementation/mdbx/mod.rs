@@ -158,6 +158,7 @@ impl<E: EnvironmentKind> Deref for Env<E> {
 mod tests {
     use super::*;
     use crate::{
+        abstraction::table::{Encode, Table},
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
         database::Database,
         models::{AccountBeforeTx, ShardedKey},
@@ -166,6 +167,7 @@ mod tests {
         transaction::{DbTx, DbTxMut},
         AccountChangeSet, DatabaseError,
     };
+    use reth_interfaces::db::DatabaseWriteOperation;
     use reth_libmdbx::{NoWriteMap, WriteMap};
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, H160, H256, U256};
     use std::{path::Path, str::FromStr, sync::Arc};
@@ -525,7 +527,15 @@ mod tests {
         assert_eq!(cursor.current(), Ok(Some((key_to_insert, H256::zero()))));
 
         // INSERT (failure)
-        assert_eq!(cursor.insert(key_to_insert, H256::zero()), Err(DatabaseError::Write(-30799)));
+        assert_eq!(
+            cursor.insert(key_to_insert, H256::zero()),
+            Err(DatabaseError::Write {
+                code: -30799,
+                operation: DatabaseWriteOperation::CursorInsert,
+                table_name: CanonicalHeaders::NAME,
+                key: Box::from(key_to_insert.encode().as_ref())
+            })
+        );
         assert_eq!(cursor.current(), Ok(Some((key_to_insert, H256::zero()))));
 
         tx.commit().expect(ERROR_COMMIT);
@@ -660,7 +670,15 @@ mod tests {
         let key_to_append = 2;
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
-        assert_eq!(cursor.append(key_to_append, H256::zero()), Err(DatabaseError::Write(-30418)));
+        assert_eq!(
+            cursor.append(key_to_append, H256::zero()),
+            Err(DatabaseError::Write {
+                code: -30418,
+                operation: DatabaseWriteOperation::CursorAppend,
+                table_name: CanonicalHeaders::NAME,
+                key: Box::from(key_to_append.encode().as_ref())
+            })
+        );
         assert_eq!(cursor.current(), Ok(Some((5, H256::zero())))); // the end of table
         tx.commit().expect(ERROR_COMMIT);
 
@@ -735,14 +753,24 @@ mod tests {
                 transition_id,
                 AccountBeforeTx { address: Address::from_low_u64_be(subkey_to_append), info: None }
             ),
-            Err(DatabaseError::Write(-30418))
+            Err(DatabaseError::Write {
+                code: -30418,
+                operation: DatabaseWriteOperation::CursorAppendDup,
+                table_name: AccountChangeSet::NAME,
+                key: Box::from(transition_id.encode().as_ref())
+            })
         );
         assert_eq!(
             cursor.append(
                 transition_id - 1,
                 AccountBeforeTx { address: Address::from_low_u64_be(subkey_to_append), info: None }
             ),
-            Err(DatabaseError::Write(-30418))
+            Err(DatabaseError::Write {
+                code: -30418,
+                operation: DatabaseWriteOperation::CursorAppend,
+                table_name: AccountChangeSet::NAME,
+                key: Box::from((transition_id - 1).encode().as_ref())
+            })
         );
         assert_eq!(
             cursor.append(
