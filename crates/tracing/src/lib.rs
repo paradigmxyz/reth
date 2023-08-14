@@ -82,9 +82,16 @@ where
     S: Subscriber,
     for<'a> S: LookupSpan<'a>,
 {
+    // Create log dir if it doesn't exist (RFA doesn't do this for us)
+    let log_dir = dir.as_ref();
+    if !log_dir.exists() {
+        std::fs::create_dir_all(log_dir).expect("Could not create log directory");
+    }
+
+    // Create layer
     let (writer, guard) = tracing_appender::non_blocking(
         RollingFileAppender::new(
-            dir.as_ref().join(file_name.as_ref()),
+            log_dir.join(file_name.as_ref()),
             RollingConditionBasic::new().max_size(max_size_bytes),
             max_files,
         )
