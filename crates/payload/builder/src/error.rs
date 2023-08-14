@@ -4,10 +4,6 @@ use reth_primitives::H256;
 use revm_primitives::EVMError;
 use tokio::sync::oneshot;
 
-// Imported for rustdoc on `DepositTransactionRecoverFailed` error.
-#[allow(unused_imports)]
-use reth_primitives::TransactionSignedEcRecovered;
-
 /// Possible error variants during payload building.
 #[derive(Debug, thiserror::Error)]
 pub enum PayloadBuilderError {
@@ -26,7 +22,8 @@ pub enum PayloadBuilderError {
     /// Thrown if the payload requests withdrawals before Shanghai activation.
     #[error("withdrawals set before Shanghai activation")]
     WithdrawalsBeforeShanghai,
-    /// Thrown when a deposit transaction fails to convert to a [TransactionSignedEcRecovered].
+    /// Thrown when a deposit transaction fails to convert to a
+    /// [reth_primitives::TransactionSignedEcRecovered].
     #[cfg(feature = "optimism")]
     #[error("failed to convert deposit transaction to TransactionSignedEcRecovered")]
     DepositTransactionRecoverFailed,

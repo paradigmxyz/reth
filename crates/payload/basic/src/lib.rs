@@ -629,8 +629,7 @@ fn build_payload<Pool, Client>(
         let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
 
         #[cfg(feature = "optimism")]
-        let block_gas_limit: u64 =
-            attributes.gas_limit.unwrap_or(block_gas_limit);
+        let block_gas_limit: u64 = attributes.gas_limit.unwrap_or(block_gas_limit);
 
         let base_fee = initialized_block_env.basefee.to::<u64>();
 
@@ -875,8 +874,7 @@ where
     let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
 
     #[cfg(feature = "optimism")]
-    let block_gas_limit: u64 =
-        if let Some(gas_limit) = attributes.gas_limit { gas_limit } else { block_gas_limit };
+    let block_gas_limit: u64 = attributes.gas_limit.unwrap_or(block_gas_limit);
 
     let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
         &mut db,
