@@ -1921,6 +1921,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
         for (transaction, sender) in tx_iter {
             let hash = transaction.hash();
             self.tx.put::<tables::TxSenders>(next_tx_num, sender)?;
+            tracing::trace!(target: "mdbx", ?hash, "put transaction");
             self.tx.put::<tables::Transactions>(next_tx_num, transaction.into())?;
             self.tx.put::<tables::TxHashNumber>(hash, next_tx_num)?;
             next_tx_num += 1;

@@ -10,8 +10,15 @@ use indexmap::IndexSet;
 use libc::{c_uint, c_void};
 use parking_lot::Mutex;
 use std::{
-    fmt, fmt::Debug, marker::PhantomData, mem::size_of, ptr, rc::Rc, result, slice,
+    fmt,
+    fmt::Debug,
+    marker::PhantomData,
+    mem::size_of,
+    ptr,
+    rc::Rc,
+    result, slice,
     sync::mpsc::sync_channel,
+    time::{Duration, Instant},
 };
 
 mod private {
@@ -285,9 +292,64 @@ where
             ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
         let mut data_val: ffi::MDBX_val =
             ffi::MDBX_val { iov_len: data.len(), iov_base: data.as_ptr() as *mut c_void };
+
+        let stat_before = self.db_stat_with_dbi(dbi)?;
+        let start = Instant::now();
         mdbx_result(txn_execute(&self.txn, |txn| unsafe {
             ffi::mdbx_put(txn, dbi, &key_val, &mut data_val, flags.bits())
         }))?;
+        let elapsed = start.elapsed();
+        let stat_after = self.db_stat_with_dbi(dbi)?;
+
+        #[derive(Debug)]
+        struct StatDiff {
+            page_size: Option<i32>,
+            depth: Option<i32>,
+            branch_pages: Option<i32>,
+            leaf_pages: Option<i32>,
+            overflow_pages: Option<i32>,
+            entries: Option<i32>,
+        }
+        let stat_diff = StatDiff {
+            page_size: if stat_before.page_size() != stat_after.page_size() {
+                Some(stat_after.page_size() as i32 - stat_before.page_size() as i32)
+            } else {
+                None
+            },
+            depth: if stat_before.depth() != stat_after.depth() {
+                Some(stat_after.depth() as i32 - stat_before.depth() as i32)
+            } else {
+                None
+            },
+            branch_pages: if stat_before.branch_pages() != stat_after.branch_pages() {
+                Some(stat_after.branch_pages() as i32 - stat_before.branch_pages() as i32)
+            } else {
+                None
+            },
+            leaf_pages: if stat_before.leaf_pages() != stat_after.leaf_pages() {
+                Some(stat_after.leaf_pages() as i32 - stat_before.leaf_pages() as i32)
+            } else {
+                None
+            },
+            overflow_pages: if stat_before.overflow_pages() != stat_after.overflow_pages() {
+                Some(stat_after.overflow_pages() as i32 - stat_before.overflow_pages() as i32)
+            } else {
+                None
+            },
+            entries: if stat_before.entries() != stat_after.entries() {
+                Some(stat_after.entries() as i32 - stat_before.entries() as i32)
+            } else {
+                None
+            },
+        };
+
+        if dbi == 10 {
+            if elapsed > Duration::from_secs(10) {
+                tracing::trace!(target: "mdbx", slow = true, ?stat_diff, "transaction put finished");
+            } else {
+                tracing::trace!(target: "mdbx", slow = false, ?stat_diff, "transaction put finished");
+            }
+        }
 
         Ok(())
     }
