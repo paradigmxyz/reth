@@ -159,7 +159,7 @@ pub struct Logs {
 
     /// The maximum amount of log files that will be stored. If set to 0, background file logging
     /// is disabled.
-    #[arg(long = "log.max-number", value_name = "COUNT", global = true, default_value_t = 5)]
+    #[arg(long = "log.max-files", value_name = "COUNT", global = true, default_value_t = 5)]
     log_max_files: usize,
 
     /// Log events to journald.
