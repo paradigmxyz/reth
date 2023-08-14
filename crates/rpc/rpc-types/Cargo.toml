@@ -16,12 +16,18 @@ reth-primitives.workspace = true
 reth-rlp.workspace = true
 # errors
 thiserror.workspace = true
+reth-codecs = { path = "../../storage/codecs" }
 
 # misc
 itertools.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 jsonrpsee-types = { workspace = true, optional = true }
+
+proptest-derive = { version = "0.3", optional = true }
+bytes.workspace = true
+modular-bitfield = "0.11.2"
+arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 [features]
 default = ["jsonrpsee-types"]
@@ -30,3 +36,8 @@ default = ["jsonrpsee-types"]
 # misc
 rand.workspace = true
 similar-asserts = "1.4"
+test-fuzz = "4"
+proptest.workspace = true
+proptest-derive = "0.3"
+arbitrary = { workspace = true, features = ["derive"] }
+

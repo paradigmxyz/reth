@@ -5,8 +5,8 @@
 mod forkchoice;
 mod payload;
 mod transition;
-
 pub use self::{forkchoice::*, payload::*, transition::*};
+pub use payload::{ExecutionPayload, PayloadError, StandaloneWithdraw};
 
 /// The list of supported Engine capabilities
 pub const CAPABILITIES: [&str; 9] = [

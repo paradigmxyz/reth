@@ -47,7 +47,7 @@ pub mod stage;
 mod storage;
 mod transaction;
 pub mod trie;
-mod withdrawal;
+pub mod withdrawal;
 
 /// Helper function for calculating Merkle proofs and hashes
 pub mod proofs;

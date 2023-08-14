@@ -6080,14 +6080,21 @@ dependencies = [
 name = "reth-rpc-types"
 version = "0.1.0-alpha.6"
 dependencies = [
+ "arbitrary",
+ "bytes",
  "itertools 0.11.0",
  "jsonrpsee-types",
+ "modular-bitfield",
+ "proptest",
+ "proptest-derive",
  "rand 0.8.5",
+ "reth-codecs",
  "reth-primitives",
  "reth-rlp",
  "serde",
  "serde_json",
  "similar-asserts",
+ "test-fuzz",
  "thiserror",
 ]
 
@@ -6098,6 +6105,7 @@ dependencies = [
  "reth-primitives",
  "reth-rlp",
  "reth-rpc-types",
+ "serde",
 ]
 
 [[package]]

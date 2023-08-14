@@ -7,10 +7,12 @@ use reth_interfaces::test_utils::generators::{
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
     proofs::{self},
-    Block, SealedBlock, TransactionSigned, H256, U256,
+    Block, SealedBlock, TransactionSigned, Withdrawal, H256, U256,
 };
 use reth_rlp::{Decodable, DecodeError};
-use reth_rpc_types::engine::{ExecutionPayload, ExecutionPayloadBodyV1, PayloadError};
+use reth_rpc_types::engine::{
+    ExecutionPayload, ExecutionPayloadBodyV1, PayloadError, StandaloneWithdraw,
+};
 
 fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> ExecutionPayload {
     let unsealed = src.unseal();
@@ -42,8 +44,13 @@ fn payload_body_roundtrip() {
                 .map(|x| TransactionSigned::decode(&mut &x[..]))
                 .collect::<Result<Vec<_>, _>>(),
         );
-
-        assert_eq!(block.withdrawals, payload_body.withdrawals);
+        let withdraw = payload_body.withdrawals.as_ref().map(|withdrawals| {
+            withdrawals
+                .iter()
+                .map(|withdrawal| Withdrawal::from(withdrawal.clone())) // Clone if needed, or dereference if they are Copy
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(block.withdrawals, withdraw);
     }
 }
 

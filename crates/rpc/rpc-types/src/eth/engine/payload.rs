@@ -1,14 +1,37 @@
+pub use crate::Withdrawal as StandaloneWithdraw;
 use reth_primitives::{
-    constants::{MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
+    constants::{GWEI_TO_WEI, MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
     proofs::{self, EMPTY_LIST_HASH},
     Address, Block, Bloom, Bytes, Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawal,
     H256, H64, U256, U64,
 };
-use reth_rlp::Decodable;
+use reth_rlp::{Decodable, RlpDecodable, RlpEncodable};
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 
 /// The execution payload body response that allows for `null` values.
 pub type ExecutionPayloadBodiesV1 = Vec<Option<ExecutionPayloadBodyV1>>;
+
+impl From<&Withdrawal> for StandaloneWithdraw {
+    fn from(withdrawal: &Withdrawal) -> Self {
+        StandaloneWithdraw {
+            index: withdrawal.index,
+            validator_index: withdrawal.validator_index,
+            address: withdrawal.address,
+            amount: withdrawal.amount,
+        }
+    }
+}
+
+impl From<StandaloneWithdraw> for Withdrawal {
+    fn from(standalone: StandaloneWithdraw) -> Self {
+        Withdrawal {
+            index: standalone.index,
+            validator_index: standalone.validator_index,
+            address: standalone.address,
+            amount: standalone.amount,
+        }
+    }
+}
 
 /// And 8-byte identifier for an execution payload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
@@ -86,7 +109,7 @@ pub struct ExecutionPayload {
     /// Array of [`Withdrawal`] enabled with V2
     /// See <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#executionpayloadv2>
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub withdrawals: Option<Vec<Withdrawal>>,
+    pub withdrawals: Option<Vec<StandaloneWithdraw>>,
 }
 
 impl From<SealedBlock> for ExecutionPayload {
@@ -100,6 +123,9 @@ impl From<SealedBlock> for ExecutionPayload {
                 encoded.into()
             })
             .collect();
+        let standalone_withdraw = value.withdrawals.as_ref().map(|withdrawals| {
+            withdrawals.iter().map(StandaloneWithdraw::from).collect::<Vec<_>>()
+        });
         ExecutionPayload {
             parent_hash: value.parent_hash,
             fee_recipient: value.beneficiary,
@@ -117,7 +143,7 @@ impl From<SealedBlock> for ExecutionPayload {
             excess_blob_gas: value.excess_blob_gas.map(U64::from),
             block_hash: value.hash(),
             transactions,
-            withdrawals: value.withdrawals,
+            withdrawals: standalone_withdraw,
         }
     }
 }
@@ -149,8 +175,13 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
             .collect::<Result<Vec<_>, _>>()?;
         let transactions_root = proofs::calculate_transaction_root(&transactions);
 
-        let withdrawals_root =
-            payload.withdrawals.as_ref().map(|w| proofs::calculate_withdrawals_root(w));
+        let withdraw = payload.withdrawals.as_ref().map(|withdrawals| {
+            withdrawals
+                .iter()
+                .map(|withdrawal| Withdrawal::from(withdrawal.clone())) // Clone if needed, or dereference if they are Copy
+                .collect::<Vec<_>>()
+        });
+        let withdrawals_root = withdraw.as_ref().map(|w| proofs::calculate_withdrawals_root(w));
 
         let header = Header {
             parent_hash: payload.parent_hash,
@@ -189,11 +220,13 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
                 consensus: payload.block_hash,
             })
         }
-
+        let withdraw = payload
+            .withdrawals
+            .map(|withdrawals| withdrawals.into_iter().map(Withdrawal::from).collect::<Vec<_>>());
         Ok(SealedBlock {
             header,
             body: transactions,
-            withdrawals: payload.withdrawals,
+            withdrawals: withdraw,
             ommers: Default::default(),
         })
     }
@@ -252,7 +285,7 @@ pub struct ExecutionPayloadBodyV1 {
     /// All withdrawals in the block.
     ///
     /// Will always be `None` if pre shanghai.
-    pub withdrawals: Option<Vec<Withdrawal>>,
+    pub withdrawals: Option<Vec<StandaloneWithdraw>>,
 }
 
 impl From<Block> for ExecutionPayloadBodyV1 {
@@ -262,9 +295,12 @@ impl From<Block> for ExecutionPayloadBodyV1 {
             tx.encode_enveloped(&mut out);
             out.into()
         });
+        let standalone_withdraw = value.withdrawals.as_ref().map(|withdrawals| {
+            withdrawals.into_iter().map(StandaloneWithdraw::from).collect::<Vec<_>>()
+        });
         ExecutionPayloadBodyV1 {
             transactions: transactions.collect(),
-            withdrawals: value.withdrawals,
+            withdrawals: standalone_withdraw,
         }
     }
 }
@@ -280,7 +316,7 @@ pub struct PayloadAttributes {
     /// Array of [`Withdrawal`] enabled with V2
     /// See <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#payloadattributesv2>
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub withdrawals: Option<Vec<Withdrawal>>,
+    pub withdrawals: Option<Vec<StandaloneWithdraw>>,
     /// Root of the parent beacon block enabled with V3.
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#payloadattributesv3>

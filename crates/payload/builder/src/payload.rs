@@ -4,7 +4,7 @@ use reth_primitives::{Address, ChainSpec, Header, SealedBlock, Withdrawal, H256,
 use reth_revm_primitives::config::revm_spec_by_timestamp_after_merge;
 use reth_rlp::Encodable;
 use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadEnvelope, PayloadAttributes, PayloadId,
+    ExecutionPayload, ExecutionPayloadEnvelope, PayloadAttributes, PayloadId, StandaloneWithdraw,
 };
 use revm_primitives::{BlockEnv, CfgEnv};
 
@@ -98,13 +98,19 @@ impl PayloadBuilderAttributes {
     /// Derives the unique [PayloadId] for the given parent and attributes
     pub fn new(parent: H256, attributes: PayloadAttributes) -> Self {
         let id = payload_id(&parent, &attributes);
+        let withdraw = attributes.withdrawals.as_ref().map(|withdrawals| {
+            withdrawals
+                .iter()
+                .map(|withdrawal| Withdrawal::from(withdrawal.clone())) // Clone if needed, or dereference if they are Copy
+                .collect::<Vec<_>>()
+        });
         Self {
             id,
             parent,
             timestamp: attributes.timestamp.as_u64(),
             suggested_fee_recipient: attributes.suggested_fee_recipient,
             prev_randao: attributes.prev_randao,
-            withdrawals: attributes.withdrawals.unwrap_or_default(),
+            withdrawals: withdraw.unwrap_or_default(),
         }
     }
 
