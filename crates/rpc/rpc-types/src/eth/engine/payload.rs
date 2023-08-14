@@ -296,7 +296,7 @@ impl From<Block> for ExecutionPayloadBodyV1 {
             out.into()
         });
         let standalone_withdraw = value.withdrawals.as_ref().map(|withdrawals| {
-            withdrawals.into_iter().map(StandaloneWithdraw::from).collect::<Vec<_>>()
+            withdrawals.iter().map(StandaloneWithdraw::from).collect::<Vec<_>>()
         });
         ExecutionPayloadBodyV1 {
             transactions: transactions.collect(),
