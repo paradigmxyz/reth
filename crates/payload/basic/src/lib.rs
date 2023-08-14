@@ -61,7 +61,7 @@ use tracing::{debug, trace};
 mod metrics;
 
 /// The [PayloadJobGenerator] that creates [BasicPayloadJob]s.
-pub struct BasicPayloadJobGenerator<Client, Pool, Tasks> {
+pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder = ()> {
     /// The client that can interact with the chain.
     client: Client,
     /// txpool
@@ -74,6 +74,10 @@ pub struct BasicPayloadJobGenerator<Client, Pool, Tasks> {
     payload_task_guard: PayloadTaskGuard,
     /// The chain spec.
     chain_spec: Arc<ChainSpec>,
+    /// The type responsible for building payloads.
+    ///
+    /// See [PayloadBuilder]
+    builder: Builder,
 }
 
 // === impl BasicPayloadJobGenerator ===
@@ -87,6 +91,20 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
         config: BasicPayloadJobGeneratorConfig,
         chain_spec: Arc<ChainSpec>,
     ) -> Self {
+        BasicPayloadJobGenerator::with_builder(client, pool, executor, config, chain_spec, ())
+    }
+}
+
+impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
+    /// Creates a new [BasicPayloadJobGenerator] with the given config and custom [PayloadBuilder]
+    pub fn with_builder(
+        client: Client,
+        pool: Pool,
+        executor: Tasks,
+        config: BasicPayloadJobGeneratorConfig,
+        chain_spec: Arc<ChainSpec>,
+        builder: Builder,
+    ) -> Self {
         Self {
             client,
             pool,
@@ -94,21 +112,22 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
             payload_task_guard: PayloadTaskGuard::new(config.max_payload_tasks),
             config,
             chain_spec,
+            builder,
         }
     }
 }
 
 // === impl BasicPayloadJobGenerator ===
 
-impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {}
-
-impl<Client, Pool, Tasks> PayloadJobGenerator for BasicPayloadJobGenerator<Client, Pool, Tasks>
+impl<Client, Pool, Tasks, Builder> PayloadJobGenerator
+    for BasicPayloadJobGenerator<Client, Pool, Tasks, Builder>
 where
     Client: StateProviderFactory + BlockReaderIdExt + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + Unpin + 'static,
+    Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
 {
-    type Job = BasicPayloadJob<Client, Pool, Tasks>;
+    type Job = BasicPayloadJob<Client, Pool, Tasks, Builder>;
 
     fn new_payload_job(
         &self,
@@ -158,6 +177,7 @@ where
             cached_reads: None,
             payload_task_guard: self.payload_task_guard.clone(),
             metrics: Default::default(),
+            builder: self.builder.clone(),
         })
     }
 }
@@ -248,7 +268,7 @@ impl Default for BasicPayloadJobGeneratorConfig {
 }
 
 /// A basic payload job that continuously builds a payload with the best transactions from the pool.
-pub struct BasicPayloadJob<Client, Pool, Tasks> {
+pub struct BasicPayloadJob<Client, Pool, Tasks, Builder> {
     /// The configuration for how the payload will be created.
     config: PayloadConfig,
     /// The client that can interact with the chain.
@@ -274,13 +294,18 @@ pub struct BasicPayloadJob<Client, Pool, Tasks> {
     cached_reads: Option<CachedReads>,
     /// metrics for this type
     metrics: PayloadBuilderMetrics,
+    /// The type responsible for building payloads.
+    ///
+    /// See [PayloadBuilder]
+    builder: Builder,
 }
 
-impl<Client, Pool, Tasks> Future for BasicPayloadJob<Client, Pool, Tasks>
+impl<Client, Pool, Tasks, Builder> Future for BasicPayloadJob<Client, Pool, Tasks, Builder>
 where
     Client: StateProviderFactory + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
+    Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
 {
     type Output = Result<(), PayloadBuilderError>;
 
@@ -308,21 +333,20 @@ where
                 let best_payload = this.best_payload.clone();
                 this.metrics.inc_initiated_payload_builds();
                 let cached_reads = this.cached_reads.take().unwrap_or_default();
+                let builder = this.builder.clone();
                 this.executor.spawn_blocking(Box::pin(async move {
                     // acquire the permit for executing the task
                     let _permit = guard.0.acquire().await;
-                    build_payload(
-                        default_payload_builder,
-                        BuildArguments {
-                            client,
-                            pool,
-                            cached_reads,
-                            config: payload_config,
-                            cancel,
-                            best_payload,
-                        },
-                        tx,
-                    )
+                    let args = BuildArguments {
+                        client,
+                        pool,
+                        cached_reads,
+                        config: payload_config,
+                        cancel,
+                        best_payload,
+                    };
+                    let result = builder.try_build(args);
+                    let _ = tx.send(result);
                 }));
                 this.pending_block = Some(PendingPayload { _cancel, payload: rx });
             }
@@ -364,11 +388,12 @@ where
     }
 }
 
-impl<Client, Pool, Tasks> PayloadJob for BasicPayloadJob<Client, Pool, Tasks>
+impl<Client, Pool, Tasks, Builder> PayloadJob for BasicPayloadJob<Client, Pool, Tasks, Builder>
 where
     Client: StateProviderFactory + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
+    Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
 {
     type ResolvePayloadFuture = ResolveBestPayload;
 
@@ -562,7 +587,7 @@ pub struct BuildArguments<Pool, Client> {
 ///
 /// Generic parameters `Pool` and `Client` represent the transaction pool and
 /// Ethereum client types.
-pub trait PayloadBuilder<Pool, Client> {
+pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
     /// Tries to build a transaction payload using provided arguments.
     ///
     /// Constructs a transaction payload based on the given arguments,
@@ -581,15 +606,17 @@ pub trait PayloadBuilder<Pool, Client> {
     ) -> Result<BuildOutcome, PayloadBuilderError>;
 }
 
-impl<Pool, Client, F> PayloadBuilder<Pool, Client> for F
+// Default implementation of [PayloadBuilder] for unit type
+impl<Pool, Client> PayloadBuilder<Pool, Client> for ()
 where
-    F: Fn(BuildArguments<Pool, Client>) -> Result<BuildOutcome, PayloadBuilderError>,
+    Client: StateProviderFactory,
+    Pool: TransactionPool,
 {
     fn try_build(
         &self,
         args: BuildArguments<Pool, Client>,
     ) -> Result<BuildOutcome, PayloadBuilderError> {
-        self(args)
+        default_payload_builder(args)
     }
 }
 
@@ -598,6 +625,7 @@ where
 /// Given build arguments including an Ethereum client, transaction pool,
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
+#[inline]
 fn default_payload_builder<Pool, Client>(
     args: BuildArguments<Pool, Client>,
 ) -> Result<BuildOutcome, PayloadBuilderError>
@@ -767,18 +795,6 @@ where
         payload: BuiltPayload::new(attributes.id, sealed_block, total_fees),
         cached_reads,
     })
-}
-
-fn build_payload<Pool, Client>(
-    builder: impl PayloadBuilder<Pool, Client>,
-    args: BuildArguments<Pool, Client>,
-    to_job: oneshot::Sender<Result<BuildOutcome, PayloadBuilderError>>,
-) where
-    Client: StateProviderFactory,
-    Pool: TransactionPool,
-{
-    let result = builder.try_build(args);
-    let _ = to_job.send(result);
 }
 
 /// Builds an empty payload without any transactions.
