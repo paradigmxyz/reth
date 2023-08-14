@@ -33,6 +33,7 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
         /// Current nonce of the sender.
         state_nonce: u64,
         /// Validated transaction.
+        // TODO add enum type for blob,regular?
         transaction: T,
         /// Whether to propagate the transaction to the network.
         propagate: bool,

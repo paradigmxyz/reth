@@ -11,9 +11,13 @@ use reth_primitives::H256;
 /// A blob store that can be used to store blob data of EIP4844 transactions.
 ///
 /// This type is responsible for keeping track of blob data until it is no longer needed (after finalization).
+///
+/// TODO in memory, file...
 pub trait BlobStore: Send + Sync + 'static {
 
-    // TODO add fns
+    // TODO add fns async
+    // get,store,delete
+    fn get(&mut self, x: H256) -> Option<()>;
 
     /// Data size of all transactions in the blob store.
     fn data_size(&self) -> usize;
@@ -22,6 +26,7 @@ pub trait BlobStore: Send + Sync + 'static {
 /// The handle that can be used to send requests to the blob storage service.
 #[derive(Clone, Debug)]
 pub struct BlobStorageHandle {
+    // everything that needs blob data needs this
     to_service: mpsc::UnboundedSender<BlobStorageRequest>
 }
 
