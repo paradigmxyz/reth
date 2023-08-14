@@ -89,14 +89,20 @@ impl StorageChanges {
     {
         let block_entry = self.inner.entry(block).or_default();
         let storage_entry = block_entry.entry(address).or_default();
+        
+        
+        let was_previously_wiped = storage_entry.wipe.is_wiped();
+        if !was_previously_wiped {
+            for (slot, value) in storage {
+                if let Entry::Vacant(entry) = storage_entry.storage.entry(slot) {
+                    entry.insert(value);
+                    self.size += 1;
+                }
+            }
+        }
+
         if wipe.is_wiped() {
             storage_entry.wipe = wipe;
-        }
-        for (slot, value) in storage {
-            if let Entry::Vacant(entry) = storage_entry.storage.entry(slot) {
-                entry.insert(value);
-                self.size += 1;
-            }
         }
     }
 
