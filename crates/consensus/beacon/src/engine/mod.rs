@@ -571,29 +571,38 @@ where
             }
         };
 
-        let status = on_updated.forkchoice_status();
+        let fcu_status = on_updated.forkchoice_status();
 
         // update the forkchoice state tracker
-        self.forkchoice_state_tracker.set_latest(state, status);
+        self.forkchoice_state_tracker.set_latest(state, fcu_status);
 
-        let is_valid_response = on_updated.is_valid_update();
+        // send the response to the CL ASAP
         let _ = tx.send(Ok(on_updated));
 
-        // notify listeners about new processed FCU
-        self.listeners.notify(BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status));
+        match fcu_status {
+            ForkchoiceStatus::Invalid => {}
+            ForkchoiceStatus::Valid => {
+                // FCU head is valid, we're no longer syncing
+                self.sync_state_updater.update_sync_state(SyncState::Idle);
+                // node's fully synced, clear active download requests
+                self.sync.clear_block_download_requests();
 
-        // Terminate the sync early if it's reached the maximum user
-        // configured block.
-        if is_valid_response {
-            // node's fully synced, clear active download requests
-            self.sync.clear_block_download_requests();
-
-            // check if we reached the maximum configured block
-            let tip_number = self.blockchain.canonical_tip().number;
-            if self.sync.has_reached_max_block(tip_number) {
-                return OnForkchoiceUpdateOutcome::ReachedMaxBlock
+                // check if we reached the maximum configured block
+                let tip_number = self.blockchain.canonical_tip().number;
+                if self.sync.has_reached_max_block(tip_number) {
+                    // Terminate the sync early if it's reached the maximum user
+                    // configured block.
+                    return OnForkchoiceUpdateOutcome::ReachedMaxBlock
+                }
+            }
+            ForkchoiceStatus::Syncing => {
+                // we're syncing
+                self.sync_state_updater.update_sync_state(SyncState::Syncing);
             }
         }
+
+        // notify listeners about new processed FCU
+        self.listeners.notify(BeaconConsensusEngineEvent::ForkchoiceUpdated(state, fcu_status));
 
         OnForkchoiceUpdateOutcome::Processed
     }
@@ -1375,8 +1384,8 @@ where
 
     /// Attempt to form a new canonical chain based on the current sync target.
     ///
-    /// This is invoked when we successfully downloaded a new block from the network which resulted
-    /// in either [BlockStatus::Accepted] or [BlockStatus::Valid].
+    /// This is invoked when we successfully __downloaded__ a new block from the network which
+    /// resulted in either [BlockStatus::Accepted] or [BlockStatus::Valid].
     ///
     /// Note: This will not succeed if the sync target has changed since the block download request
     /// was issued and the new target is still disconnected and additional missing blocks are
@@ -1569,10 +1578,7 @@ where
                             sync_target_state.finalized_block_hash,
                         ) {
                             Ok(synced) => {
-                                if synced {
-                                    // we're consider this synced and transition to live sync
-                                    self.sync_state_updater.update_sync_state(SyncState::Idle);
-                                } else {
+                                if !synced {
                                     // We don't have the finalized block in the database, so
                                     // we need to run another pipeline.
                                     self.sync.set_pipeline_sync_target(
@@ -1618,7 +1624,6 @@ where
             }
             EnginePruneEvent::Finished { result } => {
                 trace!(target: "consensus::engine", ?result, "Pruner finished");
-                self.sync_state_updater.update_sync_state(SyncState::Idle);
                 match result {
                     Ok(_) => {
                         // Update the state and hashes of the blockchain tree if possible.
