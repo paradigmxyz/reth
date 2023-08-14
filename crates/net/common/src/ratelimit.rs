@@ -27,6 +27,11 @@ impl RateLimit {
         RateLimit { rate, state, sleep: Box::pin(tokio::time::sleep_until(until)) }
     }
 
+    /// Returns the configured limit of the [RateLimit]
+    pub fn limit(&self) -> u64 {
+        self.rate.limit()
+    }
+
     /// Checks if the [RateLimit] is ready to handle a new call
     pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         match self.state {
