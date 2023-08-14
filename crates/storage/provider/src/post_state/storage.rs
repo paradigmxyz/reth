@@ -89,8 +89,7 @@ impl StorageChanges {
     {
         let block_entry = self.inner.entry(block).or_default();
         let storage_entry = block_entry.entry(address).or_default();
-        
-        
+
         let was_previously_wiped = storage_entry.wipe.is_wiped();
         if !was_previously_wiped {
             for (slot, value) in storage {

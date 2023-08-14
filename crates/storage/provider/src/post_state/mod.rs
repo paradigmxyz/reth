@@ -1520,7 +1520,6 @@ mod tests {
         );
         init_state.write_to_db(&tx, 0).expect("Could not write init state to DB");
 
-
         let mut post_state = PostState::new();
         post_state.destroy_account(1, address1, Account::default());
         post_state.create_account(1, address1, Account::default());
@@ -1528,7 +1527,7 @@ mod tests {
             1,
             address1,
             // 0x01 => 0 => 5
-            BTreeMap::from([(U256::from(1), (U256::ZERO, U256::from(5)))])
+            BTreeMap::from([(U256::from(1), (U256::ZERO, U256::from(5)))]),
         );
         post_state.write_to_db(&tx, 1).expect("Could not write post state to DB");
 
