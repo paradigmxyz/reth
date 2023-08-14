@@ -23,7 +23,7 @@ itertools.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 jsonrpsee-types = { workspace = true, optional = true }
-
+proptest = { workspace = true, optional = true }
 proptest-derive = { version = "0.3", optional = true }
 bytes.workspace = true
 modular-bitfield = "0.11.2"
