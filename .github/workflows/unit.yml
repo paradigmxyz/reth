@@ -86,7 +86,8 @@ jobs:
 
   doc-test:
     name: rustdoc
-    runs-on: ubuntu-20.04
+    runs-on:
+      group: Reth
     steps:
       - uses: actions/checkout@v3
       - name: Install toolchain
@@ -98,8 +99,7 @@ jobs:
   unit-success:
     if: always()
     name: unit success
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-20.04
     needs: [test, eth-blockchain, doc-test]
     steps:
       - name: Decide whether the needed jobs succeeded or failed
