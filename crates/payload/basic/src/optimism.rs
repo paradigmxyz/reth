@@ -66,7 +66,7 @@ where
             let sequencer_tx = sequencer_tx
                 .clone()
                 .try_into_ecrecovered()
-                .map_err(|_| PayloadBuilderError::DepositTransactionRecoverFailed)?;
+                .map_err(|_| PayloadBuilderError::TransactionEcRecoverFailed)?;
 
             // Configure the environment for the block.
             let env = Env {
