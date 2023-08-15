@@ -34,7 +34,7 @@ pub trait BlobStore: Send + Sync + Clone + 'static {
     /// Deletes the blob sidecar from the store
     fn delete(&self, tx: H256) -> Result<(), BlobStoreError>;
 
-    /// Deletes all blob sidecars from the store
+    /// Deletes multiple blob sidecars from the store
     fn delete_all(&self, txs: Vec<H256>) -> Result<(), BlobStoreError>;
 
     /// Retrieves the decoded blob data for the given transaction hash.
