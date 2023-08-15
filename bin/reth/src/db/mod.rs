@@ -20,12 +20,13 @@ use std::{
     sync::Arc,
 };
 
-mod clear;
-mod diff;
-mod get;
-mod list;
+// disabled temporarily because of redb...
+//mod clear;
+//mod diff;
+//mod get;
+//mod list;
 /// DB List TUI
-mod tui;
+//mod tui;
 
 /// `reth db` command
 #[derive(Debug, Parser)]
@@ -68,6 +69,7 @@ pub struct Command {
 #[derive(Subcommand, Debug)]
 /// `reth db` subcommands
 pub enum Subcommands {
+    /*
     /// Lists all the tables, their entry count and their size
     Stats,
     /// Lists the contents of a table
@@ -88,11 +90,13 @@ pub enum Subcommands {
     Version,
     /// Returns the full database path
     Path,
+     */
 }
 
 impl Command {
     /// Execute `db` command
     pub async fn execute(self) -> eyre::Result<()> {
+        /*
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
@@ -227,7 +231,7 @@ impl Command {
             Subcommands::Path => {
                 println!("{}", db_path.display());
             }
-        }
+        }*/
 
         Ok(())
     }

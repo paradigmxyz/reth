@@ -50,7 +50,7 @@ num-traits = "0.2.15"
 [dev-dependencies]
 # reth
 reth-primitives = { workspace = true, features = ["arbitrary"] }
-reth-db = { path = "../storage/db", features = ["test-utils", "mdbx"] }
+reth-db = { path = "../storage/db", features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-downloaders = { path = "../net/downloaders" }
 reth-eth-wire = { path = "../net/eth-wire" } # TODO(onbjerg): We only need this for [BlockBody]

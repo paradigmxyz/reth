@@ -13,7 +13,7 @@ description = "Staged syncing primitives used in reth."
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-codecs = { path = "../codecs" }
-reth-libmdbx = { path = "../libmdbx-rs", optional = true, features = ["return-borrowed"] }
+redb = { git = "https://github.com/cberner/redb", branch = "txn_send", optional = true }
 
 # codecs
 serde = { workspace = true, default-features = false }
@@ -82,11 +82,9 @@ assert_matches.workspace = true
 vergen = { version = "8.0.0", features = ["git", "gitcl"] }
 
 [features]
-default = ["mdbx"]
+default = ["redb"]
+redb = ["dep:redb"]
 test-utils = ["tempfile", "arbitrary"]
-bench-postcard = ["bench"]
-mdbx = ["reth-libmdbx"]
-bench = []
 arbitrary = [
     "reth-primitives/arbitrary",
     "reth-codecs/arbitrary",
@@ -94,6 +92,8 @@ arbitrary = [
     "dep:proptest",
     "dep:proptest-derive",
 ]
+bench-postcard = ["bench"]
+bench = []
 
 [[bench]]
 name = "hash_keys"

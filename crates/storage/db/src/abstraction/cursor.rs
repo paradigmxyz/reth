@@ -322,8 +322,12 @@ pub struct DupWalker<'cursor, 'tx, T: DupSort, CURSOR: DbDupCursorRO<'tx, T>> {
     pub _tx_phantom: PhantomData<&'tx T>,
 }
 
-impl<'cursor, 'tx, T: DupSort, CURSOR: DbCursorRW<'tx, T> + DbDupCursorRO<'tx, T>>
-    DupWalker<'cursor, 'tx, T, CURSOR>
+impl<
+        'cursor,
+        'tx,
+        T: DupSort,
+        CURSOR: DbCursorRW<'tx, T> + DbDupCursorRW<'tx, T> + DbDupCursorRO<'tx, T>,
+    > DupWalker<'cursor, 'tx, T, CURSOR>
 {
     /// Delete current item that walker points to.
     pub fn delete_current(&mut self) -> Result<(), DatabaseError> {

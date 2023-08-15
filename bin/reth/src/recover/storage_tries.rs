@@ -50,49 +50,51 @@ pub struct Command {
 impl Command {
     /// Execute `storage-tries` recovery command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db_path();
-        fs::create_dir_all(&db_path)?;
-        let db = Arc::new(init_db(db_path, None)?);
+        // todo: calls delete_current_duplicates on an RO cursor?
+        /*
+                let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+                let db_path = data_dir.db_path();
+                fs::create_dir_all(&db_path)?;
+                let db = Arc::new(init_db(db_path, None)?);
 
-        debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
-        init_genesis(db.clone(), self.chain.clone())?;
+                debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
+                init_genesis(db.clone(), self.chain.clone())?;
 
-        let factory = ProviderFactory::new(&db, self.chain.clone());
-        let mut provider = factory.provider_rw()?;
-        let best_block = provider.best_block_number()?;
-        let best_header = provider
-            .sealed_header(best_block)?
-            .ok_or(ProviderError::HeaderNotFound(best_block.into()))?;
+                let factory = ProviderFactory::new(&db, self.chain.clone());
+                let mut provider = factory.provider_rw()?;
+                let best_block = provider.best_block_number()?;
+                let best_header = provider
+                    .sealed_header(best_block)?
+                    .ok_or(ProviderError::HeaderNotFound(best_block.into()))?;
 
-        let mut deleted_tries = 0;
-        let tx_mut = provider.tx_mut();
-        let mut hashed_account_cursor = tx_mut.cursor_read::<tables::HashedAccount>()?;
-        let mut storage_trie_cursor = tx_mut.cursor_dup_read::<tables::StoragesTrie>()?;
-        let mut entry = storage_trie_cursor.first()?;
+                let mut deleted_tries = 0;
+                let tx_mut = provider.tx_mut();
+                let mut hashed_account_cursor = tx_mut.cursor_read::<tables::HashedAccount>()?;
+                let mut storage_trie_cursor = tx_mut.cursor_dup_read::<tables::StoragesTrie>()?;
+                let mut entry = storage_trie_cursor.first()?;
 
-        info!(target: "reth::cli", "Starting pruning of storage tries");
-        while let Some((hashed_address, _)) = entry {
-            if hashed_account_cursor.seek_exact(hashed_address)?.is_none() {
-                deleted_tries += 1;
-                storage_trie_cursor.delete_current_duplicates()?;
-            }
+                info!(target: "reth::cli", "Starting pruning of storage tries");
+                while let Some((hashed_address, _)) = entry {
+                    if hashed_account_cursor.seek_exact(hashed_address)?.is_none() {
+                        deleted_tries += 1;
+                        storage_trie_cursor.delete_current_duplicates()?;
+                    }
 
-            entry = storage_trie_cursor.next()?;
-        }
+                    entry = storage_trie_cursor.next()?;
+                }
 
-        let state_root = StateRoot::new(tx_mut).root()?;
-        if state_root != best_header.state_root {
-            eyre::bail!(
-                "Recovery failed. Incorrect state root. Expected: {:?}. Received: {:?}",
-                best_header.state_root,
-                state_root
-            );
-        }
+                let state_root = StateRoot::new(tx_mut).root()?;
+                if state_root != best_header.state_root {
+                    eyre::bail!(
+                        "Recovery failed. Incorrect state root. Expected: {:?}. Received: {:?}",
+                        best_header.state_root,
+                        state_root
+                    );
+                }
 
-        provider.commit()?;
-        info!(target: "reth::cli", deleted = deleted_tries, "Finished recovery");
-
+                provider.commit()?;
+                info!(target: "reth::cli", deleted = deleted_tries, "Finished recovery");
+        */
         Ok(())
     }
 }

@@ -60,48 +60,40 @@
 //! [`Compress`]: crate::abstraction::table::Compress
 //! [`Decompress`]: crate::abstraction::table::Decompress
 //! [`Table`]: crate::abstraction::table::Table
-
 #![warn(missing_docs, unreachable_pub)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
+use eyre::WrapErr;
+use reth_interfaces::db::LogLevel;
+use std::path::Path;
 
 /// Traits defining the database abstractions, such as cursors and transactions.
 pub mod abstraction;
-
-mod implementation;
 pub mod tables;
-mod utils;
 pub mod version;
 
-#[cfg(feature = "mdbx")]
-/// Bindings for [MDBX](https://libmdbx.dqdkfa.ru/).
-pub mod mdbx {
-    pub use crate::implementation::mdbx::*;
-    pub use reth_libmdbx::*;
-}
+mod implementation;
+mod utils;
 
 pub use abstraction::*;
 pub use reth_interfaces::db::{DatabaseError, DatabaseWriteOperation};
 pub use tables::*;
 pub use utils::is_database_empty;
 
-#[cfg(feature = "mdbx")]
-use mdbx::{Env, EnvKind, NoWriteMap, WriteMap};
+#[cfg(feature = "redb")]
+pub use crate::implementation::redb;
 
-#[cfg(feature = "mdbx")]
 /// Alias type for the database environment in use. Read/Write mode.
-pub type DatabaseEnv = Env<WriteMap>;
+// todo: wrapper that enforces ro/rw
+#[cfg(feature = "redb")]
+pub type DatabaseEnv = ::redb::Database;
 
-#[cfg(feature = "mdbx")]
 /// Alias type for the database engine in use. Read only mode.
-pub type DatabaseEnvRO = Env<NoWriteMap>;
-
-use eyre::WrapErr;
-use reth_interfaces::db::LogLevel;
-use std::path::Path;
+#[cfg(feature = "redb")]
+pub type DatabaseEnvRO = ::redb::Database;
 
 /// Opens up an existing database or creates a new one at the specified path. Creates tables if
 /// necessary. Read/Write mode.
@@ -120,43 +112,38 @@ pub fn init_db<P: AsRef<Path>>(path: P, log_level: Option<LogLevel>) -> eyre::Re
             Err(err) => return Err(err.into()),
         }
     }
-    #[cfg(feature = "mdbx")]
+
+    #[cfg(feature = "redb")]
     {
-        let db = DatabaseEnv::open(rpath, EnvKind::RW, log_level)?;
-        db.create_tables()?;
-        Ok(db)
+        // todo: use builder to set cache size (default 1g)
+        let db = ::redb::Database::create(rpath)?;
+        return Ok(db)
     }
-    #[cfg(not(feature = "mdbx"))]
-    {
-        unimplemented!();
-    }
+
+    unimplemented!();
 }
 
 /// Opens up an existing database. Read only mode. It doesn't create it or create tables if missing.
 pub fn open_db_read_only(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<DatabaseEnvRO> {
-    #[cfg(feature = "mdbx")]
+    #[cfg(feature = "redb")]
     {
-        Env::<NoWriteMap>::open(path, EnvKind::RO, log_level)
-            .with_context(|| format!("Could not open database at path: {}", path.display()))
+        let db = ::redb::Database::create(path)?;
+        return Ok(db)
     }
-    #[cfg(not(feature = "mdbx"))]
-    {
-        unimplemented!();
-    }
+
+    unimplemented!();
 }
 
+// todo: this is prob unnecessary - creating tables twice shouldnt do anything
 /// Opens up an existing database. Read/Write mode. It doesn't create it or create tables if
 /// missing.
 pub fn open_db(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<DatabaseEnv> {
-    #[cfg(feature = "mdbx")]
+    #[cfg(feature = "redb")]
     {
-        Env::<WriteMap>::open(path, EnvKind::RW, log_level)
-            .with_context(|| format!("Could not open database at path: {}", path.display()))
+        let db = ::redb::Database::create(path)?;
+        return Ok(db)
     }
-    #[cfg(not(feature = "mdbx"))]
-    {
-        unimplemented!();
-    }
+    unimplemented!();
 }
 
 /// Collection of database test utilities
@@ -167,10 +154,13 @@ pub mod test_utils {
 
     /// Error during database open
     pub const ERROR_DB_OPEN: &str = "Not able to open the database file.";
+
     /// Error during database creation
     pub const ERROR_DB_CREATION: &str = "Not able to create the database file.";
+
     /// Error during table creation
     pub const ERROR_TABLE_CREATION: &str = "Not able to create tables in the database.";
+
     /// Error during tempdir creation
     pub const ERROR_TEMPDIR: &str = "Not able to create a temporary directory.";
 

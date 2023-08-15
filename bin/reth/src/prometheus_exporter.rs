@@ -75,6 +75,8 @@ pub(crate) async fn initialize(
     process: metrics_process::Collector,
 ) -> eyre::Result<()> {
     let db_stats = move || {
+        // todo: redb only supports stuff like this on write transactions..
+        /*
         // TODO: A generic stats abstraction for other DB types to deduplicate this and `reth db
         //  stats`
         let _ = db.view(|tx| {
@@ -110,6 +112,8 @@ pub(crate) async fn initialize(
         {
             gauge!("db.freelist", freelist as f64);
         }
+        });
+         */
     };
 
     // Clone `process` to move it into the hook and use the original `process` for describe below.

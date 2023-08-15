@@ -13,7 +13,7 @@ ef-tests = []
 
 [dependencies]
 reth-primitives.workspace = true
-reth-db = { path = "../../crates/storage/db", features = ["mdbx", "test-utils"] }
+reth-db = { path = "../../crates/storage/db", features = ["test-utils"] }
 reth-provider.workspace = true
 reth-stages = { path = "../../crates/stages" }
 reth-rlp.workspace = true
