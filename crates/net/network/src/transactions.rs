@@ -245,6 +245,10 @@ where
         to_propagate: Vec<PropagateTransaction>,
     ) -> PropagatedTransactions {
         let mut propagated = PropagatedTransactions::default();
+        #[cfg(feature = "optimism")]
+        if self.network.disable_tx_gossip() {
+            return propagated
+        }
 
         // send full transactions to a fraction fo the connected peers (square root of the total
         // number of connected peers)

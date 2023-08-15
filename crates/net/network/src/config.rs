@@ -366,8 +366,8 @@ impl NetworkConfigBuilder {
         self
     }
 
-    #[cfg(feature = "optimism")]
     /// Sets whether tx gossip is disabled.
+    #[cfg(feature = "optimism")]
     pub fn disable_tx_gossip(mut self, disable_tx_gossip: bool) -> Self {
         self.disable_tx_gossip = disable_tx_gossip;
         self
