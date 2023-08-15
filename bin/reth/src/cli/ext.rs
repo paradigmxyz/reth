@@ -91,12 +91,21 @@ pub trait RethNodeCommandExt: fmt::Debug + clap::Args {
         #[cfg(feature = "optimism")]
         let payload_job_config = payload_job_config.compute_pending_block(compute_pending_block);
 
+        // The default payload builder is implemented on the unit type.
+        #[cfg(not(feature = "optimism"))]
+        let payload_builder = ();
+
+        // Optimism's payload builder is impelmented on the OptimismPayloadBuilder type.
+        #[cfg(feature = "optimism")]
+        let payload_builder = reth_basic_payload_builder::OptimismPayloadBuilder;
+
         let payload_generator = BasicPayloadJobGenerator::new(
             provider,
             pool,
             executor.clone(),
             payload_job_config,
             chain_spec,
+            payload_builder,
         );
         let (payload_service, payload_builder) = PayloadBuilderService::new(payload_generator);
 

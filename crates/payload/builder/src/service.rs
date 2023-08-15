@@ -243,6 +243,8 @@ where
                             warn!(%id, parent = ?attr.parent, "Payload job already in progress, ignoring.");
                         } else {
                             // Don't start the payload job if there is no tx pool to pull from.
+                            // TODO(clabby): We probably still want to start the job here and just
+                            // ignore pooled transactions within the builder itself.
                             #[cfg(feature = "optimism")]
                             if attr.no_tx_pool {
                                 let _ = tx.send(res);

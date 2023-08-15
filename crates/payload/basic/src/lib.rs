@@ -60,8 +60,13 @@ use tracing::{debug, trace};
 
 mod metrics;
 
+#[cfg(feature = "optimism")]
+mod optimism;
+#[cfg(feature = "optimism")]
+pub use optimism::OptimismPayloadBuilder;
+
 /// The [PayloadJobGenerator] that creates [BasicPayloadJob]s.
-pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder = ()> {
+pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
     /// The client that can interact with the chain.
     client: Client,
     /// txpool
@@ -82,7 +87,7 @@ pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder = ()> {
 
 // === impl BasicPayloadJobGenerator ===
 
-impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
+impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
     /// Creates a new [BasicPayloadJobGenerator] with the given config.
     pub fn new(
         client: Client,
@@ -90,8 +95,9 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
         executor: Tasks,
         config: BasicPayloadJobGeneratorConfig,
         chain_spec: Arc<ChainSpec>,
+        builder: Builder,
     ) -> Self {
-        BasicPayloadJobGenerator::with_builder(client, pool, executor, config, chain_spec, ())
+        BasicPayloadJobGenerator::with_builder(client, pool, executor, config, chain_spec, builder)
     }
 }
 
@@ -702,93 +708,12 @@ where
     let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
     let base_fee = initialized_block_env.basefee.to::<u64>();
 
-    #[cfg(feature = "optimism")]
-    let block_gas_limit: u64 = attributes.gas_limit.unwrap_or(block_gas_limit);
-
     let mut executed_txs = Vec::new();
     let mut best_txs = pool.best_transactions_with_base_fee(base_fee);
 
     let mut total_fees = U256::ZERO;
 
     let block_number = initialized_block_env.number.to::<u64>();
-
-    // Deposit transactions are always inserted at the top of the block built by the payload.
-    // These transactions are pre-paid on L1 and have no signature.
-    #[cfg(feature = "optimism")]
-    {
-        for deposit_tx in attributes.transactions {
-            // Check if the job was cancelled, if so we can exit early.
-            if cancel.is_cancelled() {
-                return Ok(BuildOutcome::Cancelled)
-            }
-
-            // Convert the deposit transaction to a [TransactionSignedEcRecovered]. This is
-            // purely for the purposes of utilizing the [tx_env_with_recovered] function,
-            // deposit transactions do not have signatures.
-            let deposit_tx = deposit_tx
-                .clone()
-                .try_into_ecrecovered()
-                .map_err(|_| PayloadBuilderError::DepositTransactionRecoverFailed)?;
-
-            // Configure the environment for the block.
-            let env = Env {
-                cfg: initialized_cfg.clone(),
-                block: initialized_block_env.clone(),
-                tx: tx_env_with_recovered(&deposit_tx),
-            };
-
-            let mut evm = revm::EVM::with_env(env);
-            evm.database(&mut db);
-
-            let ResultAndState { result, state } = match evm.transact() {
-                Ok(res) => res,
-                Err(err) => {
-                    match err {
-                        EVMError::Transaction(err) => {
-                            // if the deposit transaction is invalid, we can skip it
-                            trace!(?err, ?deposit_tx, "skipping invalid deposit transaction");
-                            continue
-                        }
-                        err => {
-                            // this is an error that we should treat as fatal for this attempt
-                            return Err(PayloadBuilderError::EvmExecutionError(err))
-                        }
-                    }
-                }
-            };
-
-            // commit changes
-            commit_state_changes(&mut db, &mut post_state, block_number, state, true);
-
-            // Push transaction changeset and calculate header bloom filter for receipt.
-            post_state.add_receipt(
-                block_number,
-                Receipt {
-                    tx_type: deposit_tx.tx_type(),
-                    success: result.is_success(),
-                    cumulative_gas_used,
-                    logs: result.logs().into_iter().map(into_reth_log).collect(),
-                    deposit_nonce: if chain_spec
-                        .is_fork_active_at_timestamp(Hardfork::Regolith, attributes.timestamp)
-                    {
-                        // Recovering the signer from the deposit transaction is only fetching
-                        // the `from` address. Deposit transactions have no signature.
-                        let from = deposit_tx.signer();
-                        let account = db.load_account(from)?;
-                        // The deposit nonce is the account's nonce - 1. The account's nonce
-                        // was incremented during the execution of the deposit transaction
-                        // above.
-                        Some(account.info.nonce.saturating_sub(1))
-                    } else {
-                        None
-                    },
-                },
-            );
-
-            // append transaction to the list of executed transactions
-            executed_txs.push(deposit_tx.into_signed());
-        }
-    }
 
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
@@ -948,9 +873,6 @@ where
     let base_fee = initialized_block_env.basefee.to::<u64>();
     let block_number = initialized_block_env.number.to::<u64>();
     let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
-
-    #[cfg(feature = "optimism")]
-    let block_gas_limit: u64 = attributes.gas_limit.unwrap_or(block_gas_limit);
 
     let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
         &mut db,
