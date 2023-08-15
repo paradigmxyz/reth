@@ -189,7 +189,6 @@ pub struct UnwindOutput {
 /// Stages are executed as part of a pipeline where they are executed serially.
 ///
 /// Stages receive [`DatabaseProviderRW`].
-#[async_trait]
 pub trait Stage<DB: Database>: Send + Sync {
     /// Get the ID of the stage.
     ///
@@ -197,14 +196,14 @@ pub trait Stage<DB: Database>: Send + Sync {
     fn id(&self) -> StageId;
 
     /// Execute the stage.
-    async fn execute(
+    fn execute(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError>;
 
     /// Unwind the stage.
-    async fn unwind(
+    fn unwind(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,

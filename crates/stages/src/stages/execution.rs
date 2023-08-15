@@ -305,7 +305,6 @@ fn calculate_gas_used_from_headers<DB: Database>(
 /// Currently 64 megabytes.
 const BIG_STACK_SIZE: usize = 64 * 1024 * 1024;
 
-#[async_trait::async_trait]
 impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -313,7 +312,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     }
 
     /// Execute the stage
-    async fn execute(
+    fn execute(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
@@ -327,7 +326,9 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         // to optimize revm or move data to the heap.
         //
         // See https://github.com/bluealloy/revm/issues/305
-        std::thread::scope(|scope| {
+
+        // todo: figure out what to do here
+        /*std::thread::scope(|scope| {
             let handle = std::thread::Builder::new()
                 .stack_size(BIG_STACK_SIZE)
                 .spawn_scoped(scope, || {
@@ -336,11 +337,12 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
                 })
                 .expect("Expects that thread name is not null");
             handle.join().expect("Expects for thread to not panic")
-        })
+        })*/
+        self.execute_inner(provider, input)
     }
 
     /// Unwind the stage.
-    async fn unwind(
+    fn unwind(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,

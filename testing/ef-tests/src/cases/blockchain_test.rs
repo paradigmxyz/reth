@@ -103,8 +103,7 @@ impl Case for BlockchainTestCase {
                     .block_on(async {
                         // ignore error
                         let _ = stage
-                            .execute(&provider, ExecInput { target: last_block, checkpoint: None })
-                            .await;
+                            .execute(&provider, ExecInput { target: last_block, checkpoint: None });
                     });
             }
 
