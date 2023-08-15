@@ -294,10 +294,13 @@ pub fn validate_header_regarding_parent(
 
     // Check gas limit, max diff between child/parent gas_limit should be  max_diff=parent_gas/1024
     // On Optimism, the gas limit can adjust instantly, so we skip this check if the optimism
-    // feature flag is enabled.
-    // TODO(clabby): Should probably do this at runtime by checking the chainspec.
-    #[cfg(not(feature = "optimism"))]
-    {
+    // flag is enabled in the chainspec.
+    #[inline(always)]
+    fn check_gas_limit(
+        parent: &SealedHeader,
+        child: &SealedHeader,
+        chain_spec: &ChainSpec,
+    ) -> Result<(), ConsensusError> {
         let mut parent_gas_limit = parent.gas_limit;
 
         // By consensus, gas_limit is multiplied by elasticity (*2) on
@@ -319,6 +322,16 @@ pub fn validate_header_regarding_parent(
                 child_gas_limit: child.gas_limit,
             })
         }
+
+        Ok(())
+    }
+
+    #[cfg(not(feature = "optimism"))]
+    check_gas_limit(parent, child, chain_spec)?;
+
+    #[cfg(feature = "optimism")]
+    if !chain_spec.optimism {
+        check_gas_limit(parent, child, chain_spec)?;
     }
 
     // EIP-1559 check base fee

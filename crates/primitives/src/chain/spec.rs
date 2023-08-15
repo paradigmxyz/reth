@@ -244,7 +244,7 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         genesis_hash: Some(H256(hex!(
             "c1fc15cd51159b1f1e5cbc4b82e85c1447ddfa33c52cf1d98d14fba0d6354be1"
         ))),
-        fork_timestamps: ForkTimestamps::default(), // TODO(clabby): update this
+        fork_timestamps: ForkTimestamps::default(),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         hardforks: BTreeMap::from([
             (Hardfork::Byzantium, ForkCondition::Block(0)),
@@ -278,7 +278,7 @@ pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         genesis_hash: Some(H256(hex!(
             "a3ab140f15ea7f7443a4702da64c10314eb04d488e72974e02e2d728096b4f76"
         ))),
-        fork_timestamps: ForkTimestamps::default(), // TODO: update this as well?
+        fork_timestamps: ForkTimestamps::default(),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         hardforks: BTreeMap::from([
             (Hardfork::Byzantium, ForkCondition::Block(0)),
@@ -344,7 +344,6 @@ pub struct ChainSpec {
     pub base_fee_params: BaseFeeParams,
 
     /// Optimism configuration
-    /// TODO(clabby): Roberto upstreamed the base fee params, we should change this to a bool.
     #[cfg(feature = "optimism")]
     pub optimism: bool,
 }
