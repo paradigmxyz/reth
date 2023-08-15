@@ -1,4 +1,5 @@
 use crate::blobstore::{BlobSideCar, BlobStore, BlobStoreError};
+use parking_lot::RwLock;
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
     H256,
@@ -8,7 +9,6 @@ use std::{
     collections::HashMap,
     sync::{atomic::AtomicUsize, Arc},
 };
-use tokio::sync::RwLock;
 
 /// An in-memory blob store.
 #[derive(Clone, Debug, Default)]
@@ -23,28 +23,27 @@ struct InMemoryBlobStoreInner {
     size: AtomicUsize,
 }
 
-#[async_trait::async_trait]
 impl BlobStore for InMemoryBlobStore {
-    async fn insert(&self, tx: H256, data: BlobSideCar) -> Result<(), BlobStoreError> {
-        let mut store = self.inner.store.write().await;
+    fn insert(&self, tx: H256, data: BlobSideCar) -> Result<(), BlobStoreError> {
+        let mut store = self.inner.store.write();
         store.insert(tx, data);
         Ok(())
     }
 
-    async fn insert_all(&self, txs: Vec<(H256, BlobSideCar)>) -> Result<(), BlobStoreError> {
-        let mut store = self.inner.store.write().await;
+    fn insert_all(&self, txs: Vec<(H256, BlobSideCar)>) -> Result<(), BlobStoreError> {
+        let mut store = self.inner.store.write();
         store.extend(txs);
         Ok(())
     }
 
-    async fn delete(&self, tx: H256) -> Result<(), BlobStoreError> {
-        let mut store = self.inner.store.write().await;
+    fn delete(&self, tx: H256) -> Result<(), BlobStoreError> {
+        let mut store = self.inner.store.write();
         store.remove(&tx);
         Ok(())
     }
 
-    async fn delete_all(&self, txs: Vec<H256>) -> Result<(), BlobStoreError> {
-        let mut store = self.inner.store.write().await;
+    fn delete_all(&self, txs: Vec<H256>) -> Result<(), BlobStoreError> {
+        let mut store = self.inner.store.write();
         for tx in txs {
             store.remove(&tx);
         }
@@ -52,14 +51,14 @@ impl BlobStore for InMemoryBlobStore {
     }
 
     // Retrieves the decoded blob data for the given transaction hash.
-    async fn get(&self, tx: H256) -> Result<Option<BlobSideCar>, BlobStoreError> {
-        let store = self.inner.store.write().await;
+    fn get(&self, tx: H256) -> Result<Option<BlobSideCar>, BlobStoreError> {
+        let store = self.inner.store.write();
         Ok(store.get(&tx).cloned())
     }
 
-    async fn get_all(&self, txs: Vec<H256>) -> Result<Vec<(H256, BlobSideCar)>, BlobStoreError> {
+    fn get_all(&self, txs: Vec<H256>) -> Result<Vec<(H256, BlobSideCar)>, BlobStoreError> {
         let mut items = Vec::new();
-        let store = self.inner.store.write().await;
+        let store = self.inner.store.write();
         for tx in txs {
             if let Some(item) = store.get(&tx) {
                 items.push((tx, item.clone()));
@@ -69,8 +68,8 @@ impl BlobStore for InMemoryBlobStore {
         Ok(items)
     }
 
-    async fn get_raw(&self, tx: H256) -> Result<Option<Bytes>, BlobStoreError> {
-        let item = self.get(tx).await?;
+    fn get_raw(&self, tx: H256) -> Result<Option<Bytes>, BlobStoreError> {
+        let item = self.get(tx)?;
         Ok(item.map(|item| {
             let mut buf = BytesMut::new();
             item.encode(&mut buf);
