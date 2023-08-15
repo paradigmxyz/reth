@@ -84,11 +84,8 @@ where
                 Err(BlockValidationError::SenderRecoveryError.into())
             }
         } else {
-            body.iter()
-                .map(|tx| {
-                    tx.recover_signer().ok_or(BlockValidationError::SenderRecoveryError.into())
-                })
-                .collect()
+            TransactionSigned::recover_signers(body, body.len())
+                .ok_or(BlockValidationError::SenderRecoveryError.into())
         }
     }
 
