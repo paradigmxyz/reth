@@ -240,16 +240,14 @@ impl<DB: Database> Pruner<DB> {
         };
         let total = range.clone().count();
 
-        let mut processed = 0;
         provider.prune_table_with_iterator_in_batches::<tables::Receipts>(
             range,
             self.batch_sizes.receipts,
             |rows| {
-                processed += rows;
                 trace!(
                     target: "pruner",
                     %rows,
-                    progress = format!("{:.1}%", 100.0 * processed as f64 / total as f64),
+                    progress = format!("{:.1}%", 100.0 * rows as f64 / total as f64),
                     "Pruned receipts"
                 );
             },
@@ -348,16 +346,14 @@ impl<DB: Database> Pruner<DB> {
         };
         let total = range.clone().count();
 
-        let mut processed = 0;
         provider.prune_table_with_range_in_batches::<tables::TxSenders>(
             range,
             self.batch_sizes.transaction_senders,
             |rows, _| {
-                processed += rows;
                 trace!(
                     target: "pruner",
                     %rows,
-                    progress = format!("{:.1}%", 100.0 * processed as f64 / total as f64),
+                    progress = format!("{:.1}%", 100.0 * rows as f64 / total as f64),
                     "Pruned transaction senders"
                 );
             },
