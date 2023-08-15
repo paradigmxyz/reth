@@ -62,5 +62,5 @@ arbitrary = ["proptest", "reth-primitives/arbitrary"]
 
 [[bench]]
 name = "reorder"
-required-features = ["test-utils"]
+required-features = ["test-utils", "arbitrary"]
 harness = false
