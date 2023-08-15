@@ -56,19 +56,16 @@ impl ChainInfoTracker {
     }
 
     /// Returns the canonical head of the chain.
-    #[allow(unused)]
     pub(crate) fn get_canonical_head(&self) -> SealedHeader {
         self.inner.canonical_head.read().clone()
     }
 
     /// Returns the safe header of the chain.
-    #[allow(unused)]
     pub(crate) fn get_safe_header(&self) -> Option<SealedHeader> {
         self.inner.safe_block.read().clone()
     }
 
     /// Returns the finalized header of the chain.
-    #[allow(unused)]
     pub(crate) fn get_finalized_header(&self) -> Option<SealedHeader> {
         self.inner.finalized_block.read().clone()
     }
