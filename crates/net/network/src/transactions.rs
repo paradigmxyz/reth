@@ -47,6 +47,11 @@ const NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT: usize = 4096;
 /// The target size for the message of full transactions.
 const MAX_FULL_TRANSACTIONS_PACKET_SIZE: usize = 100 * 1024;
 
+/// Recommended soft limit for the number of hashes in a GetPooledTransactions message (8kb)
+///
+/// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08>
+const GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES: usize = 256;
+
 /// The future for inserting a function into the pool
 pub type PoolImportFuture = Pin<Box<dyn Future<Output = PoolResult<TxHash>> + Send + 'static>>;
 
@@ -331,6 +336,10 @@ where
                 // nothing to request
                 return
             }
+
+            // enforce recommended soft limit, however the peer may enforce an arbitrary limit on
+            // the response (2MB)
+            hashes.truncate(GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES);
 
             // request the missing transactions
             let (response, rx) = oneshot::channel();
