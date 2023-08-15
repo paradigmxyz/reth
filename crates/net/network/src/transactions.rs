@@ -178,6 +178,11 @@ where
         response: oneshot::Sender<RequestResult<PooledTransactions>>,
     ) {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
+            #[cfg(feature = "optimism")]
+            if self.network.disable_tx_gossip() {
+                let _ = response.send(Ok(PooledTransactions::default()));
+                return
+            }
             let transactions = self
                 .pool
                 .get_all(request.0)
@@ -209,6 +214,10 @@ where
         if self.network.is_initially_syncing() {
             return
         }
+        #[cfg(feature = "optimism")]
+        if self.network.disable_tx_gossip() {
+            return
+        }
 
         trace!(target: "net::tx", "Start propagating transactions");
 
@@ -236,6 +245,10 @@ where
         to_propagate: Vec<PropagateTransaction>,
     ) -> PropagatedTransactions {
         let mut propagated = PropagatedTransactions::default();
+        #[cfg(feature = "optimism")]
+        if self.network.disable_tx_gossip() {
+            return propagated
+        }
 
         // send full transactions to a fraction fo the connected peers (square root of the total
         // number of connected peers)
@@ -311,6 +324,10 @@ where
     ) {
         // If the node is initially syncing, ignore transactions
         if self.network.is_initially_syncing() {
+            return
+        }
+        #[cfg(feature = "optimism")]
+        if self.network.disable_tx_gossip() {
             return
         }
 
@@ -403,6 +420,10 @@ where
                 // `NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT` transactions in the
                 // pool
                 if !self.network.is_initially_syncing() {
+                    #[cfg(feature = "optimism")]
+                    if self.network.disable_tx_gossip() {
+                        return
+                    }
                     let peer = self.peers.get_mut(&peer_id).expect("is present; qed");
 
                     let mut msg_builder = PooledTransactionsHashesBuilder::new(version);
@@ -436,6 +457,10 @@ where
     ) {
         // If the node is pipeline syncing, ignore transactions
         if self.network.is_initially_syncing() {
+            return
+        }
+        #[cfg(feature = "optimism")]
+        if self.network.disable_tx_gossip() {
             return
         }
 

@@ -75,6 +75,9 @@ pub struct NetworkConfig<C> {
     #[cfg(feature = "optimism")]
     /// The sequencer HTTP endpoint, if provided via CLI flag
     pub sequencer_endpoint: Option<String>,
+    /// Whether to disable transaction gossip
+    #[cfg(feature = "optimism")]
+    pub disable_tx_gossip: bool,
 }
 
 // === impl NetworkConfig ===
@@ -155,6 +158,9 @@ pub struct NetworkConfigBuilder {
     #[cfg(feature = "optimism")]
     /// The sequencer HTTP endpoint, if provided via CLI flag
     sequencer_endpoint: Option<String>,
+    /// Whether tx gossip is disabled
+    #[cfg(feature = "optimism")]
+    disable_tx_gossip: bool,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -178,6 +184,8 @@ impl NetworkConfigBuilder {
             head: None,
             #[cfg(feature = "optimism")]
             sequencer_endpoint: None,
+            #[cfg(feature = "optimism")]
+            disable_tx_gossip: false,
         }
     }
 
@@ -358,6 +366,13 @@ impl NetworkConfigBuilder {
         self
     }
 
+    /// Sets whether tx gossip is disabled.
+    #[cfg(feature = "optimism")]
+    pub fn disable_tx_gossip(mut self, disable_tx_gossip: bool) -> Self {
+        self.disable_tx_gossip = disable_tx_gossip;
+        self
+    }
+
     /// Consumes the type and creates the actual [`NetworkConfig`]
     /// for the given client type that can interact with the chain.
     ///
@@ -382,6 +397,8 @@ impl NetworkConfigBuilder {
             head,
             #[cfg(feature = "optimism")]
             sequencer_endpoint,
+            #[cfg(feature = "optimism")]
+            disable_tx_gossip,
         } = self;
 
         let listener_addr = listener_addr.unwrap_or_else(|| {
@@ -438,6 +455,8 @@ impl NetworkConfigBuilder {
             fork_filter,
             #[cfg(feature = "optimism")]
             sequencer_endpoint,
+            #[cfg(feature = "optimism")]
+            disable_tx_gossip,
         }
     }
 }

@@ -727,7 +727,9 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             )));
 
         #[cfg(feature = "optimism")]
-        let cfg_builder = cfg_builder.sequencer_endpoint(self.rollup.sequencer_http.clone());
+        let cfg_builder = cfg_builder
+            .sequencer_endpoint(self.rollup.sequencer_http.clone())
+            .disable_tx_gossip(self.rollup.disable_txpool_gossip);
 
         cfg_builder.build(ProviderFactory::new(db, self.chain.clone()))
     }
