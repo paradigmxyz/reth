@@ -75,7 +75,6 @@ pub struct NetworkConfig<C> {
     #[cfg(feature = "optimism")]
     /// The sequencer HTTP endpoint, if provided via CLI flag
     pub sequencer_endpoint: Option<String>,
-    #[cfg(feature = "optimism")]
     /// Whether to disable transaction gossip
     #[cfg(feature = "optimism")]
     pub disable_tx_gossip: bool,
