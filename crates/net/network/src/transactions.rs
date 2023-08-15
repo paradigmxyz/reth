@@ -341,6 +341,10 @@ where
 
             if peer.request_tx.try_send(req).is_ok() {
                 self.inflight_requests.push(GetPooledTxRequest { peer_id, response: rx })
+            } else {
+                // peer channel is saturated, drop the request
+                self.metrics.egress_peer_channel_full.increment(1);
+                return
             }
 
             if num_already_seen > 0 {
