@@ -13,7 +13,8 @@ concurrency:
 name: hive
 jobs:
   prepare:
-    runs-on: ubuntu-20.04
+    runs-on:
+      group: Reth
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -103,7 +104,8 @@ jobs:
       fail-fast: false
     needs: prepare
     name: run
-    runs-on: ubuntu-20.04
+    runs-on:
+      group: Reth
 
     steps:
       - name: Download artifacts
