@@ -54,23 +54,17 @@ where
 /// as the request's hashes. Hashes may be skipped, and the client should ensure that each body
 /// corresponds to a requested hash. Hashes may need to be re-requested if the bodies are not
 /// included in the response.
-#[derive_arbitrary(rlp, 10)]
+// #[derive_arbitrary(rlp, 10)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PooledTransactions(
     /// The transaction bodies, each of which should correspond to a requested hash.
-    pub Vec<TransactionSigned>,
+    pub Vec<PooledTransactionResponse>,
 );
 
 impl From<Vec<TransactionSigned>> for PooledTransactions {
     fn from(txs: Vec<TransactionSigned>) -> Self {
-        PooledTransactions(txs)
-    }
-}
-
-impl From<PooledTransactions> for Vec<TransactionSigned> {
-    fn from(txs: PooledTransactions) -> Self {
-        txs.0
+        PooledTransactions(txs.into_iter().map(Into::into).collect())
     }
 }
 
@@ -79,6 +73,7 @@ impl From<PooledTransactions> for Vec<TransactionSigned> {
 // TODO: redo arbitrary for this encoding - the previous encoding was incorrect. then this can be
 // replaced with `TransactionSigned` in `PooledTransactions`
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum PooledTransactionResponse {
     /// A blob transaction, which includes the transaction, blob data, commitments, and proofs.
     BlobTransaction(BlobTransaction),
@@ -133,6 +128,14 @@ impl PooledTransactionResponse {
                 let typed_tx = TransactionSigned::decode_enveloped_typed_transaction(&mut data)?;
                 Ok(PooledTransactionResponse::Transaction(typed_tx))
             }
+        }
+    }
+
+    /// Returns the inner [TransactionSigned].
+    pub fn into_transaction(self) -> TransactionSigned {
+        match self {
+            Self::Transaction(tx) => tx,
+            Self::BlobTransaction(blob_tx) => blob_tx.transaction,
         }
     }
 }
@@ -231,6 +234,15 @@ impl Decodable for PooledTransactionResponse {
     }
 }
 
+impl From<TransactionSigned> for PooledTransactionResponse {
+    /// Converts from a [TransactionSigned] to a [PooledTransactionResponse].
+    ///
+    /// NOTE: This will always return a [PooledTransactionResponse::Transaction] variant.
+    fn from(tx: TransactionSigned) -> Self {
+        Self::Transaction(tx)
+    }
+}
+
 /// An error that can occur when validating a [BlobTransaction].
 #[derive(Debug)]
 pub enum BlobTransactionValidationError {
@@ -256,6 +268,7 @@ impl From<kzg::Error> for BlobTransactionValidationError {
 /// though that would not make sense. This type is meant to be constructed using decoding methods,
 /// which should always construct the [TransactionSigned] with an EIP-4844 transaction.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BlobTransaction {
     /// The transaction payload.
     pub transaction: TransactionSigned,

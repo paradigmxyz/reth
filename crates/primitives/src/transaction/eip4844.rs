@@ -1,8 +1,9 @@
 use super::access_list::AccessList;
 use crate::{constants::eip4844::DATA_GAS_PER_BLOB, Bytes, ChainId, TransactionKind, H256};
-use c_kzg::{Blob, Bytes48};
+use c_kzg::{Blob, Bytes48, BYTES_PER_BLOB, BYTES_PER_COMMITMENT, BYTES_PER_PROOF};
 use reth_codecs::{main_codec, Compact};
 use reth_rlp::{Decodable, DecodeError, Encodable};
+use serde::{Deserialize, Serialize};
 use std::mem;
 
 /// [EIP-4844 Blob Transaction](https://eips.ethereum.org/EIPS/eip-4844#blob-transaction)
@@ -152,7 +153,7 @@ impl TxEip4844 {
 }
 
 /// This represents a set of blobs, and its corresponding commitments and proofs.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct BlobTransactionSidecar {
     /// The blob data.
     pub blobs: Vec<Blob>,
@@ -193,5 +194,13 @@ impl BlobTransactionSidecar {
             commitments: Decodable::decode(buf)?,
             proofs: Decodable::decode(buf)?,
         })
+    }
+
+    /// Calculates a size heuristic for the in-memory size of the [BlobTransactionSidecar].
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.blobs.len() * BYTES_PER_BLOB + // blobs
+        self.commitments.len() * BYTES_PER_COMMITMENT + // commitments
+        self.proofs.len() * BYTES_PER_PROOF // proofs
     }
 }
