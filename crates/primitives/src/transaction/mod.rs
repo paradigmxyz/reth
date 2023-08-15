@@ -7,6 +7,8 @@ use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
 pub use error::InvalidTransactionError;
 pub use meta::TransactionMeta;
+use once_cell::sync::Lazy;
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
 use reth_rlp::{
     length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
@@ -33,6 +35,15 @@ mod meta;
 mod signature;
 mod tx_type;
 pub(crate) mod util;
+
+// Expected number of transactions where we can expect a speed-up by recovering the senders in
+// parallel.
+pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: Lazy<usize> =
+    Lazy::new(|| match rayon::current_num_threads() {
+        0..=1 => usize::MAX,
+        2..=8 => 10,
+        _ => 5,
+    });
 
 /// A raw transaction.
 ///
@@ -939,6 +950,21 @@ impl TransactionSigned {
         self.signature.recover_signer(signature_hash)
     }
 
+    /// Recovers a list of signers from a transaction list iterator
+    ///
+    /// Returns `None`, if some transaction's signature is invalid, see also
+    /// [Self::recover_signer].
+    pub fn recover_signers<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
+    where
+        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
+    {
+        if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
+            txes.into_iter().map(|tx| tx.recover_signer()).collect()
+        } else {
+            txes.into_par_iter().map(|tx| tx.recover_signer()).collect()
+        }
+    }
+
     /// Consumes the type, recover signer and return [`TransactionSignedEcRecovered`]
     ///
     /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
@@ -1323,12 +1349,17 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
 #[cfg(test)]
 mod tests {
     use crate::{
-        transaction::{signature::Signature, TransactionKind, TxEip1559, TxLegacy},
+        sign_message,
+        transaction::{
+            signature::Signature, TransactionKind, TxEip1559, TxLegacy,
+            PARALLEL_SENDER_RECOVERY_THRESHOLD,
+        },
         Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered, H256, U256,
     };
     use bytes::BytesMut;
     use ethers_core::utils::hex;
     use reth_rlp::{Decodable, DecodeError, Encodable};
+    use secp256k1::{KeyPair, Secp256k1};
     use std::str::FromStr;
 
     #[test]
@@ -1563,5 +1594,33 @@ mod tests {
         let mut b = Vec::new();
         tx.encode(&mut b);
         assert_eq!(s, hex::encode(&b));
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(1))]
+
+        #[test]
+        fn test_parallel_recovery_order(txes in proptest::collection::vec(proptest::prelude::any::<Transaction>(), *PARALLEL_SENDER_RECOVERY_THRESHOLD * 5)) {
+            let mut rng =rand::thread_rng();
+            let secp = Secp256k1::new();
+            let txes: Vec<TransactionSigned> = txes.into_iter().map(|mut tx| {
+                 if let Some(chain_id) = tx.chain_id() {
+                    // Otherwise we might overflow when calculating `v` on `recalculate_hash`
+                    tx.set_chain_id(chain_id % (u64::MAX / 2 - 36));
+                }
+
+                let key_pair = KeyPair::new(&secp, &mut rng);
+
+                let signature =
+                    sign_message(H256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
+
+                TransactionSigned::from_transaction_and_signature(tx, signature)
+            }).collect();
+
+            let parallel_senders = TransactionSigned::recover_signers(&txes, txes.len()).unwrap();
+            let seq_senders = txes.iter().map(|tx| tx.recover_signer()).collect::<Option<Vec<_>>>().unwrap();
+
+            assert_eq!(parallel_senders, seq_senders);
+        }
     }
 }
