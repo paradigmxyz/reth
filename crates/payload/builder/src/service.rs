@@ -238,22 +238,24 @@ where
                     PayloadServiceCommand::BuildNewPayload(attr, tx) => {
                         let id = attr.payload_id();
                         let mut res = Ok(id);
+                        #[cfg(feature = "optimism")]
+                        let no_tx_pool = attr.no_tx_pool;
 
                         if this.contains_payload(id) {
                             warn!(%id, parent = ?attr.parent, "Payload job already in progress, ignoring.");
                         } else {
-                            // Don't start the payload job if there is no tx pool to pull from.
-                            // TODO(clabby): We probably still want to start the job here and just
-                            // ignore pooled transactions within the builder itself.
-                            #[cfg(feature = "optimism")]
-                            if attr.no_tx_pool {
-                                let _ = tx.send(res);
-                                continue
-                            }
-
                             // no job for this payload yet, create one
                             match this.generator.new_payload_job(attr) {
                                 Ok(job) => {
+                                    // Don't start the the payload job if there is no tx pool to
+                                    // pull from.
+                                    #[cfg(feature = "optimism")]
+                                    if no_tx_pool {
+                                        // return the id of the payload
+                                        let _ = tx.send(res);
+                                        continue
+                                    }
+
                                     this.metrics.inc_initiated_jobs();
                                     new_job = true;
                                     this.payload_jobs.push((job, id));
