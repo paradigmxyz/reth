@@ -630,7 +630,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     }
 
     /// Prune the table for the specified pre-sorted key iterator, calling `chunk_callback` after
-    /// every `batch_size` pruned rows.
+    /// every `batch_size` pruned rows with number of total rows pruned.
     ///
     /// Returns number of rows pruned.
     pub fn prune_table_with_iterator_in_batches<T: Table>(
@@ -649,12 +649,12 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             deleted += 1;
 
             if deleted % batch_size == 0 {
-                batch_callback(batch_size);
+                batch_callback(deleted);
             }
         }
 
         if deleted % batch_size != 0 {
-            batch_callback(deleted % batch_size);
+            batch_callback(deleted);
         }
 
         Ok(deleted)
