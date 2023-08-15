@@ -847,6 +847,15 @@ version = "0.17.0"
 source = "git+https://github.com/boa-dev/boa#a3b46545a2a09f9ac81fd83ac6b180934c728f61"
 
 [[package]]
+name = "boyer-moore-magiclen"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c77eb6b3a37f71fcd40e49b56c028ea8795c0e550afd8021e3e6a2369653035"
+dependencies = [
+ "debug-helper",
+]
+
+[[package]]
 name = "brotli"
 version = "3.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1603,6 +1612,12 @@ name = "data-encoding"
 version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2e66c9d817f1720209181c316d28635c050fa304f9c79e47a520882661b7308"
+
+[[package]]
+name = "debug-helper"
+version = "0.3.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f578e8e2c440e7297e008bb5486a3a8a194775224bbc23729b0dbdfaeebf162e"
 
 [[package]]
 name = "debugid"
@@ -5202,6 +5217,7 @@ name = "reth"
 version = "0.1.0-alpha.6"
 dependencies = [
  "backon",
+ "boyer-moore-magiclen",
  "clap",
  "comfy-table",
  "confy",

@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     common::{IterPairResult, PairResult, ValueOnlyResult},
-    table::{DupSort, Table},
+    table::{DupSort, Table, TableRow},
     DatabaseError,
 };
 
@@ -151,7 +151,7 @@ pub struct Walker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
 impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
     for Walker<'cursor, 'tx, T, CURSOR>
 {
-    type Item = Result<(T::Key, T::Value), DatabaseError>;
+    type Item = Result<TableRow<T>, DatabaseError>;
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.start.take();
         if start.is_some() {
@@ -220,7 +220,7 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRW<'tx, T> + DbCursorRO<'tx, T>>
 impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
     for ReverseWalker<'cursor, 'tx, T, CURSOR>
 {
-    type Item = Result<(T::Key, T::Value), DatabaseError>;
+    type Item = Result<TableRow<T>, DatabaseError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.start.take();
@@ -250,7 +250,7 @@ pub struct RangeWalker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
 impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
     for RangeWalker<'cursor, 'tx, T, CURSOR>
 {
-    type Item = Result<(T::Key, T::Value), DatabaseError>;
+    type Item = Result<TableRow<T>, DatabaseError>;
     fn next(&mut self) -> Option<Self::Item> {
         if self.is_done {
             return None
@@ -334,7 +334,7 @@ impl<'cursor, 'tx, T: DupSort, CURSOR: DbCursorRW<'tx, T> + DbDupCursorRO<'tx, T
 impl<'cursor, 'tx, T: DupSort, CURSOR: DbDupCursorRO<'tx, T>> std::iter::Iterator
     for DupWalker<'cursor, 'tx, T, CURSOR>
 {
-    type Item = Result<(T::Key, T::Value), DatabaseError>;
+    type Item = Result<TableRow<T>, DatabaseError>;
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.start.take();
         if start.is_some() {
