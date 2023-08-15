@@ -323,14 +323,10 @@ where
                             cumulative_gas_used,
                             logs: vec![],
                             // Deposit nonces are only recorded after Regolith
-                            deposit_nonce: if self
+                            deposit_nonce: self
                                 .chain_spec
                                 .is_fork_active_at_timestamp(Hardfork::Regolith, block.timestamp)
-                            {
-                                Some(old_sender_info.nonce)
-                            } else {
-                                None
-                            },
+                                .then_some(old_sender_info.nonce),
                         },
                     );
                     continue
@@ -387,15 +383,11 @@ where
                         cumulative_gas_used,
                         logs,
                         // Deposit nonce is only recorded after Regolith for deposit transactions.
-                        deposit_nonce: if self
+                        deposit_nonce: (self
                             .chain_spec
                             .is_fork_active_at_timestamp(Hardfork::Regolith, block.timestamp) &&
-                            transaction.is_deposit()
-                        {
-                            Some(old_sender_info.nonce)
-                        } else {
-                            None
-                        },
+                            transaction.is_deposit())
+                        .then_some(old_sender_info.nonce),
                     },
                 );
             }
