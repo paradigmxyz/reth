@@ -28,7 +28,7 @@ pub trait BlobStore: Send + Sync + Clone + 'static {
     /// Inserts the blob sidecar into the store
     fn insert(&self, tx: H256, data: BlobSideCar) -> Result<(), BlobStoreError>;
 
-    /// Inserts the blob sidecar into the store
+    /// Inserts multiple blob sidecars into the store
     fn insert_all(&self, txs: Vec<(H256, BlobSideCar)>) -> Result<(), BlobStoreError>;
 
     /// Deletes the blob sidecar from the store
