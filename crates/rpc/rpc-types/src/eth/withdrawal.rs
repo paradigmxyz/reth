@@ -1,12 +1,8 @@
-use std::mem;
-
-use reth_codecs::{main_codec, Compact};
 use reth_primitives::{constants::GWEI_TO_WEI, serde_helper::u64_hex, Address, U256};
-use reth_rlp::{RlpDecodable, RlpEncodable};
-
+use reth_rlp::RlpEncodable;
+use serde::{Deserialize, Serialize};
 /// Withdrawal represents a validator withdrawal from the consensus layer.
-#[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodable, RlpDecodable)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodable, Serialize, Deserialize)]
 pub struct Withdrawal {
     /// Monotonically increasing identifier issued by consensus layer.
     #[serde(with = "u64_hex")]
@@ -25,12 +21,6 @@ impl Withdrawal {
     /// Return the withdrawal amount in wei.
     pub fn amount_wei(&self) -> U256 {
         U256::from(self.amount) * U256::from(GWEI_TO_WEI)
-    }
-
-    /// Calculate a heuristic for the in-memory size of the [Withdrawal].
-    #[inline]
-    pub fn size(&self) -> usize {
-        mem::size_of::<Self>()
     }
 }
 

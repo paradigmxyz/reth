@@ -47,7 +47,7 @@ fn payload_body_roundtrip() {
         let withdraw = payload_body.withdrawals.as_ref().map(|withdrawals| {
             withdrawals
                 .iter()
-                .map(|withdrawal| Withdrawal::from(withdrawal.clone())) // Clone if needed, or dereference if they are Copy
+                .map(|withdrawal| Withdrawal::from(withdrawal.clone()))
                 .collect::<Vec<_>>()
         });
         assert_eq!(block.withdrawals, withdraw);
