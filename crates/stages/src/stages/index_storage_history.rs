@@ -34,7 +34,6 @@ impl Default for IndexStorageHistoryStage {
     }
 }
 
-#[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -42,7 +41,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
     }
 
     /// Execute the stage.
-    async fn execute(
+    fn execute(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
         mut input: ExecInput,
@@ -84,7 +83,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
     }
 
     /// Unwind the stage.
-    async fn unwind(
+    fn unwind(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,

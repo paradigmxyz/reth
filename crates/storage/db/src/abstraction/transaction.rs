@@ -9,7 +9,7 @@ use crate::{
 /// <https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats>.
 ///
 /// Sealed trait which cannot be implemented by 3rd parties, exposed only for implementers
-pub trait DbTxGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync {
+pub trait DbTxGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>> {
     /// Cursor GAT
     type Cursor<T: Table>: DbCursorRO<T> + Send + Sync;
     /// DupCursor GAT
@@ -20,7 +20,7 @@ pub trait DbTxGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync 
 /// <https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats>.
 ///
 /// Sealed trait which cannot be implemented by 3rd parties, exposed only for implementers
-pub trait DbTxMutGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync {
+pub trait DbTxMutGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>> {
     /// Cursor GAT
     type CursorMut<T: Table>: DbCursorRW<T> + DbCursorRO<T> + Send + Sync;
     /// DupCursor GAT

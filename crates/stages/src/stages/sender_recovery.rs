@@ -16,9 +16,8 @@ use reth_primitives::{
 use reth_provider::{
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
 };
-use std::fmt::Debug;
+use std::{fmt::Debug, sync::mpsc};
 use thiserror::Error;
-use tokio::sync::mpsc;
 use tracing::*;
 
 /// The sender recovery stage iterates over existing transactions,
@@ -44,7 +43,6 @@ impl Default for SenderRecoveryStage {
     }
 }
 
-#[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -56,7 +54,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// collect transactions within that range,
     /// recover signer for each transaction and store entries in
     /// the [`TxSenders`][reth_db::tables::TxSenders] table.
-    async fn execute(
+    fn execute(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
@@ -110,7 +108,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 
         for chunk in &tx_walker.chunks(chunk_size) {
             // An _unordered_ channel to receive results from a rayon job
-            let (recovered_senders_tx, recovered_senders_rx) = mpsc::unbounded_channel();
+            let (recovered_senders_tx, recovered_senders_rx) = mpsc::channel();
             channels.push(recovered_senders_rx);
             // Note: Unfortunate side-effect of how chunk is designed in itertools (it is not Send)
             let chunk: Vec<_> = chunk.collect();
@@ -129,7 +127,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 
         // Iterate over channels and append the sender in the order that they are received.
         for mut channel in channels {
-            while let Some(recovered) = channel.recv().await {
+            while let Ok(recovered) = channel.recv() {
                 let (tx_id, sender) = match recovered {
                     Ok(result) => result,
                     Err(error) => {
@@ -168,7 +166,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     }
 
     /// Unwind the stage.
-    async fn unwind(
+    fn unwind(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,

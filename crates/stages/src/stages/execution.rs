@@ -331,7 +331,6 @@ fn calculate_gas_used_from_headers<DB: Database>(
     Ok(gas_total)
 }
 
-#[async_trait::async_trait]
 impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -339,7 +338,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     }
 
     /// Execute the stage
-    async fn execute(
+    fn execute(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
@@ -348,7 +347,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     }
 
     /// Unwind the stage.
-    async fn unwind(
+    fn unwind(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,

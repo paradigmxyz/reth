@@ -159,13 +159,16 @@ where
     pub fn run_as_fut(mut self, tip: Option<B256>) -> PipelineFut<DB> {
         // TODO: fix this in a follow up PR. ideally, consensus engine would be responsible for
         // updating metrics.
+        // TODO(onbjerg): Do we need this if we make all of this stuff sync, or should it just be a
+        // thread? If we still need it, why? Do we need more granular control over how the pipeline
+        // is run?
         let _ = self.register_metrics(); // ignore error
         Box::pin(async move {
             // NOTE: the tip should only be None if we are in continuous sync mode.
             if let Some(tip) = tip {
                 self.set_tip(tip);
             }
-            let result = self.run_loop().await;
+            let result = self.run_loop();
             trace!(target: "sync::pipeline", ?tip, ?result, "Pipeline finished");
             (self, result)
         })
@@ -173,11 +176,11 @@ where
 
     /// Run the pipeline in an infinite loop. Will terminate early if the user has specified
     /// a `max_block` in the pipeline.
-    pub async fn run(&mut self) -> Result<(), PipelineError> {
+    pub fn run(&mut self) -> Result<(), PipelineError> {
         let _ = self.register_metrics(); // ignore error
 
         loop {
-            let next_action = self.run_loop().await?;
+            let next_action = self.run_loop()?;
 
             // Terminate the loop early if it's reached the maximum user
             // configured block.
@@ -210,17 +213,15 @@ where
     /// This will be [ControlFlow::Continue] or [ControlFlow::NoProgress] of the _last_ stage in the
     /// pipeline (for example the `Finish` stage). Or [ControlFlow::Unwind] of the stage that caused
     /// the unwind.
-    pub async fn run_loop(&mut self) -> Result<ControlFlow, PipelineError> {
+    pub fn run_loop(&mut self) -> Result<ControlFlow, PipelineError> {
         let mut previous_stage = None;
         for stage_index in 0..self.stages.len() {
             let stage = &self.stages[stage_index];
             let stage_id = stage.id();
 
             trace!(target: "sync::pipeline", stage = %stage_id, "Executing stage");
-            let next = self
-                .execute_stage_to_completion(previous_stage, stage_index)
-                .instrument(info_span!("execute", stage = %stage_id))
-                .await?;
+            let next = self.execute_stage_to_completion(previous_stage, stage_index)?;
+            //.instrument(info_span!("execute", stage = %stage_id))?;
 
             trace!(target: "sync::pipeline", stage = %stage_id, ?next, "Completed stage");
 
@@ -232,7 +233,7 @@ where
                 }
                 ControlFlow::Continue { block_number } => self.progress.update(block_number),
                 ControlFlow::Unwind { target, bad_block } => {
-                    self.unwind(target, Some(bad_block.number)).await?;
+                    self.unwind(target, Some(bad_block.number))?;
                     return Ok(ControlFlow::Unwind { target, bad_block })
                 }
             }
@@ -254,7 +255,7 @@ where
     /// Unwind the stages to the target block.
     ///
     /// If the unwind is due to a bad block the number of that block should be specified.
-    pub async fn unwind(
+    pub fn unwind(
         &mut self,
         to: BlockNumber,
         bad_block: Option<BlockNumber>,
@@ -293,7 +294,7 @@ where
                 let input = UnwindInput { checkpoint, unwind_to: to, bad_block };
                 self.listeners.notify(PipelineEvent::Unwinding { stage_id, input });
 
-                let output = stage.unwind(&provider_rw, input).await;
+                let output = stage.unwind(&provider_rw, input);
                 match output {
                     Ok(unwind_output) => {
                         checkpoint = unwind_output.checkpoint;
@@ -333,7 +334,7 @@ where
         Ok(())
     }
 
-    async fn execute_stage_to_completion(
+    fn execute_stage_to_completion(
         &mut self,
         previous_stage: Option<BlockNumber>,
         stage_index: usize,
@@ -379,10 +380,7 @@ where
                 checkpoint: prev_checkpoint,
             });
 
-            match stage
-                .execute(&provider_rw, ExecInput { target, checkpoint: prev_checkpoint })
-                .await
-            {
+            match stage.execute(&provider_rw, ExecInput { target, checkpoint: prev_checkpoint }) {
                 Ok(out @ ExecOutput { checkpoint, done }) => {
                     made_progress |=
                         checkpoint.block_number != prev_checkpoint.unwrap_or_default().block_number;

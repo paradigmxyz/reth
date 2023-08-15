@@ -126,9 +126,8 @@ async fn dry_run<DB: Database>(
     let mut exec_output = false;
     while !exec_output {
         exec_output = MerkleStage::Execution {
-            clean_threshold: u64::MAX, /* Forces updating the root instead of calculating
-                                        * from
-                                        * scratch */
+            // Forces updating the root instead of calculating from scratch
+            clean_threshold: u64::MAX,
         }
         .execute(
             &provider,

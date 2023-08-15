@@ -82,7 +82,7 @@ where
     /// Get the head and tip of the range we need to sync
     ///
     /// See also [SyncTarget]
-    async fn get_sync_gap<DB: Database>(
+    fn get_sync_gap<DB: Database>(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
         checkpoint: u64,
@@ -119,21 +119,22 @@ where
         // reverse from there. Else, it should use whatever the forkchoice state reports.
         let target = match next_header {
             Some(header) if checkpoint + 1 != header.number => SyncTarget::Gap(header),
-            None => self
-                .next_sync_target(head_num)
-                .await
-                .ok_or(StageError::StageCheckpoint(checkpoint))?,
+            None => {
+                self.next_sync_target(head_num).ok_or(StageError::StageCheckpoint(checkpoint))?
+            }
             _ => return Err(StageError::StageCheckpoint(checkpoint)),
         };
 
         Ok(SyncGap { local_head, target })
     }
 
-    async fn next_sync_target(&mut self, head: BlockNumber) -> Option<SyncTarget> {
+    fn next_sync_target(&mut self, head: BlockNumber) -> Option<SyncTarget> {
         match self.mode {
             HeaderSyncMode::Tip(ref mut rx) => {
-                let tip = rx.wait_for(|tip| !tip.is_zero()).await.ok()?;
-                Some(SyncTarget::Tip(*tip))
+                // TODO: this should be moved to a `poll_ready` kind of thing
+                //let tip = rx.wait_for(|tip| !tip.is_zero()).await.ok()?;
+                //Some(SyncTarget::Tip(*tip))
+                Some(SyncTarget::TipNum(head + 1)) // todo: temp
             }
             HeaderSyncMode::Continuous => {
                 trace!(target: "sync::stages::headers", head, "No next header found, using continuous sync strategy");
@@ -178,7 +179,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<DB, D> Stage<DB> for HeaderStage<D>
 where
     DB: Database,
@@ -191,7 +191,7 @@ where
 
     /// Download the headers in reverse order (falling block numbers)
     /// starting from the tip of the chain
-    async fn execute(
+    fn execute(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
@@ -200,7 +200,7 @@ where
         let current_checkpoint = input.checkpoint();
 
         // Lookup the head and tip of the sync range
-        let gap = self.get_sync_gap(provider, current_checkpoint.block_number).await?;
+        let gap = self.get_sync_gap(provider, current_checkpoint.block_number)?;
         let local_head = gap.local_head.number;
         let tip = gap.target.tip();
 
@@ -224,14 +224,17 @@ where
         // down to the local head (latest block in db).
         // Task downloader can return `None` only if the response relaying channel was closed. This
         // is a fatal error to prevent the pipeline from running forever.
-        let downloaded_headers = match self.downloader.next().await {
+
+        // todo: this should be in a poll rdy fn
+        /*let downloaded_headers = match self.downloader.next().await {
             Some(Ok(headers)) => headers,
             Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
                 error!(target: "sync::stages::headers", ?error, "Cannot attach header to head");
                 return Err(StageError::DetachedHead { local_head, header, error })
             }
             None => return Err(StageError::ChannelClosed),
-        };
+        };*/
+        let downloaded_headers: Vec<SealedHeader> = Vec::new();
 
         info!(target: "sync::stages::headers", len = downloaded_headers.len(), "Received headers");
 
@@ -326,7 +329,7 @@ where
     }
 
     /// Unwind the stage.
-    async fn unwind(
+    fn unwind(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,

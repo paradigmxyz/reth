@@ -56,7 +56,6 @@ pub struct BodyStage<D: BodyDownloader> {
     pub consensus: Arc<dyn Consensus>,
 }
 
-#[async_trait::async_trait]
 impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -65,7 +64,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
     /// Download block bodies from the last checkpoint for this stage up until the latest synced
     /// header, limited by the stage's batch size.
-    async fn execute(
+    fn execute(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
@@ -94,8 +93,11 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
         // Task downloader can return `None` only if the response relaying channel was closed. This
         // is a fatal error to prevent the pipeline from running forever.
-        let downloaded_bodies =
-            self.downloader.try_next().await?.ok_or(StageError::ChannelClosed)?;
+
+        // todo: should be in a dedicated poll rdy fn
+        /*let downloaded_bodies =
+        self.downloader.try_next().await?.ok_or(StageError::ChannelClosed)?;*/
+        let downloaded_bodies: Vec<BlockResponse> = Vec::new();
 
         trace!(target: "sync::stages::bodies", bodies_len = downloaded_bodies.len(), "Writing blocks");
 
@@ -161,7 +163,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     }
 
     /// Unwind the stage.
-    async fn unwind(
+    fn unwind(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
