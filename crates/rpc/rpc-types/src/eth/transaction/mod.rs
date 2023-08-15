@@ -3,7 +3,7 @@ pub use receipt::TransactionReceipt;
 pub use request::TransactionRequest;
 use reth_primitives::{AccessListItem, Address, Bytes, H256, U128, U256, U64};
 use serde::{Deserialize, Serialize};
-pub use signature::Signature;
+pub use signature::{Parity, Signature};
 pub use typed::*;
 
 mod common;

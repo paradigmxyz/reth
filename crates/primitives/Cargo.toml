@@ -62,6 +62,7 @@ zstd = { version = "0.12", features = ["experimental"] }
 paste = "1.0"
 rayon = "1.7"
 tempfile = "3.3"
+sha2 = "0.10.7"
 
 # proof related
 triehash = "0.8"

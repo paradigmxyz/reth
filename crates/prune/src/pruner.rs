@@ -150,7 +150,7 @@ impl<DB: Database> Pruner<DB> {
         self.last_pruned_block_number = Some(tip_block_number);
 
         let elapsed = start.elapsed();
-        self.metrics.pruner.duration_seconds.record(elapsed);
+        self.metrics.duration_seconds.record(elapsed);
 
         trace!(
             target: "pruner",
@@ -240,16 +240,14 @@ impl<DB: Database> Pruner<DB> {
         };
         let total = range.clone().count();
 
-        let mut processed = 0;
         provider.prune_table_with_iterator_in_batches::<tables::Receipts>(
             range,
             self.batch_sizes.receipts,
             |rows| {
-                processed += rows;
                 trace!(
                     target: "pruner",
                     %rows,
-                    progress = format!("{:.1}%", 100.0 * processed as f64 / total as f64),
+                    progress = format!("{:.1}%", 100.0 * rows as f64 / total as f64),
                     "Pruned receipts"
                 );
             },
@@ -348,16 +346,14 @@ impl<DB: Database> Pruner<DB> {
         };
         let total = range.clone().count();
 
-        let mut processed = 0;
         provider.prune_table_with_range_in_batches::<tables::TxSenders>(
             range,
             self.batch_sizes.transaction_senders,
             |rows, _| {
-                processed += rows;
                 trace!(
                     target: "pruner",
                     %rows,
-                    progress = format!("{:.1}%", 100.0 * processed as f64 / total as f64),
+                    progress = format!("{:.1}%", 100.0 * rows as f64 / total as f64),
                     "Pruned transaction senders"
                 );
             },
@@ -490,6 +486,7 @@ impl<DB: Database> Pruner<DB> {
     {
         let mut processed = 0;
         let mut cursor = provider.tx_ref().cursor_write::<T>()?;
+
         // Prune history table:
         // 1. If the shard has `highest_block_number` less than or equal to the target block number
         // for pruning, delete the shard completely.
@@ -525,20 +522,24 @@ impl<DB: Database> Pruner<DB> {
                         // If there are no more blocks in this shard, we need to remove it, as empty
                         // shards are not allowed.
                         if key.as_ref().highest_block_number == u64::MAX {
-                            // If current shard is the last shard for this sharded key, replace it
-                            // with the previous shard.
                             if let Some(prev_value) = cursor
                                 .prev()?
                                 .filter(|(prev_key, _)| key_matches(prev_key, &key))
                                 .map(|(_, prev_value)| prev_value)
                             {
+                                // If current shard is the last shard for the sharded key that has
+                                // previous shards, replace it with the previous shard.
                                 cursor.delete_current()?;
                                 // Upsert will replace the last shard for this sharded key with the
-                                // previous value
+                                // previous value.
                                 cursor.upsert(key.clone(), prev_value)?;
                             } else {
                                 // If there's no previous shard for this sharded key,
                                 // just delete last shard completely.
+
+                                // Jump back to the original last shard.
+                                cursor.next()?;
+                                // Delete shard.
                                 cursor.delete_current()?;
                             }
                         } else {
@@ -551,7 +552,7 @@ impl<DB: Database> Pruner<DB> {
                     }
                 }
 
-                // Jump to the next address
+                // Jump to the next address.
                 cursor.seek_exact(last_key(&key))?;
             }
 

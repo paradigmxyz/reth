@@ -1,5 +1,6 @@
 //! Cursor wrapper for libmdbx-sys.
 
+use reth_interfaces::db::DatabaseWriteOperation;
 use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds};
 
 use crate::{
@@ -230,24 +231,42 @@ impl<'tx, T: Table> DbCursorRW<'tx, T> for Cursor<'tx, RW, T> {
     /// to properly upsert, you'll need to `seek_exact` & `delete_current` if the key+subkey was
     /// found, before calling `upsert`.
     fn upsert(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+        let key = key.encode();
         // Default `WriteFlags` is UPSERT
-        self.inner
-            .put(key.encode().as_ref(), compress_or_ref!(self, value), WriteFlags::UPSERT)
-            .map_err(|e| DatabaseError::Write(e.into()))
+        self.inner.put(key.as_ref(), compress_or_ref!(self, value), WriteFlags::UPSERT).map_err(
+            |e| DatabaseError::Write {
+                code: e.into(),
+                operation: DatabaseWriteOperation::CursorUpsert,
+                table_name: T::NAME,
+                key: Box::from(key.as_ref()),
+            },
+        )
     }
 
     fn insert(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+        let key = key.encode();
         self.inner
-            .put(key.encode().as_ref(), compress_or_ref!(self, value), WriteFlags::NO_OVERWRITE)
-            .map_err(|e| DatabaseError::Write(e.into()))
+            .put(key.as_ref(), compress_or_ref!(self, value), WriteFlags::NO_OVERWRITE)
+            .map_err(|e| DatabaseError::Write {
+                code: e.into(),
+                operation: DatabaseWriteOperation::CursorInsert,
+                table_name: T::NAME,
+                key: Box::from(key.as_ref()),
+            })
     }
 
     /// Appends the data to the end of the table. Consequently, the append operation
     /// will fail if the inserted key is less than the last table key
     fn append(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
-        self.inner
-            .put(key.encode().as_ref(), compress_or_ref!(self, value), WriteFlags::APPEND)
-            .map_err(|e| DatabaseError::Write(e.into()))
+        let key = key.encode();
+        self.inner.put(key.as_ref(), compress_or_ref!(self, value), WriteFlags::APPEND).map_err(
+            |e| DatabaseError::Write {
+                code: e.into(),
+                operation: DatabaseWriteOperation::CursorAppend,
+                table_name: T::NAME,
+                key: Box::from(key.as_ref()),
+            },
+        )
     }
 
     fn delete_current(&mut self) -> Result<(), DatabaseError> {
@@ -261,8 +280,14 @@ impl<'tx, T: DupSort> DbDupCursorRW<'tx, T> for Cursor<'tx, RW, T> {
     }
 
     fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
-        self.inner
-            .put(key.encode().as_ref(), compress_or_ref!(self, value), WriteFlags::APPEND_DUP)
-            .map_err(|e| DatabaseError::Write(e.into()))
+        let key = key.encode();
+        self.inner.put(key.as_ref(), compress_or_ref!(self, value), WriteFlags::APPEND_DUP).map_err(
+            |e| DatabaseError::Write {
+                code: e.into(),
+                operation: DatabaseWriteOperation::CursorAppendDup,
+                table_name: T::NAME,
+                key: Box::from(key.as_ref()),
+            },
+        )
     }
 }

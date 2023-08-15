@@ -7,7 +7,7 @@ use crate::{
     metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
     NetworkHandle,
 };
-use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
+use futures::{stream::FuturesUnordered, Future, FutureExt, StreamExt};
 use reth_eth_wire::{
     EthVersion, GetPooledTransactions, NewPooledTransactionHashes, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, PooledTransactions, Transactions,
@@ -29,7 +29,6 @@ use reth_transaction_pool::{
 };
 use std::{
     collections::{hash_map::Entry, HashMap},
-    future::Future,
     num::NonZeroUsize,
     pin::Pin,
     sync::Arc,
@@ -47,6 +46,11 @@ const NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT: usize = 4096;
 
 /// The target size for the message of full transactions.
 const MAX_FULL_TRANSACTIONS_PACKET_SIZE: usize = 100 * 1024;
+
+/// Recommended soft limit for the number of hashes in a GetPooledTransactions message (8kb)
+///
+/// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08>
+const GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES: usize = 256;
 
 /// The future for inserting a function into the pool
 pub type PoolImportFuture = Pin<Box<dyn Future<Output = PoolResult<TxHash>> + Send + 'static>>;
@@ -205,9 +209,9 @@ where
     /// complete transaction object if it is unknown to them. The dissemination of complete
     /// transactions to a fraction of peers usually ensures that all nodes receive the transaction
     /// and won't need to request it.
-    fn on_new_transactions(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
-        // Nothing to propagate while syncing
-        if self.network.is_syncing() {
+    fn on_new_transactions(&mut self, hashes: Vec<TxHash>) {
+        // Nothing to propagate while initially syncing
+        if self.network.is_initially_syncing() {
             return
         }
 
@@ -310,8 +314,8 @@ where
         peer_id: PeerId,
         msg: NewPooledTransactionHashes,
     ) {
-        // If the node is currently syncing, ignore transactions
-        if self.network.is_syncing() {
+        // If the node is initially syncing, ignore transactions
+        if self.network.is_initially_syncing() {
             return
         }
 
@@ -333,6 +337,10 @@ where
                 return
             }
 
+            // enforce recommended soft limit, however the peer may enforce an arbitrary limit on
+            // the response (2MB)
+            hashes.truncate(GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES);
+
             // request the missing transactions
             let (response, rx) = oneshot::channel();
             let req = PeerRequest::GetPooledTransactions {
@@ -342,6 +350,10 @@ where
 
             if peer.request_tx.try_send(req).is_ok() {
                 self.inflight_requests.push(GetPooledTxRequest { peer_id, response: rx })
+            } else {
+                // peer channel is saturated, drop the request
+                self.metrics.egress_peer_channel_full.increment(1);
+                return
             }
 
             if num_already_seen > 0 {
@@ -373,9 +385,7 @@ where
     /// Handles a command received from a detached [`TransactionsHandle`]
     fn on_command(&mut self, cmd: TransactionsCommand) {
         match cmd {
-            TransactionsCommand::PropagateHash(hash) => {
-                self.on_new_transactions(std::iter::once(hash))
-            }
+            TransactionsCommand::PropagateHash(hash) => self.on_new_transactions(vec![hash]),
         }
     }
 
@@ -405,7 +415,7 @@ where
                 // Send a `NewPooledTransactionHashes` to the peer with up to
                 // `NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT` transactions in the
                 // pool
-                if !self.network.is_syncing() {
+                if !self.network.is_initially_syncing() {
                     let peer = self.peers.get_mut(&peer_id).expect("is present; qed");
 
                     let mut msg_builder = PooledTransactionsHashesBuilder::new(version);
@@ -437,8 +447,8 @@ where
         transactions: Vec<TransactionSigned>,
         source: TransactionSource,
     ) {
-        // If the node is currently syncing, ignore transactions
-        if self.network.is_syncing() {
+        // If the node is pipeline syncing, ignore transactions
+        if self.network.is_initially_syncing() {
             return
         }
 
@@ -595,9 +605,11 @@ where
                     this.on_good_import(hash);
                 }
                 Err(err) => {
-                    // if we're syncing and the transaction is bad we ignore it, otherwise we
-                    // penalize the peer that sent the bad transaction with the assumption that the
-                    // peer should have known that this transaction is bad. (e.g. consensus rules)
+                    // if we're _currently_ syncing and the transaction is bad we ignore it,
+                    // otherwise we penalize the peer that sent the bad
+                    // transaction with the assumption that the peer should have
+                    // known that this transaction is bad. (e.g. consensus
+                    // rules)
                     if err.is_bad_transaction() && !this.network.is_syncing() {
                         trace!(target: "net::tx", ?err, "Bad transaction import");
                         this.on_bad_import(*err.hash());
@@ -794,12 +806,23 @@ mod tests {
     use reth_rlp::Decodable;
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};
     use secp256k1::SecretKey;
+    use std::future::poll_fn;
 
     #[tokio::test(flavor = "multi_thread")]
     #[cfg_attr(not(feature = "geth-tests"), ignore)]
-    async fn test_ignored_tx_broadcasts_while_syncing() {
+    async fn test_ignored_tx_broadcasts_while_initially_syncing() {
         reth_tracing::init_test_tracing();
+        let net = Testnet::create(3).await;
 
+        let mut handles = net.handles();
+        let handle0 = handles.next().unwrap();
+        let handle1 = handles.next().unwrap();
+
+        drop(handles);
+        let handle = net.spawn();
+
+        let listener0 = handle0.event_listener();
+        handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
         let client = NoopProvider::default();
@@ -808,7 +831,7 @@ mod tests {
             .disable_discovery()
             .listener_port(0)
             .build(client);
-        let (handle, network, mut transactions, _) = NetworkManager::new(config)
+        let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
             .await
             .unwrap()
             .into_builder()
@@ -817,17 +840,143 @@ mod tests {
 
         tokio::task::spawn(network);
 
-        handle.update_sync_state(SyncState::Syncing);
-        assert!(NetworkInfo::is_syncing(&handle));
+        // go to syncing (pipeline sync)
+        network_handle.update_sync_state(SyncState::Syncing);
+        assert!(NetworkInfo::is_syncing(&network_handle));
+        assert!(NetworkInfo::is_initially_syncing(&network_handle));
 
-        let peer_id = PeerId::random();
-
+        // wait for all initiator connections
+        let mut established = listener0.take(2);
+        while let Some(ev) = established.next().await {
+            match ev {
+                NetworkEvent::SessionEstablished {
+                    peer_id,
+                    remote_addr,
+                    client_version,
+                    capabilities,
+                    messages,
+                    status,
+                    version,
+                } => {
+                    // to insert a new peer in transactions peerset
+                    transactions.on_network_event(NetworkEvent::SessionEstablished {
+                        peer_id,
+                        remote_addr,
+                        client_version,
+                        capabilities,
+                        messages,
+                        status,
+                        version,
+                    })
+                }
+                NetworkEvent::PeerAdded(_peer_id) => continue,
+                ev => {
+                    panic!("unexpected event {ev:?}")
+                }
+            }
+        }
+        // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
+        let input = hex::decode("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76").unwrap();
+        let signed_tx = TransactionSigned::decode(&mut &input[..]).unwrap();
         transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
-            peer_id,
-            msg: Transactions(vec![TransactionSigned::default()]),
+            peer_id: *handle1.peer_id(),
+            msg: Transactions(vec![signed_tx.clone()]),
         });
-
+        poll_fn(|cx| {
+            let _ = transactions.poll_unpin(cx);
+            Poll::Ready(())
+        })
+        .await;
         assert!(pool.is_empty());
+        handle.terminate().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[cfg_attr(not(feature = "geth-tests"), ignore)]
+    async fn test_tx_broadcasts_through_two_syncs() {
+        reth_tracing::init_test_tracing();
+        let net = Testnet::create(3).await;
+
+        let mut handles = net.handles();
+        let handle0 = handles.next().unwrap();
+        let handle1 = handles.next().unwrap();
+
+        drop(handles);
+        let handle = net.spawn();
+
+        let listener0 = handle0.event_listener();
+        handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+        let secret_key = SecretKey::new(&mut rand::thread_rng());
+
+        let client = NoopProvider::default();
+        let pool = testing_pool();
+        let config = NetworkConfigBuilder::new(secret_key)
+            .disable_discovery()
+            .listener_port(0)
+            .build(client);
+        let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
+            .await
+            .unwrap()
+            .into_builder()
+            .transactions(pool.clone())
+            .split_with_handle();
+
+        tokio::task::spawn(network);
+
+        // go to syncing (pipeline sync) to idle and then to syncing (live)
+        network_handle.update_sync_state(SyncState::Syncing);
+        assert!(NetworkInfo::is_syncing(&network_handle));
+        network_handle.update_sync_state(SyncState::Idle);
+        assert!(!NetworkInfo::is_syncing(&network_handle));
+        network_handle.update_sync_state(SyncState::Syncing);
+        assert!(NetworkInfo::is_syncing(&network_handle));
+
+        // wait for all initiator connections
+        let mut established = listener0.take(2);
+        while let Some(ev) = established.next().await {
+            match ev {
+                NetworkEvent::SessionEstablished {
+                    peer_id,
+                    remote_addr,
+                    client_version,
+                    capabilities,
+                    messages,
+                    status,
+                    version,
+                } => {
+                    // to insert a new peer in transactions peerset
+                    transactions.on_network_event(NetworkEvent::SessionEstablished {
+                        peer_id,
+                        remote_addr,
+                        client_version,
+                        capabilities,
+                        messages,
+                        status,
+                        version,
+                    })
+                }
+                NetworkEvent::PeerAdded(_peer_id) => continue,
+                ev => {
+                    panic!("unexpected event {ev:?}")
+                }
+            }
+        }
+        // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
+        let input = hex::decode("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76").unwrap();
+        let signed_tx = TransactionSigned::decode(&mut &input[..]).unwrap();
+        transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
+            peer_id: *handle1.peer_id(),
+            msg: Transactions(vec![signed_tx.clone()]),
+        });
+        poll_fn(|cx| {
+            let _ = transactions.poll_unpin(cx);
+            Poll::Ready(())
+        })
+        .await;
+        assert!(!NetworkInfo::is_initially_syncing(&network_handle));
+        assert!(NetworkInfo::is_syncing(&network_handle));
+        assert!(!pool.is_empty());
+        handle.terminate().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -906,6 +1055,16 @@ mod tests {
             *handle1.peer_id(),
             transactions.transactions_by_peers.get(&signed_tx.hash()).unwrap()[0]
         );
+
+        // advance the transaction manager future
+        poll_fn(|cx| {
+            let _ = transactions.poll_unpin(cx);
+            Poll::Ready(())
+        })
+        .await;
+
+        assert!(!pool.is_empty());
+        assert!(pool.get(&signed_tx.hash).is_some());
         handle.terminate().await;
     }
 

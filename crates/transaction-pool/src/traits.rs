@@ -7,7 +7,8 @@ use crate::{
 use futures_util::{ready, Stream};
 use reth_primitives::{
     Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
-    TransactionKind, TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, H256, U256,
+    TransactionKind, TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
+    H256, U256,
 };
 use reth_rlp::Encodable;
 use std::{
@@ -22,7 +23,7 @@ use tokio::sync::mpsc::Receiver;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// General purpose abstraction fo a transaction-pool.
+/// General purpose abstraction of a transaction-pool.
 ///
 /// This is intended to be used by API-consumers such as RPC that need inject new incoming,
 /// unverified transactions. And by block production that needs to get transactions to execute in a
@@ -126,7 +127,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Returns a new stream that yields new valid transactions added to the pool.
     fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>>;
 
-    /// Returns a new Stream that yields new transactions added to the basefee-pool.
+    /// Returns a new Stream that yields new transactions added to the pending sub-pool.
     ///
     /// This is a convenience wrapper around [Self::new_transactions_listener] that filters for
     /// [SubPool::Pending](crate::SubPool).
@@ -226,7 +227,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Consumer: Block production
     fn remove_transactions(
         &self,
-        hashes: impl IntoIterator<Item = TxHash>,
+        hashes: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Retains only those hashes that are unknown to the pool.
@@ -249,10 +250,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// This adheres to the expected behavior of [`GetPooledTransactions`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09):
     /// The transactions must be in same order as in the request, but it is OK to skip transactions
     /// which are not available.
-    fn get_all(
-        &self,
-        txs: impl IntoIterator<Item = TxHash>,
-    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+    fn get_all(&self, txs: Vec<TxHash>) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Notify the pool about transactions that are propagated to peers.
     ///
@@ -552,6 +550,11 @@ pub trait PoolTransaction:
     /// Returns true if the transaction is an EIP-1559 transaction.
     fn is_eip1559(&self) -> bool {
         self.tx_type() == EIP1559_TX_TYPE_ID
+    }
+
+    /// Returns true if the transaction is an EIP-4844 transaction.
+    fn is_eip4844(&self) -> bool {
+        self.tx_type() == EIP4844_TX_TYPE_ID
     }
 
     /// Returns the length of the rlp encoded object

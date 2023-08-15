@@ -247,10 +247,10 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Returns transactions for the multiple given hashes, if they exist.
-    pub(crate) fn get_all<'a>(
-        &'a self,
-        txs: impl IntoIterator<Item = TxHash> + 'a,
-    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + 'a {
+    pub(crate) fn get_all(
+        &self,
+        txs: Vec<TxHash>,
+    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
         txs.into_iter().filter_map(|tx| self.get(&tx))
     }
 
@@ -409,13 +409,16 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Maintenance task to apply a series of updates.
     ///
     /// This will move/discard the given transaction according to the `PoolUpdate`
-    fn process_updates(&mut self, updates: impl IntoIterator<Item = PoolUpdate>) -> UpdateOutcome {
+    fn process_updates(&mut self, updates: Vec<PoolUpdate>) -> UpdateOutcome {
         let mut outcome = UpdateOutcome::default();
         for update in updates {
             let PoolUpdate { id, hash, current, destination } = update;
             match destination {
                 Destination::Discard => {
+                    // remove the transaction from the pool and subpool
+                    self.prune_transaction_by_hash(&hash);
                     outcome.discarded.push(hash);
+                    self.metrics.removed_transactions.increment(1);
                 }
                 Destination::Pool(move_to) => {
                     debug_assert!(!move_to.eq(&current), "destination must be different");
@@ -445,7 +448,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// any additional updates.
     pub(crate) fn remove_transactions(
         &mut self,
-        hashes: impl IntoIterator<Item = TxHash>,
+        hashes: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         hashes.into_iter().filter_map(|hash| self.remove_transaction_by_hash(&hash)).collect()
     }
@@ -1682,5 +1685,31 @@ mod tests {
         assert_eq!(pool.basefee_pool.len(), 1);
 
         assert_eq!(pool.all_transactions.txs.get(&id).unwrap().subpool, SubPool::BaseFee)
+    }
+
+    #[test]
+    fn discard_nonce_too_low() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let tx = MockTransaction::eip1559().inc_price_by(10);
+        let validated = f.validated(tx.clone());
+        let id = *validated.id();
+        pool.add_transaction(validated, U256::from(1_000), 0).unwrap();
+
+        let next = tx.next();
+        let validated = f.validated(next.clone());
+        pool.add_transaction(validated, U256::from(1_000), 0).unwrap();
+
+        assert_eq!(pool.pending_pool.len(), 2);
+
+        let mut changed_senders = HashMap::new();
+        changed_senders.insert(
+            id.sender,
+            SenderInfo { state_nonce: next.get_nonce(), balance: U256::from(1_000) },
+        );
+        let outcome = pool.update_accounts(changed_senders);
+        assert_eq!(outcome.discarded.len(), 1);
+        assert_eq!(pool.pending_pool.len(), 1);
     }
 }

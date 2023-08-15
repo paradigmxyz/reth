@@ -16,7 +16,9 @@ use reth_rlp::{
 use serde::{Deserialize, Serialize};
 pub use signature::Signature;
 use std::mem;
-pub use tx_type::{TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID};
+pub use tx_type::{
+    TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+};
 
 pub use eip1559::TxEip1559;
 pub use eip2930::TxEip2930;
@@ -174,6 +176,14 @@ impl Transaction {
             Transaction::Eip2930(TxEip2930 { gas_limit, .. }) |
             Transaction::Eip1559(TxEip1559 { gas_limit, .. }) |
             Transaction::Eip4844(TxEip4844 { gas_limit, .. }) => *gas_limit,
+        }
+    }
+
+    /// Returns true if the tx supports dynamic fees
+    pub fn is_dynamic_fee(&self) -> bool {
+        match self {
+            Transaction::Legacy(_) | Transaction::Eip2930(_) => false,
+            Transaction::Eip1559(_) | Transaction::Eip4844(_) => true,
         }
     }
 
