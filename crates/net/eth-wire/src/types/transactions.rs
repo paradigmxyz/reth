@@ -141,7 +141,7 @@ impl PooledTransactionResponse {
 }
 
 impl Encodable for PooledTransactionResponse {
-    /// Encodes an enveloped post EIP-4844 [PooledTransaction] response.
+    /// Encodes an enveloped post EIP-4844 [PooledTransactionResponse].
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
             Self::Transaction(tx) => tx.encode(out),
@@ -166,7 +166,7 @@ impl Encodable for PooledTransactionResponse {
 }
 
 impl Decodable for PooledTransactionResponse {
-    /// Decodes an enveloped post EIP-4844 [PooledTransaction] response.
+    /// Decodes an enveloped post EIP-4844 [PooledTransactionResponse].
     ///
     /// CAUTION: this expects that `buf` is `[id, rlp(tx)]`
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
@@ -468,7 +468,7 @@ impl BlobTransaction {
     /// `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
     ///
     /// Note: this should be used only when implementing other RLP decoding methods, and does not
-    /// represent the full RLP decoding of the [PooledTransaction] type.
+    /// represent the full RLP decoding of the [PooledTransactionResponse] type.
     pub fn decode_inner(data: &mut &[u8]) -> Result<Self, DecodeError> {
         // decode the _first_ list header for the rest of the transaction
         let header = Header::decode(data)?;
