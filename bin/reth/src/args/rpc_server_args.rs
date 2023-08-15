@@ -2,7 +2,7 @@
 
 use crate::{
     args::GasPriceOracleArgs,
-    cli::{config::RethRpcConfig, ext::RethNodeCommandExt},
+    cli::{config::RethRpcConfig, ext::RethNodeCommandConfig},
 };
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
@@ -223,7 +223,7 @@ impl RpcServerArgs {
     /// for the auth server that handles the `engine_` API that's accessed by the consensus
     /// layer.
     #[allow(clippy::too_many_arguments)]
-    pub async fn start_servers<Provider, Pool, Network, Tasks, Events, Engine, Ext>(
+    pub async fn start_servers<Provider, Pool, Network, Tasks, Events, Engine, Conf>(
         &self,
         provider: Provider,
         pool: Pool,
@@ -232,7 +232,7 @@ impl RpcServerArgs {
         events: Events,
         engine_api: Engine,
         jwt_secret: JwtSecret,
-        ext: &mut Ext,
+        conf: &mut Conf,
     ) -> eyre::Result<(RpcServerHandle, AuthServerHandle)>
     where
         Provider: BlockReaderIdExt
@@ -249,7 +249,7 @@ impl RpcServerArgs {
         Tasks: TaskSpawner + Clone + 'static,
         Events: CanonStateSubscriptions + Clone + 'static,
         Engine: EngineApiServer,
-        Ext: RethNodeCommandExt,
+        Conf: RethNodeCommandConfig,
     {
         let auth_config = self.auth_server_config(jwt_secret)?;
 
@@ -265,7 +265,7 @@ impl RpcServerArgs {
             .build_with_auth_server(module_config, engine_api);
 
         // apply configured customization
-        ext.extend_rpc_modules(self, &mut registry, &mut rpc_modules)?;
+        conf.extend_rpc_modules(self, &mut registry, &mut rpc_modules)?;
 
         let server_config = self.rpc_server_config();
         let launch_rpc = rpc_modules.start_server(server_config).map_ok(|handle| {
