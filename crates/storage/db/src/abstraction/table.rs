@@ -81,6 +81,9 @@ pub trait Table: Send + Sync + Debug + 'static {
     type Value: Value;
 }
 
+/// Tuple with `T::Key` and `T::Value`.
+pub type TableRow<T> = (<T as Table>::Key, <T as Table>::Value);
+
 /// DupSort allows for keys to be repeated in the database.
 ///
 /// Upstream docs: <https://libmdbx.dqdkfa.ru/usage.html#autotoc_md48>
