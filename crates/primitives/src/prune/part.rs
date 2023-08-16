@@ -10,8 +10,10 @@ pub enum PrunePart {
     SenderRecovery,
     /// Prune part responsible for the `TxHashNumber` table.
     TransactionLookup,
-    /// Prune part responsible for the `Receipts` table.
+    /// Prune part responsible for all `Receipts`.
     Receipts,
+    /// Prune part responsible for some `Receipts` filtered by logs.
+    ContractLogs,
     /// Prune part responsible for the `AccountChangeSet` and `AccountHistory` tables.
     AccountHistory,
     /// Prune part responsible for the `StorageChangeSet` and `StorageHistory` tables.
@@ -19,7 +21,7 @@ pub enum PrunePart {
 }
 
 /// PrunePart error type.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum PrunePartError {
     /// Invalid configuration of a prune part.
     #[error("The configuration provided for {0} is invalid.")]

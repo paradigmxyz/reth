@@ -279,7 +279,7 @@ impl Default for IndexHistoryConfig {
 }
 
 /// Pruning configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct PruneConfig {
     /// Minimum pruning interval measured in blocks.

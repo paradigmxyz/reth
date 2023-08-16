@@ -337,7 +337,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             None
         };
 
-        let prune_config = self.pruning.prune_config(Arc::clone(&self.chain))?.or(config.prune);
+        let prune_config =
+            self.pruning.prune_config(Arc::clone(&self.chain))?.or(config.prune.clone());
 
         // Configure the pipeline
         let (mut pipeline, client) = if self.dev.dev {
@@ -373,7 +374,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     db.clone(),
                     &ctx.task_executor,
                     metrics_tx,
-                    prune_config,
+                    prune_config.clone(),
                     max_block,
                 )
                 .await?;
@@ -393,7 +394,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     db.clone(),
                     &ctx.task_executor,
                     metrics_tx,
-                    prune_config,
+                    prune_config.clone(),
                     max_block,
                 )
                 .await?;
