@@ -349,7 +349,7 @@ where
             };
 
             if peer.request_tx.try_send(req).is_ok() {
-                self.inflight_requests.push(GetPooledTxRequestFut::new(peer_id,  rx ))
+                self.inflight_requests.push(GetPooledTxRequestFut::new(peer_id, rx))
             } else {
                 // peer channel is saturated, drop the request
                 self.metrics.egress_peer_channel_full.increment(1);
@@ -575,7 +575,9 @@ where
 
         // Advance all requests.
         // We remove each request one by one and add them back.
-        while let Poll::Ready(Some(GetPooledTxResponse { peer_id, result })) = this.inflight_requests.poll_next_unpin(cx) {
+        while let Poll::Ready(Some(GetPooledTxResponse { peer_id, result })) =
+            this.inflight_requests.poll_next_unpin(cx)
+        {
             match result {
                 Ok(Ok(txs)) => {
                     this.import_transactions(peer_id, txs.0, TransactionSource::Response);
@@ -768,9 +770,11 @@ struct GetPooledTxRequestFut {
 }
 
 impl GetPooledTxRequestFut {
-    fn new( peer_id: PeerId,
-            response: oneshot::Receiver<RequestResult<PooledTransactions>>) -> Self {
-        Self { inner: Some(GetPooledTxRequest { peer_id, response } ) }
+    fn new(
+        peer_id: PeerId,
+        response: oneshot::Receiver<RequestResult<PooledTransactions>>,
+    ) -> Self {
+        Self { inner: Some(GetPooledTxRequest { peer_id, response }) }
     }
 }
 
