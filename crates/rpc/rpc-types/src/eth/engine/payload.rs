@@ -5,7 +5,7 @@ use reth_primitives::{
     H256, H64, U256, U64,
 };
 use reth_rlp::Decodable;
-use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
+use serde::{de::Error, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 
 /// The execution payload body response that allows for `null` values.
 pub type ExecutionPayloadBodiesV1 = Vec<Option<ExecutionPayloadBodyV1>>;
@@ -269,6 +269,18 @@ impl From<Block> for ExecutionPayloadBodyV1 {
     }
 }
 
+fn from_hex<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: &str = Deserialize::deserialize(deserializer)?;
+    // do better hex decoding than this
+    Ok(match u64::from_str_radix(&s[2..], 16) {
+        Ok(n) => Some(n),
+        Err(_) => None,
+    })
+}
+
 /// This structure contains the attributes required to initiate a payload build process in the
 /// context of an `engine_forkchoiceUpdated` call.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -298,7 +310,7 @@ pub struct PayloadAttributes {
     pub no_tx_pool: Option<bool>,
     /// If set, this sets the exact gas limit the block produced with.
     #[cfg(feature = "optimism")]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "from_hex")]
     pub gas_limit: Option<u64>,
 }
 
