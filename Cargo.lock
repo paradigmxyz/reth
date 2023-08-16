@@ -723,7 +723,7 @@ dependencies = [
 [[package]]
 name = "boa_ast"
 version = "0.17.0"
-source = "git+https://github.com/boa-dev/boa#a3b46545a2a09f9ac81fd83ac6b180934c728f61"
+source = "git+https://github.com/boa-dev/boa#06bb71aa50e7163f6b38767190ba30177086685f"
 dependencies = [
  "bitflags 2.4.0",
  "boa_interner",
@@ -736,7 +736,7 @@ dependencies = [
 [[package]]
 name = "boa_engine"
 version = "0.17.0"
-source = "git+https://github.com/boa-dev/boa#a3b46545a2a09f9ac81fd83ac6b180934c728f61"
+source = "git+https://github.com/boa-dev/boa#06bb71aa50e7163f6b38767190ba30177086685f"
 dependencies = [
  "bitflags 2.4.0",
  "boa_ast",
@@ -755,7 +755,7 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "num-traits",
- "num_enum",
+ "num_enum 0.7.0",
  "once_cell",
  "pollster",
  "rand 0.8.5",
@@ -774,7 +774,7 @@ dependencies = [
 [[package]]
 name = "boa_gc"
 version = "0.17.0"
-source = "git+https://github.com/boa-dev/boa#a3b46545a2a09f9ac81fd83ac6b180934c728f61"
+source = "git+https://github.com/boa-dev/boa#06bb71aa50e7163f6b38767190ba30177086685f"
 dependencies = [
  "boa_macros",
  "boa_profiler",
@@ -785,7 +785,7 @@ dependencies = [
 [[package]]
 name = "boa_icu_provider"
 version = "0.17.0"
-source = "git+https://github.com/boa-dev/boa#a3b46545a2a09f9ac81fd83ac6b180934c728f61"
+source = "git+https://github.com/boa-dev/boa#06bb71aa50e7163f6b38767190ba30177086685f"
 dependencies = [
  "icu_collections",
  "icu_normalizer",
@@ -798,7 +798,7 @@ dependencies = [
 [[package]]
 name = "boa_interner"
 version = "0.17.0"
-source = "git+https://github.com/boa-dev/boa#a3b46545a2a09f9ac81fd83ac6b180934c728f61"
+source = "git+https://github.com/boa-dev/boa#06bb71aa50e7163f6b38767190ba30177086685f"
 dependencies = [
  "boa_gc",
  "boa_macros",
@@ -813,7 +813,7 @@ dependencies = [
 [[package]]
 name = "boa_macros"
 version = "0.17.0"
-source = "git+https://github.com/boa-dev/boa#a3b46545a2a09f9ac81fd83ac6b180934c728f61"
+source = "git+https://github.com/boa-dev/boa#06bb71aa50e7163f6b38767190ba30177086685f"
 dependencies = [
  "proc-macro2 1.0.66",
  "quote 1.0.32",
@@ -824,7 +824,7 @@ dependencies = [
 [[package]]
 name = "boa_parser"
 version = "0.17.0"
-source = "git+https://github.com/boa-dev/boa#a3b46545a2a09f9ac81fd83ac6b180934c728f61"
+source = "git+https://github.com/boa-dev/boa#06bb71aa50e7163f6b38767190ba30177086685f"
 dependencies = [
  "bitflags 2.4.0",
  "boa_ast",
@@ -844,7 +844,16 @@ dependencies = [
 [[package]]
 name = "boa_profiler"
 version = "0.17.0"
-source = "git+https://github.com/boa-dev/boa#a3b46545a2a09f9ac81fd83ac6b180934c728f61"
+source = "git+https://github.com/boa-dev/boa#06bb71aa50e7163f6b38767190ba30177086685f"
+
+[[package]]
+name = "boyer-moore-magiclen"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c77eb6b3a37f71fcd40e49b56c028ea8795c0e550afd8021e3e6a2369653035"
+dependencies = [
+ "debug-helper",
+]
 
 [[package]]
 name = "brotli"
@@ -1605,6 +1614,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2e66c9d817f1720209181c316d28635c050fa304f9c79e47a520882661b7308"
 
 [[package]]
+name = "debug-helper"
+version = "0.3.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f578e8e2c440e7297e008bb5486a3a8a194775224bbc23729b0dbdfaeebf162e"
+
+[[package]]
 name = "debugid"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2250,7 +2265,7 @@ dependencies = [
  "generic-array",
  "hex",
  "k256",
- "num_enum",
+ "num_enum 0.6.1",
  "once_cell",
  "open-fastrlp",
  "rand 0.8.5",
@@ -4230,7 +4245,16 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a015b430d3c108a207fd776d2e2196aaf8b1cf8cf93253e3a097ff3085076a1"
 dependencies = [
- "num_enum_derive",
+ "num_enum_derive 0.6.1",
+]
+
+[[package]]
+name = "num_enum"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70bf6736f74634d299d00086f02986875b3c2d924781a6a2cb6c201e73da0ceb"
+dependencies = [
+ "num_enum_derive 0.7.0",
 ]
 
 [[package]]
@@ -4238,6 +4262,18 @@ name = "num_enum_derive"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96667db765a921f7b295ffee8b60472b686a51d4f21c2ee4ffdb94c7013b65a6"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2 1.0.66",
+ "quote 1.0.32",
+ "syn 2.0.28",
+]
+
+[[package]]
+name = "num_enum_derive"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56ea360eafe1022f7cc56cd7b869ed57330fb2453d0c7831d99b74c65d2f5597"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2 1.0.66",
@@ -5202,6 +5238,7 @@ name = "reth"
 version = "0.1.0-alpha.6"
 dependencies = [
  "backon",
+ "boyer-moore-magiclen",
  "clap",
  "comfy-table",
  "confy",
@@ -5442,6 +5479,7 @@ dependencies = [
  "enr 0.8.1",
  "generic-array",
  "hex",
+ "parking_lot 0.12.1",
  "rand 0.8.5",
  "reth-net-common",
  "reth-net-nat",
@@ -5801,6 +5839,7 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
+ "rayon",
  "reth-codecs",
  "reth-rlp",
  "reth-rlp-derive",
@@ -6148,7 +6187,7 @@ dependencies = [
  "assert_matches",
  "async-trait",
  "auto_impl",
- "bitflags 1.3.2",
+ "bitflags 2.4.0",
  "criterion",
  "fnv",
  "futures-util",
@@ -7394,18 +7433,18 @@ checksum = "aac81b6fd6beb5884b0cf3321b8117e6e5d47ecb6fc89f414cfdcca8b2fe2dd8"
 
 [[package]]
 name = "thiserror"
-version = "1.0.44"
+version = "1.0.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "611040a08a0439f8248d1990b111c95baa9c704c805fa1f62104b39655fd7f90"
+checksum = "d9207952ae1a003f42d3d5e892dac3c6ba42aa6ac0c79a6a91a2b5cb4253e75c"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.44"
+version = "1.0.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "090198534930841fab3a5d1bb637cde49e339654e606195f8d9c76eeb081dc96"
+checksum = "f1728216d3244de4f14f14f8c15c79be1a7c67867d28d69b719690e2a19fb445"
 dependencies = [
  "proc-macro2 1.0.66",
  "quote 1.0.32",

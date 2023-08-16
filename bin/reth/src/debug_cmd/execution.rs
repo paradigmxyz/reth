@@ -141,7 +141,7 @@ impl Command {
                         .clean_threshold
                         .max(stage_conf.account_hashing.clean_threshold)
                         .max(stage_conf.storage_hashing.clean_threshold),
-                    config.prune.map(|prune| prune.parts).unwrap_or_default(),
+                    config.prune.as_ref().map(|prune| prune.parts.clone()).unwrap_or_default(),
                 )),
             )
             .build(db, self.chain.clone());
