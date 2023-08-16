@@ -207,7 +207,7 @@ impl<'a> EVMProcessor<'a> {
         // perf: do not execute empty blocks
         if block.body.is_empty() {
             self.receipts.push(Vec::new());
-            return Ok(0);
+            return Ok(0)
         }
         let senders = self.recover_senders(&block.body, senders)?;
 
@@ -225,7 +225,7 @@ impl<'a> EVMProcessor<'a> {
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into());
+                .into())
             }
             // Execute transaction.
             let ResultAndState { result, state } = self.transact(transaction, sender)?;
@@ -287,7 +287,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                     })
                     .unwrap_or_default(),
             }
-            .into());
+            .into())
         }
         let time = Instant::now();
         self.post_execution_state_change(block, total_difficulty)?;
@@ -329,7 +329,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                     e,
                     self.receipts.last().unwrap()
                 );
-                return Err(e);
+                return Err(e)
             };
             self.stats.receipt_root_duration += time.elapsed();
         }
@@ -361,7 +361,7 @@ pub fn verify_receipt<'a>(
             got: receipts_root,
             expected: expected_receipts_root,
         }
-        .into());
+        .into())
     }
 
     // Create header log bloom.
@@ -371,7 +371,7 @@ pub fn verify_receipt<'a>(
             expected: Box::new(expected_logs_bloom),
             got: Box::new(logs_bloom),
         }
-        .into());
+        .into())
     }
 
     Ok(())
