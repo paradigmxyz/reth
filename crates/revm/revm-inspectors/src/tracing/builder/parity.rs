@@ -375,11 +375,11 @@ impl ParityTraceBuilder {
             push: {
                 let step_op = step.op.u8();
                 let show_stack: usize;
-                if step_op >= opcode::PUSH0 && step_op <= opcode::PUSH32 {
+                if (opcode::PUSH0..=opcode::PUSH32).contains(&step_op) {
                     show_stack = 1;
-                } else if step_op >= opcode::SWAP1 && step_op <= opcode::SWAP16 {
+                } else if (opcode::SWAP1..=opcode::SWAP16).contains(&step_op) {
                     show_stack = (step_op - opcode::SWAP1) as usize + 2;
-                } else if step_op >= opcode::DUP1 && step_op <= opcode::DUP16 {
+                } else if (opcode::DUP1..=opcode::DUP16).contains(&step_op) {
                     show_stack = (step_op - opcode::DUP1) as usize + 2;
                 } else {
                     show_stack = match step_op {
