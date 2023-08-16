@@ -335,6 +335,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             transaction_pool.clone(),
             ctx.task_executor.clone(),
             Arc::clone(&self.chain),
+            #[cfg(feature = "optimism")]
+            self.rollup.compute_pending_block,
         )?;
 
         let max_block = if let Some(block) = self.debug.max_block {

@@ -72,8 +72,8 @@ pub struct NetworkConfig<C> {
     pub status: Status,
     /// Sets the hello message for the p2p handshake in RLPx
     pub hello_message: HelloMessage,
-    #[cfg(feature = "optimism")]
     /// The sequencer HTTP endpoint, if provided via CLI flag
+    #[cfg(feature = "optimism")]
     pub sequencer_endpoint: Option<String>,
     /// Whether to disable transaction gossip
     #[cfg(feature = "optimism")]
@@ -155,8 +155,8 @@ pub struct NetworkConfigBuilder {
     hello_message: Option<HelloMessage>,
     /// Head used to start set for the fork filter and status.
     head: Option<Head>,
-    #[cfg(feature = "optimism")]
     /// The sequencer HTTP endpoint, if provided via CLI flag
+    #[cfg(feature = "optimism")]
     sequencer_endpoint: Option<String>,
     /// Whether tx gossip is disabled
     #[cfg(feature = "optimism")]
@@ -359,8 +359,8 @@ impl NetworkConfigBuilder {
         }
     }
 
-    #[cfg(feature = "optimism")]
     /// Sets the sequencer HTTP endpoint.
+    #[cfg(feature = "optimism")]
     pub fn sequencer_endpoint(mut self, endpoint: Option<String>) -> Self {
         self.sequencer_endpoint = endpoint;
         self

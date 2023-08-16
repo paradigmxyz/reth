@@ -26,8 +26,8 @@ use reth_primitives::{
         BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
         ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
     },
-    proofs, Block, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
-    SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
+    proofs, Block, BlockNumberOrTag, ChainSpec, Hardfork, Header, IntoRecoveredTransaction,
+    Receipt, SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
 };
 use reth_provider::{BlockReaderIdExt, BlockSource, PostState, StateProviderFactory};
 use reth_revm::{
@@ -60,8 +60,13 @@ use tracing::{debug, trace};
 
 mod metrics;
 
+#[cfg(feature = "optimism")]
+mod optimism;
+#[cfg(feature = "optimism")]
+pub use optimism::OptimismPayloadBuilder;
+
 /// The [PayloadJobGenerator] that creates [BasicPayloadJob]s.
-pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder = ()> {
+pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
     /// The client that can interact with the chain.
     client: Client,
     /// txpool
@@ -82,7 +87,7 @@ pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder = ()> {
 
 // === impl BasicPayloadJobGenerator ===
 
-impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
+impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
     /// Creates a new [BasicPayloadJobGenerator] with the given config.
     pub fn new(
         client: Client,
@@ -90,8 +95,9 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
         executor: Tasks,
         config: BasicPayloadJobGeneratorConfig,
         chain_spec: Arc<ChainSpec>,
+        builder: Builder,
     ) -> Self {
-        BasicPayloadJobGenerator::with_builder(client, pool, executor, config, chain_spec, ())
+        BasicPayloadJobGenerator::with_builder(client, pool, executor, config, chain_spec, builder)
     }
 }
 
@@ -160,6 +166,8 @@ where
             extra_data: self.config.extradata.clone(),
             attributes,
             chain_spec: Arc::clone(&self.chain_spec),
+            #[cfg(feature = "optimism")]
+            compute_pending_block: self.config.compute_pending_block,
         };
 
         let until = tokio::time::Instant::now() + self.config.deadline;
@@ -207,6 +215,9 @@ pub struct BasicPayloadJobGeneratorConfig {
     deadline: Duration,
     /// Maximum number of tasks to spawn for building a payload.
     max_payload_tasks: usize,
+    /// The rollup's compute pending block configuration option.
+    #[cfg(feature = "optimism")]
+    compute_pending_block: bool,
 }
 
 // === impl BasicPayloadJobGeneratorConfig ===
@@ -250,6 +261,15 @@ impl BasicPayloadJobGeneratorConfig {
         self.max_gas_limit = max_gas_limit;
         self
     }
+
+    /// Sets the compute pending block configuration option.
+    ///
+    /// Defaults to `false`.
+    #[cfg(feature = "optimism")]
+    pub fn compute_pending_block(mut self, compute_pending_block: bool) -> Self {
+        self.compute_pending_block = compute_pending_block;
+        self
+    }
 }
 
 impl Default for BasicPayloadJobGeneratorConfig {
@@ -263,6 +283,8 @@ impl Default for BasicPayloadJobGeneratorConfig {
             // 12s slot time
             deadline: SLOT_DURATION,
             max_payload_tasks: 3,
+            #[cfg(feature = "optimism")]
+            compute_pending_block: false,
         }
     }
 }
@@ -348,7 +370,16 @@ where
                     let result = builder.try_build(args);
                     let _ = tx.send(result);
                 }));
-                this.pending_block = Some(PendingPayload { _cancel, payload: rx });
+
+                #[cfg(not(feature = "optimism"))]
+                {
+                    this.pending_block = Some(PendingPayload { _cancel, payload: rx });
+                }
+
+                #[cfg(feature = "optimism")]
+                if this.config.compute_pending_block {
+                    this.pending_block = Some(PendingPayload { _cancel, payload: rx });
+                }
             }
         }
 
@@ -379,7 +410,15 @@ where
                     this.metrics.inc_failed_payload_builds();
                 }
                 Poll::Pending => {
-                    this.pending_block = Some(fut);
+                    #[cfg(not(feature = "optimism"))]
+                    {
+                        this.pending_block = Some(fut);
+                    }
+
+                    #[cfg(feature = "optimism")]
+                    if this.config.compute_pending_block {
+                        this.pending_block = Some(fut);
+                    }
                 }
             }
         }
@@ -542,6 +581,20 @@ struct PayloadConfig {
     attributes: PayloadBuilderAttributes,
     /// The chain spec.
     chain_spec: Arc<ChainSpec>,
+    /// The rollup's compute pending block configuration option.
+    #[cfg(feature = "optimism")]
+    compute_pending_block: bool,
+}
+
+impl PayloadConfig {
+    /// Returns an owned instance of the [PayloadConfig]'s extra_data bytes.
+    pub(crate) fn extra_data(&self) -> reth_primitives::Bytes {
+        #[cfg(feature = "optimism")]
+        if self.chain_spec.optimism {
+            Default::default()
+        }
+        reth_primitives::Bytes(self.extra_data.clone())
+    }
 }
 
 /// The possible outcomes of a payload building attempt.
@@ -635,13 +688,14 @@ where
 {
     let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
 
+    let extra_data = config.extra_data();
     let PayloadConfig {
         initialized_block_env,
         initialized_cfg,
         parent_block,
-        extra_data,
         attributes,
         chain_spec,
+        ..
     } = config;
 
     debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number, "building new payload");
@@ -784,7 +838,7 @@ where
         gas_limit: block_gas_limit,
         difficulty: U256::ZERO,
         gas_used: cumulative_gas_used,
-        extra_data: extra_data.into(),
+        extra_data,
         blob_gas_used: None,
         excess_blob_gas: None,
     };
@@ -807,14 +861,8 @@ fn build_empty_payload<Client>(
 where
     Client: StateProviderFactory,
 {
-    let PayloadConfig {
-        initialized_block_env,
-        parent_block,
-        extra_data,
-        attributes,
-        chain_spec,
-        ..
-    } = config;
+    let extra_data = config.extra_data();
+    let PayloadConfig { initialized_block_env, parent_block, attributes, chain_spec, .. } = config;
 
     debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number,  "building empty payload");
 
@@ -857,7 +905,7 @@ where
         gas_used: 0,
         blob_gas_used: None,
         excess_blob_gas: None,
-        extra_data: extra_data.into(),
+        extra_data,
     };
 
     let block = Block { header, body: vec![], ommers: vec![], withdrawals };

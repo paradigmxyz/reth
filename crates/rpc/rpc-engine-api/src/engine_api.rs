@@ -107,7 +107,13 @@ where
                 attrs.timestamp.as_u64(),
                 attrs.withdrawals.is_some(),
             )?;
+
+            #[cfg(feature = "optimism")]
+            if attrs.gas_limit.is_none() && self.inner.chain_spec.optimism {
+                return Err(EngineApiError::MissingGasLimitInPayloadAttributes)
+            }
         }
+
         Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
     }
 

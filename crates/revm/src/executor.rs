@@ -322,7 +322,11 @@ where
                             success: false,
                             cumulative_gas_used,
                             logs: vec![],
-                            deposit_nonce: None,
+                            // Deposit nonces are only recorded after Regolith
+                            deposit_nonce: self
+                                .chain_spec
+                                .is_fork_active_at_timestamp(Hardfork::Regolith, block.timestamp)
+                                .then_some(old_sender_info.nonce),
                         },
                     );
                     continue
@@ -378,23 +382,18 @@ where
                         success: result.is_success(),
                         cumulative_gas_used,
                         logs,
-                        deposit_nonce: None,
+                        // Deposit nonce is only recorded after Regolith for deposit transactions.
+                        deposit_nonce: (self
+                            .chain_spec
+                            .is_fork_active_at_timestamp(Hardfork::Regolith, block.timestamp) &&
+                            transaction.is_deposit())
+                        .then_some(old_sender_info.nonce),
                     },
                 );
             }
 
             #[cfg(not(feature = "optimism"))]
             {
-                // The sum of the transaction’s gas limit, Tg, and the gas utilised in this block
-                // prior, must be no greater than the block’s gasLimit.
-                let block_available_gas = block.header.gas_limit - cumulative_gas_used;
-                if transaction.gas_limit() > block_available_gas {
-                    return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                        transaction_gas_limit: transaction.gas_limit(),
-                        block_available_gas,
-                    }
-                    .into())
-                }
                 // Execute transaction.
                 let ResultAndState { result, state } = self.transact(transaction, sender)?;
 

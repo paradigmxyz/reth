@@ -73,6 +73,7 @@ pub trait RethNodeCommandExt: fmt::Debug + clap::Args {
         pool: Pool,
         executor: Tasks,
         chain_spec: Arc<ChainSpec>,
+        #[cfg(feature = "optimism")] compute_pending_block: bool,
     ) -> eyre::Result<PayloadBuilderHandle>
     where
         Conf: PayloadBuilderConfig,
@@ -80,17 +81,31 @@ pub trait RethNodeCommandExt: fmt::Debug + clap::Args {
         Pool: TransactionPool + Unpin + 'static,
         Tasks: TaskSpawner + Clone + Unpin + 'static,
     {
+        let payload_job_config = BasicPayloadJobGeneratorConfig::default()
+            .interval(conf.interval())
+            .deadline(conf.deadline())
+            .max_payload_tasks(conf.max_payload_tasks())
+            .extradata(conf.extradata_rlp_bytes())
+            .max_gas_limit(conf.max_gas_limit());
+
+        #[cfg(feature = "optimism")]
+        let payload_job_config = payload_job_config.compute_pending_block(compute_pending_block);
+
+        // The default payload builder is implemented on the unit type.
+        #[cfg(not(feature = "optimism"))]
+        let payload_builder = ();
+
+        // Optimism's payload builder is impelmented on the OptimismPayloadBuilder type.
+        #[cfg(feature = "optimism")]
+        let payload_builder = reth_basic_payload_builder::OptimismPayloadBuilder;
+
         let payload_generator = BasicPayloadJobGenerator::new(
             provider,
             pool,
             executor.clone(),
-            BasicPayloadJobGeneratorConfig::default()
-                .interval(conf.interval())
-                .deadline(conf.deadline())
-                .max_payload_tasks(conf.max_payload_tasks())
-                .extradata(conf.extradata_rlp_bytes())
-                .max_gas_limit(conf.max_gas_limit()),
+            payload_job_config,
             chain_spec,
+            payload_builder,
         );
         let (payload_service, payload_builder) = PayloadBuilderService::new(payload_generator);
 
