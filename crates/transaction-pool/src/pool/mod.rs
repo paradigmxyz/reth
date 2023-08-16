@@ -612,7 +612,7 @@ pub struct AddedPendingTransaction<T: PoolTransaction> {
 
 impl<T: PoolTransaction> AddedPendingTransaction<T> {
     /// Returns all transactions that were promoted to the pending pool
-    pub(crate) fn pending_transactions(&self) -> impl Iterator<Item = H256> +'_ {
+    pub(crate) fn pending_transactions(&self) -> impl Iterator<Item = H256> + '_ {
         std::iter::once(self.transaction.hash()).chain(self.promoted.iter()).copied()
     }
 
