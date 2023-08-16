@@ -1320,10 +1320,9 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
     }
 }
 
-/// A response to [`GetPooledTransactions`]. This can include either a blob transaction, or a
+/// A response to `GetPooledTransactions`. This can include either a blob transaction, or a
 /// non-4844 signed transaction.
-// TODO: redo arbitrary for this encoding - the previous encoding was incorrect. then this can be
-// replaced with `TransactionSigned` in `PooledTransactions`
+// TODO: redo arbitrary for this encoding - the previous encoding was incorrect
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PooledTransactionsElement {
     /// A blob transaction, which includes the transaction, blob data, commitments, and proofs.

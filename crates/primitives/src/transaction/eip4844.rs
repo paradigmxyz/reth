@@ -174,11 +174,11 @@ impl From<kzg::Error> for BlobTransactionValidationError {
     }
 }
 
-/// A response to [`GetPooledTransactions`] that includes blob data, their commitments, and their
+/// A response to `GetPooledTransactions` that includes blob data, their commitments, and their
 /// corresponding proofs.
 ///
 /// This is defined in [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#networking) as an element
-/// of a [PooledTransactions] response.
+/// of a `PooledTransactions` response.
 ///
 /// NOTE: This contains a [TransactionSigned], which could be a non-4844 transaction type, even
 /// though that would not make sense. This type is meant to be constructed using decoding methods,
@@ -415,7 +415,7 @@ impl BlobTransaction {
 
         // # Calculating the hash
         //
-        // The full encoding of the [PooledTransaction] response is:
+        // The full encoding of the `PooledTransaction` response is:
         // `tx_type (0x03) || rlp([tx_payload_body, blobs, commitments, proofs])`
         //
         // The transaction hash however, is:
@@ -427,7 +427,7 @@ impl BlobTransaction {
         // Because the pooled transaction encoding is different than the hash encoding for
         // EIP-4844 transactions, we do not use the original buffer to calculate the hash.
         //
-        // Instead, we use [TransactionSignedNoHash] which will encode the transaction internally.
+        // Instead, we use `TransactionSignedNoHash` which will encode the transaction internally.
         let signed_tx = tx_no_hash.with_hash();
 
         Ok(Self { transaction: signed_tx, sidecar })
