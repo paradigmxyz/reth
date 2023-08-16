@@ -3,7 +3,7 @@ use crate::{
     constants::eip4844::DATA_GAS_PER_BLOB,
     kzg::{
         self, Blob, Bytes48, KzgCommitment, KzgProof, KzgSettings, BYTES_PER_BLOB,
-        BYTES_PER_COMMITMENT, BYTES_PER_FIELD_ELEMENT, BYTES_PER_PROOF, FIELD_ELEMENTS_PER_BLOB,
+        BYTES_PER_COMMITMENT, BYTES_PER_PROOF,
     },
     kzg_to_versioned_hash, Bytes, ChainId, Signature, Transaction, TransactionKind,
     TransactionSigned, TransactionSignedNoHash, TxType, EIP4844_TX_TYPE_ID, H256,

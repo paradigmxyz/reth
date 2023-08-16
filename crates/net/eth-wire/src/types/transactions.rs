@@ -1,34 +1,11 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
-use std::ops::Deref;
 
-use bytes::{Buf, Bytes};
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{
-    kzg::{self, KzgCommitment, KzgProof, KzgSettings},
-    kzg_to_versioned_hash, BlobTransactionSidecar, PooledTransactionsElement, Signature,
-    Transaction, TransactionSigned, TransactionSignedNoHash, TxEip4844, TxType, EIP4844_TX_TYPE_ID,
-    H256,
-};
-use reth_rlp::{
-    Decodable, DecodeError, Encodable, Header, RlpDecodableWrapper, RlpEncodableWrapper,
-    EMPTY_LIST_CODE,
-};
+use reth_primitives::{PooledTransactionsElement, TransactionSigned, H256};
+use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-
-#[cfg(any(test, feature = "arbitrary"))]
-use proptest::{
-    arbitrary::{any as proptest_any, ParamsFor},
-    collection::vec as proptest_vec,
-    strategy::{BoxedStrategy, Strategy},
-};
-
-#[cfg(any(test, feature = "arbitrary"))]
-use reth_primitives::{
-    constants::eip4844::{FIELD_ELEMENTS_PER_BLOB, KZG_TRUSTED_SETUP},
-    kzg::{Blob, Bytes48, BYTES_PER_BLOB, BYTES_PER_FIELD_ELEMENT},
-};
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
 #[derive_arbitrary(rlp)]
