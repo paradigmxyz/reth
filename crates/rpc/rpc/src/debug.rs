@@ -420,8 +420,15 @@ where
                             &mut db,
                         )?;
 
-                        if bundles.peek().is_none() && transactions.peek().is_none() {
+                        // If there is more transactions, commit the database
+                        if transactions.peek().is_some() {
                             db.commit(state);
+                        } else {
+                            // If there is no transactions, but
+                            // more bundles, commit to the database too
+                            if bundles.peek().is_some() {
+                                db.commit(state);
+                            }
                         }
                         results.push(trace);
                     }
