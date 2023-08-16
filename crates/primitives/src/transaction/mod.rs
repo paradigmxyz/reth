@@ -1325,14 +1325,14 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
 // TODO: redo arbitrary for this encoding - the previous encoding was incorrect. then this can be
 // replaced with `TransactionSigned` in `PooledTransactions`
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PooledTransactionResponse {
+pub enum PooledTransactionsElement {
     /// A blob transaction, which includes the transaction, blob data, commitments, and proofs.
     BlobTransaction(BlobTransaction),
     /// A non-4844 signed transaction.
     Transaction(TransactionSigned),
 }
 
-impl PooledTransactionResponse {
+impl PooledTransactionsElement {
     /// Decodes the "raw" format of transaction (e.g. `eth_sendRawTransaction`).
     ///
     /// The raw transaction is either a legacy transaction or EIP-2718 typed transaction
@@ -1372,12 +1372,12 @@ impl PooledTransactionResponse {
                 // Now, we decode the inner blob transaction:
                 // `rlp([[chain_id, nonce, ...], blobs, commitments, proofs])`
                 let blob_tx = BlobTransaction::decode_inner(&mut data)?;
-                Ok(PooledTransactionResponse::BlobTransaction(blob_tx))
+                Ok(PooledTransactionsElement::BlobTransaction(blob_tx))
             } else {
                 // DO NOT advance the buffer for the type, since we want the enveloped decoding to
                 // decode it again and advance the buffer on its own.
                 let typed_tx = TransactionSigned::decode_enveloped_typed_transaction(&mut data)?;
-                Ok(PooledTransactionResponse::Transaction(typed_tx))
+                Ok(PooledTransactionsElement::Transaction(typed_tx))
             }
         }
     }
@@ -1391,7 +1391,7 @@ impl PooledTransactionResponse {
     }
 }
 
-impl Encodable for PooledTransactionResponse {
+impl Encodable for PooledTransactionsElement {
     /// Encodes an enveloped post EIP-4844 [PooledTransactionResponse].
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
@@ -1416,7 +1416,7 @@ impl Encodable for PooledTransactionResponse {
     }
 }
 
-impl Decodable for PooledTransactionResponse {
+impl Decodable for PooledTransactionsElement {
     /// Decodes an enveloped post EIP-4844 [PooledTransactionResponse].
     ///
     /// CAUTION: this expects that `buf` is `[id, rlp(tx)]`
@@ -1453,7 +1453,7 @@ impl Decodable for PooledTransactionResponse {
             // buffer
             *buf = original_encoding;
 
-            Ok(PooledTransactionResponse::Transaction(legacy_tx))
+            Ok(PooledTransactionsElement::Transaction(legacy_tx))
         } else {
             // decode the type byte, only decode BlobTransaction if it is a 4844 transaction
             let tx_type = *buf.first().ok_or(DecodeError::InputTooShort)?;
@@ -1474,18 +1474,18 @@ impl Decodable for PooledTransactionResponse {
                 // Now, we decode the inner blob transaction:
                 // `rlp([[chain_id, nonce, ...], blobs, commitments, proofs])`
                 let blob_tx = BlobTransaction::decode_inner(buf)?;
-                Ok(PooledTransactionResponse::BlobTransaction(blob_tx))
+                Ok(PooledTransactionsElement::BlobTransaction(blob_tx))
             } else {
                 // DO NOT advance the buffer for the type, since we want the enveloped decoding to
                 // decode it again and advance the buffer on its own.
                 let typed_tx = TransactionSigned::decode_enveloped_typed_transaction(buf)?;
-                Ok(PooledTransactionResponse::Transaction(typed_tx))
+                Ok(PooledTransactionsElement::Transaction(typed_tx))
             }
         }
     }
 }
 
-impl From<TransactionSigned> for PooledTransactionResponse {
+impl From<TransactionSigned> for PooledTransactionsElement {
     /// Converts from a [TransactionSigned] to a [PooledTransactionResponse].
     ///
     /// NOTE: This will always return a [PooledTransactionResponse::Transaction] variant.

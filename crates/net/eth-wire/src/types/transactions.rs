@@ -5,7 +5,7 @@ use bytes::{Buf, Bytes};
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{
     kzg::{self, KzgCommitment, KzgProof, KzgSettings},
-    kzg_to_versioned_hash, BlobTransactionSidecar, PooledTransactionResponse, Signature,
+    kzg_to_versioned_hash, BlobTransactionSidecar, PooledTransactionsElement, Signature,
     Transaction, TransactionSigned, TransactionSignedNoHash, TxEip4844, TxType, EIP4844_TX_TYPE_ID,
     H256,
 };
@@ -60,7 +60,7 @@ where
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PooledTransactions(
     /// The transaction bodies, each of which should correspond to a requested hash.
-    pub Vec<PooledTransactionResponse>,
+    pub Vec<PooledTransactionsElement>,
 );
 
 impl From<Vec<TransactionSigned>> for PooledTransactions {
