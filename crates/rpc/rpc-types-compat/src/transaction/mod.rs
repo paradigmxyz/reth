@@ -123,5 +123,12 @@ fn fill(
         block_hash,
         block_number: block_number.map(U256::from),
         transaction_index,
+
+        #[cfg(feature = "optimism")]
+        source_hash: signed_tx.is_deposit().then_some(signed_tx.source_hash()),
+        #[cfg(feature = "optimism")]
+        mint: signed_tx.mint(),
+        #[cfg(feature = "optimism")]
+        is_system_tx: signed_tx.is_deposit().then_some(signed_tx.is_system_transaction()),
     }
 }

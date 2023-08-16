@@ -26,8 +26,8 @@ use reth_primitives::{
         BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
         ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
     },
-    proofs, Block, BlockNumberOrTag, ChainSpec, Hardfork, Header, IntoRecoveredTransaction,
-    Receipt, SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
+    proofs, Block, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
+    SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
 };
 use reth_provider::{BlockReaderIdExt, BlockSource, PostState, StateProviderFactory};
 use reth_revm::{

@@ -899,6 +899,8 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         state_root: None,
         logs_bloom: receipt.bloom_slow(),
         status_code: if receipt.success { Some(U64::from(1)) } else { Some(U64::from(0)) },
+        #[cfg(feature = "optimism")]
+        deposit_nonce: receipt.deposit_nonce,
     };
 
     match tx.transaction.kind() {
