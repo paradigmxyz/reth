@@ -2,7 +2,7 @@ bitflags::bitflags! {
     /// Marker to represents the current state of a transaction in the pool and from which the corresponding sub-pool is derived, depending on what bits are set.
     ///
     /// This mirrors [erigon's ephemeral state field](https://github.com/ledgerwatch/erigon/wiki/Transaction-Pool-Design#ordering-function).
-    #[derive(Default)]
+     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
     pub(crate) struct TxState: u8 {
         /// Set to `1` if all ancestor transactions are pending.
         const NO_PARKED_ANCESTORS = 0b100000;
@@ -20,11 +20,11 @@ bitflags::bitflags! {
         /// Set to 1 if `feeCap` of the transaction meets the requirement of the pending block.
         const ENOUGH_FEE_CAP_BLOCK = 0b000010;
 
-        const PENDING_POOL_BITS = Self::NO_PARKED_ANCESTORS.bits | Self::NO_NONCE_GAPS.bits | Self::ENOUGH_BALANCE.bits | Self::NOT_TOO_MUCH_GAS.bits |  Self::ENOUGH_FEE_CAP_BLOCK.bits;
+        const PENDING_POOL_BITS = Self::NO_PARKED_ANCESTORS.bits()| Self::NO_NONCE_GAPS.bits() | Self::ENOUGH_BALANCE.bits() | Self::NOT_TOO_MUCH_GAS.bits() |  Self::ENOUGH_FEE_CAP_BLOCK.bits();
 
-        const BASE_FEE_POOL_BITS = Self::NO_PARKED_ANCESTORS.bits | Self::NO_NONCE_GAPS.bits | Self::ENOUGH_BALANCE.bits | Self::NOT_TOO_MUCH_GAS.bits;
+        const BASE_FEE_POOL_BITS = Self::NO_PARKED_ANCESTORS.bits() | Self::NO_NONCE_GAPS.bits() | Self::ENOUGH_BALANCE.bits() | Self::NOT_TOO_MUCH_GAS.bits();
 
-        const QUEUED_POOL_BITS  = Self::NO_PARKED_ANCESTORS.bits;
+        const QUEUED_POOL_BITS  = Self::NO_PARKED_ANCESTORS.bits();
 
     }
 }

@@ -8,7 +8,7 @@ use jsonrpsee::{
 use reth_primitives::{abi::decode_revert_reason, Address, Bytes, U256};
 use reth_revm::tracing::js::JsInspectorError;
 use reth_rpc_types::{error::EthRpcErrorCode, BlockError, CallInputError};
-use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolError};
+use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolError, PoolTransactionError};
 use revm::primitives::{EVMError, ExecutionResult, Halt, OutOfGasError};
 use std::time::Duration;
 
@@ -478,6 +478,9 @@ pub enum RpcPoolError {
     ExceedsMaxInitCodeSize,
     #[error(transparent)]
     Invalid(#[from] RpcInvalidTransactionError),
+    /// Custom pool error
+    #[error("{0:?}")]
+    PoolTransactionError(Box<dyn PoolTransactionError>),
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
@@ -515,6 +518,7 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             }
             InvalidPoolTransactionError::OversizedData(_, _) => RpcPoolError::OversizedData,
             InvalidPoolTransactionError::Underpriced => RpcPoolError::Underpriced,
+            InvalidPoolTransactionError::Other(err) => RpcPoolError::PoolTransactionError(err),
         }
     }
 }

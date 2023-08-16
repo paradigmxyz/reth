@@ -180,7 +180,7 @@ mod tests {
 
     use reth_db::{
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
-        table::Table,
+        table::{Table, TableRow},
         test_utils::create_test_rw_db,
         DatabaseEnv,
     };
@@ -193,7 +193,7 @@ mod tests {
     #[allow(clippy::type_complexity)]
     fn collect_table_entries<DB, T>(
         tx: &<DB as DatabaseGAT<'_>>::TX,
-    ) -> Result<Vec<(T::Key, T::Value)>, InitDatabaseError>
+    ) -> Result<Vec<TableRow<T>>, InitDatabaseError>
     where
         DB: Database,
         T: Table,

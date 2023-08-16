@@ -34,11 +34,6 @@ pub struct OnForkChoiceUpdated {
 // === impl OnForkChoiceUpdated ===
 
 impl OnForkChoiceUpdated {
-    /// Returns true if this update is valid
-    pub(crate) fn is_valid_update(&self) -> bool {
-        self.forkchoice_status.is_valid()
-    }
-
     /// Returns the determined status of the received ForkchoiceState.
     pub fn forkchoice_status(&self) -> ForkchoiceStatus {
         self.forkchoice_status

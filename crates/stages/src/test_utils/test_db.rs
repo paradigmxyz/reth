@@ -3,7 +3,7 @@ use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::DatabaseGAT,
     models::{AccountBeforeTx, StoredBlockBodyIndices},
-    table::Table,
+    table::{Table, TableRow},
     tables,
     test_utils::{create_test_rw_db, create_test_rw_db_with_path},
     transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
@@ -122,7 +122,7 @@ impl TestTransaction {
     where
         T: Table,
         S: Clone,
-        F: FnMut(&S) -> (T::Key, T::Value),
+        F: FnMut(&S) -> TableRow<T>,
     {
         self.commit(|tx| {
             values.iter().try_for_each(|src| {
@@ -147,7 +147,7 @@ impl TestTransaction {
         T: Table,
         <T as Table>::Value: Clone,
         S: Clone,
-        F: FnMut(&Option<<T as Table>::Value>, &S) -> (T::Key, T::Value),
+        F: FnMut(&Option<<T as Table>::Value>, &S) -> TableRow<T>,
     {
         self.commit(|tx| {
             let mut cursor = tx.cursor_write::<T>()?;
