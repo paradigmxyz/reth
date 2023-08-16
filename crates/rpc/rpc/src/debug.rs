@@ -657,7 +657,7 @@ where
         parts[0] = parts[0].trim();
         parts[1] = parts[1].trim();
 
-        if parts[0].len() == 0 || parts[1].len() == 0 {
+        if parts[0].is_empty() || parts[1].is_empty() {
             return Err(internal_rpc_err("Invalid location format".to_string()))
         }
         if !parts[0].ends_with(".rust") {
@@ -672,7 +672,7 @@ where
         *location_lock = location.to_string();
 
         let mut backtrace_enabled_lock = BACKTRACE_ENABLED.lock().unwrap();
-        *backtrace_enabled_lock = location.len() > 0;
+        *backtrace_enabled_lock = !location.is_empty();
 
         Ok(())
     }
