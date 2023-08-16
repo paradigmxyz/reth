@@ -8,7 +8,7 @@ pub type PoolResult<T> = Result<T, PoolError>;
 /// A trait for additional errors that can be thrown by the transaction pool.
 ///
 /// For example during validation
-/// [TransactionValidator::validate_transaction](crate::validate::ValidPoolTransaction::validate_transaction)
+/// [TransactionValidator::validate_transaction](crate::validate::TransactionValidator::validate_transaction)
 pub trait PoolTransactionError: std::error::Error + Send + Sync {
     /// Returns `true` if the error was caused by a transaction that is considered bad in the
     /// context of the transaction pool and warrants peer penalization.
