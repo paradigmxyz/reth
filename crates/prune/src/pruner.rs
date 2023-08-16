@@ -24,7 +24,12 @@ use tracing::{debug, instrument, trace};
 /// Result of [Pruner::run] execution
 pub type PrunerResult = Result<(), PrunerError>;
 
-type PrunerPartResult = Result<(usize, bool), PrunerError>;
+/// Result of prune part execution.
+///
+/// Returns:
+/// - [Option::Some] with number of rows pruned and if this is final block range
+/// - [Option::None] if there was nothing to prune
+type PrunerPartResult = Result<Option<(usize, bool)>, PrunerError>;
 
 /// The pipeline type itself with the result of [Pruner::run]
 pub type PrunerWithResult<DB> = (Pruner<DB>, PrunerResult);
@@ -199,7 +204,13 @@ impl<DB: Database> Pruner<DB> {
 
             let start = Instant::now();
             let rows;
-            (rows, done) = prune(&self, &provider, to_block, prune_mode)?;
+            (rows, done) = match prune(&self, &provider, to_block, prune_mode)? {
+                Some((rows, done)) => (rows, done),
+                None => {
+                    trace!(target: "pruner", part = %prune_part, "Nothing to prune");
+                    return Ok(())
+                }
+            };
             self.metrics
                 .get_prune_part_metrics(prune_part)
                 .duration_seconds
@@ -307,11 +318,8 @@ impl<DB: Database> Pruner<DB> {
                 to_block,
                 self.commit_thresholds.receipts,
             )? {
-            Some(range) => range,
-            None => {
-                trace!(target: "pruner", "No receipts to prune");
-                return Ok((0, true))
-            }
+            Some(result) => result,
+            None => return Ok(None),
         };
 
         let (_, rows) = provider.prune_table_with_range::<tables::Receipts>(range)?;
@@ -321,7 +329,7 @@ impl<DB: Database> Pruner<DB> {
             PruneCheckpoint { block_number: *block_range.end(), prune_mode },
         )?;
 
-        Ok((rows, is_final_range))
+        Ok(Some((rows, is_final_range)))
     }
 
     /// Prune transaction lookup entries up to the provided block, inclusive.
@@ -339,11 +347,8 @@ impl<DB: Database> Pruner<DB> {
                 to_block,
                 self.commit_thresholds.transaction_lookup,
             )? {
-            Some(range) => range,
-            None => {
-                trace!(target: "pruner", "No transaction lookup entries to prune");
-                return Ok((0, true))
-            }
+            Some(result) => result,
+            None => return Ok(None),
         };
 
         // Retrieve transactions in the range and calculate their hashes in parallel
@@ -371,7 +376,7 @@ impl<DB: Database> Pruner<DB> {
             PruneCheckpoint { block_number: *block_range.end(), prune_mode },
         )?;
 
-        Ok((rows, is_final_range))
+        Ok(Some((rows, is_final_range)))
     }
 
     /// Prune transaction senders up to the provided block, inclusive.
@@ -389,11 +394,8 @@ impl<DB: Database> Pruner<DB> {
                 to_block,
                 self.commit_thresholds.transaction_senders,
             )? {
-            Some(range) => range,
-            None => {
-                trace!(target: "pruner", "No transaction senders to prune");
-                return Ok((0, true))
-            }
+            Some(result) => result,
+            None => return Ok(None),
         };
 
         let (_, rows) = provider.prune_table_with_range::<tables::TxSenders>(range)?;
@@ -403,7 +405,7 @@ impl<DB: Database> Pruner<DB> {
             PruneCheckpoint { block_number: *block_range.end(), prune_mode },
         )?;
 
-        Ok((rows, is_final_range))
+        Ok(Some((rows, is_final_range)))
     }
 
     /// Prune account history up to the provided block, inclusive.
@@ -420,11 +422,8 @@ impl<DB: Database> Pruner<DB> {
             to_block,
             self.commit_thresholds.account_history,
         )? {
-            Some(range) => range,
-            None => {
-                trace!(target: "pruner", "No account history to prune");
-                return Ok((0, true))
-            }
+            Some(result) => result,
+            None => return Ok(None),
         };
 
         let (_, rows) =
@@ -442,7 +441,7 @@ impl<DB: Database> Pruner<DB> {
             PruneCheckpoint { block_number: *range.end(), prune_mode },
         )?;
 
-        Ok((rows, is_final_range))
+        Ok(Some((rows, is_final_range)))
     }
 
     /// Prune storage history up to the provided block, inclusive.
@@ -459,11 +458,8 @@ impl<DB: Database> Pruner<DB> {
             to_block,
             self.commit_thresholds.storage_history,
         )? {
-            Some(range) => range,
-            None => {
-                trace!(target: "pruner", "No storage history to prune");
-                return Ok((0, true))
-            }
+            Some(result) => result,
+            None => return Ok(None),
         };
 
         let (keys, _) = provider.prune_table_with_range::<tables::StorageChangeSet>(
@@ -482,7 +478,7 @@ impl<DB: Database> Pruner<DB> {
             PruneCheckpoint { block_number: *range.end(), prune_mode },
         )?;
 
-        Ok((keys, is_final_range))
+        Ok(Some((keys, is_final_range)))
     }
 
     /// Prune history indices up to the provided block, inclusive.
@@ -654,7 +650,7 @@ mod tests {
             let provider = tx.inner_rw();
             assert_eq!(
                 pruner.prune_receipts(&provider, to_block, prune_mode),
-                Ok((pruned, is_final_range))
+                Ok(Some((pruned, is_final_range)))
             );
             provider.commit().expect("commit");
 
@@ -721,7 +717,7 @@ mod tests {
             let provider = tx.inner_rw();
             assert_eq!(
                 pruner.prune_transaction_lookup(&provider, to_block, prune_mode),
-                Ok((pruned, is_final_range))
+                Ok(Some((pruned, is_final_range)))
             );
             provider.commit().expect("commit");
 
@@ -791,7 +787,7 @@ mod tests {
             let provider = tx.inner_rw();
             assert_eq!(
                 pruner.prune_transaction_senders(&provider, to_block, prune_mode),
-                Ok((pruned, is_final_range))
+                Ok(Some((pruned, is_final_range)))
             );
             provider.commit().expect("commit");
 
@@ -873,7 +869,7 @@ mod tests {
                 let provider = tx.inner_rw();
                 assert_eq!(
                     pruner.prune_account_history(&provider, to_block, prune_mode),
-                    Ok((changesets[pruned_blocks].iter().flatten().count(), is_final_range))
+                    Ok(Some((changesets[pruned_blocks].iter().flatten().count(), is_final_range)))
                 );
                 provider.commit().expect("commit");
 
@@ -973,14 +969,14 @@ mod tests {
             let provider = tx.inner_rw();
             assert_eq!(
                 pruner.prune_storage_history(&provider, to_block, prune_mode),
-                Ok((
+                Ok(Some((
                     changesets[pruned_blocks]
                         .iter()
                         .flatten()
                         .flat_map(|(_, _, entries)| entries)
                         .count(),
                     is_final_range
-                ))
+                )))
             );
             provider.commit().expect("commit");
 
