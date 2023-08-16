@@ -1,6 +1,7 @@
 use super::access_list::AccessList;
 use crate::{Bytes, ChainId, TransactionKind};
 use reth_codecs::{main_codec, Compact};
+use reth_rlp::{Decodable, DecodeError};
 use std::mem;
 
 /// Transaction with an [`AccessList`] ([EIP-2930](https://eips.ethereum.org/EIPS/eip-2930)).
@@ -63,6 +64,32 @@ impl TxEip2930 {
         mem::size_of::<u128>() + // value
         self.access_list.size() + // access_list
         self.input.len() // input
+    }
+
+    /// Decodes the inner [TxEip2930] fields from RLP bytes.
+    ///
+    /// NOTE: This assumes a RLP header has already been decoded, and _just_ decodes the following
+    /// RLP fields in the following order:
+    ///
+    /// - `chain_id`
+    /// - `nonce`
+    /// - `gas_price`
+    /// - `gas_limit`
+    /// - `to`
+    /// - `value`
+    /// - `data` (`input`)
+    /// - `access_list`
+    pub(crate) fn decode_inner(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        Ok(Self {
+            chain_id: Decodable::decode(buf)?,
+            nonce: Decodable::decode(buf)?,
+            gas_price: Decodable::decode(buf)?,
+            gas_limit: Decodable::decode(buf)?,
+            to: Decodable::decode(buf)?,
+            value: Decodable::decode(buf)?,
+            input: Bytes(Decodable::decode(buf)?),
+            access_list: Decodable::decode(buf)?,
+        })
     }
 }
 
