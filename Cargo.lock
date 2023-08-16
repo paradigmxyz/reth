@@ -2010,7 +2010,6 @@ dependencies = [
  "log",
  "rand 0.8.5",
  "rlp",
- "secp256k1",
  "serde",
  "sha3",
  "zeroize",
@@ -2030,6 +2029,7 @@ dependencies = [
  "log",
  "rand 0.8.5",
  "rlp",
+ "secp256k1",
  "serde",
  "serde-hex",
  "sha3",
@@ -5455,7 +5455,7 @@ name = "reth-discv4"
 version = "0.1.0-alpha.6"
 dependencies = [
  "discv5",
- "enr 0.8.1",
+ "enr 0.9.0",
  "generic-array",
  "hex",
  "rand 0.8.5",
@@ -5479,7 +5479,7 @@ version = "0.1.0-alpha.6"
 dependencies = [
  "async-trait",
  "data-encoding",
- "enr 0.8.1",
+ "enr 0.9.0",
  "linked_hash_set",
  "parking_lot 0.12.1",
  "reth-net-common",
@@ -5716,7 +5716,7 @@ dependencies = [
  "aquamarine",
  "async-trait",
  "auto_impl",
- "enr 0.8.1",
+ "enr 0.9.0",
  "ethers-core",
  "ethers-middleware",
  "ethers-providers",
