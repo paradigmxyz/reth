@@ -5,6 +5,18 @@ use reth_primitives::{Address, InvalidTransactionError, TxHash};
 /// Transaction pool result type.
 pub type PoolResult<T> = Result<T, PoolError>;
 
+/// A trait for additional errors that can be thrown by the transaction pool.
+///
+/// For example during validation
+/// [TransactionValidator::validate_transaction](crate::validate::TransactionValidator::validate_transaction)
+pub trait PoolTransactionError: std::error::Error + Send + Sync {
+    /// Returns `true` if the error was caused by a transaction that is considered bad in the
+    /// context of the transaction pool and warrants peer penalization.
+    ///
+    /// See [PoolError::is_bad_transaction].
+    fn is_bad_transaction(&self) -> bool;
+}
+
 /// All errors the Transaction pool can throw.
 #[derive(Debug, thiserror::Error)]
 pub enum PoolError {
@@ -105,7 +117,7 @@ impl PoolError {
 /// Represents errors that can happen when validating transactions for the pool
 ///
 /// See [TransactionValidator](crate::TransactionValidator).
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum InvalidPoolTransactionError {
     /// Hard consensus errors
     #[error(transparent)]
@@ -126,6 +138,9 @@ pub enum InvalidPoolTransactionError {
     /// Thrown if the transaction's fee is below the minimum fee
     #[error("transaction underpriced")]
     Underpriced,
+    /// Any other error that occurred while inserting/validating that is transaction specific
+    #[error("{0:?}")]
+    Other(Box<dyn PoolTransactionError>),
 }
 
 // === impl InvalidPoolTransactionError ===
@@ -178,6 +193,7 @@ impl InvalidPoolTransactionError {
                 // local setting
                 false
             }
+            InvalidPoolTransactionError::Other(err) => err.is_bad_transaction(),
         }
     }
 }
