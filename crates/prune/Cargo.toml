@@ -28,7 +28,3 @@ rayon.workspace = true
 # reth
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-stages = { path = "../stages", features = ["test-utils"] }
-
-# misc
-
-assert_matches = "1.5.0"

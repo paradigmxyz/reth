@@ -25,7 +25,7 @@ use reth_provider::{
     providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockExecutor, ExecutorFactory,
     ProviderFactory, StateProvider,
 };
-use reth_prune::{BatchSizes, Pruner};
+use reth_prune::{CommitThresholds, Pruner};
 use reth_revm::Factory;
 use reth_rpc_types::engine::{ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
 use reth_stages::{
@@ -470,7 +470,7 @@ where
             self.base_config.chain_spec.clone(),
             5,
             PruneModes::default(),
-            BatchSizes::default(),
+            CommitThresholds::default(),
         );
 
         let (mut engine, handle) = BeaconConsensusEngine::new(

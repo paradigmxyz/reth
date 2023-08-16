@@ -2,7 +2,7 @@ use reth_db::DatabaseError;
 use reth_provider::ProviderError;
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Eq, PartialEq)]
 pub enum PrunerError {
     #[error(transparent)]
     PrunePart(#[from] reth_primitives::PrunePartError),

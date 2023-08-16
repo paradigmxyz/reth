@@ -19,7 +19,7 @@ pub enum PrunePart {
 }
 
 /// PrunePart error type.
-#[derive(Debug, Error)]
+#[derive(Error, Debug, Eq, PartialEq)]
 pub enum PrunePartError {
     /// Invalid configuration of a prune part.
     #[error("The configuration provided for {0} is invalid.")]

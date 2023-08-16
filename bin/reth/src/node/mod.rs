@@ -51,7 +51,7 @@ use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
     HeaderProvider, ProviderFactory, StageCheckpointReader,
 };
-use reth_prune::BatchSizes;
+use reth_prune::CommitThresholds;
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
@@ -423,7 +423,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 self.chain.clone(),
                 prune_config.block_interval,
                 prune_config.parts,
-                BatchSizes::default(),
+                CommitThresholds::default(),
             )
         });
 
