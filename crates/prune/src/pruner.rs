@@ -246,7 +246,7 @@ impl<DB: Database> Pruner<DB> {
         prune_part: PrunePart,
         to_block: BlockNumber,
         limit: usize,
-    ) -> ResultWithDone<(RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)> {
+    ) -> ResultWithDone<(RangeInclusive<BlockNumber>, Option<RangeInclusive<TxNumber>>)> {
         let from_block = provider
             .get_prune_checkpoint(prune_part)?
             // Checkpoint exists, prune from the next block after the highest pruned one
@@ -254,27 +254,31 @@ impl<DB: Database> Pruner<DB> {
             // No checkpoint exists, prune from genesis
             .unwrap_or(0);
 
-        // Get first transaction
-        let from_tx_num = provider.block_body_indices(from_block)?.map(|body| body.first_tx_num);
-        // If no block body index is found, the DB is either corrupted or we've already pruned up to
-        // the latest block, so there's no thing to prune now.
-        let Some(from_tx_num) = from_tx_num else { return Ok(None) };
+        // Get first transaction. If no block body index is found, the DB is either corrupted or
+        // we've already pruned up to the latest block, so there's no thing to prune now.
+        let from_tx_num = match provider.block_body_indices(from_block)? {
+            Some(body) => body,
+            None => return Ok(None),
+        }
+        .first_tx_num;
 
         let block_range = from_block..=to_block.min(from_block + limit as u64 - 1);
+        // Get last transaction. If no block body index is found, the DB is either corrupted or
+        // we've already pruned up to the latest block, so there's no thing to prune now.
         let to_tx_num = match provider.block_body_indices(*block_range.end())? {
             Some(body) => body,
             None => return Ok(None),
         }
         .last_tx_num();
 
-        let range = from_tx_num..=to_tx_num;
-        if range.is_empty() {
-            return Ok(None)
-        }
-
         let is_final_range = *block_range.end() == to_block;
 
-        Ok(Some(((block_range, range), is_final_range)))
+        let range = from_tx_num..=to_tx_num;
+        if range.is_empty() {
+            return Ok(Some(((block_range, None), is_final_range)))
+        }
+
+        Ok(Some(((block_range, Some(range)), is_final_range)))
     }
 
     /// Get next inclusive block range to prune according to the checkpoint, `to_block` block
@@ -305,7 +309,6 @@ impl<DB: Database> Pruner<DB> {
         }
 
         let is_final_range = *range.end() == to_block;
-
         Ok(Some((range, is_final_range)))
     }
 
@@ -328,7 +331,12 @@ impl<DB: Database> Pruner<DB> {
             None => return Ok(None),
         };
 
-        let (_, rows) = provider.prune_table_with_range::<tables::Receipts>(range)?;
+        let rows = if let Some(range) = range {
+            let (_, rows) = provider.prune_table_with_range::<tables::Receipts>(range)?;
+            rows
+        } else {
+            0
+        };
 
         provider.save_prune_checkpoint(
             PrunePart::Receipts,
@@ -357,25 +365,29 @@ impl<DB: Database> Pruner<DB> {
             None => return Ok(None),
         };
 
-        // Retrieve transactions in the range and calculate their hashes in parallel
-        let mut hashes = provider
-            .transactions_by_tx_range(range.clone())?
-            .into_par_iter()
-            .map(|transaction| transaction.hash())
-            .collect::<Vec<_>>();
+        let rows = if let Some(range) = range {
+            // Retrieve transactions in the range and calculate their hashes in parallel
+            let mut hashes = provider
+                .transactions_by_tx_range(range.clone())?
+                .into_par_iter()
+                .map(|transaction| transaction.hash())
+                .collect::<Vec<_>>();
 
-        // Number of transactions retrieved from the database should match the tx range count
-        let tx_count = range.clone().count();
-        if hashes.len() != tx_count {
-            return Err(PrunerError::InconsistentData(
-                "Unexpected number of transaction hashes retrieved by transaction number range",
-            ))
-        }
+            // Number of transactions retrieved from the database should match the tx range count
+            let tx_count = range.clone().count();
+            if hashes.len() != tx_count {
+                return Err(PrunerError::InconsistentData(
+                    "Unexpected number of transaction hashes retrieved by transaction number range",
+                ))
+            }
 
-        // Pre-sort hashes to prune them in order
-        hashes.sort_unstable();
+            // Pre-sort hashes to prune them in order
+            hashes.sort_unstable();
 
-        let rows = provider.prune_table_with_iterator::<tables::TxHashNumber>(hashes)?;
+            provider.prune_table_with_iterator::<tables::TxHashNumber>(hashes)?
+        } else {
+            0
+        };
 
         provider.save_prune_checkpoint(
             PrunePart::TransactionLookup,
@@ -404,7 +416,12 @@ impl<DB: Database> Pruner<DB> {
             None => return Ok(None),
         };
 
-        let (_, rows) = provider.prune_table_with_range::<tables::TxSenders>(range)?;
+        let rows = if let Some(range) = range {
+            let (_, rows) = provider.prune_table_with_range::<tables::TxSenders>(range)?;
+            rows
+        } else {
+            0
+        };
 
         provider.save_prune_checkpoint(
             PrunePart::SenderRecovery,
