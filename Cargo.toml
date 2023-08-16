@@ -123,6 +123,7 @@ rand = "0.8.5"
 strum = "0.25"
 rayon = "1.7"
 itertools = "0.11"
+parking_lot = "0.12"
 
 ### proc-macros
 proc-macro2 = "1.0"
