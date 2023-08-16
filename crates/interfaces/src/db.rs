@@ -1,4 +1,4 @@
-/// Database error type. They are using u32 to represent error code.
+/// Database error type. It uses i32 to represent an error code.
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
 pub enum DatabaseError {
     /// Failed to open database.
@@ -7,13 +7,22 @@ pub enum DatabaseError {
     /// Failed to create a table in database.
     #[error("Table Creating error code: {0:?}")]
     TableCreation(i32),
-    /// Failed to insert a value into a table.
-    #[error("Database write error code: {0:?}")]
-    Write(i32),
-    /// Failed to get a value into a table.
+    /// Failed to write a value into a table.
+    #[error("Database write operation \"{operation:?}\" for key \"{key:?}\" in table \"{table_name}\" ended with error code: {code:?}")]
+    Write {
+        /// Database error code
+        code: i32,
+        /// Database write operation type
+        operation: DatabaseWriteOperation,
+        /// Table name
+        table_name: &'static str,
+        /// Write key
+        key: Box<[u8]>,
+    },
+    /// Failed to read a value from a table.
     #[error("Database read error code: {0:?}")]
     Read(i32),
-    /// Failed to delete a `(key, value)` pair into a table.
+    /// Failed to delete a `(key, value)` pair from a table.
     #[error("Database delete error code: {0:?}")]
     Delete(i32),
     /// Failed to commit transaction changes into the database.
@@ -34,6 +43,17 @@ pub enum DatabaseError {
     /// Failed to use the specified log level, as it's not available.
     #[error("Log level is not available: {0:?}")]
     LogLevelUnavailable(LogLevel),
+}
+
+/// Database write operation type
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[allow(missing_docs)]
+pub enum DatabaseWriteOperation {
+    CursorAppend,
+    CursorUpsert,
+    CursorInsert,
+    CursorAppendDup,
+    Put,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]

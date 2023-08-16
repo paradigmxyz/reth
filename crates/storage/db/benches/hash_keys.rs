@@ -106,7 +106,7 @@ where
 
         // Iteration to be benchmarked
         let execution = |(input, db)| {
-            let mut input: Vec<(T::Key, T::Value)> = input;
+            let mut input: Vec<TableRow<T>> = input;
             if scenario_str.contains("_sorted") || scenario_str.contains("append") {
                 input.sort_by(|a, b| a.0.cmp(&b.0));
             }
@@ -134,14 +134,14 @@ where
 /// Generates two batches. The first is to be inserted into the database before running the
 /// benchmark. The second is to be benchmarked with.
 #[allow(clippy::type_complexity)]
-fn generate_batches<T>(size: usize) -> (Vec<(T::Key, T::Value)>, Vec<(T::Key, T::Value)>)
+fn generate_batches<T>(size: usize) -> (Vec<TableRow<T>>, Vec<TableRow<T>>)
 where
     T: Table + Default,
     T::Key: std::hash::Hash + Arbitrary,
     T::Value: Arbitrary,
 {
     let strat = proptest::collection::vec(
-        any_with::<(T::Key, T::Value)>((
+        any_with::<TableRow<T>>((
             <T::Key as Arbitrary>::Parameters::default(),
             <T::Value as Arbitrary>::Parameters::default(),
         )),

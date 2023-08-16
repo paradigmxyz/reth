@@ -8,7 +8,7 @@ use proptest::{
     test_runner::TestRunner,
 };
 use reth_db::{
-    table::{DupSort, Table},
+    table::{DupSort, Table, TableRow},
     tables,
 };
 use reth_primitives::fs;
@@ -81,7 +81,7 @@ where
     let mut rows = vec![];
     let mut seen_keys = HashSet::new();
     let strat = proptest::collection::vec(
-        any_with::<(T::Key, T::Value)>((
+        any_with::<TableRow<T>>((
             <T::Key as Arbitrary>::Parameters::default(),
             <T::Value as Arbitrary>::Parameters::default(),
         )),
@@ -154,7 +154,7 @@ where
 }
 
 /// Save rows to file.
-fn save_to_file<T: Table>(rows: Vec<(T::Key, T::Value)>) -> eyre::Result<()>
+fn save_to_file<T: Table>(rows: Vec<TableRow<T>>) -> eyre::Result<()>
 where
     T::Key: serde::Serialize,
     T::Value: serde::Serialize,
