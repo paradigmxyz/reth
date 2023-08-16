@@ -21,6 +21,8 @@ use reth_provider::{
 use std::{ops::RangeInclusive, sync::Arc, time::Instant};
 use tracing::{debug, instrument, trace};
 
+type ResultWithDone<T> = Result<Option<(T, bool)>, PrunerError>;
+
 /// Result of [Pruner::run] execution
 pub type PrunerResult = Result<(), PrunerError>;
 
@@ -29,7 +31,7 @@ pub type PrunerResult = Result<(), PrunerError>;
 /// Returns:
 /// - [Option::Some] with number of rows pruned and if this is final block range
 /// - [Option::None] if there was nothing to prune
-type PrunerPartResult = Result<Option<(usize, bool)>, PrunerError>;
+type PrunerPartResult = ResultWithDone<usize>;
 
 /// The pipeline type itself with the result of [Pruner::run]
 pub type PrunerWithResult<DB> = (Pruner<DB>, PrunerResult);
@@ -210,7 +212,7 @@ impl<DB: Database> Pruner<DB> {
 
             let start = Instant::now();
             let rows;
-            (rows, done) = match prune(&self, &provider, to_block, prune_mode)? {
+            (rows, done) = match prune(self, &provider, to_block, prune_mode)? {
                 Some((rows, done)) => (rows, done),
                 None => {
                     trace!(target: "pruner", part = %prune_part, "Nothing to prune");
@@ -244,9 +246,7 @@ impl<DB: Database> Pruner<DB> {
         prune_part: PrunePart,
         to_block: BlockNumber,
         limit: usize,
-    ) -> reth_interfaces::Result<
-        Option<(RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>, bool)>,
-    > {
+    ) -> ResultWithDone<(RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)> {
         let from_block = provider
             .get_prune_checkpoint(prune_part)?
             // Checkpoint exists, prune from the next block after the highest pruned one
@@ -274,7 +274,7 @@ impl<DB: Database> Pruner<DB> {
 
         let is_final_range = *block_range.end() == to_block;
 
-        Ok(Some((block_range, range, is_final_range)))
+        Ok(Some(((block_range, range), is_final_range)))
     }
 
     /// Get next inclusive block range to prune according to the checkpoint, `to_block` block
@@ -291,7 +291,7 @@ impl<DB: Database> Pruner<DB> {
         prune_part: PrunePart,
         to_block: BlockNumber,
         limit: usize,
-    ) -> reth_interfaces::Result<Option<(RangeInclusive<BlockNumber>, bool)>> {
+    ) -> ResultWithDone<RangeInclusive<BlockNumber>> {
         let from_block = provider
             .get_prune_checkpoint(prune_part)?
             // Checkpoint exists, prune from the next block after the highest pruned one
@@ -317,7 +317,7 @@ impl<DB: Database> Pruner<DB> {
         to_block: BlockNumber,
         prune_mode: PruneMode,
     ) -> PrunerPartResult {
-        let (block_range, range, is_final_range) = match self
+        let ((block_range, range), is_final_range) = match self
             .get_next_tx_num_range_from_checkpoint(
                 provider,
                 PrunePart::Receipts,
@@ -346,7 +346,7 @@ impl<DB: Database> Pruner<DB> {
         to_block: BlockNumber,
         prune_mode: PruneMode,
     ) -> PrunerPartResult {
-        let (block_range, range, is_final_range) = match self
+        let ((block_range, range), is_final_range) = match self
             .get_next_tx_num_range_from_checkpoint(
                 provider,
                 PrunePart::TransactionLookup,
@@ -393,7 +393,7 @@ impl<DB: Database> Pruner<DB> {
         to_block: BlockNumber,
         prune_mode: PruneMode,
     ) -> PrunerPartResult {
-        let (block_range, range, is_final_range) = match self
+        let ((block_range, range), is_final_range) = match self
             .get_next_tx_num_range_from_checkpoint(
                 provider,
                 PrunePart::SenderRecovery,
