@@ -268,7 +268,7 @@ impl BlobTransaction {
     /// `rlp(tx_type (0x03) || rlp([transaction_payload_body, blobs, commitments, proofs]))`
     ///
     /// NOTE: The header will be a byte string header, not a list header.
-    pub fn encode_with_type_inner(&self, out: &mut dyn bytes::BufMut, with_header: bool) {
+    pub(crate) fn encode_with_type_inner(&self, out: &mut dyn bytes::BufMut, with_header: bool) {
         // Calculate the length of:
         // `tx_type || rlp([transaction_payload_body, blobs, commitments, proofs])`
         //
@@ -296,7 +296,7 @@ impl BlobTransaction {
     ///
     /// Note: this should be used only when implementing other RLP encoding methods, and does not
     /// represent the full RLP encoding of the blob transaction.
-    pub fn encode_inner(&self, out: &mut dyn bytes::BufMut) {
+    pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut) {
         // First we construct both required list headers.
         //
         // The `transaction_payload_body` length is the length of the fields, plus the length of
@@ -334,7 +334,7 @@ impl BlobTransaction {
     ///
     /// If `with_header` is `true`, the length of the following will be calculated:
     /// `rlp(tx_type (0x03) || rlp([transaction_payload_body, blobs, commitments, proofs]))`
-    pub fn payload_len_with_type(&self, with_header: bool) -> usize {
+    pub(crate) fn payload_len_with_type(&self, with_header: bool) -> usize {
         if with_header {
             // Construct a header and use that to calculate the total length
             let wrapped_header = Header {
@@ -360,7 +360,7 @@ impl BlobTransaction {
     ///
     /// Note: this should be used only when implementing other RLP encoding length methods, and
     /// does not represent the full RLP encoding of the blob transaction.
-    pub fn payload_len(&self) -> usize {
+    pub(crate) fn payload_len(&self) -> usize {
         // The `transaction_payload_body` length is the length of the fields, plus the length of
         // its list header.
         let tx_header = Header {
@@ -383,8 +383,8 @@ impl BlobTransaction {
     /// `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
     ///
     /// Note: this should be used only when implementing other RLP decoding methods, and does not
-    /// represent the full RLP decoding of the [PooledTransactionResponse] type.
-    pub fn decode_inner(data: &mut &[u8]) -> Result<Self, DecodeError> {
+    /// represent the full RLP decoding of the `PooledTransactionsElement` type.
+    pub(crate) fn decode_inner(data: &mut &[u8]) -> Result<Self, DecodeError> {
         // decode the _first_ list header for the rest of the transaction
         let header = Header::decode(data)?;
         if !header.list {
@@ -452,7 +452,7 @@ impl BlobTransactionSidecar {
     /// - `blobs`
     /// - `commitments`
     /// - `proofs`
-    pub fn encode_inner(&self, out: &mut dyn bytes::BufMut) {
+    pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut) {
         // Encode the blobs, commitments, and proofs
         self.blobs.encode(out);
         self.commitments.encode(out);
@@ -460,7 +460,7 @@ impl BlobTransactionSidecar {
     }
 
     /// Outputs the RLP length of the [BlobTransactionSidecar] fields, without a RLP header.
-    pub fn fields_len(&self) -> usize {
+    pub(crate) fn fields_len(&self) -> usize {
         self.blobs.len() + self.commitments.len() + self.proofs.len()
     }
 
@@ -470,7 +470,7 @@ impl BlobTransactionSidecar {
     /// - `blobs`
     /// - `commitments`
     /// - `proofs`
-    pub fn decode_inner(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    pub(crate) fn decode_inner(buf: &mut &[u8]) -> Result<Self, DecodeError> {
         Ok(Self {
             blobs: Decodable::decode(buf)?,
             commitments: Decodable::decode(buf)?,

@@ -1392,7 +1392,7 @@ impl PooledTransactionsElement {
 }
 
 impl Encodable for PooledTransactionsElement {
-    /// Encodes an enveloped post EIP-4844 [PooledTransactionResponse].
+    /// Encodes an enveloped post EIP-4844 [PooledTransactionsElement].
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
             Self::Transaction(tx) => tx.encode(out),
@@ -1417,7 +1417,7 @@ impl Encodable for PooledTransactionsElement {
 }
 
 impl Decodable for PooledTransactionsElement {
-    /// Decodes an enveloped post EIP-4844 [PooledTransactionResponse].
+    /// Decodes an enveloped post EIP-4844 [PooledTransactionsElement].
     ///
     /// CAUTION: this expects that `buf` is `[id, rlp(tx)]`
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
@@ -1486,9 +1486,9 @@ impl Decodable for PooledTransactionsElement {
 }
 
 impl From<TransactionSigned> for PooledTransactionsElement {
-    /// Converts from a [TransactionSigned] to a [PooledTransactionResponse].
+    /// Converts from a [TransactionSigned] to a [PooledTransactionsElement].
     ///
-    /// NOTE: This will always return a [PooledTransactionResponse::Transaction] variant.
+    /// NOTE: This will always return a [PooledTransactionsElement::Transaction] variant.
     fn from(tx: TransactionSigned) -> Self {
         Self::Transaction(tx)
     }
