@@ -116,7 +116,7 @@ bytes = "1.4"
 bitflags = "2.3"
 tracing = "0.1.0"
 tracing-appender = "0.2"
-thiserror = "1.0.37"
+thiserror = "1.0"
 serde_json = "1.0.94"
 serde = { version = "1.0", default-features = false }
 rand = "0.8.5"
