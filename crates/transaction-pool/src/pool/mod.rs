@@ -322,8 +322,8 @@ where
                 let hash = *added.hash();
 
                 // Notify about new pending transactions
-                if added.is_pending() {
-                    self.on_new_pending_transaction(&added);
+                if let Some(pending) = added.as_pending() {
+                    self.on_new_pending_transaction(pending);
                 }
 
                 // Notify tx event listeners
@@ -394,8 +394,7 @@ where
     }
 
     /// Notify all listeners about a new pending transaction.
-    fn on_new_pending_transaction(&self, pending: &AddedTransaction<T::Transaction>) {
-        let tx_hash = *pending.hash();
+    fn on_new_pending_transaction(&self, pending: &AddedPendingTransaction<T::Transaction>) {
         let propagate_allowed = pending.is_propagate_allowed();
 
         let mut transaction_listeners = self.pending_transaction_listener.lock();
@@ -406,25 +405,29 @@ where
                 return !listener.sender.is_closed()
             }
 
-            match listener.sender.try_send(tx_hash) {
-                Ok(()) => true,
-                Err(err) => {
-                    if matches!(err, mpsc::error::TrySendError::Full(_)) {
-                        debug!(
-                            target: "txpool",
-                            "[{:?}] failed to send pending tx; channel full",
-                            tx_hash,
-                        );
-                        true
-                    } else {
-                        false
+            // broadcast all pending transactions to the listener
+            for tx_hash in pending.pending_transactions() {
+                match listener.sender.try_send(tx_hash) {
+                    Ok(()) => {}
+                    Err(err) => {
+                        return if matches!(err, mpsc::error::TrySendError::Full(_)) {
+                            debug!(
+                                target: "txpool",
+                                "[{:?}] failed to send pending tx; channel full",
+                                tx_hash,
+                            );
+                            true
+                        } else {
+                            false
+                        }
                     }
                 }
             }
+            true
         });
     }
 
-    /// Notify all listeners about a new pending transaction.
+    /// Notify all listeners about a newly inserted pending transaction.
     fn on_new_transaction(&self, event: NewTransactionEvent<T::Transaction>) {
         let mut transaction_listeners = self.transaction_listener.lock();
 
@@ -455,7 +458,7 @@ where
         discarded.iter().for_each(|tx| listener.discarded(tx));
     }
 
-    /// Fire events for the newly added transaction.
+    /// Fire events for the newly added transaction if there are any.
     fn notify_event_listeners(&self, tx: &AddedTransaction<T::Transaction>) {
         let mut listener = self.event_listener.write();
 
@@ -601,10 +604,22 @@ pub struct AddedPendingTransaction<T: PoolTransaction> {
     transaction: Arc<ValidPoolTransaction<T>>,
     /// Replaced transaction.
     replaced: Option<Arc<ValidPoolTransaction<T>>>,
-    /// transactions promoted to the ready queue
-    promoted: Vec<TxHash>,
+    /// transactions promoted to the pending queue
+    promoted: Vec<H256>,
     /// transaction that failed and became discarded
     discarded: Vec<TxHash>,
+}
+
+impl<T: PoolTransaction> AddedPendingTransaction<T> {
+    /// Returns all transactions that were promoted to the pending pool
+    pub(crate) fn pending_transactions(&self) -> impl Iterator<Item = H256> + '_ {
+        std::iter::once(self.transaction.hash()).chain(self.promoted.iter()).copied()
+    }
+
+    /// Returns if the transaction should be propagated.
+    pub(crate) fn is_propagate_allowed(&self) -> bool {
+        self.transaction.propagate
+    }
 }
 
 /// Represents a transaction that was added into the pool and its state
@@ -625,9 +640,12 @@ pub enum AddedTransaction<T: PoolTransaction> {
 }
 
 impl<T: PoolTransaction> AddedTransaction<T> {
-    /// Returns whether the transaction is pending
-    pub(crate) fn is_pending(&self) -> bool {
-        matches!(self, AddedTransaction::Pending(_))
+    /// Returns whether the transaction has been added to the pending pool.
+    pub(crate) fn as_pending(&self) -> Option<&AddedPendingTransaction<T>> {
+        match self {
+            AddedTransaction::Pending(tx) => Some(tx),
+            _ => None,
+        }
     }
 
     /// Returns the hash of the transaction
@@ -635,13 +653,6 @@ impl<T: PoolTransaction> AddedTransaction<T> {
         match self {
             AddedTransaction::Pending(tx) => tx.transaction.hash(),
             AddedTransaction::Parked { transaction, .. } => transaction.hash(),
-        }
-    }
-    /// Returns if the transaction should be propagated.
-    pub(crate) fn is_propagate_allowed(&self) -> bool {
-        match self {
-            AddedTransaction::Pending(transaction) => transaction.transaction.propagate,
-            AddedTransaction::Parked { transaction, .. } => transaction.propagate,
         }
     }
 
