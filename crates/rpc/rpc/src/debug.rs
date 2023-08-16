@@ -45,6 +45,12 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, AcquireError, OwnedSemaphorePermit};
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
+use lazy_static::lazy_static;
+use std::sync::Mutex;
+lazy_static! {
+    static ref LOCATION: Mutex<String> = Mutex::new(String::new());
+    static ref BACKTRACE_ENABLED: Mutex<bool> = Mutex::new(false);
+}
 /// `debug` API implementation.
 ///
 /// This type provides the functionality for handling `debug` related requests.
@@ -641,6 +647,34 @@ where
         }
 
         Ok(res.into())
+    }
+
+    async fn debug_backtrace_at(&self, location: &str) -> RpcResult<()> {
+        let mut parts: Vec<&str> = location.split(':').collect();
+        if parts.len() != 2 {
+            return Err(internal_rpc_err("Invalid location format".to_string()))
+        }
+        parts[0] = parts[0].trim();
+        parts[1] = parts[1].trim();
+
+        if parts[0].len() == 0 || parts[1].len() == 0 {
+            return Err(internal_rpc_err("Invalid location format".to_string()))
+        }
+        if !parts[0].ends_with(".rust") {
+            return Err(internal_rpc_err("Invalid location format".to_string()))
+        }
+
+        if parts[1].parse::<i32>().is_err() {
+            return Err(internal_rpc_err("Invalid location format".to_string()))
+        }
+
+        let mut location_lock = LOCATION.lock().unwrap();
+        *location_lock = location.to_string();
+
+        let mut backtrace_enabled_lock = BACKTRACE_ENABLED.lock().unwrap();
+        *backtrace_enabled_lock = location.len() > 0;
+
+        Ok(())
     }
 
     /// Handler for `debug_getRawBlock`
