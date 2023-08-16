@@ -574,7 +574,6 @@ where
         }
 
         // Advance all requests.
-        // We remove each request one by one and add them back.
         while let Poll::Ready(Some(GetPooledTxResponse { peer_id, result })) =
             this.inflight_requests.poll_next_unpin(cx)
         {
