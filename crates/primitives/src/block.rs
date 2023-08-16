@@ -163,7 +163,7 @@ impl SealedBlock {
 
     /// Expensive operation that recovers transaction signer. See [SealedBlockWithSenders].
     pub fn senders(&self) -> Option<Vec<Address>> {
-        self.body.iter().map(|tx| tx.recover_signer()).collect::<Option<Vec<Address>>>()
+        TransactionSigned::recover_signers(&self.body, self.body.len())
     }
 
     /// Seal sealed block with recovered transaction senders.

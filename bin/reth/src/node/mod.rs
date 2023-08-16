@@ -8,7 +8,7 @@ use crate::{
         DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
         RpcServerArgs, TxPoolArgs,
     },
-    cli::ext::{RethCliExt, RethNodeCommandExt},
+    cli::ext::{RethCliExt, RethNodeCommandConfig},
     dirs::{DataDirPath, MaybePlatformPath},
     init::init_genesis,
     node::cl_events::ConsensusLayerHealthEvents,
