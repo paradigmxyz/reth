@@ -205,6 +205,18 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     pub async fn execute(mut self, ctx: CliContext) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
+        #[cfg(not(any(feature = "ethereum", feature = "optimism")))]
+        compile_error!(
+            "Either feature \"optimism\" or \"ethereum\" must be enabled for this crate."
+        );
+
+        // We cannot do this since runs with `--all-features` will error.
+        // See mutually exclusive features discussion here:
+        // https://github.com/rust-lang/cargo/issues/2980
+        //
+        // #[cfg(all(feature = "ethereum", feature = "optimism"))]
+        // compile_error!("Cannot use both \"optimism\" and \"ethereum\" feature flags.");
+
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         raise_fd_limit();
