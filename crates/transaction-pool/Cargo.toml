@@ -28,7 +28,7 @@ reth-tasks.workspace = true
 # async/futures
 async-trait.workspace = true
 futures-util.workspace = true
-parking_lot = "0.12"
+parking_lot.workspace = true
 tokio = { workspace = true, default-features = false, features = ["sync"] }
 tokio-stream.workspace = true
 
