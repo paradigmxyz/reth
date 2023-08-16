@@ -22,8 +22,9 @@ pub use tx_type::{
 
 pub use eip1559::TxEip1559;
 pub use eip2930::TxEip2930;
-pub use eip4844::TxEip4844;
+pub use eip4844::{BlobTransaction, BlobTransactionSidecar, TxEip4844};
 pub use legacy::TxLegacy;
+pub use pooled::PooledTransactionsElement;
 
 mod access_list;
 mod eip1559;
@@ -32,6 +33,7 @@ mod eip4844;
 mod error;
 mod legacy;
 mod meta;
+mod pooled;
 mod signature;
 mod tx_type;
 pub(crate) mod util;
@@ -343,7 +345,7 @@ impl Transaction {
 
     /// Outputs the length of the transaction's fields, without a RLP header or length of the
     /// eip155 fields.
-    pub(crate) fn fields_len(&self) -> usize {
+    pub fn fields_len(&self) -> usize {
         match self {
             Transaction::Legacy(TxLegacy {
                 chain_id: _,
@@ -438,7 +440,7 @@ impl Transaction {
     }
 
     /// Encodes only the transaction's fields into the desired buffer, without a RLP header.
-    pub(crate) fn encode_fields(&self, out: &mut dyn bytes::BufMut) {
+    pub fn encode_fields(&self, out: &mut dyn bytes::BufMut) {
         match self {
             Transaction::Legacy(TxLegacy {
                 chain_id: _,
@@ -1059,7 +1061,11 @@ impl TransactionSigned {
     /// Decodes legacy transaction from the data buffer.
     ///
     /// This expects `rlp(legacy_tx)`
-    fn decode_rlp_legacy_transaction(data: &mut &[u8]) -> Result<TransactionSigned, DecodeError> {
+    // TODO: make buf advancement semantics consistent with `decode_enveloped_typed_transaction`,
+    // so decoding methods do not need to manually advance the buffer
+    pub fn decode_rlp_legacy_transaction(
+        data: &mut &[u8],
+    ) -> Result<TransactionSigned, DecodeError> {
         // keep this around, so we can use it to calculate the hash
         let original_encoding = *data;
 
@@ -1088,7 +1094,7 @@ impl TransactionSigned {
     /// Decodes en enveloped EIP-2718 typed transaction.
     ///
     /// CAUTION: this expects that `data` is `[id, rlp(tx)]`
-    fn decode_enveloped_typed_transaction(
+    pub fn decode_enveloped_typed_transaction(
         data: &mut &[u8],
     ) -> Result<TransactionSigned, DecodeError> {
         // keep this around so we can use it to calculate the hash
@@ -1096,6 +1102,7 @@ impl TransactionSigned {
 
         let tx_type = *data.first().ok_or(DecodeError::InputTooShort)?;
         data.advance(1);
+
         // decode the list header for the rest of the transaction
         let header = Header::decode(data)?;
         if !header.list {
@@ -1107,40 +1114,9 @@ impl TransactionSigned {
 
         // decode common fields
         let transaction = match tx_type {
-            1 => Transaction::Eip2930(TxEip2930 {
-                chain_id: Decodable::decode(data)?,
-                nonce: Decodable::decode(data)?,
-                gas_price: Decodable::decode(data)?,
-                gas_limit: Decodable::decode(data)?,
-                to: Decodable::decode(data)?,
-                value: Decodable::decode(data)?,
-                input: Bytes(Decodable::decode(data)?),
-                access_list: Decodable::decode(data)?,
-            }),
-            2 => Transaction::Eip1559(TxEip1559 {
-                chain_id: Decodable::decode(data)?,
-                nonce: Decodable::decode(data)?,
-                max_priority_fee_per_gas: Decodable::decode(data)?,
-                max_fee_per_gas: Decodable::decode(data)?,
-                gas_limit: Decodable::decode(data)?,
-                to: Decodable::decode(data)?,
-                value: Decodable::decode(data)?,
-                input: Bytes(Decodable::decode(data)?),
-                access_list: Decodable::decode(data)?,
-            }),
-            3 => Transaction::Eip4844(TxEip4844 {
-                chain_id: Decodable::decode(data)?,
-                nonce: Decodable::decode(data)?,
-                max_priority_fee_per_gas: Decodable::decode(data)?,
-                max_fee_per_gas: Decodable::decode(data)?,
-                gas_limit: Decodable::decode(data)?,
-                to: Decodable::decode(data)?,
-                value: Decodable::decode(data)?,
-                input: Bytes(Decodable::decode(data)?),
-                access_list: Decodable::decode(data)?,
-                max_fee_per_blob_gas: Decodable::decode(data)?,
-                blob_versioned_hashes: Decodable::decode(data)?,
-            }),
+            1 => Transaction::Eip2930(TxEip2930::decode_inner(data)?),
+            2 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
+            3 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
             _ => return Err(DecodeError::Custom("unsupported typed transaction type")),
         };
 

@@ -193,7 +193,8 @@ where
             // we sent a response at which point we assume that the peer is aware of the transaction
             peer.transactions.extend(transactions.iter().map(|tx| tx.hash()));
 
-            let resp = PooledTransactions(transactions);
+            // TODO: remove this! this will be different when we introduce the blobpool
+            let resp = PooledTransactions(transactions.into_iter().map(Into::into).collect());
             let _ = response.send(Ok(resp));
         }
     }
@@ -579,7 +580,11 @@ where
         {
             match result {
                 Ok(Ok(txs)) => {
-                    this.import_transactions(peer_id, txs.0, TransactionSource::Response);
+                    // convert all transactions to the inner transaction type, ignoring any
+                    // sidecars
+                    // TODO: remove this! this will be different when we introduce the blobpool
+                    let transactions = txs.0.into_iter().map(|tx| tx.into_transaction()).collect();
+                    this.import_transactions(peer_id, transactions, TransactionSource::Response)
                 }
                 Ok(Err(req_err)) => {
                     this.on_request_error(peer_id, req_err);
