@@ -421,14 +421,9 @@ where
                         )?;
 
                         // If there is more transactions, commit the database
-                        if transactions.peek().is_some() {
+                        // If there is no transactions, but more bundles, commit to the database too
+                        if transactions.peek().is_some() || bundles.peek().is_some() {
                             db.commit(state);
-                        } else {
-                            // If there is no transactions, but
-                            // more bundles, commit to the database too
-                            if bundles.peek().is_some() {
-                                db.commit(state);
-                            }
                         }
                         results.push(trace);
                     }
