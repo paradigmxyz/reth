@@ -99,7 +99,7 @@ impl<DB: Database> Pruner<DB> {
         if let Some((to_block, prune_mode)) =
             self.modes.prune_target_block_receipts(tip_block_number)?
         {
-            self.run_pruner_for_part(
+            self.prune_part_until_completion(
                 PrunePart::Receipts,
                 to_block,
                 prune_mode,
@@ -110,7 +110,7 @@ impl<DB: Database> Pruner<DB> {
         if let Some((to_block, prune_mode)) =
             self.modes.prune_target_block_transaction_lookup(tip_block_number)?
         {
-            self.run_pruner_for_part(
+            self.prune_part_until_completion(
                 PrunePart::TransactionLookup,
                 to_block,
                 prune_mode,
@@ -121,7 +121,7 @@ impl<DB: Database> Pruner<DB> {
         if let Some((to_block, prune_mode)) =
             self.modes.prune_target_block_sender_recovery(tip_block_number)?
         {
-            self.run_pruner_for_part(
+            self.prune_part_until_completion(
                 PrunePart::SenderRecovery,
                 to_block,
                 prune_mode,
@@ -132,7 +132,7 @@ impl<DB: Database> Pruner<DB> {
         if let Some((to_block, prune_mode)) =
             self.modes.prune_target_block_account_history(tip_block_number)?
         {
-            self.run_pruner_for_part(
+            self.prune_part_until_completion(
                 PrunePart::AccountHistory,
                 to_block,
                 prune_mode,
@@ -143,7 +143,7 @@ impl<DB: Database> Pruner<DB> {
         if let Some((to_block, prune_mode)) =
             self.modes.prune_target_block_storage_history(tip_block_number)?
         {
-            self.run_pruner_for_part(
+            self.prune_part_until_completion(
                 PrunePart::StorageHistory,
                 to_block,
                 prune_mode,
@@ -186,7 +186,13 @@ impl<DB: Database> Pruner<DB> {
         }
     }
 
-    fn run_pruner_for_part(
+    /// Prunes the specified [PrunePart] until the provided `prune` function returns
+    /// `Some((_, true))` or `None`, meaning it's a final range.
+    ///
+    /// This method executes the `prune` function inside a loop, starting a new database transaction
+    /// for each `prune` call, and committing it at the end of the loop iteration.
+    /// The prune part duration metrics are recorded in the same way: inside each loop iteration.
+    fn prune_part_until_completion(
         &mut self,
         prune_part: PrunePart,
         to_block: BlockNumber,
