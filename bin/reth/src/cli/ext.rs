@@ -213,6 +213,7 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
         pool: Pool,
         executor: Tasks,
         chain_spec: Arc<ChainSpec>,
+        #[cfg(feature = "optimism")] compute_pending_block: bool,
     ) -> eyre::Result<PayloadBuilderHandle>
     where
         Conf: PayloadBuilderConfig,
@@ -222,7 +223,15 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
     {
         self.inner_mut()
             .ok_or_else(|| eyre::eyre!("config value must be set"))?
-            .spawn_payload_builder_service(conf, provider, pool, executor, chain_spec)
+            .spawn_payload_builder_service(
+                conf,
+                provider,
+                pool,
+                executor,
+                chain_spec,
+                #[cfg(feature = "optimism")]
+                compute_pending_block,
+            )
     }
 }
 
