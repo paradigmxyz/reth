@@ -113,6 +113,7 @@ ethers-middleware = { version = "2.0.8", default-features = false }
 
 ## misc
 bytes = "1.4"
+bitflags = "2.3"
 tracing = "0.1.0"
 tracing-appender = "0.2"
 thiserror = "1.0.37"
@@ -122,6 +123,7 @@ rand = "0.8.5"
 strum = "0.25"
 rayon = "1.7"
 itertools = "0.11"
+parking_lot = "0.12"
 
 ### proc-macros
 proc-macro2 = "1.0"
