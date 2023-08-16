@@ -568,7 +568,7 @@ pub trait PoolTransaction:
 ///
 /// This type is essentially a wrapper around [TransactionSignedEcRecovered] with additional fields
 /// derived from the transaction that are frequently used by the pools for ordering.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PooledTransaction {
     /// EcRecovered transaction info
     pub(crate) transaction: TransactionSignedEcRecovered,

@@ -18,10 +18,13 @@ use reth_primitives::{
     BlockNumber, Header, PruneModes, U256,
 };
 use reth_provider::{
-    post_state::PostState, BlockExecutor, BlockReader, DatabaseProviderRW, ExecutorFactory,
-    HeaderProvider, LatestStateProviderRef, ProviderError,
+    BlockReader, DatabaseProviderRW, ExecutorFactory, HeaderProvider, LatestStateProviderRef,
+    ProviderError,
 };
-use std::{ops::RangeInclusive, time::Instant};
+use std::{
+    ops::RangeInclusive,
+    time::{Duration, Instant},
+};
 use tracing::*;
 
 /// The execution stage executes all transactions and
@@ -116,7 +119,8 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         let start_block = input.next_block();
         let max_block = input.target();
-        let prune_modes = self.adjust_prune_modes(provider, start_block, max_block)?;
+        // TODO(rakita) integrate
+        let _prune_modes = self.adjust_prune_modes(provider, start_block, max_block)?;
 
         // Build executor
         let mut executor =
@@ -127,11 +131,15 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let mut stage_checkpoint =
             execution_checkpoint(provider, start_block, max_block, input.checkpoint())?;
 
+        let mut fetch_block_duration = Duration::default();
+        let mut execution_duration = Duration::default();
+        debug!(target: "sync::stages::execution", start = start_block, end = max_block, "Executing range");
         // Execute block range
-        let mut state = PostState::default();
-        state.add_prune_modes(prune_modes);
 
+        // TODO(rakita) integrate prunning.
+        //state.add_prune_modes(prune_modes);
         for block_number in start_block..=max_block {
+            let time = Instant::now();
             let td = provider
                 .header_td_by_number(block_number)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
@@ -139,17 +147,18 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 .block_with_senders(block_number)?
                 .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
 
+            fetch_block_duration += time.elapsed();
             // Configure the executor to use the current state.
             trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
 
+            let time = Instant::now();
             // Execute the block
             let (block, senders) = block.into_components();
-            let block_state = executor
-                .execute_and_verify_receipt(&block, td, Some(senders))
-                .map_err(|error| StageError::ExecutionError {
-                    block: block.header.clone().seal_slow(),
-                    error,
-                })?;
+            executor.execute_and_verify_receipt(&block, td, Some(senders)).map_err(|error| {
+                StageError::ExecutionError { block: block.header.clone().seal_slow(), error }
+            })?;
+
+            execution_duration += time.elapsed();
 
             // Gas metrics
             if let Some(metrics_tx) = &mut self.metrics_tx {
@@ -157,23 +166,34 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                     metrics_tx.send(MetricEvent::ExecutionStageGas { gas: block.header.gas_used });
             }
 
-            // Merge state changes
-            state.extend(block_state);
             stage_progress = block_number;
+
+            // TODO Write history periodically to free up memory
+            // if self.thresholds.should_write_history(state.changeset_size_hint() as u64) {
+            //     info!(target: "sync::stages::execution", ?block_number, "Writing history.");
+            //     state.write_history_to_db(&**tx)?;
+            //     info!(target: "sync::stages::execution", ?block_number, "Wrote history.");
+            //     // gas_since_history_write = 0;
+            // }
             stage_checkpoint.progress.processed += block.gas_used;
 
             // Check if we should commit now
-            if self.thresholds.is_end_of_batch(block_number - start_block, state.size_hint() as u64)
-            {
+            if self.thresholds.is_end_of_batch(block_number - start_block, 0) {
                 break
             }
         }
+        let time = Instant::now();
+        let state = executor.take_output_state();
+        let write_preparation_duration = time.elapsed();
 
-        // Write remaining changes
-        trace!(target: "sync::stages::execution", accounts = state.accounts().len(), "Writing updated state to database");
-        let start = Instant::now();
-        state.write_to_db(provider.tx_ref(), max_block)?;
-        trace!(target: "sync::stages::execution", took = ?start.elapsed(), "Wrote state");
+        let time = Instant::now();
+        // write output
+        state.write_to_db(provider.tx_ref(), false)?;
+        let db_write_duration = time.elapsed();
+        info!(target: "sync::stages::execution", block_fetch=?fetch_block_duration, execution=?execution_duration, 
+            write_preperation=?write_preparation_duration, write=?db_write_duration, " Execution duration.");
+
+        executor.stats().log_info();
 
         let done = stage_progress == max_block;
         Ok(ExecOutput {
@@ -442,7 +462,10 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
 ///
 /// If either of the thresholds (`max_blocks` and `max_changes`) are hit, then the execution stage
 /// commits all pending changes to the database.
-#[derive(Debug)]
+///
+/// A third threshold, `max_changesets`, can be set to periodically write changesets to the
+/// current database transaction, which frees up memory.
+#[derive(Debug, Clone)]
 pub struct ExecutionStageThresholds {
     /// The maximum number of blocks to process before the execution stage commits.
     pub max_blocks: Option<u64>,

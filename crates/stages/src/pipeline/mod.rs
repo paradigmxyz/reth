@@ -412,6 +412,7 @@ where
                     }
                 }
                 Err(err) => {
+                    error!("Stage error: {:?}", err);
                     self.listeners.notify(PipelineEvent::Error { stage_id });
 
                     let out = if let StageError::DetachedHead { local_head, header, error } = err {

@@ -1,5 +1,5 @@
 use crate::{
-    BlockIdReader, BlockNumReader, HeaderProvider, PostState, ReceiptProvider,
+    BlockIdReader, BlockNumReader, BundleState, Chain, HeaderProvider, ReceiptProvider,
     ReceiptProviderIdExt, TransactionsProvider, WithdrawalsProvider,
 };
 use auto_impl::auto_impl;
@@ -209,7 +209,7 @@ pub trait BlockExecutionWriter: BlockWriter + BlockReader + Send + Sync {
         &self,
         chain_spec: &ChainSpec,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>> {
+    ) -> Result<Chain> {
         self.get_or_take_block_and_execution_range::<false>(chain_spec, range)
     }
 
@@ -218,7 +218,7 @@ pub trait BlockExecutionWriter: BlockWriter + BlockReader + Send + Sync {
         &self,
         chain_spec: &ChainSpec,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>> {
+    ) -> Result<Chain> {
         self.get_or_take_block_and_execution_range::<true>(chain_spec, range)
     }
 
@@ -227,7 +227,7 @@ pub trait BlockExecutionWriter: BlockWriter + BlockReader + Send + Sync {
         &self,
         chain_spec: &ChainSpec,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>>;
+    ) -> Result<Chain>;
 }
 
 /// Block Writer
@@ -244,11 +244,11 @@ pub trait BlockWriter: Send + Sync {
         senders: Option<Vec<Address>>,
     ) -> Result<StoredBlockBodyIndices>;
 
-    /// Append blocks and insert its post state.
+    /// Append blocks and insert its bundle state.
     /// This will insert block data to all related tables and will update pipeline progress.
-    fn append_blocks_with_post_state(
+    fn append_blocks_with_bundle_state(
         &self,
         blocks: Vec<SealedBlockWithSenders>,
-        state: PostState,
+        state: BundleState,
     ) -> Result<()>;
 }

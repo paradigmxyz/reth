@@ -2,6 +2,8 @@
 //!
 //! Adapted from <https://github.com/paritytech/parity-common/blob/2fb72eea96b6de4a085144ce239feb49da0cd39e/ethbloom/src/lib.rs>
 #![allow(missing_docs)]
+#![allow(clippy::incorrect_clone_impl_on_copy_type)]
+
 use crate::{impl_fixed_hash_type, keccak256, Log};
 use bytes::Buf;
 use core::{mem, ops};

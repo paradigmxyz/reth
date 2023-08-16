@@ -1,9 +1,9 @@
 use crate::{
-    AccountReader, BlockHashReader, PostState, PostStateDataProvider, StateProvider,
+    change::BundleState, AccountReader, BlockHashReader, PostStateDataProvider, StateProvider,
     StateRootProvider,
 };
 use reth_interfaces::{provider::ProviderError, Result};
-use reth_primitives::{Account, Address, BlockNumber, Bytecode, Bytes, H256, U256};
+use reth_primitives::{Account, Address, BlockNumber, Bytecode, Bytes, H256};
 
 /// A state provider that either resolves to data in a wrapped [`crate::PostState`], or an
 /// underlying state provider.
@@ -42,7 +42,7 @@ impl<SP: StateProvider, PSDP: PostStateDataProvider> BlockHashReader
 impl<SP: StateProvider, PSDP: PostStateDataProvider> AccountReader for PostStateProvider<SP, PSDP> {
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
         if let Some(account) = self.post_state_data_provider.state().account(&address) {
-            Ok(*account)
+            Ok(account)
         } else {
             self.state_provider.basic_account(address)
         }
@@ -52,7 +52,7 @@ impl<SP: StateProvider, PSDP: PostStateDataProvider> AccountReader for PostState
 impl<SP: StateProvider, PSDP: PostStateDataProvider> StateRootProvider
     for PostStateProvider<SP, PSDP>
 {
-    fn state_root(&self, post_state: PostState) -> Result<H256> {
+    fn state_root(&self, post_state: BundleState) -> Result<H256> {
         let mut state = self.post_state_data_provider.state().clone();
         state.extend(post_state);
         self.state_provider.state_root(state)
@@ -65,22 +65,18 @@ impl<SP: StateProvider, PSDP: PostStateDataProvider> StateProvider for PostState
         account: Address,
         storage_key: reth_primitives::StorageKey,
     ) -> Result<Option<reth_primitives::StorageValue>> {
-        if let Some(storage) = self.post_state_data_provider.state().account_storage(&account) {
-            if let Some(value) =
-                storage.storage.get(&U256::from_be_bytes(storage_key.to_fixed_bytes()))
-            {
-                return Ok(Some(*value))
-            } else if storage.wiped() {
-                return Ok(Some(U256::ZERO))
-            }
+        let u256_storage_key = storage_key.into();
+        if let Some(value) =
+            self.post_state_data_provider.state().storage(&account, u256_storage_key)
+        {
+            return Ok(Some(value))
         }
 
         self.state_provider.storage(account, storage_key)
     }
 
     fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytecode>> {
-        if let Some(bytecode) = self.post_state_data_provider.state().bytecode(&code_hash).cloned()
-        {
+        if let Some(bytecode) = self.post_state_data_provider.state().bytecode(&code_hash) {
             return Ok(Some(bytecode))
         }
 

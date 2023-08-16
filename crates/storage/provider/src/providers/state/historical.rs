@@ -1,5 +1,5 @@
 use crate::{
-    providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader, PostState,
+    providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader, BundleState,
     ProviderError, StateProvider, StateRootProvider,
 };
 use reth_db::{
@@ -201,7 +201,7 @@ impl<'a, 'b, TX: DbTx<'a>> BlockHashReader for HistoricalStateProviderRef<'a, 'b
 }
 
 impl<'a, 'b, TX: DbTx<'a>> StateRootProvider for HistoricalStateProviderRef<'a, 'b, TX> {
-    fn state_root(&self, _post_state: PostState) -> Result<H256> {
+    fn state_root(&self, _post_state: BundleState) -> Result<H256> {
         Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
     }
 }

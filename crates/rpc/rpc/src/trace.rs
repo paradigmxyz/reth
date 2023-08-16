@@ -11,12 +11,11 @@ use crate::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_consensus_common::calc::{base_block_reward, block_reward};
+use reth_interfaces::Error;
 use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, SealedHeader, H256, U256};
-use reth_provider::{
-    BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
-};
+use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::{
-    database::{State, SubState},
+    database::State,
     env::tx_env_with_recovered,
     tracing::{
         parity::populate_account_balance_nonce_diffs, TracingInspector, TracingInspectorConfig,
@@ -28,8 +27,12 @@ use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*},
     BlockError, BlockOverrides, CallRequest, Index, TransactionInfo,
 };
-use revm::{db::CacheDB, primitives::Env};
-use revm_primitives::{db::DatabaseCommit, ExecutionResult, ResultAndState};
+use revm::{
+    db::{State as RevmState, StateBuilder as RevmStateBuilder},
+    primitives::Env,
+    DatabaseCommit,
+};
+use revm_primitives::{ExecutionResult, ResultAndState};
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -84,12 +87,12 @@ where
         let mut inspector = TracingInspector::new(config);
         self.inner
             .eth_api
-            .spawn_with_call_at(call, at, overrides, move |db, env| {
-                let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
+            .spawn_with_call_at(call, at, overrides, move |mut db, env| {
+                let (res, _) = inspect_and_return_db(&mut db, env, &mut inspector)?;
                 let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
                     res,
                     &trace_types,
-                    &db,
+                    &mut db,
                 )?;
                 Ok(trace_res)
             })
@@ -117,11 +120,11 @@ where
 
         self.inner
             .eth_api
-            .spawn_trace_at_with_state(env, config, at, move |inspector, res, db| {
+            .spawn_trace_at_with_state(env, config, at, move |inspector, res, mut db| {
                 Ok(inspector.into_parity_builder().into_trace_results_with_state(
                     res,
                     &trace_types,
-                    &db,
+                    &mut db,
                 )?)
             })
             .await
@@ -145,7 +148,11 @@ where
             .eth_api
             .spawn_with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(calls.len());
-                let mut db = SubState::new(State::new(state));
+                let provider = Box::new(State::new(state));
+                let mut revm_state = RevmStateBuilder::default()
+                    .with_database(provider)
+                    .without_bundle_update()
+                    .build();
 
                 let mut calls = calls.into_iter().peekable();
 
@@ -155,12 +162,12 @@ where
                         block_env.clone(),
                         call,
                         gas_limit,
-                        &mut db,
+                        &mut revm_state,
                         Default::default(),
                     )?;
                     let config = tracing_config(&trace_types);
                     let mut inspector = TracingInspector::new(config);
-                    let (res, _) = inspect(&mut db, env, &mut inspector)?;
+                    let (res, _) = inspect(&mut revm_state, env, &mut inspector)?;
                     let ResultAndState { result, state } = res;
 
                     let mut trace_res =
@@ -171,7 +178,7 @@ where
                     if let Some(ref mut state_diff) = trace_res.state_diff {
                         populate_account_balance_nonce_diffs(
                             state_diff,
-                            &db,
+                            &mut revm_state,
                             state.iter().map(|(addr, acc)| (*addr, acc.info.clone())),
                         )?;
                     }
@@ -183,7 +190,7 @@ where
                     if calls.peek().is_some() {
                         // need to apply the state changes of this call before executing
                         // the next call
-                        db.commit(state)
+                        revm_state.commit(state)
                     }
                 }
 
@@ -201,11 +208,11 @@ where
         let config = tracing_config(&trace_types);
         self.inner
             .eth_api
-            .spawn_trace_transaction_in_block(hash, config, move |_, inspector, res, db| {
+            .spawn_trace_transaction_in_block(hash, config, move |_, inspector, res, mut db| {
                 let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
                     res,
                     &trace_types,
-                    &db,
+                    &mut db,
                 )?;
                 Ok(trace_res)
             })
@@ -290,7 +297,7 @@ where
                 TracingInspector,
                 ExecutionResult,
                 &'a revm_primitives::State,
-                &'a CacheDB<State<StateProviderBox<'a>>>,
+                &'a mut RevmState<'_, Error>,
             ) -> EthResult<R>
             + Send
             + 'static,
@@ -318,7 +325,10 @@ where
             .eth_api
             .spawn_with_state_at_block(state_at.into(), move |state| {
                 let mut results = Vec::with_capacity(transactions.len());
-                let mut db = SubState::new(State::new(state));
+                let mut db = RevmStateBuilder::default()
+                    .with_database(Box::new(State::new(state)))
+                    .without_bundle_update()
+                    .build();
 
                 let mut transactions = transactions.into_iter().enumerate().peekable();
 
@@ -338,8 +348,9 @@ where
                     let mut inspector = TracingInspector::new(config);
                     let (res, _) = inspect(&mut db, env, &mut inspector)?;
                     let ResultAndState { result, state } = res;
-                    results.push(f(tx_info, inspector, result, &state, &db)?);
+                    results.push(f(tx_info, inspector, result, &state, &mut db)?);
 
+                    // TODO (rakita) revm state check if this is correct.
                     // need to apply the state changes of this transaction before executing the
                     // next transaction
                     if transactions.peek().is_some() {
@@ -399,8 +410,10 @@ where
                             RewardAction {
                                 author: block.header.beneficiary,
                                 reward_type: RewardType::Uncle,
-                                value: block_reward(base_block_reward, block.ommers.len()) -
-                                    U256::from(base_block_reward),
+                                value: U256::from(
+                                    block_reward(base_block_reward, block.ommers.len()) -
+                                        base_block_reward,
+                                ),
                             },
                         ));
                     }

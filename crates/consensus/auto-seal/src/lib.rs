@@ -31,8 +31,11 @@ use reth_primitives::{
     Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, EMPTY_OMMER_ROOT, H256,
     U256,
 };
-use reth_provider::{BlockReaderIdExt, CanonStateNotificationSender, PostState, StateProvider};
-use reth_revm::executor::Executor;
+use reth_provider::{
+    BlockExecutor, BlockReaderIdExt, BundleState, CanonStateNotificationSender,
+    StateProviderFactory,
+};
+use reth_revm::{database::State, processor::EVMProcessor, StateBuilder as RevmStateBuilder};
 use reth_transaction_pool::TransactionPool;
 use std::{
     collections::HashMap,
@@ -291,33 +294,37 @@ impl StorageInner {
     /// Executes the block with the given block and senders, on the provided [Executor].
     ///
     /// This returns the poststate from execution and post-block changes, as well as the gas used.
-    pub(crate) fn execute<DB: StateProvider>(
+    pub(crate) fn execute(
         &mut self,
         block: &Block,
-        executor: &mut Executor<DB>,
+        executor: &mut EVMProcessor<'_>,
         senders: Vec<Address>,
-    ) -> Result<(PostState, u64), BlockExecutionError> {
+    ) -> Result<(BundleState, u64), BlockExecutionError> {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
-        let (post_state, gas_used) =
-            executor.execute_transactions(block, U256::ZERO, Some(senders))?;
+        let gas_used = executor.execute_transactions(block, U256::ZERO, Some(senders))?;
+
+        // add post execution state change
+        // Withdrawals, rewards etc.
+        executor.post_execution_state_change(block, U256::ZERO)?;
+
+        // merge transitions
+        executor.db().merge_transitions();
 
         // apply post block changes
-        let post_state = executor.apply_post_block_changes(block, U256::ZERO, post_state)?;
-
-        Ok((post_state, gas_used))
+        Ok((executor.take_output_state(), gas_used))
     }
 
     /// Fills in the post-execution header fields based on the given PostState and gas used.
     /// In doing this, the state root is calculated and the final header is returned.
-    pub(crate) fn complete_header<DB: StateProvider>(
+    pub(crate) fn complete_header(
         &self,
         mut header: Header,
-        post_state: &PostState,
-        executor: &mut Executor<DB>,
+        bundle_state: &BundleState,
+        client: &impl StateProviderFactory,
         gas_used: u64,
     ) -> Header {
-        let receipts = post_state.receipts(header.number);
+        let receipts = bundle_state.receipts_by_block(header.number);
         header.receipts_root = if receipts.is_empty() {
             EMPTY_RECEIPTS
         } else {
@@ -331,7 +338,7 @@ impl StorageInner {
         header.gas_used = gas_used;
 
         // calculate the state root
-        let state_root = executor.db().db.0.state_root(post_state.clone()).unwrap();
+        let state_root = client.latest().unwrap().state_root(bundle_state.clone()).unwrap();
         header.state_root = state_root;
         header
     }
@@ -339,13 +346,13 @@ impl StorageInner {
     /// Builds and executes a new block with the given transactions, on the provided [Executor].
     ///
     /// This returns the header of the executed block, as well as the poststate from execution.
-    pub(crate) fn build_and_execute<DB: StateProvider>(
+    pub(crate) fn build_and_execute(
         &mut self,
         transactions: Vec<TransactionSigned>,
-        executor: &mut Executor<DB>,
+        client: &impl StateProviderFactory,
         chain_spec: Arc<ChainSpec>,
-    ) -> Result<(SealedHeader, PostState), BlockExecutionError> {
-        let header = self.build_header_template(&transactions, chain_spec);
+    ) -> Result<(SealedHeader, BundleState), BlockExecutionError> {
+        let header = self.build_header_template(&transactions, chain_spec.clone());
 
         let block = Block { header, body: transactions, ommers: vec![], withdrawals: None };
 
@@ -355,15 +362,21 @@ impl StorageInner {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
         // now execute the block
-        let (post_state, gas_used) = self.execute(&block, executor, senders)?;
+        let db = RevmStateBuilder::default()
+            .with_database(Box::new(State::new(client.latest().unwrap())))
+            .without_bundle_update()
+            .build();
+        let mut executor = EVMProcessor::new_with_state(chain_spec, db);
+
+        let (bundle_state, gas_used) = self.execute(&block, &mut executor, senders)?;
 
         let Block { header, body, .. } = block;
         let body = BlockBody { transactions: body, ommers: vec![], withdrawals: None };
 
-        trace!(target: "consensus::auto", ?post_state, ?header, ?body, "executed block, calculating state root and completing header");
+        trace!(target: "consensus::auto", ?bundle_state, ?header, ?body, "executed block, calculating state root and completing header");
 
         // fill in the rest of the fields
-        let header = self.complete_header(header, &post_state, executor, gas_used);
+        let header = self.complete_header(header, &bundle_state, client, gas_used);
 
         trace!(target: "consensus::auto", root=?header.state_root, ?body, "calculated root");
 
@@ -373,6 +386,6 @@ impl StorageInner {
         // set new header with hash that should have been updated by insert_new_block
         let new_header = header.seal(self.best_hash);
 
-        Ok((new_header, post_state))
+        Ok((new_header, bundle_state))
     }
 }

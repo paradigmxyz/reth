@@ -3,7 +3,7 @@
 //! A [`Chain`] contains the state of accounts for the chain after execution of its constituent
 //! blocks, as well as a list of the blocks the chain is composed of.
 use super::externals::TreeExternals;
-use crate::{post_state::PostState, PostStateDataRef};
+use crate::PostStateDataRef;
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::error::{BlockchainTreeError, InsertBlockError},
@@ -14,8 +14,8 @@ use reth_primitives::{
     BlockHash, BlockNumber, ForkBlock, SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
-    providers::PostStateProvider, BlockExecutor, Chain, ExecutorFactory, PostStateDataProvider,
-    StateRootProvider,
+    change::BundleState, providers::PostStateProvider, Chain, ExecutorFactory,
+    PostStateDataProvider, StateRootProvider,
 };
 use std::{
     collections::BTreeMap,
@@ -72,7 +72,7 @@ impl AppendableChain {
         C: Consensus,
         EF: ExecutorFactory,
     {
-        let state = PostState::default();
+        let state = BundleState::default();
         let empty = BTreeMap::new();
 
         let state_provider = PostStateDataRef {
@@ -82,7 +82,7 @@ impl AppendableChain {
             canonical_fork,
         };
 
-        let changeset = Self::validate_and_execute_canonical_head_descendant(
+        let bundle_state = Self::validate_and_execute_canonical_head_descendant(
             block.clone(),
             parent_header,
             state_provider,
@@ -90,7 +90,7 @@ impl AppendableChain {
         )
         .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
 
-        Ok(Self { chain: Chain::new(vec![(block, changeset)]) })
+        Ok(Self { chain: Chain::new(vec![block], bundle_state) })
     }
 
     /// Create a new chain that forks off of the canonical chain.
@@ -106,7 +106,7 @@ impl AppendableChain {
         C: Consensus,
         EF: ExecutorFactory,
     {
-        let state = PostState::default();
+        let state = BundleState::default();
         let empty = BTreeMap::new();
 
         let state_provider = PostStateDataRef {
@@ -116,7 +116,7 @@ impl AppendableChain {
             canonical_fork,
         };
 
-        let changeset = Self::validate_and_execute_sidechain(
+        let bundle_state = Self::validate_and_execute_sidechain(
             block.clone(),
             parent_header,
             state_provider,
@@ -124,7 +124,7 @@ impl AppendableChain {
         )
         .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
 
-        Ok(Self { chain: Chain::new(vec![(block, changeset)]) })
+        Ok(Self { chain: Chain::new(vec![block], bundle_state) })
     }
 
     /// Create a new chain that forks off of an existing sidechain.
@@ -183,7 +183,7 @@ impl AppendableChain {
         post_state_data_provider: PSDP,
         externals: &TreeExternals<DB, C, EF>,
         block_kind: BlockKind,
-    ) -> Result<PostState, Error>
+    ) -> Result<BundleState, Error>
     where
         PSDP: PostStateDataProvider,
         DB: Database,
@@ -204,12 +204,13 @@ impl AppendableChain {
         let provider = PostStateProvider::new(state_provider, post_state_data_provider);
 
         let mut executor = externals.executor_factory.with_sp(&provider);
-        let post_state = executor.execute_and_verify_receipt(&block, U256::MAX, Some(senders))?;
+        executor.execute_and_verify_receipt(&block, U256::MAX, Some(senders))?;
+        let bundle_state = executor.take_output_state();
 
         // check state root if the block extends the canonical chain.
         if block_kind.extends_canonical_head() {
             // check state root
-            let state_root = provider.state_root(post_state.clone())?;
+            let state_root = provider.state_root(bundle_state.clone())?;
             if block.state_root != state_root {
                 return Err(ConsensusError::BodyStateRootDiff {
                     got: state_root,
@@ -219,7 +220,7 @@ impl AppendableChain {
             }
         }
 
-        Ok(post_state)
+        Ok(bundle_state)
     }
 
     /// Validate and execute the given block that _extends the canonical chain_, validating its
@@ -229,7 +230,7 @@ impl AppendableChain {
         parent_block: &SealedHeader,
         post_state_data_provider: PSDP,
         externals: &TreeExternals<DB, C, EF>,
-    ) -> Result<PostState, Error>
+    ) -> Result<BundleState, Error>
     where
         PSDP: PostStateDataProvider,
         DB: Database,
@@ -251,7 +252,7 @@ impl AppendableChain {
         parent_block: &SealedHeader,
         post_state_data_provider: PSDP,
         externals: &TreeExternals<DB, C, EF>,
-    ) -> Result<PostState, Error>
+    ) -> Result<BundleState, Error>
     where
         PSDP: PostStateDataProvider,
         DB: Database,

@@ -1,14 +1,14 @@
 //! Substate for blockchain trees
 
 use reth_primitives::{BlockHash, BlockNumber, ForkBlock};
-use reth_provider::{post_state::PostState, PostStateDataProvider};
+use reth_provider::{change::BundleState, PostStateDataProvider};
 use std::collections::BTreeMap;
 
 /// Structure that bundles references of data needs to implement [`PostStateDataProvider`]
 #[derive(Clone, Debug)]
 pub struct PostStateDataRef<'a> {
     /// The wrapped state after execution of one or more transactions and/or blocks.
-    pub state: &'a PostState,
+    pub state: &'a BundleState,
     /// The blocks in the sidechain.
     pub sidechain_block_hashes: &'a BTreeMap<BlockNumber, BlockHash>,
     /// The blocks in the canonical chain.
@@ -18,7 +18,7 @@ pub struct PostStateDataRef<'a> {
 }
 
 impl<'a> PostStateDataProvider for PostStateDataRef<'a> {
-    fn state(&self) -> &PostState {
+    fn state(&self) -> &BundleState {
         self.state
     }
 
@@ -40,7 +40,7 @@ impl<'a> PostStateDataProvider for PostStateDataRef<'a> {
 #[derive(Clone, Debug)]
 pub struct PostStateData {
     /// Post state with changes
-    pub state: PostState,
+    pub state: BundleState,
     /// Parent block hashes needs for evm BLOCKHASH opcode.
     /// NOTE: it does not mean that all hashes are there but all until finalized are there.
     /// Other hashes can be obtained from provider
@@ -50,7 +50,7 @@ pub struct PostStateData {
 }
 
 impl PostStateDataProvider for PostStateData {
-    fn state(&self) -> &PostState {
+    fn state(&self) -> &BundleState {
         &self.state
     }
 

@@ -2,12 +2,10 @@ use reth_interfaces::Error;
 use reth_primitives::{H160, H256, KECCAK_EMPTY, U256};
 use reth_provider::StateProvider;
 use revm::{
-    db::{CacheDB, DatabaseRef},
+    db::DatabaseRef,
     primitives::{AccountInfo, Bytecode},
+    Database,
 };
-
-/// SubState of database. Uses revm internal cache with binding to reth StateProvider trait.
-pub type SubState<DB> = CacheDB<State<DB>>;
 
 /// Wrapper around StateProvider that implements revm database trait
 #[derive(Debug, Clone)]
@@ -35,8 +33,42 @@ impl<DB: StateProvider> State<DB> {
     }
 }
 
-impl<DB: StateProvider> DatabaseRef for State<DB> {
+impl<DB: StateProvider> Database for State<DB> {
     type Error = Error;
+
+    fn basic(&mut self, address: H160) -> Result<Option<AccountInfo>, Self::Error> {
+        Ok(self.0.basic_account(address)?.map(|account| AccountInfo {
+            balance: account.balance,
+            nonce: account.nonce,
+            code_hash: account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+            code: None,
+        }))
+    }
+
+    fn code_by_hash(&mut self, code_hash: H256) -> Result<Bytecode, Self::Error> {
+        let bytecode = self.0.bytecode_by_hash(code_hash)?;
+
+        if let Some(bytecode) = bytecode {
+            Ok(bytecode.0)
+        } else {
+            Ok(Bytecode::new())
+        }
+    }
+
+    fn storage(&mut self, address: H160, index: U256) -> Result<U256, Self::Error> {
+        let index = H256(index.to_be_bytes());
+        let ret = self.0.storage(address, index)?.unwrap_or_default();
+        Ok(ret)
+    }
+
+    fn block_hash(&mut self, number: U256) -> Result<H256, Self::Error> {
+        // Note: this unwrap is potentially unsafe
+        Ok(self.0.block_hash(number.try_into().unwrap())?.unwrap_or_default())
+    }
+}
+
+impl<DB: StateProvider> DatabaseRef for State<DB> {
+    type Error = <Self as Database>::Error;
 
     fn basic(&self, address: H160) -> Result<Option<AccountInfo>, Self::Error> {
         Ok(self.0.basic_account(address)?.map(|account| AccountInfo {
@@ -51,7 +83,7 @@ impl<DB: StateProvider> DatabaseRef for State<DB> {
         let bytecode = self.0.bytecode_by_hash(code_hash)?;
 
         if let Some(bytecode) = bytecode {
-            Ok(bytecode.with_code_hash(code_hash).0)
+            Ok(bytecode.0)
         } else {
             Ok(Bytecode::new())
         }

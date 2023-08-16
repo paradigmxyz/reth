@@ -12,6 +12,7 @@ use crate::{
     EthApi, EthApiSpec,
 };
 use async_trait::async_trait;
+use reth_interfaces::Error;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, Header,
@@ -25,8 +26,9 @@ use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_revm::{
-    database::{State, SubState},
+    database::State,
     env::{fill_block_env_with_coinbase, tx_env_with_recovered},
+    revm::{State as RevmState, StateBuilder as RevmStateBuilder},
     tracing::{TracingInspector, TracingInspectorConfig},
 };
 use reth_rpc_types::{
@@ -35,14 +37,13 @@ use reth_rpc_types::{
 };
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::{
-    db::CacheDB,
     primitives::{BlockEnv, CfgEnv},
     Inspector,
 };
 use revm_primitives::{utilities::create_address, Env, ResultAndState, SpecId};
 
 /// Helper alias type for the state's [CacheDB]
-pub(crate) type StateCacheDB<'r> = CacheDB<State<StateProviderBox<'r>>>;
+pub(crate) type StateCacheDB<'r> = RevmState<'r, Error>;
 
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace.
 ///
@@ -521,7 +522,10 @@ where
             .tracing_call_pool
             .spawn(move || {
                 let state = this.state_at(at)?;
-                let mut db = SubState::new(State::new(state));
+                let mut db = RevmStateBuilder::default()
+                    .with_database(Box::new(State::new(state)))
+                    .without_bundle_update()
+                    .build();
 
                 let env = prepare_call_env(
                     cfg,
@@ -572,10 +576,13 @@ where
         F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>,
     {
         self.with_state_at_block(at, |state| {
-            let db = SubState::new(State::new(state));
+            let mut db = RevmStateBuilder::default()
+                .with_database(Box::new(State::new(state)))
+                .without_bundle_update()
+                .build();
 
             let mut inspector = TracingInspector::new(config);
-            let (res, _) = inspect(db, env, &mut inspector)?;
+            let (res, _) = inspect(&mut db, env, &mut inspector)?;
 
             f(inspector, res)
         })
@@ -595,9 +602,12 @@ where
         R: Send + 'static,
     {
         self.spawn_with_state_at_block(at, move |state| {
-            let db = SubState::new(State::new(state));
+            let mut db = RevmStateBuilder::default()
+                .with_database(Box::new(State::new(state)))
+                .without_bundle_update()
+                .build();
             let mut inspector = TracingInspector::new(config);
-            let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
+            let (res, _) = inspect_and_return_db(&mut db, env, &mut inspector)?;
 
             f(inspector, res, db)
         })
@@ -653,15 +663,24 @@ where
         let block_txs = block.body;
 
         self.spawn_with_state_at_block(parent_block.into(), move |state| {
-            let mut db = SubState::new(State::new(state));
+            let mut db = RevmStateBuilder::default()
+                .with_database(Box::new(State::new(state)))
+                .without_bundle_update()
+                .build();
 
             // replay all transactions prior to the targeted transaction
-            replay_transactions_until(&mut db, cfg.clone(), block_env.clone(), block_txs, tx.hash)?;
+            replay_transactions_until::<StateCacheDB<'_>, _, _>(
+                &mut db,
+                cfg.clone(),
+                block_env.clone(),
+                block_txs,
+                tx.hash,
+            )?;
 
             let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
 
             let mut inspector = TracingInspector::new(config);
-            let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
+            let (res, _) = inspect_and_return_db(&mut db, env, &mut inspector)?;
             f(tx_info, inspector, res, db)
         })
         .await

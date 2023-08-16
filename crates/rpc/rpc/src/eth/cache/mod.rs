@@ -457,7 +457,7 @@ where
             for block in &blocks {
                 let block_receipts = BlockReceipts {
                     block_hash: block.hash,
-                    receipts: state.receipts(block.number).to_vec(),
+                    receipts: state.receipts_by_block(block.number).to_vec(),
                 };
                 receipts.push(block_receipts);
             }

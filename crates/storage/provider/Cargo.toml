@@ -27,7 +27,6 @@ tracing.workspace = true
 auto_impl = "1.0"
 itertools.workspace = true
 pin-project.workspace = true
-derive_more = "0.99"
 parking_lot.workspace = true
 
 # test-utils

@@ -9,7 +9,7 @@ use reth_rpc_types::trace::geth::{
     AccountState, CallConfig, CallFrame, DefaultFrame, DiffMode, GethDefaultTracingOptions,
     PreStateConfig, PreStateFrame, PreStateMode, StructLog,
 };
-use revm::{db::DatabaseRef, primitives::ResultAndState};
+use revm::{primitives::ResultAndState, Database};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 /// A type for creating geth style traces
@@ -164,10 +164,10 @@ impl GethTraceBuilder {
         &self,
         ResultAndState { state, .. }: &ResultAndState,
         prestate_config: PreStateConfig,
-        db: DB,
+        db: &mut DB,
     ) -> Result<PreStateFrame, DB::Error>
     where
-        DB: DatabaseRef,
+        DB: Database,
     {
         let account_diffs: Vec<_> =
             state.into_iter().map(|(addr, acc)| (*addr, &acc.info)).collect();

@@ -1,9 +1,10 @@
 use crate::{
+    change::BundleState,
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    ChainSpecProvider, EvmEnvProvider, HeaderProvider, PostState, PostStateDataProvider,
-    ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider,
-    TransactionsProvider, WithdrawalsProvider,
+    ChainSpecProvider, EvmEnvProvider, HeaderProvider, PostStateDataProvider, ReceiptProviderIdExt,
+    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use parking_lot::Mutex;
 use reth_db::models::StoredBlockBodyIndices;
@@ -399,7 +400,7 @@ impl AccountReader for MockEthProvider {
 }
 
 impl StateRootProvider for MockEthProvider {
-    fn state_root(&self, _post_state: PostState) -> Result<H256> {
+    fn state_root(&self, _state: BundleState) -> Result<H256> {
         todo!()
     }
 }

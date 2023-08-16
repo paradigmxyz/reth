@@ -669,6 +669,10 @@ name = "bitflags"
 version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4682ae6287fcf752ecaabbfcc7b6f9b72aa33933dc23a554d853aea8eea8635"
+dependencies = [
+ "arbitrary",
+ "serde",
+]
 
 [[package]]
 name = "bitvec"
@@ -2846,7 +2850,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
 dependencies = [
  "ahash 0.8.3",
- "serde",
 ]
 
 [[package]]
@@ -2857,6 +2860,7 @@ checksum = "2c6201b9ff9fd90a5a3bac2e56a830d0caa509576f0e503818ee82c181b3437a"
 dependencies = [
  "ahash 0.8.3",
  "allocator-api2",
+ "serde",
 ]
 
 [[package]]
@@ -5327,6 +5331,7 @@ version = "0.1.0-alpha.6"
 dependencies = [
  "futures-core",
  "futures-util",
+ "reth-interfaces",
  "reth-metrics",
  "reth-payload-builder",
  "reth-primitives",
@@ -5870,7 +5875,6 @@ name = "reth-provider"
 version = "0.1.0-alpha.6"
 dependencies = [
  "auto_impl",
- "derive_more",
  "itertools 0.11.0",
  "parking_lot 0.12.1",
  "pin-project",
@@ -6148,6 +6152,7 @@ dependencies = [
  "reth-revm",
  "reth-rlp",
  "reth-trie",
+ "revm",
  "serde",
  "serde_json",
  "thiserror",
@@ -6231,9 +6236,11 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "3.3.0"
-source = "git+https://github.com/bluealloy/revm/?branch=release/v25#88337924f4d16ed1f5e4cde12a03d0cb755cd658"
+source = "git+https://github.com/bluealloy/revm.git?rev=49a64704f488b4bc0b42a80ab291b8290ac5b0e6#49a64704f488b4bc0b42a80ab291b8290ac5b0e6"
 dependencies = [
  "auto_impl",
+ "once_cell",
+ "rayon",
  "revm-interpreter",
  "revm-precompile",
 ]
@@ -6241,7 +6248,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "1.1.2"
-source = "git+https://github.com/bluealloy/revm/?branch=release/v25#88337924f4d16ed1f5e4cde12a03d0cb755cd658"
+source = "git+https://github.com/bluealloy/revm.git?rev=49a64704f488b4bc0b42a80ab291b8290ac5b0e6#49a64704f488b4bc0b42a80ab291b8290ac5b0e6"
 dependencies = [
  "derive_more",
  "enumn",
@@ -6252,7 +6259,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "2.0.3"
-source = "git+https://github.com/bluealloy/revm/?branch=release/v25#88337924f4d16ed1f5e4cde12a03d0cb755cd658"
+source = "git+https://github.com/bluealloy/revm.git?rev=49a64704f488b4bc0b42a80ab291b8290ac5b0e6#49a64704f488b4bc0b42a80ab291b8290ac5b0e6"
 dependencies = [
  "k256",
  "num",
@@ -6268,16 +6275,17 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "1.1.2"
-source = "git+https://github.com/bluealloy/revm/?branch=release/v25#88337924f4d16ed1f5e4cde12a03d0cb755cd658"
+source = "git+https://github.com/bluealloy/revm.git?rev=49a64704f488b4bc0b42a80ab291b8290ac5b0e6#49a64704f488b4bc0b42a80ab291b8290ac5b0e6"
 dependencies = [
  "arbitrary",
  "auto_impl",
+ "bitflags 2.4.0",
  "bitvec 1.0.1",
  "bytes",
  "derive_more",
  "enumn",
  "fixed-hash",
- "hashbrown 0.13.2",
+ "hashbrown 0.14.0",
  "hex",
  "hex-literal 0.4.1",
  "primitive-types",
@@ -6287,6 +6295,7 @@ dependencies = [
  "ruint",
  "serde",
  "sha3",
+ "to-binary",
 ]
 
 [[package]]
@@ -7534,6 +7543,15 @@ name = "tinyvec_macros"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
+
+[[package]]
+name = "to-binary"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4424552bc848fd1afbcd81f0e8a54b7401b90fd81bb418655ad6dc6d0823bbe3"
+dependencies = [
+ "hex",
+]
 
 [[package]]
 name = "tokio"

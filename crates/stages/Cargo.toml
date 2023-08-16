@@ -24,6 +24,9 @@ reth-provider.workspace = true
 reth-metrics.workspace = true
 reth-trie = { path = "../trie" }
 
+# temp wrap it around reth-revm crates
+revm.workspace = true
+
 # async
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true

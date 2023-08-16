@@ -77,14 +77,9 @@ lto = "fat"
 codegen-units = 1
 incremental = false
 
-[patch.crates-io]
-revm = { git = "https://github.com/bluealloy/revm/", branch = "release/v25" }
-revm-primitives = { git = "https://github.com/bluealloy/revm/", branch = "release/v25" }
-
 [workspace.dependencies]
-## reth
-revm = { version = "3" }
-revm-primitives = "1.1"
+revm = { git = "https://github.com/bluealloy/revm.git", rev = "49a64704f488b4bc0b42a80ab291b8290ac5b0e6" }
+revm-primitives = { git = "https://github.com/bluealloy/revm.git", rev = "49a64704f488b4bc0b42a80ab291b8290ac5b0e6" }
 reth = { path = "./bin/reth" }
 reth-primitives = { path = "./crates/primitives" }
 reth-interfaces = { path = "./crates/interfaces" }

@@ -22,9 +22,6 @@
 //!
 //! - `test-utils`: Export utilities for testing
 
-/// Execution result types.
-pub use reth_provider::post_state;
-
 pub mod blockchain_tree;
 pub use blockchain_tree::{BlockHashes, BlockchainTree};
 

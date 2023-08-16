@@ -21,9 +21,9 @@
 /// Various provider traits.
 mod traits;
 pub use traits::{
-    AccountExtReader, AccountReader, BlockExecutionWriter, BlockExecutor, BlockHashReader,
-    BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BlockWriter,
-    BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotification,
+    AccountExtReader, AccountReader, BlockExecutionWriter, BlockExecutor, BlockExecutorStats,
+    BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
+    BlockWriter, BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotification,
     CanonStateNotificationSender, CanonStateNotifications, CanonStateSubscriptions,
     ChainSpecProvider, ChangeSetReader, EvmEnvProvider, ExecutorFactory, HashingWriter,
     HeaderProvider, HistoryWriter, PostStateDataProvider, PruneCheckpointReader,
@@ -39,9 +39,8 @@ pub use providers::{
     HistoricalStateProviderRef, LatestStateProvider, LatestStateProviderRef, ProviderFactory,
 };
 
-/// Execution result
-pub mod post_state;
-pub use post_state::PostState;
+/// Helper types for interacting with the database
+mod transaction;
 
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking the Provider.
@@ -52,3 +51,6 @@ pub use reth_interfaces::provider::ProviderError;
 
 pub mod chain;
 pub use chain::{Chain, DisplayBlocksChain};
+
+pub mod change;
+pub use change::{BundleState, StateChange, StateReverts};

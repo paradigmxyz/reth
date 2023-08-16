@@ -1,6 +1,7 @@
 //! utilities for working with revm
 
 use crate::eth::error::{EthApiError, EthResult, RpcInvalidTransactionError};
+use reth_interfaces::Error;
 use reth_primitives::{
     AccessList, Address, TransactionSigned, TransactionSignedEcRecovered, TxHash, H256, U256,
 };
@@ -10,15 +11,12 @@ use reth_rpc_types::{
     BlockOverrides, CallRequest,
 };
 use revm::{
-    db::{CacheDB, EmptyDB},
+    db::{states::CacheAccount, AccountStatus, EmptyDBTyped, State as RevmState},
     precompile::{Precompiles, SpecId as PrecompilesSpecId},
     primitives::{BlockEnv, CfgEnv, Env, ResultAndState, SpecId, TransactTo, TxEnv},
     Database, Inspector,
 };
-use revm_primitives::{
-    db::{DatabaseCommit, DatabaseRef},
-    Bytecode, ExecutionResult,
-};
+use revm_primitives::{db::DatabaseCommit, Bytecode, ExecutionResult};
 use tracing::trace;
 
 /// Helper type that bundles various overrides for EVM Execution.
@@ -135,7 +133,7 @@ where
 {
     let mut evm = revm::EVM::with_env(env);
     evm.database(db);
-    let res = evm.inspect(inspector)?;
+    let res: ResultAndState = evm.inspect(inspector)?;
     Ok((res, evm.env))
 }
 
@@ -143,21 +141,20 @@ where
 ///
 /// Even though [Database] is also implemented on `&mut`
 /// this is still useful if there are certain trait bounds on the Inspector's database generic type
-pub(crate) fn inspect_and_return_db<DB, I>(
-    db: DB,
+pub(crate) fn inspect_and_return_db<'a, DB, I>(
+    db: &'a mut DB,
     env: Env,
     inspector: I,
-) -> EthResult<(ResultAndState, Env, DB)>
+) -> EthResult<(ResultAndState, Env)>
 where
     DB: Database,
     <DB as Database>::Error: Into<EthApiError>,
-    I: Inspector<DB>,
+    I: Inspector<&'a mut DB>,
 {
     let mut evm = revm::EVM::with_env(env);
     evm.database(db);
     let res = evm.inspect(inspector)?;
-    let db = evm.take_db();
-    Ok((res, evm.env, db))
+    Ok((res, evm.env))
 }
 
 /// Replays all the transactions until the target transaction is found.
@@ -167,15 +164,15 @@ where
 ///
 /// Note: This assumes the target transaction is in the given iterator.
 pub(crate) fn replay_transactions_until<DB, I, Tx>(
-    db: &mut CacheDB<DB>,
+    db: &mut RevmState<'_, DB::Error>,
     cfg: CfgEnv,
     block_env: BlockEnv,
     transactions: I,
     target_tx_hash: H256,
 ) -> EthResult<()>
 where
-    DB: DatabaseRef,
-    EthApiError: From<<DB as DatabaseRef>::Error>,
+    DB: Database,
+    EthApiError: From<<DB as Database>::Error>,
     I: IntoIterator<Item = Tx>,
     Tx: FillableTransaction,
 {
@@ -198,17 +195,16 @@ where
 /// Prepares the [Env] for execution.
 ///
 /// Does not commit any changes to the underlying database.
-pub(crate) fn prepare_call_env<DB>(
+pub(crate) fn prepare_call_env(
     mut cfg: CfgEnv,
     block: BlockEnv,
     request: CallRequest,
     gas_limit: u64,
-    db: &mut CacheDB<DB>,
+    db: &mut RevmState<'_, Error>,
     overrides: EvmOverrides,
 ) -> EthResult<Env>
 where
-    DB: DatabaseRef,
-    EthApiError: From<<DB as DatabaseRef>::Error>,
+    EthApiError: From<Error>,
 {
     // we want to disable this in eth_call, since this is common practice used by other node
     // impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
@@ -438,10 +434,9 @@ fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
 }
 
 /// Applies the given state overrides (a set of [AccountOverride]) to the [CacheDB].
-fn apply_state_overrides<DB>(overrides: StateOverride, db: &mut CacheDB<DB>) -> EthResult<()>
+fn apply_state_overrides(overrides: StateOverride, db: &mut RevmState<'_, Error>) -> EthResult<()>
 where
-    DB: DatabaseRef,
-    EthApiError: From<<DB as DatabaseRef>::Error>,
+    EthApiError: From<Error>,
 {
     for (account, account_overrides) in overrides {
         apply_account_override(account, account_overrides, db)?;
@@ -449,61 +444,60 @@ where
     Ok(())
 }
 
-/// Applies a single [AccountOverride] to the [CacheDB].
-fn apply_account_override<DB>(
-    account: Address,
+/// Applies a single [AccountOverride] to the [CacheState].
+fn apply_account_override(
+    address: Address,
     account_override: AccountOverride,
-    db: &mut CacheDB<DB>,
+    db: &mut RevmState<'_, Error>,
 ) -> EthResult<()>
 where
-    DB: DatabaseRef,
-    EthApiError: From<<DB as DatabaseRef>::Error>,
+    EthApiError: From<Error>,
 {
-    // we need to fetch the account via the `DatabaseRef` to not update the state of the account,
-    // which is modified via `Database::basic`
-    let mut account_info = DatabaseRef::basic(db, account)?.unwrap_or_default();
+    // Fetch account from cache or create a new one. Mark it as changed.
+    let mut account = db
+        .cache
+        .accounts
+        .get_mut(&address)
+        .cloned()
+        .unwrap_or_else(|| CacheAccount { account: None, status: AccountStatus::Changed });
+    let mut plain_account = account.account.unwrap_or_default();
 
     if let Some(nonce) = account_override.nonce {
-        account_info.nonce = nonce.as_u64();
+        plain_account.info.nonce = nonce.as_u64();
     }
     if let Some(code) = account_override.code {
-        account_info.code = Some(Bytecode::new_raw(code.0));
+        plain_account.info.code = Some(Bytecode::new_raw(code.0));
     }
     if let Some(balance) = account_override.balance {
-        account_info.balance = balance;
+        plain_account.info.balance = balance;
     }
-
-    db.insert_account_info(account, account_info);
 
     // We ensure that not both state and state_diff are set.
     // If state is set, we must mark the account as "NewlyCreated", so that the old storage
-    // isn't read from
+    // isn't read from database
     match (account_override.state, account_override.state_diff) {
-        (Some(_), Some(_)) => return Err(EthApiError::BothStateAndStateDiffInOverride(account)),
+        (Some(_), Some(_)) => return Err(EthApiError::BothStateAndStateDiffInOverride(address)),
         (None, None) => {
             // nothing to do
         }
         (Some(new_account_state), None) => {
-            db.replace_account_storage(
-                account,
-                new_account_state
-                    .into_iter()
-                    .map(|(slot, value)| {
-                        (U256::from_be_bytes(slot.0), U256::from_be_bytes(value.0))
-                    })
-                    .collect(),
-            )?;
+            // mark it as in memory to not fetch database for other storage value.
+            account.status = AccountStatus::InMemoryChange;
+            plain_account.storage = new_account_state
+                .into_iter()
+                .map(|(slot, value)| (U256::from_be_bytes(slot.0), U256::from_be_bytes(value.0)))
+                .collect();
         }
         (None, Some(account_state_diff)) => {
             for (slot, value) in account_state_diff {
-                db.insert_account_storage(
-                    account,
-                    U256::from_be_bytes(slot.0),
-                    U256::from_be_bytes(value.0),
-                )?;
+                plain_account
+                    .storage
+                    .insert(U256::from_be_bytes(slot.0), U256::from_be_bytes(value.0));
             }
         }
     };
+    // set plain account to cache account.
+    account.account = Some(plain_account);
 
     Ok(())
 }
@@ -511,16 +505,16 @@ where
 /// This clones and transforms the given [CacheDB] with an arbitrary [DatabaseRef] into a new
 /// [CacheDB] with [EmptyDB] as the database type
 #[inline]
-pub(crate) fn clone_into_empty_db<DB>(db: &CacheDB<DB>) -> CacheDB<EmptyDB>
-where
-    DB: DatabaseRef,
-{
-    CacheDB {
-        accounts: db.accounts.clone(),
-        contracts: db.contracts.clone(),
-        logs: db.logs.clone(),
-        block_hashes: db.block_hashes.clone(),
-        db: Default::default(),
+pub(crate) fn clone_into_empty_db<DBError: Send + 'static>(
+    db: &RevmState<'_, DBError>,
+) -> RevmState<'static, DBError> {
+    let database = Box::new(EmptyDBTyped::<DBError>::new());
+    RevmState {
+        cache: db.cache.clone(),
+        database,
+        transition_state: db.transition_state.clone(),
+        bundle_state: db.bundle_state.clone(),
+        use_preloaded_bundle: db.use_preloaded_bundle,
     }
 }
 
