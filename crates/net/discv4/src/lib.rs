@@ -1656,8 +1656,8 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
         });
     };
 
+    let mut buf = [0; MAX_PACKET_SIZE];
     loop {
-        let mut buf = [0; MAX_PACKET_SIZE];
         let res = udp.recv_from(&mut buf).await;
         match res {
             Err(err) => {
