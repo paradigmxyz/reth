@@ -15,7 +15,7 @@ pub use spec::{
 };
 
 #[cfg(feature = "optimism")]
-pub use spec::{BASE_GOERLI, OP_GOERLI};
+pub use spec::{BASE_GOERLI, BASE_MAINNET, OP_GOERLI};
 
 // The chain info module.
 mod info;
@@ -63,6 +63,14 @@ impl Chain {
     #[cfg(feature = "optimism")]
     pub const fn base_goerli() -> Self {
         Chain::Named(ethers_core::types::Chain::BaseGoerli)
+    }
+
+    /// Returns the base mainnet chain.
+    #[cfg(feature = "optimism")]
+    pub const fn base_mainnet() -> Self {
+        // TODO: add to ethers-core
+        //Chain::Named(ethers_core::types::Chain::Base)
+        Chain::Id(8453)
     }
 
     /// Returns the dev chain.
