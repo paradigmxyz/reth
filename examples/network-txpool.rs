@@ -10,7 +10,7 @@
 use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::{
-    CoinbaseTipOrdering, PoolTransaction, EthPooledTransaction, TransactionOrigin, TransactionPool,
+    CoinbaseTipOrdering, EthPooledTransaction, PoolTransaction, TransactionOrigin, TransactionPool,
     TransactionValidationOutcome, TransactionValidator,
 };
 
