@@ -15,7 +15,9 @@ mod eth;
 mod task;
 
 /// A `TransactionValidator` implementation that validates ethereum transaction.
-pub use eth::{EthTransactionValidator, EthTransactionValidatorBuilder};
+pub use eth::{
+    EthTransactionValidator, EthTransactionValidatorBuilder, TransactionValidationTaskExecutor,
+};
 
 /// A spawnable task that performs transaction validation.
 pub use task::ValidationTask;
@@ -85,7 +87,7 @@ pub trait TransactionValidator: Send + Sync {
     /// example nonce or balance changes. Hence, any validation checks must be applied in this
     /// function.
     ///
-    /// See [EthTransactionValidator] for a reference implementation.
+    /// See [TransactionValidationTaskExecutor] for a reference implementation.
     async fn validate_transaction(
         &self,
         origin: TransactionOrigin,

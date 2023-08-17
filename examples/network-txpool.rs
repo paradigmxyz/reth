@@ -57,8 +57,8 @@ async fn main() -> eyre::Result<()> {
 /// A transaction validator that determines all transactions to be valid.
 ///
 /// An actual validator impl like
-/// [EthTransactionValidator](reth_transaction_pool::EthTransactionValidator) would require up to
-/// date db access.
+/// [TransactionValidationTaskExecutor](reth_transaction_pool::TransactionValidationTaskExecutor)
+/// would require up to date db access.
 ///
 /// CAUTION: This validator is not safe to use since it doesn't actually validate the transaction's
 /// properties such as chain id, balance, nonce, etc.

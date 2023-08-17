@@ -18,31 +18,44 @@ use reth_tasks::TaskSpawner;
 use std::{marker::PhantomData, sync::Arc};
 use tokio::sync::{oneshot, Mutex};
 
-/// A [TransactionValidator] implementation that validates ethereum transaction.
-///
-/// This validator is non-blocking, all validation work is done in a separate task.
+// /// A [TransactionValidator] implementation that validates ethereum transaction.
+// ///
+// /// This validator is non-blocking, all validation work is done in a separate task.
+// #[derive(Debug, Clone)]
+// pub struct TransactionValidationTaskExecutor<Client, T> {
+//     /// The type that performs the actual validation.
+//     inner: Arc<EthTransactionValidatorInner<Client, T>>,
+//     /// The sender half to validation tasks that perform the actual validation.
+//     to_validation_task: Arc<Mutex<ValidationJobSender>>,
+// }
+
 #[derive(Debug, Clone)]
-pub struct EthTransactionValidator<Client, T> {
-    /// The type that performs the actual validation.
-    inner: Arc<EthTransactionValidatorInner<Client, T>>,
+pub struct TransactionValidationTaskExecutor<V> {
+    /// The validator that will validate transactions on a separate task.
+    validator: V,
     /// The sender half to validation tasks that perform the actual validation.
     to_validation_task: Arc<Mutex<ValidationJobSender>>,
 }
 
-// === impl EthTransactionValidator ===
+#[derive(Debug)]
+pub struct EthTransactionValidator<Client, T> {
+    inner: Arc<EthTransactionValidatorInner<Client, T>>,
+}
 
-impl EthTransactionValidator<(), ()> {
+// === impl TransactionValidationTaskExecutor ===
+
+impl TransactionValidationTaskExecutor<()> {
     /// Convenience method to create a [EthTransactionValidatorBuilder]
     pub fn builder(chain_spec: Arc<ChainSpec>) -> EthTransactionValidatorBuilder {
         EthTransactionValidatorBuilder::new(chain_spec)
     }
 }
 
-impl<Client, Tx> EthTransactionValidator<Client, Tx> {
+impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx>> {
     /// Creates a new instance for the given [ChainSpec]
     ///
     /// This will spawn a single validation tasks that performs the actual validation.
-    /// See [EthTransactionValidator::with_additional_tasks]
+    /// See [TransactionValidationTaskExecutor::with_additional_tasks]
     pub fn new<T>(client: Client, chain_spec: Arc<ChainSpec>, tasks: T) -> Self
     where
         T: TaskSpawner,
@@ -75,12 +88,13 @@ impl<Client, Tx> EthTransactionValidator<Client, Tx> {
 
     /// Returns the configured chain id
     pub fn chain_id(&self) -> u64 {
-        self.inner.chain_id()
+        self.validator.inner.chain_id()
     }
 }
 
 #[async_trait::async_trait]
-impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
+impl<Client, Tx> TransactionValidator
+    for TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx>>
 where
     Client: StateProviderFactory + Clone + 'static,
     Tx: PoolTransaction + 'static,
@@ -97,7 +111,7 @@ where
         {
             let to_validation_task = self.to_validation_task.clone();
             let to_validation_task = to_validation_task.lock().await;
-            let validator = Arc::clone(&self.inner);
+            let validator = Arc::clone(&self.validator.inner);
             let res = to_validation_task
                 .send(Box::pin(async move {
                     let res = validator.validate_transaction(origin, transaction).await;
@@ -122,7 +136,7 @@ where
     }
 }
 
-/// A builder for [EthTransactionValidator]
+/// A builder for [TransactionValidationTaskExecutor]
 #[derive(Debug, Clone)]
 pub struct EthTransactionValidatorBuilder {
     chain_spec: Arc<ChainSpec>,
@@ -222,7 +236,7 @@ impl EthTransactionValidatorBuilder {
         self
     }
 
-    /// Builds a [EthTransactionValidator]
+    /// Builds a [TransactionValidationTaskExecutor]
     ///
     /// The validator will spawn `additional_tasks` additional tasks for validation.
     ///
@@ -231,7 +245,7 @@ impl EthTransactionValidatorBuilder {
         self,
         client: Client,
         tasks: T,
-    ) -> EthTransactionValidator<Client, Tx>
+    ) -> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx>>
     where
         T: TaskSpawner,
     {
@@ -277,7 +291,10 @@ impl EthTransactionValidatorBuilder {
 
         let to_validation_task = Arc::new(Mutex::new(tx));
 
-        EthTransactionValidator { inner: Arc::new(inner), to_validation_task }
+        TransactionValidationTaskExecutor {
+            validator: EthTransactionValidator { inner: Arc::new(inner) },
+            to_validation_task,
+        }
     }
 }
 
