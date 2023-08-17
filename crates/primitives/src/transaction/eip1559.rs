@@ -1,7 +1,7 @@
 use super::access_list::AccessList;
-use crate::{Bytes, ChainId, TransactionKind};
+use crate::{Bytes, ChainId, Signature, TransactionKind, TxType};
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::{Decodable, DecodeError};
+use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header};
 use std::mem;
 
 /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
@@ -109,6 +109,62 @@ impl TxEip1559 {
             input: Bytes(Decodable::decode(buf)?),
             access_list: Decodable::decode(buf)?,
         })
+    }
+
+    /// Encodes only the transaction's fields into the desired buffer, without a RLP header.
+    pub(crate) fn fields_len(&self) -> usize {
+        let mut len = 0;
+        len += self.chain_id.length();
+        len += self.nonce.length();
+        len += self.max_priority_fee_per_gas.length();
+        len += self.max_fee_per_gas.length();
+        len += self.gas_limit.length();
+        len += self.to.length();
+        len += self.value.length();
+        len += self.input.0.length();
+        len += self.access_list.length();
+        len
+    }
+
+    /// Encodes only the transaction's fields into the desired buffer, without a RLP header.
+    pub(crate) fn encode_fields(&self, out: &mut dyn bytes::BufMut) {
+        self.chain_id.encode(out);
+        self.nonce.encode(out);
+        self.max_priority_fee_per_gas.encode(out);
+        self.max_fee_per_gas.encode(out);
+        self.gas_limit.encode(out);
+        self.to.encode(out);
+        self.value.encode(out);
+        self.input.0.encode(out);
+        self.access_list.encode(out);
+    }
+
+    /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
+    /// hash that for eip2718 does not require rlp header
+    pub(crate) fn encode_with_signature(
+        &self,
+        signature: &Signature,
+        out: &mut dyn bytes::BufMut,
+        with_header: bool,
+    ) {
+        let payload_length = self.fields_len() + signature.payload_len();
+        if with_header {
+            Header {
+                list: false,
+                payload_length: 1 + length_of_length(payload_length) + payload_length,
+            }
+            .encode(out);
+        }
+        out.put_u8(self.tx_type() as u8);
+        let header = Header { list: true, payload_length };
+        header.encode(out);
+        self.encode_fields(out);
+        signature.encode(out);
+    }
+
+    /// Get transaction type
+    pub(crate) fn tx_type(&self) -> TxType {
+        TxType::EIP1559
     }
 
     /// Calculates a heuristic for the in-memory size of the [TxEip1559] transaction.

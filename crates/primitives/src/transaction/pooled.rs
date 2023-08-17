@@ -1,5 +1,9 @@
-//! Includes the
-use crate::{BlobTransaction, Bytes, TransactionSigned, EIP4844_TX_TYPE_ID};
+//! Defines the types for blob transactions, legacy, and other EIP-2718 transactions included in a
+//! response to `GetPooledTransactions`.
+use crate::{
+    BlobTransaction, Bytes, Signature, Transaction, TransactionSigned, TxEip1559, TxEip2930,
+    TxHash, TxLegacy, EIP4844_TX_TYPE_ID,
+};
 use bytes::Buf;
 use reth_rlp::{Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE};
 use serde::{Deserialize, Serialize};
@@ -9,10 +13,35 @@ use serde::{Deserialize, Serialize};
 // TODO: redo arbitrary for this encoding - the previous encoding was incorrect
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PooledTransactionsElement {
+    /// A legacy transaction
+    Legacy {
+        /// The inner transaction
+        transaction: TxLegacy,
+        /// The signature
+        signature: Signature,
+        /// The hash of the transaction
+        hash: TxHash,
+    },
+    /// An EIP-2930 typed transaction
+    Eip2930 {
+        /// The inner transaction
+        transaction: TxEip2930,
+        /// The signature
+        signature: Signature,
+        /// The hash of the transaction
+        hash: TxHash,
+    },
+    /// An EIP-1559 typed transaction
+    Eip1559 {
+        /// The inner transaction
+        transaction: TxEip1559,
+        /// The signature
+        signature: Signature,
+        /// The hash of the transaction
+        hash: TxHash,
+    },
     /// A blob transaction, which includes the transaction, blob data, commitments, and proofs.
     BlobTransaction(BlobTransaction),
-    /// A non-4844 signed transaction.
-    Transaction(TransactionSigned),
 }
 
 impl PooledTransactionsElement {
@@ -34,7 +63,10 @@ impl PooledTransactionsElement {
         // Check if the tx is a list - tx types are less than EMPTY_LIST_CODE (0xc0)
         if data[0] >= EMPTY_LIST_CODE {
             // decode as legacy transaction
-            Ok(Self::Transaction(TransactionSigned::decode_rlp_legacy_transaction(&mut data)?))
+            let (transaction, hash, signature) =
+                TransactionSigned::decode_rlp_legacy_transaction_tuple(&mut data)?;
+
+            Ok(Self::Legacy { transaction, signature, hash })
         } else {
             // decode the type byte, only decode BlobTransaction if it is a 4844 transaction
             let tx_type = *data.first().ok_or(DecodeError::InputTooShort)?;
@@ -60,7 +92,27 @@ impl PooledTransactionsElement {
                 // DO NOT advance the buffer for the type, since we want the enveloped decoding to
                 // decode it again and advance the buffer on its own.
                 let typed_tx = TransactionSigned::decode_enveloped_typed_transaction(&mut data)?;
-                Ok(PooledTransactionsElement::Transaction(typed_tx))
+
+                // because we checked the tx type, we can be sure that the transaction is not a
+                // blob transaction or legacy
+                match typed_tx.transaction {
+                    Transaction::Legacy(_) => Err(DecodeError::Custom(
+                        "legacy transactions should not be a result of EIP-2718 decoding",
+                    )),
+                    Transaction::Eip4844(_) => Err(DecodeError::Custom(
+                        "EIP-4844 transactions can only be decoded with transaction type 0x03",
+                    )),
+                    Transaction::Eip2930(tx) => Ok(PooledTransactionsElement::Eip2930 {
+                        transaction: tx,
+                        signature: typed_tx.signature,
+                        hash: typed_tx.hash,
+                    }),
+                    Transaction::Eip1559(tx) => Ok(PooledTransactionsElement::Eip1559 {
+                        transaction: tx,
+                        signature: typed_tx.signature,
+                        hash: typed_tx.hash,
+                    }),
+                }
             }
         }
     }
@@ -68,8 +120,20 @@ impl PooledTransactionsElement {
     /// Returns the inner [TransactionSigned].
     pub fn into_transaction(self) -> TransactionSigned {
         match self {
-            Self::Transaction(tx) => tx,
-            Self::BlobTransaction(blob_tx) => blob_tx.transaction,
+            Self::Legacy { transaction, signature, hash } => {
+                TransactionSigned { transaction: Transaction::Legacy(transaction), signature, hash }
+            }
+            Self::Eip2930 { transaction, signature, hash } => TransactionSigned {
+                transaction: Transaction::Eip2930(transaction),
+                signature,
+                hash,
+            },
+            Self::Eip1559 { transaction, signature, hash } => TransactionSigned {
+                transaction: Transaction::Eip1559(transaction),
+                signature,
+                hash,
+            },
+            Self::BlobTransaction(blob_tx) => blob_tx.into_parts().0,
         }
     }
 }
@@ -78,7 +142,39 @@ impl Encodable for PooledTransactionsElement {
     /// Encodes an enveloped post EIP-4844 [PooledTransactionsElement].
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
-            Self::Transaction(tx) => tx.encode(out),
+            Self::Legacy { transaction, signature, hash } => {
+                // construct signed transaction
+                let signed_tx = TransactionSigned {
+                    transaction: Transaction::Legacy(transaction.clone()),
+                    signature: *signature,
+                    hash: *hash,
+                };
+
+                // encode signed transaction
+                signed_tx.encode(out);
+            }
+            Self::Eip2930 { transaction, signature, hash } => {
+                // construct signed transaction
+                let signed_tx = TransactionSigned {
+                    transaction: Transaction::Eip2930(transaction.clone()),
+                    signature: *signature,
+                    hash: *hash,
+                };
+
+                // encode signed transaction
+                signed_tx.encode(out);
+            }
+            Self::Eip1559 { transaction, signature, hash } => {
+                // construct signed transaction
+                let signed_tx = TransactionSigned {
+                    transaction: Transaction::Eip1559(transaction.clone()),
+                    signature: *signature,
+                    hash: *hash,
+                };
+
+                // encode signed transaction
+                signed_tx.encode(out);
+            }
             Self::BlobTransaction(blob_tx) => {
                 // The inner encoding is used with `with_header` set to true, making the final
                 // encoding:
@@ -90,7 +186,36 @@ impl Encodable for PooledTransactionsElement {
 
     fn length(&self) -> usize {
         match self {
-            Self::Transaction(tx) => tx.length(),
+            Self::Legacy { transaction, signature, hash } => {
+                // construct signed transaction
+                let signed_tx = TransactionSigned {
+                    transaction: Transaction::Legacy(transaction.clone()),
+                    signature: *signature,
+                    hash: *hash,
+                };
+
+                signed_tx.length()
+            }
+            Self::Eip2930 { transaction, signature, hash } => {
+                // construct signed transaction
+                let signed_tx = TransactionSigned {
+                    transaction: Transaction::Eip2930(transaction.clone()),
+                    signature: *signature,
+                    hash: *hash,
+                };
+
+                signed_tx.length()
+            }
+            Self::Eip1559 { transaction, signature, hash } => {
+                // construct signed transaction
+                let signed_tx = TransactionSigned {
+                    transaction: Transaction::Eip1559(transaction.clone()),
+                    signature: *signature,
+                    hash: *hash,
+                };
+
+                signed_tx.length()
+            }
             Self::BlobTransaction(blob_tx) => {
                 // the encoding uses a header, so we set `with_header` to true
                 blob_tx.payload_len_with_type(true)
@@ -129,14 +254,14 @@ impl Decodable for PooledTransactionsElement {
         // Check if the tx is a list
         if header.list {
             // decode as legacy transaction
-            let legacy_tx =
-                TransactionSigned::decode_rlp_legacy_transaction(&mut original_encoding)?;
+            let (transaction, hash, signature) =
+                TransactionSigned::decode_rlp_legacy_transaction_tuple(&mut original_encoding)?;
 
             // advance the buffer based on how far `decode_rlp_legacy_transaction` advanced the
             // buffer
             *buf = original_encoding;
 
-            Ok(PooledTransactionsElement::Transaction(legacy_tx))
+            Ok(Self::Legacy { transaction, signature, hash })
         } else {
             // decode the type byte, only decode BlobTransaction if it is a 4844 transaction
             let tx_type = *buf.first().ok_or(DecodeError::InputTooShort)?;
@@ -162,7 +287,27 @@ impl Decodable for PooledTransactionsElement {
                 // DO NOT advance the buffer for the type, since we want the enveloped decoding to
                 // decode it again and advance the buffer on its own.
                 let typed_tx = TransactionSigned::decode_enveloped_typed_transaction(buf)?;
-                Ok(PooledTransactionsElement::Transaction(typed_tx))
+
+                // because we checked the tx type, we can be sure that the transaction is not a
+                // blob transaction or legacy
+                match typed_tx.transaction {
+                    Transaction::Legacy(_) => Err(DecodeError::Custom(
+                        "legacy transactions should not be a result of EIP-2718 decoding",
+                    )),
+                    Transaction::Eip4844(_) => Err(DecodeError::Custom(
+                        "EIP-4844 transactions can only be decoded with transaction type 0x03",
+                    )),
+                    Transaction::Eip2930(tx) => Ok(PooledTransactionsElement::Eip2930 {
+                        transaction: tx,
+                        signature: typed_tx.signature,
+                        hash: typed_tx.hash,
+                    }),
+                    Transaction::Eip1559(tx) => Ok(PooledTransactionsElement::Eip1559 {
+                        transaction: tx,
+                        signature: typed_tx.signature,
+                        hash: typed_tx.hash,
+                    }),
+                }
             }
         }
     }
@@ -171,8 +316,28 @@ impl Decodable for PooledTransactionsElement {
 impl From<TransactionSigned> for PooledTransactionsElement {
     /// Converts from a [TransactionSigned] to a [PooledTransactionsElement].
     ///
-    /// NOTE: This will always return a [PooledTransactionsElement::Transaction] variant.
+    /// NOTE: For EIP-4844 transactions, this will return an empty sidecar.
     fn from(tx: TransactionSigned) -> Self {
-        Self::Transaction(tx)
+        let TransactionSigned { transaction, signature, hash } = tx;
+        match transaction {
+            Transaction::Legacy(tx) => {
+                PooledTransactionsElement::Legacy { transaction: tx, signature, hash }
+            }
+            Transaction::Eip2930(tx) => {
+                PooledTransactionsElement::Eip2930 { transaction: tx, signature, hash }
+            }
+            Transaction::Eip1559(tx) => {
+                PooledTransactionsElement::Eip1559 { transaction: tx, signature, hash }
+            }
+            Transaction::Eip4844(tx) => {
+                PooledTransactionsElement::BlobTransaction(BlobTransaction {
+                    transaction: tx,
+                    signature,
+                    hash,
+                    // This is empty - just for the conversion!
+                    sidecar: Default::default(),
+                })
+            }
+        }
     }
 }
