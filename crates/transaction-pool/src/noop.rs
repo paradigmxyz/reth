@@ -10,7 +10,7 @@ use crate::{
     TransactionOrigin, TransactionPool, TransactionValidationOutcome, TransactionValidator,
     ValidPoolTransaction,
 };
-use reth_primitives::{Address, TxHash};
+use reth_primitives::{Address, InvalidTransactionError, TxHash};
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
@@ -181,6 +181,14 @@ impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
+        #[cfg(feature = "optimism")]
+        if transaction.is_deposit() {
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidTransactionError::TxTypeNotSupported.into(),
+            )
+        }
+
         TransactionValidationOutcome::Valid {
             balance: Default::default(),
             state_nonce: 0,
