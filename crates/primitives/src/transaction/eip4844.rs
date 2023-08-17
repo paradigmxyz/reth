@@ -1,15 +1,16 @@
 use super::access_list::AccessList;
 use crate::{
     constants::eip4844::DATA_GAS_PER_BLOB,
+    keccak256,
     kzg::{
         self, Blob, Bytes48, KzgCommitment, KzgProof, KzgSettings, BYTES_PER_BLOB,
         BYTES_PER_COMMITMENT, BYTES_PER_PROOF,
     },
     kzg_to_versioned_hash, Bytes, ChainId, Signature, Transaction, TransactionKind,
-    TransactionSigned, TransactionSignedNoHash, TxType, EIP4844_TX_TYPE_ID, H256,
+    TransactionSigned, TxHash, TxType, EIP4844_TX_TYPE_ID, H256,
 };
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::{Decodable, DecodeError, Encodable, Header};
+use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header};
 use serde::{Deserialize, Serialize};
 use std::{mem, ops::Deref};
 
@@ -142,6 +143,38 @@ impl TxEip4844 {
         })
     }
 
+    /// Outputs the length of the transaction's fields, without a RLP header.
+    pub(crate) fn fields_len(&self) -> usize {
+        let mut len = 0;
+        len += self.chain_id.length();
+        len += self.nonce.length();
+        len += self.gas_limit.length();
+        len += self.max_fee_per_gas.length();
+        len += self.max_priority_fee_per_gas.length();
+        len += self.to.length();
+        len += self.value.length();
+        len += self.access_list.length();
+        len += self.blob_versioned_hashes.length();
+        len += self.max_fee_per_blob_gas.length();
+        len += self.input.0.length();
+        len
+    }
+
+    /// Encodes only the transaction's fields into the desired buffer, without a RLP header.
+    pub(crate) fn encode_fields(&self, out: &mut dyn bytes::BufMut) {
+        self.chain_id.encode(out);
+        self.nonce.encode(out);
+        self.max_priority_fee_per_gas.encode(out);
+        self.max_fee_per_gas.encode(out);
+        self.gas_limit.encode(out);
+        self.to.encode(out);
+        self.value.encode(out);
+        self.input.0.encode(out);
+        self.access_list.encode(out);
+        self.max_fee_per_blob_gas.encode(out);
+        self.blob_versioned_hashes.encode(out);
+    }
+
     /// Calculates a heuristic for the in-memory size of the [TxEip4844] transaction.
     #[inline]
     pub fn size(&self) -> usize {
@@ -156,6 +189,34 @@ impl TxEip4844 {
         self.input.len() +  // input
         self.blob_versioned_hashes.capacity() * mem::size_of::<H256>() + // blob hashes size
         mem::size_of::<u128>() // max_fee_per_data_gas
+    }
+
+    /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
+    /// hash that for eip2718 does not require rlp header
+    pub(crate) fn encode_with_signature(
+        &self,
+        signature: &Signature,
+        out: &mut dyn bytes::BufMut,
+        with_header: bool,
+    ) {
+        let payload_length = self.fields_len() + signature.payload_len();
+        if with_header {
+            Header {
+                list: false,
+                payload_length: 1 + length_of_length(payload_length) + payload_length,
+            }
+            .encode(out);
+        }
+        out.put_u8(self.tx_type() as u8);
+        let header = Header { list: true, payload_length };
+        header.encode(out);
+        self.encode_fields(out);
+        signature.encode(out);
+    }
+
+    /// Get transaction type
+    pub(crate) fn tx_type(&self) -> TxType {
+        TxType::EIP4844
     }
 }
 
@@ -185,8 +246,12 @@ impl From<kzg::Error> for BlobTransactionValidationError {
 /// which should always construct the [TransactionSigned] with an EIP-4844 transaction.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct BlobTransaction {
+    /// The transaction hash.
+    pub hash: TxHash,
     /// The transaction payload.
-    pub transaction: TransactionSigned,
+    pub transaction: TxEip4844,
+    /// The transaction signature.
+    pub signature: Signature,
     /// The transaction's blob sidecar.
     pub sidecar: BlobTransactionSidecar,
 }
@@ -207,14 +272,7 @@ impl BlobTransaction {
         &self,
         proof_settings: &KzgSettings,
     ) -> Result<bool, BlobTransactionValidationError> {
-        let inner_tx = match &self.transaction.transaction {
-            Transaction::Eip4844(blob_tx) => blob_tx,
-            non_blob_tx => {
-                return Err(BlobTransactionValidationError::NotBlobTransaction(
-                    non_blob_tx.tx_type(),
-                ))
-            }
-        };
+        let inner_tx = &self.transaction;
 
         // Ensure the versioned hashes and commitments have the same length
         if inner_tx.blob_versioned_hashes.len() != self.sidecar.commitments.len() {
@@ -257,7 +315,13 @@ impl BlobTransaction {
     /// Splits the [BlobTransaction] into its [TransactionSigned] and [BlobTransactionSidecar]
     /// components.
     pub fn into_parts(self) -> (TransactionSigned, BlobTransactionSidecar) {
-        (self.transaction, self.sidecar)
+        let transaction = TransactionSigned {
+            transaction: Transaction::Eip4844(self.transaction),
+            hash: self.hash,
+            signature: self.signature,
+        };
+
+        (transaction, self.sidecar)
     }
 
     /// Encodes the [BlobTransaction] fields as RLP, with a tx type. If `with_header` is `false`,
@@ -303,8 +367,7 @@ impl BlobTransaction {
         // its list header.
         let tx_header = Header {
             list: true,
-            payload_length: self.transaction.fields_len() +
-                self.transaction.signature.payload_len(),
+            payload_length: self.transaction.fields_len() + self.signature.payload_len(),
         };
 
         let tx_length = tx_header.length() + tx_header.payload_length;
@@ -365,8 +428,7 @@ impl BlobTransaction {
         // its list header.
         let tx_header = Header {
             list: true,
-            payload_length: self.transaction.fields_len() +
-                self.transaction.signature.payload_len(),
+            payload_length: self.transaction.fields_len() + self.signature.payload_len(),
         };
 
         let tx_length = tx_header.length() + tx_header.payload_length;
@@ -402,13 +464,10 @@ impl BlobTransaction {
         }
 
         // inner transaction
-        let transaction = Transaction::Eip4844(TxEip4844::decode_inner(data)?);
+        let transaction = TxEip4844::decode_inner(data)?;
 
         // signature
         let signature = Signature::decode(data)?;
-
-        // construct the tx now that we've decoded the fields in order
-        let tx_no_hash = TransactionSignedNoHash { transaction, signature };
 
         // All that's left are the blobs, commitments, and proofs
         let sidecar = BlobTransactionSidecar::decode_inner(data)?;
@@ -427,10 +486,13 @@ impl BlobTransaction {
         // Because the pooled transaction encoding is different than the hash encoding for
         // EIP-4844 transactions, we do not use the original buffer to calculate the hash.
         //
-        // Instead, we use `TransactionSignedNoHash` which will encode the transaction internally.
-        let signed_tx = tx_no_hash.with_hash();
+        // Instead, we use `encode_with_signature`, which RLP encodes the transaction with a
+        // signature for hashing without a header. We then hash the result.
+        let mut buf = Vec::new();
+        transaction.encode_with_signature(&signature, &mut buf, false);
+        let hash = keccak256(&buf);
 
-        Ok(Self { transaction: signed_tx, sidecar })
+        Ok(Self { transaction, hash, signature, sidecar })
     }
 }
 
