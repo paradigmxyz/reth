@@ -10,7 +10,7 @@
 use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::{
-    CoinbaseTipOrdering, PoolTransaction, PooledTransaction, TransactionOrigin, TransactionPool,
+    CoinbaseTipOrdering, EthPooledTransaction, PoolTransaction, TransactionOrigin, TransactionPool,
     TransactionValidationOutcome, TransactionValidator,
 };
 
@@ -68,7 +68,7 @@ struct OkValidator;
 
 #[async_trait::async_trait]
 impl TransactionValidator for OkValidator {
-    type Transaction = PooledTransaction;
+    type Transaction = EthPooledTransaction;
 
     async fn validate_transaction(
         &self,
