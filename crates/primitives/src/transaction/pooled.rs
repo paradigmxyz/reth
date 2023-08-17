@@ -69,7 +69,7 @@ impl PooledTransactionsElement {
     pub fn into_transaction(self) -> TransactionSigned {
         match self {
             Self::Transaction(tx) => tx,
-            Self::BlobTransaction(blob_tx) => blob_tx.transaction,
+            Self::BlobTransaction(blob_tx) => blob_tx.into_parts().0,
         }
     }
 }
