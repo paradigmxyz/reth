@@ -1,10 +1,7 @@
-use crate::blobstore::{BlobSideCar, BlobStore, BlobStoreError};
+use crate::blobstore::{BlobStore, BlobStoreError, BlobTransactionSidecar};
 use parking_lot::RwLock;
-use reth_primitives::{
-    bytes::{Bytes, BytesMut},
-    H256,
-};
-use reth_rlp::Encodable;
+use reth_primitives::H256;
+
 use std::{
     collections::HashMap,
     sync::{atomic::AtomicUsize, Arc},
@@ -19,18 +16,18 @@ pub struct InMemoryBlobStore {
 #[derive(Debug, Default)]
 struct InMemoryBlobStoreInner {
     /// Storage for all blob data.
-    store: RwLock<HashMap<H256, BlobSideCar>>,
+    store: RwLock<HashMap<H256, BlobTransactionSidecar>>,
     size: AtomicUsize,
 }
 
 impl BlobStore for InMemoryBlobStore {
-    fn insert(&self, tx: H256, data: BlobSideCar) -> Result<(), BlobStoreError> {
+    fn insert(&self, tx: H256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError> {
         let mut store = self.inner.store.write();
         store.insert(tx, data);
         Ok(())
     }
 
-    fn insert_all(&self, txs: Vec<(H256, BlobSideCar)>) -> Result<(), BlobStoreError> {
+    fn insert_all(&self, txs: Vec<(H256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError> {
         let mut store = self.inner.store.write();
         store.extend(txs);
         Ok(())
@@ -51,12 +48,15 @@ impl BlobStore for InMemoryBlobStore {
     }
 
     // Retrieves the decoded blob data for the given transaction hash.
-    fn get(&self, tx: H256) -> Result<Option<BlobSideCar>, BlobStoreError> {
+    fn get(&self, tx: H256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
         let store = self.inner.store.write();
         Ok(store.get(&tx).cloned())
     }
 
-    fn get_all(&self, txs: Vec<H256>) -> Result<Vec<(H256, BlobSideCar)>, BlobStoreError> {
+    fn get_all(
+        &self,
+        txs: Vec<H256>,
+    ) -> Result<Vec<(H256, BlobTransactionSidecar)>, BlobStoreError> {
         let mut items = Vec::with_capacity(txs.len());
         let store = self.inner.store.write();
         for tx in txs {
@@ -66,15 +66,6 @@ impl BlobStore for InMemoryBlobStore {
         }
 
         Ok(items)
-    }
-
-    fn get_raw(&self, tx: H256) -> Result<Option<Bytes>, BlobStoreError> {
-        let item = self.get(tx)?;
-        Ok(item.map(|item| {
-            let mut buf = BytesMut::new();
-            item.encode(&mut buf);
-            buf.freeze()
-        }))
     }
 
     fn data_size(&self) -> usize {
