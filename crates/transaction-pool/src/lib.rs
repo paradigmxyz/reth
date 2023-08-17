@@ -182,6 +182,7 @@ pub mod noop;
 pub mod pool;
 pub mod validate;
 
+pub mod blobstore;
 mod config;
 mod identifier;
 mod ordering;
