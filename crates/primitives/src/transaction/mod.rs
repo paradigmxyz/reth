@@ -630,7 +630,7 @@ impl Transaction {
             }
             #[cfg(feature = "optimism")]
             Transaction::Deposit(_) => {
-                let payload_length = self.fields_len() + signature.payload_len();
+                let payload_length = self.fields_len();
                 if with_header {
                     Header {
                         list: false,
@@ -639,11 +639,9 @@ impl Transaction {
                     .encode(out);
                 }
                 out.put_u8(self.tx_type() as u8);
-                // out.put_u8(DEPOSIT_VERSION);
                 let header = Header { list: true, payload_length };
                 header.encode(out);
                 self.encode_fields(out);
-                signature.encode(out);
             }
             _ => {
                 let payload_length = self.fields_len() + signature.payload_len();
@@ -1170,7 +1168,7 @@ impl TransactionSigned {
             }
             #[cfg(feature = "optimism")]
             Transaction::Deposit(_) => {
-                let payload_length = self.transaction.fields_len() + self.signature.payload_len();
+                let payload_length = self.transaction.fields_len();
                 // 'tx type byte length' + 'version byte' + 'header length' + 'payload length'
                 let len = 1 + length_of_length(payload_length) + payload_length;
                 length_of_length(len) + len
@@ -1252,18 +1250,6 @@ impl TransactionSigned {
         if !header.list {
             return Err(DecodeError::Custom("typed tx fields must be encoded as a list"))
         }
-
-        // If the transaction is a deposit, we need to first ensure that the version
-        // byte is correct.
-        // #[cfg(feature = "optimism")]
-        // if tx_type == DEPOSIT_TX_TYPE_ID {
-        //     let version = *data.first().ok_or(DecodeError::InputTooShort)?;
-        //     if version != DEPOSIT_VERSION {
-        //         dbg!(version, DEPOSIT_VERSION);
-        //         return Err(DecodeError::Custom("Deposit version mismatch"));
-        //     }
-        //     data.advance(1);
-        // }
 
         // length of tx encoding = tx type byte (size = 1) + length of header + payload length
         let tx_length = 1 + header.length() + header.payload_length;
