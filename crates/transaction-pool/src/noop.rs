@@ -4,11 +4,11 @@
 //! to be generic over it.
 
 use crate::{
-    error::PoolError, traits::PendingTransactionListenerKind, AllPoolTransactions,
-    AllTransactionsEvents, BestTransactions, BlockInfo, EthPooledTransaction, NewTransactionEvent,
-    PoolResult, PoolSize, PoolTransaction, PropagatedTransactions, TransactionEvents,
-    TransactionOrigin, TransactionPool, TransactionValidationOutcome, TransactionValidator,
-    ValidPoolTransaction,
+    error::PoolError, traits::PendingTransactionListenerKind, validate::ValidTransaction,
+    AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPooledTransaction,
+    NewTransactionEvent, PoolResult, PoolSize, PoolTransaction, PropagatedTransactions,
+    TransactionEvents, TransactionOrigin, TransactionPool, TransactionValidationOutcome,
+    TransactionValidator, ValidPoolTransaction,
 };
 use reth_primitives::{Address, TxHash};
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
@@ -184,7 +184,7 @@ impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
         TransactionValidationOutcome::Valid {
             balance: Default::default(),
             state_nonce: 0,
-            transaction,
+            transaction: ValidTransaction::Valid(transaction),
             propagate: match origin {
                 TransactionOrigin::External => true,
                 TransactionOrigin::Local => self.propagate_local,
