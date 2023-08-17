@@ -40,7 +40,7 @@ pub struct EthTransactionValidator<Client, T> {
 
 impl TransactionValidationTaskExecutor<()> {
     /// Convenience method to create a [EthTransactionValidatorBuilder]
-    pub fn builder(chain_spec: Arc<ChainSpec>) -> EthTransactionValidatorBuilder {
+    pub fn eth_builder(chain_spec: Arc<ChainSpec>) -> EthTransactionValidatorBuilder {
         EthTransactionValidatorBuilder::new(chain_spec)
     }
 }
