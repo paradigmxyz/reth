@@ -5,8 +5,8 @@
 
 use crate::{
     error::PoolError, traits::PendingTransactionListenerKind, AllPoolTransactions,
-    AllTransactionsEvents, BestTransactions, BlockInfo, NewTransactionEvent, PoolResult, PoolSize,
-    PoolTransaction, PooledTransaction, PropagatedTransactions, TransactionEvents,
+    AllTransactionsEvents, BestTransactions, BlockInfo, EthPooledTransaction, NewTransactionEvent,
+    PoolResult, PoolSize, PoolTransaction, PropagatedTransactions, TransactionEvents,
     TransactionOrigin, TransactionPool, TransactionValidationOutcome, TransactionValidator,
     ValidPoolTransaction,
 };
@@ -24,7 +24,7 @@ pub struct NoopTransactionPool;
 
 #[async_trait::async_trait]
 impl TransactionPool for NoopTransactionPool {
-    type Transaction = PooledTransaction;
+    type Transaction = EthPooledTransaction;
 
     fn pool_size(&self) -> PoolSize {
         Default::default()
@@ -212,16 +212,16 @@ impl<T> Default for MockTransactionValidator<T> {
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("Can't insert transaction into the noop pool that does nothing.")]
 pub struct NoopInsertError {
-    tx: PooledTransaction,
+    tx: EthPooledTransaction,
 }
 
 impl NoopInsertError {
-    fn new(tx: PooledTransaction) -> Self {
+    fn new(tx: EthPooledTransaction) -> Self {
         Self { tx }
     }
 
     /// Returns the transaction that failed to be inserted.
-    pub fn into_inner(self) -> PooledTransaction {
+    pub fn into_inner(self) -> EthPooledTransaction {
         self.tx
     }
 }
