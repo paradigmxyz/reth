@@ -34,7 +34,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::{debug, trace};
 
@@ -46,6 +46,11 @@ const NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT: usize = 4096;
 
 /// The target size for the message of full transactions.
 const MAX_FULL_TRANSACTIONS_PACKET_SIZE: usize = 100 * 1024;
+
+/// Recommended soft limit for the number of hashes in a GetPooledTransactions message (8kb)
+///
+/// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08>
+const GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES: usize = 256;
 
 /// The future for inserting a function into the pool
 pub type PoolImportFuture = Pin<Box<dyn Future<Output = PoolResult<TxHash>> + Send + 'static>>;
@@ -96,7 +101,7 @@ pub struct TransactionsManager<Pool> {
     /// From which we get all new incoming transaction related messages.
     network_events: UnboundedReceiverStream<NetworkEvent>,
     /// All currently active requests for pooled transactions.
-    inflight_requests: Vec<GetPooledTxRequest>,
+    inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
     /// All currently pending transactions grouped by peers.
     ///
     /// This way we can track incoming transactions and prevent multiple pool imports for the same
@@ -189,7 +194,8 @@ where
             // we sent a response at which point we assume that the peer is aware of the transaction
             peer.transactions.extend(transactions.iter().map(|tx| tx.hash()));
 
-            let resp = PooledTransactions(transactions);
+            // TODO: remove this! this will be different when we introduce the blobpool
+            let resp = PooledTransactions(transactions.into_iter().map(Into::into).collect());
             let _ = response.send(Ok(resp));
         }
     }
@@ -335,7 +341,9 @@ where
                 return
             }
 
-            // TODO enforce soft limit
+            // enforce recommended soft limit, however the peer may enforce an arbitrary limit on
+            // the response (2MB)
+            hashes.truncate(GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES);
 
             // request the missing transactions
             let (response, rx) = oneshot::channel();
@@ -345,7 +353,11 @@ where
             };
 
             if peer.request_tx.try_send(req).is_ok() {
-                self.inflight_requests.push(GetPooledTxRequest { peer_id, response: rx })
+                self.inflight_requests.push(GetPooledTxRequestFut::new(peer_id, rx))
+            } else {
+                // peer channel is saturated, drop the request
+                self.metrics.egress_peer_channel_full.increment(1);
+                return
             }
 
             if num_already_seen > 0 {
@@ -566,27 +578,26 @@ where
         }
 
         // Advance all requests.
-        // We remove each request one by one and add them back.
-        for idx in (0..this.inflight_requests.len()).rev() {
-            let mut req = this.inflight_requests.swap_remove(idx);
-            match req.response.poll_unpin(cx) {
-                Poll::Pending => {
-                    this.inflight_requests.push(req);
+        while let Poll::Ready(Some(GetPooledTxResponse { peer_id, result })) =
+            this.inflight_requests.poll_next_unpin(cx)
+        {
+            match result {
+                Ok(Ok(txs)) => {
+                    // convert all transactions to the inner transaction type, ignoring any
+                    // sidecars
+                    // TODO: remove this! this will be different when we introduce the blobpool
+                    let transactions = txs.0.into_iter().map(|tx| tx.into_transaction()).collect();
+                    this.import_transactions(peer_id, transactions, TransactionSource::Response)
                 }
-                Poll::Ready(Ok(Ok(txs))) => {
-                    this.import_transactions(req.peer_id, txs.0, TransactionSource::Response);
+                Ok(Err(req_err)) => {
+                    this.on_request_error(peer_id, req_err);
                 }
-                Poll::Ready(Ok(Err(req_err))) => {
-                    this.on_request_error(req.peer_id, req_err);
-                }
-                Poll::Ready(Err(_)) => {
+                Err(_) => {
                     // request channel closed/dropped
-                    this.on_request_error(req.peer_id, RequestError::ChannelClosed)
+                    this.on_request_error(peer_id, RequestError::ChannelClosed)
                 }
             }
         }
-
-        this.inflight_requests.shrink_to_fit();
 
         this.update_import_metrics();
 
@@ -748,10 +759,47 @@ impl TransactionSource {
 }
 
 /// An inflight request for `PooledTransactions` from a peer
-#[allow(missing_docs)]
 struct GetPooledTxRequest {
     peer_id: PeerId,
     response: oneshot::Receiver<RequestResult<PooledTransactions>>,
+}
+
+struct GetPooledTxResponse {
+    peer_id: PeerId,
+    result: Result<RequestResult<PooledTransactions>, RecvError>,
+}
+
+#[must_use = "futures do nothing unless polled"]
+#[pin_project::pin_project]
+struct GetPooledTxRequestFut {
+    #[pin]
+    inner: Option<GetPooledTxRequest>,
+}
+
+impl GetPooledTxRequestFut {
+    fn new(
+        peer_id: PeerId,
+        response: oneshot::Receiver<RequestResult<PooledTransactions>>,
+    ) -> Self {
+        Self { inner: Some(GetPooledTxRequest { peer_id, response }) }
+    }
+}
+
+impl Future for GetPooledTxRequestFut {
+    type Output = GetPooledTxResponse;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut req = self.as_mut().project().inner.take().expect("polled after completion");
+        match req.response.poll_unpin(cx) {
+            Poll::Ready(result) => {
+                Poll::Ready(GetPooledTxResponse { peer_id: req.peer_id, result })
+            }
+            Poll::Pending => {
+                self.project().inner.set(Some(req));
+                Poll::Pending
+            }
+        }
+    }
 }
 
 /// Tracks a single peer

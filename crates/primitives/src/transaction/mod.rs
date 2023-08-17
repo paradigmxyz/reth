@@ -7,6 +7,8 @@ use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
 pub use error::InvalidTransactionError;
 pub use meta::TransactionMeta;
+use once_cell::sync::Lazy;
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
 use reth_rlp::{
     length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
@@ -20,8 +22,9 @@ pub use tx_type::{
 
 pub use eip1559::TxEip1559;
 pub use eip2930::TxEip2930;
-pub use eip4844::TxEip4844;
+pub use eip4844::{BlobTransaction, BlobTransactionSidecar, TxEip4844};
 pub use legacy::TxLegacy;
+pub use pooled::PooledTransactionsElement;
 
 mod access_list;
 mod eip1559;
@@ -30,9 +33,19 @@ mod eip4844;
 mod error;
 mod legacy;
 mod meta;
+mod pooled;
 mod signature;
 mod tx_type;
 pub(crate) mod util;
+
+// Expected number of transactions where we can expect a speed-up by recovering the senders in
+// parallel.
+pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: Lazy<usize> =
+    Lazy::new(|| match rayon::current_num_threads() {
+        0..=1 => usize::MAX,
+        2..=8 => 10,
+        _ => 5,
+    });
 
 /// A raw transaction.
 ///
@@ -131,10 +144,10 @@ impl Transaction {
     /// Get transaction type
     pub fn tx_type(&self) -> TxType {
         match self {
-            Transaction::Legacy { .. } => TxType::Legacy,
-            Transaction::Eip2930 { .. } => TxType::EIP2930,
-            Transaction::Eip1559 { .. } => TxType::EIP1559,
-            Transaction::Eip4844 { .. } => TxType::EIP4844,
+            Transaction::Legacy(legacy_tx) => legacy_tx.tx_type(),
+            Transaction::Eip2930(access_list_tx) => access_list_tx.tx_type(),
+            Transaction::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.tx_type(),
+            Transaction::Eip4844(blob_tx) => blob_tx.tx_type(),
         }
     }
 
@@ -334,182 +347,20 @@ impl Transaction {
     /// eip155 fields.
     pub(crate) fn fields_len(&self) -> usize {
         match self {
-            Transaction::Legacy(TxLegacy {
-                chain_id: _,
-                nonce,
-                gas_price,
-                gas_limit,
-                to,
-                value,
-                input,
-            }) => {
-                let mut len = 0;
-                len += nonce.length();
-                len += gas_price.length();
-                len += gas_limit.length();
-                len += to.length();
-                len += value.length();
-                len += input.0.length();
-                len
-            }
-            Transaction::Eip2930(TxEip2930 {
-                chain_id,
-                nonce,
-                gas_price,
-                gas_limit,
-                to,
-                value,
-                input,
-                access_list,
-            }) => {
-                let mut len = 0;
-                len += chain_id.length();
-                len += nonce.length();
-                len += gas_price.length();
-                len += gas_limit.length();
-                len += to.length();
-                len += value.length();
-                len += input.0.length();
-                len += access_list.length();
-                len
-            }
-            Transaction::Eip1559(TxEip1559 {
-                chain_id,
-                nonce,
-                gas_limit,
-                max_fee_per_gas,
-                max_priority_fee_per_gas,
-                to,
-                value,
-                input,
-                access_list,
-            }) => {
-                let mut len = 0;
-                len += chain_id.length();
-                len += nonce.length();
-                len += max_priority_fee_per_gas.length();
-                len += max_fee_per_gas.length();
-                len += gas_limit.length();
-                len += to.length();
-                len += value.length();
-                len += input.0.length();
-                len += access_list.length();
-                len
-            }
-            Transaction::Eip4844(TxEip4844 {
-                chain_id,
-                nonce,
-                gas_limit,
-                max_fee_per_gas,
-                max_priority_fee_per_gas,
-                to,
-                value,
-                access_list,
-                blob_versioned_hashes,
-                max_fee_per_blob_gas,
-                input,
-            }) => {
-                let mut len = 0;
-                len += chain_id.length();
-                len += nonce.length();
-                len += gas_limit.length();
-                len += max_fee_per_gas.length();
-                len += max_priority_fee_per_gas.length();
-                len += to.length();
-                len += value.length();
-                len += access_list.length();
-                len += blob_versioned_hashes.length();
-                len += max_fee_per_blob_gas.length();
-                len += input.0.length();
-                len
-            }
+            Transaction::Legacy(legacy_tx) => legacy_tx.fields_len(),
+            Transaction::Eip2930(access_list_tx) => access_list_tx.fields_len(),
+            Transaction::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.fields_len(),
+            Transaction::Eip4844(blob_tx) => blob_tx.fields_len(),
         }
     }
 
     /// Encodes only the transaction's fields into the desired buffer, without a RLP header.
     pub(crate) fn encode_fields(&self, out: &mut dyn bytes::BufMut) {
         match self {
-            Transaction::Legacy(TxLegacy {
-                chain_id: _,
-                nonce,
-                gas_price,
-                gas_limit,
-                to,
-                value,
-                input,
-            }) => {
-                nonce.encode(out);
-                gas_price.encode(out);
-                gas_limit.encode(out);
-                to.encode(out);
-                value.encode(out);
-                input.0.encode(out);
-            }
-            Transaction::Eip2930(TxEip2930 {
-                chain_id,
-                nonce,
-                gas_price,
-                gas_limit,
-                to,
-                value,
-                input,
-                access_list,
-            }) => {
-                chain_id.encode(out);
-                nonce.encode(out);
-                gas_price.encode(out);
-                gas_limit.encode(out);
-                to.encode(out);
-                value.encode(out);
-                input.0.encode(out);
-                access_list.encode(out);
-            }
-            Transaction::Eip1559(TxEip1559 {
-                chain_id,
-                nonce,
-                gas_limit,
-                max_fee_per_gas,
-                max_priority_fee_per_gas,
-                to,
-                value,
-                input,
-                access_list,
-            }) => {
-                chain_id.encode(out);
-                nonce.encode(out);
-                max_priority_fee_per_gas.encode(out);
-                max_fee_per_gas.encode(out);
-                gas_limit.encode(out);
-                to.encode(out);
-                value.encode(out);
-                input.0.encode(out);
-                access_list.encode(out);
-            }
-            Transaction::Eip4844(TxEip4844 {
-                chain_id,
-                nonce,
-                gas_limit,
-                max_fee_per_gas,
-                max_priority_fee_per_gas,
-                to,
-                value,
-                access_list,
-                blob_versioned_hashes,
-                max_fee_per_blob_gas,
-                input,
-            }) => {
-                chain_id.encode(out);
-                nonce.encode(out);
-                max_priority_fee_per_gas.encode(out);
-                max_fee_per_gas.encode(out);
-                gas_limit.encode(out);
-                to.encode(out);
-                value.encode(out);
-                input.0.encode(out);
-                access_list.encode(out);
-                max_fee_per_blob_gas.encode(out);
-                blob_versioned_hashes.encode(out);
-            }
+            Transaction::Legacy(legacy_tx) => legacy_tx.encode_fields(out),
+            Transaction::Eip2930(access_list_tx) => access_list_tx.encode_fields(out),
+            Transaction::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.encode_fields(out),
+            Transaction::Eip4844(blob_tx) => blob_tx.encode_fields(out),
         }
     }
 
@@ -528,29 +379,18 @@ impl Transaction {
         with_header: bool,
     ) {
         match self {
-            Transaction::Legacy(TxLegacy { chain_id, .. }) => {
+            Transaction::Legacy(legacy_tx) => {
                 // do nothing w/ with_header
-                let payload_length =
-                    self.fields_len() + signature.payload_len_with_eip155_chain_id(*chain_id);
-                let header = Header { list: true, payload_length };
-                header.encode(out);
-                self.encode_fields(out);
-                signature.encode_with_eip155_chain_id(out, *chain_id);
+                legacy_tx.encode_with_signature(signature, out)
             }
-            _ => {
-                let payload_length = self.fields_len() + signature.payload_len();
-                if with_header {
-                    Header {
-                        list: false,
-                        payload_length: 1 + length_of_length(payload_length) + payload_length,
-                    }
-                    .encode(out);
-                }
-                out.put_u8(self.tx_type() as u8);
-                let header = Header { list: true, payload_length };
-                header.encode(out);
-                self.encode_fields(out);
-                signature.encode(out);
+            Transaction::Eip2930(access_list_tx) => {
+                access_list_tx.encode_with_signature(signature, out, with_header)
+            }
+            Transaction::Eip1559(dynamic_fee_tx) => {
+                dynamic_fee_tx.encode_with_signature(signature, out, with_header)
+            }
+            Transaction::Eip4844(blob_tx) => {
+                blob_tx.encode_with_signature(signature, out, with_header)
             }
         }
     }
@@ -939,6 +779,21 @@ impl TransactionSigned {
         self.signature.recover_signer(signature_hash)
     }
 
+    /// Recovers a list of signers from a transaction list iterator
+    ///
+    /// Returns `None`, if some transaction's signature is invalid, see also
+    /// [Self::recover_signer].
+    pub fn recover_signers<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
+    where
+        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
+    {
+        if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
+            txes.into_iter().map(|tx| tx.recover_signer()).collect()
+        } else {
+            txes.into_par_iter().map(|tx| tx.recover_signer()).collect()
+        }
+    }
+
     /// Consumes the type, recover signer and return [`TransactionSignedEcRecovered`]
     ///
     /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
@@ -1030,16 +885,20 @@ impl TransactionSigned {
         mem::size_of::<TxHash>() + self.transaction.size() + self.signature.size()
     }
 
-    /// Decodes legacy transaction from the data buffer.
+    /// Decodes legacy transaction from the data buffer into a tuple.
     ///
     /// This expects `rlp(legacy_tx)`
-    fn decode_rlp_legacy_transaction(data: &mut &[u8]) -> Result<TransactionSigned, DecodeError> {
+    // TODO: make buf advancement semantics consistent with `decode_enveloped_typed_transaction`,
+    // so decoding methods do not need to manually advance the buffer
+    pub(crate) fn decode_rlp_legacy_transaction_tuple(
+        data: &mut &[u8],
+    ) -> Result<(TxLegacy, TxHash, Signature), DecodeError> {
         // keep this around, so we can use it to calculate the hash
         let original_encoding = *data;
 
         let header = Header::decode(data)?;
 
-        let mut transaction = Transaction::Legacy(TxLegacy {
+        let mut transaction = TxLegacy {
             nonce: Decodable::decode(data)?,
             gas_price: Decodable::decode(data)?,
             gas_limit: Decodable::decode(data)?,
@@ -1047,22 +906,34 @@ impl TransactionSigned {
             value: Decodable::decode(data)?,
             input: Bytes(Decodable::decode(data)?),
             chain_id: None,
-        });
+        };
         let (signature, extracted_id) = Signature::decode_with_eip155_chain_id(data)?;
-        if let Some(id) = extracted_id {
-            transaction.set_chain_id(id);
-        }
+        transaction.chain_id = extracted_id;
 
         let tx_length = header.payload_length + header.length();
         let hash = keccak256(&original_encoding[..tx_length]);
-        let signed = TransactionSigned { transaction, hash, signature };
+        Ok((transaction, hash, signature))
+    }
+
+    /// Decodes legacy transaction from the data buffer.
+    ///
+    /// This expects `rlp(legacy_tx)`
+    // TODO: make buf advancement semantics consistent with `decode_enveloped_typed_transaction`,
+    // so decoding methods do not need to manually advance the buffer
+    pub fn decode_rlp_legacy_transaction(
+        data: &mut &[u8],
+    ) -> Result<TransactionSigned, DecodeError> {
+        let (transaction, hash, signature) =
+            TransactionSigned::decode_rlp_legacy_transaction_tuple(data)?;
+        let signed =
+            TransactionSigned { transaction: Transaction::Legacy(transaction), hash, signature };
         Ok(signed)
     }
 
     /// Decodes en enveloped EIP-2718 typed transaction.
     ///
     /// CAUTION: this expects that `data` is `[id, rlp(tx)]`
-    fn decode_enveloped_typed_transaction(
+    pub fn decode_enveloped_typed_transaction(
         data: &mut &[u8],
     ) -> Result<TransactionSigned, DecodeError> {
         // keep this around so we can use it to calculate the hash
@@ -1070,6 +941,7 @@ impl TransactionSigned {
 
         let tx_type = *data.first().ok_or(DecodeError::InputTooShort)?;
         data.advance(1);
+
         // decode the list header for the rest of the transaction
         let header = Header::decode(data)?;
         if !header.list {
@@ -1081,40 +953,9 @@ impl TransactionSigned {
 
         // decode common fields
         let transaction = match tx_type {
-            1 => Transaction::Eip2930(TxEip2930 {
-                chain_id: Decodable::decode(data)?,
-                nonce: Decodable::decode(data)?,
-                gas_price: Decodable::decode(data)?,
-                gas_limit: Decodable::decode(data)?,
-                to: Decodable::decode(data)?,
-                value: Decodable::decode(data)?,
-                input: Bytes(Decodable::decode(data)?),
-                access_list: Decodable::decode(data)?,
-            }),
-            2 => Transaction::Eip1559(TxEip1559 {
-                chain_id: Decodable::decode(data)?,
-                nonce: Decodable::decode(data)?,
-                max_priority_fee_per_gas: Decodable::decode(data)?,
-                max_fee_per_gas: Decodable::decode(data)?,
-                gas_limit: Decodable::decode(data)?,
-                to: Decodable::decode(data)?,
-                value: Decodable::decode(data)?,
-                input: Bytes(Decodable::decode(data)?),
-                access_list: Decodable::decode(data)?,
-            }),
-            3 => Transaction::Eip4844(TxEip4844 {
-                chain_id: Decodable::decode(data)?,
-                nonce: Decodable::decode(data)?,
-                max_priority_fee_per_gas: Decodable::decode(data)?,
-                max_fee_per_gas: Decodable::decode(data)?,
-                gas_limit: Decodable::decode(data)?,
-                to: Decodable::decode(data)?,
-                value: Decodable::decode(data)?,
-                input: Bytes(Decodable::decode(data)?),
-                access_list: Decodable::decode(data)?,
-                max_fee_per_blob_gas: Decodable::decode(data)?,
-                blob_versioned_hashes: Decodable::decode(data)?,
-            }),
+            1 => Transaction::Eip2930(TxEip2930::decode_inner(data)?),
+            2 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
+            3 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
             _ => return Err(DecodeError::Custom("unsupported typed transaction type")),
         };
 
@@ -1323,12 +1164,17 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
 #[cfg(test)]
 mod tests {
     use crate::{
-        transaction::{signature::Signature, TransactionKind, TxEip1559, TxLegacy},
+        sign_message,
+        transaction::{
+            signature::Signature, TransactionKind, TxEip1559, TxLegacy,
+            PARALLEL_SENDER_RECOVERY_THRESHOLD,
+        },
         Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered, H256, U256,
     };
     use bytes::BytesMut;
     use ethers_core::utils::hex;
     use reth_rlp::{Decodable, DecodeError, Encodable};
+    use secp256k1::{KeyPair, Secp256k1};
     use std::str::FromStr;
 
     #[test]
@@ -1563,5 +1409,33 @@ mod tests {
         let mut b = Vec::new();
         tx.encode(&mut b);
         assert_eq!(s, hex::encode(&b));
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(1))]
+
+        #[test]
+        fn test_parallel_recovery_order(txes in proptest::collection::vec(proptest::prelude::any::<Transaction>(), *PARALLEL_SENDER_RECOVERY_THRESHOLD * 5)) {
+            let mut rng =rand::thread_rng();
+            let secp = Secp256k1::new();
+            let txes: Vec<TransactionSigned> = txes.into_iter().map(|mut tx| {
+                 if let Some(chain_id) = tx.chain_id() {
+                    // Otherwise we might overflow when calculating `v` on `recalculate_hash`
+                    tx.set_chain_id(chain_id % (u64::MAX / 2 - 36));
+                }
+
+                let key_pair = KeyPair::new(&secp, &mut rng);
+
+                let signature =
+                    sign_message(H256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
+
+                TransactionSigned::from_transaction_and_signature(tx, signature)
+            }).collect();
+
+            let parallel_senders = TransactionSigned::recover_signers(&txes, txes.len()).unwrap();
+            let seq_senders = txes.iter().map(|tx| tx.recover_signer()).collect::<Option<Vec<_>>>().unwrap();
+
+            assert_eq!(parallel_senders, seq_senders);
+        }
     }
 }

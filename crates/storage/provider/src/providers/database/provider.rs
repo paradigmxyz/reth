@@ -22,7 +22,10 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     BlockNumberList, DatabaseError,
 };
-use reth_interfaces::Result;
+use reth_interfaces::{
+    executor::{BlockExecutionError, BlockValidationError},
+    Result,
+};
 use reth_primitives::{
     keccak256,
     stage::{StageCheckpoint, StageId},
@@ -630,7 +633,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     }
 
     /// Prune the table for the specified pre-sorted key iterator, calling `chunk_callback` after
-    /// every `batch_size` pruned rows.
+    /// every `batch_size` pruned rows with number of total rows pruned.
     ///
     /// Returns number of rows pruned.
     pub fn prune_table_with_iterator_in_batches<T: Table>(
@@ -649,12 +652,12 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             deleted += 1;
 
             if deleted % batch_size == 0 {
-                batch_callback(batch_size);
+                batch_callback(deleted);
             }
         }
 
         if deleted % batch_size != 0 {
-            batch_callback(deleted % batch_size);
+            batch_callback(deleted);
         }
 
         Ok(deleted)
@@ -935,14 +938,24 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
         }
     }
 
+    /// Returns the block with matching number from database.
+    ///
+    /// If the header for this block is not found, this returns `None`.
+    /// If the header is found, but the transactions either do not exist, or are not indexed, this
+    /// will return None.
     fn block(&self, id: BlockHashOrNumber) -> Result<Option<Block>> {
         if let Some(number) = self.convert_hash_or_number(id)? {
             if let Some(header) = self.header_by_number(number)? {
                 let withdrawals = self.withdrawals_by_block(number.into(), header.timestamp)?;
                 let ommers = self.ommers(number.into())?.unwrap_or_default();
-                let transactions = self
-                    .transactions_by_block(number.into())?
-                    .ok_or(ProviderError::BlockBodyIndicesNotFound(number))?;
+                // If the body indices are not found, this means that the transactions either do not
+                // exist in the database yet, or they do exit but are not indexed.
+                // If they exist but are not indexed, we don't have enough
+                // information to return the block anyways, so we return `None`.
+                let transactions = match self.transactions_by_block(number.into())? {
+                    Some(transactions) => transactions,
+                    None => return Ok(None),
+                };
 
                 return Ok(Some(Block { header, body: transactions, ommers, withdrawals }))
             }
@@ -983,7 +996,9 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
     /// **NOTE: The transactions have invalid hashes, since they would need to be calculated on the
     /// spot, and we want fast querying.**
     ///
-    /// Returns `None` if block is not found.
+    /// If the header for this block is not found, this returns `None`.
+    /// If the header is found, but the transactions either do not exist, or are not indexed, this
+    /// will return None.
     fn block_with_senders(&self, block_number: BlockNumber) -> Result<Option<BlockWithSenders>> {
         let header = self
             .header_by_number(block_number)?
@@ -993,9 +1008,16 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
         let withdrawals = self.withdrawals_by_block(block_number.into(), header.timestamp)?;
 
         // Get the block body
-        let body = self
-            .block_body_indices(block_number)?
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(block_number))?;
+        //
+        // If the body indices are not found, this means that the transactions either do not exist
+        // in the database yet, or they do exit but are not indexed. If they exist but are not
+        // indexed, we don't have enough information to return the block anyways, so we return
+        // `None`.
+        let body = match self.block_body_indices(block_number)? {
+            Some(body) => body,
+            None => return Ok(None),
+        };
+
         let tx_range = body.tx_num_range();
 
         let (transactions, senders) = if tx_range.is_empty() {
@@ -1908,14 +1930,11 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
         let tx_iter = if Some(block.body.len()) == senders_len {
             block.body.into_iter().zip(senders.unwrap()).collect::<Vec<(_, _)>>()
         } else {
-            block
-                .body
-                .into_iter()
-                .map(|tx| {
-                    let signer = tx.recover_signer();
-                    (tx, signer.unwrap_or_default())
-                })
-                .collect::<Vec<(_, _)>>()
+            let senders = TransactionSigned::recover_signers(&block.body, block.body.len()).ok_or(
+                BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError),
+            )?;
+            debug_assert_eq!(senders.len(), block.body.len(), "missing one or more senders");
+            block.body.into_iter().zip(senders).collect()
         };
 
         for (transaction, sender) in tx_iter {
