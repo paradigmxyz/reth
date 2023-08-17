@@ -36,7 +36,7 @@ where
 
     /// Generate an account proof from intermediate nodes.
     pub fn get_account_proof(&self, address: Address) -> Result<Vec<Bytes>, ProofError> {
-        let hashed_address = keccak256(&address);
+        let hashed_address = keccak256(address);
         let target_nibbles = Nibbles::unpack(hashed_address);
 
         let mut trie_node_restorer = ProofRestorer::new(self.hashed_cursor_factory)?;
@@ -54,11 +54,8 @@ where
         while let Some(key) = walker.key() {
             if target_nibbles.has_prefix(&key) {
                 debug_assert!(proofs.is_empty(), "Prefix must match a single key");
-                proofs = self.traverse_path(
-                    &mut walker.cursor,
-                    &mut trie_node_restorer,
-                    hashed_address,
-                )?;
+                proofs =
+                    self.traverse_path(walker.cursor, &mut trie_node_restorer, hashed_address)?;
             }
 
             let value = walker.hash().unwrap();
