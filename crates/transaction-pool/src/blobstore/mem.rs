@@ -20,15 +20,37 @@ struct InMemoryBlobStoreInner {
     size: AtomicUsize,
 }
 
+impl InMemoryBlobStoreInner {
+
+    fn add_size(&self, add: usize) {
+
+    }
+
+    fn sub_size(&self, sub: usize) {
+
+    }
+
+    fn update_size(&self, add: usize, sub: usize) {
+
+    }
+}
+
 impl BlobStore for InMemoryBlobStore {
     fn insert(&self, tx: H256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError> {
+        let add = data.size();
         let mut store = self.inner.store.write();
-        store.insert(tx, data);
+        let sub = store.insert(tx, data).map(|rem| rem.size()).unwrap_or_default();
+        self.inner.update_size(add, sub);
         Ok(())
     }
 
     fn insert_all(&self, txs: Vec<(H256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError> {
         let mut store = self.inner.store.write();
+        let mut add = 0;
+        for (tx, data) in txs {
+            add += data.size();
+            store.insert(tx, data);
+        }
         store.extend(txs);
         Ok(())
     }
@@ -68,7 +90,17 @@ impl BlobStore for InMemoryBlobStore {
         Ok(items)
     }
 
-    fn data_size(&self) -> usize {
-        self.inner.size.load(std::sync::atomic::Ordering::Relaxed)
+    fn data_size_hint(&self) -> Option<usize> {
+        Some(self.inner.size.load(std::sync::atomic::Ordering::Relaxed))
     }
+}
+
+#[inline]
+fn remove_size(store: &mut HashMap<H256, BlobTransactionSidecar>, tx: &H256) -> usize {
+    store.remove(tx).map(|rem| rem.size()).unwrap_or_default()
+}
+
+#[inline]
+fn insert_size(store: &mut HashMap<H256, BlobTransactionSidecar>, tx: H256, blob: BlobTransactionSidecar) -> usize {
+    store.insert(tx).map(|rem| rem.size()).unwrap_or_default()
 }

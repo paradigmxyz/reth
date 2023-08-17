@@ -34,7 +34,7 @@ impl BlobStore for NoopBlobStore {
         Ok(vec![])
     }
 
-    fn data_size(&self) -> usize {
-        0
+    fn data_size_hint(&self) -> Option<usize> {
+        Some(0)
     }
 }

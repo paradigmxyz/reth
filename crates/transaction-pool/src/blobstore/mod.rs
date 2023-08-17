@@ -31,14 +31,17 @@ pub trait BlobStore: Send + Sync + 'static {
     /// Retrieves the decoded blob data for the given transaction hash.
     fn get(&self, tx: H256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError>;
 
-    /// Retrieves all decoded blob data for the given transaction hashes
+    /// Retrieves all decoded blob data for the given transaction hashes.
+    ///
+    /// This only returns the blobs that were found in the store.
+    /// If there's no blob it will not be returned.
     fn get_all(
         &self,
         txs: Vec<H256>,
     ) -> Result<Vec<(H256, BlobTransactionSidecar)>, BlobStoreError>;
 
     /// Data size of all transactions in the blob store.
-    fn data_size(&self) -> usize;
+    fn data_size_hint(&self) -> Option<usize>;
 }
 
 /// Error variants that can occur when interacting with a blob store.
