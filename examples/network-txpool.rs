@@ -10,8 +10,8 @@
 use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::{
-    CoinbaseTipOrdering, EthPooledTransaction, PoolTransaction, TransactionOrigin, TransactionPool,
-    TransactionValidationOutcome, TransactionValidator,
+    validate::ValidTransaction, CoinbaseTipOrdering, EthPooledTransaction, PoolTransaction,
+    TransactionOrigin, TransactionPool, TransactionValidationOutcome, TransactionValidator,
 };
 
 #[tokio::main]
@@ -79,7 +79,7 @@ impl TransactionValidator for OkValidator {
         TransactionValidationOutcome::Valid {
             balance: transaction.cost(),
             state_nonce: transaction.nonce(),
-            transaction,
+            transaction: ValidTransaction::Valid(transaction),
             propagate: false,
         }
     }
