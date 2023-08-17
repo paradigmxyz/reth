@@ -624,6 +624,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     }
 
     /// Prune the table for the specified pre-sorted key iterator.
+    ///
     /// Returns number of rows pruned.
     pub fn prune_table_with_iterator<T: Table>(
         &self,
@@ -663,17 +664,27 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         Ok(deleted)
     }
 
+    /// Prune the table for the specified key range.
+    ///
+    /// Returns number of total unique keys and total rows pruned pruned.
+    pub fn prune_table_with_range<T: Table>(
+        &self,
+        keys: impl RangeBounds<T::Key>,
+    ) -> std::result::Result<(usize, usize), DatabaseError> {
+        self.prune_table_with_range_in_batches::<T>(keys, usize::MAX, |_, _| {})
+    }
+
     /// Prune the table for the specified key range, calling `chunk_callback` after every
     /// `batch_size` pruned rows with number of total unique keys and total rows pruned. For dupsort
     /// tables, these numbers will be different as one key can correspond to multiple rows.
     ///
-    /// Returns number of rows pruned.
+    /// Returns number of total unique keys and total rows pruned pruned.
     pub fn prune_table_with_range_in_batches<T: Table>(
         &self,
         keys: impl RangeBounds<T::Key>,
         batch_size: usize,
         mut batch_callback: impl FnMut(usize, usize),
-    ) -> std::result::Result<(), DatabaseError> {
+    ) -> std::result::Result<(usize, usize), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut walker = cursor.walk_range(keys)?;
         let mut deleted_keys = 0;
@@ -697,7 +708,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             batch_callback(deleted_keys, deleted_rows);
         }
 
-        Ok(())
+        Ok((deleted_keys, deleted_rows))
     }
 
     /// Load shard and remove it. If list is empty, last shard was full or
