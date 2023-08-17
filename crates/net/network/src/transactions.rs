@@ -183,6 +183,7 @@ where
         response: oneshot::Sender<RequestResult<PooledTransactions>>,
     ) {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
+            // TODO softResponseLimit 2 * 1024 * 1024
             let transactions = self
                 .pool
                 .get_all(request.0)
@@ -237,6 +238,8 @@ where
     ///
     /// The message for new pooled hashes depends on the negotiated version of the stream.
     /// See [NewPooledTransactionHashes](NewPooledTransactionHashes)
+    ///
+    /// TODO add note that this never broadcasts full 4844 transactions
     fn propagate_transactions(
         &mut self,
         to_propagate: Vec<PropagateTransaction>,
@@ -803,7 +806,7 @@ impl Future for GetPooledTxRequestFut {
 struct Peer {
     /// Keeps track of transactions that we know the peer has seen.
     transactions: LruCache<H256>,
-    /// A communication channel directly to the session task.
+    /// A communication channel directly to the peer's session task.
     request_tx: PeerRequestSender,
     /// negotiated version of the session.
     version: EthVersion,

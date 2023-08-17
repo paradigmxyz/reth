@@ -247,7 +247,8 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Returns all transactions objects for the given hashes.
     ///
-    /// This adheres to the expected behavior of [`GetPooledTransactions`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09):
+    /// TODO(mattsse): this will no longer be accurate and we need a new function specifically for
+    /// pooled txs This adheres to the expected behavior of [`GetPooledTransactions`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09):
     /// The transactions must be in same order as in the request, but it is OK to skip transactions
     /// which are not available.
     fn get_all(&self, txs: Vec<TxHash>) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
@@ -576,6 +577,7 @@ pub struct PooledTransaction {
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     pub(crate) cost: U256,
+    // TODO optional sidecar
 }
 
 impl PooledTransaction {
