@@ -42,6 +42,7 @@ pub enum BlockExecutionError {
     CanonicalRevert { inner: String },
     #[error("Transaction error on commit: {inner:?}")]
     CanonicalCommit { inner: String },
+
     // === tree errors ===
     // TODO(mattsse): move this to tree error
     #[error("Block hash {block_hash} not found in blockchain tree chain")]

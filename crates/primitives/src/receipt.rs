@@ -205,21 +205,13 @@ impl proptest::arbitrary::Arbitrary for Receipt {
                         logs in proptest::collection::vec(proptest::arbitrary::any::<Log>(), 0..=20),
                         _deposit_nonce in any::<Option<u64>>()) -> Receipt
             {
-
-                // Only reecipts for deposit transactions may contain a deposit nonce
-                #[cfg(feature = "optimism")]
-                let deposit_nonce = if tx_type == TxType::DEPOSIT {
-                    _deposit_nonce
-                } else {
-                    None
-                };
-
                 Receipt { tx_type,
                     success,
                     cumulative_gas_used,
                     logs,
+                    // Only reecipts for deposit transactions may contain a deposit nonce
                     #[cfg(feature = "optimism")]
-                    deposit_nonce
+                    deposit_nonce: (tx_type == TxType::DEPOSIT).then_some(_deposit_nonce).flatten()
                 }
             }
         };
