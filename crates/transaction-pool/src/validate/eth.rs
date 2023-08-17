@@ -562,8 +562,6 @@ mod tests {
             TransactionValidationOutcome::Invalid(_, err) => err,
             _ => panic!("Expected invalid transaction"),
         };
-        let expected: InvalidPoolTransactionError =
-            InvalidTransactionError::TxTypeNotSupported.into();
-        assert!(matches!(err, expected));
+        assert_eq!(err.to_string(), "Transaction type not supported");
     }
 }
