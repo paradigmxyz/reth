@@ -6215,6 +6215,7 @@ dependencies = [
  "criterion",
  "derive_more",
  "hex",
+ "pretty_assertions",
  "proptest",
  "reth-db",
  "reth-interfaces",
