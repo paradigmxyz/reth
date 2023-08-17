@@ -57,7 +57,7 @@ impl BlobStore for InMemoryBlobStore {
     }
 
     fn get_all(&self, txs: Vec<H256>) -> Result<Vec<(H256, BlobSideCar)>, BlobStoreError> {
-        let mut items = Vec::new();
+        let mut items = Vec::with_capacity(txs.len());
         let store = self.inner.store.write();
         for tx in txs {
             if let Some(item) = store.get(&tx) {

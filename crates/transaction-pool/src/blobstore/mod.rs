@@ -27,7 +27,7 @@ impl BlobSideCar {
 /// finalization).
 ///
 /// Note: this is Clone because it is expected to be wrapped in an Arc.
-pub trait BlobStore: Send + Sync + Clone + 'static {
+pub trait BlobStore: Send + Sync + 'static {
     /// Inserts the blob sidecar into the store
     fn insert(&self, tx: H256, data: BlobSideCar) -> Result<(), BlobStoreError>;
 
