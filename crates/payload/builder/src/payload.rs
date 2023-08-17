@@ -117,7 +117,7 @@ impl PayloadBuilderAttributes {
             .as_ref()
             .unwrap_or(&Vec::default())
             .iter()
-            .map(|tx| TransactionSigned::decode(&mut &tx[..]))
+            .map(|tx| TransactionSigned::decode_enveloped(tx.clone()))
             .collect::<Result<_, _>>()?;
 
         #[cfg(not(feature = "optimism"))]

@@ -21,6 +21,8 @@ where
 {
     let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
 
+    dbg!("[MADE IT TO PAYLOAD BUILDER]");
+
     let extra_data = config.extra_data();
     let PayloadConfig {
         initialized_block_env,
@@ -50,100 +52,112 @@ where
 
     let block_number = initialized_block_env.number.to::<u64>();
 
+    dbg!(
+        "[OP BUILDER] LOOPING SEQ TXS: ",
+        &attributes.transactions.len(),
+        &attributes.transactions
+    );
+
     // Transactions sent via the payload attributes are force included at the top of the block, in
     // the order that they were sent in.
-    #[cfg(feature = "optimism")]
-    {
-        for sequencer_tx in attributes.transactions {
-            // Check if the job was cancelled, if so we can exit early.
-            if cancel.is_cancelled() {
-                return Ok(BuildOutcome::Cancelled)
-            }
+    for sequencer_tx in attributes.transactions {
+        // Check if the job was cancelled, if so we can exit early.
+        if cancel.is_cancelled() {
+            dbg!("[OP BUILDER] CANCELLED");
+            return Ok(BuildOutcome::Cancelled);
+        }
 
-            // Convert the transaction to a [TransactionSignedEcRecovered]. This is
-            // purely for the purposes of utilizing the [tx_env_with_recovered] function.
-            // Deposit transactions do not have signatures, so if the tx is a deposit, this
-            // will just pull in its `from` address.
-            let sequencer_tx = sequencer_tx
-                .clone()
-                .try_into_ecrecovered()
-                .map_err(|_| PayloadBuilderError::TransactionEcRecoverFailed)?;
+        // Convert the transaction to a [TransactionSignedEcRecovered]. This is
+        // purely for the purposes of utilizing the [tx_env_with_recovered] function.
+        // Deposit transactions do not have signatures, so if the tx is a deposit, this
+        // will just pull in its `from` address.
+        let sequencer_tx = sequencer_tx.clone().try_into_ecrecovered().map_err(|err| {
+            dbg!("[OP BUILDER] err converting to ecrecovered", err);
+            PayloadBuilderError::TransactionEcRecoverFailed
+        })?;
 
-            // Configure the environment for the block.
-            let env = Env {
-                cfg: initialized_cfg.clone(),
-                block: initialized_block_env.clone(),
-                tx: tx_env_with_recovered(&sequencer_tx),
-            };
+        dbg!("GOT SEQUENCER TX", &sequencer_tx);
 
-            let mut evm = revm::EVM::with_env(env);
-            evm.database(&mut db);
+        // Configure the environment for the block.
+        let env = Env {
+            cfg: initialized_cfg.clone(),
+            block: initialized_block_env.clone(),
+            tx: tx_env_with_recovered(&sequencer_tx),
+        };
 
-            let ResultAndState { result, state } = match evm.transact() {
-                Ok(res) => res,
-                Err(err) => {
-                    // TODO(clabby): This could be an issue - deposit transactions should always be
-                    // included with a receipt regardless of if there was an error or not. The
-                    // sequencer performs some basic validation on the transactions it sends prior
-                    // to sending a fork choice update, so this shouldn't be an issue, but we may
-                    // want to revisit this.
-                    match err {
-                        EVMError::Transaction(err) => {
-                            if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
-                                // if the nonce is too low, we can skip this transaction
-                                trace!(?err, ?sequencer_tx, "skipping nonce too low transaction");
-                            } else {
-                                // if the transaction is invalid, we can skip it and all of its
-                                // descendants
-                                trace!(
-                                    ?err,
-                                    ?sequencer_tx,
-                                    "skipping invalid transaction and its descendants"
-                                );
-                            }
-                            continue
+        let mut evm = revm::EVM::with_env(env);
+        evm.database(&mut db);
+
+        let ResultAndState { result, state } = match evm.transact() {
+            Ok(res) => res,
+            Err(err) => {
+                // TODO(clabby): This could be an issue - deposit transactions should always be
+                // included with a receipt regardless of if there was an error or not. The
+                // sequencer performs some basic validation on the transactions it sends prior
+                // to sending a fork choice update, so this shouldn't be an issue, but we may
+                // want to revisit this.
+                match err {
+                    EVMError::Transaction(err) => {
+                        if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
+                            // if the nonce is too low, we can skip this transaction
+                            trace!(?err, ?sequencer_tx, "skipping nonce too low transaction");
+                        } else {
+                            // if the transaction is invalid, we can skip it and all of its
+                            // descendants
+                            trace!(
+                                ?err,
+                                ?sequencer_tx,
+                                "skipping invalid transaction and its descendants"
+                            );
                         }
-                        err => {
-                            // this is an error that we should treat as fatal for this attempt
-                            return Err(PayloadBuilderError::EvmExecutionError(err))
-                        }
+                        continue;
+                    }
+                    err => {
+                        // this is an error that we should treat as fatal for this attempt
+                        return Err(PayloadBuilderError::EvmExecutionError(err));
                     }
                 }
-            };
+            }
+        };
 
-            // commit changes
-            commit_state_changes(&mut db, &mut post_state, block_number, state, true);
+        dbg!("EXECUTED ", sequencer_tx.hash());
 
-            // Push transaction changeset and calculate header bloom filter for receipt.
-            post_state.add_receipt(
-                block_number,
-                Receipt {
-                    tx_type: sequencer_tx.tx_type(),
-                    success: result.is_success(),
-                    cumulative_gas_used,
-                    logs: result.logs().into_iter().map(into_reth_log).collect(),
-                    deposit_nonce: if chain_spec
-                        .is_fork_active_at_timestamp(Hardfork::Regolith, attributes.timestamp) &&
-                        sequencer_tx.is_deposit()
-                    {
-                        // Recovering the signer from the deposit transaction is only fetching
-                        // the `from` address. Deposit transactions have no signature.
-                        let from = sequencer_tx.signer();
-                        let account = db.load_account(from)?;
-                        // The deposit nonce is the account's nonce - 1. The account's nonce
-                        // was incremented during the execution of the deposit transaction
-                        // above.
-                        Some(account.info.nonce.saturating_sub(1))
-                    } else {
-                        None
-                    },
+        // commit changes
+        commit_state_changes(&mut db, &mut post_state, block_number, state, true);
+
+        // Push transaction changeset and calculate header bloom filter for receipt.
+        post_state.add_receipt(
+            block_number,
+            Receipt {
+                tx_type: sequencer_tx.tx_type(),
+                success: result.is_success(),
+                cumulative_gas_used,
+                logs: result.logs().into_iter().map(into_reth_log).collect(),
+                deposit_nonce: if chain_spec
+                    .is_fork_active_at_timestamp(Hardfork::Regolith, attributes.timestamp)
+                    && sequencer_tx.is_deposit()
+                {
+                    // Recovering the signer from the deposit transaction is only fetching
+                    // the `from` address. Deposit transactions have no signature.
+                    let from = sequencer_tx.signer();
+                    let account = db.load_account(from)?;
+                    // The deposit nonce is the account's nonce - 1. The account's nonce
+                    // was incremented during the execution of the deposit transaction
+                    // above.
+                    Some(account.info.nonce.saturating_sub(1))
+                } else {
+                    None
                 },
-            );
+            },
+        );
 
-            // append transaction to the list of executed transactions
-            executed_txs.push(sequencer_tx.into_signed());
-        }
+        dbg!("COMMITTED STATE CHANGES");
+
+        // append transaction to the list of executed transactions
+        executed_txs.push(sequencer_tx.into_signed());
     }
+
+    dbg!("[OP BUILDER] LOOPING POOL TXS");
 
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
@@ -152,12 +166,12 @@ where
             // which also removes all dependent transaction from the iterator before we can
             // continue
             best_txs.mark_invalid(&pool_tx);
-            continue
+            continue;
         }
 
         // check if the job was cancelled, if so we can exit early
         if cancel.is_cancelled() {
-            return Ok(BuildOutcome::Cancelled)
+            return Ok(BuildOutcome::Cancelled);
         }
 
         // convert tx to a signed transaction
@@ -187,11 +201,11 @@ where
                             trace!(?err, ?tx, "skipping invalid transaction and its descendants");
                             best_txs.mark_invalid(&pool_tx);
                         }
-                        continue
+                        continue;
                     }
                     err => {
                         // this is an error that we should treat as fatal for this attempt
-                        return Err(PayloadBuilderError::EvmExecutionError(err))
+                        return Err(PayloadBuilderError::EvmExecutionError(err));
                     }
                 }
             }
@@ -230,7 +244,7 @@ where
     // check if we have a better block
     if !is_better_payload(best_payload.as_deref(), total_fees) {
         // can skip building the block
-        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
+        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads });
     }
 
     let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
@@ -273,10 +287,13 @@ where
         excess_blob_gas: None,
     };
 
+    dbg!("[OP BUILDER] BUILD PAYLOAD HEADER", &header);
+
     // seal the block
     let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
 
     let sealed_block = block.seal_slow();
+    dbg!("[OP BUILDER] RETURNING BUILD OUTCOME");
     Ok(BuildOutcome::Better {
         payload: BuiltPayload::new(attributes.id, sealed_block, total_fees),
         cached_reads,

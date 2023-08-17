@@ -139,6 +139,7 @@ where
         &self,
         attributes: PayloadBuilderAttributes,
     ) -> Result<Self::Job, PayloadBuilderError> {
+        dbg!("[NEW_PAYLOAD_JOB]");
         let parent_block = if attributes.parent.is_zero() {
             // use latest block if parent is zero: genesis block
             self.client
@@ -154,6 +155,7 @@ where
             // we already know the hash, so we can seal it
             block.seal(attributes.parent)
         };
+        dbg!("[NEW_PAYLOAD_JOB] MADE IT PAST PARENT BLOCK CHECK");
 
         // configure evm env based on parent block
         let (initialized_cfg, initialized_block_env) =
@@ -172,6 +174,8 @@ where
 
         let until = tokio::time::Instant::now() + self.config.deadline;
         let deadline = Box::pin(tokio::time::sleep_until(until));
+
+        dbg!("[NEW_PAYLOAD_JOB] MADE JOB TYPE");
 
         Ok(BasicPayloadJob {
             config,
@@ -336,14 +340,19 @@ where
 
         // check if the deadline is reached
         if this.deadline.as_mut().poll(cx).is_ready() {
+            dbg!("[Basic Job] Deadline reached");
             trace!("Payload building deadline reached");
             return Poll::Ready(Ok(()))
         }
 
+        dbg!("[Basic Job] Polled");
+
         // check if the interval is reached
         while this.interval.poll_tick(cx).is_ready() {
+            dbg!("[Basic Job] Interval ready");
             // start a new job if there is no pending block and we haven't reached the deadline
             if this.pending_block.is_none() {
+                dbg!("[Basic Job] No pending block, spawning new payload build task");
                 trace!("spawn new payload build task");
                 let (tx, rx) = oneshot::channel();
                 let client = this.client.clone();
@@ -358,6 +367,7 @@ where
                 let builder = this.builder.clone();
                 this.executor.spawn_blocking(Box::pin(async move {
                     // acquire the permit for executing the task
+                    dbg!("[Basic Job] trying build");
                     let _permit = guard.0.acquire().await;
                     let args = BuildArguments {
                         client,
@@ -383,11 +393,14 @@ where
             }
         }
 
+        dbg!("Made it past interval");
+
         // poll the pending block
         if let Some(mut fut) = this.pending_block.take() {
             match fut.poll_unpin(cx) {
                 Poll::Ready(Ok(outcome)) => {
                     this.interval.reset();
+                    dbg!("[Basic Job] Ready - ", &outcome);
                     match outcome {
                         BuildOutcome::Better { payload, cached_reads } => {
                             this.cached_reads = Some(cached_reads);
@@ -408,6 +421,8 @@ where
                     // job failed, but we simply try again next interval
                     trace!(?err, "payload build attempt failed");
                     this.metrics.inc_failed_payload_builds();
+
+                    dbg!("[Basic Job] Payload build failed - ", &err);
                 }
                 Poll::Pending => {
                     #[cfg(not(feature = "optimism"))]
@@ -419,6 +434,8 @@ where
                     if this.config.compute_pending_block {
                         this.pending_block = Some(fut);
                     }
+
+                    dbg!("[Basic Job] Payload build pending - ");
                 }
             }
         }
@@ -451,11 +468,14 @@ where
     }
 
     fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+        dbg!("[Basic Job] Resolving...");
         let best_payload = self.best_payload.take();
         let maybe_better = self.pending_block.take();
         let mut empty_payload = None;
 
         if best_payload.is_none() {
+            dbg!("[Basic Job] No best payload, returning empty payload.");
+
             // if no payload has been built yet
             self.metrics.inc_requested_empty_payload();
             // no payload built yet, so we need to return an empty payload
