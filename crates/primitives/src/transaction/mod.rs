@@ -13,6 +13,7 @@ use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
 use reth_rlp::{
     length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
+use revm_primitives::U256;
 use serde::{Deserialize, Serialize};
 pub use signature::Signature;
 use std::mem;
@@ -633,12 +634,12 @@ impl Transaction {
                 if with_header {
                     Header {
                         list: false,
-                        payload_length: 1 + 1 + length_of_length(payload_length) + payload_length,
+                        payload_length: 1 + length_of_length(payload_length) + payload_length,
                     }
                     .encode(out);
                 }
                 out.put_u8(self.tx_type() as u8);
-                out.put_u8(DEPOSIT_VERSION);
+                // out.put_u8(DEPOSIT_VERSION);
                 let header = Header { list: true, payload_length };
                 header.encode(out);
                 self.encode_fields(out);
@@ -822,7 +823,7 @@ impl Encodable for Transaction {
                 let payload_length = self.fields_len();
                 // 'transaction type byte length' + 'version byte' + 'header length' + 'payload
                 // length'
-                1 + 1 + length_of_length(payload_length) + payload_length
+                1 + length_of_length(payload_length) + payload_length
             }
             _ => {
                 let payload_length = self.fields_len();
@@ -1171,7 +1172,7 @@ impl TransactionSigned {
             Transaction::Deposit(_) => {
                 let payload_length = self.transaction.fields_len() + self.signature.payload_len();
                 // 'tx type byte length' + 'version byte' + 'header length' + 'payload length'
-                let len = 1 + 1 + length_of_length(payload_length) + payload_length;
+                let len = 1 + length_of_length(payload_length) + payload_length;
                 length_of_length(len) + len
             }
             _ => {
@@ -1246,29 +1247,26 @@ impl TransactionSigned {
         let tx_type = *data.first().ok_or(DecodeError::InputTooShort)?;
         data.advance(1);
 
-        // If the transaction is a deposit, we need to first ensure that the version
-        // byte is correct.
-        #[cfg(feature = "optimism")]
-        if tx_type == DEPOSIT_TX_TYPE_ID {
-            let version = *data.first().ok_or(DecodeError::InputTooShort)?;
-            if version != DEPOSIT_VERSION {
-                return Err(DecodeError::Custom("Deposit version mismatch"))
-            }
-            data.advance(1);
-        }
-
         // decode the list header for the rest of the transaction
         let header = Header::decode(data)?;
         if !header.list {
             return Err(DecodeError::Custom("typed tx fields must be encoded as a list"))
         }
 
+        // If the transaction is a deposit, we need to first ensure that the version
+        // byte is correct.
+        // #[cfg(feature = "optimism")]
+        // if tx_type == DEPOSIT_TX_TYPE_ID {
+        //     let version = *data.first().ok_or(DecodeError::InputTooShort)?;
+        //     if version != DEPOSIT_VERSION {
+        //         dbg!(version, DEPOSIT_VERSION);
+        //         return Err(DecodeError::Custom("Deposit version mismatch"));
+        //     }
+        //     data.advance(1);
+        // }
+
         // length of tx encoding = tx type byte (size = 1) + length of header + payload length
         let tx_length = 1 + header.length() + header.payload_length;
-        // If the transaction is a deposit, we need to add one to the length to account for the
-        // version byte.
-        #[cfg(feature = "optimism")]
-        let tx_length = if tx_type == DEPOSIT_TX_TYPE_ID { tx_length + 1 } else { tx_length };
 
         // decode common fields
         let transaction = match tx_type {
@@ -1318,14 +1316,22 @@ impl TransactionSigned {
                     Some(Decodable::decode(data)?)
                 },
                 value: Decodable::decode(data)?,
-                input: Decodable::decode(data)?,
                 gas_limit: Decodable::decode(data)?,
                 is_system_transaction: Decodable::decode(data)?,
+                input: Decodable::decode(data)?,
             }),
             _ => return Err(DecodeError::Custom("unsupported typed transaction type")),
         };
 
+        #[cfg(not(feature = "optimism"))]
         let signature = Signature::decode(data)?;
+
+        #[cfg(feature = "optimism")]
+        let signature = if tx_type == DEPOSIT_TX_TYPE_ID {
+            Signature { r: U256::ZERO, s: U256::ZERO, odd_y_parity: true }
+        } else {
+            Signature::decode(data)?
+        };
 
         let hash = keccak256(&original_encoding[..tx_length]);
         let signed = TransactionSigned { transaction, hash, signature };

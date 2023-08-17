@@ -56,9 +56,9 @@ impl TxDeposit {
         len += self.to.length();
         len += self.mint.map_or(1, |mint| mint.length());
         len += self.value.length();
-        len += self.input.0.length();
         len += self.gas_limit.length();
         len += self.is_system_transaction.length();
+        len += self.input.0.length();
         len
     }
 
@@ -74,8 +74,25 @@ impl TxDeposit {
             out.put_u8(EMPTY_STRING_CODE);
         }
         self.value.encode(out);
-        self.input.encode(out);
         self.gas_limit.encode(out);
         self.is_system_transaction.encode(out);
+        self.input.encode(out);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use reth_rlp::Decodable;
+    use revm_primitives::hex_literal::hex;
+
+    use crate::{Bytes, TransactionSigned};
+
+    #[test]
+    fn test_rlp_decode() {
+        let bytes = hex!("7ef9015aa044bae9d41b8380d781187b426c6fe43df5fb2fb57bd4466ef6a701e1f01e015694deaddeaddeaddeaddeaddeaddeaddeaddead000194420000000000000000000000000000000000001580808408f0d18001b90104015d8eb900000000000000000000000000000000000000000000000000000000008057650000000000000000000000000000000000000000000000000000000063d96d10000000000000000000000000000000000000000000000000000000000009f35273d89754a1e0387b89520d989d3be9c37c1f32495a88faf1ea05c61121ab0d1900000000000000000000000000000000000000000000000000000000000000010000000000000000000000002d679b567db6187c0c8323fa982cfb88b74dbcc7000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240");
+
+        // let tx = TransactionSigned::decode_enveloped(Bytes::from(&bytes[..])).unwrap();
+        let tx = TransactionSigned::decode(&mut &bytes[..]).unwrap();
+        dbg!(&tx);
     }
 }
