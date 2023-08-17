@@ -885,6 +885,36 @@ impl TransactionSigned {
         mem::size_of::<TxHash>() + self.transaction.size() + self.signature.size()
     }
 
+    /// Decodes legacy transaction from the data buffer into a tuple.
+    ///
+    /// This expects `rlp(legacy_tx)`
+    // TODO: make buf advancement semantics consistent with `decode_enveloped_typed_transaction`,
+    // so decoding methods do not need to manually advance the buffer
+    pub(crate) fn decode_rlp_legacy_transaction_tuple(
+        data: &mut &[u8],
+    ) -> Result<(TxLegacy, TxHash, Signature), DecodeError> {
+        // keep this around, so we can use it to calculate the hash
+        let original_encoding = *data;
+
+        let header = Header::decode(data)?;
+
+        let mut transaction = TxLegacy {
+            nonce: Decodable::decode(data)?,
+            gas_price: Decodable::decode(data)?,
+            gas_limit: Decodable::decode(data)?,
+            to: Decodable::decode(data)?,
+            value: Decodable::decode(data)?,
+            input: Bytes(Decodable::decode(data)?),
+            chain_id: None,
+        };
+        let (signature, extracted_id) = Signature::decode_with_eip155_chain_id(data)?;
+        transaction.chain_id = extracted_id;
+
+        let tx_length = header.payload_length + header.length();
+        let hash = keccak256(&original_encoding[..tx_length]);
+        Ok((transaction, hash, signature))
+    }
+
     /// Decodes legacy transaction from the data buffer.
     ///
     /// This expects `rlp(legacy_tx)`
@@ -893,28 +923,10 @@ impl TransactionSigned {
     pub fn decode_rlp_legacy_transaction(
         data: &mut &[u8],
     ) -> Result<TransactionSigned, DecodeError> {
-        // keep this around, so we can use it to calculate the hash
-        let original_encoding = *data;
-
-        let header = Header::decode(data)?;
-
-        let mut transaction = Transaction::Legacy(TxLegacy {
-            nonce: Decodable::decode(data)?,
-            gas_price: Decodable::decode(data)?,
-            gas_limit: Decodable::decode(data)?,
-            to: Decodable::decode(data)?,
-            value: Decodable::decode(data)?,
-            input: Bytes(Decodable::decode(data)?),
-            chain_id: None,
-        });
-        let (signature, extracted_id) = Signature::decode_with_eip155_chain_id(data)?;
-        if let Some(id) = extracted_id {
-            transaction.set_chain_id(id);
-        }
-
-        let tx_length = header.payload_length + header.length();
-        let hash = keccak256(&original_encoding[..tx_length]);
-        let signed = TransactionSigned { transaction, hash, signature };
+        let (transaction, hash, signature) =
+            TransactionSigned::decode_rlp_legacy_transaction_tuple(data)?;
+        let signed =
+            TransactionSigned { transaction: Transaction::Legacy(transaction), hash, signature };
         Ok(signed)
     }
 
