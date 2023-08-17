@@ -18,17 +18,9 @@ use reth_tasks::TaskSpawner;
 use std::{marker::PhantomData, sync::Arc};
 use tokio::sync::{oneshot, Mutex};
 
-// /// A [TransactionValidator] implementation that validates ethereum transaction.
-// ///
-// /// This validator is non-blocking, all validation work is done in a separate task.
-// #[derive(Debug, Clone)]
-// pub struct TransactionValidationTaskExecutor<Client, T> {
-//     /// The type that performs the actual validation.
-//     inner: Arc<EthTransactionValidatorInner<Client, T>>,
-//     /// The sender half to validation tasks that perform the actual validation.
-//     to_validation_task: Arc<Mutex<ValidationJobSender>>,
-// }
-
+/// A [TransactionValidator] implementation that validates ethereum transaction.
+///
+/// This validator is non-blocking, all validation work is done in a separate task.
 #[derive(Debug, Clone)]
 pub struct TransactionValidationTaskExecutor<V> {
     /// The validator that will validate transactions on a separate task.
@@ -37,8 +29,10 @@ pub struct TransactionValidationTaskExecutor<V> {
     to_validation_task: Arc<Mutex<ValidationJobSender>>,
 }
 
+/// Validator for Ethereum transactions.
 #[derive(Debug)]
 pub struct EthTransactionValidator<Client, T> {
+    /// The type that performs the actual validation.
     inner: Arc<EthTransactionValidatorInner<Client, T>>,
 }
 
