@@ -201,7 +201,7 @@ where
             .without_bundle_update()
             .build();
 
-        //if the request is a simple transfer we can optimize
+        // if the request is a simple transfer we can optimize
         if env.tx.data.is_empty() {
             if let TransactTo::Call(to) = env.tx.transact_to {
                 if let Ok(code) = db.basic(to) {

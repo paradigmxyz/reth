@@ -412,7 +412,6 @@ where
                     }
                 }
                 Err(err) => {
-                    error!("Stage error: {:?}", err);
                     self.listeners.notify(PipelineEvent::Error { stage_id });
 
                     let out = if let StageError::DetachedHead { local_head, header, error } = err {
@@ -425,7 +424,7 @@ where
                             .max(1);
                         Ok(ControlFlow::Unwind { target: unwind_to, bad_block: local_head })
                     } else if let StageError::Validation { block, error } = err {
-                        warn!(
+                        error!(
                             target: "sync::pipeline",
                             stage = %stage_id,
                             bad_block = %block.number,
@@ -457,7 +456,7 @@ where
                         error: BlockExecutionError::Validation(error),
                     } = err
                     {
-                        warn!(
+                        error!(
                             target: "sync::pipeline",
                             stage = %stage_id,
                             bad_block = %block.number,

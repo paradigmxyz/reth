@@ -359,7 +359,11 @@ pub enum ChainSplit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::H256;
+    use reth_primitives::{Account, H160, H256};
+    use reth_revm_primitives::{
+        db::states::BundleState as RevmBundleState,
+        primitives::{AccountInfo, HashMap},
+    };
 
     #[test]
     fn chain_append() {
@@ -393,71 +397,79 @@ mod tests {
         assert!(chain1.append_chain(chain2).is_err());
     }
 
-    /* TODO
-       #[test]
-       fn test_number_split() {
-           let mut base_state = PostState::default();
-           let account = Account { nonce: 10, ..Default::default() };
-           base_state.create_account(1, H160([1; 20]), account);
+    #[test]
+    fn test_number_split() {
+        let block_state1 = BundleState::new(
+            RevmBundleState::new(
+                vec![(H160([2; 20]), None, Some(AccountInfo::default()), HashMap::default())],
+                vec![vec![(H160([2; 20]), None, vec![])]],
+                vec![],
+            ),
+            vec![vec![]],
+            1,
+        );
 
-           let mut block_state1 = PostState::default();
-           block_state1.create_account(2, H160([2; 20]), Account::default());
+        let block_state2 = BundleState::new(
+            RevmBundleState::new(
+                vec![(H160([3; 20]), None, Some(AccountInfo::default()), HashMap::default())],
+                vec![vec![(H160([3; 20]), None, vec![])]],
+                vec![],
+            ),
+            vec![vec![]],
+            2,
+        );
 
-           let mut block_state2 = PostState::default();
-           block_state2.create_account(3, H160([3; 20]), Account::default());
+        let mut block1 = SealedBlockWithSenders::default();
+        let block1_hash = H256([15; 32]);
+        block1.number = 1;
+        block1.hash = block1_hash;
+        block1.senders.push(H160([4; 20]));
 
-           let mut block1 = SealedBlockWithSenders::default();
-           let block1_hash = H256([15; 32]);
-           block1.number = 1;
-           block1.hash = block1_hash;
-           block1.senders.push(H160([4; 20]));
+        let mut block2 = SealedBlockWithSenders::default();
+        let block2_hash = H256([16; 32]);
+        block2.number = 2;
+        block2.hash = block2_hash;
+        block2.senders.push(H160([4; 20]));
 
-           let mut block2 = SealedBlockWithSenders::default();
-           let block2_hash = H256([16; 32]);
-           block2.number = 2;
-           block2.hash = block2_hash;
-           block2.senders.push(H160([4; 20]));
+        let mut block_state_extended = block_state1.clone();
+        block_state_extended.extend(block_state2.clone());
 
-           let chain = Chain::new(vec![
-               (block1.clone(), block_state1.clone()),
-               (block2.clone(), block_state2.clone()),
-           ]);
+        let chain = Chain::new(vec![block1.clone(), block2.clone()], block_state_extended);
 
-           let mut split1_state = chain.state.clone();
-           let split2_state = split1_state.split_at(1);
+        let mut split2_state = chain.state.clone();
+        let split1_state = split2_state.detach_lower_part_at(1).unwrap();
 
-           let chain_split1 =
-               Chain { state: split1_state, blocks: BTreeMap::from([(1, block1.clone())]) };
+        let chain_split1 =
+            Chain { state: split1_state, blocks: BTreeMap::from([(1, block1.clone())]) };
 
-           let chain_split2 =
-               Chain { state: split2_state, blocks: BTreeMap::from([(2, block2.clone())]) };
+        let chain_split2 =
+            Chain { state: split2_state, blocks: BTreeMap::from([(2, block2.clone())]) };
 
-           // return tip state
-           assert_eq!(chain.state_at_block(block2.number), Some(chain.state.clone()));
-           assert_eq!(chain.state_at_block(block1.number), Some(chain_split1.state.clone()));
-           // state at unknown block
-           assert_eq!(chain.state_at_block(100), None);
+        // return tip state
+        assert_eq!(chain.state_at_block(block2.number), Some(chain.state.clone()));
+        assert_eq!(chain.state_at_block(block1.number), Some(chain_split1.state.clone()));
+        // state at unknown block
+        assert_eq!(chain.state_at_block(100), None);
 
-           // split in two
-           assert_eq!(
-               chain.clone().split(SplitAt::Hash(block1_hash)),
-               ChainSplit::Split { canonical: chain_split1, pending: chain_split2 }
-           );
+        // split in two
+        assert_eq!(
+            chain.clone().split(SplitAt::Hash(block1_hash)),
+            ChainSplit::Split { canonical: chain_split1, pending: chain_split2 }
+        );
 
-           // split at unknown block hash
-           assert_eq!(
-               chain.clone().split(SplitAt::Hash(H256([100; 32]))),
-               ChainSplit::NoSplitPending(chain.clone())
-           );
+        // split at unknown block hash
+        assert_eq!(
+            chain.clone().split(SplitAt::Hash(H256([100; 32]))),
+            ChainSplit::NoSplitPending(chain.clone())
+        );
 
-           // split at higher number
-           assert_eq!(
-               chain.clone().split(SplitAt::Number(10)),
-               ChainSplit::NoSplitCanonical(chain.clone())
-           );
+        // split at higher number
+        assert_eq!(
+            chain.clone().split(SplitAt::Number(10)),
+            ChainSplit::NoSplitCanonical(chain.clone())
+        );
 
-           // split at lower number
-           assert_eq!(chain.clone().split(SplitAt::Number(0)), ChainSplit::NoSplitPending(chain));
-       }
-    */
+        // split at lower number
+        assert_eq!(chain.clone().split(SplitAt::Number(0)), ChainSplit::NoSplitPending(chain));
+    }
 }

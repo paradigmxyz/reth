@@ -24,7 +24,7 @@ reth-provider.workspace = true
 reth-metrics.workspace = true
 reth-trie = { path = "../trie" }
 
-# temp wrap it around reth-revm crates
+# revm
 revm.workspace = true
 
 # async

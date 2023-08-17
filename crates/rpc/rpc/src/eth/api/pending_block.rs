@@ -113,6 +113,8 @@ impl PendingBlockEnv {
             // append transaction to the list of executed transactions
             executed_txs.push(tx.into_signed());
         }
+        // merge made transations into bundle state.
+        db.merge_transitions();
 
         let bundle = BundleState::new(db.take_bundle(), vec![receipts], block_number);
 
