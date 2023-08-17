@@ -141,6 +141,14 @@ impl TxEip2930 {
         signature.encode(out);
     }
 
+    /// Output the length of the RLP signed transaction encoding. This encodes with a RLP header.
+    pub(crate) fn payload_len_with_signature(&self, signature: &Signature) -> usize {
+        let payload_length = self.fields_len() + signature.payload_len();
+        // 'transaction type byte length' + 'header length' + 'payload length'
+        let len = 1 + length_of_length(payload_length) + payload_length;
+        length_of_length(len) + len
+    }
+
     /// Get transaction type
     pub(crate) fn tx_type(&self) -> TxType {
         TxType::EIP2930

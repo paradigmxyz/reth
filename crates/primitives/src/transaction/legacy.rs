@@ -1,6 +1,6 @@
 use crate::{Bytes, ChainId, Signature, TransactionKind, TxType};
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::{Encodable, Header};
+use reth_rlp::{length_of_length, Encodable, Header};
 use std::mem;
 
 /// Legacy transaction.
@@ -91,6 +91,14 @@ impl TxLegacy {
         header.encode(out);
         self.encode_fields(out);
         signature.encode_with_eip155_chain_id(out, self.chain_id);
+    }
+
+    /// Output the length of the RLP signed transaction encoding.
+    pub(crate) fn payload_len_with_signature(&self, signature: &Signature) -> usize {
+        let payload_length =
+            self.fields_len() + signature.payload_len_with_eip155_chain_id(self.chain_id);
+        // 'header length' + 'payload length'
+        length_of_length(payload_length) + payload_length
     }
 
     /// Get transaction type
