@@ -355,7 +355,11 @@ impl<DB: Database> Pruner<DB> {
             )? {
                 Some(range) => range,
                 None => {
-                    trace!(target: "pruner", "No receipts to filter and prune between {start_block} and {end_block} blocks.");
+                    trace!(
+                    target: "pruner",
+                    block_range = format!("{start_block}..={end_block}"),
+                    "No receipts to prune."
+                    );
                     continue
                 }
             };
@@ -371,8 +375,9 @@ impl<DB: Database> Pruner<DB> {
                     trace!(
                         target: "pruner",
                         %rows,
+                        block_range = format!("{start_block}..={end_block}"),
                         progress = format!("{:.1}%", 100.0 * processed as f64 / total as f64),
-                        "Filtered or pruned receipts"
+                        "Pruned receipts"
                     );
                 },
                 |receipt| {
