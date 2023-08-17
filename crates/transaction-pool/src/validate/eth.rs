@@ -4,8 +4,8 @@ use crate::{
     error::InvalidPoolTransactionError,
     traits::{PoolTransaction, TransactionOrigin},
     validate::{
-        task::ValidationJobSender, TransactionValidatorError, ValidationTask, MAX_INIT_CODE_SIZE,
-        TX_MAX_SIZE,
+        task::ValidationJobSender, TransactionValidatorError, ValidTransaction, ValidationTask,
+        MAX_INIT_CODE_SIZE, TX_MAX_SIZE,
     },
     TransactionValidationOutcome, TransactionValidator,
 };
@@ -499,7 +499,7 @@ where
         TransactionValidationOutcome::Valid {
             balance: account.balance,
             state_nonce: account.nonce,
-            transaction,
+            transaction: ValidTransaction::Valid(transaction),
             // by this point assume all external transactions should be propagated
             propagate: match origin {
                 TransactionOrigin::External => true,

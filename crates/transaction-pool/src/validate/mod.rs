@@ -6,7 +6,8 @@ use crate::{
     traits::{PoolTransaction, TransactionOrigin},
 };
 use reth_primitives::{
-    Address, IntoRecoveredTransaction, TransactionKind, TransactionSignedEcRecovered, TxHash, U256,
+    Address, BlobTransactionSidecar, IntoRecoveredTransaction, TransactionKind,
+    TransactionSignedEcRecovered, TxHash, H256, U256,
 };
 use std::{fmt, time::Instant};
 
@@ -32,9 +33,13 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
         balance: U256,
         /// Current nonce of the sender.
         state_nonce: u64,
-        /// Validated transaction.
-        // TODO add enum type for blob,regular?
-        transaction: T,
+        /// The validated transaction.
+        ///
+        /// See also [ValidTransaction].
+        ///
+        /// If this is a _new_ EIP-4844 blob transaction, then this must contain the extracted
+        /// sidecar.
+        transaction: ValidTransaction<T>,
         /// Whether to propagate the transaction to the network.
         propagate: bool,
     },
@@ -53,6 +58,65 @@ impl<T: PoolTransaction> TransactionValidationOutcome<T> {
             Self::Invalid(transaction, ..) => *transaction.hash(),
             Self::Error(hash, ..) => *hash,
         }
+    }
+}
+
+/// A wrapper type for a transaction that is valid and has an optional extracted EIP-4844 blob
+/// transaction sidecar.
+///
+/// If this is provided, then the sidecar will be temporarily stored in the blob store until the
+/// transaction is finalized.
+///
+/// Note: Since blob transactions can be re-injected without their sidecar (after reorg), the
+/// validator can omit the sidecar if it is still in the blob store and return a
+/// [ValidTransaction::Valid] instead.
+#[derive(Debug)]
+pub enum ValidTransaction<T> {
+    /// A valid transaction without a sidecar.
+    Valid(T),
+    /// A valid transaction for which a sidecar should be stored.
+    ///
+    /// Caution: The [TransactionValidator] must ensure that this is only returned for EIP-4844
+    /// transactions.
+    ValidWithSidecar {
+        /// The valid EIP-4844 transaction.
+        transaction: T,
+        /// The extracted sidecar of that transaction
+        sidecar: BlobTransactionSidecar,
+    },
+}
+
+impl<T: PoolTransaction> ValidTransaction<T> {
+    #[inline]
+    pub(crate) fn transaction(&self) -> &T {
+        match self {
+            Self::Valid(transaction) => transaction,
+            Self::ValidWithSidecar { transaction, .. } => transaction,
+        }
+    }
+
+    /// Returns the address of that transaction.
+    #[inline]
+    pub(crate) fn sender(&self) -> Address {
+        self.transaction().sender()
+    }
+
+    /// Returns the hash of the transaction.
+    #[inline]
+    pub(crate) fn hash(&self) -> &H256 {
+        self.transaction().hash()
+    }
+
+    /// Returns the length of the rlp encoded object
+    #[inline]
+    pub(crate) fn encoded_length(&self) -> usize {
+        self.transaction().encoded_length()
+    }
+
+    /// Returns the nonce of the transaction.
+    #[inline]
+    pub(crate) fn nonce(&self) -> u64 {
+        self.transaction().nonce()
     }
 }
 
@@ -113,6 +177,11 @@ pub trait TransactionValidator: Send + Sync {
 }
 
 /// A valid transaction in the pool.
+///
+/// This is used as the internal representation of a transaction inside the pool.
+///
+/// For EIP-4844 blob transactions this will _not_ contain the blob sidecar which is stored
+/// separately in the [BlobStore](crate::blobstore::BlobStore).
 pub struct ValidPoolTransaction<T: PoolTransaction> {
     /// The transaction
     pub transaction: T,

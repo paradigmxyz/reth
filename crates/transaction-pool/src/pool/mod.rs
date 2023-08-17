@@ -96,7 +96,9 @@ mod events;
 pub use events::{FullTransactionEvent, TransactionEvent};
 
 mod listener;
-use crate::{pool::txpool::UpdateOutcome, traits::PendingTransactionListenerKind};
+use crate::{
+    pool::txpool::UpdateOutcome, traits::PendingTransactionListenerKind, validate::ValidTransaction,
+};
 pub use listener::{AllTransactionsEvents, TransactionEvents};
 
 mod best;
@@ -313,6 +315,17 @@ where
                 let sender_id = self.get_sender_id(transaction.sender());
                 let transaction_id = TransactionId::new(sender_id, transaction.nonce());
                 let encoded_length = transaction.encoded_length();
+
+                let (transaction, _maybe_sidecar) = match transaction {
+                    ValidTransaction::Valid(tx) => (tx, None),
+                    ValidTransaction::ValidWithSidecar { transaction, sidecar } => {
+                        debug_assert!(
+                            transaction.is_eip4844(),
+                            "validator returned sidecar for non EIP-4844 transaction"
+                        );
+                        (transaction, Some(sidecar))
+                    }
+                };
 
                 let tx = ValidPoolTransaction {
                     transaction,
