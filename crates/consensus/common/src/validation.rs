@@ -39,9 +39,7 @@ pub fn validate_header_standalone(
     let wd_root_missing = header.withdrawals_root.is_none();
 
     // EIP-4895: Beacon chain push withdrawals as operations
-    if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp) &&
-        header.withdrawals_root.is_none() &&
-        wd_root_missing
+    if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp) && wd_root_missing
     {
         return Err(ConsensusError::WithdrawalsRootMissing)
     } else if !chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp) &&
