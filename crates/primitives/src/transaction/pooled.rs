@@ -96,8 +96,12 @@ impl PooledTransactionsElement {
                 // because we checked the tx type, we can be sure that the transaction is not a
                 // blob transaction or legacy
                 match typed_tx.transaction {
-                    Transaction::Legacy(_) => unreachable!("todo, turn this into a proper error"),
-                    Transaction::Eip4844(_) => unreachable!("todo, turn this into a proper error"),
+                    Transaction::Legacy(_) => Err(DecodeError::Custom(
+                        "legacy transactions should not be a result of EIP-2718 decoding",
+                    )),
+                    Transaction::Eip4844(_) => Err(DecodeError::Custom(
+                        "EIP-4844 transactions can only be decoded with transaction type 0x03",
+                    )),
                     Transaction::Eip2930(tx) => Ok(PooledTransactionsElement::Eip2930 {
                         transaction: tx,
                         signature: typed_tx.signature,
@@ -287,8 +291,12 @@ impl Decodable for PooledTransactionsElement {
                 // because we checked the tx type, we can be sure that the transaction is not a
                 // blob transaction or legacy
                 match typed_tx.transaction {
-                    Transaction::Legacy(_) => unreachable!("todo, turn this into a proper error"),
-                    Transaction::Eip4844(_) => unreachable!("todo, turn this into a proper error"),
+                    Transaction::Legacy(_) => Err(DecodeError::Custom(
+                        "legacy transactions should not be a result of EIP-2718 decoding",
+                    )),
+                    Transaction::Eip4844(_) => Err(DecodeError::Custom(
+                        "EIP-4844 transactions can only be decoded with transaction type 0x03",
+                    )),
                     Transaction::Eip2930(tx) => Ok(PooledTransactionsElement::Eip2930 {
                         transaction: tx,
                         signature: typed_tx.signature,
