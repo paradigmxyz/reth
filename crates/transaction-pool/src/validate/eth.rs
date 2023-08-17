@@ -11,7 +11,7 @@ use crate::{
 };
 use reth_primitives::{
     constants::ETHEREUM_BLOCK_GAS_LIMIT, ChainSpec, InvalidTransactionError, EIP1559_TX_TYPE_ID,
-    EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID, EIP4844_TX_TYPE_ID
+    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 use reth_provider::{AccountReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
