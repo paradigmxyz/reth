@@ -247,7 +247,8 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Returns all transactions objects for the given hashes.
     ///
-    /// This adheres to the expected behavior of [`GetPooledTransactions`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09):
+    /// TODO(mattsse): this will no longer be accurate and we need a new function specifically for
+    /// pooled txs This adheres to the expected behavior of [`GetPooledTransactions`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09):
     /// The transactions must be in same order as in the request, but it is OK to skip transactions
     /// which are not available.
     fn get_all(&self, txs: Vec<TxHash>) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
@@ -564,21 +565,22 @@ pub trait PoolTransaction:
     fn chain_id(&self) -> Option<u64>;
 }
 
-/// The default [PoolTransaction] for the [Pool](crate::Pool).
+/// The default [PoolTransaction] for the [Pool](crate::Pool) for Ethereum.
 ///
 /// This type is essentially a wrapper around [TransactionSignedEcRecovered] with additional fields
 /// derived from the transaction that are frequently used by the pools for ordering.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct PooledTransaction {
+pub struct EthPooledTransaction {
     /// EcRecovered transaction info
     pub(crate) transaction: TransactionSignedEcRecovered,
 
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     pub(crate) cost: U256,
+    // TODO optional sidecar
 }
 
-impl PooledTransaction {
+impl EthPooledTransaction {
     /// Create new instance of [Self].
     pub fn new(transaction: TransactionSignedEcRecovered) -> Self {
         let gas_cost = match &transaction.transaction {
@@ -598,7 +600,7 @@ impl PooledTransaction {
     }
 }
 
-impl PoolTransaction for PooledTransaction {
+impl PoolTransaction for EthPooledTransaction {
     /// Returns hash of the transaction.
     fn hash(&self) -> &TxHash {
         self.transaction.hash_ref()
@@ -694,13 +696,13 @@ impl PoolTransaction for PooledTransaction {
     }
 }
 
-impl FromRecoveredTransaction for PooledTransaction {
+impl FromRecoveredTransaction for EthPooledTransaction {
     fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
-        PooledTransaction::new(tx)
+        EthPooledTransaction::new(tx)
     }
 }
 
-impl IntoRecoveredTransaction for PooledTransaction {
+impl IntoRecoveredTransaction for EthPooledTransaction {
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
         self.transaction.clone()
     }

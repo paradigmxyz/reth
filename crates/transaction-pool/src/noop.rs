@@ -4,11 +4,11 @@
 //! to be generic over it.
 
 use crate::{
-    error::PoolError, traits::PendingTransactionListenerKind, AllPoolTransactions,
-    AllTransactionsEvents, BestTransactions, BlockInfo, NewTransactionEvent, PoolResult, PoolSize,
-    PoolTransaction, PooledTransaction, PropagatedTransactions, TransactionEvents,
-    TransactionOrigin, TransactionPool, TransactionValidationOutcome, TransactionValidator,
-    ValidPoolTransaction,
+    error::PoolError, traits::PendingTransactionListenerKind, validate::ValidTransaction,
+    AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPooledTransaction,
+    NewTransactionEvent, PoolResult, PoolSize, PoolTransaction, PropagatedTransactions,
+    TransactionEvents, TransactionOrigin, TransactionPool, TransactionValidationOutcome,
+    TransactionValidator, ValidPoolTransaction,
 };
 use reth_primitives::{Address, TxHash};
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
@@ -24,7 +24,7 @@ pub struct NoopTransactionPool;
 
 #[async_trait::async_trait]
 impl TransactionPool for NoopTransactionPool {
-    type Transaction = PooledTransaction;
+    type Transaction = EthPooledTransaction;
 
     fn pool_size(&self) -> PoolSize {
         Default::default()
@@ -184,7 +184,7 @@ impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
         TransactionValidationOutcome::Valid {
             balance: Default::default(),
             state_nonce: 0,
-            transaction,
+            transaction: ValidTransaction::Valid(transaction),
             propagate: match origin {
                 TransactionOrigin::External => true,
                 TransactionOrigin::Local => self.propagate_local,
@@ -212,16 +212,16 @@ impl<T> Default for MockTransactionValidator<T> {
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("Can't insert transaction into the noop pool that does nothing.")]
 pub struct NoopInsertError {
-    tx: PooledTransaction,
+    tx: EthPooledTransaction,
 }
 
 impl NoopInsertError {
-    fn new(tx: PooledTransaction) -> Self {
+    fn new(tx: EthPooledTransaction) -> Self {
         Self { tx }
     }
 
     /// Returns the transaction that failed to be inserted.
-    pub fn into_inner(self) -> PooledTransaction {
+    pub fn into_inner(self) -> EthPooledTransaction {
         self.tx
     }
 }
