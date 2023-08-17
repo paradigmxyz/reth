@@ -142,38 +142,16 @@ impl Encodable for PooledTransactionsElement {
     /// Encodes an enveloped post EIP-4844 [PooledTransactionsElement].
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
-            Self::Legacy { transaction, signature, hash } => {
-                // construct signed transaction
-                let signed_tx = TransactionSigned {
-                    transaction: Transaction::Legacy(transaction.clone()),
-                    signature: *signature,
-                    hash: *hash,
-                };
-
-                // encode signed transaction
-                signed_tx.encode(out);
+            Self::Legacy { transaction, signature, .. } => {
+                transaction.encode_with_signature(signature, out)
             }
-            Self::Eip2930 { transaction, signature, hash } => {
-                // construct signed transaction
-                let signed_tx = TransactionSigned {
-                    transaction: Transaction::Eip2930(transaction.clone()),
-                    signature: *signature,
-                    hash: *hash,
-                };
-
-                // encode signed transaction
-                signed_tx.encode(out);
+            Self::Eip2930 { transaction, signature, .. } => {
+                // encodes with header
+                transaction.encode_with_signature(signature, out, true)
             }
-            Self::Eip1559 { transaction, signature, hash } => {
-                // construct signed transaction
-                let signed_tx = TransactionSigned {
-                    transaction: Transaction::Eip1559(transaction.clone()),
-                    signature: *signature,
-                    hash: *hash,
-                };
-
-                // encode signed transaction
-                signed_tx.encode(out);
+            Self::Eip1559 { transaction, signature, .. } => {
+                // encodes with header
+                transaction.encode_with_signature(signature, out, true)
             }
             Self::BlobTransaction(blob_tx) => {
                 // The inner encoding is used with `with_header` set to true, making the final
@@ -186,35 +164,17 @@ impl Encodable for PooledTransactionsElement {
 
     fn length(&self) -> usize {
         match self {
-            Self::Legacy { transaction, signature, hash } => {
-                // construct signed transaction
-                let signed_tx = TransactionSigned {
-                    transaction: Transaction::Legacy(transaction.clone()),
-                    signature: *signature,
-                    hash: *hash,
-                };
-
-                signed_tx.length()
+            Self::Legacy { transaction, signature, .. } => {
+                // method computes the payload len with a RLP header
+                transaction.payload_len_with_signature(signature)
             }
-            Self::Eip2930 { transaction, signature, hash } => {
-                // construct signed transaction
-                let signed_tx = TransactionSigned {
-                    transaction: Transaction::Eip2930(transaction.clone()),
-                    signature: *signature,
-                    hash: *hash,
-                };
-
-                signed_tx.length()
+            Self::Eip2930 { transaction, signature, .. } => {
+                // method computes the payload len with a RLP header
+                transaction.payload_len_with_signature(signature)
             }
-            Self::Eip1559 { transaction, signature, hash } => {
-                // construct signed transaction
-                let signed_tx = TransactionSigned {
-                    transaction: Transaction::Eip1559(transaction.clone()),
-                    signature: *signature,
-                    hash: *hash,
-                };
-
-                signed_tx.length()
+            Self::Eip1559 { transaction, signature, .. } => {
+                // method computes the payload len with a RLP header
+                transaction.payload_len_with_signature(signature)
             }
             Self::BlobTransaction(blob_tx) => {
                 // the encoding uses a header, so we set `with_header` to true
