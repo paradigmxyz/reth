@@ -20,11 +20,14 @@ pub enum InvalidTransactionError {
     #[error("Transaction's chain ID does not match.")]
     ChainIdMismatch,
     /// The transaction requires EIP-2930 which is not enabled currently.
-    #[error("EIP-2930 transactions are not valid before Berlin.")]
+    #[error("EIP-2930 transactions are disabled.")]
     Eip2930Disabled,
     /// The transaction requires EIP-1559 which is not enabled currently.
-    #[error("EIP-1559 transactions are not valid before London.")]
+    #[error("EIP-1559 transactions are disabled.")]
     Eip1559Disabled,
+    /// The transaction requires EIP-4844 which is not enabled currently.
+    #[error("EIP-4844 transactions are disabled.")]
+    Eip4844Disabled,
     /// Thrown if a transaction is not supported in the current network configuration.
     #[error("Transaction type not supported")]
     TxTypeNotSupported,

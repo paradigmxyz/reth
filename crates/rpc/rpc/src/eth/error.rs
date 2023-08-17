@@ -381,10 +381,9 @@ impl From<reth_primitives::InvalidTransactionError> for RpcInvalidTransactionErr
                 RpcInvalidTransactionError::OldLegacyChainId
             }
             InvalidTransactionError::ChainIdMismatch => RpcInvalidTransactionError::InvalidChainId,
-            InvalidTransactionError::Eip2930Disabled => {
-                RpcInvalidTransactionError::TxTypeNotSupported
-            }
-            InvalidTransactionError::Eip1559Disabled => {
+            InvalidTransactionError::Eip2930Disabled |
+            InvalidTransactionError::Eip1559Disabled |
+            InvalidTransactionError::Eip4844Disabled => {
                 RpcInvalidTransactionError::TxTypeNotSupported
             }
             InvalidTransactionError::TxTypeNotSupported => {
