@@ -847,19 +847,15 @@ impl TransactionSigned {
     /// Output the length of the encode_inner(out, true). Note to assume that `with_header` is only
     /// `true`.
     pub(crate) fn payload_len_inner(&self) -> usize {
-        match self.transaction {
-            Transaction::Legacy(TxLegacy { chain_id, .. }) => {
-                let payload_length = self.transaction.fields_len() +
-                    self.signature.payload_len_with_eip155_chain_id(chain_id);
-                // 'header length' + 'payload length'
-                length_of_length(payload_length) + payload_length
+        match &self.transaction {
+            Transaction::Legacy(legacy_tx) => legacy_tx.payload_len_with_signature(&self.signature),
+            Transaction::Eip2930(access_list_tx) => {
+                access_list_tx.payload_len_with_signature(&self.signature)
             }
-            _ => {
-                let payload_length = self.transaction.fields_len() + self.signature.payload_len();
-                // 'transaction type byte length' + 'header length' + 'payload length'
-                let len = 1 + length_of_length(payload_length) + payload_length;
-                length_of_length(len) + len
+            Transaction::Eip1559(dynamic_fee_tx) => {
+                dynamic_fee_tx.payload_len_with_signature(&self.signature)
             }
+            Transaction::Eip4844(blob_tx) => blob_tx.payload_len_with_signature(&self.signature),
         }
     }
 
