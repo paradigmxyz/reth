@@ -2,11 +2,14 @@
 
 #![allow(missing_docs)]
 
-pub use mem::InMemoryBlobStore;
 use reth_primitives::{bytes::Bytes, H256};
 use reth_rlp::{Decodable, RlpDecodable, RlpEncodable};
 use std::collections::BTreeMap;
 mod mem;
+mod noop;
+
+pub use mem::InMemoryBlobStore;
+pub use noop::NoopBlobStore;
 
 // TODO replace with the actual type
 #[derive(Debug, Clone, RlpDecodable, RlpEncodable)]
