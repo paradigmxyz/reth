@@ -1,26 +1,10 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
-use reth_codecs::{add_arbitrary_tests, derive_arbitrary};
-use reth_primitives::{
-    kzg::{self, Blob, Bytes48, KzgProof, KzgSettings},
-    TransactionSigned, H256,
-};
-use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
+use reth_codecs::derive_arbitrary;
+use reth_primitives::{PooledTransactionsElement, TransactionSigned, H256};
+use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-
-#[cfg(any(test, feature = "arbitrary"))]
-use proptest::{
-    arbitrary::{any as proptest_any, ParamsFor},
-    collection::vec as proptest_vec,
-    strategy::{BoxedStrategy, Strategy},
-};
-
-#[cfg(any(test, feature = "arbitrary"))]
-use reth_primitives::{
-    constants::eip4844::{FIELD_ELEMENTS_PER_BLOB, KZG_TRUSTED_SETUP},
-    kzg::{KzgCommitment, BYTES_PER_BLOB, BYTES_PER_FIELD_ELEMENT},
-};
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
 #[derive_arbitrary(rlp)]
@@ -47,141 +31,20 @@ where
 /// as the request's hashes. Hashes may be skipped, and the client should ensure that each body
 /// corresponds to a requested hash. Hashes may need to be re-requested if the bodies are not
 /// included in the response.
-#[derive_arbitrary(rlp, 10)]
+// #[derive_arbitrary(rlp, 10)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PooledTransactions(
     /// The transaction bodies, each of which should correspond to a requested hash.
-    pub Vec<TransactionSigned>,
+    pub Vec<PooledTransactionsElement>,
 );
 
 impl From<Vec<TransactionSigned>> for PooledTransactions {
     fn from(txs: Vec<TransactionSigned>) -> Self {
-        PooledTransactions(txs)
+        PooledTransactions(txs.into_iter().map(Into::into).collect())
     }
 }
 
-impl From<PooledTransactions> for Vec<TransactionSigned> {
-    fn from(txs: PooledTransactions) -> Self {
-        txs.0
-    }
-}
-
-/// A response to [`GetPooledTransactions`] that includes blob data, their commitments, and their
-/// corresponding proofs.
-///
-/// This is defined in [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#networking) as an element
-/// of a [PooledTransactions] response.
-#[add_arbitrary_tests(rlp, 20)]
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
-pub struct BlobTransaction {
-    /// The transaction payload.
-    pub transaction: TransactionSigned,
-    /// The transaction's blob data.
-    pub blobs: Vec<Blob>,
-    /// The transaction's blob commitments.
-    pub commitments: Vec<Bytes48>,
-    /// The transaction's blob proofs.
-    pub proofs: Vec<Bytes48>,
-}
-
-impl BlobTransaction {
-    /// Verifies that the transaction's blob data, commitments, and proofs are all valid.
-    ///
-    /// Takes as input the [KzgSettings], which should contain the the parameters derived from the
-    /// KZG trusted setup.
-    ///
-    /// This ensures that the blob transaction payload has the same number of blob data elements,
-    /// commitments, and proofs. Each blob data element is verified against its commitment and
-    /// proof.
-    ///
-    /// Returns `false` if any blob KZG proof in the response fails to verify.
-    pub fn validate(&self, proof_settings: &KzgSettings) -> Result<bool, kzg::Error> {
-        // Verify as a batch
-        KzgProof::verify_blob_kzg_proof_batch(
-            self.blobs.as_slice(),
-            self.commitments.as_slice(),
-            self.proofs.as_slice(),
-            proof_settings,
-        )
-    }
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for BlobTransaction {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let mut arr = [0u8; BYTES_PER_BLOB];
-        let blobs: Vec<Blob> = (0..u.int_in_range(1..=16)?)
-            .map(|_| {
-                arr = arbitrary::Arbitrary::arbitrary(u).unwrap();
-
-                // Ensure that the blob is canonical by ensuring that
-                // each field element contained in the blob is < BLS_MODULUS
-                for i in 0..(FIELD_ELEMENTS_PER_BLOB as usize) {
-                    arr[i * BYTES_PER_FIELD_ELEMENT] = 0;
-                }
-                Blob::from(arr)
-            })
-            .collect();
-
-        Ok(generate_blob_transaction(blobs, TransactionSigned::arbitrary(u)?))
-    }
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl proptest::arbitrary::Arbitrary for BlobTransaction {
-    type Parameters = ParamsFor<String>;
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (
-            proptest_vec(proptest_vec(proptest_any::<u8>(), BYTES_PER_BLOB), 1..=5),
-            proptest_any::<TransactionSigned>(),
-        )
-            .prop_map(move |(blobs, tx)| {
-                let blobs = blobs
-                    .into_iter()
-                    .map(|mut blob| {
-                        let mut arr = [0u8; BYTES_PER_BLOB];
-
-                        // Ensure that the blob is canonical by ensuring that
-                        // each field element contained in the blob is < BLS_MODULUS
-                        for i in 0..(FIELD_ELEMENTS_PER_BLOB as usize) {
-                            blob[i * BYTES_PER_FIELD_ELEMENT] = 0;
-                        }
-
-                        arr.copy_from_slice(blob.as_slice());
-                        arr.into()
-                    })
-                    .collect();
-
-                generate_blob_transaction(blobs, tx)
-            })
-            .boxed()
-    }
-
-    type Strategy = BoxedStrategy<BlobTransaction>;
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-fn generate_blob_transaction(blobs: Vec<Blob>, transaction: TransactionSigned) -> BlobTransaction {
-    let kzg_settings = KZG_TRUSTED_SETUP.clone();
-
-    let commitments: Vec<Bytes48> = blobs
-        .iter()
-        .map(|blob| KzgCommitment::blob_to_kzg_commitment(blob.clone(), &kzg_settings).unwrap())
-        .map(|commitment| commitment.to_bytes())
-        .collect();
-
-    let proofs: Vec<Bytes48> = blobs
-        .iter()
-        .zip(commitments.iter())
-        .map(|(blob, commitment)| {
-            KzgProof::compute_blob_kzg_proof(blob.clone(), *commitment, &kzg_settings).unwrap()
-        })
-        .map(|proof| proof.to_bytes())
-        .collect();
-
-    BlobTransaction { transaction, blobs, commitments, proofs }
-}
 #[cfg(test)]
 mod test {
     use crate::{message::RequestPair, GetPooledTransactions, PooledTransactions};

@@ -1,6 +1,7 @@
-use crate::{Address, Bytes, TransactionKind, H256};
+use crate::{Address, Bytes, Signature, TransactionKind, TxType, H256};
+use bytes::Buf;
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::{Encodable, EMPTY_STRING_CODE};
+use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_STRING_CODE};
 use std::mem;
 
 /// A versioned byte sequence to enable the protocol to upgrade the deposit transaction type without
@@ -47,6 +48,37 @@ impl TxDeposit {
         self.input.len() // input
     }
 
+    /// Decodes the inner [TxDeposit] fields from RLP bytes.
+    ///
+    /// NOTE: This assumes a RLP header has already been decoded, and _just_ decodes the following
+    /// RLP fields in the following order:
+    ///
+    /// - `source_hash`
+    /// - `from`
+    /// - `to`
+    /// - `mint`
+    /// - `value`
+    /// - `input`
+    /// - `gas_limit`
+    /// - `is_system_transaction`
+    pub fn decode_inner(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        Ok(Self {
+            source_hash: Decodable::decode(buf)?,
+            from: Decodable::decode(buf)?,
+            to: Decodable::decode(buf)?,
+            mint: if *buf.first().ok_or(DecodeError::InputTooShort)? == EMPTY_STRING_CODE {
+                buf.advance(1);
+                None
+            } else {
+                Some(Decodable::decode(buf)?)
+            },
+            value: Decodable::decode(buf)?,
+            input: Decodable::decode(buf)?,
+            gas_limit: Decodable::decode(buf)?,
+            is_system_transaction: Decodable::decode(buf)?,
+        })
+    }
+
     /// Outputs the length of the transaction's fields, without a RLP header or length of the
     /// eip155 fields.
     pub(crate) fn fields_len(&self) -> usize {
@@ -77,5 +109,42 @@ impl TxDeposit {
         self.input.encode(out);
         self.gas_limit.encode(out);
         self.is_system_transaction.encode(out);
+    }
+
+    /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
+    /// hash that for eip2718 does not require rlp header
+    pub(crate) fn encode_with_signature(
+        &self,
+        signature: &Signature,
+        out: &mut dyn bytes::BufMut,
+        with_header: bool,
+    ) {
+        let payload_length = self.fields_len() + signature.payload_len();
+        if with_header {
+            Header {
+                list: false,
+                payload_length: 1 + 1 + length_of_length(payload_length) + payload_length,
+            }
+            .encode(out);
+        }
+        out.put_u8(self.tx_type() as u8);
+        out.put_u8(DEPOSIT_VERSION);
+        let header = Header { list: true, payload_length };
+        header.encode(out);
+        self.encode_fields(out);
+        signature.encode(out);
+    }
+
+    /// Output the length of the RLP signed transaction encoding. This encodes with a RLP header.
+    pub(crate) fn payload_len_with_signature(&self, signature: &Signature) -> usize {
+        let payload_length = self.fields_len() + signature.payload_len();
+        // 'tx type byte length' + 'version byte' + 'header length' + 'payload length'
+        let len = 1 + 1 + length_of_length(payload_length) + payload_length;
+        length_of_length(len) + len
+    }
+
+    /// Get the transaction type
+    pub(crate) fn tx_type(&self) -> TxType {
+        TxType::DEPOSIT
     }
 }

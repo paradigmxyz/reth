@@ -4,14 +4,14 @@ use crate::{
     error::InvalidPoolTransactionError,
     traits::{PoolTransaction, TransactionOrigin},
     validate::{
-        task::ValidationJobSender, TransactionValidatorError, ValidationTask, MAX_INIT_CODE_SIZE,
-        TX_MAX_SIZE,
+        task::ValidationJobSender, TransactionValidatorError, ValidTransaction, ValidationTask,
+        MAX_INIT_CODE_SIZE, TX_MAX_SIZE,
     },
     TransactionValidationOutcome, TransactionValidator,
 };
 use reth_primitives::{
     constants::ETHEREUM_BLOCK_GAS_LIMIT, ChainSpec, InvalidTransactionError, EIP1559_TX_TYPE_ID,
-    EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 use reth_provider::{AccountReader, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -142,10 +142,14 @@ pub struct EthTransactionValidatorBuilder {
     chain_spec: Arc<ChainSpec>,
     /// Fork indicator whether we are in the Shanghai stage.
     shanghai: bool,
+    /// Fork indicator whether we are in the Cancun hardfork.
+    cancun: bool,
     /// Fork indicator whether we are using EIP-2718 type transactions.
     eip2718: bool,
     /// Fork indicator whether we are using EIP-1559 type transactions.
     eip1559: bool,
+    /// Fork indicator whether we are using EIP-4844 blob transactions.
+    eip4844: bool,
     /// The current max gas limit
     block_gas_limit: u64,
     /// Minimum priority fee to enforce for acceptance into the pool.
@@ -171,7 +175,22 @@ impl EthTransactionValidatorBuilder {
             additional_tasks: 1,
             // default to true, can potentially take this as a param in the future
             propagate_local_transactions: true,
+
+            // TODO: can hard enable by default once transitioned
+            cancun: false,
+            eip4844: false,
         }
+    }
+
+    /// Disables the Cancun fork.
+    pub fn no_cancun(self) -> Self {
+        self.set_cancun(false)
+    }
+
+    /// Set the Cancun fork.
+    pub fn set_cancun(mut self, cancun: bool) -> Self {
+        self.cancun = cancun;
+        self
     }
 
     /// Disables the Shanghai fork.
@@ -252,8 +271,10 @@ impl EthTransactionValidatorBuilder {
         let Self {
             chain_spec,
             shanghai,
+            cancun,
             eip2718,
             eip1559,
+            eip4844,
             block_gas_limit,
             minimum_priority_fee,
             additional_tasks,
@@ -266,6 +287,8 @@ impl EthTransactionValidatorBuilder {
             shanghai,
             eip2718,
             eip1559,
+            cancun,
+            eip4844,
             block_gas_limit,
             minimum_priority_fee,
             propagate_local_transactions,
@@ -304,18 +327,22 @@ struct EthTransactionValidatorInner<Client, T> {
     client: Client,
     /// Fork indicator whether we are in the Shanghai stage.
     shanghai: bool,
+    /// Fork indicator whether we are in the Cancun hardfork.
+    cancun: bool,
     /// Fork indicator whether we are using EIP-2718 type transactions.
     eip2718: bool,
     /// Fork indicator whether we are using EIP-1559 type transactions.
     eip1559: bool,
+    /// Fork indicator whether we are using EIP-4844 blob transactions.
+    eip4844: bool,
     /// The current max gas limit
     block_gas_limit: u64,
     /// Minimum priority fee to enforce for acceptance into the pool.
     minimum_priority_fee: Option<u128>,
-    /// Marker for the transaction type
-    _marker: PhantomData<T>,
     /// Toggle to determine if a local transaction should be propagated
     propagate_local_transactions: bool,
+    /// Marker for the transaction type
+    _marker: PhantomData<T>,
 }
 
 // === impl EthTransactionValidatorInner ===
@@ -362,13 +389,21 @@ where
                     )
                 }
             }
-
             EIP1559_TX_TYPE_ID => {
                 // Reject dynamic fee transactions until EIP-1559 activates.
                 if !self.eip1559 {
                     return TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip1559Disabled.into(),
+                    )
+                }
+            }
+            EIP4844_TX_TYPE_ID => {
+                // Reject blob transactions.
+                if !self.eip4844 {
+                    return TransactionValidationOutcome::Invalid(
+                        transaction,
+                        InvalidTransactionError::Eip4844Disabled.into(),
                     )
                 }
             }
@@ -434,6 +469,11 @@ where
                     InvalidTransactionError::ChainIdMismatch.into(),
                 )
             }
+        }
+
+        // blob tx checks
+        if self.cancun {
+            // TODO: implement blob tx checks
         }
 
         let account = match self
@@ -510,7 +550,7 @@ where
         TransactionValidationOutcome::Valid {
             balance: account.balance,
             state_nonce: account.nonce,
-            transaction,
+            transaction: ValidTransaction::Valid(transaction),
             // by this point assume all external transactions should be propagated
             propagate: match origin {
                 TransactionOrigin::External => true,
@@ -528,7 +568,7 @@ mod tests {
     #[cfg(feature = "optimism")]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_validate_optimism_transaction() {
-        use crate::traits::PooledTransaction;
+        use crate::traits::EthPooledTransaction;
         use reth_primitives::{
             Signature, Transaction, TransactionKind, TransactionSigned,
             TransactionSignedEcRecovered, TxDeposit, MAINNET, U256,
@@ -555,7 +595,7 @@ mod tests {
         let signed_tx = TransactionSigned::from_transaction_and_signature(deposit_tx, signature);
         let signed_recovered =
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, signer);
-        let pooled_tx = PooledTransaction::new(signed_recovered);
+        let pooled_tx = EthPooledTransaction::new(signed_recovered);
         let outcome = validator.validate_transaction(origin, pooled_tx).await;
 
         let err = match outcome {
