@@ -45,7 +45,6 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, AcquireError, OwnedSemaphorePermit};
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
-
 /// `debug` API implementation.
 ///
 /// This type provides the functionality for handling `debug` related requests.
@@ -645,11 +644,8 @@ where
     }
 
     async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {
-
         Ok(())
     }
-
-    
 
     /// Handler for `debug_getRawBlock`
     async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes> {

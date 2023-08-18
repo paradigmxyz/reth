@@ -129,7 +129,4 @@ pub trait DebugApi {
     /// be printed to stderr.
     #[method(name = "backtraceAt")]
     async fn debug_backtrace_at(&self, location: &str) -> RpcResult<()>;
-
-
-   
 }
