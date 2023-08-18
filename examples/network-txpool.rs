@@ -10,8 +10,9 @@
 use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::{
-    validate::ValidTransaction, CoinbaseTipOrdering, EthPooledTransaction, PoolTransaction,
-    TransactionOrigin, TransactionPool, TransactionValidationOutcome, TransactionValidator,
+    blobstore::InMemoryBlobStore, validate::ValidTransaction, CoinbaseTipOrdering,
+    EthPooledTransaction, PoolTransaction, TransactionOrigin, TransactionPool,
+    TransactionValidationOutcome, TransactionValidator,
 };
 
 #[tokio::main]
@@ -25,6 +26,7 @@ async fn main() -> eyre::Result<()> {
     let pool = reth_transaction_pool::Pool::new(
         OkValidator::default(),
         CoinbaseTipOrdering::default(),
+        InMemoryBlobStore::default(),
         Default::default(),
     );
 
