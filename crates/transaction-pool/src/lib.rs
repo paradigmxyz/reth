@@ -154,7 +154,7 @@
 //! - `test-utils`: Export utilities for testing
 use crate::pool::PoolInner;
 use aquamarine as _;
-use reth_primitives::{Address, TxHash, U256};
+use reth_primitives::{Address, BlobTransactionSidecar, TxHash, U256};
 use reth_provider::StateProviderFactory;
 use std::{
     collections::{HashMap, HashSet},
@@ -163,7 +163,7 @@ use std::{
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
 
-use crate::blobstore::BlobStore;
+use crate::blobstore::{BlobStore, BlobStoreError};
 pub use crate::{
     config::{
         PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP, REPLACE_BLOB_PRICE_BUMP,
@@ -457,6 +457,17 @@ where
 
     fn unique_senders(&self) -> HashSet<Address> {
         self.pool.unique_senders()
+    }
+
+    fn get_blob(&self, tx_hash: TxHash) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
+        self.pool.blob_store().get(tx_hash)
+    }
+
+    fn get_all_blobs(
+        &self,
+        tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError> {
+        self.pool.blob_store().get_all(tx_hashes)
     }
 }
 
