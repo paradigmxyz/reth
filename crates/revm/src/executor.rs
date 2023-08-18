@@ -240,16 +240,22 @@ where
             // The sum of the transaction’s gas limit, Tg, and the gas utilised in this block prior,
             // must be no greater than the block’s gasLimit.
             let block_available_gas = block.header.gas_limit - cumulative_gas_used;
-            if transaction.gas_limit() > block_available_gas {
-                return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                    transaction_gas_limit: transaction.gas_limit(),
-                    block_available_gas,
-                }
-                .into())
-            }
 
             #[cfg(feature = "optimism")]
             {
+                if transaction.gas_limit() > block_available_gas &&
+                    !transaction.is_deposit() &&
+                    !self
+                        .chain_spec
+                        .is_fork_active_at_timestamp(Hardfork::Regolith, block.timestamp)
+                {
+                    return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                        transaction_gas_limit: transaction.gas_limit(),
+                        block_available_gas,
+                    }
+                    .into())
+                }
+
                 let db = self.db();
                 let l1_cost = l1_block_info.as_ref().map(|l1_block_info| {
                     l1_block_info
@@ -392,6 +398,14 @@ where
 
             #[cfg(not(feature = "optimism"))]
             {
+                if transaction.gas_limit() > block_available_gas {
+                    return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                        transaction_gas_limit: transaction.gas_limit(),
+                        block_available_gas,
+                    }
+                    .into())
+                }
+
                 // Execute transaction.
                 let ResultAndState { result, state } = self.transact(transaction, sender)?;
 

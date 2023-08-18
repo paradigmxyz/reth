@@ -173,6 +173,7 @@ where
         let until = tokio::time::Instant::now() + self.config.deadline;
         let deadline = Box::pin(tokio::time::sleep_until(until));
 
+        #[cfg(feature = "optimism")]
         if config.attributes.no_tx_pool {
             dbg!("No tx pool; Building");
             let args = BuildArguments {
