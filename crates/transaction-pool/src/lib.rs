@@ -94,10 +94,10 @@
 //! use reth_primitives::MAINNET;
 //! use reth_provider::{ChainSpecProvider, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
-//! use reth_transaction_pool::{EthTransactionValidator, Pool, TransactionPool};
+//! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool, TransactionPool};
 //!  async fn t<C>(client: C)  where C: StateProviderFactory + ChainSpecProvider + Clone + 'static{
 //!     let pool = Pool::eth_pool(
-//!         EthTransactionValidator::new(client, MAINNET.clone(), TokioTaskExecutor::default()),
+//!         TransactionValidationTaskExecutor::eth(client, MAINNET.clone(), TokioTaskExecutor::default()),
 //!         Default::default(),
 //!     );
 //!   let mut transactions = pool.pending_transactions_listener();
@@ -119,14 +119,14 @@
 //! use reth_primitives::MAINNET;
 //! use reth_provider::{BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
-//! use reth_transaction_pool::{EthTransactionValidator, Pool};
+//! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool};
 //! use reth_transaction_pool::maintain::maintain_transaction_pool_future;
 //!  async fn t<C, St>(client: C, stream: St)
 //!    where C: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
 //!     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 //!     {
 //!     let pool = Pool::eth_pool(
-//!         EthTransactionValidator::new(client.clone(), MAINNET.clone(), TokioTaskExecutor::default()),
+//!         TransactionValidationTaskExecutor::eth(client.clone(), MAINNET.clone(), TokioTaskExecutor::default()),
 //!         Default::default(),
 //!     );
 //!
@@ -170,8 +170,8 @@ pub use crate::{
         TransactionPoolExt,
     },
     validate::{
-        EthTransactionValidator, TransactionValidationOutcome, TransactionValidator,
-        ValidPoolTransaction,
+        EthTransactionValidator, TransactionValidationOutcome, TransactionValidationTaskExecutor,
+        TransactionValidator, ValidPoolTransaction,
     },
 };
 
@@ -263,14 +263,14 @@ where
 
 impl<Client>
     Pool<
-        EthTransactionValidator<Client, EthPooledTransaction>,
+        TransactionValidationTaskExecutor<EthTransactionValidator<Client, EthPooledTransaction>>,
         CoinbaseTipOrdering<EthPooledTransaction>,
     >
 where
     Client: StateProviderFactory + Clone + 'static,
 {
-    /// Returns a new [Pool] that uses the default [EthTransactionValidator] when validating
-    /// [EthPooledTransaction]s and ords via [CoinbaseTipOrdering]
+    /// Returns a new [Pool] that uses the default [TransactionValidationTaskExecutor] when
+    /// validating [EthPooledTransaction]s and ords via [CoinbaseTipOrdering]
     ///
     /// # Example
     ///
@@ -278,16 +278,18 @@ where
     /// use reth_provider::StateProviderFactory;
     /// use reth_primitives::MAINNET;
     /// use reth_tasks::TokioTaskExecutor;
-    /// use reth_transaction_pool::{EthTransactionValidator, Pool};
+    /// use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool};
     /// # fn t<C>(client: C)  where C: StateProviderFactory + Clone + 'static{
     ///     let pool = Pool::eth_pool(
-    ///         EthTransactionValidator::new(client, MAINNET.clone(), TokioTaskExecutor::default()),
+    ///         TransactionValidationTaskExecutor::eth(client, MAINNET.clone(), TokioTaskExecutor::default()),
     ///         Default::default(),
     ///     );
     /// # }
     /// ```
     pub fn eth_pool(
-        validator: EthTransactionValidator<Client, EthPooledTransaction>,
+        validator: TransactionValidationTaskExecutor<
+            EthTransactionValidator<Client, EthPooledTransaction>,
+        >,
         config: PoolConfig,
     ) -> Self {
         Self::new(validator, CoinbaseTipOrdering::default(), config)
