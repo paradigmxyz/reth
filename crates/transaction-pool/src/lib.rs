@@ -165,9 +165,9 @@ pub use crate::{
     },
     traits::{
         AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
-        NewTransactionEvent, PendingTransactionListenerKind, PoolSize, PoolTransaction,
-        PooledTransaction, PropagateKind, PropagatedTransactions, TransactionOrigin,
-        TransactionPool, TransactionPoolExt,
+        EthPooledTransaction, NewTransactionEvent, PendingTransactionListenerKind, PoolSize,
+        PoolTransaction, PropagateKind, PropagatedTransactions, TransactionOrigin, TransactionPool,
+        TransactionPoolExt,
     },
     validate::{
         EthTransactionValidator, TransactionValidationOutcome, TransactionValidator,
@@ -182,6 +182,7 @@ pub mod noop;
 pub mod pool;
 pub mod validate;
 
+pub mod blobstore;
 mod config;
 mod identifier;
 mod ordering;
@@ -261,12 +262,15 @@ where
 }
 
 impl<Client>
-    Pool<EthTransactionValidator<Client, PooledTransaction>, CoinbaseTipOrdering<PooledTransaction>>
+    Pool<
+        EthTransactionValidator<Client, EthPooledTransaction>,
+        CoinbaseTipOrdering<EthPooledTransaction>,
+    >
 where
     Client: StateProviderFactory + reth_provider::BlockReaderIdExt + Clone + 'static,
 {
     /// Returns a new [Pool] that uses the default [EthTransactionValidator] when validating
-    /// [PooledTransaction]s and ords via [CoinbaseTipOrdering]
+    /// [EthPooledTransaction]s and ords via [CoinbaseTipOrdering]
     ///
     /// # Example
     ///
@@ -283,7 +287,7 @@ where
     /// # }
     /// ```
     pub fn eth_pool(
-        validator: EthTransactionValidator<Client, PooledTransaction>,
+        validator: EthTransactionValidator<Client, EthPooledTransaction>,
         config: PoolConfig,
     ) -> Self {
         Self::new(validator, CoinbaseTipOrdering::default(), config)

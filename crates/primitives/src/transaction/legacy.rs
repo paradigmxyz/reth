@@ -1,5 +1,6 @@
-use crate::{Bytes, ChainId, TransactionKind};
+use crate::{Bytes, ChainId, Signature, TransactionKind, TxType};
 use reth_codecs::{main_codec, Compact};
+use reth_rlp::{length_of_length, Encodable, Header};
 use std::mem;
 
 /// Legacy transaction.
@@ -55,6 +56,54 @@ impl TxLegacy {
         self.to.size() + // to
         mem::size_of::<u128>() + // value
         self.input.len() // input
+    }
+
+    /// Outputs the length of the transaction's fields, without a RLP header or length of the
+    /// eip155 fields.
+    pub(crate) fn fields_len(&self) -> usize {
+        let mut len = 0;
+        len += self.nonce.length();
+        len += self.gas_price.length();
+        len += self.gas_limit.length();
+        len += self.to.length();
+        len += self.value.length();
+        len += self.input.0.length();
+        len
+    }
+
+    /// Encodes only the transaction's fields into the desired buffer, without a RLP header or
+    /// eip155 fields.
+    pub(crate) fn encode_fields(&self, out: &mut dyn bytes::BufMut) {
+        self.nonce.encode(out);
+        self.gas_price.encode(out);
+        self.gas_limit.encode(out);
+        self.to.encode(out);
+        self.value.encode(out);
+        self.input.0.encode(out);
+    }
+
+    /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
+    /// hash.
+    pub(crate) fn encode_with_signature(&self, signature: &Signature, out: &mut dyn bytes::BufMut) {
+        let payload_length =
+            self.fields_len() + signature.payload_len_with_eip155_chain_id(self.chain_id);
+        let header = Header { list: true, payload_length };
+        header.encode(out);
+        self.encode_fields(out);
+        signature.encode_with_eip155_chain_id(out, self.chain_id);
+    }
+
+    /// Output the length of the RLP signed transaction encoding.
+    pub(crate) fn payload_len_with_signature(&self, signature: &Signature) -> usize {
+        let payload_length =
+            self.fields_len() + signature.payload_len_with_eip155_chain_id(self.chain_id);
+        // 'header length' + 'payload length'
+        length_of_length(payload_length) + payload_length
+    }
+
+    /// Get transaction type
+    pub(crate) fn tx_type(&self) -> TxType {
+        TxType::Legacy
     }
 }
 
