@@ -105,9 +105,10 @@
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool, TransactionPool};
 //! use reth_transaction_pool::blobstore::InMemoryBlobStore;
 //!  async fn t<C>(client: C)  where C: StateProviderFactory + ChainSpecProvider + Clone + 'static{
+//!     let blob_store = InMemoryBlobStore::default();
 //!     let pool = Pool::eth_pool(
-//!         TransactionValidationTaskExecutor::eth(client, MAINNET.clone(), TokioTaskExecutor::default()),
-//!         InMemoryBlobStore::default(),
+//!         TransactionValidationTaskExecutor::eth(client, MAINNET.clone(), blob_store.clone(), TokioTaskExecutor::default()),
+//!         blob_store,
 //!         Default::default(),
 //!     );
 //!   let mut transactions = pool.pending_transactions_listener();
@@ -136,9 +137,10 @@
 //!    where C: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
 //!     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 //!     {
+//!     let blob_store = InMemoryBlobStore::default();
 //!     let pool = Pool::eth_pool(
-//!         TransactionValidationTaskExecutor::eth(client.clone(), MAINNET.clone(), TokioTaskExecutor::default()),
-//!         InMemoryBlobStore::default(),
+//!         TransactionValidationTaskExecutor::eth(client.clone(), MAINNET.clone(), blob_store.clone(), TokioTaskExecutor::default()),
+//!         blob_store,
 //!         Default::default(),
 //!     );
 //!
@@ -296,10 +298,11 @@ where
     /// use reth_tasks::TokioTaskExecutor;
     /// use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool};
     /// use reth_transaction_pool::blobstore::InMemoryBlobStore;
-    /// # fn t<C>(client: C)  where C: StateProviderFactory + Clone + 'static{
+    /// # fn t<C>(client: C)  where C: StateProviderFactory + Clone + 'static {
+    ///     let blob_store = InMemoryBlobStore::default();
     ///     let pool = Pool::eth_pool(
-    ///         TransactionValidationTaskExecutor::eth(client, MAINNET.clone(), TokioTaskExecutor::default()),
-    ///         InMemoryBlobStore::default(),
+    ///         TransactionValidationTaskExecutor::eth(client, MAINNET.clone(), blob_store.clone(), TokioTaskExecutor::default()),
+    ///         blob_store,
     ///         Default::default(),
     ///     );
     /// # }
