@@ -636,7 +636,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         let mut deleted = 0;
 
         let mut keys = keys.into_iter();
-        while let Some(key) = keys.next() {
+        for key in &mut keys {
             let row = cursor.seek_exact(key.clone())?;
             if let Some(row) = row {
                 cursor.delete_current()?;

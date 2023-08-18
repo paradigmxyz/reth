@@ -21,22 +21,27 @@ use reth_provider::{
 use std::{ops::RangeInclusive, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
 
-/// Result of [Pruner::run] execution
+/// Result of [Pruner::run] execution.
+///
+/// Returns `true` if pruning has been completed up to the target block,
+/// and `false` if there's more data to prune in further runs.
 pub type PrunerResult = Result<bool, PrunerError>;
 
-/// The pipeline type itself with the result of [Pruner::run]
+/// The pruner type itself with the result of [Pruner::run]
 pub type PrunerWithResult<DB> = (Pruner<DB>, PrunerResult);
 
 pub struct BatchSizes {
-    // Measured in transactions
+    /// Maximum number of receipts to prune in one run.
     receipts: usize,
-    // Measured in transactions
+    /// Maximum number of transaction lookup entries to prune in one run.
     transaction_lookup: usize,
-    // Measured in transactions
+    /// Maximum number of transaction senders to prune in one run.
     transaction_senders: usize,
-    // Measured in blocks
+    /// Maximum number of account history entries to prune in one run.
+    /// Measured in the number of [tables::AccountChangeSet] rows.
     account_history: usize,
-    // Measured in blocks
+    /// Maximum number of storage history entries to prune in one run.
+    /// Measured in the number of [tables::StorageChangeSet] rows.
     storage_history: usize,
 }
 
@@ -63,6 +68,7 @@ pub struct Pruner<DB> {
     /// when the pruning needs to be initiated.
     last_pruned_block_number: Option<BlockNumber>,
     modes: PruneModes,
+    /// Maximum entries to prune per one run, per prune part.
     batch_sizes: BatchSizes,
 }
 
@@ -271,7 +277,7 @@ impl<DB: Database> Pruner<DB> {
     /// 1. If checkpoint exists, use next block.
     /// 2. If checkpoint doesn't exist, use block 0.
     ///
-    /// To get the range end: use block `min(to_block, from_block + limit - 1)`.
+    /// To get the range end: use block `to_block`.
     fn get_next_block_range_from_checkpoint(
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
@@ -362,6 +368,8 @@ impl<DB: Database> Pruner<DB> {
         let last_pruned_block = provider
             .transaction_block(last_pruned_transaction)?
             .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
+            // If there's more receipts to prune, set the checkpoint block number to previous,
+            // so we could finish pruning its receipts on the next run.
             .checked_sub(if done { 0 } else { 1 });
 
         provider.save_prune_checkpoint(
@@ -376,7 +384,8 @@ impl<DB: Database> Pruner<DB> {
         Ok(done)
     }
 
-    /// Prune transaction lookup entries up to the provided block, inclusive.
+    /// Prune transaction lookup entries up to the provided block, inclusive, respecting the batch
+    /// size.
     #[instrument(level = "trace", skip(self, provider), target = "pruner")]
     fn prune_transaction_lookup(
         &self,
@@ -425,6 +434,9 @@ impl<DB: Database> Pruner<DB> {
         let last_pruned_block = provider
             .transaction_block(last_pruned_transaction)?
             .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
+            // If there's more transaction lookup entries to prune, set the checkpoint block number
+            // to previous, so we could finish pruning its transaction lookup entries on the next
+            // run.
             .checked_sub(if done { 0 } else { 1 });
 
         provider.save_prune_checkpoint(
@@ -471,6 +483,8 @@ impl<DB: Database> Pruner<DB> {
         let last_pruned_block = provider
             .transaction_block(last_pruned_transaction)?
             .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
+            // If there's more transaction senders to prune, set the checkpoint block number to
+            // previous, so we could finish pruning its transaction senders on the next run.
             .checked_sub(if done { 0 } else { 1 });
 
         provider.save_prune_checkpoint(
@@ -515,6 +529,8 @@ impl<DB: Database> Pruner<DB> {
         trace!(target: "pruner", %rows, %done, "Pruned account history (changesets)");
 
         let last_pruned_block = last_pruned_block_number
+            // If there's more account account changesets to prune, set the checkpoint block number
+            // to previous, so we could finish pruning its account changesets on the next run.
             .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
             .unwrap_or(range_end);
 
@@ -564,6 +580,8 @@ impl<DB: Database> Pruner<DB> {
         trace!(target: "pruner", %rows, %done, "Pruned storage history (changesets)");
 
         let last_pruned_block = last_pruned_block_number
+            // If there's more account storage changesets to prune, set the checkpoint block number
+            // to previous, so we could finish pruning its storage changesets on the next run.
             .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
             .unwrap_or(range_end);
 
