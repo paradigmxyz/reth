@@ -18,6 +18,22 @@ use reth_primitives::{
 use reth_rlp::Encodable;
 
 /// A struct for generating merkle proofs.
+///
+/// Proof generator starts with acquiring the trie walker and restoring the root node in the trie.
+/// The root node is restored from its immediate children which are stored in the database.
+///
+/// Upon encountering the child of the root node that matches the prefix of the requested account's
+/// hashed key, the proof generator traverses the path down to the leaf node (excluded as we don't
+/// store leaf nodes in the database). The proof generator stops traversing the path upon
+/// encountering a branch node with no children matching the hashed key.
+///
+/// After traversing the branch node path, the proof generator attempts to restore the leaf node of
+/// the target account by looking up the target account info.
+/// If the leaf node exists, we encoded it and add it to the proof thus proving **inclusion**.
+/// If the leaf node does not exist, we return the proof as is thus proving **exclusion**.
+///
+/// After traversing the path, the proof generator continues to restore the root node of the trie
+/// until completion. The root node is then inserted at the start of the proof.
 pub struct Proof<'a, 'b, TX, H> {
     /// A reference to the database transaction.
     tx: &'a TX,
@@ -35,11 +51,11 @@ where
     }
 
     /// Generate an account proof from intermediate nodes.
-    pub fn get_account_proof(&self, address: Address) -> Result<Vec<Bytes>, ProofError> {
+    pub fn account_proof(&self, address: Address) -> Result<Vec<Bytes>, ProofError> {
         let hashed_address = keccak256(address);
         let target_nibbles = Nibbles::unpack(hashed_address);
 
-        let mut trie_node_restorer = ProofRestorer::new(self.hashed_cursor_factory)?;
+        let mut proof_restorer = ProofRestorer::new(self.hashed_cursor_factory)?;
         let mut trie_cursor =
             AccountTrieCursor::new(self.tx.cursor_read::<tables::AccountsTrie>()?);
 
@@ -54,8 +70,7 @@ where
         while let Some(key) = walker.key() {
             if target_nibbles.has_prefix(&key) {
                 debug_assert!(proofs.is_empty(), "Prefix must match a single key");
-                proofs =
-                    self.traverse_path(walker.cursor, &mut trie_node_restorer, hashed_address)?;
+                proofs = self.traverse_path(walker.cursor, &mut proof_restorer, hashed_address)?;
             }
 
             let value = walker.hash().unwrap();
@@ -72,8 +87,7 @@ where
         let root_node = updates.remove(&Nibbles::default()).expect("root node is present");
 
         // Restore the root node RLP and prepend it to the proofs result
-        let root_node_rlp =
-            trie_node_restorer.restore_branch_node(&Nibbles::default(), root_node)?;
+        let root_node_rlp = proof_restorer.restore_branch_node(&Nibbles::default(), root_node)?;
         proofs.insert(0, root_node_rlp);
 
         Ok(proofs)
@@ -82,7 +96,7 @@ where
     fn traverse_path<T: DbCursorRO<'a, tables::AccountsTrie>>(
         &self,
         trie_cursor: &mut AccountTrieCursor<T>,
-        trie_node_restorer: &mut ProofRestorer<'a, 'a, TX, TX>,
+        proof_restorer: &mut ProofRestorer<'a, 'a, TX, TX>,
         hashed_address: H256,
     ) -> Result<Vec<Bytes>, ProofError> {
         let mut intermediate_proofs = Vec::new();
@@ -92,7 +106,7 @@ where
         while let Some((_, node)) =
             trie_cursor.seek_exact(current_prefix.hex_data.to_vec().into())?
         {
-            let branch_node_rlp = trie_node_restorer.restore_branch_node(&current_prefix, node)?;
+            let branch_node_rlp = proof_restorer.restore_branch_node(&current_prefix, node)?;
             intermediate_proofs.push(branch_node_rlp);
 
             if current_prefix.len() < target.len() {
@@ -101,7 +115,7 @@ where
         }
 
         if let Some(leaf_node_rlp) =
-            trie_node_restorer.restore_target_leaf_node(hashed_address, current_prefix.len())?
+            proof_restorer.restore_target_leaf_node(hashed_address, current_prefix.len())?
         {
             intermediate_proofs.push(leaf_node_rlp);
         }
@@ -170,8 +184,7 @@ where
     }
 
     /// Restore leaf node.
-    /// The `is_target` flag indicates whether the searched node is the target of our proof.
-    /// The leaf nodes are encoded as `RLP(node) or RLP(keccak(RLP(node)))`.
+    /// The leaf nodes are always encoded as `RLP(node) or RLP(keccak(RLP(node)))`.
     fn restore_leaf_node(&mut self, seek_key: H256, slice_at: usize) -> Result<Bytes, ProofError> {
         let (hashed_address, account) = self
             .hashed_account_cursor
@@ -288,7 +301,7 @@ mod tests {
         ].into_iter().map(Bytes::from_str).collect::<Result<Vec<_>, _>>().unwrap();
 
         let tx = db.tx().unwrap();
-        let proof = Proof::new(&tx).get_account_proof(target).unwrap();
+        let proof = Proof::new(&tx).account_proof(target).unwrap();
         pretty_assertions::assert_eq!(proof, expected_account_proof);
     }
 
@@ -310,7 +323,7 @@ mod tests {
         ].into_iter().map(Bytes::from_str).collect::<Result<Vec<_>, _>>().unwrap();
 
         let tx = db.tx().unwrap();
-        let proof = Proof::new(&tx).get_account_proof(target).unwrap();
+        let proof = Proof::new(&tx).account_proof(target).unwrap();
         pretty_assertions::assert_eq!(proof, expected_account_proof);
     }
 }
