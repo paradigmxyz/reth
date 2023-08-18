@@ -5986,6 +5986,7 @@ dependencies = [
  "hyper",
  "jsonrpsee",
  "jsonwebtoken",
+ "lazy_static",
  "pin-project",
  "rand 0.8.5",
  "rayon",
