@@ -24,7 +24,7 @@ pub use eip1559::TxEip1559;
 pub use eip2930::TxEip2930;
 pub use eip4844::{BlobTransaction, BlobTransactionSidecar, TxEip4844};
 pub use legacy::TxLegacy;
-pub use pooled::PooledTransactionsElement;
+pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 
 mod access_list;
 mod eip1559;
