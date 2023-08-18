@@ -38,6 +38,16 @@ pub struct TxPoolMetrics {
     pub(crate) performed_state_updates: Counter,
 }
 
+/// Transaction pool blobstore metrics
+#[derive(Metrics)]
+#[metrics(scope = "transaction_pool")]
+pub struct BlobStoreMetrics {
+    /// Number of failed inserts into the blobstore
+    pub(crate) blobstore_failed_inserts: Counter,
+    /// Number of failed deletes into the blobstore
+    pub(crate) blobstore_failed_deletes: Counter,
+}
+
 /// Transaction pool maintenance metrics
 #[derive(Metrics)]
 #[metrics(scope = "transaction_pool")]

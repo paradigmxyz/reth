@@ -65,7 +65,9 @@ use reth_stages::{
     MetricEventsSender, MetricsListener,
 };
 use reth_tasks::TaskExecutor;
-use reth_transaction_pool::{TransactionPool, TransactionValidationTaskExecutor};
+use reth_transaction_pool::{
+    blobstore::InMemoryBlobStore, TransactionPool, TransactionValidationTaskExecutor,
+};
 use secp256k1::SecretKey;
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
@@ -269,6 +271,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 ctx.task_executor.clone(),
                 1,
             ),
+            InMemoryBlobStore::default(),
             self.txpool.pool_config(),
         );
         info!(target: "reth::cli", "Transaction pool initialized");

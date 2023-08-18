@@ -82,7 +82,7 @@ use crate::{
 };
 use best::BestTransactions;
 use parking_lot::{Mutex, RwLock};
-use reth_primitives::{Address, TxHash, H256};
+use reth_primitives::{Address, BlobTransactionSidecar, TxHash, H256};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -90,14 +90,15 @@ use std::{
     time::Instant,
 };
 use tokio::sync::mpsc;
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 mod events;
 pub use events::{FullTransactionEvent, TransactionEvent};
 
 mod listener;
 use crate::{
-    pool::txpool::UpdateOutcome, traits::PendingTransactionListenerKind, validate::ValidTransaction,
+    blobstore::BlobStore, metrics::BlobStoreMetrics, pool::txpool::UpdateOutcome,
+    traits::PendingTransactionListenerKind, validate::ValidTransaction,
 };
 pub use listener::{AllTransactionsEvents, TransactionEvents};
 
@@ -110,11 +111,16 @@ pub mod txpool;
 mod update;
 
 /// Transaction pool internals.
-pub struct PoolInner<V: TransactionValidator, T: TransactionOrdering> {
+pub struct PoolInner<V, T, S>
+where
+    T: TransactionOrdering,
+{
     /// Internal mapping of addresses to plain ints.
     identifiers: RwLock<SenderIdentifiers>,
     /// Transaction validation.
     validator: V,
+    /// Storage for blob transactions
+    blob_store: S,
     /// The internal pool that manages all transactions.
     pool: RwLock<TxPool<T>>,
     /// Pool settings.
@@ -125,17 +131,20 @@ pub struct PoolInner<V: TransactionValidator, T: TransactionOrdering> {
     pending_transaction_listener: Mutex<Vec<PendingTransactionListener>>,
     /// Listeners for new transactions added to the pool.
     transaction_listener: Mutex<Vec<mpsc::Sender<NewTransactionEvent<T::Transaction>>>>,
+    /// Metrics for the blob store
+    blob_store_metrics: BlobStoreMetrics,
 }
 
 // === impl PoolInner ===
 
-impl<V, T> PoolInner<V, T>
+impl<V, T, S> PoolInner<V, T, S>
 where
     V: TransactionValidator,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
+    S: BlobStore,
 {
     /// Create a new transaction pool instance.
-    pub(crate) fn new(validator: V, ordering: T, config: PoolConfig) -> Self {
+    pub(crate) fn new(validator: V, ordering: T, blob_store: S, config: PoolConfig) -> Self {
         Self {
             identifiers: Default::default(),
             validator,
@@ -144,6 +153,8 @@ where
             pending_transaction_listener: Default::default(),
             transaction_listener: Default::default(),
             config,
+            blob_store,
+            blob_store_metrics: Default::default(),
         }
     }
 
@@ -316,7 +327,8 @@ where
                 let transaction_id = TransactionId::new(sender_id, transaction.nonce());
                 let encoded_length = transaction.encoded_length();
 
-                let (transaction, _maybe_sidecar) = match transaction {
+                // split the valid transaction and the blob sidecar if it has any
+                let (transaction, maybe_sidecar) = match transaction {
                     ValidTransaction::Valid(tx) => (tx, None),
                     ValidTransaction::ValidWithSidecar { transaction, sidecar } => {
                         debug_assert!(
@@ -338,6 +350,16 @@ where
 
                 let added = self.pool.write().add_transaction(tx, balance, state_nonce)?;
                 let hash = *added.hash();
+
+                // transaction was successfully inserted into the pool
+                if let Some(sidecar) = maybe_sidecar {
+                    // store the sidecar in the blob store
+                    self.insert_blob(hash, sidecar);
+                }
+                if let Some(replaced) = added.replaced_blob_transaction() {
+                    // delete the replaced transaction from the blob store
+                    self.delete_blob(replaced);
+                }
 
                 // Notify about new pending transactions
                 if let Some(pending) = added.as_pending() {
@@ -625,9 +647,25 @@ where
     pub(crate) fn discard_worst(&self) -> HashSet<TxHash> {
         self.pool.write().discard_worst().into_iter().map(|tx| *tx.hash()).collect()
     }
+
+    /// Inserts a blob transaction into the blob store
+    fn insert_blob(&self, hash: TxHash, blob: BlobTransactionSidecar) {
+        if let Err(err) = self.blob_store.insert(hash, blob) {
+            warn!(target: "txpool", ?err, "[{:?}] failed to insert blob", hash);
+            self.blob_store_metrics.blobstore_failed_inserts.increment(1);
+        }
+    }
+
+    /// Delete a blob from the blob store
+    fn delete_blob(&self, blob: TxHash) {
+        if let Err(err) = self.blob_store.delete(blob) {
+            warn!(target: "txpool", ?err, "[{:?}] failed to delete blobs", blob);
+            self.blob_store_metrics.blobstore_failed_deletes.increment(1);
+        }
+    }
 }
 
-impl<V: TransactionValidator, T: TransactionOrdering> fmt::Debug for PoolInner<V, T> {
+impl<V, T: TransactionOrdering, S> fmt::Debug for PoolInner<V, T, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PoolInner").field("config", &self.config).finish_non_exhaustive()
     }
@@ -721,6 +759,19 @@ impl<T: PoolTransaction> AddedTransaction<T> {
             AddedTransaction::Pending(tx) => Some(tx),
             _ => None,
         }
+    }
+
+    /// Returns the the replaced transaction if there was one
+    pub(crate) fn replaced(&self) -> Option<&Arc<ValidPoolTransaction<T>>> {
+        match self {
+            AddedTransaction::Pending(tx) => tx.replaced.as_ref(),
+            AddedTransaction::Parked { replaced, .. } => replaced.as_ref(),
+        }
+    }
+
+    /// Returns the hash of the replaced transaction if it is a blob transaction.
+    pub(crate) fn replaced_blob_transaction(&self) -> Option<H256> {
+        self.replaced().filter(|tx| tx.transaction.is_eip4844()).map(|tx| *tx.transaction.hash())
     }
 
     /// Returns the hash of the transaction
