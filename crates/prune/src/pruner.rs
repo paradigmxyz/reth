@@ -43,11 +43,11 @@ pub struct BatchSizes {
 impl Default for BatchSizes {
     fn default() -> Self {
         Self {
-            receipts: 100,
-            transaction_lookup: 100,
-            transaction_senders: 100,
-            account_history: 100,
-            storage_history: 100,
+            receipts: 1000,
+            transaction_lookup: 1000,
+            transaction_senders: 1000,
+            account_history: 1000,
+            storage_history: 1000,
         }
     }
 }
