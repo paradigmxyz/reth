@@ -1,6 +1,7 @@
 //! A validation service for transactions.
 
 use crate::{
+    blobstore::BlobStore,
     validate::{EthTransactionValidatorBuilder, TransactionValidatorError},
     EthTransactionValidator, PoolTransaction, TransactionOrigin, TransactionValidationOutcome,
     TransactionValidator,
@@ -96,11 +97,16 @@ impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Clien
     ///
     /// This will spawn a single validation tasks that performs the actual validation.
     /// See [TransactionValidationTaskExecutor::eth_with_additional_tasks]
-    pub fn eth<T>(client: Client, chain_spec: Arc<ChainSpec>, tasks: T) -> Self
+    pub fn eth<T, S: BlobStore>(
+        client: Client,
+        chain_spec: Arc<ChainSpec>,
+        blob_store: S,
+        tasks: T,
+    ) -> Self
     where
         T: TaskSpawner,
     {
-        Self::eth_with_additional_tasks(client, chain_spec, tasks, 0)
+        Self::eth_with_additional_tasks(client, chain_spec, blob_store, tasks, 0)
     }
 
     /// Creates a new instance for the given [ChainSpec]
@@ -112,9 +118,10 @@ impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Clien
     ///
     /// This will always spawn a validation task that performs the actual validation. It will spawn
     /// `num_additional_tasks` additional tasks.
-    pub fn eth_with_additional_tasks<T>(
+    pub fn eth_with_additional_tasks<T, S: BlobStore>(
         client: Client,
         chain_spec: Arc<ChainSpec>,
+        blob_store: S,
         tasks: T,
         num_additional_tasks: usize,
     ) -> Self
@@ -123,7 +130,7 @@ impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Clien
     {
         EthTransactionValidatorBuilder::new(chain_spec)
             .with_additional_tasks(num_additional_tasks)
-            .build::<Client, Tx, T>(client, tasks)
+            .build_with_tasks::<Client, Tx, T, S>(client, tasks, blob_store)
     }
 
     /// Returns the configured chain id
