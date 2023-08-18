@@ -352,12 +352,12 @@ impl<DB: Database> Pruner<DB> {
         let tx_range_end = *tx_range.end();
 
         let mut last_pruned_transaction = tx_range_end;
-        let (rows, done) = provider.prune_table_with_range::<tables::Receipts>(
+        let (deleted, done) = provider.prune_table_with_range::<tables::Receipts>(
             tx_range,
             self.batch_sizes.receipts,
             |row| last_pruned_transaction = row.0,
         )?;
-        trace!(target: "pruner", %rows, %done, "Pruned receipts");
+        trace!(target: "pruner", %deleted, %done, "Pruned receipts");
 
         let last_pruned_block = provider
             .transaction_block(last_pruned_transaction)?
@@ -415,12 +415,12 @@ impl<DB: Database> Pruner<DB> {
         }
 
         let mut last_pruned_transaction = tx_range_end;
-        let (rows, done) = provider.prune_table_with_iterator::<tables::TxHashNumber>(
+        let (deleted, done) = provider.prune_table_with_iterator::<tables::TxHashNumber>(
             hashes,
             self.batch_sizes.transaction_lookup,
             |row| last_pruned_transaction = row.1,
         )?;
-        trace!(target: "pruner", %rows, %done, "Pruned transaction lookup");
+        trace!(target: "pruner", %deleted, %done, "Pruned transaction lookup");
 
         let last_pruned_block = provider
             .transaction_block(last_pruned_transaction)?
@@ -461,12 +461,12 @@ impl<DB: Database> Pruner<DB> {
         let tx_range_end = *tx_range.end();
 
         let mut last_pruned_transaction = tx_range_end;
-        let (rows, done) = provider.prune_table_with_range::<tables::TxSenders>(
+        let (deleted, done) = provider.prune_table_with_range::<tables::TxSenders>(
             tx_range,
             self.batch_sizes.transaction_senders,
             |row| last_pruned_transaction = row.0,
         )?;
-        trace!(target: "pruner", %rows, %done, "Pruned transaction senders");
+        trace!(target: "pruner", %deleted, %done, "Pruned transaction senders");
 
         let last_pruned_block = provider
             .transaction_block(last_pruned_transaction)?
@@ -518,13 +518,13 @@ impl<DB: Database> Pruner<DB> {
             .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
             .unwrap_or(range_end);
 
-        let rows = self.prune_history_indices::<tables::AccountHistory, _>(
+        let (processed, deleted) = self.prune_history_indices::<tables::AccountHistory, _>(
             provider,
             last_pruned_block,
             |a, b| a.key == b.key,
             |key| ShardedKey::last(key.key),
         )?;
-        trace!(target: "pruner", %rows, %done, "Pruned account history (history)" );
+        trace!(target: "pruner", %processed, %deleted, %done, "Pruned account history (history)" );
 
         provider.save_prune_checkpoint(
             PrunePart::AccountHistory,
@@ -567,13 +567,13 @@ impl<DB: Database> Pruner<DB> {
             .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
             .unwrap_or(range_end);
 
-        self.prune_history_indices::<tables::StorageHistory, _>(
+        let (processed, deleted) = self.prune_history_indices::<tables::StorageHistory, _>(
             provider,
             last_pruned_block,
             |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
             |key| StorageShardedKey::last(key.address, key.sharded_key.key),
         )?;
-        trace!(target: "pruner", %rows, %done, "Pruned storage history (history)" );
+        trace!(target: "pruner", %processed, %deleted, %done, "Pruned storage history (history)" );
 
         provider.save_prune_checkpoint(
             PrunePart::StorageHistory,
@@ -590,12 +590,13 @@ impl<DB: Database> Pruner<DB> {
         to_block: BlockNumber,
         key_matches: impl Fn(&T::Key, &T::Key) -> bool,
         last_key: impl Fn(&T::Key) -> T::Key,
-    ) -> Result<usize, PrunerError>
+    ) -> Result<(usize, usize), PrunerError>
     where
         T: Table<Value = BlockNumberList>,
         T::Key: AsRef<ShardedKey<SK>>,
     {
         let mut processed = 0;
+        let mut deleted = 0;
         let mut cursor = provider.tx_ref().cursor_write::<T>()?;
 
         // Prune history table:
@@ -611,6 +612,7 @@ impl<DB: Database> Pruner<DB> {
                 // If shard consists only of block numbers less than the target one, delete shard
                 // completely.
                 cursor.delete_current()?;
+                deleted += 1;
                 if key.as_ref().highest_block_number == to_block {
                     // Shard contains only block numbers up to the target one, so we can skip to the
                     // next sharded key. It is guaranteed that further shards for this sharded key
@@ -641,6 +643,7 @@ impl<DB: Database> Pruner<DB> {
                                 // If current shard is the last shard for the sharded key that has
                                 // previous shards, replace it with the previous shard.
                                 cursor.delete_current()?;
+                                deleted += 1;
                                 // Upsert will replace the last shard for this sharded key with the
                                 // previous value.
                                 cursor.upsert(key.clone(), prev_value)?;
@@ -652,11 +655,13 @@ impl<DB: Database> Pruner<DB> {
                                 cursor.next()?;
                                 // Delete shard.
                                 cursor.delete_current()?;
+                                deleted += 1;
                             }
                         } else {
                             // If current shard is not the last shard for this sharded key,
                             // just delete it.
                             cursor.delete_current()?;
+                            deleted += 1;
                         }
                     } else {
                         cursor.upsert(key.clone(), BlockNumberList::new_pre_sorted(new_blocks))?;
@@ -670,7 +675,7 @@ impl<DB: Database> Pruner<DB> {
             processed += 1;
         }
 
-        Ok(processed)
+        Ok((processed, deleted))
     }
 }
 
