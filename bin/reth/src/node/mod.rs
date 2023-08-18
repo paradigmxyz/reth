@@ -576,8 +576,12 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     async fn start_metrics_endpoint(&self, db: Arc<DatabaseEnv>) -> eyre::Result<()> {
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
-            prometheus_exporter::initialize(listen_addr, db, metrics_process::Collector::default())
-                .await?;
+            prometheus_exporter::initialize(
+                listen_addr,
+                db,
+                metrics_process::Collector::default().prefix("reth"),
+            )
+            .await?;
         }
 
         Ok(())
