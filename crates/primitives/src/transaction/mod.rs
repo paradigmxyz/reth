@@ -23,8 +23,9 @@ pub use tx_type::{
 
 pub use eip1559::TxEip1559;
 pub use eip2930::TxEip2930;
-pub use eip4844::TxEip4844;
+pub use eip4844::{BlobTransaction, BlobTransactionSidecar, TxEip4844};
 pub use legacy::TxLegacy;
+pub use pooled::PooledTransactionsElement;
 
 mod access_list;
 mod eip1559;
@@ -33,6 +34,7 @@ mod eip4844;
 mod error;
 mod legacy;
 mod meta;
+mod pooled;
 mod signature;
 mod tx_type;
 pub(crate) mod util;
@@ -159,12 +161,12 @@ impl Transaction {
     /// Get transaction type
     pub fn tx_type(&self) -> TxType {
         match self {
-            Transaction::Legacy { .. } => TxType::Legacy,
-            Transaction::Eip2930 { .. } => TxType::EIP2930,
-            Transaction::Eip1559 { .. } => TxType::EIP1559,
-            Transaction::Eip4844 { .. } => TxType::EIP4844,
+            Transaction::Legacy(legacy_tx) => legacy_tx.tx_type(),
+            Transaction::Eip2930(access_list_tx) => access_list_tx.tx_type(),
+            Transaction::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.tx_type(),
+            Transaction::Eip4844(blob_tx) => blob_tx.tx_type(),
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => TxType::DEPOSIT,
+            Transaction::Deposit(deposit_tx) => deposit_tx.tx_type(),
         }
     }
 
@@ -421,95 +423,10 @@ impl Transaction {
     /// eip155 fields.
     pub(crate) fn fields_len(&self) -> usize {
         match self {
-            Transaction::Legacy(TxLegacy {
-                chain_id: _,
-                nonce,
-                gas_price,
-                gas_limit,
-                to,
-                value,
-                input,
-            }) => {
-                let mut len = 0;
-                len += nonce.length();
-                len += gas_price.length();
-                len += gas_limit.length();
-                len += to.length();
-                len += value.length();
-                len += input.0.length();
-                len
-            }
-            Transaction::Eip2930(TxEip2930 {
-                chain_id,
-                nonce,
-                gas_price,
-                gas_limit,
-                to,
-                value,
-                input,
-                access_list,
-            }) => {
-                let mut len = 0;
-                len += chain_id.length();
-                len += nonce.length();
-                len += gas_price.length();
-                len += gas_limit.length();
-                len += to.length();
-                len += value.length();
-                len += input.0.length();
-                len += access_list.length();
-                len
-            }
-            Transaction::Eip1559(TxEip1559 {
-                chain_id,
-                nonce,
-                gas_limit,
-                max_fee_per_gas,
-                max_priority_fee_per_gas,
-                to,
-                value,
-                input,
-                access_list,
-            }) => {
-                let mut len = 0;
-                len += chain_id.length();
-                len += nonce.length();
-                len += max_priority_fee_per_gas.length();
-                len += max_fee_per_gas.length();
-                len += gas_limit.length();
-                len += to.length();
-                len += value.length();
-                len += input.0.length();
-                len += access_list.length();
-                len
-            }
-            Transaction::Eip4844(TxEip4844 {
-                chain_id,
-                nonce,
-                gas_limit,
-                max_fee_per_gas,
-                max_priority_fee_per_gas,
-                to,
-                value,
-                access_list,
-                blob_versioned_hashes,
-                max_fee_per_blob_gas,
-                input,
-            }) => {
-                let mut len = 0;
-                len += chain_id.length();
-                len += nonce.length();
-                len += gas_limit.length();
-                len += max_fee_per_gas.length();
-                len += max_priority_fee_per_gas.length();
-                len += to.length();
-                len += value.length();
-                len += access_list.length();
-                len += blob_versioned_hashes.length();
-                len += max_fee_per_blob_gas.length();
-                len += input.0.length();
-                len
-            }
+            Transaction::Legacy(legacy_tx) => legacy_tx.fields_len(),
+            Transaction::Eip2930(access_list_tx) => access_list_tx.fields_len(),
+            Transaction::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.fields_len(),
+            Transaction::Eip4844(blob_tx) => blob_tx.fields_len(),
             #[cfg(feature = "optimism")]
             Transaction::Deposit(deposit) => deposit.fields_len(),
         }
@@ -518,87 +435,10 @@ impl Transaction {
     /// Encodes only the transaction's fields into the desired buffer, without a RLP header.
     pub(crate) fn encode_fields(&self, out: &mut dyn bytes::BufMut) {
         match self {
-            Transaction::Legacy(TxLegacy {
-                chain_id: _,
-                nonce,
-                gas_price,
-                gas_limit,
-                to,
-                value,
-                input,
-            }) => {
-                nonce.encode(out);
-                gas_price.encode(out);
-                gas_limit.encode(out);
-                to.encode(out);
-                value.encode(out);
-                input.0.encode(out);
-            }
-            Transaction::Eip2930(TxEip2930 {
-                chain_id,
-                nonce,
-                gas_price,
-                gas_limit,
-                to,
-                value,
-                input,
-                access_list,
-            }) => {
-                chain_id.encode(out);
-                nonce.encode(out);
-                gas_price.encode(out);
-                gas_limit.encode(out);
-                to.encode(out);
-                value.encode(out);
-                input.0.encode(out);
-                access_list.encode(out);
-            }
-            Transaction::Eip1559(TxEip1559 {
-                chain_id,
-                nonce,
-                gas_limit,
-                max_fee_per_gas,
-                max_priority_fee_per_gas,
-                to,
-                value,
-                input,
-                access_list,
-            }) => {
-                chain_id.encode(out);
-                nonce.encode(out);
-                max_priority_fee_per_gas.encode(out);
-                max_fee_per_gas.encode(out);
-                gas_limit.encode(out);
-                to.encode(out);
-                value.encode(out);
-                input.0.encode(out);
-                access_list.encode(out);
-            }
-            Transaction::Eip4844(TxEip4844 {
-                chain_id,
-                nonce,
-                gas_limit,
-                max_fee_per_gas,
-                max_priority_fee_per_gas,
-                to,
-                value,
-                access_list,
-                blob_versioned_hashes,
-                max_fee_per_blob_gas,
-                input,
-            }) => {
-                chain_id.encode(out);
-                nonce.encode(out);
-                max_priority_fee_per_gas.encode(out);
-                max_fee_per_gas.encode(out);
-                gas_limit.encode(out);
-                to.encode(out);
-                value.encode(out);
-                input.0.encode(out);
-                access_list.encode(out);
-                max_fee_per_blob_gas.encode(out);
-                blob_versioned_hashes.encode(out);
-            }
+            Transaction::Legacy(legacy_tx) => legacy_tx.encode_fields(out),
+            Transaction::Eip2930(access_list_tx) => access_list_tx.encode_fields(out),
+            Transaction::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.encode_fields(out),
+            Transaction::Eip4844(blob_tx) => blob_tx.encode_fields(out),
             #[cfg(feature = "optimism")]
             Transaction::Deposit(deposit) => deposit.encode_fields(out),
         }
@@ -619,44 +459,22 @@ impl Transaction {
         with_header: bool,
     ) {
         match self {
-            Transaction::Legacy(TxLegacy { chain_id, .. }) => {
+            Transaction::Legacy(legacy_tx) => {
                 // do nothing w/ with_header
-                let payload_length =
-                    self.fields_len() + signature.payload_len_with_eip155_chain_id(*chain_id);
-                let header = Header { list: true, payload_length };
-                header.encode(out);
-                self.encode_fields(out);
-                signature.encode_with_eip155_chain_id(out, *chain_id);
+                legacy_tx.encode_with_signature(signature, out)
+            }
+            Transaction::Eip2930(access_list_tx) => {
+                access_list_tx.encode_with_signature(signature, out, with_header)
+            }
+            Transaction::Eip1559(dynamic_fee_tx) => {
+                dynamic_fee_tx.encode_with_signature(signature, out, with_header)
+            }
+            Transaction::Eip4844(blob_tx) => {
+                blob_tx.encode_with_signature(signature, out, with_header)
             }
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => {
-                let payload_length = self.fields_len();
-                if with_header {
-                    Header {
-                        list: false,
-                        payload_length: 1 + length_of_length(payload_length) + payload_length,
-                    }
-                    .encode(out);
-                }
-                out.put_u8(self.tx_type() as u8);
-                let header = Header { list: true, payload_length };
-                header.encode(out);
-                self.encode_fields(out);
-            }
-            _ => {
-                let payload_length = self.fields_len() + signature.payload_len();
-                if with_header {
-                    Header {
-                        list: false,
-                        payload_length: 1 + length_of_length(payload_length) + payload_length,
-                    }
-                    .encode(out);
-                }
-                out.put_u8(self.tx_type() as u8);
-                let header = Header { list: true, payload_length };
-                header.encode(out);
-                self.encode_fields(out);
-                signature.encode(out);
+            Transaction::Deposit(deposit_tx) => {
+                deposit_tx.encode_with_signature(signature, out, with_header)
             }
         }
     }
@@ -1159,25 +977,18 @@ impl TransactionSigned {
     /// Output the length of the encode_inner(out, true). Note to assume that `with_header` is only
     /// `true`.
     pub(crate) fn payload_len_inner(&self) -> usize {
-        match self.transaction {
-            Transaction::Legacy(TxLegacy { chain_id, .. }) => {
-                let payload_length = self.transaction.fields_len() +
-                    self.signature.payload_len_with_eip155_chain_id(chain_id);
-                // 'header length' + 'payload length'
-                length_of_length(payload_length) + payload_length
+        match &self.transaction {
+            Transaction::Legacy(legacy_tx) => legacy_tx.payload_len_with_signature(&self.signature),
+            Transaction::Eip2930(access_list_tx) => {
+                access_list_tx.payload_len_with_signature(&self.signature)
             }
+            Transaction::Eip1559(dynamic_fee_tx) => {
+                dynamic_fee_tx.payload_len_with_signature(&self.signature)
+            }
+            Transaction::Eip4844(blob_tx) => blob_tx.payload_len_with_signature(&self.signature),
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => {
-                let payload_length = self.transaction.fields_len();
-                // 'tx type byte length' + 'version byte' + 'header length' + 'payload length'
-                let len = 1 + length_of_length(payload_length) + payload_length;
-                length_of_length(len) + len
-            }
-            _ => {
-                let payload_length = self.transaction.fields_len() + self.signature.payload_len();
-                // 'transaction type byte length' + 'header length' + 'payload length'
-                let len = 1 + length_of_length(payload_length) + payload_length;
-                length_of_length(len) + len
+            Transaction::Deposit(deposit_tx) => {
+                deposit_tx.payload_len_with_signature(&self.signature)
             }
         }
     }
@@ -1204,16 +1015,20 @@ impl TransactionSigned {
         mem::size_of::<TxHash>() + self.transaction.size() + self.signature.size()
     }
 
-    /// Decodes legacy transaction from the data buffer.
+    /// Decodes legacy transaction from the data buffer into a tuple.
     ///
     /// This expects `rlp(legacy_tx)`
-    fn decode_rlp_legacy_transaction(data: &mut &[u8]) -> Result<TransactionSigned, DecodeError> {
+    // TODO: make buf advancement semantics consistent with `decode_enveloped_typed_transaction`,
+    // so decoding methods do not need to manually advance the buffer
+    pub(crate) fn decode_rlp_legacy_transaction_tuple(
+        data: &mut &[u8],
+    ) -> Result<(TxLegacy, TxHash, Signature), DecodeError> {
         // keep this around, so we can use it to calculate the hash
         let original_encoding = *data;
 
         let header = Header::decode(data)?;
 
-        let mut transaction = Transaction::Legacy(TxLegacy {
+        let mut transaction = TxLegacy {
             nonce: Decodable::decode(data)?,
             gas_price: Decodable::decode(data)?,
             gas_limit: Decodable::decode(data)?,
@@ -1221,22 +1036,34 @@ impl TransactionSigned {
             value: Decodable::decode(data)?,
             input: Bytes(Decodable::decode(data)?),
             chain_id: None,
-        });
+        };
         let (signature, extracted_id) = Signature::decode_with_eip155_chain_id(data)?;
-        if let Some(id) = extracted_id {
-            transaction.set_chain_id(id);
-        }
+        transaction.chain_id = extracted_id;
 
         let tx_length = header.payload_length + header.length();
         let hash = keccak256(&original_encoding[..tx_length]);
-        let signed = TransactionSigned { transaction, hash, signature };
+        Ok((transaction, hash, signature))
+    }
+
+    /// Decodes legacy transaction from the data buffer.
+    ///
+    /// This expects `rlp(legacy_tx)`
+    // TODO: make buf advancement semantics consistent with `decode_enveloped_typed_transaction`,
+    // so decoding methods do not need to manually advance the buffer
+    pub fn decode_rlp_legacy_transaction(
+        data: &mut &[u8],
+    ) -> Result<TransactionSigned, DecodeError> {
+        let (transaction, hash, signature) =
+            TransactionSigned::decode_rlp_legacy_transaction_tuple(data)?;
+        let signed =
+            TransactionSigned { transaction: Transaction::Legacy(transaction), hash, signature };
         Ok(signed)
     }
 
     /// Decodes en enveloped EIP-2718 typed transaction.
     ///
     /// CAUTION: this expects that `data` is `[id, rlp(tx)]`
-    fn decode_enveloped_typed_transaction(
+    pub fn decode_enveloped_typed_transaction(
         data: &mut &[u8],
     ) -> Result<TransactionSigned, DecodeError> {
         // keep this around so we can use it to calculate the hash
@@ -1256,56 +1083,11 @@ impl TransactionSigned {
 
         // decode common fields
         let transaction = match tx_type {
-            1 => Transaction::Eip2930(TxEip2930 {
-                chain_id: Decodable::decode(data)?,
-                nonce: Decodable::decode(data)?,
-                gas_price: Decodable::decode(data)?,
-                gas_limit: Decodable::decode(data)?,
-                to: Decodable::decode(data)?,
-                value: Decodable::decode(data)?,
-                input: Bytes(Decodable::decode(data)?),
-                access_list: Decodable::decode(data)?,
-            }),
-            2 => Transaction::Eip1559(TxEip1559 {
-                chain_id: Decodable::decode(data)?,
-                nonce: Decodable::decode(data)?,
-                max_priority_fee_per_gas: Decodable::decode(data)?,
-                max_fee_per_gas: Decodable::decode(data)?,
-                gas_limit: Decodable::decode(data)?,
-                to: Decodable::decode(data)?,
-                value: Decodable::decode(data)?,
-                input: Bytes(Decodable::decode(data)?),
-                access_list: Decodable::decode(data)?,
-            }),
-            3 => Transaction::Eip4844(TxEip4844 {
-                chain_id: Decodable::decode(data)?,
-                nonce: Decodable::decode(data)?,
-                max_priority_fee_per_gas: Decodable::decode(data)?,
-                max_fee_per_gas: Decodable::decode(data)?,
-                gas_limit: Decodable::decode(data)?,
-                to: Decodable::decode(data)?,
-                value: Decodable::decode(data)?,
-                input: Bytes(Decodable::decode(data)?),
-                access_list: Decodable::decode(data)?,
-                max_fee_per_blob_gas: Decodable::decode(data)?,
-                blob_versioned_hashes: Decodable::decode(data)?,
-            }),
+            1 => Transaction::Eip2930(TxEip2930::decode_inner(data)?),
+            2 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
+            3 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
             #[cfg(feature = "optimism")]
-            DEPOSIT_TX_TYPE_ID => Transaction::Deposit(TxDeposit {
-                source_hash: Decodable::decode(data)?,
-                from: Decodable::decode(data)?,
-                to: Decodable::decode(data)?,
-                mint: if *data.first().ok_or(DecodeError::InputTooShort)? == EMPTY_STRING_CODE {
-                    data.advance(1);
-                    None
-                } else {
-                    Some(Decodable::decode(data)?)
-                },
-                value: Decodable::decode(data)?,
-                gas_limit: Decodable::decode(data)?,
-                is_system_transaction: Decodable::decode(data)?,
-                input: Decodable::decode(data)?,
-            }),
+            DEPOSIT_TX_TYPE_ID => Transaction::Deposit(TxDeposit::decode_inner(data)?),
             _ => return Err(DecodeError::Custom("unsupported typed transaction type")),
         };
 

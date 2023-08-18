@@ -266,7 +266,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub(crate) fn update_accounts(
         &mut self,
         changed_senders: HashMap<SenderId, SenderInfo>,
-    ) -> UpdateOutcome {
+    ) -> UpdateOutcome<T::Transaction> {
         // track changed accounts
         self.sender_info.extend(changed_senders.clone());
         // Apply the state changes to the total set of transactions which triggers sub-pool updates.
@@ -287,7 +287,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         block_info: BlockInfo,
         mined_transactions: Vec<TxHash>,
         changed_senders: HashMap<SenderId, SenderInfo>,
-    ) -> OnNewCanonicalStateOutcome {
+    ) -> OnNewCanonicalStateOutcome<T::Transaction> {
         // update block info
         let block_hash = block_info.last_seen_block_hash;
         self.all_transactions.set_block_info(block_info);
@@ -409,7 +409,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Maintenance task to apply a series of updates.
     ///
     /// This will move/discard the given transaction according to the `PoolUpdate`
-    fn process_updates(&mut self, updates: Vec<PoolUpdate>) -> UpdateOutcome {
+    fn process_updates(&mut self, updates: Vec<PoolUpdate>) -> UpdateOutcome<T::Transaction> {
         let mut outcome = UpdateOutcome::default();
         for update in updates {
             let PoolUpdate { id, hash, current, destination } = update;
@@ -422,9 +422,11 @@ impl<T: TransactionOrdering> TxPool<T> {
                 }
                 Destination::Pool(move_to) => {
                     debug_assert!(!move_to.eq(&current), "destination must be different");
-                    self.move_transaction(current, move_to, &id);
+                    let moved = self.move_transaction(current, move_to, &id);
                     if matches!(move_to, SubPool::Pending) {
-                        outcome.promoted.push(hash);
+                        if let Some(tx) = moved {
+                            outcome.promoted.push(tx);
+                        }
                     }
                 }
             }
@@ -436,10 +438,15 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///
     /// This will remove the given transaction from one sub-pool and insert it into the other
     /// sub-pool.
-    fn move_transaction(&mut self, from: SubPool, to: SubPool, id: &TransactionId) {
-        if let Some(tx) = self.remove_from_subpool(from, id) {
-            self.add_transaction_to_subpool(to, tx);
-        }
+    fn move_transaction(
+        &mut self,
+        from: SubPool,
+        to: SubPool,
+        id: &TransactionId,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let tx = self.remove_from_subpool(from, id)?;
+        self.add_transaction_to_subpool(to, tx.clone());
+        Some(tx)
     }
 
     /// Removes and returns all matching transactions from the pool.
@@ -1324,12 +1331,18 @@ impl<T: PoolTransaction> PoolInternalTransaction<T> {
 }
 
 /// Tracks the result after updating the pool
-#[derive(Default, Debug)]
-pub(crate) struct UpdateOutcome {
-    /// transactions promoted to the ready queue
-    pub(crate) promoted: Vec<TxHash>,
-    /// transaction that failed and became discarded
+#[derive(Debug)]
+pub(crate) struct UpdateOutcome<T: PoolTransaction> {
+    /// transactions promoted to the pending pool
+    pub(crate) promoted: Vec<Arc<ValidPoolTransaction<T>>>,
+    /// transaction that failed and were discarded
     pub(crate) discarded: Vec<TxHash>,
+}
+
+impl<T: PoolTransaction> Default for UpdateOutcome<T> {
+    fn default() -> Self {
+        Self { promoted: vec![], discarded: vec![] }
+    }
 }
 
 /// Represents the outcome of a prune

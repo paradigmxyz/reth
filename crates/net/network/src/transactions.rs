@@ -188,6 +188,7 @@ where
                 let _ = response.send(Ok(PooledTransactions::default()));
                 return
             }
+            // TODO softResponseLimit 2 * 1024 * 1024
             let transactions = self
                 .pool
                 .get_all(request.0)
@@ -198,7 +199,8 @@ where
             // we sent a response at which point we assume that the peer is aware of the transaction
             peer.transactions.extend(transactions.iter().map(|tx| tx.hash()));
 
-            let resp = PooledTransactions(transactions);
+            // TODO: remove this! this will be different when we introduce the blobpool
+            let resp = PooledTransactions(transactions.into_iter().map(Into::into).collect());
             let _ = response.send(Ok(resp));
         }
     }
@@ -245,6 +247,8 @@ where
     ///
     /// The message for new pooled hashes depends on the negotiated version of the stream.
     /// See [NewPooledTransactionHashes](NewPooledTransactionHashes)
+    ///
+    /// TODO add note that this never broadcasts full 4844 transactions
     fn propagate_transactions(
         &mut self,
         to_propagate: Vec<PropagateTransaction>,
@@ -604,7 +608,11 @@ where
         {
             match result {
                 Ok(Ok(txs)) => {
-                    this.import_transactions(peer_id, txs.0, TransactionSource::Response);
+                    // convert all transactions to the inner transaction type, ignoring any
+                    // sidecars
+                    // TODO: remove this! this will be different when we introduce the blobpool
+                    let transactions = txs.0.into_iter().map(|tx| tx.into_transaction()).collect();
+                    this.import_transactions(peer_id, transactions, TransactionSource::Response)
                 }
                 Ok(Err(req_err)) => {
                     this.on_request_error(peer_id, req_err);
@@ -823,7 +831,7 @@ impl Future for GetPooledTxRequestFut {
 struct Peer {
     /// Keeps track of transactions that we know the peer has seen.
     transactions: LruCache<H256>,
-    /// A communication channel directly to the session task.
+    /// A communication channel directly to the peer's session task.
     request_tx: PeerRequestSender,
     /// negotiated version of the session.
     version: EthVersion,
