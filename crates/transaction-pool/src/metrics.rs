@@ -1,7 +1,7 @@
 //! Transaction pool metrics.
 
 use reth_metrics::{
-    metrics::{self, Counter, Gauge},
+    metrics::{Counter, Gauge},
     Metrics,
 };
 

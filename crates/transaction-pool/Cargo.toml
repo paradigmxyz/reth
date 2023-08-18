@@ -22,7 +22,6 @@ reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-interfaces.workspace = true
 reth-rlp.workspace = true
-reth-metrics.workspace = true
 reth-tasks.workspace = true
 
 # async/futures
@@ -31,6 +30,10 @@ futures-util.workspace = true
 parking_lot.workspace = true
 tokio = { workspace = true, default-features = false, features = ["sync"] }
 tokio-stream.workspace = true
+
+# metrics
+reth-metrics.workspace = true
+metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
 
 # misc
 aquamarine = "0.3.0"
