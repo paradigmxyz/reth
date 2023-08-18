@@ -168,7 +168,7 @@ where
         StageSetBuilder::default()
             .add_stage(headers)
             .add_stage(TotalDifficultyStage::new(consensus.clone()))
-            .add_stage(BodyStage { downloader: body_downloader, consensus })
+            .add_stage(BodyStage::new(body_downloader, consensus))
     }
 
     /// Create a new builder using the given bodies stage.
@@ -195,7 +195,7 @@ where
         StageSetBuilder::default()
             .add_stage(HeaderStage::new(self.header_downloader, self.header_mode))
             .add_stage(TotalDifficultyStage::new(self.consensus.clone()))
-            .add_stage(BodyStage { downloader: self.body_downloader, consensus: self.consensus })
+            .add_stage(BodyStage::new(self.body_downloader, self.consensus))
     }
 }
 
