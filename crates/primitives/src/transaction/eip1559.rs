@@ -1,5 +1,6 @@
 use super::access_list::AccessList;
-use crate::{Bytes, ChainId, Signature, TransactionKind, TxType};
+use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, H256};
+use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header};
 use std::mem;
@@ -187,6 +188,28 @@ impl TxEip1559 {
         mem::size_of::<u128>() + // value
         self.access_list.size() + // access_list
         self.input.len() // input
+    }
+
+    /// Encodes the legacy transaction in RLP for signing.
+    pub(crate) fn encode_for_signing(&self, out: &mut dyn bytes::BufMut) {
+        out.put_u8(self.tx_type() as u8);
+        Header { list: true, payload_length: self.fields_len() }.encode(out);
+        self.encode_fields(out);
+    }
+
+    /// Outputs the length of the signature RLP encoding for the transaction.
+    pub(crate) fn payload_len_for_signature(&self) -> usize {
+        let payload_length = self.fields_len();
+        // 'transaction type byte length' + 'header length' + 'payload length'
+        1 + length_of_length(payload_length) + payload_length
+    }
+
+    /// Outputs the signature hash of the transaction by first encoding without a signature, then
+    /// hashing.
+    pub(crate) fn signature_hash(&self) -> H256 {
+        let mut buf = BytesMut::with_capacity(self.payload_len_for_signature());
+        self.encode_for_signing(&mut buf);
+        keccak256(&buf)
     }
 }
 
