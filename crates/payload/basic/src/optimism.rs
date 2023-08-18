@@ -68,15 +68,25 @@ where
             .map_err(|_| PayloadBuilderError::TransactionEcRecoverFailed)?;
 
         let mut cfg = initialized_cfg.clone();
-        let mut block_cfg = initialized_block_env.clone();
 
         if sequencer_tx.is_deposit() {
             cfg.disable_base_fee = true;
-            block_cfg.gas_limit = U256::from(block_gas_limit);
+
+            // If the Regolith hardfork is active, we do not need to disable the block gas limit.
+            // Otherwise, we allow for the block gas limit to be exceeded by deposit transactions.
+            if !chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, attributes.timestamp) &&
+                sequencer_tx.is_deposit()
+            {
+                cfg.disable_block_gas_limit = true;
+            };
         }
 
         // Configure the environment for the block.
-        let env = Env { cfg, block: block_cfg, tx: tx_env_with_recovered(&sequencer_tx) };
+        let env = Env {
+            cfg,
+            block: initialized_block_env.clone(),
+            tx: tx_env_with_recovered(&sequencer_tx),
+        };
 
         let mut evm = revm::EVM::with_env(env);
         evm.database(&mut db);
