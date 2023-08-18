@@ -243,17 +243,24 @@ where
 
             #[cfg(feature = "optimism")]
             {
+                let is_regolith = self
+                    .chain_spec
+                    .is_fork_active_at_timestamp(Hardfork::Regolith, block.timestamp);
+
                 if transaction.gas_limit() > block_available_gas &&
                     !transaction.is_deposit() &&
-                    !self
-                        .chain_spec
-                        .is_fork_active_at_timestamp(Hardfork::Regolith, block.timestamp)
+                    !is_regolith
                 {
                     return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                         transaction_gas_limit: transaction.gas_limit(),
                         block_available_gas,
                     }
                     .into())
+                }
+
+                if transaction.is_deposit() && !is_regolith {
+                    self.evm.env.cfg.disable_base_fee = true;
+                    self.evm.env.cfg.disable_block_gas_limit = true;
                 }
 
                 let db = self.db();
@@ -394,6 +401,11 @@ where
                         .then_some(old_sender_info.nonce),
                     },
                 );
+
+                if transaction.is_deposit() && !is_regolith {
+                    self.evm.env.cfg.disable_base_fee = false;
+                    self.evm.env.cfg.disable_block_gas_limit = false;
+                }
             }
 
             #[cfg(not(feature = "optimism"))]
