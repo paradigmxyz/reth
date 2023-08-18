@@ -97,7 +97,7 @@
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool, TransactionPool};
 //!  async fn t<C>(client: C)  where C: StateProviderFactory + ChainSpecProvider + Clone + 'static{
 //!     let pool = Pool::eth_pool(
-//!         TransactionValidationTaskExecutor::new(client, MAINNET.clone(), TokioTaskExecutor::default()),
+//!         TransactionValidationTaskExecutor::eth(client, MAINNET.clone(), TokioTaskExecutor::default()),
 //!         Default::default(),
 //!     );
 //!   let mut transactions = pool.pending_transactions_listener();
@@ -126,7 +126,7 @@
 //!     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 //!     {
 //!     let pool = Pool::eth_pool(
-//!         TransactionValidationTaskExecutor::new(client.clone(), MAINNET.clone(), TokioTaskExecutor::default()),
+//!         TransactionValidationTaskExecutor::eth(client.clone(), MAINNET.clone(), TokioTaskExecutor::default()),
 //!         Default::default(),
 //!     );
 //!
@@ -281,7 +281,7 @@ where
     /// use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool};
     /// # fn t<C>(client: C)  where C: StateProviderFactory + Clone + 'static{
     ///     let pool = Pool::eth_pool(
-    ///         TransactionValidationTaskExecutor::new(client, MAINNET.clone(), TokioTaskExecutor::default()),
+    ///         TransactionValidationTaskExecutor::eth(client, MAINNET.clone(), TokioTaskExecutor::default()),
     ///         Default::default(),
     ///     );
     /// # }
