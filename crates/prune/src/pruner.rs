@@ -101,6 +101,14 @@ impl<DB: Database> Pruner<DB> {
         if let Some((to_block, prune_mode)) =
             self.modes.prune_target_block_receipts(tip_block_number)?
         {
+            trace!(
+                target: "pruner",
+                prune_part = ?PrunePart::Receipts,
+                %to_block,
+                ?prune_mode,
+                "Got target block to prune"
+            );
+
             let part_start = Instant::now();
             done = done && self.prune_receipts(&provider, to_block, prune_mode)?;
             self.metrics
@@ -108,12 +116,24 @@ impl<DB: Database> Pruner<DB> {
                 .duration_seconds
                 .record(part_start.elapsed())
         } else {
-            trace!(target: "pruner", "No receipts to prune");
+            trace!(
+                target: "pruner",
+                prune_part = ?PrunePart::Receipts,
+                "No target block to prune"
+            );
         }
 
         if let Some((to_block, prune_mode)) =
             self.modes.prune_target_block_transaction_lookup(tip_block_number)?
         {
+            trace!(
+                target: "pruner",
+                prune_part = ?PrunePart::TransactionLookup,
+                %to_block,
+                ?prune_mode,
+                "Got target block to prune"
+            );
+
             let part_start = Instant::now();
             done = done && self.prune_transaction_lookup(&provider, to_block, prune_mode)?;
             self.metrics
@@ -121,12 +141,24 @@ impl<DB: Database> Pruner<DB> {
                 .duration_seconds
                 .record(part_start.elapsed())
         } else {
-            trace!(target: "pruner", "No transaction lookup entries to prune");
+            trace!(
+                target: "pruner",
+                prune_part = ?PrunePart::TransactionLookup,
+                "No target block to prune"
+            );
         }
 
         if let Some((to_block, prune_mode)) =
             self.modes.prune_target_block_sender_recovery(tip_block_number)?
         {
+            trace!(
+                target: "pruner",
+                prune_part = ?PrunePart::SenderRecovery,
+                %to_block,
+                ?prune_mode,
+                "Got target block to prune"
+            );
+
             let part_start = Instant::now();
             done = done && self.prune_transaction_senders(&provider, to_block, prune_mode)?;
             self.metrics
@@ -134,12 +166,24 @@ impl<DB: Database> Pruner<DB> {
                 .duration_seconds
                 .record(part_start.elapsed())
         } else {
-            trace!(target: "pruner", "No transaction senders to prune");
+            trace!(
+                target: "pruner",
+                prune_part = ?PrunePart::SenderRecovery,
+                "No target block to prune"
+            );
         }
 
         if let Some((to_block, prune_mode)) =
             self.modes.prune_target_block_account_history(tip_block_number)?
         {
+            trace!(
+                target: "pruner",
+                prune_part = ?PrunePart::AccountHistory,
+                %to_block,
+                ?prune_mode,
+                "Got target block to prune"
+            );
+
             let part_start = Instant::now();
             done = done && self.prune_account_history(&provider, to_block, prune_mode)?;
             self.metrics
@@ -147,12 +191,24 @@ impl<DB: Database> Pruner<DB> {
                 .duration_seconds
                 .record(part_start.elapsed())
         } else {
-            trace!(target: "pruner", "No account history entries to prune");
+            trace!(
+                target: "pruner",
+                prune_part = ?PrunePart::AccountHistory,
+                "No target block to prune"
+            );
         }
 
         if let Some((to_block, prune_mode)) =
             self.modes.prune_target_block_storage_history(tip_block_number)?
         {
+            trace!(
+                target: "pruner",
+                prune_part = ?PrunePart::StorageHistory,
+                %to_block,
+                ?prune_mode,
+                "Got target block to prune"
+            );
+
             let part_start = Instant::now();
             done = done && self.prune_storage_history(&provider, to_block, prune_mode)?;
             self.metrics
@@ -160,7 +216,11 @@ impl<DB: Database> Pruner<DB> {
                 .duration_seconds
                 .record(part_start.elapsed())
         } else {
-            trace!(target: "pruner", "No storage history entries to prune");
+            trace!(
+                target: "pruner",
+                prune_part = ?PrunePart::StorageHistory,
+                "No target block to prune"
+            );
         }
 
         provider.commit()?;
