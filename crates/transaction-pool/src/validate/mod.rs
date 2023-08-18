@@ -19,7 +19,7 @@ mod task;
 pub use eth::{EthTransactionValidator, EthTransactionValidatorBuilder};
 
 /// A spawnable task that performs transaction validation.
-pub use task::ValidationTask;
+pub use task::{TransactionValidationTaskExecutor, ValidationTask};
 
 /// Validation constants.
 pub use constants::{MAX_CODE_SIZE, MAX_INIT_CODE_SIZE, TX_MAX_SIZE, TX_SLOT_SIZE};
@@ -150,7 +150,7 @@ pub trait TransactionValidator: Send + Sync {
     /// example nonce or balance changes. Hence, any validation checks must be applied in this
     /// function.
     ///
-    /// See [EthTransactionValidator] for a reference implementation.
+    /// See [TransactionValidationTaskExecutor] for a reference implementation.
     async fn validate_transaction(
         &self,
         origin: TransactionOrigin,
