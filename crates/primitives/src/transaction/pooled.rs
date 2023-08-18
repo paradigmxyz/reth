@@ -1,10 +1,11 @@
 //! Defines the types for blob transactions, legacy, and other EIP-2718 transactions included in a
 //! response to `GetPooledTransactions`.
 use crate::{
-    BlobTransaction, Bytes, Signature, Transaction, TransactionSigned, TxEip1559, TxEip2930,
-    TxHash, TxLegacy, EIP4844_TX_TYPE_ID,
+    Address, BlobTransaction, Bytes, Signature, Transaction, TransactionSigned,
+    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxHash, TxLegacy, EIP4844_TX_TYPE_ID, H256,
 };
 use bytes::Buf;
+use derive_more::{AsRef, Deref};
 use reth_rlp::{Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE};
 use serde::{Deserialize, Serialize};
 
@@ -45,6 +46,46 @@ pub enum PooledTransactionsElement {
 }
 
 impl PooledTransactionsElement {
+    /// Heavy operation that return signature hash over rlp encoded transaction.
+    /// It is only for signature signing or signer recovery.
+    pub fn signature_hash(&self) -> H256 {
+        match self {
+            Self::Legacy { transaction, .. } => transaction.signature_hash(),
+            Self::Eip2930 { transaction, .. } => transaction.signature_hash(),
+            Self::Eip1559 { transaction, .. } => transaction.signature_hash(),
+            Self::BlobTransaction(blob_tx) => blob_tx.transaction.signature_hash(),
+        }
+    }
+
+    /// Returns the signature of the transaction.
+    pub fn signature(&self) -> &Signature {
+        match self {
+            Self::Legacy { signature, .. } => signature,
+            Self::Eip2930 { signature, .. } => signature,
+            Self::Eip1559 { signature, .. } => signature,
+            Self::BlobTransaction(blob_tx) => &blob_tx.signature,
+        }
+    }
+
+    /// Recover signer from signature and hash.
+    ///
+    /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
+    pub fn recover_signer(&self) -> Option<Address> {
+        let signature_hash = self.signature_hash();
+        self.signature().recover_signer(signature_hash)
+    }
+
+    /// Tries to recover signer and return [`PooledTransactionsElementEcRecovered`].
+    ///
+    /// Returns `Err(Self)` if the transaction's signature is invalid, see also
+    /// [Self::recover_signer].
+    pub fn try_into_ecrecovered(self) -> Result<PooledTransactionsElementEcRecovered, Self> {
+        match self.recover_signer() {
+            None => Err(self),
+            Some(signer) => Ok(PooledTransactionsElementEcRecovered { transaction: self, signer }),
+        }
+    }
+
     /// Decodes the "raw" format of transaction (e.g. `eth_sendRawTransaction`).
     ///
     /// The raw transaction is either a legacy transaction or EIP-2718 typed transaction
@@ -115,6 +156,12 @@ impl PooledTransactionsElement {
                 }
             }
         }
+    }
+
+    /// Create [`TransactionSignedEcRecovered`] by converting this transaction into
+    /// [`TransactionSigned`] and [`Address`] of the signer.
+    pub fn into_ecrecovered_transaction(self, signer: Address) -> TransactionSignedEcRecovered {
+        TransactionSignedEcRecovered::from_signed_transaction(self.into_transaction(), signer)
     }
 
     /// Returns the inner [TransactionSigned].
@@ -299,5 +346,44 @@ impl From<TransactionSigned> for PooledTransactionsElement {
                 })
             }
         }
+    }
+}
+
+/// A signed pooled transaction with recovered signer.
+#[derive(Debug, Clone, PartialEq, Eq, AsRef, Deref)]
+pub struct PooledTransactionsElementEcRecovered {
+    /// Signer of the transaction
+    signer: Address,
+    /// Signed transaction
+    #[deref]
+    #[as_ref]
+    transaction: PooledTransactionsElement,
+}
+
+// === impl PooledTransactionsElementEcRecovered ===
+
+impl PooledTransactionsElementEcRecovered {
+    /// Signer of transaction recovered from signature
+    pub fn signer(&self) -> Address {
+        self.signer
+    }
+
+    /// Transform back to [`PooledTransactionsElement`]
+    pub fn into_transaction(self) -> PooledTransactionsElement {
+        self.transaction
+    }
+
+    /// Desolve Self to its component
+    pub fn into_components(self) -> (PooledTransactionsElement, Address) {
+        (self.transaction, self.signer)
+    }
+
+    /// Create [`TransactionSignedEcRecovered`] from [`PooledTransactionsElement`] and [`Address`]
+    /// of the signer.
+    pub fn from_signed_transaction(
+        transaction: PooledTransactionsElement,
+        signer: Address,
+    ) -> Self {
+        Self { transaction, signer }
     }
 }
