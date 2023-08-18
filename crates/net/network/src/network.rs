@@ -186,7 +186,17 @@ impl PeersInfo for NetworkHandle {
 
     fn local_node_record(&self) -> NodeRecord {
         let id = *self.peer_id();
-        let socket_addr = *self.inner.listener_address.lock();
+        let mut socket_addr = *self.inner.listener_address.lock();
+
+        if socket_addr.ip().is_unspecified() {
+            // zero address is invalid
+            if socket_addr.ip().is_ipv4() {
+                socket_addr.set_ip(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+            } else {
+                socket_addr.set_ip(std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST));
+            }
+        }
+
         NodeRecord::new(socket_addr, id)
     }
 }
