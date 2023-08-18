@@ -79,17 +79,15 @@ where
         dbg!("GOT SEQUENCER TX", &sequencer_tx);
 
         let mut cfg = initialized_cfg.clone();
+        let mut block_cfg = initialized_block_env.clone();
 
         if sequencer_tx.is_deposit() {
             cfg.disable_base_fee = true;
+            block_cfg.gas_limit = U256::from(block_gas_limit);
         }
 
         // Configure the environment for the block.
-        let env = Env {
-            cfg,
-            block: initialized_block_env.clone(),
-            tx: tx_env_with_recovered(&sequencer_tx),
-        };
+        let env = Env { cfg, block: block_cfg, tx: tx_env_with_recovered(&sequencer_tx) };
 
         let mut evm = revm::EVM::with_env(env);
         evm.database(&mut db);
