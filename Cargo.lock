@@ -3824,15 +3824,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mach"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b823e83b2affd8f40a9ee8c29dbc56404c1e34cd2710921f2801e2cf29527afa"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "mach2"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3894,54 +3885,31 @@ dependencies = [
 
 [[package]]
 name = "metrics"
-version = "0.20.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b9b8653cec6897f73b519a43fba5ee3d50f62fe9af80b428accdcc093b4a849"
-dependencies = [
- "ahash 0.7.6",
- "metrics-macros 0.6.0",
- "portable-atomic 0.3.20",
-]
-
-[[package]]
-name = "metrics"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fde3af1a009ed76a778cb84fdef9e7dbbdf5775ae3e4cc1f434a6a307f6f76c5"
 dependencies = [
  "ahash 0.8.3",
- "metrics-macros 0.7.0",
- "portable-atomic 1.4.2",
+ "metrics-macros",
+ "portable-atomic",
 ]
 
 [[package]]
 name = "metrics-exporter-prometheus"
-version = "0.11.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8603921e1f54ef386189335f288441af761e0fc61bcb552168d9cedfe63ebc70"
+checksum = "8a4964177ddfdab1e3a2b37aec7cf320e14169abb0ed73999f558136409178d5"
 dependencies = [
+ "base64 0.21.2",
  "hyper",
  "indexmap 1.9.3",
  "ipnet",
- "metrics 0.20.1",
+ "metrics",
  "metrics-util",
- "parking_lot 0.12.1",
- "portable-atomic 0.3.20",
  "quanta",
  "thiserror",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "metrics-macros"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "731f8ecebd9f3a4aa847dfe75455e4757a45da40a7793d2f0b1f9b6ed18b23f3"
-dependencies = [
- "proc-macro2 1.0.66",
- "quote 1.0.32",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -3963,7 +3931,7 @@ checksum = "1c93f6ad342d3f7bc14724147e2dbc6eb6fdbe5a832ace16ea23b73618e8cc17"
 dependencies = [
  "libproc",
  "mach2",
- "metrics 0.21.1",
+ "metrics",
  "once_cell",
  "procfs",
  "rlimit",
@@ -3972,20 +3940,18 @@ dependencies = [
 
 [[package]]
 name = "metrics-util"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7d24dc2dbae22bff6f1f9326ffce828c9f07ef9cc1e8002e5279f845432a30a"
+checksum = "111cb375987443c3de8d503580b536f77dc8416d32db62d9456db5d93bd7ac47"
 dependencies = [
  "aho-corasick 0.7.20",
  "crossbeam-epoch",
  "crossbeam-utils",
- "hashbrown 0.12.3",
+ "hashbrown 0.13.2",
  "indexmap 1.9.3",
- "metrics 0.20.1",
+ "metrics",
  "num_cpus",
  "ordered-float",
- "parking_lot 0.12.1",
- "portable-atomic 0.3.20",
  "quanta",
  "radix_trie",
  "sketches-ddsketch",
@@ -4360,9 +4326,9 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "ordered-float"
-version = "2.10.0"
+version = "3.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7940cf2ca942593318d07fcf2596cdca60a85c9e7fab408a5e21a4f9dcd40d87"
+checksum = "7417b1484e3641a8791af3c3123cdc083ac60a0d262a2f281b6125d58917caf4"
 dependencies = [
  "num-traits",
 ]
@@ -4691,15 +4657,6 @@ dependencies = [
 
 [[package]]
 name = "portable-atomic"
-version = "0.3.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e30165d31df606f5726b090ec7592c308a0eaf61721ff64c9a3018e344a8753e"
-dependencies = [
- "portable-atomic 1.4.2",
-]
-
-[[package]]
-name = "portable-atomic"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f32154ba0af3a075eefa1eda8bb414ee928f62303a54ea85b8d6638ff1a6ee9e"
@@ -4926,16 +4883,16 @@ dependencies = [
 
 [[package]]
 name = "quanta"
-version = "0.10.1"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7e31331286705f455e56cca62e0e717158474ff02b7936c1fa596d983f4ae27"
+checksum = "a17e662a7a8291a865152364c20c7abc5e60486ab2001e8ec10b24862de0b9ab"
 dependencies = [
  "crossbeam-utils",
  "libc",
- "mach",
+ "mach2",
  "once_cell",
  "raw-cpuid",
- "wasi 0.10.2+wasi-snapshot-preview1",
+ "wasi 0.11.0+wasi-snapshot-preview1",
  "web-sys",
  "winapi",
 ]
@@ -5254,6 +5211,7 @@ dependencies = [
  "hyper",
  "jemalloc-ctl",
  "jemallocator",
+ "metrics",
  "metrics-exporter-prometheus",
  "metrics-process",
  "metrics-util",
@@ -5327,6 +5285,7 @@ version = "0.1.0-alpha.6"
 dependencies = [
  "futures-core",
  "futures-util",
+ "metrics",
  "reth-metrics",
  "reth-payload-builder",
  "reth-primitives",
@@ -5346,6 +5305,7 @@ version = "0.1.0-alpha.6"
 dependencies = [
  "assert_matches",
  "futures",
+ "metrics",
  "reth-blockchain-tree",
  "reth-consensus-common",
  "reth-db",
@@ -5376,6 +5336,7 @@ dependencies = [
  "assert_matches",
  "linked_hash_set",
  "lru 0.10.1",
+ "metrics",
  "parking_lot 0.12.1",
  "reth-db",
  "reth-interfaces",
@@ -5444,6 +5405,7 @@ dependencies = [
  "futures",
  "heapless",
  "iai",
+ "metrics",
  "modular-bitfield",
  "page_size",
  "parity-scale-codec",
@@ -5527,6 +5489,7 @@ dependencies = [
  "futures",
  "futures-util",
  "itertools 0.11.0",
+ "metrics",
  "pin-project",
  "rayon",
  "reth-db",
@@ -5586,6 +5549,7 @@ dependencies = [
  "futures",
  "hex",
  "hex-literal 0.3.4",
+ "metrics",
  "pin-project",
  "proptest",
  "proptest-derive",
@@ -5689,7 +5653,7 @@ name = "reth-metrics"
 version = "0.1.0-alpha.6"
 dependencies = [
  "futures",
- "metrics 0.20.1",
+ "metrics",
  "reth-metrics-derive",
  "tokio",
 ]
@@ -5698,7 +5662,7 @@ dependencies = [
 name = "reth-metrics-derive"
 version = "0.1.0-alpha.6"
 dependencies = [
- "metrics 0.20.1",
+ "metrics",
  "once_cell",
  "proc-macro2 1.0.66",
  "quote 1.0.32",
@@ -5749,6 +5713,7 @@ dependencies = [
  "humantime-serde",
  "linked-hash-map",
  "linked_hash_set",
+ "metrics",
  "parking_lot 0.12.1",
  "pin-project",
  "rand 0.8.5",
@@ -5799,6 +5764,7 @@ name = "reth-payload-builder"
 version = "0.1.0-alpha.6"
 dependencies = [
  "futures-util",
+ "metrics",
  "reth-interfaces",
  "reth-metrics",
  "reth-primitives",
@@ -5892,6 +5858,7 @@ version = "0.1.0-alpha.6"
 dependencies = [
  "assert_matches",
  "itertools 0.11.0",
+ "metrics",
  "rayon",
  "reth-db",
  "reth-interfaces",
@@ -5987,6 +5954,7 @@ dependencies = [
  "jsonrpsee",
  "jsonwebtoken",
  "lazy_static",
+ "metrics",
  "pin-project",
  "rand 0.8.5",
  "rayon",
@@ -6050,6 +6018,7 @@ version = "0.1.0-alpha.6"
 dependencies = [
  "hyper",
  "jsonrpsee",
+ "metrics",
  "reth-beacon-consensus",
  "reth-interfaces",
  "reth-ipc",
@@ -6131,6 +6100,7 @@ dependencies = [
  "criterion",
  "futures-util",
  "itertools 0.11.0",
+ "metrics",
  "num-traits",
  "paste",
  "pin-project",
@@ -6163,6 +6133,7 @@ version = "0.1.0-alpha.6"
 dependencies = [
  "dyn-clone",
  "futures-util",
+ "metrics",
  "reth-metrics",
  "thiserror",
  "tokio",
@@ -6192,6 +6163,7 @@ dependencies = [
  "criterion",
  "fnv",
  "futures-util",
+ "metrics",
  "parking_lot 0.12.1",
  "paste",
  "proptest",
@@ -8195,12 +8167,6 @@ name = "wasi"
 version = "0.9.0+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cccddf32554fecc6acb585f82a32a72e28b48f8c4c1883ddfeeeaa96f7d8e519"
-
-[[package]]
-name = "wasi"
-version = "0.10.2+wasi-snapshot-preview1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd6fbd9a79829dd1ad0cc20627bf1ed606756a7f77edff7b66b7064f9cb327c6"
 
 [[package]]
 name = "wasi"
