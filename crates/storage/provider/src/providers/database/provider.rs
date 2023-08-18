@@ -228,10 +228,10 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
         let mut state: BundleStateInit = HashMap::new();
 
-        // TODO this was not working for blocks that are not at tip. as plain state is not the last
+        // This is not working for blocks that are not at tip. as plain state is not the last
         // state of end range. We should rename the functions or add support to access
         // History state. Accessing history state can be tricky but we are not gaining
-        // anything. For now I will leave it as it is and come back to it later.
+        // anything.
         let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
         let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
 

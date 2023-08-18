@@ -69,7 +69,11 @@ async fn unwind_and_copy<DB: Database>(
     // Bring Plainstate to TO (hashing stage execution requires it)
     let mut exec_stage = ExecutionStage::new(
         reth_revm::Factory::new(db_tool.chain.clone()),
-        ExecutionStageThresholds { max_blocks: Some(u64::MAX), max_changes: None },
+        ExecutionStageThresholds {
+            max_blocks: Some(u64::MAX),
+            max_changes: None,
+            max_cumulative_gas: None,
+        },
         MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
         PruneModes::all(),
     );

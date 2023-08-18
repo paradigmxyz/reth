@@ -201,6 +201,7 @@ impl Command {
                             ExecutionStageThresholds {
                                 max_blocks: Some(batch_size),
                                 max_changes: None,
+                                max_cumulative_gas: None,
                             },
                             config.stages.merkle.clean_threshold,
                             config.prune.map(|prune| prune.parts).unwrap_or_default(),

@@ -792,6 +792,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                         ExecutionStageThresholds {
                             max_blocks: stage_config.execution.max_blocks,
                             max_changes: stage_config.execution.max_changes,
+                            max_cumulative_gas: stage_config.execution.max_cumulative_gas,
                         },
                         stage_config
                             .merkle

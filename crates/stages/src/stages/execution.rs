@@ -136,6 +136,8 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         debug!(target: "sync::stages::execution", start = start_block, end = max_block, "Executing range");
         // Execute block range
 
+        let mut cumulative_gas = 0;
+
         // TODO(rakita) integrate prunning.
         //state.add_prune_modes(prune_modes);
         for block_number in start_block..=max_block {
@@ -148,6 +150,9 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
 
             fetch_block_duration += time.elapsed();
+
+            cumulative_gas += block.gas_used;
+
             // Configure the executor to use the current state.
             trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
 
@@ -168,17 +173,10 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
             stage_progress = block_number;
 
-            // TODO Write history periodically to free up memory
-            // if self.thresholds.should_write_history(state.changeset_size_hint() as u64) {
-            //     info!(target: "sync::stages::execution", ?block_number, "Writing history.");
-            //     state.write_history_to_db(&**tx)?;
-            //     info!(target: "sync::stages::execution", ?block_number, "Wrote history.");
-            //     // gas_since_history_write = 0;
-            // }
             stage_checkpoint.progress.processed += block.gas_used;
 
             // Check if we should commit now
-            if self.thresholds.is_end_of_batch(block_number - start_block, 0) {
+            if self.thresholds.is_end_of_batch(block_number - start_block, 0, cumulative_gas) {
                 break
             }
         }
@@ -471,20 +469,33 @@ pub struct ExecutionStageThresholds {
     pub max_blocks: Option<u64>,
     /// The maximum amount of state changes to keep in memory before the execution stage commits.
     pub max_changes: Option<u64>,
+    /// The maximum amount of cumultive gas used in the batch.
+    pub max_cumulative_gas: Option<u64>,
 }
 
 impl Default for ExecutionStageThresholds {
     fn default() -> Self {
-        Self { max_blocks: Some(500_000), max_changes: Some(5_000_000) }
+        Self {
+            max_blocks: Some(500_000),
+            max_changes: Some(5_000_000),
+            // 30M block per gas on 50k blocks
+            max_cumulative_gas: Some(30_000_000 * 50_000),
+        }
     }
 }
 
 impl ExecutionStageThresholds {
     /// Check if the batch thresholds have been hit.
     #[inline]
-    pub fn is_end_of_batch(&self, blocks_processed: u64, changes_processed: u64) -> bool {
+    pub fn is_end_of_batch(
+        &self,
+        blocks_processed: u64,
+        changes_processed: u64,
+        cumulative_gas_used: u64,
+    ) -> bool {
         blocks_processed >= self.max_blocks.unwrap_or(u64::MAX) ||
-            changes_processed >= self.max_changes.unwrap_or(u64::MAX)
+            changes_processed >= self.max_changes.unwrap_or(u64::MAX) ||
+            cumulative_gas_used >= self.max_cumulative_gas.unwrap_or(u64::MAX)
     }
 }
 
@@ -508,7 +519,11 @@ mod tests {
             Factory::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()));
         ExecutionStage::new(
             factory,
-            ExecutionStageThresholds { max_blocks: Some(100), max_changes: None },
+            ExecutionStageThresholds {
+                max_blocks: Some(100),
+                max_changes: None,
+                max_cumulative_gas: None,
+            },
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::none(),
         )
