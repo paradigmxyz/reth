@@ -145,7 +145,6 @@ impl GethTraceBuilder {
             call_frames.push((idx, trace.geth_empty_call_frame(include_logs)));
         }
 
-
         // pop the _children_ calls frame and move it to the parent
         // this will roll up the child frames to their parent; this works because `child idx >
         // parent idx`
