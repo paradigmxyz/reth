@@ -264,14 +264,16 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
         let blockchain_db = BlockchainProvider::new(factory, blockchain_tree.clone())?;
 
+        let blob_store = InMemoryBlobStore::default();
         let transaction_pool = reth_transaction_pool::Pool::eth_pool(
             TransactionValidationTaskExecutor::eth_with_additional_tasks(
                 blockchain_db.clone(),
                 Arc::clone(&self.chain),
+                blob_store.clone(),
                 ctx.task_executor.clone(),
                 1,
             ),
-            InMemoryBlobStore::default(),
+            blob_store,
             self.txpool.pool_config(),
         );
         info!(target: "reth::cli", "Transaction pool initialized");
