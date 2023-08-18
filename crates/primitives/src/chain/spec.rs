@@ -326,6 +326,7 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
                 Hardfork::Paris,
                 ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
             ),
+            (Hardfork::Bedrock, ForkCondition::Block(0)),
             (Hardfork::Regolith, ForkCondition::Timestamp(0)),
         ]),
         base_fee_params: BaseFeeParams::optimism(),
