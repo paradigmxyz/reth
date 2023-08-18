@@ -10,9 +10,7 @@ pub use meta::TransactionMeta;
 use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
-use reth_rlp::{
-    length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
-};
+use reth_rlp::{Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
 use serde::{Deserialize, Serialize};
 pub use signature::Signature;
 use std::mem;
@@ -24,7 +22,7 @@ pub use eip1559::TxEip1559;
 pub use eip2930::TxEip2930;
 pub use eip4844::{BlobTransaction, BlobTransactionSidecar, TxEip4844};
 pub use legacy::TxLegacy;
-pub use pooled::PooledTransactionsElement;
+pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 
 mod access_list;
 mod eip1559;
@@ -100,9 +98,12 @@ impl Transaction {
     /// Heavy operation that return signature hash over rlp encoded transaction.
     /// It is only for signature signing or signer recovery.
     pub fn signature_hash(&self) -> H256 {
-        let mut buf = BytesMut::new();
-        self.encode(&mut buf);
-        keccak256(&buf)
+        match self {
+            Transaction::Legacy(tx) => tx.signature_hash(),
+            Transaction::Eip2930(tx) => tx.signature_hash(),
+            Transaction::Eip1559(tx) => tx.signature_hash(),
+            Transaction::Eip4844(tx) => tx.signature_hash(),
+        }
     }
 
     /// Get chain_id.
@@ -316,54 +317,6 @@ impl Transaction {
         }
     }
 
-    /// Encodes EIP-155 arguments into the desired buffer. Only encodes values for legacy
-    /// transactions.
-    pub(crate) fn encode_eip155_fields(&self, out: &mut dyn bytes::BufMut) {
-        // if this is a legacy transaction without a chain ID, it must be pre-EIP-155
-        // and does not need to encode the chain ID for the signature hash encoding
-        if let Transaction::Legacy(TxLegacy { chain_id: Some(id), .. }) = self {
-            // EIP-155 encodes the chain ID and two zeroes
-            id.encode(out);
-            0x00u8.encode(out);
-            0x00u8.encode(out);
-        }
-    }
-
-    /// Outputs the length of EIP-155 fields. Only outputs a non-zero value for EIP-155 legacy
-    /// transactions.
-    pub(crate) fn eip155_fields_len(&self) -> usize {
-        if let Transaction::Legacy(TxLegacy { chain_id: Some(id), .. }) = self {
-            // EIP-155 encodes the chain ID and two zeroes, so we add 2 to the length of the chain
-            // ID to get the length of all 3 fields
-            // len(chain_id) + (0x00) + (0x00)
-            id.length() + 2
-        } else {
-            // this is either a pre-EIP-155 legacy transaction or a typed transaction
-            0
-        }
-    }
-
-    /// Outputs the length of the transaction's fields, without a RLP header or length of the
-    /// eip155 fields.
-    pub(crate) fn fields_len(&self) -> usize {
-        match self {
-            Transaction::Legacy(legacy_tx) => legacy_tx.fields_len(),
-            Transaction::Eip2930(access_list_tx) => access_list_tx.fields_len(),
-            Transaction::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.fields_len(),
-            Transaction::Eip4844(blob_tx) => blob_tx.fields_len(),
-        }
-    }
-
-    /// Encodes only the transaction's fields into the desired buffer, without a RLP header.
-    pub(crate) fn encode_fields(&self, out: &mut dyn bytes::BufMut) {
-        match self {
-            Transaction::Legacy(legacy_tx) => legacy_tx.encode_fields(out),
-            Transaction::Eip2930(access_list_tx) => access_list_tx.encode_fields(out),
-            Transaction::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.encode_fields(out),
-            Transaction::Eip4844(blob_tx) => blob_tx.encode_fields(out),
-        }
-    }
-
     /// This encodes the transaction _without_ the signature, and is only suitable for creating a
     /// hash intended for signing.
     pub fn encode_without_signature(&self, out: &mut dyn bytes::BufMut) {
@@ -496,32 +449,27 @@ impl Default for Transaction {
 impl Encodable for Transaction {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
-            Transaction::Legacy { .. } => {
-                Header { list: true, payload_length: self.fields_len() + self.eip155_fields_len() }
-                    .encode(out);
-                self.encode_fields(out);
-                self.encode_eip155_fields(out);
+            Transaction::Legacy(legacy_tx) => {
+                legacy_tx.encode_for_signing(out);
             }
-            _ => {
-                out.put_u8(self.tx_type() as u8);
-                Header { list: true, payload_length: self.fields_len() }.encode(out);
-                self.encode_fields(out);
+            Transaction::Eip2930(access_list_tx) => {
+                access_list_tx.encode_for_signing(out);
+            }
+            Transaction::Eip1559(dynamic_fee_tx) => {
+                dynamic_fee_tx.encode_for_signing(out);
+            }
+            Transaction::Eip4844(blob_tx) => {
+                blob_tx.encode_for_signing(out);
             }
         }
     }
 
     fn length(&self) -> usize {
         match self {
-            Transaction::Legacy { .. } => {
-                let payload_length = self.fields_len() + self.eip155_fields_len();
-                // 'header length' + 'payload length'
-                length_of_length(payload_length) + payload_length
-            }
-            _ => {
-                let payload_length = self.fields_len();
-                // 'transaction type byte length' + 'header length' + 'payload length'
-                1 + length_of_length(payload_length) + payload_length
-            }
+            Transaction::Legacy(legacy_tx) => legacy_tx.payload_len_for_signature(),
+            Transaction::Eip2930(access_list_tx) => access_list_tx.payload_len_for_signature(),
+            Transaction::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.payload_len_for_signature(),
+            Transaction::Eip4844(blob_tx) => blob_tx.payload_len_for_signature(),
         }
     }
 }
