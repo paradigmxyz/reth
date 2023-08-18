@@ -173,6 +173,38 @@ where
         let until = tokio::time::Instant::now() + self.config.deadline;
         let deadline = Box::pin(tokio::time::sleep_until(until));
 
+        if config.attributes.no_tx_pool {
+            dbg!("No tx pool; Building");
+            let args = BuildArguments {
+                client: self.client.clone(),
+                pool: self.pool.clone(),
+                cached_reads: CachedReads::default(),
+                config: config.clone(),
+                cancel: Cancelled::default(),
+                best_payload: None,
+            };
+            match self.builder.try_build(args)? {
+                BuildOutcome::Better { payload, cached_reads } => {
+                    dbg!("Got better payload", &payload);
+                    return Ok(BasicPayloadJob {
+                        config,
+                        client: self.client.clone(),
+                        pool: self.pool.clone(),
+                        executor: self.executor.clone(),
+                        deadline,
+                        interval: tokio::time::interval(self.config.interval),
+                        best_payload: Some(Arc::new(payload)),
+                        pending_block: None,
+                        cached_reads: Some(cached_reads),
+                        payload_task_guard: self.payload_task_guard.clone(),
+                        metrics: Default::default(),
+                        builder: self.builder.clone(),
+                    })
+                }
+                _ => {}
+            }
+        }
+
         Ok(BasicPayloadJob {
             config,
             client: self.client.clone(),
@@ -453,6 +485,8 @@ where
 
             empty_payload = Some(rx);
         }
+
+        dbg!(&best_payload, &maybe_better, &empty_payload);
 
         let fut = ResolveBestPayload { best_payload, maybe_better, empty_payload };
 
