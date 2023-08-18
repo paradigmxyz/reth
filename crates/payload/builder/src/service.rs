@@ -181,7 +181,6 @@ where
     /// Returns the best payload for the given identifier that has been built so far and terminates
     /// the job if requested.
     fn resolve(&mut self, id: PayloadId) -> Option<PayloadFuture> {
-        dbg!("Resolving job", id);
         let job = self.payload_jobs.iter().position(|(_, job_id)| *job_id == id)?;
         let (fut, keep_alive) = self.payload_jobs[job].0.resolve();
 
@@ -240,8 +239,6 @@ where
                         let id = attr.payload_id();
                         let mut res = Ok(id);
 
-                        dbg!("build new payload", id);
-
                         if this.contains_payload(id) {
                             warn!(%id, parent = ?attr.parent, "Payload job already in progress, ignoring.");
                         } else {
@@ -251,7 +248,6 @@ where
                                     this.metrics.inc_initiated_jobs();
                                     new_job = true;
                                     this.payload_jobs.push((job, id));
-                                    dbg!("[ADDED JOB!]");
                                 }
                                 Err(err) => {
                                     this.metrics.inc_failed_jobs();

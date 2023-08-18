@@ -21,8 +21,6 @@ where
 {
     let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
 
-    dbg!("[MADE IT TO PAYLOAD BUILDER]");
-
     let extra_data = config.extra_data();
     let PayloadConfig {
         initialized_block_env,
@@ -52,18 +50,11 @@ where
 
     let block_number = initialized_block_env.number.to::<u64>();
 
-    dbg!(
-        "[OP BUILDER] LOOPING SEQ TXS: ",
-        &attributes.transactions.len(),
-        &attributes.transactions
-    );
-
     // Transactions sent via the payload attributes are force included at the top of the block, in
     // the order that they were sent in.
     for sequencer_tx in attributes.transactions {
         // Check if the job was cancelled, if so we can exit early.
         if cancel.is_cancelled() {
-            dbg!("[OP BUILDER] CANCELLED");
             return Ok(BuildOutcome::Cancelled)
         }
 
@@ -71,12 +62,10 @@ where
         // purely for the purposes of utilizing the [tx_env_with_recovered] function.
         // Deposit transactions do not have signatures, so if the tx is a deposit, this
         // will just pull in its `from` address.
-        let sequencer_tx = sequencer_tx.clone().try_into_ecrecovered().map_err(|err| {
-            dbg!("[OP BUILDER] err converting to ecrecovered", err);
-            PayloadBuilderError::TransactionEcRecoverFailed
-        })?;
-
-        dbg!("GOT SEQUENCER TX", &sequencer_tx);
+        let sequencer_tx = sequencer_tx
+            .clone()
+            .try_into_ecrecovered()
+            .map_err(|err| PayloadBuilderError::TransactionEcRecoverFailed)?;
 
         let mut cfg = initialized_cfg.clone();
         let mut block_cfg = initialized_block_env.clone();
@@ -125,7 +114,6 @@ where
                 }
             }
         };
-
         dbg!("EXECUTED ", sequencer_tx.hash());
 
         // commit changes
@@ -162,8 +150,6 @@ where
         // append transaction to the list of executed transactions
         executed_txs.push(sequencer_tx.into_signed());
     }
-
-    dbg!("[OP BUILDER] LOOPING POOL TXS");
 
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
@@ -293,13 +279,10 @@ where
         excess_blob_gas: None,
     };
 
-    dbg!("[OP BUILDER] BUILD PAYLOAD HEADER", &header);
-
     // seal the block
     let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
 
     let sealed_block = block.seal_slow();
-    dbg!("[OP BUILDER] RETURNING BUILD OUTCOME");
     Ok(BuildOutcome::Better {
         payload: BuiltPayload::new(attributes.id, sealed_block, total_fees),
         cached_reads,
