@@ -46,33 +46,33 @@ impl TryFrom<&Block> for L1BlockInfo {
                 })
             })?;
 
-        // The setL1BlockValues tx calldata must be exactly 184 bytes long, considering that
+        // The setL1BlockValues tx calldata must be exactly 260 bytes long, considering that
         // we already removed the first 4 bytes (the function selector). Detailed breakdown:
-        //   8  bytes for the block number
-        // + 8  bytes for the block timestamp
+        //   32 bytes for the block number
+        // + 32 bytes for the block timestamp
         // + 32 bytes for the base fee
         // + 32 bytes for the block hash
-        // + 8  bytes for the block sequence number
+        // + 32 bytes for the block sequence number
         // + 32 bytes for the batcher hash
         // + 32 bytes for the fee overhead
         // + 32 bytes for the fee scalar
-        if l1_info_tx_data.len() != 184 {
+        if l1_info_tx_data.len() != 256 {
             return Err(executor::BlockExecutionError::L1BlockInfoError {
                 message: "unexpected l1 block info tx calldata length found".to_string(),
             })
         }
 
-        let l1_base_fee = U256::try_from_le_slice(&l1_info_tx_data[16..48]).ok_or(
+        let l1_base_fee = U256::try_from_le_slice(&l1_info_tx_data[64..96]).ok_or(
             executor::BlockExecutionError::L1BlockInfoError {
                 message: "could not convert l1 base fee".to_string(),
             },
         )?;
-        let l1_fee_overhead = U256::try_from_le_slice(&l1_info_tx_data[120..152]).ok_or(
+        let l1_fee_overhead = U256::try_from_le_slice(&l1_info_tx_data[192..224]).ok_or(
             executor::BlockExecutionError::L1BlockInfoError {
                 message: "could not convert l1 fee overhead".to_string(),
             },
         )?;
-        let l1_fee_scalar = U256::try_from_le_slice(&l1_info_tx_data[152..184]).ok_or(
+        let l1_fee_scalar = U256::try_from_le_slice(&l1_info_tx_data[224..256]).ok_or(
             executor::BlockExecutionError::L1BlockInfoError {
                 message: "could not convert l1 fee scalar".to_string(),
             },
