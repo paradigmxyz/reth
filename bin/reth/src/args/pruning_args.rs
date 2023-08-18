@@ -22,7 +22,7 @@ impl PruningArgs {
     /// Returns pruning configuration.
     pub fn prune_config(&self, _chain_spec: Arc<ChainSpec>) -> eyre::Result<Option<PruneConfig>> {
         Ok(if self.full {
-            eyre::bail!("full node is not supported yet, keep an eye on next releases");
+            // eyre::bail!("full node is not supported yet, keep an eye on next releases");
             #[allow(unreachable_code)]
             Some(PruneConfig {
                 block_interval: 5,
