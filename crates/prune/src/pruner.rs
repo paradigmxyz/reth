@@ -110,7 +110,8 @@ impl<DB: Database> Pruner<DB> {
             );
 
             let part_start = Instant::now();
-            done = done && self.prune_receipts(&provider, to_block, prune_mode)?;
+            let part_done = self.prune_receipts(&provider, to_block, prune_mode)?;
+            done = done && part_done;
             self.metrics
                 .get_prune_part_metrics(PrunePart::Receipts)
                 .duration_seconds
@@ -135,7 +136,8 @@ impl<DB: Database> Pruner<DB> {
             );
 
             let part_start = Instant::now();
-            done = done && self.prune_transaction_lookup(&provider, to_block, prune_mode)?;
+            let part_done = self.prune_transaction_lookup(&provider, to_block, prune_mode)?;
+            done = done && part_done;
             self.metrics
                 .get_prune_part_metrics(PrunePart::TransactionLookup)
                 .duration_seconds
@@ -160,7 +162,8 @@ impl<DB: Database> Pruner<DB> {
             );
 
             let part_start = Instant::now();
-            done = done && self.prune_transaction_senders(&provider, to_block, prune_mode)?;
+            let part_done = self.prune_transaction_senders(&provider, to_block, prune_mode)?;
+            done = done && part_done;
             self.metrics
                 .get_prune_part_metrics(PrunePart::SenderRecovery)
                 .duration_seconds
@@ -185,7 +188,8 @@ impl<DB: Database> Pruner<DB> {
             );
 
             let part_start = Instant::now();
-            done = done && self.prune_account_history(&provider, to_block, prune_mode)?;
+            let part_done = self.prune_account_history(&provider, to_block, prune_mode)?;
+            done = done && part_done;
             self.metrics
                 .get_prune_part_metrics(PrunePart::AccountHistory)
                 .duration_seconds
@@ -210,7 +214,8 @@ impl<DB: Database> Pruner<DB> {
             );
 
             let part_start = Instant::now();
-            done = done && self.prune_storage_history(&provider, to_block, prune_mode)?;
+            let part_done = self.prune_storage_history(&provider, to_block, prune_mode)?;
+            done = done && part_done;
             self.metrics
                 .get_prune_part_metrics(PrunePart::StorageHistory)
                 .duration_seconds
@@ -495,7 +500,7 @@ impl<DB: Database> Pruner<DB> {
         )? {
             Some(range) => range,
             None => {
-                trace!(target: "pruner", "No acount history to prune");
+                trace!(target: "pruner", "No account history to prune");
                 return Ok(true)
             }
         };
