@@ -91,7 +91,7 @@
 //!
 //! Blob transaction can be quite large hence they are stored in a separate blobstore. The pool is
 //! responsible for inserting blob data for new transactions into the blobstore.
-//! See als [ValidTransaction](validate::ValidTransaction)
+//! See also [ValidTransaction](validate::ValidTransaction)
 //!
 //!
 //! ## Examples
