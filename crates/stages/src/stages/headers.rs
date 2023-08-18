@@ -1,5 +1,4 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
-use futures_util::StreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -7,10 +6,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::{
-    p2p::headers::{
-        downloader::{HeaderDownloader, SyncTarget},
-        error::HeadersDownloaderError,
-    },
+    p2p::headers::downloader::{HeaderDownloader, SyncTarget},
     provider::ProviderError,
 };
 use reth_primitives::{

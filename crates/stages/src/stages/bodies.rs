@@ -14,7 +14,7 @@ use reth_interfaces::{
 };
 use reth_primitives::stage::{EntitiesCheckpoint, StageCheckpoint, StageId};
 use reth_provider::DatabaseProviderRW;
-use std::sync::Arc;
+use std::{sync::Arc, task::Poll};
 use tracing::*;
 
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
@@ -50,16 +50,46 @@ use tracing::*;
 /// - The [`Transactions`][reth_db::tables::Transactions] table
 #[derive(Debug)]
 pub struct BodyStage<D: BodyDownloader> {
+    buffer: Vec<BlockResponse>,
     /// The body downloader.
-    pub downloader: D,
+    downloader: D,
     /// The consensus engine.
-    pub consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn Consensus>,
+}
+
+impl<D: BodyDownloader> BodyStage<D> {
+    pub fn new(downloader: D, consensus: Arc<dyn Consensus>) -> Self {
+        Self { buffer: Vec::new(), downloader, consensus }
+    }
 }
 
 impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     /// Return the id of the stage
     fn id(&self) -> StageId {
         StageId::Bodies
+    }
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+        input: ExecInput,
+    ) -> std::task::Poll<Result<(), StageError>> {
+        // todo: check if this is bad async code
+        if !self.buffer.is_empty() {
+            return Poll::Ready(Ok(()))
+        }
+
+        match self.downloader.try_poll_next_unpin(cx) {
+            Poll::Ready(Some(res)) => match res {
+                Ok(downloaded) => {
+                    self.buffer.extend(downloaded);
+                    Poll::Ready(Ok(()))
+                }
+                Err(err) => Poll::Ready(Err(err.into())),
+            },
+            Poll::Ready(None) => Poll::Ready(Err(StageError::ChannelClosed)),
+            Poll::Pending => Poll::Pending,
+        }
     }
 
     /// Download block bodies from the last checkpoint for this stage up until the latest synced
@@ -95,14 +125,10 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // is a fatal error to prevent the pipeline from running forever.
 
         // todo: should be in a dedicated poll rdy fn
-        /*let downloaded_bodies =
-        self.downloader.try_next().await?.ok_or(StageError::ChannelClosed)?;*/
-        let downloaded_bodies: Vec<BlockResponse> = Vec::new();
-
-        trace!(target: "sync::stages::bodies", bodies_len = downloaded_bodies.len(), "Writing blocks");
+        trace!(target: "sync::stages::bodies", bodies_len = self.buffer.len(), "Writing blocks");
 
         let mut highest_block = from_block;
-        for response in downloaded_bodies {
+        for response in self.buffer.drain(..) {
             // Write block
             let block_number = response.block_number();
 
@@ -542,14 +568,14 @@ mod tests {
             }
 
             fn stage(&self) -> Self::S {
-                BodyStage {
-                    downloader: TestBodyDownloader::new(
+                BodyStage::new(
+                    TestBodyDownloader::new(
                         self.tx.inner_raw(),
                         self.responses.clone(),
                         self.batch_size,
                     ),
-                    consensus: self.consensus.clone(),
-                }
+                    self.consensus.clone(),
+                )
             }
         }
 
