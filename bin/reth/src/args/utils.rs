@@ -13,7 +13,7 @@ use std::{
 };
 
 #[cfg(feature = "optimism")]
-use reth_primitives::BASE_GOERLI;
+use reth_primitives::{BASE_GOERLI, BASE_MAINNET};
 
 /// Helper to parse a [Duration] from seconds
 pub fn parse_duration_from_secs(arg: &str) -> eyre::Result<Duration, std::num::ParseIntError> {
@@ -31,6 +31,8 @@ pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Er
         "dev" => DEV.clone(),
         #[cfg(feature = "optimism")]
         "base_goerli" => BASE_GOERLI.clone(),
+        #[cfg(feature = "optimism")]
+        "base" => BASE_MAINNET.clone(),
         _ => {
             let raw = fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
             serde_json::from_str(&raw)?
@@ -48,6 +50,8 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
         "dev" => DEV.clone(),
         #[cfg(feature = "optimism")]
         "base_goerli" => BASE_GOERLI.clone(),
+        #[cfg(feature = "optimism")]
+        "base" => BASE_MAINNET.clone(),
         _ => {
             let raw = fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
             let genesis: AllGenesisFormats = serde_json::from_str(&raw)?;
