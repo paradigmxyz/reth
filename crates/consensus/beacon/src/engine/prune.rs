@@ -116,7 +116,7 @@ pub(crate) enum EnginePruneEvent {
     /// If this is returned, the pruner is idle.
     Finished {
         /// Final result of the pruner run.
-        result: Result<(), PrunerError>,
+        result: Result<bool, PrunerError>,
     },
     /// Pruner task was dropped after it was started, unable to receive it because channel
     /// closed. This would indicate a panicked pruner task
