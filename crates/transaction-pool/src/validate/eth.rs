@@ -49,12 +49,12 @@ impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Clien
     /// Creates a new instance for the given [ChainSpec]
     ///
     /// This will spawn a single validation tasks that performs the actual validation.
-    /// See [TransactionValidationTaskExecutor::with_additional_tasks]
-    pub fn new<T>(client: Client, chain_spec: Arc<ChainSpec>, tasks: T) -> Self
+    /// See [TransactionValidationTaskExecutor::eth_with_additional_tasks]
+    pub fn eth<T>(client: Client, chain_spec: Arc<ChainSpec>, tasks: T) -> Self
     where
         T: TaskSpawner,
     {
-        Self::with_additional_tasks(client, chain_spec, tasks, 0)
+        Self::eth_with_additional_tasks(client, chain_spec, tasks, 0)
     }
 
     /// Creates a new instance for the given [ChainSpec]
@@ -66,7 +66,7 @@ impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Clien
     ///
     /// This will always spawn a validation task that performs the actual validation. It will spawn
     /// `num_additional_tasks` additional tasks.
-    pub fn with_additional_tasks<T>(
+    pub fn eth_with_additional_tasks<T>(
         client: Client,
         chain_spec: Arc<ChainSpec>,
         tasks: T,
@@ -83,6 +83,17 @@ impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Clien
     /// Returns the configured chain id
     pub fn chain_id(&self) -> u64 {
         self.validator.inner.chain_id()
+    }
+}
+
+impl<V: TransactionValidator + Clone> TransactionValidationTaskExecutor<V> {
+    /// Creates a new executor instance with the given validator for transaction validation.
+    ///
+    /// Initializes the executor with the provided validator and sets up communication for
+    /// validation tasks.
+    pub fn new(validator: V) -> Self {
+        let (tx, _) = ValidationTask::new();
+        Self { validator, to_validation_task: Arc::new(Mutex::new(tx)) }
     }
 }
 
