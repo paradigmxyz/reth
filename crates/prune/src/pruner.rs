@@ -107,6 +107,8 @@ impl<DB: Database> Pruner<DB> {
                 .get_prune_part_metrics(PrunePart::Receipts)
                 .duration_seconds
                 .record(part_start.elapsed())
+        } else {
+            trace!(target: "pruner", "No receipts to prune");
         }
 
         if let Some((to_block, prune_mode)) =
@@ -118,6 +120,8 @@ impl<DB: Database> Pruner<DB> {
                 .get_prune_part_metrics(PrunePart::TransactionLookup)
                 .duration_seconds
                 .record(part_start.elapsed())
+        } else {
+            trace!(target: "pruner", "No transaction lookup entries to prune");
         }
 
         if let Some((to_block, prune_mode)) =
@@ -129,6 +133,8 @@ impl<DB: Database> Pruner<DB> {
                 .get_prune_part_metrics(PrunePart::SenderRecovery)
                 .duration_seconds
                 .record(part_start.elapsed())
+        } else {
+            trace!(target: "pruner", "No transaction senders to prune");
         }
 
         if let Some((to_block, prune_mode)) =
@@ -140,6 +146,8 @@ impl<DB: Database> Pruner<DB> {
                 .get_prune_part_metrics(PrunePart::AccountHistory)
                 .duration_seconds
                 .record(part_start.elapsed())
+        } else {
+            trace!(target: "pruner", "No account history entries to prune");
         }
 
         if let Some((to_block, prune_mode)) =
@@ -151,6 +159,8 @@ impl<DB: Database> Pruner<DB> {
                 .get_prune_part_metrics(PrunePart::StorageHistory)
                 .duration_seconds
                 .record(part_start.elapsed())
+        } else {
+            trace!(target: "pruner", "No storage history entries to prune");
         }
 
         provider.commit()?;
