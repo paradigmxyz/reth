@@ -16,12 +16,10 @@ mod eth;
 mod task;
 
 /// A `TransactionValidator` implementation that validates ethereum transaction.
-pub use eth::{
-    EthTransactionValidator, EthTransactionValidatorBuilder, TransactionValidationTaskExecutor,
-};
+pub use eth::{EthTransactionValidator, EthTransactionValidatorBuilder};
 
 /// A spawnable task that performs transaction validation.
-pub use task::ValidationTask;
+pub use task::{TransactionValidationTaskExecutor, ValidationTask};
 
 /// Validation constants.
 pub use constants::{MAX_CODE_SIZE, MAX_INIT_CODE_SIZE, TX_MAX_SIZE, TX_SLOT_SIZE};
