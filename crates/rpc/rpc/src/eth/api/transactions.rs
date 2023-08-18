@@ -712,7 +712,7 @@ where
                 return match signer.sign_transaction(request, from) {
                     Ok(tx) => Ok(tx),
                     Err(e) => Err(e.into()),
-                }
+                };
             }
         }
         Err(EthApiError::InvalidTransactionSignature)
@@ -740,7 +740,7 @@ where
                     block.header.number,
                     block.header.base_fee_per_gas,
                     index.into(),
-                )))
+                )));
             }
         }
 
@@ -859,7 +859,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
 
     let mut res_receipt = TransactionReceipt {
         transaction_hash: Some(meta.tx_hash),
-        transaction_index: Some(U256::from(meta.index)),
+        transaction_index: meta.index,
         block_hash: Some(meta.block_hash),
         block_number: Some(U256::from(meta.block_number)),
         from: transaction.signer(),
