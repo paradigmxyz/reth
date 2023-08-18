@@ -15,7 +15,7 @@ pub use self::{
 /// The range of valid child indexes.
 pub const CHILD_INDEX_RANGE: Range<u8> = 0..16;
 
-/// Given an RLP encoded node, returns either RLP(Node) or RLP(keccak(RLP(node)))
+/// Given an RLP encoded node, returns either RLP(node) or RLP(keccak(RLP(node)))
 fn rlp_node(rlp: &[u8]) -> Vec<u8> {
     if rlp.len() < H256::len_bytes() {
         rlp.to_vec()
