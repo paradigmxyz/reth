@@ -20,6 +20,7 @@ use std::{
 };
 use tokio::sync::mpsc::Receiver;
 
+use crate::blobstore::BlobStoreError;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -266,6 +267,20 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Returns a set of all senders of transactions in the pool
     fn unique_senders(&self) -> HashSet<Address>;
+
+    /// Returns the [BlobTransactionSidecar] for the given transaction hash if it exists in the blob
+    /// store.
+    fn get_blob(&self, tx_hash: TxHash) -> Result<Option<BlobTransactionSidecar>, BlobStoreError>;
+
+    /// Returns all [BlobTransactionSidecar] for the given transaction hashes if they exists in the
+    /// blob store.
+    ///
+    /// This only returns the blobs that were found in the store.
+    /// If there's no blob it will not be returned.
+    fn get_all_blobs(
+        &self,
+        tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError>;
 }
 
 /// Extension for [TransactionPool] trait that allows to set the current block info.
