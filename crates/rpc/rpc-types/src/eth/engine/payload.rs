@@ -2,7 +2,7 @@ pub use crate::Withdrawal as StandaloneWithdraw;
 use reth_primitives::{
     constants::{MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
     proofs::{self, EMPTY_LIST_HASH},
-    Address, Block, Bloom, Bytes, Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawal,
+    Address, Block, Bloom, Bytes, Header, SealedBlock, TransactionSigned, UintTryTo,
     H256, H64, U256, U64,
 };
 use reth_rlp::Decodable;
@@ -10,28 +10,6 @@ use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 
 /// The execution payload body response that allows for `null` values.
 pub type ExecutionPayloadBodiesV1 = Vec<Option<ExecutionPayloadBodyV1>>;
-
-impl From<&Withdrawal> for StandaloneWithdraw {
-    fn from(withdrawal: &Withdrawal) -> Self {
-        StandaloneWithdraw {
-            index: withdrawal.index,
-            validator_index: withdrawal.validator_index,
-            address: withdrawal.address,
-            amount: withdrawal.amount,
-        }
-    }
-}
-
-impl From<StandaloneWithdraw> for Withdrawal {
-    fn from(standalone: StandaloneWithdraw) -> Self {
-        Withdrawal {
-            index: standalone.index,
-            validator_index: standalone.validator_index,
-            address: standalone.address,
-            amount: standalone.amount,
-        }
-    }
-}
 
 /// And 8-byte identifier for an execution payload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
@@ -112,125 +90,6 @@ pub struct ExecutionPayload {
     pub withdrawals: Option<Vec<StandaloneWithdraw>>,
 }
 
-impl From<SealedBlock> for ExecutionPayload {
-    fn from(value: SealedBlock) -> Self {
-        let transactions = value
-            .body
-            .iter()
-            .map(|tx| {
-                let mut encoded = Vec::new();
-                tx.encode_enveloped(&mut encoded);
-                encoded.into()
-            })
-            .collect();
-        let standalone_withdraw = value.withdrawals.as_ref().map(|withdrawals| {
-            withdrawals.iter().map(StandaloneWithdraw::from).collect::<Vec<_>>()
-        });
-        ExecutionPayload {
-            parent_hash: value.parent_hash,
-            fee_recipient: value.beneficiary,
-            state_root: value.state_root,
-            receipts_root: value.receipts_root,
-            logs_bloom: value.logs_bloom,
-            prev_randao: value.mix_hash,
-            block_number: value.number.into(),
-            gas_limit: value.gas_limit.into(),
-            gas_used: value.gas_used.into(),
-            timestamp: value.timestamp.into(),
-            extra_data: value.extra_data.clone(),
-            base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
-            blob_gas_used: value.blob_gas_used.map(U64::from),
-            excess_blob_gas: value.excess_blob_gas.map(U64::from),
-            block_hash: value.hash(),
-            transactions,
-            withdrawals: standalone_withdraw,
-        }
-    }
-}
-
-/// Try to construct a block from given payload. Perform addition validation of `extra_data` and
-/// `base_fee_per_gas` fields.
-///
-/// NOTE: The log bloom is assumed to be validated during serialization.
-/// NOTE: Empty ommers, nonce and difficulty values are validated upon computing block hash and
-/// comparing the value with `payload.block_hash`.
-///
-/// See <https://github.com/ethereum/go-ethereum/blob/79a478bb6176425c2400e949890e668a3d9a3d05/core/beacon/types.go#L145>
-impl TryFrom<ExecutionPayload> for SealedBlock {
-    type Error = PayloadError;
-
-    fn try_from(payload: ExecutionPayload) -> Result<Self, Self::Error> {
-        if payload.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
-            return Err(PayloadError::ExtraData(payload.extra_data))
-        }
-
-        if payload.base_fee_per_gas < MIN_PROTOCOL_BASE_FEE_U256 {
-            return Err(PayloadError::BaseFee(payload.base_fee_per_gas))
-        }
-
-        let transactions = payload
-            .transactions
-            .iter()
-            .map(|tx| TransactionSigned::decode(&mut tx.as_ref()))
-            .collect::<Result<Vec<_>, _>>()?;
-        let transactions_root = proofs::calculate_transaction_root(&transactions);
-
-        let withdraw = payload.withdrawals.as_ref().map(|withdrawals| {
-            withdrawals
-                .iter()
-                .map(|withdrawal| Withdrawal::from(withdrawal.clone()))
-                .collect::<Vec<_>>()
-        });
-        let withdrawals_root = withdraw.as_ref().map(|w| proofs::calculate_withdrawals_root(w));
-
-        let header = Header {
-            parent_hash: payload.parent_hash,
-            beneficiary: payload.fee_recipient,
-            state_root: payload.state_root,
-            transactions_root,
-            receipts_root: payload.receipts_root,
-            withdrawals_root,
-            logs_bloom: payload.logs_bloom,
-            number: payload.block_number.as_u64(),
-            gas_limit: payload.gas_limit.as_u64(),
-            gas_used: payload.gas_used.as_u64(),
-            timestamp: payload.timestamp.as_u64(),
-            mix_hash: payload.prev_randao,
-            base_fee_per_gas: Some(
-                payload
-                    .base_fee_per_gas
-                    .uint_try_to()
-                    .map_err(|_| PayloadError::BaseFee(payload.base_fee_per_gas))?,
-            ),
-            blob_gas_used: payload.blob_gas_used.map(|blob_gas_used| blob_gas_used.as_u64()),
-            excess_blob_gas: payload
-                .excess_blob_gas
-                .map(|excess_blob_gas| excess_blob_gas.as_u64()),
-            extra_data: payload.extra_data,
-            // Defaults
-            ommers_hash: EMPTY_LIST_HASH,
-            difficulty: Default::default(),
-            nonce: Default::default(),
-        }
-        .seal_slow();
-
-        if payload.block_hash != header.hash() {
-            return Err(PayloadError::BlockHash {
-                execution: header.hash(),
-                consensus: payload.block_hash,
-            })
-        }
-        let withdraw = payload
-            .withdrawals
-            .map(|withdrawals| withdrawals.into_iter().map(Withdrawal::from).collect::<Vec<_>>());
-        Ok(SealedBlock {
-            header,
-            body: transactions,
-            withdrawals: withdraw,
-            ommers: Default::default(),
-        })
-    }
-}
 
 /// This includes all bundled blob related data of an executed payload.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -288,22 +147,6 @@ pub struct ExecutionPayloadBodyV1 {
     pub withdrawals: Option<Vec<StandaloneWithdraw>>,
 }
 
-impl From<Block> for ExecutionPayloadBodyV1 {
-    fn from(value: Block) -> Self {
-        let transactions = value.body.into_iter().map(|tx| {
-            let mut out = Vec::new();
-            tx.encode_enveloped(&mut out);
-            out.into()
-        });
-        let standalone_withdraw = value.withdrawals.as_ref().map(|withdrawals| {
-            withdrawals.iter().map(StandaloneWithdraw::from).collect::<Vec<_>>()
-        });
-        ExecutionPayloadBodyV1 {
-            transactions: transactions.collect(),
-            withdrawals: standalone_withdraw,
-        }
-    }
-}
 
 /// This structure contains the attributes required to initiate a payload build process in the
 /// context of an `engine_forkchoiceUpdated` call.

@@ -33,6 +33,7 @@ use reth_prune::Pruner;
 use reth_rpc_types::engine::{
     ExecutionPayload, PayloadAttributes, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
+use reth_rpc_types_compat::engine::payload::{try_convert_from_execution_payload_to_sealed_block,convert_to_execution_payload};
 use reth_stages::{ControlFlow, Pipeline, PipelineError};
 use reth_tasks::TaskSpawner;
 use std::{
@@ -1103,7 +1104,7 @@ where
         payload: ExecutionPayload,
     ) -> Result<SealedBlock, PayloadStatus> {
         let parent_hash = payload.parent_hash;
-        let block = match SealedBlock::try_from(payload) {
+        let block = match try_convert_from_execution_payload_to_sealed_block(payload) {
             Ok(block) => block,
             Err(error) => {
                 error!(target: "consensus::engine", ?error, "Invalid payload");
@@ -1833,7 +1834,7 @@ mod tests {
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
         // consensus engine is still idle because no FCUs were received
-        let _ = env.send_new_payload(SealedBlock::default().into()).await;
+        let _ = env.send_new_payload(convert_to_execution_payload(SealedBlock::default())).await;
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
         // consensus engine is still idle because pruning is running
@@ -1955,7 +1956,6 @@ mod tests {
         use reth_db::{tables, transaction::DbTxMut};
         use reth_interfaces::test_utils::{generators, generators::random_block};
         use reth_rpc_types::engine::ForkchoiceUpdateError;
-
         #[tokio::test]
         async fn empty_head() {
             let chain_spec = Arc::new(
@@ -2225,6 +2225,7 @@ mod tests {
         };
         use reth_primitives::{public_key_to_address, Genesis, GenesisAccount, Hardfork, U256};
         use reth_provider::test_utils::blocks::BlockChainTestData;
+        use reth_rpc_types_compat::engine::payload::{convert_to_execution_payload};
 
         #[tokio::test]
         async fn new_payload_before_forkchoice() {
@@ -2248,13 +2249,13 @@ mod tests {
 
             // Send new payload
             let res =
-                env.send_new_payload(random_block(&mut rng, 0, None, None, Some(0)).into()).await;
+                env.send_new_payload(convert_to_execution_payload(random_block(&mut rng, 0, None, None, Some(0)))).await;
             // Invalid, because this is a genesis block
             assert_matches!(res, Ok(result) => assert_matches!(result.status, PayloadStatusEnum::Invalid { .. }));
 
             // Send new payload
             let res =
-                env.send_new_payload(random_block(&mut rng, 1, None, None, Some(0)).into()).await;
+                env.send_new_payload(convert_to_execution_payload(random_block(&mut rng, 1, None, None, Some(0)))).await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
 
@@ -2304,7 +2305,7 @@ mod tests {
 
             // Send new payload
             let result =
-                env.send_new_payload_retry_on_syncing(block2.clone().into()).await.unwrap();
+                env.send_new_payload_retry_on_syncing(convert_to_execution_payload(block2.clone())).await.unwrap();
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Valid)
                 .with_latest_valid_hash(block2.hash);
             assert_eq!(result, expected_result);
@@ -2402,7 +2403,7 @@ mod tests {
 
             // Send new payload
             let block = random_block(&mut rng, 2, Some(H256::random()), None, Some(0));
-            let res = env.send_new_payload(block.into()).await;
+            let res = env.send_new_payload(convert_to_execution_payload(block)).await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
 
@@ -2465,7 +2466,7 @@ mod tests {
 
             // Send new payload
             let result =
-                env.send_new_payload_retry_on_syncing(block2.clone().into()).await.unwrap();
+                env.send_new_payload_retry_on_syncing(convert_to_execution_payload(block2.clone())).await.unwrap();
 
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                 validation_error: BlockValidationError::BlockPreMerge { hash: block2.hash }

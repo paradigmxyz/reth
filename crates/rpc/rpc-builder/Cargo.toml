@@ -22,7 +22,7 @@ reth-rpc-types.workspace = true
 reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
 reth-metrics = { workspace = true, features = ["common"] }
-
+reth-rpc-types-compat.workspace = true
 # rpc/net
 jsonrpsee = { workspace = true, features = ["server"] }
 tower-http = { version = "0.4", features = ["full"] }

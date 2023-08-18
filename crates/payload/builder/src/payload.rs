@@ -7,7 +7,7 @@ use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadEnvelope, PayloadAttributes, PayloadId,
 };
 use revm_primitives::{BlockEnv, CfgEnv};
-
+use reth_rpc_types_compat::engine::payload::{convert_standalonewithdraw_to_withdrawal,convert_to_execution_payload};
 /// Contains the built payload.
 ///
 /// According to the [engine API specification](https://github.com/ethereum/execution-apis/blob/main/src/engine/README.md) the execution layer should build the initial version of the payload with an empty transaction set and then keep update it in order to maximize the revenue.
@@ -60,7 +60,7 @@ impl BuiltPayload {
 // V1 engine_getPayloadV1 response
 impl From<BuiltPayload> for ExecutionPayload {
     fn from(value: BuiltPayload) -> Self {
-        value.block.into()
+        convert_to_execution_payload(value.block)
     }
 }
 
@@ -69,7 +69,7 @@ impl From<BuiltPayload> for ExecutionPayloadEnvelope {
     fn from(value: BuiltPayload) -> Self {
         let BuiltPayload { block, fees, .. } = value;
 
-        ExecutionPayloadEnvelope { block_value: fees, payload: block.into() }
+        ExecutionPayloadEnvelope { block_value: fees, payload: convert_to_execution_payload(block) }
     }
 }
 
@@ -98,12 +98,14 @@ impl PayloadBuilderAttributes {
     /// Derives the unique [PayloadId] for the given parent and attributes
     pub fn new(parent: H256, attributes: PayloadAttributes) -> Self {
         let id = payload_id(&parent, &attributes);
-        let withdraw = attributes.withdrawals.as_ref().map(|withdrawals| {
+        
+        let withdraw = attributes.withdrawals.map(|withdrawals| {
             withdrawals
-                .iter()
-                .map(|withdrawal| Withdrawal::from(withdrawal.clone()))
+                .into_iter()
+                .map(|withdrawal| convert_standalonewithdraw_to_withdrawal(withdrawal)) // Removed the parentheses here
                 .collect::<Vec<_>>()
         });
+
         Self {
             id,
             parent,

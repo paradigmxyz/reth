@@ -11,6 +11,7 @@ use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadEnvelope, ForkchoiceUpdated,
     PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration, CAPABILITIES,
 };
+use reth_rpc_types_compat::engine::payload::{convert_to_execution_payloadv1,convert_to_execution_payload};
 use reth_tasks::TaskSpawner;
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -225,7 +226,7 @@ where
                 let block_result = inner.provider.block(BlockHashOrNumber::Number(num));
                 match block_result {
                     Ok(block) => {
-                        result.push(block.map(Into::into));
+                        result.push(block.map(convert_to_execution_payloadv1));
                     }
                     Err(err) => {
                         tx.send(Err(EngineApiError::Internal(Box::new(err)))).ok();
@@ -256,7 +257,7 @@ where
                 .provider
                 .block(BlockHashOrNumber::Hash(hash))
                 .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
-            result.push(block.map(Into::into));
+            result.push(block.map(convert_to_execution_payloadv1));
         }
 
         Ok(result)
@@ -551,7 +552,7 @@ mod tests {
         let (mut handle, api) = setup_engine_api();
 
         tokio::spawn(async move {
-            api.new_payload_v1(SealedBlock::default().into()).await.unwrap();
+            api.new_payload_v1(convert_to_execution_payload(SealedBlock::default())).await.unwrap();
         });
         assert_matches!(handle.from_api.recv().await, Some(BeaconEngineMessage::NewPayload { .. }));
     }
@@ -599,7 +600,7 @@ mod tests {
             handle.provider.extend_blocks(blocks.iter().cloned().map(|b| (b.hash(), b.unseal())));
 
             let expected =
-                blocks.iter().cloned().map(|b| Some(b.unseal().into())).collect::<Vec<_>>();
+                blocks.iter().cloned().map(|b| Some(convert_to_execution_payloadv1(b.unseal()))).collect::<Vec<_>>();
 
             let res = api.get_payload_bodies_by_range(start, count).await.unwrap();
             assert_eq!(res, expected);
@@ -636,7 +637,7 @@ mod tests {
                     {
                         None
                     } else {
-                        Some(b.unseal().into())
+                        Some(convert_to_execution_payloadv1(b.unseal()))
                     }
                 })
                 .collect::<Vec<_>>();
