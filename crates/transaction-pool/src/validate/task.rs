@@ -148,7 +148,7 @@ impl<Client, Tx> TransactionValidator
     for TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx>>
 where
     Client: StateProviderFactory + Clone + 'static,
-    Tx: PoolTransaction + 'static + std::clone::Clone,
+    Tx: PoolTransaction + Clone + 'static,
 {
     type Transaction = Tx;
 
