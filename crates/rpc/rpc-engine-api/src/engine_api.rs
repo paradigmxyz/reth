@@ -71,7 +71,7 @@ where
         &self,
         payload: ExecutionPayload,
     ) -> EngineApiResult<PayloadStatus> {
-        self.validate_fork_specific_fields(
+        self.validate_version_specific_fields(
             EngineApiMessageVersion::V1,
             PayloadOrAttributes::from_execution_payload(&payload, None),
         )?;
@@ -83,7 +83,7 @@ where
         &self,
         payload: ExecutionPayload,
     ) -> EngineApiResult<PayloadStatus> {
-        self.validate_fork_specific_fields(
+        self.validate_version_specific_fields(
             EngineApiMessageVersion::V2,
             PayloadOrAttributes::from_execution_payload(&payload, None),
         )?;
@@ -97,7 +97,7 @@ where
         _versioned_hashes: Vec<H256>,
         parent_beacon_block_root: H256,
     ) -> EngineApiResult<PayloadStatus> {
-        self.validate_fork_specific_fields(
+        self.validate_version_specific_fields(
             EngineApiMessageVersion::V3,
             PayloadOrAttributes::from_execution_payload(&payload, Some(parent_beacon_block_root)),
         )?;
@@ -118,7 +118,7 @@ where
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(ref attrs) = payload_attrs {
-            self.validate_fork_specific_fields(EngineApiMessageVersion::V1, attrs.into())?;
+            self.validate_version_specific_fields(EngineApiMessageVersion::V1, attrs.into())?;
         }
         Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
     }
@@ -133,7 +133,7 @@ where
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(ref attrs) = payload_attrs {
-            self.validate_fork_specific_fields(EngineApiMessageVersion::V2, attrs.into())?;
+            self.validate_version_specific_fields(EngineApiMessageVersion::V2, attrs.into())?;
         }
         Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
     }
@@ -148,7 +148,7 @@ where
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(ref attrs) = payload_attrs {
-            self.validate_fork_specific_fields(EngineApiMessageVersion::V3, attrs.into())?;
+            self.validate_version_specific_fields(EngineApiMessageVersion::V3, attrs.into())?;
         }
 
         Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
@@ -405,7 +405,7 @@ where
 
     /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
     /// and the message version.
-    fn validate_fork_specific_fields(
+    fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
         payload_or_attrs: PayloadOrAttributes<'_>,
