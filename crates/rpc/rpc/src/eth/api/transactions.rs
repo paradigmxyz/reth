@@ -740,7 +740,7 @@ where
                     block.header.number,
                     block.header.base_fee_per_gas,
                     index.into(),
-                )));
+                )))
             }
         }
 
