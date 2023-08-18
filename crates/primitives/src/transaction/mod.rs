@@ -1314,7 +1314,7 @@ impl TransactionSigned {
 
         #[cfg(feature = "optimism")]
         let signature = if tx_type == DEPOSIT_TX_TYPE_ID {
-            Signature { r: U256::ZERO, s: U256::ZERO, odd_y_parity: true }
+            Signature { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false }
         } else {
             Signature::decode(data)?
         };
@@ -1399,6 +1399,14 @@ impl proptest::arbitrary::Arbitrary for TransactionSigned {
                     // Otherwise we might overflow when calculating `v` on `recalculate_hash`
                     transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
                 }
+
+                #[cfg(feature = "optimism")]
+                let sig = if transaction.is_deposit() {
+                    Signature { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false }
+                } else {
+                    sig
+                };
+
                 let mut tx =
                     TransactionSigned { hash: Default::default(), signature: sig, transaction };
                 tx.hash = tx.recalculate_hash();
@@ -1419,11 +1427,16 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
             transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
         }
 
-        let mut tx = TransactionSigned {
-            hash: Default::default(),
-            signature: Signature::arbitrary(u)?,
-            transaction,
+        let signature = Signature::arbitrary(u)?;
+
+        #[cfg(feature = "optimism")]
+        let signature = if transaction.is_deposit() {
+            Signature { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false }
+        } else {
+            signature
         };
+
+        let mut tx = TransactionSigned { hash: Default::default(), signature, transaction };
         tx.hash = tx.recalculate_hash();
 
         Ok(tx)

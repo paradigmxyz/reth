@@ -10,8 +10,6 @@ use revm_primitives::{BlockEnv, CfgEnv};
 
 #[cfg(feature = "optimism")]
 use reth_primitives::TransactionSigned;
-#[cfg(feature = "optimism")]
-use reth_rlp::Decodable;
 
 /// Contains the built payload.
 ///

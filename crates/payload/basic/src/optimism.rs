@@ -65,7 +65,7 @@ where
         let sequencer_tx = sequencer_tx
             .clone()
             .try_into_ecrecovered()
-            .map_err(|err| PayloadBuilderError::TransactionEcRecoverFailed)?;
+            .map_err(|_| PayloadBuilderError::TransactionEcRecoverFailed)?;
 
         let mut cfg = initialized_cfg.clone();
         let mut block_cfg = initialized_block_env.clone();
