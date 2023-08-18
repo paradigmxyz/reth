@@ -49,7 +49,12 @@ impl PooledTransactionsElement {
     /// Heavy operation that return signature hash over rlp encoded transaction.
     /// It is only for signature signing or signer recovery.
     pub fn signature_hash(&self) -> H256 {
-        todo!()
+        match self {
+            Self::Legacy { transaction, .. } => transaction.signature_hash(),
+            Self::Eip2930 { transaction, .. } => transaction.signature_hash(),
+            Self::Eip1559 { transaction, .. } => transaction.signature_hash(),
+            Self::BlobTransaction(blob_tx) => blob_tx.transaction.signature_hash(),
+        }
     }
 
     /// Returns the signature of the transaction.
