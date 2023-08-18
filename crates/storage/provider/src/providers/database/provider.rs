@@ -17,7 +17,7 @@ use reth_db::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
         ShardedKey, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals,
     },
-    table::Table,
+    table::{Table, TableRow},
     tables,
     transaction::{DbTx, DbTxMut},
     BlockNumberList, DatabaseError,
@@ -629,39 +629,27 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     pub fn prune_table_with_iterator<T: Table>(
         &self,
         keys: impl IntoIterator<Item = T::Key>,
-    ) -> std::result::Result<usize, DatabaseError> {
-        self.prune_table_with_iterator_in_batches::<T>(keys, usize::MAX, |_| {})
-    }
-
-    /// Prune the table for the specified pre-sorted key iterator, calling `chunk_callback` after
-    /// every `batch_size` pruned rows with number of total rows pruned.
-    ///
-    /// Returns number of rows pruned.
-    pub fn prune_table_with_iterator_in_batches<T: Table>(
-        &self,
-        keys: impl IntoIterator<Item = T::Key>,
-        batch_size: usize,
-        mut batch_callback: impl FnMut(usize),
-    ) -> std::result::Result<usize, DatabaseError> {
+        limit: usize,
+        mut delete_callback: impl FnMut(TableRow<T>),
+    ) -> std::result::Result<(usize, bool), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut deleted = 0;
 
-        for key in keys {
-            if cursor.seek_exact(key)?.is_some() {
+        let mut keys = keys.into_iter();
+        while let Some(key) = keys.next() {
+            let row = cursor.seek_exact(key.clone())?;
+            if let Some(row) = row {
                 cursor.delete_current()?;
+                deleted += 1;
+                delete_callback(row);
             }
-            deleted += 1;
 
-            if deleted % batch_size == 0 {
-                batch_callback(deleted);
+            if deleted == limit {
+                break
             }
         }
 
-        if deleted % batch_size != 0 {
-            batch_callback(deleted);
-        }
-
-        Ok(deleted)
+        Ok((deleted, keys.next().is_none()))
     }
 
     /// Prune the table for the specified key range.
@@ -669,46 +657,25 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     /// Returns number of total unique keys and total rows pruned pruned.
     pub fn prune_table_with_range<T: Table>(
         &self,
-        keys: impl RangeBounds<T::Key>,
-    ) -> std::result::Result<(usize, usize), DatabaseError> {
-        self.prune_table_with_range_in_batches::<T>(keys, usize::MAX, |_, _| {})
-    }
-
-    /// Prune the table for the specified key range, calling `chunk_callback` after every
-    /// `batch_size` pruned rows with number of total unique keys and total rows pruned. For dupsort
-    /// tables, these numbers will be different as one key can correspond to multiple rows.
-    ///
-    /// Returns number of total unique keys and total rows pruned pruned.
-    pub fn prune_table_with_range_in_batches<T: Table>(
-        &self,
-        keys: impl RangeBounds<T::Key>,
-        batch_size: usize,
-        mut batch_callback: impl FnMut(usize, usize),
-    ) -> std::result::Result<(usize, usize), DatabaseError> {
+        keys: impl RangeBounds<T::Key> + Clone + Debug,
+        limit: usize,
+        mut delete_callback: impl FnMut(TableRow<T>),
+    ) -> std::result::Result<(usize, bool), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
-        let mut walker = cursor.walk_range(keys)?;
-        let mut deleted_keys = 0;
-        let mut deleted_rows = 0;
-        let mut previous_key = None;
+        let mut walker = cursor.walk_range(keys.clone())?;
+        let mut deleted = 0;
 
-        while let Some((key, _)) = walker.next().transpose()? {
+        while let Some(row) = walker.next().transpose()? {
             walker.delete_current()?;
-            deleted_rows += 1;
-            if previous_key.as_ref().map(|previous_key| previous_key != &key).unwrap_or(true) {
-                deleted_keys += 1;
-                previous_key = Some(key);
-            }
+            deleted += 1;
+            delete_callback(row);
 
-            if deleted_rows % batch_size == 0 {
-                batch_callback(deleted_keys, deleted_rows);
+            if deleted == limit {
+                break
             }
         }
 
-        if deleted_rows % batch_size != 0 {
-            batch_callback(deleted_keys, deleted_rows);
-        }
-
-        Ok((deleted_keys, deleted_rows))
+        Ok((deleted, walker.next().transpose()?.is_none()))
     }
 
     /// Load shard and remove it. If list is empty, last shard was full or

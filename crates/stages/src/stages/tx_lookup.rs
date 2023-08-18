@@ -13,7 +13,7 @@ use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     PrunePart, TransactionSignedNoHash, TxNumber, H256,
 };
-use reth_provider::{BlockReader, DatabaseProviderRW, PruneCheckpointReader};
+use reth_provider::{DatabaseProviderRW, PruneCheckpointReader};
 use tokio::sync::mpsc;
 use tracing::*;
 
@@ -186,11 +186,7 @@ fn stage_checkpoint<DB: Database>(
 ) -> Result<EntitiesCheckpoint, StageError> {
     let pruned_entries = provider
         .get_prune_checkpoint(PrunePart::TransactionLookup)?
-        .map(|checkpoint| provider.block_body_indices(checkpoint.block_number))
-        .transpose()?
-        .flatten()
-        // +1 is needed because TxNumber is 0-indexed
-        .map(|body| body.last_tx_num() + 1)
+        .and_then(|checkpoint| checkpoint.tx_number)
         .unwrap_or_default();
     Ok(EntitiesCheckpoint {
         // If `TxHashNumber` table was pruned, we will have a number of entries in it not matching
