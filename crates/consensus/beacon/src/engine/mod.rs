@@ -664,7 +664,7 @@ where
 
                     #[cfg(feature = "optimism")]
                     if self.blockchain.chain_spec().optimism {
-                        warn!(target: "consensus::engine", fcu_head_num=?outcome.header().number, current_head_num=?self.blockchain.canonical_tip().number, "Allowing beacon reorg to old head");
+                        warn!(target: "consensus::engine", fcu_head_num=?outcome.header().number, current_head_num=?self.blockchain.canonical_tip().number, "[OPTIMISM] Allowing beacon reorg to old head");
                         let _ = self.update_head(outcome.header().clone());
                     } else {
                         debug!(target: "consensus::engine", fcu_head_num=?outcome.header().number, current_head_num=?self.blockchain.canonical_tip().number, "Ignoring beacon update to old head");
