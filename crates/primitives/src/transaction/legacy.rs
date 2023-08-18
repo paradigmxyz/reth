@@ -1,4 +1,5 @@
-use crate::{Bytes, ChainId, Signature, TransactionKind, TxType};
+use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, H256};
+use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
 use reth_rlp::{length_of_length, Encodable, Header};
 use std::mem;
@@ -104,6 +105,59 @@ impl TxLegacy {
     /// Get transaction type
     pub(crate) fn tx_type(&self) -> TxType {
         TxType::Legacy
+    }
+
+    /// Encodes EIP-155 arguments into the desired buffer. Only encodes values for legacy
+    /// transactions.
+    pub(crate) fn encode_eip155_fields(&self, out: &mut dyn bytes::BufMut) {
+        // if this is a legacy transaction without a chain ID, it must be pre-EIP-155
+        // and does not need to encode the chain ID for the signature hash encoding
+        if let Some(id) = self.chain_id {
+            // EIP-155 encodes the chain ID and two zeroes
+            id.encode(out);
+            0x00u8.encode(out);
+            0x00u8.encode(out);
+        }
+    }
+
+    /// Outputs the length of EIP-155 fields. Only outputs a non-zero value for EIP-155 legacy
+    /// transactions.
+    pub(crate) fn eip155_fields_len(&self) -> usize {
+        if let Some(id) = self.chain_id {
+            // EIP-155 encodes the chain ID and two zeroes, so we add 2 to the length of the chain
+            // ID to get the length of all 3 fields
+            // len(chain_id) + (0x00) + (0x00)
+            id.length() + 2
+        } else {
+            // this is either a pre-EIP-155 legacy transaction or a typed transaction
+            0
+        }
+    }
+
+    /// Encodes the legacy transaction in RLP for signing, including the EIP-155 fields if possible.
+    pub(crate) fn encode_for_signing(&self, out: &mut dyn bytes::BufMut) {
+        Header { list: true, payload_length: self.fields_len() + self.eip155_fields_len() }
+            .encode(out);
+        self.encode_fields(out);
+        self.encode_eip155_fields(out);
+    }
+
+    /// Outputs the length of the signature RLP encoding for the transaction, including the length
+    /// of the EIP-155 fields if possible.
+    pub(crate) fn payload_len_for_signature(&self) -> usize {
+        let payload_length = self.fields_len() + self.eip155_fields_len();
+        // 'header length' + 'payload length'
+        length_of_length(payload_length) + payload_length
+    }
+
+    /// Outputs the signature hash of the transaction by first encoding without a signature, then
+    /// hashing.
+    ///
+    /// See [Self::encode_for_signing] for more information on the encoding format.
+    pub(crate) fn signature_hash(&self) -> H256 {
+        let mut buf = BytesMut::with_capacity(self.payload_len_for_signature());
+        self.encode_for_signing(&mut buf);
+        keccak256(&buf)
     }
 }
 

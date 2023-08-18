@@ -6,9 +6,9 @@ use crate::{
 };
 use futures_util::{ready, Stream};
 use reth_primitives::{
-    Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
-    TransactionKind, TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
-    H256, U256,
+    Address, BlobTransactionSidecar, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId,
+    PooledTransactionsElement, PooledTransactionsElementEcRecovered, Transaction, TransactionKind,
+    TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, H256, U256,
 };
 use reth_rlp::Encodable;
 use std::{
@@ -569,7 +569,7 @@ pub trait PoolTransaction:
 ///
 /// This type is essentially a wrapper around [TransactionSignedEcRecovered] with additional fields
 /// derived from the transaction that are frequently used by the pools for ordering.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EthPooledTransaction {
     /// EcRecovered transaction info
     pub(crate) transaction: TransactionSignedEcRecovered,
@@ -577,26 +577,67 @@ pub struct EthPooledTransaction {
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     pub(crate) cost: U256,
-    // TODO optional sidecar
+
+    /// The blob side car this transaction
+    pub(crate) blob_sidecar: EthBlobTransactionSidecar,
+}
+
+/// Represents the blob sidecar of the [EthPooledTransaction].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum EthBlobTransactionSidecar {
+    /// This transaction does not have a blob sidecar
+    None,
+    /// This transaction has a blob sidecar (EIP-4844) but it is missing
+    ///
+    /// It was either extracted after being inserted into the pool or re-injected after reorg
+    /// without the blob sidecar
+    Missing,
+    /// The eip-4844 transaction was pulled from the network and still has its blob sidecar
+    Present(BlobTransactionSidecar),
 }
 
 impl EthPooledTransaction {
     /// Create new instance of [Self].
     pub fn new(transaction: TransactionSignedEcRecovered) -> Self {
+        let mut blob_sidecar = EthBlobTransactionSidecar::None;
         let gas_cost = match &transaction.transaction {
             Transaction::Legacy(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
             Transaction::Eip2930(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
             Transaction::Eip1559(t) => U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit),
-            Transaction::Eip4844(t) => U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit),
+            Transaction::Eip4844(t) => {
+                blob_sidecar = EthBlobTransactionSidecar::Missing;
+                U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit)
+            }
         };
         let cost = gas_cost + U256::from(transaction.value());
 
-        Self { transaction, cost }
+        Self { transaction, cost, blob_sidecar }
     }
 
     /// Return the reference to the underlying transaction.
     pub fn transaction(&self) -> &TransactionSignedEcRecovered {
         &self.transaction
+    }
+}
+
+/// Conversion from the network transaction type to the pool transaction type.
+impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
+    fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
+        let (tx, signer) = tx.into_components();
+        match tx {
+            PooledTransactionsElement::BlobTransaction(tx) => {
+                // include the blob sidecar
+                let (tx, blob) = tx.into_parts();
+                let tx = TransactionSignedEcRecovered::from_signed_transaction(tx, signer);
+                let mut pooled = EthPooledTransaction::new(tx);
+                pooled.blob_sidecar = EthBlobTransactionSidecar::Present(blob);
+                pooled
+            }
+            tx => {
+                // no blob sidecar
+                EthPooledTransaction::new(tx.into_ecrecovered_transaction(signer))
+            }
+        }
     }
 }
 
