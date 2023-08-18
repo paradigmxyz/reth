@@ -42,7 +42,7 @@ pub(crate) mod util;
 #[cfg(feature = "optimism")]
 mod optimism;
 #[cfg(feature = "optimism")]
-pub use optimism::{TxDeposit, DEPOSIT_VERSION};
+pub use optimism::TxDeposit;
 #[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
 
@@ -612,13 +612,6 @@ impl Encodable for Transaction {
                 self.encode_fields(out);
                 self.encode_eip155_fields(out);
             }
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => {
-                out.put_u8(self.tx_type() as u8);
-                out.put_u8(DEPOSIT_VERSION);
-                Header { list: true, payload_length: self.fields_len() }.encode(out);
-                self.encode_fields(out);
-            }
             _ => {
                 out.put_u8(self.tx_type() as u8);
                 Header { list: true, payload_length: self.fields_len() }.encode(out);
@@ -633,13 +626,6 @@ impl Encodable for Transaction {
                 let payload_length = self.fields_len() + self.eip155_fields_len();
                 // 'header length' + 'payload length'
                 length_of_length(payload_length) + payload_length
-            }
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit { .. } => {
-                let payload_length = self.fields_len();
-                // 'transaction type byte length' + 'version byte' + 'header length' + 'payload
-                // length'
-                1 + length_of_length(payload_length) + payload_length
             }
             _ => {
                 let payload_length = self.fields_len();

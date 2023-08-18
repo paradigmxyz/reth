@@ -71,6 +71,7 @@ where
 
         if sequencer_tx.is_deposit() {
             cfg.disable_base_fee = true;
+            cfg.disable_balance_check = true;
 
             // If the Regolith hardfork is active, we do not need to disable the block gas limit.
             // Otherwise, we allow for the block gas limit to be exceeded by deposit transactions.
