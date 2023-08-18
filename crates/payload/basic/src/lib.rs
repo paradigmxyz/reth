@@ -381,15 +381,7 @@ where
                     let _ = tx.send(result);
                 }));
 
-                #[cfg(not(feature = "optimism"))]
-                {
-                    this.pending_block = Some(PendingPayload { _cancel, payload: rx });
-                }
-
-                #[cfg(feature = "optimism")]
-                if this.config.compute_pending_block {
-                    this.pending_block = Some(PendingPayload { _cancel, payload: rx });
-                }
+                this.pending_block = Some(PendingPayload { _cancel, payload: rx });
             }
         }
 
@@ -425,15 +417,7 @@ where
                     dbg!("[Basic Job] Payload build failed - ", &err);
                 }
                 Poll::Pending => {
-                    #[cfg(not(feature = "optimism"))]
-                    {
-                        this.pending_block = Some(fut);
-                    }
-
-                    #[cfg(feature = "optimism")]
-                    if this.config.compute_pending_block {
-                        this.pending_block = Some(fut);
-                    }
+                    this.pending_block = Some(fut);
 
                     dbg!("[Basic Job] Payload build pending - ");
                 }
@@ -611,7 +595,7 @@ impl PayloadConfig {
     pub(crate) fn extra_data(&self) -> reth_primitives::Bytes {
         #[cfg(feature = "optimism")]
         if self.chain_spec.optimism {
-            Default::default()
+            return Default::default()
         }
         reth_primitives::Bytes(self.extra_data.clone())
     }

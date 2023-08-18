@@ -78,9 +78,15 @@ where
 
         dbg!("GOT SEQUENCER TX", &sequencer_tx);
 
+        let mut cfg = initialized_cfg.clone();
+
+        if sequencer_tx.is_deposit() {
+            cfg.disable_base_fee = true;
+        }
+
         // Configure the environment for the block.
         let env = Env {
-            cfg: initialized_cfg.clone(),
+            cfg,
             block: initialized_block_env.clone(),
             tx: tx_env_with_recovered(&sequencer_tx),
         };
@@ -98,6 +104,7 @@ where
                 // want to revisit this.
                 match err {
                     EVMError::Transaction(err) => {
+                        dbg!("Transaction error", err);
                         if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
                             // if the nonce is too low, we can skip this transaction
                             trace!(?err, ?sequencer_tx, "skipping nonce too low transaction");
@@ -113,6 +120,7 @@ where
                         continue
                     }
                     err => {
+                        dbg!("EVM Error", &err);
                         // this is an error that we should treat as fatal for this attempt
                         return Err(PayloadBuilderError::EvmExecutionError(err))
                     }
