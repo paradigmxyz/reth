@@ -215,10 +215,7 @@ impl Command {
                 StageEnum::StorageHashing => {
                     (Box::new(StorageHashingStage::new(1, batch_size)), None)
                 }
-                StageEnum::Merkle => (
-                    Box::new(MerkleStage::default_execution()),
-                    Some(Box::new(MerkleStage::default_unwind())),
-                ),
+                StageEnum::Merkle => (Box::new(MerkleStage::default_execution()), None),
                 StageEnum::AccountHistory => (Box::<IndexAccountHistoryStage>::default(), None),
                 StageEnum::StorageHistory => (Box::<IndexStorageHistoryStage>::default(), None),
                 _ => return Ok(()),
