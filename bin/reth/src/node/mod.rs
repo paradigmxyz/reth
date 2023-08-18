@@ -65,7 +65,7 @@ use reth_stages::{
     MetricEventsSender, MetricsListener,
 };
 use reth_tasks::TaskExecutor;
-use reth_transaction_pool::{EthTransactionValidator, TransactionPool};
+use reth_transaction_pool::{TransactionPool, TransactionValidationTaskExecutor};
 use secp256k1::SecretKey;
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
@@ -263,7 +263,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let blockchain_db = BlockchainProvider::new(factory, blockchain_tree.clone())?;
 
         let transaction_pool = reth_transaction_pool::Pool::eth_pool(
-            EthTransactionValidator::with_additional_tasks(
+            TransactionValidationTaskExecutor::eth_with_additional_tasks(
                 blockchain_db.clone(),
                 Arc::clone(&self.chain),
                 ctx.task_executor.clone(),
