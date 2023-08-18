@@ -9,6 +9,7 @@ pub struct TransactionReceipt {
     /// Transaction Hash.
     pub transaction_hash: Option<H256>,
     /// Index within the block.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub transaction_index: Option<U256>,
     /// Hash of the block this transaction was included within.
     pub block_hash: Option<H256>,
@@ -16,7 +17,8 @@ pub struct TransactionReceipt {
     pub block_number: Option<U256>,
     /// Address of the sender
     pub from: Address,
-    /// Address of the receiver. null when its a contract creation transaction.
+    /// Address of the receiver. None when it's a contract creation transaction.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub to: Option<Address>,
     /// Cumulative gas used within the block after this was executed.
     pub cumulative_gas_used: U256,
