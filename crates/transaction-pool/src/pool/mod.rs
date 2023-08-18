@@ -158,6 +158,11 @@ where
         }
     }
 
+    /// Returns the configured blob store.
+    pub(crate) fn blob_store(&self) -> &S {
+        &self.blob_store
+    }
+
     /// Returns stats about the size of the pool.
     pub(crate) fn size(&self) -> PoolSize {
         self.pool.read().size()
