@@ -311,7 +311,7 @@ where
         // check if the deadline is reached
         if this.deadline.as_mut().poll(cx).is_ready() {
             trace!("Payload building deadline reached");
-            return Poll::Ready(Ok(()));
+            return Poll::Ready(Ok(()))
         }
 
         // check if the interval is reached
@@ -656,7 +656,7 @@ where
             // which also removes all dependent transaction from the iterator before we can
             // continue
             best_txs.mark_invalid(&pool_tx);
-            continue;
+            continue
         }
 
         // check if the job was cancelled, if so we can exit early
@@ -686,7 +686,7 @@ where
                             trace!(?err, ?tx, "skipping invalid transaction and its descendants");
                             best_txs.mark_invalid(&pool_tx);
                         }
-                        continue;
+                        continue
                     }
                     err => {
                         // this is an error that we should treat as fatal for this attempt

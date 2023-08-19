@@ -450,7 +450,7 @@ pub fn commit_state_changes<DB>(
             db_account.account_state = AccountState::NotExisting;
             db_account.info = AccountInfo::default();
 
-            continue;
+            continue
         } else {
             // check if account code is new or old.
             // does it exist inside cached contracts if it doesn't it is new bytecode that
