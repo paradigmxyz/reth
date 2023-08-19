@@ -435,12 +435,17 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)?;
 
         // Recover senders manually if not found in db
+        let start_index = senders.len();
+        let end_index = transactions.len();
+        let missing_senders = end_index - start_index;
         senders.extend(
-            transactions
-                .iter()
-                .skip(senders.len())
-                // I suppose every signature is valid sice taken from db
-                .map(|(id, tx_signed)| (id.to_owned(), tx_signed.recover_signer().unwrap())),
+            (start_index as u64..end_index as u64).zip(
+                TransactionSigned::recover_signers(
+                    transactions.iter().skip(start_index).map(|(_, tx)| tx).collect::<Vec<_>>(),
+                    missing_senders,
+                )
+                .unwrap(),
+            ),
         );
 
         if TAKE {
