@@ -441,7 +441,7 @@ impl ParityTraceBuilder {
                 let mut push_stack = step.push_stack.clone().unwrap_or_default();
                 for i in (0..show_stack).rev() {
                     if step.stack.len() > i {
-                        push_stack.push(step.stack.clone().pop().unwrap_or_default())
+                        push_stack.push(step.stack.peek(i).unwrap_or_default())
                     }
                 }
                 push_stack
