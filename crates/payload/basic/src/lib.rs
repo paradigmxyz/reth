@@ -43,7 +43,7 @@ use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::{
     db::{CacheDB, DatabaseRef},
-    primitives::{BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState},
+    primitives::{BlockEnv, EVMError, InvalidTransaction},
 };
 use std::{
     future::Future,
@@ -57,6 +57,7 @@ use tokio::{
     time::{Interval, Sleep},
 };
 use tracing::{debug, trace};
+use reth_revm::executor::Executor;
 
 mod metrics;
 
@@ -120,12 +121,12 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
 // === impl BasicPayloadJobGenerator ===
 
 impl<Client, Pool, Tasks, Builder> PayloadJobGenerator
-    for BasicPayloadJobGenerator<Client, Pool, Tasks, Builder>
-where
-    Client: StateProviderFactory + BlockReaderIdExt + Clone + Unpin + 'static,
-    Pool: TransactionPool + Unpin + 'static,
-    Tasks: TaskSpawner + Clone + Unpin + 'static,
-    Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
+for BasicPayloadJobGenerator<Client, Pool, Tasks, Builder>
+    where
+        Client: StateProviderFactory + BlockReaderIdExt + Clone + Unpin + 'static,
+        Pool: TransactionPool + Unpin + 'static,
+        Tasks: TaskSpawner + Clone + Unpin + 'static,
+        Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
 {
     type Job = BasicPayloadJob<Client, Pool, Tasks, Builder>;
 
@@ -150,12 +151,11 @@ where
         };
 
         // configure evm env based on parent block
-        let (initialized_cfg, initialized_block_env) =
+        let (_, initialized_block_env) =
             attributes.cfg_and_block_env(&self.chain_spec, &parent_block);
 
         let config = PayloadConfig {
             initialized_block_env,
-            initialized_cfg,
             parent_block: Arc::new(parent_block),
             extra_data: self.config.extradata.clone(),
             attributes,
@@ -301,11 +301,11 @@ pub struct BasicPayloadJob<Client, Pool, Tasks, Builder> {
 }
 
 impl<Client, Pool, Tasks, Builder> Future for BasicPayloadJob<Client, Pool, Tasks, Builder>
-where
-    Client: StateProviderFactory + Clone + Unpin + 'static,
-    Pool: TransactionPool + Unpin + 'static,
-    Tasks: TaskSpawner + Clone + 'static,
-    Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
+    where
+        Client: StateProviderFactory + Clone + Unpin + 'static,
+        Pool: TransactionPool + Unpin + 'static,
+        Tasks: TaskSpawner + Clone + 'static,
+        Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
 {
     type Output = Result<(), PayloadBuilderError>;
 
@@ -389,11 +389,11 @@ where
 }
 
 impl<Client, Pool, Tasks, Builder> PayloadJob for BasicPayloadJob<Client, Pool, Tasks, Builder>
-where
-    Client: StateProviderFactory + Clone + Unpin + 'static,
-    Pool: TransactionPool + Unpin + 'static,
-    Tasks: TaskSpawner + Clone + 'static,
-    Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
+    where
+        Client: StateProviderFactory + Clone + Unpin + 'static,
+        Pool: TransactionPool + Unpin + 'static,
+        Tasks: TaskSpawner + Clone + 'static,
+        Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
 {
     type ResolvePayloadFuture = ResolveBestPayload;
 
@@ -532,8 +532,6 @@ impl Drop for Cancelled {
 struct PayloadConfig {
     /// Pre-configured block environment.
     initialized_block_env: BlockEnv,
-    /// Configuration for the environment.
-    initialized_cfg: CfgEnv,
     /// The parent block.
     parent_block: Arc<SealedBlock>,
     /// Block extra data.
@@ -608,9 +606,9 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
 
 // Default implementation of [PayloadBuilder] for unit type
 impl<Pool, Client> PayloadBuilder<Pool, Client> for ()
-where
-    Client: StateProviderFactory,
-    Pool: TransactionPool,
+    where
+        Client: StateProviderFactory,
+        Pool: TransactionPool,
 {
     fn try_build(
         &self,
@@ -629,25 +627,24 @@ where
 fn default_payload_builder<Pool, Client>(
     args: BuildArguments<Pool, Client>,
 ) -> Result<BuildOutcome, PayloadBuilderError>
-where
-    Client: StateProviderFactory,
-    Pool: TransactionPool,
+    where
+        Client: StateProviderFactory,
+        Pool: TransactionPool,
 {
-    let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
+    let BuildArguments { client, pool, config, cached_reads, cancel, best_payload} = args;
 
     let PayloadConfig {
         initialized_block_env,
-        initialized_cfg,
         parent_block,
         extra_data,
         attributes,
-        chain_spec,
+        chain_spec
     } = config;
 
     debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number, "building new payload");
 
     let state = State::new(client.state_by_block_hash(parent_block.hash)?);
-    let mut db = CacheDB::new(cached_reads.as_db(&state));
+    let mut executor = Executor::new(Arc::clone(&chain_spec),  SubState::new(state));
     let mut post_state = PostState::default();
 
     let mut cumulative_gas_used = 0;
@@ -679,17 +676,7 @@ where
         // convert tx to a signed transaction
         let tx = pool_tx.to_recovered_transaction();
 
-        // Configure the environment for the block.
-        let env = Env {
-            cfg: initialized_cfg.clone(),
-            block: initialized_block_env.clone(),
-            tx: tx_env_with_recovered(&tx),
-        };
-
-        let mut evm = revm::EVM::with_env(env);
-        evm.database(&mut db);
-
-        let ResultAndState { result, state } = match evm.transact() {
+        let result = match executor.execute_and_apply(block_number, &mut post_state, tx.signed(), tx.signer()) {
             Ok(res) => res,
             Err(err) => {
                 match err {
@@ -714,23 +701,8 @@ where
         };
 
         let gas_used = result.gas_used();
-
-        // commit changes
-        commit_state_changes(&mut db, &mut post_state, block_number, state, true);
-
         // add gas used by the transaction to cumulative gas used, before creating the receipt
         cumulative_gas_used += gas_used;
-
-        // Push transaction changeset and calculate header bloom filter for receipt.
-        post_state.add_receipt(
-            block_number,
-            Receipt {
-                tx_type: tx.tx_type(),
-                success: result.is_success(),
-                cumulative_gas_used,
-                logs: result.logs().into_iter().map(into_reth_log).collect(),
-            },
-        );
 
         // update add to total fees
         let miner_fee =
@@ -748,7 +720,7 @@ where
     }
 
     let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
-        &mut db,
+        executor.db(),
         &mut post_state,
         &chain_spec,
         block_number,
@@ -760,7 +732,7 @@ where
     let logs_bloom = post_state.logs_bloom(block_number);
 
     // calculate the state root
-    let state_root = state.state().state_root(post_state)?;
+    let state_root = executor.db().db.0.state_root(post_state)?;
 
     // create the block header
     let transactions_root = proofs::calculate_transaction_root(&executed_txs);
@@ -802,8 +774,8 @@ fn build_empty_payload<Client>(
     client: &Client,
     config: PayloadConfig,
 ) -> Result<BuiltPayload, PayloadBuilderError>
-where
-    Client: StateProviderFactory,
+    where
+        Client: StateProviderFactory,
 {
     let PayloadConfig {
         initialized_block_env,
@@ -896,8 +868,8 @@ fn commit_withdrawals<DB>(
     timestamp: u64,
     withdrawals: Vec<Withdrawal>,
 ) -> Result<WithdrawalsOutcome, <DB as DatabaseRef>::Error>
-where
-    DB: DatabaseRef,
+    where
+        DB: DatabaseRef,
 {
     if !chain_spec.is_shanghai_activated_at_timestamp(timestamp) {
         return Ok(WithdrawalsOutcome::pre_shanghai())

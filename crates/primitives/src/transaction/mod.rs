@@ -1040,6 +1040,11 @@ impl TransactionSignedEcRecovered {
         self.signed_transaction
     }
 
+    /// Transform back to immutable reference of [`TransactionSigned`]
+    pub fn signed(&self) -> &TransactionSigned {
+        &self.signed_transaction
+    }
+
     /// Desolve Self to its component
     pub fn to_components(self) -> (TransactionSigned, Address) {
         (self.signed_transaction, self.signer)

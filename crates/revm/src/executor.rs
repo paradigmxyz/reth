@@ -7,6 +7,7 @@ use crate::{
     to_reth_acc,
 };
 use reth_consensus_common::calc;
+use reth_interfaces;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     Account, Address, Block, BlockNumber, Bloom, Bytecode, ChainSpec, Hardfork, Header, Receipt,
@@ -25,6 +26,8 @@ use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
 };
+use revm::primitives::{EVMError, ExecutionResult};
+use reth_revm_primitives::primitives::EVMResult;
 
 /// Main block executor
 pub struct Executor<DB>
@@ -179,12 +182,12 @@ where
         &mut self,
         transaction: &TransactionSigned,
         sender: Address,
-    ) -> Result<ResultAndState, BlockExecutionError> {
+    ) -> EVMResult<reth_interfaces::Error> {
         // Fill revm structure.
         fill_tx_env(&mut self.evm.env.tx, transaction, sender);
 
         let hash = transaction.hash();
-        let out = if self.stack.should_inspect(&self.evm.env, hash) {
+        if self.stack.should_inspect(&self.evm.env, hash) {
             // execution with inspector.
             let output = self.evm.inspect(&mut self.stack);
             tracing::trace!(
@@ -192,12 +195,11 @@ where
                 ?hash, ?output, ?transaction, env = ?self.evm.env,
                 "Executed transaction"
             );
-            output
-        } else {
-            // main execution.
-            self.evm.transact()
-        };
-        out.map_err(|e| BlockValidationError::EVM { hash, message: format!("{e:?}") }.into())
+            return output;
+        }
+
+        // main execution.
+        self.evm.transact()
     }
 
     /// Runs the provided transactions and commits their state to the run-time database.
@@ -235,38 +237,52 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into())
+                    .into())
             }
-            // Execute transaction.
-            let ResultAndState { result, state } = self.transact(transaction, sender)?;
 
-            // commit changes
-            self.commit_changes(
-                block.number,
-                state,
-                self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(block.number),
-                &mut post_state,
-            );
-
-            // append gas used
-            cumulative_gas_used += result.gas_used();
-
-            // Push transaction changeset and calculate header bloom filter for receipt.
-            post_state.add_receipt(
-                block.number,
-                Receipt {
-                    tx_type: transaction.tx_type(),
-                    // Success flag was added in `EIP-658: Embedding transaction status code in
-                    // receipts`.
-                    success: result.is_success(),
-                    cumulative_gas_used,
-                    // convert to reth log
-                    logs: result.into_logs().into_iter().map(into_reth_log).collect(),
-                },
-            );
+            let result = self.execute_and_apply(block.number, &mut post_state, transaction, sender);
+            match result {
+                Ok(result) => {
+                    cumulative_gas_used += result.gas_used();
+                }
+                Err(e) => {
+                    return Err(BlockValidationError::EVM { hash: transaction.hash, message: format!("{e:?}") }.into());
+                }
+            }
         }
 
         Ok((post_state, cumulative_gas_used))
+    }
+
+    /// Executes the transaction and applies the state changes to the given [PostState].
+    ///
+    /// Returns the [ExecutionResult] from applying the transaction
+    pub fn execute_and_apply(&mut self, block_number: BlockNumber, post_state: &mut PostState, transaction: &TransactionSigned, sender: Address) -> Result<ExecutionResult, EVMError<reth_interfaces::Error>> {
+        let ResultAndState { result, state } = self.transact(transaction, sender)?;
+
+        // commit changes
+        self.commit_changes(
+            block_number,
+            state,
+            self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(block_number),
+            post_state,
+        );
+
+        // Push transaction changeset and calculate header bloom filter for receipt.
+        post_state.add_receipt(
+            block_number,
+            Receipt {
+                tx_type: transaction.tx_type(),
+                // Success flag was added in `EIP-658: Embedding transaction status code in
+                // receipts`.
+                success: result.is_success(),
+                cumulative_gas_used: result.gas_used(),
+                // convert to reth log
+                logs: result.logs().into_iter().map(into_reth_log).collect(),
+            },
+        );
+
+        Ok(result)
     }
 
     /// Applies the post-block changes, assuming the poststate is generated after executing
