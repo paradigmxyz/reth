@@ -127,7 +127,7 @@ fn fill(
         #[cfg(feature = "optimism")]
         source_hash: signed_tx.is_deposit().then_some(signed_tx.source_hash()),
         #[cfg(feature = "optimism")]
-        mint: signed_tx.mint(),
+        mint: signed_tx.mint().map(U128::from),
         #[cfg(feature = "optimism")]
         is_system_tx: signed_tx.is_deposit().then_some(signed_tx.is_system_transaction()),
     }

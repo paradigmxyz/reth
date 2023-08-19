@@ -27,7 +27,7 @@ use std::{
 };
 
 #[cfg(feature = "optimism")]
-use crate::optimism;
+pub use crate::optimism;
 
 /// Main block executor
 pub struct Executor<DB>
@@ -231,6 +231,7 @@ where
         let l1_block_info =
             self.chain_spec.optimism.then_some(optimism::L1BlockInfo::try_from(block)?);
 
+        // TODO(clabby): OP needs a gas pool.
         let mut cumulative_gas_used = 0;
         let mut post_state = PostState::with_tx_capacity(block.number, block.body.len());
         for (transaction, sender) in block.body.iter().zip(senders) {
@@ -244,8 +245,7 @@ where
                     self.chain_spec.fork(Hardfork::Regolith).active_at_timestamp(block.timestamp);
 
                 if transaction.gas_limit() > block_available_gas &&
-                    !transaction.is_deposit() &&
-                    !is_regolith
+                    (is_regolith || !transaction.is_system_transaction())
                 {
                     return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                         transaction_gas_limit: transaction.gas_limit(),
@@ -261,6 +261,18 @@ where
                     self.evm.env.cfg.disable_gas_refund = true;
                 }
 
+                if let Some(m) = transaction.mint() {
+                    // Add balance to the caler account equal to the minted amount.
+                    // Note: This is unconditional, and will not be reverted if the tx fails
+                    // (unless the block can't be built at all due to gas limit constraints)
+                    self.increment_account_balance(
+                        block.number,
+                        sender,
+                        U256::from(m),
+                        &mut post_state,
+                    )?;
+                }
+
                 let chain_spec = Arc::clone(&self.chain_spec);
                 let db = self.db();
                 let l1_cost = l1_block_info.as_ref().map(|l1_block_info| {
@@ -272,16 +284,11 @@ where
                     )
                 });
 
-                let sender_account =
-                    db.load_account(sender).map_err(|_| BlockExecutionError::ProviderError)?;
+                let mut sender_account = db
+                    .load_account(sender)
+                    .map_err(|_| BlockExecutionError::ProviderError)?
+                    .clone();
                 let old_sender_info = to_reth_acc(&sender_account.info);
-
-                if let Some(m) = transaction.mint() {
-                    // Add balance to the caler account equal to the minted amount.
-                    // Note: This is unconditional, and will not be reverted if the tx fails
-                    // (unless the block can't be built at all due to gas limit constraints)
-                    sender_account.info.balance += U256::from(m);
-                }
 
                 if let Some(l1_cost) = l1_cost {
                     // Check if the sender balance can cover the L1 cost.
@@ -304,11 +311,13 @@ where
 
                 let new_sender_info = to_reth_acc(&sender_account.info);
                 post_state.change_account(block.number, sender, old_sender_info, new_sender_info);
+                db.insert_account_info(sender, sender_account.info);
 
                 // Execute transaction.
                 let ResultAndState { result, state } = self.transact(transaction, sender)?;
 
                 if transaction.is_deposit() && !result.is_success() {
+                    dbg!("FAILED DEPOSIT!!!!", &result);
                     // If the Deposited transaction failed, the deposit must still be included.
                     // In this case, we need to increment the sender nonce and disregard the
                     // state changes. The transaction is also recorded as using all gas.
@@ -325,9 +334,10 @@ where
                         old_sender_info,
                         new_sender_info,
                     );
-                    if !transaction.is_system_transaction() {
-                        cumulative_gas_used +=
-                            if is_regolith { result.gas_used() } else { transaction.gas_limit() };
+                    if is_regolith || !transaction.is_deposit() {
+                        cumulative_gas_used += result.gas_used()
+                    } else if transaction.is_deposit() && !transaction.is_system_transaction() {
+                        cumulative_gas_used += transaction.gas_limit();
                     }
 
                     post_state.add_receipt(
@@ -352,12 +362,10 @@ where
                     &mut post_state,
                 );
 
-                if !transaction.is_system_transaction() {
-                    cumulative_gas_used += if is_regolith || !transaction.is_deposit() {
-                        result.gas_used()
-                    } else {
-                        transaction.gas_limit()
-                    };
+                if is_regolith || !transaction.is_deposit() {
+                    cumulative_gas_used += result.gas_used()
+                } else if transaction.is_deposit() && !transaction.is_system_transaction() {
+                    cumulative_gas_used += transaction.gas_limit();
                 }
 
                 // Skip coinbase payments in Regolith for deposit transactions
@@ -371,7 +379,7 @@ where
                             &mut post_state,
                         )?
                     }
-                    if !transaction.is_system_transaction() {
+                    if !transaction.is_deposit() {
                         self.increment_account_balance(
                             block.number,
                             optimism::base_fee_recipient(),
@@ -452,6 +460,8 @@ where
                 );
             }
         }
+
+        dbg!(&post_state);
 
         Ok((post_state, cumulative_gas_used))
     }

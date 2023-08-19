@@ -2,6 +2,7 @@
 
 use super::*;
 use reth_primitives::Hardfork;
+use reth_revm::{executor, optimism::L1BlockInfo};
 
 /// Constructs an Ethereum transaction payload from the transactions sent through the
 /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -50,6 +51,15 @@ where
 
     let block_number = initialized_block_env.number.to::<u64>();
 
+    let is_regolith =
+        chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, attributes.timestamp);
+
+    // TODO(clabby): Add new error type
+    let l1_block_info = (!attributes.transactions.is_empty()).then_some(
+        L1BlockInfo::try_from(&attributes.transactions[0].input()[..])
+            .map_err(|_| PayloadBuilderError::TransactionEcRecoverFailed)?,
+    );
+
     // Transactions sent via the payload attributes are force included at the top of the block, in
     // the order that they were sent in.
     for sequencer_tx in attributes.transactions {
@@ -67,19 +77,44 @@ where
             .try_into_ecrecovered()
             .map_err(|_| PayloadBuilderError::TransactionEcRecoverFailed)?;
 
+        let l1_cost = l1_block_info.as_ref().map(|l1_block_info| {
+            l1_block_info.calculate_tx_l1_cost(
+                Arc::clone(&chain_spec),
+                attributes.timestamp,
+                sequencer_tx.input(),
+                sequencer_tx.is_deposit(),
+            )
+        });
+
         let mut cfg = initialized_cfg.clone();
 
         if sequencer_tx.is_deposit() {
             cfg.disable_base_fee = true;
             cfg.disable_balance_check = true;
+            cfg.disable_gas_refund = true;
 
             // If the Regolith hardfork is active, we do not need to disable the block gas limit.
             // Otherwise, we allow for the block gas limit to be exceeded by deposit transactions.
-            if !chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, attributes.timestamp) &&
-                sequencer_tx.is_deposit()
-            {
+            if !is_regolith && sequencer_tx.is_deposit() {
                 cfg.disable_block_gas_limit = true;
             };
+
+            // Temporarily increase the sender's balance in the database if the deposit transaction
+            // mints eth.
+            if let Some(m) = sequencer_tx.mint() {
+                let sender = db.load_account(sequencer_tx.signer())?.clone();
+                let mut sender_new = sender.clone();
+                sender_new.info.balance += U256::from(m);
+
+                executor::increment_account_balance(
+                    &mut db,
+                    &mut post_state,
+                    parent_block.number + 1,
+                    sequencer_tx.signer(),
+                    U256::from(m),
+                )?;
+                db.insert_account_info(sequencer_tx.signer(), sender_new.info);
+            }
         }
 
         // Configure the environment for the block.
@@ -130,31 +165,59 @@ where
         // commit changes
         commit_state_changes(&mut db, &mut post_state, block_number, state, true);
 
-        // Push transaction changeset and calculate header bloom filter for receipt.
-        post_state.add_receipt(
-            block_number,
-            Receipt {
-                tx_type: sequencer_tx.tx_type(),
-                success: result.is_success(),
-                cumulative_gas_used,
-                logs: result.logs().into_iter().map(into_reth_log).collect(),
-                deposit_nonce: if chain_spec
-                    .is_fork_active_at_timestamp(Hardfork::Regolith, attributes.timestamp) &&
-                    sequencer_tx.is_deposit()
-                {
-                    // Recovering the signer from the deposit transaction is only fetching
-                    // the `from` address. Deposit transactions have no signature.
-                    let from = sequencer_tx.signer();
-                    let account = db.load_account(from)?;
-                    // The deposit nonce is the account's nonce - 1. The account's nonce
-                    // was incremented during the execution of the deposit transaction
-                    // above.
-                    Some(account.info.nonce.saturating_sub(1))
-                } else {
-                    None
-                },
+        // Skip coinbase payments in Regolith for deposit transactions
+        if chain_spec.optimism {
+            if is_regolith || !sequencer_tx.is_deposit() {
+                cumulative_gas_used += result.gas_used()
+            } else if sequencer_tx.is_deposit() && !sequencer_tx.is_system_transaction() {
+                cumulative_gas_used += sequencer_tx.gas_limit();
+            }
+            if !(sequencer_tx.is_deposit() && is_regolith) {
+                // Route the l1 cost and base fee to the appropriate optimism vaults
+                if let Some(l1_cost) = l1_cost {
+                    executor::increment_account_balance(
+                        &mut db,
+                        &mut post_state,
+                        parent_block.number + 1,
+                        executor::optimism::l1_cost_recipient(),
+                        l1_cost,
+                    )?
+                }
+                if !sequencer_tx.is_deposit() {
+                    executor::increment_account_balance(
+                        &mut db,
+                        &mut post_state,
+                        parent_block.number + 1,
+                        executor::optimism::base_fee_recipient(),
+                        U256::from(base_fee.saturating_mul(result.gas_used())),
+                    )?;
+                }
+            }
+        }
+
+        let r = Receipt {
+            tx_type: sequencer_tx.tx_type(),
+            success: result.is_success(),
+            cumulative_gas_used,
+            logs: result.logs().into_iter().map(into_reth_log).collect(),
+            deposit_nonce: if is_regolith && sequencer_tx.is_deposit() {
+                // Recovering the signer from the deposit transaction is only fetching
+                // the `from` address. Deposit transactions have no signature.
+                let from = sequencer_tx.signer();
+                let account = db.load_account(from)?;
+                // The deposit nonce is the account's nonce - 1. The account's nonce
+                // was incremented during the execution of the deposit transaction
+                // above.
+                Some(account.info.nonce.saturating_sub(1))
+            } else {
+                None
             },
-        );
+        };
+
+        dbg!(&r, result);
+
+        // Push transaction changeset and calculate header bloom filter for receipt.
+        post_state.add_receipt(block_number, r);
 
         dbg!("COMMITTED STATE CHANGES");
 

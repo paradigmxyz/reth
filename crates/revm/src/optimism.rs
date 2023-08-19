@@ -46,6 +46,14 @@ impl TryFrom<&Block> for L1BlockInfo {
                 })
             })?;
 
+        Self::try_from(l1_info_tx_data)
+    }
+}
+
+impl TryFrom<&[u8]> for L1BlockInfo {
+    type Error = executor::BlockExecutionError;
+
+    fn try_from(l1_info_tx_data: &[u8]) -> Result<Self, Self::Error> {
         // The setL1BlockValues tx calldata must be exactly 260 bytes long, considering that
         // we already removed the first 4 bytes (the function selector). Detailed breakdown:
         //   32 bytes for the block number
