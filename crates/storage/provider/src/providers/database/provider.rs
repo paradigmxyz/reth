@@ -446,7 +446,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
                 )
                 .unwrap(),
             ),
-        );        
+        );
 
         if TAKE {
             // Remove TxHashNumber
