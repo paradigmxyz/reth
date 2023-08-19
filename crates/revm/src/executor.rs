@@ -220,7 +220,7 @@ where
     ) -> Result<(PostState, u64), BlockExecutionError> {
         // perf: do not execute empty blocks
         if block.body.is_empty() {
-            return Ok((PostState::default(), 0));
+            return Ok((PostState::default(), 0))
         }
         let senders = self.recover_senders(&block.body, senders)?;
 
@@ -237,7 +237,7 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into());
+                .into())
             }
 
             let result = self.execute_and_apply(block.number, &mut post_state, transaction, sender);
@@ -250,7 +250,7 @@ where
                         hash: transaction.hash,
                         message: format!("{e:?}"),
                     }
-                    .into());
+                    .into())
                 }
             }
         }
@@ -336,7 +336,7 @@ where
                 got: cumulative_gas_used,
                 expected: block.gas_used,
             }
-            .into());
+            .into())
         }
 
         self.apply_post_block_changes(block, total_difficulty, post_state)
@@ -567,7 +567,7 @@ pub fn verify_receipt<'a>(
             got: receipts_root,
             expected: expected_receipts_root,
         }
-        .into());
+        .into())
     }
 
     // Create header log bloom.
@@ -577,7 +577,7 @@ pub fn verify_receipt<'a>(
             expected: Box::new(expected_logs_bloom),
             got: Box::new(logs_bloom),
         }
-        .into());
+        .into())
     }
 
     Ok(())
