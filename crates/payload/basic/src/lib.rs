@@ -26,14 +26,13 @@ use reth_primitives::{
         BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
         ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
     },
-    proofs, Block, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction,
-    SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
+    proofs, Block, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, SealedBlock,
+    Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
 };
 use reth_provider::{BlockReaderIdExt, BlockSource, PostState, StateProviderFactory};
-use reth_revm::executor::Executor;
 use reth_revm::{
     database::{State, SubState},
-    executor::{increment_account_balance, post_block_withdrawals_balance_increments},
+    executor::{increment_account_balance, post_block_withdrawals_balance_increments, Executor},
 };
 use reth_rlp::Encodable;
 use reth_tasks::TaskSpawner;

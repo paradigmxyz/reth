@@ -7,20 +7,21 @@ use crate::{
     to_reth_acc,
 };
 use reth_consensus_common::calc;
-use reth_interfaces;
-use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
+use reth_interfaces::{
+    self,
+    executor::{BlockExecutionError, BlockValidationError},
+};
 use reth_primitives::{
     Account, Address, Block, BlockNumber, Bloom, Bytecode, ChainSpec, Hardfork, Header, Receipt,
     ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
 };
 use reth_provider::{BlockExecutor, PostState, StateProvider};
 use reth_revm_primitives::primitives::EVMResult;
-use revm::primitives::{EVMError, ExecutionResult};
 use revm::{
     db::{AccountState, CacheDB, DatabaseRef},
     primitives::{
         hash_map::{self, Entry},
-        Account as RevmAccount, AccountInfo, ResultAndState,
+        Account as RevmAccount, AccountInfo, EVMError, ExecutionResult, ResultAndState,
     },
     EVM,
 };
@@ -195,7 +196,7 @@ where
                 ?hash, ?output, ?transaction, env = ?self.evm.env,
                 "Executed transaction"
             );
-            return output;
+            return output
         }
 
         // main execution.
@@ -525,9 +526,9 @@ pub fn commit_state_changes<DB>(
                 // the account already exists and its storage was cleared, preserve its previous
                 // state
                 AccountState::StorageCleared
-            } else if has_state_clear_eip
-                && matches!(cached_account.account_state, AccountState::NotExisting)
-                && cached_account.info.is_empty()
+            } else if has_state_clear_eip &&
+                matches!(cached_account.account_state, AccountState::NotExisting) &&
+                cached_account.info.is_empty()
             {
                 AccountState::NotExisting
             } else {
