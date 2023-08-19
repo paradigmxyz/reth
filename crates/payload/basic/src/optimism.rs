@@ -2,6 +2,7 @@
 
 use super::*;
 use reth_primitives::Hardfork;
+use reth_revm::{executor, optimism::L1BlockInfo};
 
 /// Constructs an Ethereum transaction payload from the transactions sent through the
 /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -50,99 +51,178 @@ where
 
     let block_number = initialized_block_env.number.to::<u64>();
 
+    let is_regolith =
+        chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, attributes.timestamp);
+
+    // TODO(clabby): Add new error type
+    let l1_block_info = (!attributes.transactions.is_empty()).then_some(
+        L1BlockInfo::try_from(&attributes.transactions[0].input()[..])
+            .map_err(|_| PayloadBuilderError::TransactionEcRecoverFailed)?,
+    );
+
     // Transactions sent via the payload attributes are force included at the top of the block, in
     // the order that they were sent in.
-    #[cfg(feature = "optimism")]
-    {
-        for sequencer_tx in attributes.transactions {
-            // Check if the job was cancelled, if so we can exit early.
-            if cancel.is_cancelled() {
-                return Ok(BuildOutcome::Cancelled)
-            }
+    for sequencer_tx in attributes.transactions {
+        // Check if the job was cancelled, if so we can exit early.
+        if cancel.is_cancelled() {
+            return Ok(BuildOutcome::Cancelled)
+        }
 
-            // Convert the transaction to a [TransactionSignedEcRecovered]. This is
-            // purely for the purposes of utilizing the [tx_env_with_recovered] function.
-            // Deposit transactions do not have signatures, so if the tx is a deposit, this
-            // will just pull in its `from` address.
-            let sequencer_tx = sequencer_tx
-                .clone()
-                .try_into_ecrecovered()
-                .map_err(|_| PayloadBuilderError::TransactionEcRecoverFailed)?;
+        // Convert the transaction to a [TransactionSignedEcRecovered]. This is
+        // purely for the purposes of utilizing the [tx_env_with_recovered] function.
+        // Deposit transactions do not have signatures, so if the tx is a deposit, this
+        // will just pull in its `from` address.
+        let sequencer_tx = sequencer_tx
+            .clone()
+            .try_into_ecrecovered()
+            .map_err(|_| PayloadBuilderError::TransactionEcRecoverFailed)?;
 
-            // Configure the environment for the block.
-            let env = Env {
-                cfg: initialized_cfg.clone(),
-                block: initialized_block_env.clone(),
-                tx: tx_env_with_recovered(&sequencer_tx),
+        let l1_cost = l1_block_info.as_ref().map(|l1_block_info| {
+            l1_block_info.calculate_tx_l1_cost(
+                Arc::clone(&chain_spec),
+                attributes.timestamp,
+                sequencer_tx.input(),
+                sequencer_tx.is_deposit(),
+            )
+        });
+
+        let mut cfg = initialized_cfg.clone();
+
+        if sequencer_tx.is_deposit() {
+            cfg.disable_base_fee = true;
+            cfg.disable_balance_check = true;
+            cfg.disable_gas_refund = true;
+
+            // If the Regolith hardfork is active, we do not need to disable the block gas limit.
+            // Otherwise, we allow for the block gas limit to be exceeded by deposit transactions.
+            if !is_regolith && sequencer_tx.is_deposit() {
+                cfg.disable_block_gas_limit = true;
             };
 
-            let mut evm = revm::EVM::with_env(env);
-            evm.database(&mut db);
+            // Temporarily increase the sender's balance in the database if the deposit transaction
+            // mints eth.
+            if let Some(m) = sequencer_tx.mint() {
+                let sender = db.load_account(sequencer_tx.signer())?.clone();
+                let mut sender_new = sender.clone();
+                sender_new.info.balance += U256::from(m);
 
-            let ResultAndState { result, state } = match evm.transact() {
-                Ok(res) => res,
-                Err(err) => {
-                    // TODO(clabby): This could be an issue - deposit transactions should always be
-                    // included with a receipt regardless of if there was an error or not. The
-                    // sequencer performs some basic validation on the transactions it sends prior
-                    // to sending a fork choice update, so this shouldn't be an issue, but we may
-                    // want to revisit this.
-                    match err {
-                        EVMError::Transaction(err) => {
-                            if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
-                                // if the nonce is too low, we can skip this transaction
-                                trace!(?err, ?sequencer_tx, "skipping nonce too low transaction");
-                            } else {
-                                // if the transaction is invalid, we can skip it and all of its
-                                // descendants
-                                trace!(
-                                    ?err,
-                                    ?sequencer_tx,
-                                    "skipping invalid transaction and its descendants"
-                                );
-                            }
-                            continue
+                executor::increment_account_balance(
+                    &mut db,
+                    &mut post_state,
+                    parent_block.number + 1,
+                    sequencer_tx.signer(),
+                    U256::from(m),
+                )?;
+                db.insert_account_info(sequencer_tx.signer(), sender_new.info);
+            }
+        }
+
+        // Configure the environment for the block.
+        let env = Env {
+            cfg,
+            block: initialized_block_env.clone(),
+            tx: tx_env_with_recovered(&sequencer_tx),
+        };
+
+        let mut evm = revm::EVM::with_env(env);
+        evm.database(&mut db);
+
+        let ResultAndState { result, state } = match evm.transact() {
+            Ok(res) => res,
+            Err(err) => {
+                // TODO(clabby): This could be an issue - deposit transactions should always be
+                // included with a receipt regardless of if there was an error or not. The
+                // sequencer performs some basic validation on the transactions it sends prior
+                // to sending a fork choice update, so this shouldn't be an issue, but we may
+                // want to revisit this.
+                match err {
+                    EVMError::Transaction(err) => {
+                        dbg!("Transaction error", err);
+                        if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
+                            // if the nonce is too low, we can skip this transaction
+                            trace!(?err, ?sequencer_tx, "skipping nonce too low transaction");
+                        } else {
+                            // if the transaction is invalid, we can skip it and all of its
+                            // descendants
+                            trace!(
+                                ?err,
+                                ?sequencer_tx,
+                                "skipping invalid transaction and its descendants"
+                            );
                         }
-                        err => {
-                            // this is an error that we should treat as fatal for this attempt
-                            return Err(PayloadBuilderError::EvmExecutionError(err))
-                        }
+                        continue
+                    }
+                    err => {
+                        dbg!("EVM Error", &err);
+                        // this is an error that we should treat as fatal for this attempt
+                        return Err(PayloadBuilderError::EvmExecutionError(err))
                     }
                 }
-            };
+            }
+        };
+        dbg!("EXECUTED ", sequencer_tx.hash());
 
-            // commit changes
-            commit_state_changes(&mut db, &mut post_state, block_number, state, true);
+        // commit changes
+        commit_state_changes(&mut db, &mut post_state, block_number, state, true);
 
-            // Push transaction changeset and calculate header bloom filter for receipt.
-            post_state.add_receipt(
-                block_number,
-                Receipt {
-                    tx_type: sequencer_tx.tx_type(),
-                    success: result.is_success(),
-                    cumulative_gas_used,
-                    logs: result.logs().into_iter().map(into_reth_log).collect(),
-                    deposit_nonce: if chain_spec
-                        .is_fork_active_at_timestamp(Hardfork::Regolith, attributes.timestamp) &&
-                        sequencer_tx.is_deposit()
-                    {
-                        // Recovering the signer from the deposit transaction is only fetching
-                        // the `from` address. Deposit transactions have no signature.
-                        let from = sequencer_tx.signer();
-                        let account = db.load_account(from)?;
-                        // The deposit nonce is the account's nonce - 1. The account's nonce
-                        // was incremented during the execution of the deposit transaction
-                        // above.
-                        Some(account.info.nonce.saturating_sub(1))
-                    } else {
-                        None
-                    },
-                },
-            );
-
-            // append transaction to the list of executed transactions
-            executed_txs.push(sequencer_tx.into_signed());
+        // Skip coinbase payments in Regolith for deposit transactions
+        if chain_spec.optimism {
+            if is_regolith || !sequencer_tx.is_deposit() {
+                cumulative_gas_used += result.gas_used()
+            } else if sequencer_tx.is_deposit() && !sequencer_tx.is_system_transaction() {
+                cumulative_gas_used += sequencer_tx.gas_limit();
+            }
+            if !(sequencer_tx.is_deposit() && is_regolith) {
+                // Route the l1 cost and base fee to the appropriate optimism vaults
+                if let Some(l1_cost) = l1_cost {
+                    executor::increment_account_balance(
+                        &mut db,
+                        &mut post_state,
+                        parent_block.number + 1,
+                        executor::optimism::l1_cost_recipient(),
+                        l1_cost,
+                    )?
+                }
+                if !sequencer_tx.is_deposit() {
+                    executor::increment_account_balance(
+                        &mut db,
+                        &mut post_state,
+                        parent_block.number + 1,
+                        executor::optimism::base_fee_recipient(),
+                        U256::from(base_fee.saturating_mul(result.gas_used())),
+                    )?;
+                }
+            }
         }
+
+        let r = Receipt {
+            tx_type: sequencer_tx.tx_type(),
+            success: result.is_success(),
+            cumulative_gas_used,
+            logs: result.logs().into_iter().map(into_reth_log).collect(),
+            deposit_nonce: if is_regolith && sequencer_tx.is_deposit() {
+                // Recovering the signer from the deposit transaction is only fetching
+                // the `from` address. Deposit transactions have no signature.
+                let from = sequencer_tx.signer();
+                let account = db.load_account(from)?;
+                // The deposit nonce is the account's nonce - 1. The account's nonce
+                // was incremented during the execution of the deposit transaction
+                // above.
+                Some(account.info.nonce.saturating_sub(1))
+            } else {
+                None
+            },
+        };
+
+        dbg!(&r, result);
+
+        // Push transaction changeset and calculate header bloom filter for receipt.
+        post_state.add_receipt(block_number, r);
+
+        dbg!("COMMITTED STATE CHANGES");
+
+        // append transaction to the list of executed transactions
+        executed_txs.push(sequencer_tx.into_signed());
     }
 
     while let Some(pool_tx) = best_txs.next() {

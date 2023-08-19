@@ -100,7 +100,7 @@ pub use transaction::{
     LEGACY_TX_TYPE_ID,
 };
 #[cfg(feature = "optimism")]
-pub use transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID, DEPOSIT_VERSION};
+pub use transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID};
 pub use withdrawal::Withdrawal;
 
 /// A block hash.

@@ -71,7 +71,7 @@ pub struct Transaction {
     /// The ETH value to mint on L2
     #[cfg(feature = "optimism")]
     #[serde(rename = "mint", skip_serializing_if = "Option::is_none")]
-    pub mint: Option<u128>,
+    pub mint: Option<U128>,
     /// Field indicating whether the transaction is a system transaction, and therefore
     /// exempt from the L2 gas limit.
     #[cfg(feature = "optimism")]

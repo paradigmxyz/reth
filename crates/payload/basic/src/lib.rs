@@ -173,6 +173,43 @@ where
         let until = tokio::time::Instant::now() + self.config.deadline;
         let deadline = Box::pin(tokio::time::sleep_until(until));
 
+        #[cfg(feature = "optimism")]
+        if config.attributes.no_tx_pool {
+            dbg!("No tx pool; Building");
+            let args = BuildArguments {
+                client: self.client.clone(),
+                pool: self.pool.clone(),
+                cached_reads: CachedReads::default(),
+                config: config.clone(),
+                cancel: Cancelled::default(),
+                best_payload: None,
+            };
+            match self.builder.try_build(args)? {
+                BuildOutcome::Better { payload, cached_reads } => {
+                    dbg!("Got better payload", &payload);
+                    return Ok(BasicPayloadJob {
+                        config,
+                        client: self.client.clone(),
+                        pool: self.pool.clone(),
+                        executor: self.executor.clone(),
+                        deadline,
+                        interval: tokio::time::interval(self.config.interval),
+                        best_payload: Some(Arc::new(payload)),
+                        pending_block: None,
+                        cached_reads: Some(cached_reads),
+                        payload_task_guard: self.payload_task_guard.clone(),
+                        metrics: Default::default(),
+                        builder: self.builder.clone(),
+                    })
+                }
+                _ => {
+                    // TODO(clabby): Remove, don't need to add a new error type - this is temp
+                    // code.
+                    return Err(PayloadBuilderError::TransactionEcRecoverFailed)
+                }
+            }
+        }
+
         Ok(BasicPayloadJob {
             config,
             client: self.client.clone(),
@@ -371,15 +408,7 @@ where
                     let _ = tx.send(result);
                 }));
 
-                #[cfg(not(feature = "optimism"))]
-                {
-                    this.pending_block = Some(PendingPayload { _cancel, payload: rx });
-                }
-
-                #[cfg(feature = "optimism")]
-                if this.config.compute_pending_block {
-                    this.pending_block = Some(PendingPayload { _cancel, payload: rx });
-                }
+                this.pending_block = Some(PendingPayload { _cancel, payload: rx });
             }
         }
 
@@ -410,15 +439,7 @@ where
                     this.metrics.inc_failed_payload_builds();
                 }
                 Poll::Pending => {
-                    #[cfg(not(feature = "optimism"))]
-                    {
-                        this.pending_block = Some(fut);
-                    }
-
-                    #[cfg(feature = "optimism")]
-                    if this.config.compute_pending_block {
-                        this.pending_block = Some(fut);
-                    }
+                    this.pending_block = Some(fut);
                 }
             }
         }
@@ -469,6 +490,8 @@ where
 
             empty_payload = Some(rx);
         }
+
+        dbg!(&best_payload, &maybe_better, &empty_payload);
 
         let fut = ResolveBestPayload { best_payload, maybe_better, empty_payload };
 
@@ -582,7 +605,9 @@ struct PayloadConfig {
     /// The chain spec.
     chain_spec: Arc<ChainSpec>,
     /// The rollup's compute pending block configuration option.
+    /// TODO(clabby): Implement this feature.
     #[cfg(feature = "optimism")]
+    #[allow(dead_code)]
     compute_pending_block: bool,
 }
 
@@ -591,7 +616,7 @@ impl PayloadConfig {
     pub(crate) fn extra_data(&self) -> reth_primitives::Bytes {
         #[cfg(feature = "optimism")]
         if self.chain_spec.optimism {
-            Default::default()
+            return Default::default()
         }
         reth_primitives::Bytes(self.extra_data.clone())
     }

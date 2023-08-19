@@ -523,9 +523,12 @@ where
             };
 
             let cost_addition = match L1BlockInfo::try_from(&block) {
-                Ok(info) => {
-                    info.calculate_tx_l1_cost(transaction.input(), transaction.is_deposit())
-                }
+                Ok(info) => info.calculate_tx_l1_cost(
+                    Arc::clone(&self.chain_spec),
+                    block.timestamp,
+                    transaction.input(),
+                    transaction.is_deposit(),
+                ),
                 Err(err) => {
                     return TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err))
                 }

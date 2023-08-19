@@ -7,6 +7,9 @@ use reth_primitives::{
 use reth_rlp::Decodable;
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 
+#[cfg(feature = "optimism")]
+use reth_primitives::serde_helper::option_u64_hex;
+
 /// The execution payload body response that allows for `null` values.
 pub type ExecutionPayloadBodiesV1 = Vec<Option<ExecutionPayloadBodyV1>>;
 
@@ -298,7 +301,11 @@ pub struct PayloadAttributes {
     pub no_tx_pool: Option<bool>,
     /// If set, this sets the exact gas limit the block produced with.
     #[cfg(feature = "optimism")]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "option_u64_hex::deserialize"
+    )]
     pub gas_limit: Option<u64>,
 }
 

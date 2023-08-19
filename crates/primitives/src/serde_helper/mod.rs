@@ -32,6 +32,21 @@ pub mod u64_hex {
     }
 }
 
+/// serde functions for handling `Option<u64>` as [U64](crate::U64)
+#[cfg(feature = "optimism")]
+pub mod option_u64_hex {
+    use crate::U64;
+    use serde::{Deserialize, Deserializer};
+
+    /// Deserializes an `Option` from [U64] accepting a hex quantity string with optional 0x prefix
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(U64::deserialize(deserializer).map_or(None, |v| Some(v.as_u64())))
+    }
+}
+
 /// serde functions for handling bytes as hex strings, such as [bytes::Bytes]
 pub mod hex_bytes {
     use serde::{Deserialize, Deserializer, Serializer};

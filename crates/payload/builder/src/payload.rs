@@ -10,8 +10,6 @@ use revm_primitives::{BlockEnv, CfgEnv};
 
 #[cfg(feature = "optimism")]
 use reth_primitives::TransactionSigned;
-#[cfg(feature = "optimism")]
-use reth_rlp::Decodable;
 
 /// Contains the built payload.
 ///
@@ -117,7 +115,7 @@ impl PayloadBuilderAttributes {
             .as_ref()
             .unwrap_or(&Vec::default())
             .iter()
-            .map(|tx| TransactionSigned::decode(&mut &tx[..]))
+            .map(|tx| TransactionSigned::decode_enveloped(tx.clone()))
             .collect::<Result<_, _>>()?;
 
         #[cfg(not(feature = "optimism"))]

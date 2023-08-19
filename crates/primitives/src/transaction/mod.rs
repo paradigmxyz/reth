@@ -13,6 +13,7 @@ use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
 use reth_rlp::{
     length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
+use revm_primitives::U256;
 use serde::{Deserialize, Serialize};
 pub use signature::Signature;
 use std::mem;
@@ -41,7 +42,7 @@ pub(crate) mod util;
 #[cfg(feature = "optimism")]
 mod optimism;
 #[cfg(feature = "optimism")]
-pub use optimism::{TxDeposit, DEPOSIT_VERSION};
+pub use optimism::TxDeposit;
 #[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
 
@@ -611,13 +612,6 @@ impl Encodable for Transaction {
                 self.encode_fields(out);
                 self.encode_eip155_fields(out);
             }
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => {
-                out.put_u8(self.tx_type() as u8);
-                out.put_u8(DEPOSIT_VERSION);
-                Header { list: true, payload_length: self.fields_len() }.encode(out);
-                self.encode_fields(out);
-            }
             _ => {
                 out.put_u8(self.tx_type() as u8);
                 Header { list: true, payload_length: self.fields_len() }.encode(out);
@@ -632,13 +626,6 @@ impl Encodable for Transaction {
                 let payload_length = self.fields_len() + self.eip155_fields_len();
                 // 'header length' + 'payload length'
                 length_of_length(payload_length) + payload_length
-            }
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit { .. } => {
-                let payload_length = self.fields_len();
-                // 'transaction type byte length' + 'version byte' + 'header length' + 'payload
-                // length'
-                1 + 1 + length_of_length(payload_length) + payload_length
             }
             _ => {
                 let payload_length = self.fields_len();
@@ -1071,17 +1058,6 @@ impl TransactionSigned {
         let tx_type = *data.first().ok_or(DecodeError::InputTooShort)?;
         data.advance(1);
 
-        // If the transaction is a deposit, we need to first ensure that the version
-        // byte is correct.
-        #[cfg(feature = "optimism")]
-        if tx_type == DEPOSIT_TX_TYPE_ID {
-            let version = *data.first().ok_or(DecodeError::InputTooShort)?;
-            if version != DEPOSIT_VERSION {
-                return Err(DecodeError::Custom("Deposit version mismatch"))
-            }
-            data.advance(1);
-        }
-
         // decode the list header for the rest of the transaction
         let header = Header::decode(data)?;
         if !header.list {
@@ -1090,10 +1066,6 @@ impl TransactionSigned {
 
         // length of tx encoding = tx type byte (size = 1) + length of header + payload length
         let tx_length = 1 + header.length() + header.payload_length;
-        // If the transaction is a deposit, we need to add one to the length to account for the
-        // version byte.
-        #[cfg(feature = "optimism")]
-        let tx_length = if tx_type == DEPOSIT_TX_TYPE_ID { tx_length + 1 } else { tx_length };
 
         // decode common fields
         let transaction = match tx_type {
@@ -1105,7 +1077,15 @@ impl TransactionSigned {
             _ => return Err(DecodeError::Custom("unsupported typed transaction type")),
         };
 
+        #[cfg(not(feature = "optimism"))]
         let signature = Signature::decode(data)?;
+
+        #[cfg(feature = "optimism")]
+        let signature = if tx_type == DEPOSIT_TX_TYPE_ID {
+            Signature { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false }
+        } else {
+            Signature::decode(data)?
+        };
 
         let hash = keccak256(&original_encoding[..tx_length]);
         let signed = TransactionSigned { transaction, hash, signature };
@@ -1187,6 +1167,14 @@ impl proptest::arbitrary::Arbitrary for TransactionSigned {
                     // Otherwise we might overflow when calculating `v` on `recalculate_hash`
                     transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
                 }
+
+                #[cfg(feature = "optimism")]
+                let sig = if transaction.is_deposit() {
+                    Signature { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false }
+                } else {
+                    sig
+                };
+
                 let mut tx =
                     TransactionSigned { hash: Default::default(), signature: sig, transaction };
                 tx.hash = tx.recalculate_hash();
@@ -1207,11 +1195,16 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
             transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
         }
 
-        let mut tx = TransactionSigned {
-            hash: Default::default(),
-            signature: Signature::arbitrary(u)?,
-            transaction,
+        let signature = Signature::arbitrary(u)?;
+
+        #[cfg(feature = "optimism")]
+        let signature = if transaction.is_deposit() {
+            Signature { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false }
+        } else {
+            signature
         };
+
+        let mut tx = TransactionSigned { hash: Default::default(), signature, transaction };
         tx.hash = tx.recalculate_hash();
 
         Ok(tx)
