@@ -4326,9 +4326,9 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "ordered-float"
-version = "3.8.0"
+version = "3.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7417b1484e3641a8791af3c3123cdc083ac60a0d262a2f281b6125d58917caf4"
+checksum = "126d3e6f3926bfb0fb24495b4f4da50626f547e54956594748e3d8882a0320b4"
 dependencies = [
  "num-traits",
 ]

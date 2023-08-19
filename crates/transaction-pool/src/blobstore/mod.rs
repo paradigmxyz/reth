@@ -1,14 +1,14 @@
 //! Storage for blob data of EIP4844 transactions.
 
-use reth_primitives::{BlobTransactionSidecar, H256};
-use std::fmt;
-mod maintain;
-mod mem;
-mod noop;
-
-pub use maintain::BlobStoreMaintainer;
 pub use mem::InMemoryBlobStore;
 pub use noop::NoopBlobStore;
+use reth_primitives::{BlobTransactionSidecar, H256};
+use std::fmt;
+pub use tracker::BlobStoreCanonTracker;
+
+mod mem;
+mod noop;
+mod tracker;
 
 /// A blob store that can be used to store blob data of EIP4844 transactions.
 ///
@@ -43,6 +43,9 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
 
     /// Data size of all transactions in the blob store.
     fn data_size_hint(&self) -> Option<usize>;
+
+    /// How many blobs are in the blob store.
+    fn blobs_len(&self) -> usize;
 }
 
 /// Error variants that can occur when interacting with a blob store.
