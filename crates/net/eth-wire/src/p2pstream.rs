@@ -9,7 +9,7 @@ use crate::{
 use futures::{Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_codecs::derive_arbitrary;
-use reth_metrics::metrics::{self, counter};
+use reth_metrics::metrics::counter;
 use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
     hex,

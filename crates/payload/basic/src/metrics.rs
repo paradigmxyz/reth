@@ -1,9 +1,6 @@
 //! Metrics for the payload builder impl
 
-use reth_metrics::{
-    metrics::{self, Counter},
-    Metrics,
-};
+use reth_metrics::{metrics::Counter, Metrics};
 
 /// Transaction pool metrics
 #[derive(Metrics)]

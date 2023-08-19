@@ -4,13 +4,14 @@
 //! to be generic over it.
 
 use crate::{
-    error::PoolError, traits::PendingTransactionListenerKind, validate::ValidTransaction,
-    AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPooledTransaction,
-    NewTransactionEvent, PoolResult, PoolSize, PoolTransaction, PropagatedTransactions,
-    TransactionEvents, TransactionOrigin, TransactionPool, TransactionValidationOutcome,
-    TransactionValidator, ValidPoolTransaction,
+    blobstore::BlobStoreError, error::PoolError, traits::PendingTransactionListenerKind,
+    validate::ValidTransaction, AllPoolTransactions, AllTransactionsEvents, BestTransactions,
+    BlockInfo, EthPooledTransaction, NewTransactionEvent, PoolResult, PoolSize, PoolTransaction,
+    PropagatedTransactions, TransactionEvents, TransactionOrigin, TransactionPool,
+    TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
-use reth_primitives::{Address, InvalidTransactionError, TxHash};
+use reth_primitives::{Address, BlobTransactionSidecar, InvalidTransactionError, TxHash};
+use reth_primitives::{Address, BlobTransactionSidecar, TxHash};
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
@@ -162,6 +163,17 @@ impl TransactionPool for NoopTransactionPool {
     fn unique_senders(&self) -> HashSet<Address> {
         Default::default()
     }
+
+    fn get_blob(&self, _tx_hash: TxHash) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
+        Ok(None)
+    }
+
+    fn get_all_blobs(
+        &self,
+        _tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError> {
+        Ok(vec![])
+    }
 }
 
 /// A [`TransactionValidator`] that does nothing.
@@ -186,7 +198,7 @@ impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::TxTypeNotSupported.into(),
-            )
+            );
         }
 
         TransactionValidationOutcome::Valid {

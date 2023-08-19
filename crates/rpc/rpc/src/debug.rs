@@ -643,6 +643,10 @@ where
         Ok(res.into())
     }
 
+    async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {
+        Ok(())
+    }
+
     /// Handler for `debug_getRawBlock`
     async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes> {
         let block = self.inner.provider.block_by_id(block_id).to_rpc_result()?;
