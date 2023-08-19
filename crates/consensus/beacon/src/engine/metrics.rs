@@ -1,5 +1,5 @@
 use reth_metrics::{
-    metrics::{self, Counter, Gauge, Histogram},
+    metrics::{Counter, Gauge, Histogram},
     Metrics,
 };
 

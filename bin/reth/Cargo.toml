@@ -38,7 +38,6 @@ reth-net-nat = { path = "../../crates/net/nat" }
 reth-payload-builder.workspace = true
 reth-basic-payload-builder = { path = "../../crates/payload/basic" }
 reth-discv4 = { path = "../../crates/net/discv4" }
-reth-metrics.workspace = true
 reth-prune = { path = "../../crates/prune" }
 reth-trie = { path = "../../crates/trie" }
 
@@ -58,9 +57,11 @@ confy = "0.5"
 toml = { version = "0.7", features = ["display"] }
 
 # metrics
-metrics-exporter-prometheus = "0.11.0"
-metrics-util = "0.14.0"
+metrics-exporter-prometheus = "0.12.1"
+metrics-util = "0.15.0"
 metrics-process = "1.0.9"
+reth-metrics.workspace = true
+metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
 
 # test vectors generation
 proptest.workspace = true
