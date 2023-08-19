@@ -431,8 +431,22 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             .map(|(id, tx)| (id, tx.into()))
             .collect::<Vec<(u64, TransactionSigned)>>();
 
-        let senders =
+        let mut senders =
             self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)?;
+
+        // Recover senders manually if not found in db
+        let start_index = senders.len();
+        let end_index = transactions.len();
+        let missing_senders = end_index - start_index;
+        senders.extend(
+            (start_index as u64..end_index as u64).zip(
+                TransactionSigned::recover_signers(
+                    transactions.iter().skip(start_index).map(|(_, tx)| tx).collect::<Vec<_>>(),
+                    missing_senders,
+                )
+                .unwrap(),
+            ),
+        );        
 
         if TAKE {
             // Remove TxHashNumber
