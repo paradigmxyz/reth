@@ -14,6 +14,8 @@ use reth_primitives::{
     ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
 };
 use reth_provider::{BlockExecutor, PostState, StateProvider};
+use reth_revm_primitives::primitives::EVMResult;
+use revm::primitives::{EVMError, ExecutionResult};
 use revm::{
     db::{AccountState, CacheDB, DatabaseRef},
     primitives::{
@@ -26,8 +28,6 @@ use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
 };
-use revm::primitives::{EVMError, ExecutionResult};
-use reth_revm_primitives::primitives::EVMResult;
 
 /// Main block executor
 pub struct Executor<DB>
@@ -220,7 +220,7 @@ where
     ) -> Result<(PostState, u64), BlockExecutionError> {
         // perf: do not execute empty blocks
         if block.body.is_empty() {
-            return Ok((PostState::default(), 0))
+            return Ok((PostState::default(), 0));
         }
         let senders = self.recover_senders(&block.body, senders)?;
 
@@ -237,7 +237,7 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                    .into())
+                .into());
             }
 
             let result = self.execute_and_apply(block.number, &mut post_state, transaction, sender);
@@ -246,7 +246,11 @@ where
                     cumulative_gas_used += result.gas_used();
                 }
                 Err(e) => {
-                    return Err(BlockValidationError::EVM { hash: transaction.hash, message: format!("{e:?}") }.into());
+                    return Err(BlockValidationError::EVM {
+                        hash: transaction.hash,
+                        message: format!("{e:?}"),
+                    }
+                    .into());
                 }
             }
         }
@@ -257,7 +261,13 @@ where
     /// Executes the transaction and applies the state changes to the given [PostState].
     ///
     /// Returns the [ExecutionResult] from applying the transaction
-    pub fn execute_and_apply(&mut self, block_number: BlockNumber, post_state: &mut PostState, transaction: &TransactionSigned, sender: Address) -> Result<ExecutionResult, EVMError<reth_interfaces::Error>> {
+    pub fn execute_and_apply(
+        &mut self,
+        block_number: BlockNumber,
+        post_state: &mut PostState,
+        transaction: &TransactionSigned,
+        sender: Address,
+    ) -> Result<ExecutionResult, EVMError<reth_interfaces::Error>> {
         let ResultAndState { result, state } = self.transact(transaction, sender)?;
 
         // commit changes
@@ -326,7 +336,7 @@ where
                 got: cumulative_gas_used,
                 expected: block.gas_used,
             }
-            .into())
+            .into());
         }
 
         self.apply_post_block_changes(block, total_difficulty, post_state)
@@ -440,7 +450,7 @@ pub fn commit_state_changes<DB>(
             db_account.account_state = AccountState::NotExisting;
             db_account.info = AccountInfo::default();
 
-            continue
+            continue;
         } else {
             // check if account code is new or old.
             // does it exist inside cached contracts if it doesn't it is new bytecode that
@@ -515,9 +525,9 @@ pub fn commit_state_changes<DB>(
                 // the account already exists and its storage was cleared, preserve its previous
                 // state
                 AccountState::StorageCleared
-            } else if has_state_clear_eip &&
-                matches!(cached_account.account_state, AccountState::NotExisting) &&
-                cached_account.info.is_empty()
+            } else if has_state_clear_eip
+                && matches!(cached_account.account_state, AccountState::NotExisting)
+                && cached_account.info.is_empty()
             {
                 AccountState::NotExisting
             } else {
@@ -557,7 +567,7 @@ pub fn verify_receipt<'a>(
             got: receipts_root,
             expected: expected_receipts_root,
         }
-        .into())
+        .into());
     }
 
     // Create header log bloom.
@@ -567,7 +577,7 @@ pub fn verify_receipt<'a>(
             expected: Box::new(expected_logs_bloom),
             got: Box::new(logs_bloom),
         }
-        .into())
+        .into());
     }
 
     Ok(())

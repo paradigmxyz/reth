@@ -26,17 +26,14 @@ use reth_primitives::{
         BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
         ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
     },
-    proofs, Block, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
+    proofs, Block, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction,
     SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
 };
 use reth_provider::{BlockReaderIdExt, BlockSource, PostState, StateProviderFactory};
+use reth_revm::executor::Executor;
 use reth_revm::{
     database::{State, SubState},
-    env::tx_env_with_recovered,
-    executor::{
-        commit_state_changes, increment_account_balance, post_block_withdrawals_balance_increments,
-    },
-    into_reth_log,
+    executor::{increment_account_balance, post_block_withdrawals_balance_increments},
 };
 use reth_rlp::Encodable;
 use reth_tasks::TaskSpawner;
@@ -57,7 +54,6 @@ use tokio::{
     time::{Interval, Sleep},
 };
 use tracing::{debug, trace};
-use reth_revm::executor::Executor;
 
 mod metrics;
 
@@ -121,12 +117,12 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
 // === impl BasicPayloadJobGenerator ===
 
 impl<Client, Pool, Tasks, Builder> PayloadJobGenerator
-for BasicPayloadJobGenerator<Client, Pool, Tasks, Builder>
-    where
-        Client: StateProviderFactory + BlockReaderIdExt + Clone + Unpin + 'static,
-        Pool: TransactionPool + Unpin + 'static,
-        Tasks: TaskSpawner + Clone + Unpin + 'static,
-        Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
+    for BasicPayloadJobGenerator<Client, Pool, Tasks, Builder>
+where
+    Client: StateProviderFactory + BlockReaderIdExt + Clone + Unpin + 'static,
+    Pool: TransactionPool + Unpin + 'static,
+    Tasks: TaskSpawner + Clone + Unpin + 'static,
+    Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
 {
     type Job = BasicPayloadJob<Client, Pool, Tasks, Builder>;
 
@@ -301,11 +297,11 @@ pub struct BasicPayloadJob<Client, Pool, Tasks, Builder> {
 }
 
 impl<Client, Pool, Tasks, Builder> Future for BasicPayloadJob<Client, Pool, Tasks, Builder>
-    where
-        Client: StateProviderFactory + Clone + Unpin + 'static,
-        Pool: TransactionPool + Unpin + 'static,
-        Tasks: TaskSpawner + Clone + 'static,
-        Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
+where
+    Client: StateProviderFactory + Clone + Unpin + 'static,
+    Pool: TransactionPool + Unpin + 'static,
+    Tasks: TaskSpawner + Clone + 'static,
+    Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
 {
     type Output = Result<(), PayloadBuilderError>;
 
@@ -315,7 +311,7 @@ impl<Client, Pool, Tasks, Builder> Future for BasicPayloadJob<Client, Pool, Task
         // check if the deadline is reached
         if this.deadline.as_mut().poll(cx).is_ready() {
             trace!("Payload building deadline reached");
-            return Poll::Ready(Ok(()))
+            return Poll::Ready(Ok(()));
         }
 
         // check if the interval is reached
@@ -389,17 +385,17 @@ impl<Client, Pool, Tasks, Builder> Future for BasicPayloadJob<Client, Pool, Task
 }
 
 impl<Client, Pool, Tasks, Builder> PayloadJob for BasicPayloadJob<Client, Pool, Tasks, Builder>
-    where
-        Client: StateProviderFactory + Clone + Unpin + 'static,
-        Pool: TransactionPool + Unpin + 'static,
-        Tasks: TaskSpawner + Clone + 'static,
-        Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
+where
+    Client: StateProviderFactory + Clone + Unpin + 'static,
+    Pool: TransactionPool + Unpin + 'static,
+    Tasks: TaskSpawner + Clone + 'static,
+    Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
 {
     type ResolvePayloadFuture = ResolveBestPayload;
 
     fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError> {
         if let Some(ref payload) = self.best_payload {
-            return Ok(payload.clone())
+            return Ok(payload.clone());
         }
         // No payload has been built yet, but we need to return something that the CL then can
         // deliver, so we need to return an empty payload.
@@ -467,13 +463,13 @@ impl Future for ResolveBestPayload {
             if let Poll::Ready(res) = fut.poll(cx) {
                 this.maybe_better = None;
                 if let Ok(BuildOutcome::Better { payload, .. }) = res {
-                    return Poll::Ready(Ok(Arc::new(payload)))
+                    return Poll::Ready(Ok(Arc::new(payload)));
                 }
             }
         }
 
         if let Some(best) = this.best_payload.take() {
-            return Poll::Ready(Ok(best))
+            return Poll::Ready(Ok(best));
         }
 
         let mut empty_payload = this.empty_payload.take().expect("polled after completion");
@@ -606,9 +602,9 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
 
 // Default implementation of [PayloadBuilder] for unit type
 impl<Pool, Client> PayloadBuilder<Pool, Client> for ()
-    where
-        Client: StateProviderFactory,
-        Pool: TransactionPool,
+where
+    Client: StateProviderFactory,
+    Pool: TransactionPool,
 {
     fn try_build(
         &self,
@@ -627,24 +623,19 @@ impl<Pool, Client> PayloadBuilder<Pool, Client> for ()
 fn default_payload_builder<Pool, Client>(
     args: BuildArguments<Pool, Client>,
 ) -> Result<BuildOutcome, PayloadBuilderError>
-    where
-        Client: StateProviderFactory,
-        Pool: TransactionPool,
+where
+    Client: StateProviderFactory,
+    Pool: TransactionPool,
 {
-    let BuildArguments { client, pool, config, cached_reads, cancel, best_payload} = args;
+    let BuildArguments { client, pool, config, cached_reads, cancel, best_payload } = args;
 
-    let PayloadConfig {
-        initialized_block_env,
-        parent_block,
-        extra_data,
-        attributes,
-        chain_spec
-    } = config;
+    let PayloadConfig { initialized_block_env, parent_block, extra_data, attributes, chain_spec } =
+        config;
 
     debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number, "building new payload");
 
     let state = State::new(client.state_by_block_hash(parent_block.hash)?);
-    let mut executor = Executor::new(Arc::clone(&chain_spec),  SubState::new(state));
+    let mut executor = Executor::new(Arc::clone(&chain_spec), SubState::new(state));
     let mut post_state = PostState::default();
 
     let mut cumulative_gas_used = 0;
@@ -665,18 +656,23 @@ fn default_payload_builder<Pool, Client>(
             // which also removes all dependent transaction from the iterator before we can
             // continue
             best_txs.mark_invalid(&pool_tx);
-            continue
+            continue;
         }
 
         // check if the job was cancelled, if so we can exit early
         if cancel.is_cancelled() {
-            return Ok(BuildOutcome::Cancelled)
+            return Ok(BuildOutcome::Cancelled);
         }
 
         // convert tx to a signed transaction
         let tx = pool_tx.to_recovered_transaction();
 
-        let result = match executor.execute_and_apply(block_number, &mut post_state, tx.signed(), tx.signer()) {
+        let result = match executor.execute_and_apply(
+            block_number,
+            &mut post_state,
+            tx.signed(),
+            tx.signer(),
+        ) {
             Ok(res) => res,
             Err(err) => {
                 match err {
@@ -690,11 +686,11 @@ fn default_payload_builder<Pool, Client>(
                             trace!(?err, ?tx, "skipping invalid transaction and its descendants");
                             best_txs.mark_invalid(&pool_tx);
                         }
-                        continue
+                        continue;
                     }
                     err => {
                         // this is an error that we should treat as fatal for this attempt
-                        return Err(PayloadBuilderError::EvmExecutionError(err))
+                        return Err(PayloadBuilderError::EvmExecutionError(err));
                     }
                 }
             }
@@ -716,7 +712,7 @@ fn default_payload_builder<Pool, Client>(
     // check if we have a better block
     if !is_better_payload(best_payload.as_deref(), total_fees) {
         // can skip building the block
-        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
+        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads });
     }
 
     let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
@@ -774,8 +770,8 @@ fn build_empty_payload<Client>(
     client: &Client,
     config: PayloadConfig,
 ) -> Result<BuiltPayload, PayloadBuilderError>
-    where
-        Client: StateProviderFactory,
+where
+    Client: StateProviderFactory,
 {
     let PayloadConfig {
         initialized_block_env,
@@ -868,15 +864,15 @@ fn commit_withdrawals<DB>(
     timestamp: u64,
     withdrawals: Vec<Withdrawal>,
 ) -> Result<WithdrawalsOutcome, <DB as DatabaseRef>::Error>
-    where
-        DB: DatabaseRef,
+where
+    DB: DatabaseRef,
 {
     if !chain_spec.is_shanghai_activated_at_timestamp(timestamp) {
-        return Ok(WithdrawalsOutcome::pre_shanghai())
+        return Ok(WithdrawalsOutcome::pre_shanghai());
     }
 
     if withdrawals.is_empty() {
-        return Ok(WithdrawalsOutcome::empty())
+        return Ok(WithdrawalsOutcome::empty());
     }
 
     let balance_increments =
