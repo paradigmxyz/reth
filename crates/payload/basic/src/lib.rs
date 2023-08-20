@@ -175,7 +175,6 @@ where
 
         #[cfg(feature = "optimism")]
         if config.attributes.no_tx_pool {
-            dbg!("No tx pool; Building");
             let args = BuildArguments {
                 client: self.client.clone(),
                 pool: self.pool.clone(),
@@ -186,7 +185,6 @@ where
             };
             match self.builder.try_build(args)? {
                 BuildOutcome::Better { payload, cached_reads } => {
-                    dbg!("Got better payload", &payload);
                     return Ok(BasicPayloadJob {
                         config,
                         client: self.client.clone(),
@@ -490,8 +488,6 @@ where
 
             empty_payload = Some(rx);
         }
-
-        dbg!(&best_payload, &maybe_better, &empty_payload);
 
         let fut = ResolveBestPayload { best_payload, maybe_better, empty_payload };
 

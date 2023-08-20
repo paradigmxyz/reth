@@ -9,12 +9,12 @@ use crate::{
 use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
-    Account, Address, Block, BlockNumber, Bloom, Bytecode, ChainSpec, Hardfork, Header, Receipt,
-    ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
+    bytes::BytesMut, Account, Address, Block, BlockNumber, Bloom, Bytecode, ChainSpec, Hardfork,
+    Header, Receipt, ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
 };
 use reth_provider::{BlockExecutor, PostState, StateProvider};
 use revm::{
-    db::{AccountState, CacheDB, DatabaseRef},
+    db::{AccountState, CacheDB, DatabaseRef, DbAccount},
     primitives::{
         hash_map::{self, Entry},
         Account as RevmAccount, AccountInfo, ResultAndState,
@@ -174,6 +174,18 @@ where
             .map_err(|_| BlockExecutionError::ProviderError)
     }
 
+    /// Decrement the balance for the given account in the [PostState].
+    fn decrement_account_balance(
+        &mut self,
+        block_number: BlockNumber,
+        address: Address,
+        decrement: U256,
+        post_state: &mut PostState,
+    ) -> Result<(), BlockExecutionError> {
+        decrement_account_balance(self.db(), post_state, block_number, address, decrement)
+            .map_err(|_| BlockExecutionError::ProviderError)
+    }
+
     /// Runs a single transaction in the configured environment and proceeds
     /// to return the result and state diff (without applying it).
     ///
@@ -275,26 +287,28 @@ where
 
                 let chain_spec = Arc::clone(&self.chain_spec);
                 let db = self.db();
+
+                let mut encoded = BytesMut::default();
+                transaction.encode_enveloped(&mut encoded);
                 let l1_cost = l1_block_info.as_ref().map(|l1_block_info| {
                     l1_block_info.calculate_tx_l1_cost(
                         chain_spec,
                         block.timestamp,
-                        transaction.input(),
+                        &encoded.freeze().into(),
                         transaction.is_deposit(),
                     )
                 });
 
-                let mut sender_account = db
+                let sender_account = db
                     .load_account(sender)
                     .map_err(|_| BlockExecutionError::ProviderError)?
                     .clone();
-                let old_sender_info = to_reth_acc(&sender_account.info);
 
                 if let Some(l1_cost) = l1_cost {
                     // Check if the sender balance can cover the L1 cost.
                     // Deposits pay for their gas directly on L1 so they are exempt from the L2
                     // tx fee.
-                    if !transaction.is_system_transaction() {
+                    if !transaction.is_deposit() {
                         if sender_account.info.balance.cmp(&l1_cost) == std::cmp::Ordering::Less {
                             return Err(BlockExecutionError::InsufficientFundsForL1Cost {
                                 have: sender_account.info.balance.to::<u64>(),
@@ -305,19 +319,19 @@ where
                         // Safely take l1_cost from sender (the rest will be deducted by the
                         // internal EVM execution and included in result.gas_used())
                         // TODO: need to handle calls with `disable_balance_check` flag set?
-                        sender_account.info.balance -= l1_cost;
+                        self.decrement_account_balance(
+                            block.number,
+                            sender,
+                            l1_cost,
+                            &mut post_state,
+                        )?;
                     }
                 }
-
-                let new_sender_info = to_reth_acc(&sender_account.info);
-                post_state.change_account(block.number, sender, old_sender_info, new_sender_info);
-                db.insert_account_info(sender, sender_account.info);
 
                 // Execute transaction.
                 let ResultAndState { result, state } = self.transact(transaction, sender)?;
 
                 if transaction.is_deposit() && !result.is_success() {
-                    dbg!("FAILED DEPOSIT!!!!", &result);
                     // If the Deposited transaction failed, the deposit must still be included.
                     // In this case, we need to increment the sender nonce and disregard the
                     // state changes. The transaction is also recorded as using all gas.
@@ -362,24 +376,23 @@ where
                     &mut post_state,
                 );
 
-                if is_regolith || !transaction.is_deposit() {
-                    cumulative_gas_used += result.gas_used()
-                } else if transaction.is_deposit() && !transaction.is_system_transaction() {
-                    cumulative_gas_used += transaction.gas_limit();
-                }
-
-                // Skip coinbase payments in Regolith for deposit transactions
-                if self.chain_spec.optimism && !(transaction.is_deposit() && is_regolith) {
-                    // Route the l1 cost and base fee to the appropriate optimism vaults
-                    if let Some(l1_cost) = l1_cost {
-                        self.increment_account_balance(
-                            block.number,
-                            optimism::l1_cost_recipient(),
-                            l1_cost,
-                            &mut post_state,
-                        )?
+                // Pay out fees to Optimism vaults.
+                if self.chain_spec.optimism {
+                    if is_regolith || !transaction.is_deposit() {
+                        cumulative_gas_used += result.gas_used()
+                    } else if transaction.is_deposit() && !transaction.is_system_transaction() {
+                        cumulative_gas_used += transaction.gas_limit();
                     }
                     if !transaction.is_deposit() {
+                        // Route the l1 cost and base fee to the appropriate optimism vaults
+                        if let Some(l1_cost) = l1_cost {
+                            self.increment_account_balance(
+                                block.number,
+                                optimism::l1_cost_recipient(),
+                                l1_cost,
+                                &mut post_state,
+                            )?
+                        }
                         self.increment_account_balance(
                             block.number,
                             optimism::base_fee_recipient(),
@@ -409,7 +422,7 @@ where
                         logs,
                         // Deposit nonce is only recorded after Regolith for deposit transactions.
                         deposit_nonce: (is_regolith && transaction.is_deposit())
-                            .then_some(old_sender_info.nonce),
+                            .then_some(sender_account.info.nonce),
                     },
                 );
 
@@ -460,8 +473,6 @@ where
                 );
             }
         }
-
-        dbg!(&post_state);
 
         Ok((post_state, cumulative_gas_used))
     }
@@ -555,31 +566,31 @@ where
     // Increment beneficiary balance by mutating db entry in place.
     beneficiary.info.balance += increment;
     let new = to_reth_acc(&beneficiary.info);
-    match beneficiary.account_state {
-        AccountState::NotExisting => {
-            // if account was not existing that means that storage is not
-            // present.
-            beneficiary.account_state = AccountState::StorageCleared;
+    update_account(beneficiary, post_state, address, old, new, block_number);
 
-            // if account was not present append `Created` changeset
-            post_state.create_account(
-                block_number,
-                address,
-                Account { nonce: 0, balance: new.balance, bytecode_hash: None },
-            )
-        }
+    Ok(())
+}
 
-        AccountState::StorageCleared | AccountState::Touched | AccountState::None => {
-            // If account is None that means that EVM didn't touch it.
-            // we are changing the state to Touched as account can have
-            // storage in db.
-            if beneficiary.account_state == AccountState::None {
-                beneficiary.account_state = AccountState::Touched;
-            }
-            // if account was present, append changed changeset.
-            post_state.change_account(block_number, address, old, new);
-        }
-    }
+/// Decrement the balance for the given account in the [PostState].
+///
+/// Returns an error if the database encountered an error while loading the account.
+pub fn decrement_account_balance<DB>(
+    db: &mut CacheDB<DB>,
+    post_state: &mut PostState,
+    block_number: BlockNumber,
+    address: Address,
+    decrement: U256,
+) -> Result<(), <DB as DatabaseRef>::Error>
+where
+    DB: DatabaseRef,
+{
+    let beneficiary = db.load_account(address)?;
+    let old = to_reth_acc(&beneficiary.info);
+    // Increment beneficiary balance by mutating db entry in place.
+    beneficiary.info.balance -= decrement;
+
+    let new = to_reth_acc(&beneficiary.info);
+    update_account(beneficiary, post_state, address, old, new, block_number);
 
     Ok(())
 }
@@ -752,6 +763,45 @@ pub fn verify_receipt<'a>(
     }
 
     Ok(())
+}
+
+/// Updates an account in the passed post state and sets the [DbAccount]'s state
+/// to [AccountState::Touched] if the account was not touched before or to
+/// [AccountState::StorageCleared] if the account did not exist prior to the update.
+#[inline]
+fn update_account(
+    beneficiary: &mut DbAccount,
+    post_state: &mut PostState,
+    address: Address,
+    old: Account,
+    new: Account,
+    block_number: BlockNumber,
+) {
+    match beneficiary.account_state {
+        AccountState::NotExisting => {
+            // if account was not existing that means that storage is not
+            // present.
+            beneficiary.account_state = AccountState::StorageCleared;
+
+            // if account was not present append `Created` changeset
+            post_state.create_account(
+                block_number,
+                address,
+                Account { nonce: 0, balance: new.balance, bytecode_hash: None },
+            )
+        }
+
+        AccountState::StorageCleared | AccountState::Touched | AccountState::None => {
+            // If account is None that means that EVM didn't touch it.
+            // we are changing the state to Touched as account can have
+            // storage in db.
+            if beneficiary.account_state == AccountState::None {
+                beneficiary.account_state = AccountState::Touched;
+            }
+            // if account was present, append changed changeset.
+            post_state.change_account(block_number, address, old, new);
+        }
+    }
 }
 
 /// Collect all balance changes at the end of the block.

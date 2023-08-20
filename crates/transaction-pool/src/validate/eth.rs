@@ -8,8 +8,8 @@ use crate::{
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 use reth_primitives::{
-    constants::ETHEREUM_BLOCK_GAS_LIMIT, ChainSpec, InvalidTransactionError, EIP1559_TX_TYPE_ID,
-    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    bytes::BytesMut, constants::ETHEREUM_BLOCK_GAS_LIMIT, ChainSpec, InvalidTransactionError,
+    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 use reth_provider::{AccountReader, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -245,11 +245,13 @@ where
                 }
             };
 
+            let mut encoded = BytesMut::default();
+            transaction.to_recovered_transaction().encode_enveloped(&mut encoded);
             let cost_addition = match L1BlockInfo::try_from(&block) {
                 Ok(info) => info.calculate_tx_l1_cost(
                     Arc::clone(&self.chain_spec),
                     block.timestamp,
-                    transaction.input(),
+                    &encoded.freeze().into(),
                     transaction.is_deposit(),
                 ),
                 Err(err) => {

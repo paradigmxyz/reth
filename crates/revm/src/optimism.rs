@@ -1,7 +1,7 @@
 use std::{ops::Mul, str::FromStr, sync::Arc};
 
 use reth_interfaces::executor;
-use reth_primitives::{Address, Block, Bytes, ChainSpec, TransactionKind, U256};
+use reth_primitives::{Address, Block, Bytes, ChainSpec, Hardfork, TransactionKind, U256};
 
 const L1_FEE_RECIPIENT: &str = "0x420000000000000000000000000000000000001A";
 const BASE_FEE_RECIPIENT: &str = "0x4200000000000000000000000000000000000019";
@@ -21,6 +21,7 @@ const NON_ZERO_BYTE_COST: u64 = 16;
 /// uint64 _sequenceNumber, bytes32 _batcherHash, uint256 _l1FeeOverhead, uint256 _l1FeeScalar)
 ///
 /// For now, we only care about the fields necessary for L1 cost calculation.
+#[derive(Debug)]
 pub struct L1BlockInfo {
     l1_base_fee: U256,
     l1_fee_overhead: U256,
@@ -103,13 +104,13 @@ impl L1BlockInfo {
             acc + if *byte == 0x00 { ZERO_BYTE_COST } else { NON_ZERO_BYTE_COST }
         }));
 
-        if is_deposit || rollup_data_gas_cost == U256::ZERO {
-            return U256::ZERO
+        // Prior to regolith, an extra 68 non zero bytes were included in the rollup data costs.
+        if !chain_spec.fork(Hardfork::Regolith).active_at_timestamp(timestamp) {
+            rollup_data_gas_cost += U256::from(NON_ZERO_BYTE_COST).mul(U256::from(68));
         }
 
-        // Prior to regolith, an extra 68 non zero bytes were included in the rollup data costs.
-        if !chain_spec.fork(reth_primitives::Hardfork::Regolith).active_at_timestamp(timestamp) {
-            rollup_data_gas_cost += U256::from(NON_ZERO_BYTE_COST).mul(U256::from(68));
+        if is_deposit || rollup_data_gas_cost == U256::ZERO {
+            return U256::ZERO
         }
 
         rollup_data_gas_cost
