@@ -1,7 +1,7 @@
 use std::{ops::Mul, str::FromStr, sync::Arc};
 
 use reth_interfaces::executor;
-use reth_primitives::{Address, Block, Bytes, ChainSpec, TransactionKind, U256};
+use reth_primitives::{Address, Block, Bytes, ChainSpec, Hardfork, TransactionKind, U256};
 
 const L1_FEE_RECIPIENT: &str = "0x420000000000000000000000000000000000001A";
 const BASE_FEE_RECIPIENT: &str = "0x4200000000000000000000000000000000000019";
@@ -105,7 +105,7 @@ impl L1BlockInfo {
         }));
 
         // Prior to regolith, an extra 68 non zero bytes were included in the rollup data costs.
-        if !chain_spec.fork(reth_primitives::Hardfork::Regolith).active_at_timestamp(timestamp) {
+        if !chain_spec.fork(Hardfork::Regolith).active_at_timestamp(timestamp) {
             rollup_data_gas_cost += U256::from(NON_ZERO_BYTE_COST).mul(U256::from(68));
         }
 

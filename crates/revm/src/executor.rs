@@ -294,7 +294,7 @@ where
                     l1_block_info.calculate_tx_l1_cost(
                         chain_spec,
                         block.timestamp,
-                        &Bytes::from(&encoded[..]),
+                        &encoded.freeze().into(),
                         transaction.is_deposit(),
                     )
                 });

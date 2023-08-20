@@ -87,7 +87,7 @@ where
             l1_block_info.calculate_tx_l1_cost(
                 Arc::clone(&chain_spec),
                 attributes.timestamp,
-                &reth_primitives::Bytes::from(&encoded[..]),
+                &encoded.freeze().into(),
                 sequencer_tx.is_deposit(),
             )
         });
