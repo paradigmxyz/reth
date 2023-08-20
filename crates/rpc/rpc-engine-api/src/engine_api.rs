@@ -118,12 +118,6 @@ where
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(ref attrs) = payload_attrs {
-            self.validate_withdrawals_presence(
-                EngineApiMessageVersion::V1,
-                attrs.timestamp.as_u64(),
-                attrs.withdrawals.is_some(),
-            )?;
-
             #[cfg(feature = "optimism")]
             if attrs.gas_limit.is_none() && self.inner.chain_spec.optimism {
                 return Err(EngineApiError::MissingGasLimitInPayloadAttributes)
