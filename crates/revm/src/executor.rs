@@ -241,7 +241,7 @@ where
 
         #[cfg(feature = "optimism")]
         let l1_block_info =
-            self.chain_spec.optimism.then_some(optimism::L1BlockInfo::try_from(block)?);
+            self.chain_spec.optimism.then(|| optimism::L1BlockInfo::try_from(block)).transpose()?;
 
         // TODO(clabby): OP needs a gas pool.
         let mut cumulative_gas_used = 0;
@@ -405,6 +405,8 @@ where
                             &mut post_state,
                         )?;
                     }
+                } else {
+                    cumulative_gas_used += result.gas_used();
                 }
 
                 // cast revm logs to reth logs
