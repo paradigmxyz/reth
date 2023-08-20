@@ -57,10 +57,10 @@ where
     // Parse the L1 block info from the first transaction in the payload attributes. This
     // transaction should always be the L1 info tx. We skip the first 4 bytes of the calldata
     // because the first 4 bytes are the function selector.
-    let l1_block_info = (!attributes.transactions.is_empty()).then_some(
-        L1BlockInfo::try_from(&attributes.transactions[0].input()[4..])
-            .map_err(|_| PayloadBuilderError::L1BlockInfoParseFailed)?,
-    );
+    let l1_block_info = (!attributes.transactions.is_empty())
+        .then(|| optimism::L1BlockInfo::try_from(&attributes.transactions[0].input()[4..]))
+        .transpose()
+        .map_err(|_| PayloadBuilderError::L1BlockInfoParseFailed)?;
 
     // Transactions sent via the payload attributes are force included at the top of the block, in
     // the order that they were sent in.
@@ -243,6 +243,8 @@ where
                     U256::from(base_fee.saturating_mul(result.gas_used())),
                 )?;
             }
+        } else {
+            cumulative_gas_used += result.gas_used();
         }
 
         // Push transaction changeset and calculate header bloom filter for receipt.
