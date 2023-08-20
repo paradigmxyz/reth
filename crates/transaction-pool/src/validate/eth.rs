@@ -1,13 +1,11 @@
 //! Ethereum transaction validator.
 
 use crate::{
+    blobstore::BlobStore,
     error::InvalidPoolTransactionError,
     traits::{PoolTransaction, TransactionOrigin},
-    validate::{
-        task::ValidationJobSender, TransactionValidatorError, ValidTransaction, ValidationTask,
-        MAX_INIT_CODE_SIZE, TX_MAX_SIZE,
-    },
-    TransactionValidationOutcome, TransactionValidator,
+    validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_SIZE, TX_MAX_SIZE},
+    TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 use reth_primitives::{
     constants::ETHEREUM_BLOCK_GAS_LIMIT, ChainSpec, InvalidTransactionError, EIP1559_TX_TYPE_ID,
@@ -16,7 +14,7 @@ use reth_primitives::{
 use reth_provider::{AccountReader, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{marker::PhantomData, sync::Arc};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::Mutex;
 
 #[cfg(feature = "optimism")]
 use reth_revm::optimism::L1BlockInfo;
@@ -24,307 +22,29 @@ use reth_revm::optimism::L1BlockInfo;
 #[cfg(feature = "optimism")]
 use reth_primitives::BlockNumberOrTag;
 
-/// A [TransactionValidator] implementation that validates ethereum transaction.
-///
-/// This validator is non-blocking, all validation work is done in a separate task.
-#[derive(Debug, Clone)]
-pub struct EthTransactionValidator<Client, T> {
-    /// The type that performs the actual validation.
-    inner: Arc<EthTransactionValidatorInner<Client, T>>,
-    /// The sender half to validation tasks that perform the actual validation.
-    to_validation_task: Arc<Mutex<ValidationJobSender>>,
-}
-
-// === impl EthTransactionValidator ===
-
-impl EthTransactionValidator<(), ()> {
-    /// Convenience method to create a [EthTransactionValidatorBuilder]
-    pub fn builder(chain_spec: Arc<ChainSpec>) -> EthTransactionValidatorBuilder {
-        EthTransactionValidatorBuilder::new(chain_spec)
-    }
-}
-
-impl<Client, Tx> EthTransactionValidator<Client, Tx> {
-    /// Creates a new instance for the given [ChainSpec]
-    ///
-    /// This will spawn a single validation tasks that performs the actual validation.
-    /// See [EthTransactionValidator::with_additional_tasks]
-    pub fn new<T>(client: Client, chain_spec: Arc<ChainSpec>, tasks: T) -> Self
-    where
-        T: TaskSpawner,
-    {
-        Self::with_additional_tasks(client, chain_spec, tasks, 0)
-    }
-
-    /// Creates a new instance for the given [ChainSpec]
-    ///
-    /// By default this will enable support for:
-    ///   - shanghai
-    ///   - eip1559
-    ///   - eip2930
-    ///
-    /// This will always spawn a validation task that performs the actual validation. It will spawn
-    /// `num_additional_tasks` additional tasks.
-    pub fn with_additional_tasks<T>(
-        client: Client,
-        chain_spec: Arc<ChainSpec>,
-        tasks: T,
-        num_additional_tasks: usize,
-    ) -> Self
-    where
-        T: TaskSpawner,
-    {
-        EthTransactionValidatorBuilder::new(chain_spec)
-            .with_additional_tasks(num_additional_tasks)
-            .build(client, tasks)
-    }
-
-    /// Returns the configured chain id
-    pub fn chain_id(&self) -> u64 {
-        self.inner.chain_id()
-    }
-}
-
-#[async_trait::async_trait]
-impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
+/// Validator for Ethereum transactions.
+#[derive(Debug)]
+pub struct EthTransactionValidator<Client, T>
 where
-    Client: StateProviderFactory + reth_provider::BlockReaderIdExt + Clone + 'static,
-    Tx: PoolTransaction + 'static,
+    Client: BlockReaderIdExt,
 {
-    type Transaction = Tx;
-
-    async fn validate_transaction(
-        &self,
-        origin: TransactionOrigin,
-        transaction: Self::Transaction,
-    ) -> TransactionValidationOutcome<Self::Transaction> {
-        #[cfg(feature = "optimism")]
-        if transaction.is_deposit() {
-            return TransactionValidationOutcome::Invalid(
-                transaction,
-                InvalidTransactionError::TxTypeNotSupported.into(),
-            )
-        }
-
-        let hash = *transaction.hash();
-        let (tx, rx) = oneshot::channel();
-        {
-            let to_validation_task = self.to_validation_task.clone();
-            let to_validation_task = to_validation_task.lock().await;
-            let validator = Arc::clone(&self.inner);
-            let res = to_validation_task
-                .send(Box::pin(async move {
-                    let res = validator.validate_transaction(origin, transaction).await;
-                    let _ = tx.send(res);
-                }))
-                .await;
-            if res.is_err() {
-                return TransactionValidationOutcome::Error(
-                    hash,
-                    Box::new(TransactionValidatorError::ValidationServiceUnreachable),
-                )
-            }
-        }
-
-        match rx.await {
-            Ok(res) => res,
-            Err(_) => TransactionValidationOutcome::Error(
-                hash,
-                Box::new(TransactionValidatorError::ValidationServiceUnreachable),
-            ),
-        }
-    }
-}
-
-/// A builder for [EthTransactionValidator]
-#[derive(Debug, Clone)]
-pub struct EthTransactionValidatorBuilder {
-    chain_spec: Arc<ChainSpec>,
-    /// Fork indicator whether we are in the Shanghai stage.
-    shanghai: bool,
-    /// Fork indicator whether we are in the Cancun hardfork.
-    cancun: bool,
-    /// Fork indicator whether we are using EIP-2718 type transactions.
-    eip2718: bool,
-    /// Fork indicator whether we are using EIP-1559 type transactions.
-    eip1559: bool,
-    /// Fork indicator whether we are using EIP-4844 blob transactions.
-    eip4844: bool,
-    /// The current max gas limit
-    block_gas_limit: u64,
-    /// Minimum priority fee to enforce for acceptance into the pool.
-    minimum_priority_fee: Option<u128>,
-    /// Determines how many additional tasks to spawn
-    ///
-    /// Default is 1
-    additional_tasks: usize,
-    /// Toggle to determine if a local transaction should be propagated
-    propagate_local_transactions: bool,
-}
-
-impl EthTransactionValidatorBuilder {
-    /// Creates a new builder for the given [ChainSpec]
-    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self {
-            chain_spec,
-            shanghai: true,
-            eip2718: true,
-            eip1559: true,
-            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
-            minimum_priority_fee: None,
-            additional_tasks: 1,
-            // default to true, can potentially take this as a param in the future
-            propagate_local_transactions: true,
-
-            // TODO: can hard enable by default once transitioned
-            cancun: false,
-            eip4844: false,
-        }
-    }
-
-    /// Disables the Cancun fork.
-    pub fn no_cancun(self) -> Self {
-        self.set_cancun(false)
-    }
-
-    /// Set the Cancun fork.
-    pub fn set_cancun(mut self, cancun: bool) -> Self {
-        self.cancun = cancun;
-        self
-    }
-
-    /// Disables the Shanghai fork.
-    pub fn no_shanghai(self) -> Self {
-        self.set_shanghai(false)
-    }
-
-    /// Set the Shanghai fork.
-    pub fn set_shanghai(mut self, shanghai: bool) -> Self {
-        self.shanghai = shanghai;
-        self
-    }
-
-    /// Disables the eip2718 support.
-    pub fn no_eip2718(self) -> Self {
-        self.set_eip2718(false)
-    }
-
-    /// Set eip2718 support.
-    pub fn set_eip2718(mut self, eip2718: bool) -> Self {
-        self.eip2718 = eip2718;
-        self
-    }
-
-    /// Disables the eip1559 support.
-    pub fn no_eip1559(self) -> Self {
-        self.set_eip1559(false)
-    }
-
-    /// Set the eip1559 support.
-    pub fn set_eip1559(mut self, eip1559: bool) -> Self {
-        self.eip1559 = eip1559;
-        self
-    }
-    /// Sets toggle to propagate transactions received locally by this client (e.g
-    /// transactions from eth_Sendtransaction to this nodes' RPC server)
-    ///
-    ///  If set to false, only transactions received by network peers (via
-    /// p2p) will be marked as propagated in the local transaction pool and returned on a
-    /// GetPooledTransactions p2p request
-    pub fn set_propagate_local_transactions(mut self, propagate_local_txs: bool) -> Self {
-        self.propagate_local_transactions = propagate_local_txs;
-        self
-    }
-    /// Disables propagating transactions recieved locally by this client
-    ///
-    /// For more information, check docs for set_propagate_local_transactions
-    pub fn no_local_transaction_propagation(mut self) -> Self {
-        self.propagate_local_transactions = false;
-        self
-    }
-
-    /// Sets a minimum priority fee that's enforced for acceptance into the pool.
-    pub fn with_minimum_priority_fee(mut self, minimum_priority_fee: u128) -> Self {
-        self.minimum_priority_fee = Some(minimum_priority_fee);
-        self
-    }
-
-    /// Sets the number of additional tasks to spawn.
-    pub fn with_additional_tasks(mut self, additional_tasks: usize) -> Self {
-        self.additional_tasks = additional_tasks;
-        self
-    }
-
-    /// Builds a [EthTransactionValidator]
-    ///
-    /// The validator will spawn `additional_tasks` additional tasks for validation.
-    ///
-    /// By default this will spawn 1 additional task.
-    pub fn build<Client, Tx, T>(
-        self,
-        client: Client,
-        tasks: T,
-    ) -> EthTransactionValidator<Client, Tx>
-    where
-        T: TaskSpawner,
-    {
-        let Self {
-            chain_spec,
-            shanghai,
-            cancun,
-            eip2718,
-            eip1559,
-            eip4844,
-            block_gas_limit,
-            minimum_priority_fee,
-            additional_tasks,
-            propagate_local_transactions,
-        } = self;
-
-        let inner = EthTransactionValidatorInner {
-            chain_spec,
-            client,
-            shanghai,
-            eip2718,
-            eip1559,
-            cancun,
-            eip4844,
-            block_gas_limit,
-            minimum_priority_fee,
-            propagate_local_transactions,
-            _marker: Default::default(),
-        };
-
-        let (tx, task) = ValidationTask::new();
-
-        // Spawn validation tasks, they are blocking because they perform db lookups
-        for _ in 0..additional_tasks {
-            let task = task.clone();
-            tasks.spawn_blocking(Box::pin(async move {
-                task.run().await;
-            }));
-        }
-
-        tasks.spawn_critical_blocking(
-            "transaction-validation-service",
-            Box::pin(async move {
-                task.run().await;
-            }),
-        );
-
-        let to_validation_task = Arc::new(Mutex::new(tx));
-
-        EthTransactionValidator { inner: Arc::new(inner), to_validation_task }
-    }
+    /// The type that performs the actual validation.
+    pub inner: Arc<EthTransactionValidatorInner<Client, T>>,
 }
 
 /// A [TransactionValidator] implementation that validates ethereum transaction.
-#[derive(Debug, Clone)]
-struct EthTransactionValidatorInner<Client, T> {
+#[derive(Debug)]
+pub struct EthTransactionValidatorInner<Client, T>
+where
+    Client: BlockReaderIdExt,
+{
     /// Spec of the chain
     chain_spec: Arc<ChainSpec>,
     /// This type fetches account info from the db
     client: Client,
+    /// Blobstore used for fetching re-injected blob transactions.
+    #[allow(unused)]
+    blob_store: Box<dyn BlobStore>,
     /// Fork indicator whether we are in the Shanghai stage.
     shanghai: bool,
     /// Fork indicator whether we are in the Cancun hardfork.
@@ -347,9 +67,12 @@ struct EthTransactionValidatorInner<Client, T> {
 
 // === impl EthTransactionValidatorInner ===
 
-impl<Client, Tx> EthTransactionValidatorInner<Client, Tx> {
+impl<Client, Tx> EthTransactionValidatorInner<Client, Tx>
+where
+    Client: BlockReaderIdExt,
+{
     /// Returns the configured chain id
-    fn chain_id(&self) -> u64 {
+    pub fn chain_id(&self) -> u64 {
         self.chain_spec.chain().id()
     }
 }
@@ -564,6 +287,196 @@ where
     }
 }
 
+/// A builder for [TransactionValidationTaskExecutor]
+#[derive(Debug, Clone)]
+pub struct EthTransactionValidatorBuilder {
+    chain_spec: Arc<ChainSpec>,
+    /// Fork indicator whether we are in the Shanghai stage.
+    shanghai: bool,
+    /// Fork indicator whether we are in the Cancun hardfork.
+    cancun: bool,
+    /// Fork indicator whether we are using EIP-2718 type transactions.
+    eip2718: bool,
+    /// Fork indicator whether we are using EIP-1559 type transactions.
+    eip1559: bool,
+    /// Fork indicator whether we are using EIP-4844 blob transactions.
+    eip4844: bool,
+    /// The current max gas limit
+    block_gas_limit: u64,
+    /// Minimum priority fee to enforce for acceptance into the pool.
+    minimum_priority_fee: Option<u128>,
+    /// Determines how many additional tasks to spawn
+    ///
+    /// Default is 1
+    additional_tasks: usize,
+    /// Toggle to determine if a local transaction should be propagated
+    propagate_local_transactions: bool,
+}
+
+impl EthTransactionValidatorBuilder {
+    /// Creates a new builder for the given [ChainSpec]
+    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        Self {
+            chain_spec,
+            shanghai: true,
+            eip2718: true,
+            eip1559: true,
+            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+            minimum_priority_fee: None,
+            additional_tasks: 1,
+            // default to true, can potentially take this as a param in the future
+            propagate_local_transactions: true,
+
+            // TODO: can hard enable by default once transitioned
+            cancun: false,
+            eip4844: false,
+        }
+    }
+
+    /// Disables the Cancun fork.
+    pub fn no_cancun(self) -> Self {
+        self.set_cancun(false)
+    }
+
+    /// Set the Cancun fork.
+    pub fn set_cancun(mut self, cancun: bool) -> Self {
+        self.cancun = cancun;
+        self
+    }
+
+    /// Disables the Shanghai fork.
+    pub fn no_shanghai(self) -> Self {
+        self.set_shanghai(false)
+    }
+
+    /// Set the Shanghai fork.
+    pub fn set_shanghai(mut self, shanghai: bool) -> Self {
+        self.shanghai = shanghai;
+        self
+    }
+
+    /// Disables the eip2718 support.
+    pub fn no_eip2718(self) -> Self {
+        self.set_eip2718(false)
+    }
+
+    /// Set eip2718 support.
+    pub fn set_eip2718(mut self, eip2718: bool) -> Self {
+        self.eip2718 = eip2718;
+        self
+    }
+
+    /// Disables the eip1559 support.
+    pub fn no_eip1559(self) -> Self {
+        self.set_eip1559(false)
+    }
+
+    /// Set the eip1559 support.
+    pub fn set_eip1559(mut self, eip1559: bool) -> Self {
+        self.eip1559 = eip1559;
+        self
+    }
+    /// Sets toggle to propagate transactions received locally by this client (e.g
+    /// transactions from eth_Sendtransaction to this nodes' RPC server)
+    ///
+    ///  If set to false, only transactions received by network peers (via
+    /// p2p) will be marked as propagated in the local transaction pool and returned on a
+    /// GetPooledTransactions p2p request
+    pub fn set_propagate_local_transactions(mut self, propagate_local_txs: bool) -> Self {
+        self.propagate_local_transactions = propagate_local_txs;
+        self
+    }
+    /// Disables propagating transactions recieved locally by this client
+    ///
+    /// For more information, check docs for set_propagate_local_transactions
+    pub fn no_local_transaction_propagation(mut self) -> Self {
+        self.propagate_local_transactions = false;
+        self
+    }
+
+    /// Sets a minimum priority fee that's enforced for acceptance into the pool.
+    pub fn with_minimum_priority_fee(mut self, minimum_priority_fee: u128) -> Self {
+        self.minimum_priority_fee = Some(minimum_priority_fee);
+        self
+    }
+
+    /// Sets the number of additional tasks to spawn.
+    pub fn with_additional_tasks(mut self, additional_tasks: usize) -> Self {
+        self.additional_tasks = additional_tasks;
+        self
+    }
+
+    /// Builds a the [EthTransactionValidator] and spawns validation tasks via the
+    /// [TransactionValidationTaskExecutor]
+    ///
+    /// The validator will spawn `additional_tasks` additional tasks for validation.
+    ///
+    /// By default this will spawn 1 additional task.
+    pub fn build_with_tasks<Client, Tx, T, S>(
+        self,
+        client: Client,
+        tasks: T,
+        blob_store: S,
+    ) -> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx>>
+    where
+        Client: BlockReaderIdExt,
+        T: TaskSpawner,
+        S: BlobStore,
+    {
+        let Self {
+            chain_spec,
+            shanghai,
+            cancun,
+            eip2718,
+            eip1559,
+            eip4844,
+            block_gas_limit,
+            minimum_priority_fee,
+            additional_tasks,
+            propagate_local_transactions,
+        } = self;
+
+        let inner = EthTransactionValidatorInner {
+            chain_spec,
+            client,
+            shanghai,
+            eip2718,
+            eip1559,
+            cancun,
+            eip4844,
+            block_gas_limit,
+            minimum_priority_fee,
+            propagate_local_transactions,
+            blob_store: Box::new(blob_store),
+            _marker: Default::default(),
+        };
+
+        let (tx, task) = ValidationTask::new();
+
+        // Spawn validation tasks, they are blocking because they perform db lookups
+        for _ in 0..additional_tasks {
+            let task = task.clone();
+            tasks.spawn_blocking(Box::pin(async move {
+                task.run().await;
+            }));
+        }
+
+        tasks.spawn_critical_blocking(
+            "transaction-validation-service",
+            Box::pin(async move {
+                task.run().await;
+            }),
+        );
+
+        let to_validation_task = Arc::new(Mutex::new(tx));
+
+        TransactionValidationTaskExecutor {
+            validator: EthTransactionValidator { inner: Arc::new(inner) },
+            to_validation_task,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -571,7 +484,7 @@ mod tests {
     #[cfg(feature = "optimism")]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_validate_optimism_transaction() {
-        use crate::traits::EthPooledTransaction;
+        use crate::{blobstore::InMemoryBlobStore, traits::EthPooledTransaction};
         use reth_primitives::{
             Signature, Transaction, TransactionKind, TransactionSigned,
             TransactionSignedEcRecovered, TxDeposit, MAINNET, U256,
@@ -581,7 +494,8 @@ mod tests {
 
         let client = MockEthProvider::default();
         let validator =
-            EthTransactionValidator::new(client, MAINNET.clone(), TokioTaskExecutor::default());
+            // EthTransactionValidator::new(client, MAINNET.clone(), TokioTaskExecutor::default());
+            EthTransactionValidatorBuilder::new(MAINNET.clone()).no_shanghai().no_cancun().build_with_tasks(client, TokioTaskExecutor::default(), InMemoryBlobStore::default());
         let origin = TransactionOrigin::External;
         let signer = Default::default();
         let deposit_tx = Transaction::Deposit(TxDeposit {

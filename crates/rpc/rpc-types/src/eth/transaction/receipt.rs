@@ -9,7 +9,7 @@ pub struct TransactionReceipt {
     /// Transaction Hash.
     pub transaction_hash: Option<H256>,
     /// Index within the block.
-    pub transaction_index: Option<U256>,
+    pub transaction_index: U64,
     /// Hash of the block this transaction was included within.
     pub block_hash: Option<H256>,
     /// Number of the block this transaction was included within.

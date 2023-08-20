@@ -1,4 +1,4 @@
-use crate::{Address, Bytes, Signature, TransactionKind, TxType, H256};
+use crate::{Address, Bytes, TransactionKind, TxType, H256};
 use bytes::Buf;
 use reth_codecs::{main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_STRING_CODE};
@@ -109,12 +109,7 @@ impl TxDeposit {
 
     /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
     /// hash that for eip2718 does not require rlp header
-    pub(crate) fn encode_with_signature(
-        &self,
-        _: &Signature,
-        out: &mut dyn bytes::BufMut,
-        with_header: bool,
-    ) {
+    pub(crate) fn encode(&self, out: &mut dyn bytes::BufMut, with_header: bool) {
         let payload_length = self.fields_len();
         if with_header {
             Header {
@@ -130,8 +125,8 @@ impl TxDeposit {
     }
 
     /// Output the length of the RLP signed transaction encoding. This encodes with a RLP header.
-    pub(crate) fn payload_len_with_signature(&self, signature: &Signature) -> usize {
-        let payload_length = self.fields_len() + signature.payload_len();
+    pub(crate) fn payload_len(&self) -> usize {
+        let payload_length = self.fields_len();
         // 'tx type' + 'header length' + 'payload length'
         let len = 1 + length_of_length(payload_length) + payload_length;
         length_of_length(len) + len

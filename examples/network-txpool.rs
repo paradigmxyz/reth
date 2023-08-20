@@ -10,8 +10,9 @@
 use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::{
-    validate::ValidTransaction, CoinbaseTipOrdering, EthPooledTransaction, PoolTransaction,
-    TransactionOrigin, TransactionPool, TransactionValidationOutcome, TransactionValidator,
+    blobstore::InMemoryBlobStore, validate::ValidTransaction, CoinbaseTipOrdering,
+    EthPooledTransaction, PoolTransaction, TransactionOrigin, TransactionPool,
+    TransactionValidationOutcome, TransactionValidator,
 };
 
 #[tokio::main]
@@ -25,6 +26,7 @@ async fn main() -> eyre::Result<()> {
     let pool = reth_transaction_pool::Pool::new(
         OkValidator::default(),
         CoinbaseTipOrdering::default(),
+        InMemoryBlobStore::default(),
         Default::default(),
     );
 
@@ -57,8 +59,8 @@ async fn main() -> eyre::Result<()> {
 /// A transaction validator that determines all transactions to be valid.
 ///
 /// An actual validator impl like
-/// [EthTransactionValidator](reth_transaction_pool::EthTransactionValidator) would require up to
-/// date db access.
+/// [TransactionValidationTaskExecutor](reth_transaction_pool::TransactionValidationTaskExecutor)
+/// would require up to date db access.
 ///
 /// CAUTION: This validator is not safe to use since it doesn't actually validate the transaction's
 /// properties such as chain id, balance, nonce, etc.

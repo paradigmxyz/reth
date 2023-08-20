@@ -1,6 +1,7 @@
 //! Storage for blob data of EIP4844 transactions.
 
 use reth_primitives::{BlobTransactionSidecar, H256};
+use std::fmt;
 mod maintain;
 mod mem;
 mod noop;
@@ -15,7 +16,7 @@ pub use noop::NoopBlobStore;
 /// finalization).
 ///
 /// Note: this is Clone because it is expected to be wrapped in an Arc.
-pub trait BlobStore: Send + Sync + 'static {
+pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     /// Inserts the blob sidecar into the store
     fn insert(&self, tx: H256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError>;
 
