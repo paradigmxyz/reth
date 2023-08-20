@@ -56,7 +56,7 @@ where
 
     // TODO(clabby): Add new error type
     let l1_block_info = (!attributes.transactions.is_empty()).then_some(
-        L1BlockInfo::try_from(&attributes.transactions[0].input()[..])
+        L1BlockInfo::try_from(&attributes.transactions[0].input()[4..])
             .map_err(|_| PayloadBuilderError::TransactionEcRecoverFailed)?,
     );
 
@@ -195,6 +195,7 @@ where
             }
         }
 
+        // TODO(clabby): This is for debugging. move back inline to `add_receipt` when done.
         let r = Receipt {
             tx_type: sequencer_tx.tx_type(),
             success: result.is_success(),
@@ -226,6 +227,7 @@ where
     }
 
     while let Some(pool_tx) = best_txs.next() {
+        dbg!("POOL TX!!!!");
         // ensure we still have capacity for this transaction
         if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
             // we can't fit this transaction into the block, so we need to mark it as invalid
