@@ -13,7 +13,7 @@ use reth_revm::{executor, optimism::L1BlockInfo};
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
 #[inline]
-fn optimism_payload_builder<Pool, Client>(
+pub(crate) fn optimism_payload_builder<Pool, Client>(
     args: BuildArguments<Pool, Client>,
 ) -> Result<BuildOutcome, PayloadBuilderError>
 where

@@ -173,41 +173,6 @@ where
         let until = tokio::time::Instant::now() + self.config.deadline;
         let deadline = Box::pin(tokio::time::sleep_until(until));
 
-        #[cfg(feature = "optimism")]
-        if config.attributes.no_tx_pool {
-            let args = BuildArguments {
-                client: self.client.clone(),
-                pool: self.pool.clone(),
-                cached_reads: CachedReads::default(),
-                config: config.clone(),
-                cancel: Cancelled::default(),
-                best_payload: None,
-            };
-            match self.builder.try_build(args)? {
-                BuildOutcome::Better { payload, cached_reads } => {
-                    return Ok(BasicPayloadJob {
-                        config,
-                        client: self.client.clone(),
-                        pool: self.pool.clone(),
-                        executor: self.executor.clone(),
-                        deadline,
-                        interval: tokio::time::interval(self.config.interval),
-                        best_payload: Some(Arc::new(payload)),
-                        pending_block: None,
-                        cached_reads: Some(cached_reads),
-                        payload_task_guard: self.payload_task_guard.clone(),
-                        metrics: Default::default(),
-                        builder: self.builder.clone(),
-                    })
-                }
-                _ => {
-                    // TODO(clabby): Remove, don't need to add a new error type - this is temp
-                    // code.
-                    return Err(PayloadBuilderError::TransactionEcRecoverFailed)
-                }
-            }
-        }
-
         Ok(BasicPayloadJob {
             config,
             client: self.client.clone(),
@@ -485,6 +450,33 @@ where
                 let res = build_empty_payload(&client, config);
                 let _ = tx.send(res);
             }));
+
+            #[cfg(feature = "optimism")]
+            if self.config.chain_spec.optimism && self.config.attributes.no_tx_pool {
+                let args = BuildArguments {
+                    client: self.client.clone(),
+                    pool: self.pool.clone(),
+                    cached_reads: self.cached_reads.take().unwrap_or_default(),
+                    config: self.config.clone(),
+                    cancel: Cancelled::default(),
+                    best_payload: None,
+                };
+                if let Ok(build_outcome) = self.builder.try_build(args) {
+                    if let BuildOutcome::Better { payload, cached_reads } = build_outcome {
+                        self.cached_reads = Some(cached_reads);
+                        trace!("[OPTIMISM] Forced best payload");
+                        let payload = Arc::new(payload);
+                        return (
+                            ResolveBestPayload {
+                                best_payload: Some(payload),
+                                maybe_better,
+                                empty_payload,
+                            },
+                            KeepPayloadJobAlive::Yes,
+                        )
+                    }
+                };
+            }
 
             empty_payload = Some(rx);
         }
