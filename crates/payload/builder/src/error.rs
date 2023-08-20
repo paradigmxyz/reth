@@ -27,6 +27,11 @@ pub enum PayloadBuilderError {
     #[cfg(feature = "optimism")]
     #[error("failed to convert deposit transaction to TransactionSignedEcRecovered")]
     TransactionEcRecoverFailed,
+    /// Thrown when the L1 block info could not be parsed from the calldata of the
+    /// first transaction supplied in the payload attributes.
+    #[cfg(feature = "optimism")]
+    #[error("failed to parse L1 block info from L1 info tx calldata")]
+    L1BlockInfoParseFailed,
 }
 
 impl From<oneshot::error::RecvError> for PayloadBuilderError {

@@ -3,7 +3,6 @@
 use super::*;
 use reth_primitives::Hardfork;
 use reth_revm::{executor, optimism::L1BlockInfo};
-use reth_rlp::BufMut;
 
 /// Constructs an Ethereum transaction payload from the transactions sent through the
 /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -55,10 +54,12 @@ where
     let is_regolith =
         chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, attributes.timestamp);
 
-    // TODO(clabby): Add new error type
+    // Parse the L1 block info from the first transaction in the payload attributes. This
+    // transaction should always be the L1 info tx. We skip the first 4 bytes of the calldata
+    // because the first 4 bytes are the function selector.
     let l1_block_info = (!attributes.transactions.is_empty()).then_some(
         L1BlockInfo::try_from(&attributes.transactions[0].input()[4..])
-            .map_err(|_| PayloadBuilderError::TransactionEcRecoverFailed)?,
+            .map_err(|_| PayloadBuilderError::L1BlockInfoParseFailed)?,
     );
 
     // Transactions sent via the payload attributes are force included at the top of the block, in
@@ -78,6 +79,8 @@ where
             .try_into_ecrecovered()
             .map_err(|_| PayloadBuilderError::TransactionEcRecoverFailed)?;
 
+        // Compute the L1 cost of the transaction. This is the amount of ETH that it will cost to
+        // post the entire encoded typed transaction to L1.
         let mut encoded = BytesMut::default();
         sequencer_tx.encode_enveloped(&mut encoded);
         let l1_cost = l1_block_info.as_ref().map(|l1_block_info| {
@@ -91,6 +94,16 @@ where
 
         let mut cfg = initialized_cfg.clone();
 
+        let sender = db.load_account(sequencer_tx.signer())?.clone();
+        let mut sender_new = sender.clone();
+
+        // If the transaction is a deposit, we need to disable the base fee, balance check, and
+        // gas refund. We also need to disable the block gas limit if the Regolith hardfork is not
+        // active. In addition, we need to increase the sender's balance by the mint value of the
+        // deposit transaction if it is `Some(n)`.
+        //
+        // Otherwise, we need to decrement the sender's balance by the L1 cost of the transaction
+        // prior to execution.
         if sequencer_tx.is_deposit() {
             cfg.disable_base_fee = true;
             cfg.disable_balance_check = true;
@@ -98,40 +111,35 @@ where
 
             // If the Regolith hardfork is active, we do not need to disable the block gas limit.
             // Otherwise, we allow for the block gas limit to be exceeded by deposit transactions.
-            if !is_regolith && sequencer_tx.is_deposit() {
+            if !is_regolith {
                 cfg.disable_block_gas_limit = true;
-            };
+            }
 
             // Increase the sender's balance in the database if the deposit transaction mints eth.
             if let Some(m) = sequencer_tx.mint() {
-                let sender = db.load_account(sequencer_tx.signer())?.clone();
-                let mut sender_new = sender.clone();
-                sender_new.info.balance += U256::from(m);
+                let m = U256::from(m);
+                sender_new.info.balance += m;
 
                 executor::increment_account_balance(
                     &mut db,
                     &mut post_state,
                     parent_block.number + 1,
                     sequencer_tx.signer(),
-                    U256::from(m),
+                    m,
                 )?;
                 db.insert_account_info(sequencer_tx.signer(), sender_new.info);
             }
-        } else {
-            if let Some(l1_cost) = l1_cost {
-                let sender = db.load_account(sequencer_tx.signer())?.clone();
-                let mut sender_new = sender.clone();
-                sender_new.info.balance -= U256::from(l1_cost);
-
-                executor::decrement_account_balance(
-                    &mut db,
-                    &mut post_state,
-                    parent_block.number + 1,
-                    sequencer_tx.signer(),
-                    U256::from(l1_cost),
-                )?;
-                db.insert_account_info(sequencer_tx.signer(), sender_new.info);
-            }
+        } else if let Some(l1_cost) = l1_cost {
+            // Decrement the sender's balance by the L1 cost of the transaction prior to execution.
+            sender_new.info.balance -= l1_cost;
+            executor::decrement_account_balance(
+                &mut db,
+                &mut post_state,
+                parent_block.number + 1,
+                sequencer_tx.signer(),
+                l1_cost,
+            )?;
+            db.insert_account_info(sequencer_tx.signer(), sender_new.info);
         }
 
         // Configure the environment for the block.
@@ -178,14 +186,23 @@ where
         // commit changes
         commit_state_changes(&mut db, &mut post_state, block_number, state, true);
 
-        // Skip coinbase payments in Regolith for deposit transactions
         if chain_spec.optimism {
+            // If either Regolith is active or the transaction is not a deposit, we report the
+            // actual gas used in execution to the cumulative gas.
+            //
+            // Otherwise, if we are pre-Regolith and the transaction is a non-system-tx deposit,
+            // we report the gas limit of the transaction to the cumulative gas. Pre-Regolith,
+            // system transactions are not included in the cumulative gas and their execution
+            // gas is ignored. Post regolith, system transactions are deprecated and no longer
+            // exist.
             if is_regolith || !sequencer_tx.is_deposit() {
                 cumulative_gas_used += result.gas_used()
             } else if sequencer_tx.is_deposit() && !sequencer_tx.is_system_transaction() {
                 cumulative_gas_used += sequencer_tx.gas_limit();
             }
 
+            // If the transaction is not a deposit, we route the l1 cost and base fee to the
+            // appropriate optimism vaults.
             if !sequencer_tx.is_deposit() {
                 // Route the l1 cost and base fee to the appropriate optimism vaults
                 if let Some(l1_cost) = l1_cost {
