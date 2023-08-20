@@ -584,6 +584,53 @@ where
     Ok(())
 }
 
+/// Decrement the balance for the given account in the [PostState].
+///
+/// Returns an error if the database encountered an error while loading the account.
+pub fn decrement_account_balance<DB>(
+    db: &mut CacheDB<DB>,
+    post_state: &mut PostState,
+    block_number: BlockNumber,
+    address: Address,
+    decrement: U256,
+) -> Result<(), <DB as DatabaseRef>::Error>
+where
+    DB: DatabaseRef,
+{
+    let beneficiary = db.load_account(address)?;
+    let old = to_reth_acc(&beneficiary.info);
+    // Increment beneficiary balance by mutating db entry in place.
+    beneficiary.info.balance -= decrement;
+    let new = to_reth_acc(&beneficiary.info);
+    match beneficiary.account_state {
+        AccountState::NotExisting => {
+            // if account was not existing that means that storage is not
+            // present.
+            beneficiary.account_state = AccountState::StorageCleared;
+
+            // if account was not present append `Created` changeset
+            post_state.create_account(
+                block_number,
+                address,
+                Account { nonce: 0, balance: new.balance, bytecode_hash: None },
+            )
+        }
+
+        AccountState::StorageCleared | AccountState::Touched | AccountState::None => {
+            // If account is None that means that EVM didn't touch it.
+            // we are changing the state to Touched as account can have
+            // storage in db.
+            if beneficiary.account_state == AccountState::None {
+                beneficiary.account_state = AccountState::Touched;
+            }
+            // if account was present, append changed changeset.
+            post_state.change_account(block_number, address, old, new);
+        }
+    }
+
+    Ok(())
+}
+
 /// Commit change to the _run-time_ database [CacheDB], and update the given [PostState] with the
 /// changes made in the transaction, which can be persisted to the database.
 ///

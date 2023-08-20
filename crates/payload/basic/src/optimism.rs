@@ -99,8 +99,7 @@ where
                 cfg.disable_block_gas_limit = true;
             };
 
-            // Temporarily increase the sender's balance in the database if the deposit transaction
-            // mints eth.
+            // Increase the sender's balance in the database if the deposit transaction mints eth.
             if let Some(m) = sequencer_tx.mint() {
                 let sender = db.load_account(sequencer_tx.signer())?.clone();
                 let mut sender_new = sender.clone();
@@ -112,6 +111,23 @@ where
                     parent_block.number + 1,
                     sequencer_tx.signer(),
                     U256::from(m),
+                )?;
+                db.insert_account_info(sequencer_tx.signer(), sender_new.info);
+            }
+        }
+
+        if !sequencer_tx.is_deposit() {
+            if let Some(l1_cost) = l1_cost {
+                let sender = db.load_account(sequencer_tx.signer())?.clone();
+                let mut sender_new = sender.clone();
+                sender_new.info.balance -= U256::from(l1_cost);
+
+                executor::decrement_account_balance(
+                    &mut db,
+                    &mut post_state,
+                    parent_block.number + 1,
+                    sequencer_tx.signer(),
+                    U256::from(l1_cost),
                 )?;
                 db.insert_account_info(sequencer_tx.signer(), sender_new.info);
             }
