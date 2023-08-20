@@ -274,86 +274,93 @@ where
         executed_txs.push(sequencer_tx.into_signed());
     }
 
-    while let Some(pool_tx) = best_txs.next() {
-        // ensure we still have capacity for this transaction
-        if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
-            // we can't fit this transaction into the block, so we need to mark it as invalid
-            // which also removes all dependent transaction from the iterator before we can
-            // continue
-            best_txs.mark_invalid(&pool_tx);
-            continue
-        }
+    if !attributes.no_tx_pool {
+        while let Some(pool_tx) = best_txs.next() {
+            // ensure we still have capacity for this transaction
+            if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
+                // we can't fit this transaction into the block, so we need to mark it as invalid
+                // which also removes all dependent transaction from the iterator before we can
+                // continue
+                best_txs.mark_invalid(&pool_tx);
+                continue
+            }
 
-        // check if the job was cancelled, if so we can exit early
-        if cancel.is_cancelled() {
-            return Ok(BuildOutcome::Cancelled)
-        }
+            // check if the job was cancelled, if so we can exit early
+            if cancel.is_cancelled() {
+                return Ok(BuildOutcome::Cancelled)
+            }
 
-        // convert tx to a signed transaction
-        let tx = pool_tx.to_recovered_transaction();
+            // convert tx to a signed transaction
+            let tx = pool_tx.to_recovered_transaction();
 
-        // Configure the environment for the block.
-        let env = Env {
-            cfg: initialized_cfg.clone(),
-            block: initialized_block_env.clone(),
-            tx: tx_env_with_recovered(&tx),
-        };
+            // Configure the environment for the block.
+            let env = Env {
+                cfg: initialized_cfg.clone(),
+                block: initialized_block_env.clone(),
+                tx: tx_env_with_recovered(&tx),
+            };
 
-        let mut evm = revm::EVM::with_env(env);
-        evm.database(&mut db);
+            let mut evm = revm::EVM::with_env(env);
+            evm.database(&mut db);
 
-        let ResultAndState { result, state } = match evm.transact() {
-            Ok(res) => res,
-            Err(err) => {
-                match err {
-                    EVMError::Transaction(err) => {
-                        if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
-                            // if the nonce is too low, we can skip this transaction
-                            trace!(?err, ?tx, "skipping nonce too low transaction");
-                        } else {
-                            // if the transaction is invalid, we can skip it and all of its
-                            // descendants
-                            trace!(?err, ?tx, "skipping invalid transaction and its descendants");
-                            best_txs.mark_invalid(&pool_tx);
+            let ResultAndState { result, state } = match evm.transact() {
+                Ok(res) => res,
+                Err(err) => {
+                    match err {
+                        EVMError::Transaction(err) => {
+                            if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
+                                // if the nonce is too low, we can skip this transaction
+                                trace!(?err, ?tx, "skipping nonce too low transaction");
+                            } else {
+                                // if the transaction is invalid, we can skip it and all of its
+                                // descendants
+                                trace!(
+                                    ?err,
+                                    ?tx,
+                                    "skipping invalid transaction and its descendants"
+                                );
+                                best_txs.mark_invalid(&pool_tx);
+                            }
+                            continue
                         }
-                        continue
-                    }
-                    err => {
-                        // this is an error that we should treat as fatal for this attempt
-                        return Err(PayloadBuilderError::EvmExecutionError(err))
+                        err => {
+                            // this is an error that we should treat as fatal for this attempt
+                            return Err(PayloadBuilderError::EvmExecutionError(err))
+                        }
                     }
                 }
-            }
-        };
+            };
 
-        let gas_used = result.gas_used();
+            let gas_used = result.gas_used();
 
-        // commit changes
-        commit_state_changes(&mut db, &mut post_state, block_number, state, true);
+            // commit changes
+            commit_state_changes(&mut db, &mut post_state, block_number, state, true);
 
-        // add gas used by the transaction to cumulative gas used, before creating the receipt
-        cumulative_gas_used += gas_used;
+            // add gas used by the transaction to cumulative gas used, before creating the receipt
+            cumulative_gas_used += gas_used;
 
-        // Push transaction changeset and calculate header bloom filter for receipt.
-        post_state.add_receipt(
-            block_number,
-            Receipt {
-                tx_type: tx.tx_type(),
-                success: result.is_success(),
-                cumulative_gas_used,
-                logs: result.logs().into_iter().map(into_reth_log).collect(),
-                #[cfg(feature = "optimism")]
-                deposit_nonce: None,
-            },
-        );
+            // Push transaction changeset and calculate header bloom filter for receipt.
+            post_state.add_receipt(
+                block_number,
+                Receipt {
+                    tx_type: tx.tx_type(),
+                    success: result.is_success(),
+                    cumulative_gas_used,
+                    logs: result.logs().into_iter().map(into_reth_log).collect(),
+                    #[cfg(feature = "optimism")]
+                    deposit_nonce: None,
+                },
+            );
 
-        // update add to total fees
-        let miner_fee =
-            tx.effective_tip_per_gas(base_fee).expect("fee is always valid; execution succeeded");
-        total_fees += U256::from(miner_fee) * U256::from(gas_used);
+            // update add to total fees
+            let miner_fee = tx
+                .effective_tip_per_gas(base_fee)
+                .expect("fee is always valid; execution succeeded");
+            total_fees += U256::from(miner_fee) * U256::from(gas_used);
 
-        // append transaction to the list of executed transactions
-        executed_txs.push(tx.into_signed());
+            // append transaction to the list of executed transactions
+            executed_txs.push(tx.into_signed());
+        }
     }
 
     // check if we have a better block

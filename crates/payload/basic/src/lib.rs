@@ -461,21 +461,21 @@ where
                     cancel: Cancelled::default(),
                     best_payload: None,
                 };
-                if let Ok(build_outcome) = self.builder.try_build(args) {
-                    if let BuildOutcome::Better { payload, cached_reads } = build_outcome {
-                        self.cached_reads = Some(cached_reads);
-                        trace!("[OPTIMISM] Forced best payload");
-                        let payload = Arc::new(payload);
-                        return (
-                            ResolveBestPayload {
-                                best_payload: Some(payload),
-                                maybe_better,
-                                empty_payload,
-                            },
-                            KeepPayloadJobAlive::Yes,
-                        )
-                    }
-                };
+                if let Ok(BuildOutcome::Better { payload, cached_reads }) =
+                    self.builder.try_build(args)
+                {
+                    self.cached_reads = Some(cached_reads);
+                    trace!("[OPTIMISM] Forced best payload");
+                    let payload = Arc::new(payload);
+                    return (
+                        ResolveBestPayload {
+                            best_payload: Some(payload),
+                            maybe_better,
+                            empty_payload,
+                        },
+                        KeepPayloadJobAlive::Yes,
+                    )
+                }
             }
 
             empty_payload = Some(rx);
