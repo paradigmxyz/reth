@@ -155,11 +155,32 @@ where
         let ResultAndState { result, state } = match evm.transact() {
             Ok(res) => res,
             Err(err) => {
-                // TODO(clabby): This could be an issue - deposit transactions should always be
-                // included with a receipt regardless of if there was an error or not. The
-                // sequencer performs some basic validation on the transactions it sends prior
-                // to sending a fork choice update, so this shouldn't be an issue, but we may
-                // want to revisit this.
+                if sequencer_tx.is_deposit() {
+                    post_state.add_receipt(
+                        block_number,
+                        Receipt {
+                            tx_type: sequencer_tx.tx_type(),
+                            success: false,
+                            cumulative_gas_used,
+                            logs: vec![],
+                            deposit_nonce: if is_regolith && sequencer_tx.is_deposit() {
+                                // Recovering the signer from the deposit transaction is only
+                                // fetching the `from` address.
+                                // Deposit transactions have no signature.
+                                let from = sequencer_tx.signer();
+                                let account = db.load_account(from)?;
+                                // The deposit nonce is the account's nonce - 1. The account's nonce
+                                // was incremented during the execution of the deposit transaction
+                                // above.
+                                Some(account.info.nonce.saturating_sub(1))
+                            } else {
+                                None
+                            },
+                        },
+                    );
+                    continue
+                }
+
                 match err {
                     EVMError::Transaction(err) => {
                         if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
