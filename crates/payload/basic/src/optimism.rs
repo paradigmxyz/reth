@@ -154,7 +154,6 @@ where
                 // want to revisit this.
                 match err {
                     EVMError::Transaction(err) => {
-                        dbg!("Transaction error", err);
                         if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
                             // if the nonce is too low, we can skip this transaction
                             trace!(?err, ?sequencer_tx, "skipping nonce too low transaction");
@@ -170,15 +169,12 @@ where
                         continue
                     }
                     err => {
-                        dbg!("EVM Error", &err);
                         // this is an error that we should treat as fatal for this attempt
                         return Err(PayloadBuilderError::EvmExecutionError(err))
                     }
                 }
             }
         };
-        dbg!("EXECUTED ", sequencer_tx.hash());
-
         // commit changes
         commit_state_changes(&mut db, &mut post_state, block_number, state, true);
 
@@ -211,39 +207,34 @@ where
             }
         }
 
-        // TODO(clabby): This is for debugging. move back inline to `add_receipt` when done.
-        let r = Receipt {
-            tx_type: sequencer_tx.tx_type(),
-            success: result.is_success(),
-            cumulative_gas_used,
-            logs: result.logs().into_iter().map(into_reth_log).collect(),
-            deposit_nonce: if is_regolith && sequencer_tx.is_deposit() {
-                // Recovering the signer from the deposit transaction is only fetching
-                // the `from` address. Deposit transactions have no signature.
-                let from = sequencer_tx.signer();
-                let account = db.load_account(from)?;
-                // The deposit nonce is the account's nonce - 1. The account's nonce
-                // was incremented during the execution of the deposit transaction
-                // above.
-                Some(account.info.nonce.saturating_sub(1))
-            } else {
-                None
-            },
-        };
-
-        dbg!(&r, result);
-
         // Push transaction changeset and calculate header bloom filter for receipt.
-        post_state.add_receipt(block_number, r);
-
-        dbg!("COMMITTED STATE CHANGES");
+        post_state.add_receipt(
+            block_number,
+            Receipt {
+                tx_type: sequencer_tx.tx_type(),
+                success: result.is_success(),
+                cumulative_gas_used,
+                logs: result.logs().into_iter().map(into_reth_log).collect(),
+                deposit_nonce: if is_regolith && sequencer_tx.is_deposit() {
+                    // Recovering the signer from the deposit transaction is only fetching
+                    // the `from` address. Deposit transactions have no signature.
+                    let from = sequencer_tx.signer();
+                    let account = db.load_account(from)?;
+                    // The deposit nonce is the account's nonce - 1. The account's nonce
+                    // was incremented during the execution of the deposit transaction
+                    // above.
+                    Some(account.info.nonce.saturating_sub(1))
+                } else {
+                    None
+                },
+            },
+        );
 
         // append transaction to the list of executed transactions
         executed_txs.push(sequencer_tx.into_signed());
     }
 
     while let Some(pool_tx) = best_txs.next() {
-        dbg!("POOL TX!!!!");
         // ensure we still have capacity for this transaction
         if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
             // we can't fit this transaction into the block, so we need to mark it as invalid

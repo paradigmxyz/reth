@@ -332,7 +332,6 @@ where
                 let ResultAndState { result, state } = self.transact(transaction, sender)?;
 
                 if transaction.is_deposit() && !result.is_success() {
-                    dbg!("FAILED DEPOSIT!!!!", &result);
                     // If the Deposited transaction failed, the deposit must still be included.
                     // In this case, we need to increment the sender nonce and disregard the
                     // state changes. The transaction is also recorded as using all gas.
@@ -387,8 +386,6 @@ where
                     if !transaction.is_deposit() {
                         // Route the l1 cost and base fee to the appropriate optimism vaults
                         if let Some(l1_cost) = l1_cost {
-                            dbg!("L1 BLOCK INFO: ", l1_block_info.as_ref());
-                            dbg!("L1 COST: ", l1_cost);
                             self.increment_account_balance(
                                 block.number,
                                 optimism::l1_cost_recipient(),
@@ -476,8 +473,6 @@ where
                 );
             }
         }
-
-        dbg!(&post_state);
 
         Ok((post_state, cumulative_gas_used))
     }
