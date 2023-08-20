@@ -34,8 +34,7 @@ async fn main() -> eyre::Result<()> {
     let local_key = rng_secret_key();
 
     // Configure the network
-    let config =
-        NetworkConfig::<NoopProvider>::builder(local_key).mainnet_boot_nodes().build(client);
+    let config = NetworkConfig::builder(local_key).mainnet_boot_nodes().build(client);
 
     // create the network instance
     let (_handle, network, txpool, _) =
