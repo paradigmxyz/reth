@@ -15,6 +15,8 @@ use reth_provider::{AccountReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{marker::PhantomData, sync::Arc};
 use tokio::sync::Mutex;
+use reth_primitives::constants::eip4844::KZG_TRUSTED_SETUP;
+use reth_primitives::kzg::KzgSettings;
 
 /// Validator for Ethereum transactions.
 #[derive(Debug)]
@@ -49,6 +51,9 @@ pub struct EthTransactionValidatorInner<Client, T> {
     minimum_priority_fee: Option<u128>,
     /// Toggle to determine if a local transaction should be propagated
     propagate_local_transactions: bool,
+    /// Stores the setup and parameters needed for validating KZG proofs.
+    #[allow(unused)]
+    kzg_settings: Arc<KzgSettings>,
     /// Marker for the transaction type
     _marker: PhantomData<T>,
 }
@@ -173,7 +178,7 @@ where
 
         // blob tx checks
         if self.cancun {
-            // TODO: implement blob tx checks
+            // TODO: validate blob txs, if missing try load from blob store
         }
 
         let account = match self
@@ -256,6 +261,9 @@ pub struct EthTransactionValidatorBuilder {
     additional_tasks: usize,
     /// Toggle to determine if a local transaction should be propagated
     propagate_local_transactions: bool,
+
+    /// Stores the setup and parameters needed for validating KZG proofs.
+    kzg_settings: Arc<KzgSettings>,
 }
 
 impl EthTransactionValidatorBuilder {
@@ -271,6 +279,7 @@ impl EthTransactionValidatorBuilder {
             additional_tasks: 1,
             // default to true, can potentially take this as a param in the future
             propagate_local_transactions: true,
+            kzg_settings: Arc::clone(&KZG_TRUSTED_SETUP),
 
             // TODO: can hard enable by default once transitioned
             cancun: false,
@@ -321,6 +330,13 @@ impl EthTransactionValidatorBuilder {
         self.eip1559 = eip1559;
         self
     }
+
+    /// Sets the [KzgSettings] to use for validating KZG proofs.
+    pub fn kzg_settings(mut self, kzg_settings: Arc<KzgSettings>) -> Self {
+        self.kzg_settings = kzg_settings;
+        self
+    }
+
     /// Sets toggle to propagate transactions received locally by this client (e.g
     /// transactions from eth_Sendtransaction to this nodes' RPC server)
     ///
@@ -377,7 +393,7 @@ impl EthTransactionValidatorBuilder {
             block_gas_limit,
             minimum_priority_fee,
             additional_tasks,
-            propagate_local_transactions,
+            propagate_local_transactions, kzg_settings,
         } = self;
 
         let inner = EthTransactionValidatorInner {
@@ -392,6 +408,7 @@ impl EthTransactionValidatorBuilder {
             minimum_priority_fee,
             propagate_local_transactions,
             blob_store: Box::new(blob_store),
+            kzg_settings,
             _marker: Default::default(),
         };
 
