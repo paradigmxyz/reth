@@ -3,6 +3,7 @@
 use super::*;
 use reth_primitives::Hardfork;
 use reth_revm::{executor, optimism::L1BlockInfo};
+use reth_rlp::BufMut;
 
 /// Constructs an Ethereum transaction payload from the transactions sent through the
 /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -77,11 +78,13 @@ where
             .try_into_ecrecovered()
             .map_err(|_| PayloadBuilderError::TransactionEcRecoverFailed)?;
 
+        let mut encoded = BytesMut::default();
+        sequencer_tx.encode_enveloped(&mut encoded);
         let l1_cost = l1_block_info.as_ref().map(|l1_block_info| {
             l1_block_info.calculate_tx_l1_cost(
                 Arc::clone(&chain_spec),
                 attributes.timestamp,
-                sequencer_tx.input(),
+                &reth_primitives::Bytes::from(&encoded[..]),
                 sequencer_tx.is_deposit(),
             )
         });

@@ -9,8 +9,8 @@ use crate::{
 use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
-    Account, Address, Block, BlockNumber, Bloom, Bytecode, ChainSpec, Hardfork, Header, Receipt,
-    ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
+    bytes::BytesMut, Account, Address, Block, BlockNumber, Bloom, Bytecode, Bytes, ChainSpec,
+    Hardfork, Header, Receipt, ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
 };
 use reth_provider::{BlockExecutor, PostState, StateProvider};
 use revm::{
@@ -287,11 +287,14 @@ where
 
                 let chain_spec = Arc::clone(&self.chain_spec);
                 let db = self.db();
+
+                let mut encoded = BytesMut::default();
+                transaction.encode_enveloped(&mut encoded);
                 let l1_cost = l1_block_info.as_ref().map(|l1_block_info| {
                     l1_block_info.calculate_tx_l1_cost(
                         chain_spec,
                         block.timestamp,
-                        transaction.input(),
+                        &Bytes::from(&encoded[..]),
                         transaction.is_deposit(),
                     )
                 });
