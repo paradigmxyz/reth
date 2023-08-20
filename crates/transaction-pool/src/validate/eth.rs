@@ -8,15 +8,15 @@ use crate::{
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 use reth_primitives::{
-    constants::ETHEREUM_BLOCK_GAS_LIMIT, ChainSpec, InvalidTransactionError, EIP1559_TX_TYPE_ID,
-    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    constants::{eip4844::KZG_TRUSTED_SETUP, ETHEREUM_BLOCK_GAS_LIMIT},
+    kzg::KzgSettings,
+    ChainSpec, InvalidTransactionError, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
+    LEGACY_TX_TYPE_ID,
 };
 use reth_provider::{AccountReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{marker::PhantomData, sync::Arc};
 use tokio::sync::Mutex;
-use reth_primitives::constants::eip4844::KZG_TRUSTED_SETUP;
-use reth_primitives::kzg::KzgSettings;
 
 /// Validator for Ethereum transactions.
 #[derive(Debug)]
@@ -393,7 +393,8 @@ impl EthTransactionValidatorBuilder {
             block_gas_limit,
             minimum_priority_fee,
             additional_tasks,
-            propagate_local_transactions, kzg_settings,
+            propagate_local_transactions,
+            kzg_settings,
         } = self;
 
         let inner = EthTransactionValidatorInner {
