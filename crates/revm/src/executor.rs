@@ -9,8 +9,8 @@ use crate::{
 use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
-    bytes::BytesMut, Account, Address, Block, BlockNumber, Bloom, Bytecode, Bytes, ChainSpec,
-    Hardfork, Header, Receipt, ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
+    bytes::BytesMut, Account, Address, Block, BlockNumber, Bloom, Bytecode, ChainSpec, Hardfork,
+    Header, Receipt, ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
 };
 use reth_provider::{BlockExecutor, PostState, StateProvider};
 use revm::{
