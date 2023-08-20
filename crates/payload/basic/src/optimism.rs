@@ -114,9 +114,7 @@ where
                 )?;
                 db.insert_account_info(sequencer_tx.signer(), sender_new.info);
             }
-        }
-
-        if !sequencer_tx.is_deposit() {
+        } else {
             if let Some(l1_cost) = l1_cost {
                 let sender = db.load_account(sequencer_tx.signer())?.clone();
                 let mut sender_new = sender.clone();
@@ -188,7 +186,8 @@ where
             } else if sequencer_tx.is_deposit() && !sequencer_tx.is_system_transaction() {
                 cumulative_gas_used += sequencer_tx.gas_limit();
             }
-            if !(sequencer_tx.is_deposit() && is_regolith) {
+
+            if !sequencer_tx.is_deposit() {
                 // Route the l1 cost and base fee to the appropriate optimism vaults
                 if let Some(l1_cost) = l1_cost {
                     executor::increment_account_balance(
@@ -199,15 +198,13 @@ where
                         l1_cost,
                     )?
                 }
-                if !sequencer_tx.is_deposit() {
-                    executor::increment_account_balance(
-                        &mut db,
-                        &mut post_state,
-                        parent_block.number + 1,
-                        executor::optimism::base_fee_recipient(),
-                        U256::from(base_fee.saturating_mul(result.gas_used())),
-                    )?;
-                }
+                executor::increment_account_balance(
+                    &mut db,
+                    &mut post_state,
+                    parent_block.number + 1,
+                    executor::optimism::base_fee_recipient(),
+                    U256::from(base_fee.saturating_mul(result.gas_used())),
+                )?;
             }
         }
 
