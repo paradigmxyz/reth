@@ -11,7 +11,6 @@ use crate::{
     TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
 use reth_primitives::{Address, BlobTransactionSidecar, InvalidTransactionError, TxHash};
-use reth_primitives::{Address, BlobTransactionSidecar, TxHash};
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
@@ -198,7 +197,7 @@ impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::TxTypeNotSupported.into(),
-            );
+            )
         }
 
         TransactionValidationOutcome::Valid {

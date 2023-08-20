@@ -67,6 +67,8 @@ impl PooledTransactionsElement {
             Self::Eip2930 { transaction, .. } => transaction.signature_hash(),
             Self::Eip1559 { transaction, .. } => transaction.signature_hash(),
             Self::BlobTransaction(blob_tx) => blob_tx.transaction.signature_hash(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit { .. } => H256::zero(),
         }
     }
 
@@ -77,6 +79,10 @@ impl PooledTransactionsElement {
             Self::Eip2930 { signature, .. } => signature,
             Self::Eip1559 { signature, .. } => signature,
             Self::BlobTransaction(blob_tx) => &blob_tx.signature,
+            #[cfg(feature = "optimism")]
+            Self::Deposit { .. } => {
+                panic!("Deposit transactions do not have a signature! This is a bug.")
+            }
         }
     }
 
@@ -232,8 +238,8 @@ impl Encodable for PooledTransactionsElement {
                 blob_tx.encode_with_type_inner(out, true);
             }
             #[cfg(feature = "optimism")]
-            Self::Deposit { transaction, signature, .. } => {
-                transaction.encode_with_signature(signature, out, true)
+            Self::Deposit { transaction, .. } => {
+                transaction.encode(out, true);
             }
         }
     }
@@ -257,9 +263,9 @@ impl Encodable for PooledTransactionsElement {
                 blob_tx.payload_len_with_type(true)
             }
             #[cfg(feature = "optimism")]
-            Self::Deposit { transaction, signature, .. } => {
+            Self::Deposit { transaction, .. } => {
                 // method computes the payload len with a RLP header
-                transaction.payload_len_with_signature(signature)
+                transaction.payload_len()
             }
         }
     }

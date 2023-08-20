@@ -284,7 +284,7 @@ impl<Client, S>
         S,
     >
 where
-    Client: StateProviderFactory + reth_primitives::BlockReaderIdExt + Clone + 'static,
+    Client: StateProviderFactory + reth_provider::BlockReaderIdExt + Clone + 'static,
     S: BlobStore,
 {
     /// Returns a new [Pool] that uses the default [TransactionValidationTaskExecutor] when

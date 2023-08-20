@@ -24,14 +24,20 @@ use reth_primitives::BlockNumberOrTag;
 
 /// Validator for Ethereum transactions.
 #[derive(Debug)]
-pub struct EthTransactionValidator<Client, T> {
+pub struct EthTransactionValidator<Client, T>
+where
+    Client: BlockReaderIdExt,
+{
     /// The type that performs the actual validation.
-    inner: Arc<EthTransactionValidatorInner<Client, T>>,
+    pub inner: Arc<EthTransactionValidatorInner<Client, T>>,
 }
 
 /// A [TransactionValidator] implementation that validates ethereum transaction.
 #[derive(Debug)]
-pub struct EthTransactionValidatorInner<Client, T> {
+pub struct EthTransactionValidatorInner<Client, T>
+where
+    Client: BlockReaderIdExt,
+{
     /// Spec of the chain
     chain_spec: Arc<ChainSpec>,
     /// This type fetches account info from the db
@@ -61,7 +67,10 @@ pub struct EthTransactionValidatorInner<Client, T> {
 
 // === impl EthTransactionValidatorInner ===
 
-impl<Client, Tx> EthTransactionValidatorInner<Client, Tx> {
+impl<Client, Tx> EthTransactionValidatorInner<Client, Tx>
+where
+    Client: BlockReaderIdExt,
+{
     /// Returns the configured chain id
     pub fn chain_id(&self) -> u64 {
         self.chain_spec.chain().id()
@@ -71,7 +80,7 @@ impl<Client, Tx> EthTransactionValidatorInner<Client, Tx> {
 #[async_trait::async_trait]
 impl<Client, Tx> TransactionValidator for EthTransactionValidatorInner<Client, Tx>
 where
-    Client: StateProviderFactory,
+    Client: StateProviderFactory + BlockReaderIdExt,
     Tx: PoolTransaction,
 {
     type Transaction = Tx;
@@ -81,6 +90,14 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
+        #[cfg(feature = "optimism")]
+        if transaction.is_deposit() {
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidTransactionError::TxTypeNotSupported.into(),
+            )
+        }
+
         // Checks for tx_type
         match transaction.tx_type() {
             LEGACY_TX_TYPE_ID => {
@@ -92,7 +109,7 @@ where
                     return TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip1559Disabled.into(),
-                    );
+                    )
                 }
             }
             EIP1559_TX_TYPE_ID => {
@@ -101,7 +118,7 @@ where
                     return TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip1559Disabled.into(),
-                    );
+                    )
                 }
             }
             EIP4844_TX_TYPE_ID => {
@@ -110,7 +127,7 @@ where
                     return TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip4844Disabled.into(),
-                    );
+                    )
                 }
             }
 
@@ -128,13 +145,13 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::OversizedData(size, TX_MAX_SIZE),
-            );
+            )
         }
 
         // Check whether the init code size has been exceeded.
         if self.shanghai {
             if let Err(err) = self.ensure_max_init_code_size(&transaction, MAX_INIT_CODE_SIZE) {
-                return TransactionValidationOutcome::Invalid(transaction, err);
+                return TransactionValidationOutcome::Invalid(transaction, err)
             }
         }
 
@@ -144,7 +161,7 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::ExceedsGasLimit(gas_limit, self.block_gas_limit),
-            );
+            )
         }
 
         // Ensure max_priority_fee_per_gas (if EIP1559) is less than max_fee_per_gas if any.
@@ -152,19 +169,19 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::TipAboveFeeCap.into(),
-            );
+            )
         }
 
         // Drop non-local transactions with a fee lower than the configured fee for acceptance into
         // the pool.
-        if !origin.is_local()
-            && transaction.is_eip1559()
-            && transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
+        if !origin.is_local() &&
+            transaction.is_eip1559() &&
+            transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
         {
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::Underpriced,
-            );
+            )
         }
 
         // Checks for chainid
@@ -173,7 +190,7 @@ where
                 return TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidTransactionError::ChainIdMismatch.into(),
-                );
+                )
             }
         }
 
@@ -199,7 +216,7 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::SignerAccountHasBytecode.into(),
-            );
+            )
         }
 
         // Checks for nonce
@@ -207,11 +224,43 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::NonceNotConsistent.into(),
-            );
+            )
         }
 
-        // Checks for max cost
+        #[cfg(not(feature = "optimism"))]
         let cost = transaction.cost();
+
+        #[cfg(feature = "optimism")]
+        let cost = {
+            let block = match self.client.block_by_number_or_tag(BlockNumberOrTag::Latest) {
+                Ok(Some(block)) => block,
+                Ok(None) => {
+                    return TransactionValidationOutcome::Error(
+                        *transaction.hash(),
+                        "Latest block should be found".into(),
+                    )
+                }
+                Err(err) => {
+                    return TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err))
+                }
+            };
+
+            let cost_addition = match L1BlockInfo::try_from(&block) {
+                Ok(info) => info.calculate_tx_l1_cost(
+                    Arc::clone(&self.chain_spec),
+                    block.timestamp,
+                    transaction.input(),
+                    transaction.is_deposit(),
+                ),
+                Err(err) => {
+                    return TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err))
+                }
+            };
+
+            transaction.cost().saturating_add(cost_addition)
+        };
+
+        // Checks for max cost
         if cost > account.balance {
             return TransactionValidationOutcome::Invalid(
                 transaction,
@@ -220,7 +269,7 @@ where
                     available_funds: account.balance,
                 }
                 .into(),
-            );
+            )
         }
 
         // Return the valid transaction
@@ -370,6 +419,7 @@ impl EthTransactionValidatorBuilder {
         blob_store: S,
     ) -> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx>>
     where
+        Client: BlockReaderIdExt,
         T: TaskSpawner,
         S: BlobStore,
     {
@@ -434,7 +484,7 @@ mod tests {
     #[cfg(feature = "optimism")]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_validate_optimism_transaction() {
-        use crate::traits::EthPooledTransaction;
+        use crate::{blobstore::InMemoryBlobStore, traits::EthPooledTransaction};
         use reth_primitives::{
             Signature, Transaction, TransactionKind, TransactionSigned,
             TransactionSignedEcRecovered, TxDeposit, MAINNET, U256,
@@ -444,7 +494,8 @@ mod tests {
 
         let client = MockEthProvider::default();
         let validator =
-            EthTransactionValidator::new(client, MAINNET.clone(), TokioTaskExecutor::default());
+            // EthTransactionValidator::new(client, MAINNET.clone(), TokioTaskExecutor::default());
+            EthTransactionValidatorBuilder::new(MAINNET.clone()).no_shanghai().no_cancun().build_with_tasks(client, TokioTaskExecutor::default(), InMemoryBlobStore::default());
         let origin = TransactionOrigin::External;
         let signer = Default::default();
         let deposit_tx = Transaction::Deposit(TxDeposit {

@@ -6,9 +6,10 @@ use crate::{
 };
 use futures_util::{ready, Stream};
 use reth_primitives::{
-    Address, BlobTransactionSidecar, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId,
-    PooledTransactionsElement, PooledTransactionsElementEcRecovered, Transaction, TransactionKind,
-    TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, H256, U256,
+    Address, BlobTransactionSidecar, Bytes, FromRecoveredTransaction, IntoRecoveredTransaction,
+    PeerId, PooledTransactionsElement, PooledTransactionsElementEcRecovered, Transaction,
+    TransactionKind, TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
+    H256, U256,
 };
 use reth_rlp::Encodable;
 use std::{
@@ -848,7 +849,7 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
             match ready!(self.st.poll_recv(cx)) {
                 Some(event) => {
                     if event.subpool == self.subpool {
-                        return Poll::Ready(Some(event));
+                        return Poll::Ready(Some(event))
                     }
                 }
                 None => return Poll::Ready(None),

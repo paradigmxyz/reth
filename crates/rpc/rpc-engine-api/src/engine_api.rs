@@ -126,7 +126,7 @@ where
 
             #[cfg(feature = "optimism")]
             if attrs.gas_limit.is_none() && self.inner.chain_spec.optimism {
-                return Err(EngineApiError::MissingGasLimitInPayloadAttributes);
+                return Err(EngineApiError::MissingGasLimitInPayloadAttributes)
             }
             self.validate_version_specific_fields(EngineApiMessageVersion::V1, attrs.into())?;
         }
@@ -225,12 +225,12 @@ where
         self.inner.task_spawner.spawn_blocking(Box::pin(async move {
             if count > MAX_PAYLOAD_BODIES_LIMIT {
                 tx.send(Err(EngineApiError::PayloadRequestTooLarge { len: count })).ok();
-                return;
+                return
             }
 
             if start == 0 || count == 0 {
                 tx.send(Err(EngineApiError::InvalidBodiesRange { start, count })).ok();
-                return;
+                return
             }
 
             let mut result = Vec::with_capacity(count as usize);
@@ -244,7 +244,7 @@ where
                     }
                     Err(err) => {
                         tx.send(Err(EngineApiError::Internal(Box::new(err)))).ok();
-                        return;
+                        return
                     }
                 };
             }
@@ -261,7 +261,7 @@ where
     ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
         let len = hashes.len() as u64;
         if len > MAX_PAYLOAD_BODIES_LIMIT {
-            return Err(EngineApiError::PayloadRequestTooLarge { len });
+            return Err(EngineApiError::PayloadRequestTooLarge { len })
         }
 
         let mut result = Vec::with_capacity(hashes.len());
@@ -301,7 +301,7 @@ where
             return Err(EngineApiError::TerminalTD {
                 execution: merge_terminal_td,
                 consensus: terminal_total_difficulty,
-            });
+            })
         }
 
         self.inner.beacon_consensus.transition_configuration_exchanged().await;
@@ -311,7 +311,7 @@ where
             return Ok(TransitionConfiguration {
                 terminal_total_difficulty: merge_terminal_td,
                 ..Default::default()
-            });
+            })
         }
 
         // Attempt to look up terminal block hash
@@ -350,18 +350,18 @@ where
         match version {
             EngineApiMessageVersion::V1 => {
                 if has_withdrawals {
-                    return Err(EngineApiError::WithdrawalsNotSupportedInV1);
+                    return Err(EngineApiError::WithdrawalsNotSupportedInV1)
                 }
                 if is_shanghai {
-                    return Err(EngineApiError::NoWithdrawalsPostShanghai);
+                    return Err(EngineApiError::NoWithdrawalsPostShanghai)
                 }
             }
             EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 => {
                 if is_shanghai && !has_withdrawals {
-                    return Err(EngineApiError::NoWithdrawalsPostShanghai);
+                    return Err(EngineApiError::NoWithdrawalsPostShanghai)
                 }
                 if !is_shanghai && has_withdrawals {
-                    return Err(EngineApiError::HasWithdrawalsPreShanghai);
+                    return Err(EngineApiError::HasWithdrawalsPreShanghai)
                 }
             }
         };
@@ -396,17 +396,17 @@ where
         match version {
             EngineApiMessageVersion::V1 | EngineApiMessageVersion::V2 => {
                 if has_parent_beacon_block_root {
-                    return Err(EngineApiError::ParentBeaconBlockRootNotSupportedBeforeV3);
+                    return Err(EngineApiError::ParentBeaconBlockRootNotSupportedBeforeV3)
                 }
                 if is_cancun {
-                    return Err(EngineApiError::NoParentBeaconBlockRootPostCancun);
+                    return Err(EngineApiError::NoParentBeaconBlockRootPostCancun)
                 }
             }
             EngineApiMessageVersion::V3 => {
                 if !is_cancun {
-                    return Err(EngineApiError::UnsupportedFork);
+                    return Err(EngineApiError::UnsupportedFork)
                 } else if !has_parent_beacon_block_root {
-                    return Err(EngineApiError::NoParentBeaconBlockRootPostCancun);
+                    return Err(EngineApiError::NoParentBeaconBlockRootPostCancun)
                 }
             }
         };
@@ -700,8 +700,8 @@ mod tests {
                 blocks
                     .iter()
                     .filter(|b| {
-                        !first_missing_range.contains(&b.number)
-                            && !second_missing_range.contains(&b.number)
+                        !first_missing_range.contains(&b.number) &&
+                            !second_missing_range.contains(&b.number)
                     })
                     .map(|b| (b.hash(), b.clone().unseal())),
             );
@@ -710,8 +710,8 @@ mod tests {
                 .iter()
                 .cloned()
                 .map(|b| {
-                    if first_missing_range.contains(&b.number)
-                        || second_missing_range.contains(&b.number)
+                    if first_missing_range.contains(&b.number) ||
+                        second_missing_range.contains(&b.number)
                     {
                         None
                     } else {
@@ -740,8 +740,8 @@ mod tests {
             let (handle, api) = setup_engine_api();
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap()
-                    + U256::from(1),
+                terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap() +
+                    U256::from(1),
                 ..Default::default()
             };
 
