@@ -406,7 +406,12 @@ mod tests {
                 PrunePart::SenderRecovery,
                 PruneCheckpoint {
                     block_number: Some(max_pruned_block),
-                    tx_number: None,
+                    tx_number: Some(
+                        blocks[..=max_pruned_block as usize]
+                            .iter()
+                            .map(|block| block.body.len() as u64)
+                            .sum::<u64>(),
+                    ),
                     prune_mode: PruneMode::Full,
                 },
             )
