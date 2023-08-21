@@ -486,7 +486,7 @@ where
         self.pool.set_block_info(info)
     }
 
-    fn on_canonical_state_change(&self, update: CanonicalStateUpdate) {
+    fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_>) {
         self.pool.on_canonical_state_change(update);
     }
 
