@@ -6,9 +6,9 @@ use crate::{
 };
 use futures_util::{ready, Stream};
 use reth_primitives::{
-    Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
-    TransactionKind, TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
-    H256, U256,
+    Address, BlobTransactionSidecar, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId,
+    PooledTransactionsElement, PooledTransactionsElementEcRecovered, Transaction, TransactionKind,
+    TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, H256, U256,
 };
 use reth_rlp::Encodable;
 use std::{
@@ -20,6 +20,7 @@ use std::{
 };
 use tokio::sync::mpsc::Receiver;
 
+use crate::blobstore::BlobStoreError;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -247,7 +248,8 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Returns all transactions objects for the given hashes.
     ///
-    /// This adheres to the expected behavior of [`GetPooledTransactions`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09):
+    /// TODO(mattsse): this will no longer be accurate and we need a new function specifically for
+    /// pooled txs This adheres to the expected behavior of [`GetPooledTransactions`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09):
     /// The transactions must be in same order as in the request, but it is OK to skip transactions
     /// which are not available.
     fn get_all(&self, txs: Vec<TxHash>) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
@@ -265,6 +267,20 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Returns a set of all senders of transactions in the pool
     fn unique_senders(&self) -> HashSet<Address>;
+
+    /// Returns the [BlobTransactionSidecar] for the given transaction hash if it exists in the blob
+    /// store.
+    fn get_blob(&self, tx_hash: TxHash) -> Result<Option<BlobTransactionSidecar>, BlobStoreError>;
+
+    /// Returns all [BlobTransactionSidecar] for the given transaction hashes if they exists in the
+    /// blob store.
+    ///
+    /// This only returns the blobs that were found in the store.
+    /// If there's no blob it will not be returned.
+    fn get_all_blobs(
+        &self,
+        tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError>;
 }
 
 /// Extension for [TransactionPool] trait that allows to set the current block info.
@@ -564,32 +580,53 @@ pub trait PoolTransaction:
     fn chain_id(&self) -> Option<u64>;
 }
 
-/// The default [PoolTransaction] for the [Pool](crate::Pool).
+/// The default [PoolTransaction] for the [Pool](crate::Pool) for Ethereum.
 ///
 /// This type is essentially a wrapper around [TransactionSignedEcRecovered] with additional fields
 /// derived from the transaction that are frequently used by the pools for ordering.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct PooledTransaction {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EthPooledTransaction {
     /// EcRecovered transaction info
     pub(crate) transaction: TransactionSignedEcRecovered,
 
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     pub(crate) cost: U256,
+
+    /// The blob side car this transaction
+    pub(crate) blob_sidecar: EthBlobTransactionSidecar,
 }
 
-impl PooledTransaction {
+/// Represents the blob sidecar of the [EthPooledTransaction].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum EthBlobTransactionSidecar {
+    /// This transaction does not have a blob sidecar
+    None,
+    /// This transaction has a blob sidecar (EIP-4844) but it is missing
+    ///
+    /// It was either extracted after being inserted into the pool or re-injected after reorg
+    /// without the blob sidecar
+    Missing,
+    /// The eip-4844 transaction was pulled from the network and still has its blob sidecar
+    Present(BlobTransactionSidecar),
+}
+
+impl EthPooledTransaction {
     /// Create new instance of [Self].
     pub fn new(transaction: TransactionSignedEcRecovered) -> Self {
+        let mut blob_sidecar = EthBlobTransactionSidecar::None;
         let gas_cost = match &transaction.transaction {
             Transaction::Legacy(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
             Transaction::Eip2930(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
             Transaction::Eip1559(t) => U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit),
-            Transaction::Eip4844(t) => U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit),
+            Transaction::Eip4844(t) => {
+                blob_sidecar = EthBlobTransactionSidecar::Missing;
+                U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit)
+            }
         };
         let cost = gas_cost + U256::from(transaction.value());
 
-        Self { transaction, cost }
+        Self { transaction, cost, blob_sidecar }
     }
 
     /// Return the reference to the underlying transaction.
@@ -598,7 +635,28 @@ impl PooledTransaction {
     }
 }
 
-impl PoolTransaction for PooledTransaction {
+/// Conversion from the network transaction type to the pool transaction type.
+impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
+    fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
+        let (tx, signer) = tx.into_components();
+        match tx {
+            PooledTransactionsElement::BlobTransaction(tx) => {
+                // include the blob sidecar
+                let (tx, blob) = tx.into_parts();
+                let tx = TransactionSignedEcRecovered::from_signed_transaction(tx, signer);
+                let mut pooled = EthPooledTransaction::new(tx);
+                pooled.blob_sidecar = EthBlobTransactionSidecar::Present(blob);
+                pooled
+            }
+            tx => {
+                // no blob sidecar
+                EthPooledTransaction::new(tx.into_ecrecovered_transaction(signer))
+            }
+        }
+    }
+}
+
+impl PoolTransaction for EthPooledTransaction {
     /// Returns hash of the transaction.
     fn hash(&self) -> &TxHash {
         self.transaction.hash_ref()
@@ -694,13 +752,13 @@ impl PoolTransaction for PooledTransaction {
     }
 }
 
-impl FromRecoveredTransaction for PooledTransaction {
+impl FromRecoveredTransaction for EthPooledTransaction {
     fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
-        PooledTransaction::new(tx)
+        EthPooledTransaction::new(tx)
     }
 }
 
-impl IntoRecoveredTransaction for PooledTransaction {
+impl IntoRecoveredTransaction for EthPooledTransaction {
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
         self.transaction.clone()
     }

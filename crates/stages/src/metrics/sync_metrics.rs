@@ -1,7 +1,4 @@
-use reth_metrics::{
-    metrics::{self, Gauge},
-    Metrics,
-};
+use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives::stage::StageId;
 use std::collections::HashMap;
 

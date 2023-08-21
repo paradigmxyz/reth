@@ -18,7 +18,6 @@ normal = [
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-db = { path = "../storage/db" }
-reth-metrics = { workspace = true, features = ["common"] }
 reth-provider.workspace = true
 reth-stages = { path = "../stages" }
 
@@ -27,7 +26,11 @@ parking_lot.workspace = true
 lru = "0.10"
 tracing.workspace = true
 
-# mics
+# metrics
+reth-metrics = { workspace = true, features = ["common"] }
+metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
+
+# misc
 aquamarine = "0.3.0"
 linked_hash_set = "0.1.4"
 

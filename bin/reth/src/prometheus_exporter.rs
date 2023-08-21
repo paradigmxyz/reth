@@ -7,7 +7,7 @@ use hyper::{
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
 use reth_db::{database::Database, tables, DatabaseEnv};
-use reth_metrics::metrics::{self, absolute_counter, describe_counter, Unit};
+use reth_metrics::metrics::{absolute_counter, describe_counter, Unit};
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 
 pub(crate) trait Hook: Fn() + Send + Sync {}

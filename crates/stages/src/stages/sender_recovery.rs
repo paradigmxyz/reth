@@ -405,7 +405,8 @@ mod tests {
             .save_prune_checkpoint(
                 PrunePart::SenderRecovery,
                 PruneCheckpoint {
-                    block_number: max_pruned_block as BlockNumber,
+                    block_number: Some(max_pruned_block),
+                    tx_number: None,
                     prune_mode: PruneMode::Full,
                 },
             )

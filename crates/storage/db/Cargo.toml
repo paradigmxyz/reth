@@ -14,7 +14,6 @@ reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-codecs = { path = "../codecs" }
 reth-libmdbx = { path = "../libmdbx-rs", optional = true, features = ["return-borrowed"] }
-reth-metrics.workspace = true
 
 # codecs
 serde = { workspace = true, default-features = false }
@@ -30,6 +29,10 @@ secp256k1 = { workspace = true, default-features = false, features = [
     "rand",
 ], optional = true }
 modular-bitfield = "0.11.2"
+
+# metrics
+reth-metrics.workspace = true
+metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
 
 # misc
 bytes.workspace = true
