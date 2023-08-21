@@ -248,9 +248,10 @@ where
                             .inner
                             .eth_api
                             .spawn_with_call_at(call, at, overrides, move |db, env| {
-                                inspect(db, env, &mut inspector)?;
-                                let frame =
-                                    inspector.into_geth_builder().geth_call_traces(call_config);
+                                let (res, _) = inspect(db, env, &mut inspector)?;
+                                let frame = inspector
+                                    .into_geth_builder()
+                                    .geth_call_traces(call_config, res.result.gas_used());
                                 Ok(frame.into())
                             })
                             .await?;
@@ -469,7 +470,9 @@ where
 
                         let (res, _) = inspect(db, env, &mut inspector)?;
 
-                        let frame = inspector.into_geth_builder().geth_call_traces(call_config);
+                        let frame = inspector
+                            .into_geth_builder()
+                            .geth_call_traces(call_config, res.result.gas_used());
 
                         return Ok((frame.into(), res.state))
                     }
