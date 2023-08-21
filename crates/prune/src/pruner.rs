@@ -666,9 +666,9 @@ impl<DB: Database> Pruner<DB> {
             if key.as_ref().highest_block_number <= to_block {
                 cursor.delete_current()?;
                 if key.as_ref().highest_block_number == to_block {
-                    // Shard contains only block numbers up to the target one, so we can skip to the
-                    // next sharded key. It is guaranteed that further shards for this sharded key
-                    // will not contain the target block number, as it's in this shard.
+                    // Shard contains only block numbers up to the target one, so we can skip to
+                    // the last shard for this key. It is guaranteed that further shards for this
+                    // sharded key will not contain the target block number, as it's in this shard.
                     cursor.seek_exact(last_key(&key))?;
                 }
             }
@@ -721,8 +721,10 @@ impl<DB: Database> Pruner<DB> {
                     }
                 }
 
-                // Jump to the next address.
-                cursor.seek_exact(last_key(&key))?;
+                // Jump to the last shard for this key, if current key isn't already the last shard.
+                if key.as_ref().highest_block_number != u64::MAX {
+                    cursor.seek_exact(last_key(&key))?;
+                }
             }
 
             processed += 1;
