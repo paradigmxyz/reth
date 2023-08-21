@@ -397,8 +397,8 @@ impl<DB: Database> Pruner<DB> {
         Ok(done)
     }
 
-    /// Prune receipts up to the provided block by filtering logs. Works as in inclusion list, and
-    /// removes every receipt not belonging to it.
+    /// Prune receipts up to the provided block, inclusive, by filtering logs. Works as in inclusion
+    /// list, and removes every receipt not belonging to it. Respects the batch size.
     #[instrument(level = "trace", skip(self, provider), target = "pruner")]
     fn prune_receipts_by_logs(
         &self,
@@ -533,23 +533,42 @@ impl<DB: Database> Pruner<DB> {
         }
 
         // If there are contracts using `PruneMode::Distance(_)` there will be receipts before
-        // `to_block` that become eligible to be pruned in future runs. Therefore, our
-        // checkpoint is not actually `to_block`, but the `lowest_block_with_distance` from any
-        // contract. This ensures that in future pruner runs we can
-        // prune all these receipts between the previous `lowest_block_with_distance` and the new
-        // one using `get_next_tx_num_range_from_checkpoint`.
+        // `to_block` that become eligible to be pruned in future runs. Therefore, our checkpoint is
+        // not actually `to_block`, but the `lowest_block_with_distance` from any contract.
+        // This ensures that in future pruner runs we can prune all these receipts between the
+        // previous `lowest_block_with_distance` and the new one using
+        // `get_next_tx_num_range_from_checkpoint`.
         let prune_mode_block = self
             .modes
             .contract_logs_filter
             .lowest_block_with_distance(tip_block_number, pruned_block)?
             .unwrap_or(to_block);
-        let checkpoint_block = last_pruned_block.map(|block| block.min(prune_mode_block - 1));
+
+        let (checkpoint_block, checkpoint_transaction) = if done {
+            let Some(prune_mode_block) = prune_mode_block.checked_sub(1) else { return Ok(done) };
+            (
+                Some(prune_mode_block),
+                provider
+                    .block_body_indices(prune_mode_block)?
+                    .ok_or(PrunerError::InconsistentData(
+                        "Block body indices for prune mode block not found",
+                    ))?
+                    .last_tx_num(),
+            )
+        } else {
+            (
+                last_pruned_block,
+                last_pruned_transaction.ok_or(PrunerError::InconsistentData(
+                    "Last pruned transaction is not present",
+                ))?,
+            )
+        };
 
         provider.save_prune_checkpoint(
             PrunePart::ContractLogs,
             PruneCheckpoint {
                 block_number: checkpoint_block,
-                tx_number: last_pruned_transaction,
+                tx_number: Some(checkpoint_transaction),
                 prune_mode: PruneMode::Before(prune_mode_block),
             },
         )?;
