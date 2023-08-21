@@ -1,6 +1,8 @@
 //! Contains types required for building a payload.
 
-use reth_primitives::{Address, ChainSpec, Header, SealedBlock, Withdrawal, H256, U256};
+use reth_primitives::{
+    Address, BlobTransactionSidecar, ChainSpec, Header, SealedBlock, Withdrawal, H256, U256,
+};
 use reth_revm_primitives::config::revm_spec_by_timestamp_after_merge;
 use reth_rlp::Encodable;
 use reth_rpc_types::engine::{
@@ -21,6 +23,8 @@ pub struct BuiltPayload {
     pub(crate) block: SealedBlock,
     /// The fees of the block
     pub(crate) fees: U256,
+    /// The blobs, proofs, and commitments in the block
+    pub(crate) sidecars: Vec<BlobTransactionSidecar>,
 }
 
 // === impl BuiltPayload ===
@@ -28,7 +32,7 @@ pub struct BuiltPayload {
 impl BuiltPayload {
     /// Initializes the payload with the given initial block.
     pub fn new(id: PayloadId, block: SealedBlock, fees: U256) -> Self {
-        Self { id, block, fees }
+        Self { id, block, fees, sidecars: Vec::new() }
     }
 
     /// Returns the identifier of the payload.
@@ -67,7 +71,7 @@ impl From<BuiltPayload> for ExecutionPayload {
 // V2 engine_getPayloadV2 response
 impl From<BuiltPayload> for ExecutionPayloadEnvelope {
     fn from(value: BuiltPayload) -> Self {
-        let BuiltPayload { block, fees, .. } = value;
+        let BuiltPayload { block, fees, sidecars } = value;
 
         ExecutionPayloadEnvelope {
             block_value: fees,
