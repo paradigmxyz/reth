@@ -509,11 +509,20 @@ pub trait BestTransactions: Iterator + Send {
     /// In other words, this must remove the given transaction _and_ drain all transaction that
     /// depend on it.
     fn mark_invalid(&mut self, transaction: &Self::Item);
+
+    /// An iterator may be able to receive additional pending transactions that weren't present it
+    /// the pool when it was created.
+    ///
+    /// This ensures that iterator will return the best transaction that it currently knows and not
+    /// listen to pool updates.
+    fn no_updates(&mut self);
 }
 
 /// A no-op implementation that yields no transactions.
 impl<T> BestTransactions for std::iter::Empty<T> {
     fn mark_invalid(&mut self, _tx: &T) {}
+
+    fn no_updates(&mut self) {}
 }
 
 /// Trait for transaction types used inside the pool
