@@ -46,6 +46,10 @@ pub struct BlobStoreMetrics {
     pub(crate) blobstore_failed_inserts: Counter,
     /// Number of failed deletes into the blobstore
     pub(crate) blobstore_failed_deletes: Counter,
+    /// The number of bytes the blobs in the blobstore take up
+    pub(crate) blobstore_byte_size: Gauge,
+    /// How many blobs are currently in the blobstore
+    pub(crate) blobstore_entries: Gauge,
 }
 
 /// Transaction pool maintenance metrics

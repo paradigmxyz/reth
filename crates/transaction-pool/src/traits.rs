@@ -299,6 +299,12 @@ pub trait TransactionPoolExt: TransactionPool {
 
     /// Updates the accounts in the pool
     fn update_accounts(&self, accounts: Vec<ChangedAccount>);
+
+    /// Deletes the blob sidecar for the given transaction from the blob store
+    fn delete_blob(&self, tx: H256);
+
+    /// Deletes multiple blob sidecars from the blob store
+    fn delete_blobs(&self, txs: Vec<H256>);
 }
 
 /// Determines what kind of new pending transactions should be emitted by a stream of pending
