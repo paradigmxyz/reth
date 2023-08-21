@@ -79,14 +79,20 @@ pub struct ExecutionPayload {
     pub timestamp: U64,
     pub extra_data: Bytes,
     pub base_fee_per_gas: U256,
-    pub blob_gas_used: Option<U64>,
-    pub excess_blob_gas: Option<U64>,
     pub block_hash: H256,
     pub transactions: Vec<Bytes>,
     /// Array of [`Withdrawal`] enabled with V2
     /// See <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#executionpayloadv2>
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub withdrawals: Option<Vec<Withdrawal>>,
+    /// Array of [`U64`] representing blob gas used, enabled with V3
+    /// See <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#ExecutionPayloadV3>
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blob_gas_used: Option<U64>,
+    /// Array of [`U64`] representing excess blob gas, enabled with V3
+    /// See <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#ExecutionPayloadV3>
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub excess_blob_gas: Option<U64>,
 }
 
 impl From<SealedBlock> for ExecutionPayload {
