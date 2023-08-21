@@ -785,6 +785,7 @@ where
         extra_data: extra_data.into(),
         blob_gas_used: None,
         excess_blob_gas: None,
+        parent_beacon_block_root: None,
     };
 
     // seal the block
@@ -856,6 +857,7 @@ where
         blob_gas_used: None,
         excess_blob_gas: None,
         extra_data: extra_data.into(),
+        parent_beacon_block_root: None,
     };
 
     let block = Block { header, body: vec![], ommers: vec![], withdrawals };

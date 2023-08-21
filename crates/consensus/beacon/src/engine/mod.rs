@@ -1049,12 +1049,13 @@ where
     ///
     /// This returns a [`PayloadStatus`] that represents the outcome of a processed new payload and
     /// returns an error if an internal error occurred.
-    #[instrument(level = "trace", skip(self, payload), fields(block_hash= ?payload.block_hash, block_number = %payload.block_number.as_u64(), is_pipeline_idle = %self.sync.is_pipeline_idle()), target = "consensus::engine")]
+    #[instrument(level = "trace", skip(self, payload, parent_beacon_block_root), fields(block_hash= ?payload.block_hash, block_number = %payload.block_number.as_u64(), is_pipeline_idle = %self.sync.is_pipeline_idle()), target = "consensus::engine")]
     fn on_new_payload(
         &mut self,
         payload: ExecutionPayload,
+        parent_beacon_block_root: Option<H256>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
-        let block = match self.ensure_well_formed_payload(payload) {
+        let block = match self.ensure_well_formed_payload(payload, parent_beacon_block_root) {
             Ok(block) => block,
             Err(status) => return Ok(status),
         };
@@ -1118,9 +1119,10 @@ where
     fn ensure_well_formed_payload(
         &self,
         payload: ExecutionPayload,
+        parent_beacon_block_root: Option<H256>,
     ) -> Result<SealedBlock, PayloadStatus> {
         let parent_hash = payload.parent_hash;
-        let block = match SealedBlock::try_from(payload) {
+        let block = match payload.try_into_sealed_block(parent_beacon_block_root) {
             Ok(block) => block,
             Err(error) => {
                 error!(target: "consensus::engine", ?error, "Invalid payload");
@@ -1725,9 +1727,9 @@ where
                             }
                         }
                     }
-                    BeaconEngineMessage::NewPayload { payload, tx } => {
+                    BeaconEngineMessage::NewPayload { payload, parent_beacon_block_root, tx } => {
                         this.metrics.new_payload_messages.increment(1);
-                        let res = this.on_new_payload(payload);
+                        let res = this.on_new_payload(payload, parent_beacon_block_root);
                         let _ = tx.send(res);
                     }
                     BeaconEngineMessage::TransitionConfigurationExchanged => {
@@ -1865,7 +1867,7 @@ mod tests {
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
         // consensus engine is still idle because no FCUs were received
-        let _ = env.send_new_payload(SealedBlock::default().into()).await;
+        let _ = env.send_new_payload(SealedBlock::default().into(), None).await;
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
         // consensus engine is still idle because pruning is running
@@ -2279,14 +2281,16 @@ mod tests {
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
             // Send new payload
-            let res =
-                env.send_new_payload(random_block(&mut rng, 0, None, None, Some(0)).into()).await;
+            let res = env
+                .send_new_payload(random_block(&mut rng, 0, None, None, Some(0)).into(), None)
+                .await;
             // Invalid, because this is a genesis block
             assert_matches!(res, Ok(result) => assert_matches!(result.status, PayloadStatusEnum::Invalid { .. }));
 
             // Send new payload
-            let res =
-                env.send_new_payload(random_block(&mut rng, 1, None, None, Some(0)).into()).await;
+            let res = env
+                .send_new_payload(random_block(&mut rng, 1, None, None, Some(0)).into(), None)
+                .await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
 
@@ -2336,7 +2340,7 @@ mod tests {
 
             // Send new payload
             let result =
-                env.send_new_payload_retry_on_syncing(block2.clone().into()).await.unwrap();
+                env.send_new_payload_retry_on_syncing(block2.clone().into(), None).await.unwrap();
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Valid)
                 .with_latest_valid_hash(block2.hash);
             assert_eq!(result, expected_result);
@@ -2434,7 +2438,7 @@ mod tests {
 
             // Send new payload
             let block = random_block(&mut rng, 2, Some(H256::random()), None, Some(0));
-            let res = env.send_new_payload(block.into()).await;
+            let res = env.send_new_payload(block.into(), None).await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
 
@@ -2497,7 +2501,7 @@ mod tests {
 
             // Send new payload
             let result =
-                env.send_new_payload_retry_on_syncing(block2.clone().into()).await.unwrap();
+                env.send_new_payload_retry_on_syncing(block2.clone().into(), None).await.unwrap();
 
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                 validation_error: BlockValidationError::BlockPreMerge { hash: block2.hash }
