@@ -6,7 +6,7 @@ use crate::{
     traits::{PoolTransaction, TransactionOrigin},
 };
 use reth_primitives::{
-    Address, BlobTransactionSidecar, IntoRecoveredTransaction, TransactionKind,
+    Address, BlobTransactionSidecar, IntoRecoveredTransaction, SealedBlock, TransactionKind,
     TransactionSignedEcRecovered, TxHash, H256, U256,
 };
 use std::{fmt, time::Instant};
@@ -156,6 +156,11 @@ pub trait TransactionValidator: Send + Sync {
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction>;
+
+    /// Invoked when the head block changes.
+    ///
+    /// This can be used to update fork specific values (timestamp).
+    fn on_new_head_block(&self, _new_tip_block: &SealedBlock) {}
 
     /// Ensure that the code size is not greater than `max_init_code_size`.
     /// `max_init_code_size` should be configurable so this will take it as an argument.

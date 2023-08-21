@@ -271,13 +271,11 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
 
                 // update the pool first
                 let update = CanonicalStateUpdate {
-                    hash: new_tip.hash,
-                    number: new_tip.number,
+                    new_tip: &new_tip.block,
                     pending_block_base_fee,
                     changed_accounts,
                     // all transactions mined in the new chain need to be removed from the pool
                     mined_transactions: new_mined_transactions.into_iter().collect(),
-                    timestamp: new_tip.timestamp,
                 };
                 pool.on_canonical_state_change(update);
 
@@ -348,12 +346,10 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
 
                 // Canonical update
                 let update = CanonicalStateUpdate {
-                    hash: tip.hash,
-                    number: tip.number,
+                    new_tip: &tip.block,
                     pending_block_base_fee,
                     changed_accounts,
                     mined_transactions,
-                    timestamp: tip.timestamp,
                 };
                 pool.on_canonical_state_change(update);
 

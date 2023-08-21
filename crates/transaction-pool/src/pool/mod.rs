@@ -270,23 +270,14 @@ where
     }
 
     /// Updates the entire pool after a new block was executed.
-    pub(crate) fn on_canonical_state_change(&self, update: CanonicalStateUpdate) {
+    pub(crate) fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_>) {
         trace!(target: "txpool", %update, "updating pool on canonical state change");
 
-        let CanonicalStateUpdate {
-            hash,
-            number,
-            pending_block_base_fee,
-            changed_accounts,
-            mined_transactions,
-            timestamp: _,
-        } = update;
+        let block_info = update.block_info();
+        let CanonicalStateUpdate { new_tip, changed_accounts, mined_transactions, .. } = update;
+        self.validator.on_new_head_block(new_tip);
+
         let changed_senders = self.changed_senders(changed_accounts.into_iter());
-        let block_info = BlockInfo {
-            last_seen_block_hash: hash,
-            last_seen_block_number: number,
-            pending_basefee: pending_block_base_fee,
-        };
 
         // update the pool
         let outcome = self.pool.write().on_canonical_state_change(
