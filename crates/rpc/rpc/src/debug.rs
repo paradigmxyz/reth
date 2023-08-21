@@ -38,7 +38,7 @@ use reth_rpc_types::{
     BlockError, Bundle, CallRequest, RichBlock, StateContext,
 };
 use reth_tasks::TaskSpawner;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::{mpsc, AcquireError, OwnedSemaphorePermit};
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
@@ -591,7 +591,14 @@ where
 
         let mut db = if let Some(db) = db {
             let RevmState { cache, use_preloaded_bundle, transition_state, bundle_state, .. } = db;
-            RevmState { cache, transition_state, bundle_state, database, use_preloaded_bundle }
+            RevmState {
+                cache,
+                transition_state,
+                bundle_state,
+                database,
+                use_preloaded_bundle,
+                block_hashes: BTreeMap::new(),
+            }
         } else {
             RevmStateBuilder::default().with_database(database).build()
         };

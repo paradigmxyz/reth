@@ -7,7 +7,7 @@ use reth_db::{
 };
 use reth_interfaces::db::DatabaseError;
 use reth_primitives::{
-    bloom::logs_bloom, keccak256, proofs::calculate_receipt_root_ref, Account, Address,
+    bloom::logs_bloom, keccak256, proofs::calculate_receipt_root_ref, Account, Address, BlockHash,
     BlockNumber, Bloom, Bytecode, Log, Receipt, StorageEntry, H256, U256,
 };
 use reth_revm_primitives::{
@@ -22,7 +22,7 @@ use reth_trie::{
     hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
     StateRoot, StateRootError,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Bundle state of post execution changes and reverts
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -33,6 +33,9 @@ pub struct BundleState {
     receipts: Vec<Vec<Receipt>>,
     /// First block o bundle state.
     first_block: BlockNumber,
+    /// Past blocks hashes, used inside Tree for execution.
+    /// Contain overrides of block hashes.
+    block_hashes: BTreeMap<BlockNumber, BlockHash>,
 }
 
 /// Type used to initialize revms bundle state.
@@ -52,7 +55,24 @@ impl BundleState {
         receipts: Vec<Vec<Receipt>>,
         first_block: BlockNumber,
     ) -> Self {
-        Self { bundle, receipts, first_block }
+        Self { bundle, receipts, first_block, block_hashes: BTreeMap::new() }
+    }
+
+    /// Set block hashes.
+    pub fn set_block_hashes(&mut self, block_hashes: BTreeMap<BlockNumber, BlockHash>) {
+        self.block_hashes = block_hashes;
+    }
+
+    /// Return all block hashes overrides.
+    pub fn block_hashes(&self) -> BTreeMap<BlockNumber, BlockHash> {
+        self.block_hashes.clone()
+    }
+
+    /// Cast Self into inner components.
+    pub fn into_inner(
+        self,
+    ) -> (RevmBundleState, Vec<Vec<Receipt>>, BlockNumber, BTreeMap<BlockNumber, BlockHash>) {
+        (self.bundle, self.receipts, self.first_block, self.block_hashes)
     }
 
     /// Create new bundle state with receipts.
@@ -90,7 +110,7 @@ impl BundleState {
             contracts_init.into_iter().map(|(code_hash, bytecode)| (code_hash, bytecode.0)),
         );
 
-        Self { bundle, receipts, first_block }
+        Self { bundle, receipts, first_block, block_hashes: BTreeMap::new() }
     }
 
     /// Return revm bundle state.

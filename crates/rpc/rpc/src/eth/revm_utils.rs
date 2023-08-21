@@ -1,5 +1,7 @@
 //! utilities for working with revm
 
+use std::collections::BTreeMap;
+
 use crate::eth::error::{EthApiError, EthResult, RpcInvalidTransactionError};
 use reth_interfaces::Error;
 use reth_primitives::{
@@ -515,6 +517,7 @@ pub(crate) fn clone_into_empty_db<DBError: Send + 'static>(
         transition_state: db.transition_state.clone(),
         bundle_state: db.bundle_state.clone(),
         use_preloaded_bundle: db.use_preloaded_bundle,
+        block_hashes: BTreeMap::new(),
     }
 }
 

@@ -16,6 +16,13 @@ pub trait ExecutorFactory: Send + Sync + 'static {
 
     /// Return internal chainspec
     fn chain_spec(&self) -> &ChainSpec;
+
+    /// Create executor with [`StateProvider`] and [`BundleState`] with preset data.
+    fn with_sp_and_bundle<'a, SP: StateProvider + 'a>(
+        &'a self,
+        sp: SP,
+        bundle: BundleState,
+    ) -> Box<dyn BlockExecutor + 'a>;
 }
 
 /// Statistic data of bock execution
