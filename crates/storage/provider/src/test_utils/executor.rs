@@ -70,10 +70,15 @@ impl ExecutorFactory for TestExecutorFactory {
     fn with_sp_and_bundle<'a, SP: StateProvider + 'a>(
         &'a self,
         _sp: SP,
-        _bundle: BundleState,
+        mut bundle: BundleState,
     ) -> Box<dyn BlockExecutor + 'a> {
         let exec_res = self.exec_results.lock().pop();
-        Box::new(TestExecutor(exec_res))
+        let bundle = exec_res.map(|res| {
+            bundle.extend(res);
+            bundle
+        });
+
+        Box::new(TestExecutor(bundle))
     }
 
     fn chain_spec(&self) -> &ChainSpec {

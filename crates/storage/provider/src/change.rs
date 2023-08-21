@@ -63,6 +63,11 @@ impl BundleState {
         self.block_hashes = block_hashes;
     }
 
+    /// Discard Revm state reverts.
+    pub fn discard_reverts(&mut self) {
+        self.bundle.take_reverts();
+    }
+
     /// Return all block hashes overrides.
     pub fn block_hashes(&self) -> BTreeMap<BlockNumber, BlockHash> {
         self.block_hashes.clone()
@@ -116,6 +121,11 @@ impl BundleState {
     /// Return revm bundle state.
     pub fn state(&self) -> &RevmBundleState {
         &self.bundle
+    }
+
+    /// Set first block.
+    pub fn set_first_block(&mut self, first_block: BlockNumber) {
+        self.first_block = first_block;
     }
 
     /// Return iterator over all accounts
@@ -361,7 +371,8 @@ impl BundleState {
                 next_number += 1;
             }
         }
-        StateReverts(self.bundle.take_reverts()).write_to_db(tx, self.first_block)?;
+        let reverts = self.bundle.take_reverts();
+        StateReverts(reverts).write_to_db(tx, self.first_block)?;
 
         StateChange(self.bundle.take_sorted_plain_change_inner(omit_changed_check))
             .write_to_db(tx)?;

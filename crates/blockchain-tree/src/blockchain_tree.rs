@@ -1356,12 +1356,12 @@ mod tests {
         );
 
         // make block1 canonical
-        assert!(tree.make_canonical(&block1.hash()).is_ok());
+        tree.make_canonical(&block1.hash()).unwrap();
         // check notification
         assert_matches!(canon_notif.try_recv(), Ok(CanonStateNotification::Commit{ new}) if *new.blocks() == BTreeMap::from([(block1.number,block1.clone())]));
 
         // make block2 canonicals
-        assert!(tree.make_canonical(&block2.hash()).is_ok());
+        tree.make_canonical(&block2.hash()).unwrap();
         // check notification.
         assert_matches!(canon_notif.try_recv(), Ok(CanonStateNotification::Commit{ new}) if *new.blocks() == BTreeMap::from([(block2.number,block2.clone())]));
 

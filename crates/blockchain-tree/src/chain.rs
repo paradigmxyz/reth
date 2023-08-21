@@ -136,6 +136,10 @@ impl AppendableChain {
         state.revert_to(parent.number);
         // Override block hashes of parent side chain.
         state.set_block_hashes(side_chain_block_hashes);
+        // discard reverts.
+        state.discard_reverts();
+        // set state block to this one
+        state.set_first_block(block.number);
 
         let state = Self::validate_and_execute(
             block.clone(),
@@ -182,7 +186,6 @@ impl AppendableChain {
         //let provider = PostStateProvider::new(state_provider, post_state_data_provider);
 
         let mut executor = if let Some(bundle_state) = bundle_state {
-            println!("\n ORIGINAL STATE:\n{:?}\n", bundle_state);
             externals.executor_factory.with_sp_and_bundle(&state_provider, bundle_state)
         } else {
             externals.executor_factory.with_sp(&state_provider)
@@ -190,7 +193,6 @@ impl AppendableChain {
 
         executor.execute_and_verify_receipt(&block, U256::MAX, Some(senders))?;
         let bundle_state = executor.take_output_state();
-        println!("\nBUNDLE STATE:\n{:?}\n", bundle_state);
 
         // check state root if the block extends the canonical chain.
         if block_kind.extends_canonical_head() {
@@ -247,7 +249,8 @@ impl AppendableChain {
             block_kind,
         )
         .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
-        self.state.extend(block_state);
+        // bundle state was already extended.
+        self.state = block_state;
         self.blocks.insert(block.number, block);
         Ok(())
     }
