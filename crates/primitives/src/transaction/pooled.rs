@@ -46,6 +46,17 @@ pub enum PooledTransactionsElement {
 }
 
 impl PooledTransactionsElement {
+    /// Tries to convert a [TransactionSigned] into a [PooledTransactionsElement].
+    ///
+    /// [BlobTransaction] are disallowed from being propagated, hence this returns an error if the
+    /// `tx` is [Transaction::Eip4844]
+    pub fn try_from_broadcast(tx: TransactionSigned) -> Result<Self, TransactionSigned> {
+        if tx.is_eip4844() {
+            return Err(tx)
+        }
+        Ok(tx.into())
+    }
+
     /// Heavy operation that return signature hash over rlp encoded transaction.
     /// It is only for signature signing or signer recovery.
     pub fn signature_hash(&self) -> H256 {
@@ -54,6 +65,16 @@ impl PooledTransactionsElement {
             Self::Eip2930 { transaction, .. } => transaction.signature_hash(),
             Self::Eip1559 { transaction, .. } => transaction.signature_hash(),
             Self::BlobTransaction(blob_tx) => blob_tx.transaction.signature_hash(),
+        }
+    }
+
+    /// Reference to transaction hash. Used to identify transaction.
+    pub fn hash(&self) -> &TxHash {
+        match self {
+            PooledTransactionsElement::Legacy { hash, .. } => hash,
+            PooledTransactionsElement::Eip2930 { hash, .. } => hash,
+            PooledTransactionsElement::Eip1559 { hash, .. } => hash,
+            PooledTransactionsElement::BlobTransaction(tx) => &tx.hash,
         }
     }
 
