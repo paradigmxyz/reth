@@ -53,7 +53,7 @@ rayon.workspace = true
 
 # metrics
 reth-metrics.workspace = true
-metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
+metrics.workspace = true
 
 # misc
 bytes.workspace = true
