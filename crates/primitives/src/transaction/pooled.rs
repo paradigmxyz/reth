@@ -373,6 +373,12 @@ impl PooledTransactionsElementEcRecovered {
         self.transaction
     }
 
+    /// Transform back to [`PooledTransactionsElement`]
+    pub fn into_ecrecovered_transaction(self) -> TransactionSignedEcRecovered {
+        let (tx, signer) = self.into_components();
+        tx.into_ecrecovered_transaction(signer)
+    }
+
     /// Desolve Self to its component
     pub fn into_components(self) -> (PooledTransactionsElement, Address) {
         (self.transaction, self.signer)

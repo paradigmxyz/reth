@@ -6,8 +6,9 @@ use crate::{
 };
 use futures_util::{ready, Stream};
 use reth_primitives::{
-    Address, BlobTransactionSidecar, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId,
-    PooledTransactionsElement, PooledTransactionsElementEcRecovered, Transaction, TransactionKind,
+    Address, BlobTransactionSidecar, FromRecoveredPooledTransaction, FromRecoveredTransaction,
+    IntoRecoveredTransaction, PeerId, PooledTransactionsElement,
+    PooledTransactionsElementEcRecovered, Transaction, TransactionKind,
     TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, H256, U256,
 };
 use reth_rlp::Encodable;
@@ -511,7 +512,12 @@ impl<T> BestTransactions for std::iter::Empty<T> {
 
 /// Trait for transaction types used inside the pool
 pub trait PoolTransaction:
-    fmt::Debug + Send + Sync + FromRecoveredTransaction + IntoRecoveredTransaction
+    fmt::Debug
+    + Send
+    + Sync
+    + FromRecoveredPooledTransaction
+    + FromRecoveredTransaction
+    + IntoRecoveredTransaction
 {
     /// Hash of the transaction.
     fn hash(&self) -> &TxHash;
@@ -755,6 +761,12 @@ impl PoolTransaction for EthPooledTransaction {
 impl FromRecoveredTransaction for EthPooledTransaction {
     fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
         EthPooledTransaction::new(tx)
+    }
+}
+
+impl FromRecoveredPooledTransaction for EthPooledTransaction {
+    fn from_recovered_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
+        EthPooledTransaction::from(tx)
     }
 }
 
