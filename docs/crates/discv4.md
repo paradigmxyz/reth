@@ -5,16 +5,20 @@ The `discv4` crate plays an important role in Reth, enabling discovery of other 
 ## Starting the Node Discovery Protocol
 As mentioned in the network and stages chapters, when the node is first started up, the `node::Command::execute()` function is called, which initializes the node and starts to run the Reth pipeline. Throughout the initialization of the node, there are many processes that are are started. One of the processes that is initialized is the p2p network which starts the node discovery protocol amongst other tasks.  
 
-[File: bin/reth/src/node/mod.rs](https://github.com/paradigmxyz/reth/blob/main/bin/reth/src/node/mod.rs#L95)
+[File: bin/reth/src/node/mod.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/bin/reth/src/node/mod.rs#L314-L322)
 ```rust ignore
   pub async fn execute(&self) -> eyre::Result<()> {
     //--snip--
-    let network = config
-        .network_config(db.clone(), chain_id, genesis_hash, self.network.disable_discovery)
-        .start_network()
-        .await?;
+    let network = self
+            .start_network(
+                network_config,
+                &ctx.task_executor,
+                transaction_pool.clone(),
+                default_peers_path,
+            )
+            .await?;
 
-    info!(peer_id = ?network.peer_id(), local_addr = %network.local_addr(), "Started p2p networking");
+    info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
 
     //--snip--
     }
@@ -22,7 +26,7 @@ As mentioned in the network and stages chapters, when the node is first started 
 
 During this process, a new `NetworkManager` is created through the `NetworkManager::new()` function, which starts the discovery protocol through a handful of newly spawned tasks. Lets take a look at how this actually works under the hood. 
 
-[File: crates/net/network/src/manager.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/manager.rs#L147)
+[File: crates/net/network/src/manager.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/manager.rs#L89)
 ```rust ignore
 impl<C> NetworkManager<C>
 where
@@ -37,6 +41,7 @@ where
             mut discovery_v4_config,
             discovery_addr,
             boot_nodes,
+            dns_discovery_config,
             //--snip--
             ..
         } = config;
@@ -50,16 +55,18 @@ where
             disc_config
         });
 
-        let discovery = Discovery::new(discovery_addr, secret_key, discovery_v4_config).await?;
+        let discovery =
+            Discovery::new(discovery_addr, secret_key, discovery_v4_config, dns_discovery_config)
+            .await?;
 
     //--snip--
     }
 }
 ```
 
-First, the `NetworkConfig` is deconstructed and the `disc_config` is updated to merge configured [bootstrap nodes](https://github.com/paradigmxyz/reth/blob/main/crates/net/discv4/src/bootnodes.rs#L8) and add the `forkid` to adhere to [EIP 868](https://eips.ethereum.org/EIPS/eip-868). This updated configuration variable is then passed into the `Discovery::new()` function. Note that `Discovery` is a catch all for all discovery services, which include discv4, DNS discovery and others in the future.
+First, the `NetworkConfig` is deconstructed and the `disc_config` is updated to merge configured [bootstrap nodes](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/primitives/src/net.rs#L120-L151) and add the `forkid` to adhere to [EIP 868](https://eips.ethereum.org/EIPS/eip-868). This updated configuration variable is then passed into the `Discovery::new()` function. Note that `Discovery` is a catch all for all discovery services, which include discv4, DNS discovery and others in the future.
 
-[File: crates/net/network/src/discovery.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/discovery.rs#L51)
+[File: crates/net/network/src/discovery.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/discovery.rs#L53)
 ```rust ignore
 impl Discovery {
     /// Spawns the discovery service.
@@ -70,6 +77,7 @@ impl Discovery {
         discovery_addr: SocketAddr,
         sk: SecretKey,
         discv4_config: Option<Discv4Config>,
+        dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
         let local_enr = NodeRecord::from_secret_key(discovery_addr, &sk);
         
@@ -85,6 +93,20 @@ impl Discovery {
         } else {
             (None, None, None)
         };
+
+        // setup DNS discovery
+        let (_dns_discovery, dns_discovery_updates, _dns_disc_service) =
+            if let Some(dns_config) = dns_discovery_config {
+                let (mut service, dns_disc) = DnsDiscoveryService::new_pair(
+                    Arc::new(DnsResolver::from_system_conf()?),
+                    dns_config,
+                );
+                let dns_discovery_updates = service.node_record_stream();
+                let dns_disc_service = service.spawn();
+                (Some(dns_disc), Some(dns_discovery_updates), Some(dns_disc_service))
+            } else {
+                (None, None, None)
+            };
 
         Ok(Self {
             local_enr,
