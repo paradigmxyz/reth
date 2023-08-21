@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use reth_primitives::{
     constants::{MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
     proofs::{self, EMPTY_LIST_HASH},
@@ -220,12 +222,14 @@ pub struct BlobsBundleV1 {
 
 impl From<Vec<BlobTransactionSidecar>> for BlobsBundleV1 {
     fn from(sidecars: Vec<BlobTransactionSidecar>) -> Self {
+        // TODO: either upstream a conversion or upstream QUANTITY serde impls
         let (commitments, proofs, blobs) = sidecars.into_iter().fold(
             (Vec::new(), Vec::new(), Vec::new()),
             |(mut commitments, mut proofs, mut blobs), sidecar| {
-                commitments.extend(sidecar.commitments);
-                proofs.extend(sidecar.proofs);
-                blobs.extend(sidecar.blobs);
+                commitments
+                    .extend(sidecar.commitments.iter().map(|sidecar| Bytes::from(sidecar.deref())));
+                proofs.extend(sidecar.proofs.iter().map(|proof| Bytes::from(proof.deref())));
+                blobs.extend(sidecar.blobs.iter().map(|blob| Bytes::from(blob.deref())));
                 (commitments, proofs, blobs)
             },
         );

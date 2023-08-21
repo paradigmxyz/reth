@@ -23,8 +23,9 @@ pub struct BuiltPayload {
     pub(crate) block: SealedBlock,
     /// The fees of the block
     pub(crate) fees: U256,
-    /// The blobs, proofs, and commitments in the block
-    pub(crate) sidecars: Vec<BlobTransactionSidecar>,
+    /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
+    /// None.
+    pub(crate) sidecars: Option<Vec<BlobTransactionSidecar>>,
 }
 
 // === impl BuiltPayload ===
@@ -32,7 +33,7 @@ pub struct BuiltPayload {
 impl BuiltPayload {
     /// Initializes the payload with the given initial block.
     pub fn new(id: PayloadId, block: SealedBlock, fees: U256) -> Self {
-        Self { id, block, fees, sidecars: Vec::new() }
+        Self { id, block, fees, sidecars: None }
     }
 
     /// Returns the identifier of the payload.
@@ -71,12 +72,13 @@ impl From<BuiltPayload> for ExecutionPayload {
 // V2 engine_getPayloadV2 response
 impl From<BuiltPayload> for ExecutionPayloadEnvelope {
     fn from(value: BuiltPayload) -> Self {
-        let BuiltPayload { block, fees, sidecars } = value;
+        let BuiltPayload { block, fees, sidecars, .. } = value;
 
         ExecutionPayloadEnvelope {
             block_value: fees,
             payload: block.into(),
             should_override_builder: None,
+            blobs_bundle: sidecars.map(Into::into),
         }
     }
 }
