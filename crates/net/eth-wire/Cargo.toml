@@ -27,7 +27,7 @@ reth-rlp = { workspace = true, features = [
 
 # metrics
 reth-metrics.workspace = true
-metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
+metrics.workspace = true
 
 # used for Chain and builders
 ethers-core = { workspace = true, default-features = false }
