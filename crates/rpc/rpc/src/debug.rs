@@ -25,7 +25,6 @@ use reth_revm::{
 use reth_rlp::{Decodable, Encodable};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::{
-    state::StateOverride,
     trace::geth::{
         BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
         GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult,
@@ -341,8 +340,7 @@ where
         &self,
         bundles: Vec<Bundle>,
         state_context: Option<StateContext>,
-        opts: Option<GethDebugTracingOptions>,
-        state_override: Option<StateOverride>,
+        opts: Option<GethDebugTracingCallOptions>,
     ) -> EthResult<Vec<GethTrace>> {
         if bundles.is_empty() {
             return Err(EthApiError::InvalidParams(String::from("bundles are empty.")))
@@ -357,8 +355,9 @@ where
             self.inner.eth_api.block_by_id(target_block),
         )?;
 
+        let opts = opts.unwrap_or_default();
         let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-        let tracing_options = opts.unwrap_or_default();
+        let GethDebugTracingCallOptions { tracing_options, state_overrides, .. } = opts;
         let gas_limit = self.inner.eth_api.call_gas_limit();
 
         // we're essentially replaying the transactions in the block here, hence we need the state
@@ -401,7 +400,7 @@ where
                     //let mut result = Vec::with_capacity(bundle.len());
                     let Bundle { transactions, block_override } = bundle;
                     let overrides =
-                        EvmOverrides::new(state_override.clone(), block_override.map(Box::new));
+                        EvmOverrides::new(state_overrides.clone(), block_override.map(Box::new));
 
                     let mut transactions = transactions.into_iter().peekable();
                     while let Some(tx) = transactions.next() {
@@ -765,12 +764,10 @@ where
         &self,
         bundles: Vec<Bundle>,
         state_context: Option<StateContext>,
-        opts: Option<GethDebugTracingOptions>,
-        state_override: Option<StateOverride>,
+        opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<GethTrace>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(DebugApi::debug_trace_call_many(self, bundles, state_context, opts, state_override)
-            .await?)
+        Ok(DebugApi::debug_trace_call_many(self, bundles, state_context, opts).await?)
     }
 }
 
