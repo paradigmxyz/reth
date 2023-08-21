@@ -37,4 +37,8 @@ impl BlobStore for NoopBlobStore {
     fn data_size_hint(&self) -> Option<usize> {
         Some(0)
     }
+
+    fn blobs_len(&self) -> usize {
+        0
+    }
 }

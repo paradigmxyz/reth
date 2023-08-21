@@ -1,6 +1,7 @@
 //! Support for maintaining the state of the transaction pool
 
 use crate::{
+    blobstore::BlobStoreCanonTracker,
     metrics::MaintainPoolMetrics,
     traits::{CanonicalStateUpdate, ChangedAccount, TransactionPoolExt},
     BlockInfo, TransactionPool,
@@ -92,6 +93,9 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         };
         pool.set_block_info(info);
     }
+
+    // keeps track of mined blob transaction so we can clean finalized transactions
+    let mut blob_store_tracker = BlobStoreCanonTracker::default();
 
     // keeps track of any dirty accounts that we know of are out of sync with the pool
     let mut dirty_addresses = HashSet::new();
@@ -283,6 +287,10 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 // Note: we no longer know if the tx was local or external
                 metrics.inc_reinserted_transactions(pruned_old_transactions.len());
                 let _ = pool.add_external_transactions(pruned_old_transactions).await;
+
+                // keep track of mined blob transactions
+                // TODO(mattsse): handle reorged transactions
+                blob_store_tracker.add_new_chain_blocks(&new_blocks);
             }
             CanonStateNotification::Commit { new } => {
                 let (blocks, state) = new.inner();
@@ -314,6 +322,10 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                         pending_basefee: pending_block_base_fee,
                     };
                     pool.set_block_info(info);
+
+                    // keep track of mined blob transactions
+                    blob_store_tracker.add_new_chain_blocks(&blocks);
+
                     continue
                 }
 
@@ -344,6 +356,9 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     timestamp: tip.timestamp,
                 };
                 pool.on_canonical_state_change(update);
+
+                // keep track of mined blob transactions
+                blob_store_tracker.add_new_chain_blocks(&blocks);
             }
         }
     }

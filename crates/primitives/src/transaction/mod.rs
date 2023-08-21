@@ -388,6 +388,30 @@ impl Transaction {
             Transaction::Eip4844(tx) => tx.size(),
         }
     }
+
+    /// Returns true if the transaction is a legacy transaction.
+    #[inline]
+    pub fn is_legacy(&self) -> bool {
+        matches!(self, Transaction::Legacy(_))
+    }
+
+    /// Returns true if the transaction is an EIP-2930 transaction.
+    #[inline]
+    pub fn is_eip2930(&self) -> bool {
+        matches!(self, Transaction::Eip2930(_))
+    }
+
+    /// Returns true if the transaction is an EIP-1559 transaction.
+    #[inline]
+    pub fn is_eip1559(&self) -> bool {
+        matches!(self, Transaction::Eip1559(_))
+    }
+
+    /// Returns true if the transaction is an EIP-4844 transaction.
+    #[inline]
+    pub fn is_eip4844(&self) -> bool {
+        matches!(self, Transaction::Eip4844(_))
+    }
 }
 
 impl Compact for Transaction {

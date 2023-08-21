@@ -493,6 +493,14 @@ where
     fn update_accounts(&self, accounts: Vec<ChangedAccount>) {
         self.pool.update_accounts(accounts);
     }
+
+    fn delete_blob(&self, tx: TxHash) {
+        self.pool.delete_blob(tx)
+    }
+
+    fn delete_blobs(&self, txs: Vec<TxHash>) {
+        self.pool.delete_blobs(txs)
+    }
 }
 
 impl<V, T: TransactionOrdering, S> Clone for Pool<V, T, S> {
