@@ -80,6 +80,13 @@ pub struct Transactions(
     pub Vec<TransactionSigned>,
 );
 
+impl Transactions {
+    /// Returns `true` if the list of transactions contains any blob transactions.
+    pub fn has_eip4844(&self) -> bool {
+        self.0.iter().any(|tx| tx.is_eip4844())
+    }
+}
+
 impl From<Vec<TransactionSigned>> for Transactions {
     fn from(txs: Vec<TransactionSigned>) -> Self {
         Transactions(txs)
