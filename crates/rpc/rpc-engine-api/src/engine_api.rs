@@ -103,7 +103,7 @@ where
         )?;
 
         // TODO: validate versioned hashes and figure out what to do with parent_beacon_block_root
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+        Ok(self.inner.beacon_consensus.new_payload(payload, Some(parent_beacon_block_root)).await?)
     }
 
     /// Sends a message to the beacon consensus engine to update the fork choice _without_
