@@ -41,7 +41,7 @@ kurtosis run github.com/kurtosis-tech/eth2-package "$(cat ~/network_params.json)
 ```
 
 In the end, Kurtosis will print the services running in your enclave that form your private testnet alongside all the container ports and files that were generated & used to start up the private testnet. Here is a sample output:
-```
+```console
 INFO[2023-08-21T18:22:18-04:00] ====================================================
 INFO[2023-08-21T18:22:18-04:00] ||          Created enclave: silky-swamp          ||
 INFO[2023-08-21T18:22:18-04:00] ====================================================
