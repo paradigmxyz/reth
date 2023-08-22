@@ -132,11 +132,14 @@ impl<DB: Database> Pruner<DB> {
 
         if !self.modes.contract_logs_filter.is_empty() {
             let part_start = Instant::now();
-            self.prune_receipts_by_logs(&provider, tip_block_number)?;
+            let part_done = self.prune_receipts_by_logs(&provider, tip_block_number)?;
+            done = done && part_done;
             self.metrics
                 .get_prune_part_metrics(PrunePart::ContractLogs)
                 .duration_seconds
                 .record(part_start.elapsed())
+        } else {
+            trace!(target: "pruner", prune_part = ?PrunePart::ContractLogs, "No filter to prune");
         }
 
         if let Some((to_block, prune_mode)) =
@@ -463,6 +466,13 @@ impl<DB: Database> Pruner<DB> {
             // ranges.
             block_ranges.push((*start_block, end_block, filtered_addresses.len()));
         }
+
+        trace!(
+            target: "pruner",
+            ?block_ranges,
+            ?filtered_addresses,
+            "Calculated block ranges and filtered addresses",
+        );
 
         let mut limit = self.batch_sizes.receipts;
         let mut done = true;
