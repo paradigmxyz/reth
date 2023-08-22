@@ -156,7 +156,7 @@
 //! - `test-utils`: Export utilities for testing
 use crate::pool::PoolInner;
 use aquamarine as _;
-use reth_primitives::{Address, BlobTransactionSidecar, TxHash, U256};
+use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
 use reth_provider::StateProviderFactory;
 use std::{
     collections::{HashMap, HashSet},
@@ -165,7 +165,10 @@ use std::{
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
 
-use crate::blobstore::{BlobStore, BlobStoreError};
+use crate::{
+    blobstore::{BlobStore, BlobStoreError},
+    traits::GetPooledTransactionLimit,
+};
 pub use crate::{
     config::{
         PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP, REPLACE_BLOB_PRICE_BUMP,
@@ -401,6 +404,14 @@ where
         max: usize,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pooled_transactions().into_iter().take(max).collect()
+    }
+
+    fn get_pooled_transaction_elements(
+        &self,
+        tx_hashes: Vec<TxHash>,
+        limit: GetPooledTransactionLimit,
+    ) -> Vec<PooledTransactionsElement> {
+        self.pool.get_pooled_transaction_elements(tx_hashes, limit)
     }
 
     fn best_transactions(
