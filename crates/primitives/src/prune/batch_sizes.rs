@@ -52,9 +52,9 @@ impl PruneBatchSizes {
     /// These settings are sufficient to prune more data than generated with each new block.
     pub const fn mainnet() -> Self {
         Self {
-            receipts: 500,
-            transaction_lookup: 500,
-            transaction_senders: 500,
+            receipts: 250,
+            transaction_lookup: 250,
+            transaction_senders: 250,
             account_history: 1000,
             storage_history: 1000,
         }
