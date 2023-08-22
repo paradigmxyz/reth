@@ -94,11 +94,14 @@ impl<DB: Database> Pruner<DB> {
 
     /// Run the pruner
     pub fn run(&mut self, tip_block_number: BlockNumber) -> PrunerResult {
-        trace!(
-            target: "pruner",
-            %tip_block_number,
-            "Pruner started"
-        );
+        if tip_block_number == 0 {
+            self.last_pruned_block_number = Some(tip_block_number);
+
+            trace!(target: "pruner", %tip_block_number, "Nothing to prune yet");
+            return Ok(true)
+        }
+
+        trace!(target: "pruner", %tip_block_number, "Pruner started");
         let start = Instant::now();
 
         let provider = self.provider_factory.provider_rw()?;
@@ -124,11 +127,7 @@ impl<DB: Database> Pruner<DB> {
                 .duration_seconds
                 .record(part_start.elapsed())
         } else {
-            trace!(
-                target: "pruner",
-                prune_part = ?PrunePart::Receipts,
-                "No target block to prune"
-            );
+            trace!(target: "pruner", prune_part = ?PrunePart::Receipts, "No target block to prune");
         }
 
         if !self.modes.contract_logs_filter.is_empty() {
@@ -250,12 +249,7 @@ impl<DB: Database> Pruner<DB> {
         let elapsed = start.elapsed();
         self.metrics.duration_seconds.record(elapsed);
 
-        trace!(
-            target: "pruner",
-            %tip_block_number,
-            ?elapsed,
-            "Pruner finished"
-        );
+        trace!(target: "pruner", %tip_block_number, ?elapsed, "Pruner finished");
         Ok(done)
     }
 
