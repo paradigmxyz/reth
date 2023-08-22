@@ -29,9 +29,12 @@ impl std::fmt::Display for PayloadId {
     }
 }
 
-/// This structure maps for the return value of `engine_getPayloadV2` of the beacon chain spec.
+/// This structure maps for the return value of `engine_getPayload` of the beacon chain spec, for
+/// both V2 and V3.
 ///
-/// See also: <https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadv2>
+/// See also:
+/// <https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadv2>
+/// <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_getpayloadv3>
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionPayloadEnvelope {
     /// Execution payload, which could be either V1 or V2
@@ -50,6 +53,10 @@ pub struct ExecutionPayloadEnvelope {
     // // TODO(mattsse): for V3
     // #[serde(rename = "blobsBundle", skip_serializing_if = "Option::is_none")]
     // pub blobs_bundle: Option<BlobsBundleV1>,
+    /// Introduced in V3, this represents a suggestion from the execution layer if the payload
+    /// should be used instead of an externally provided one.
+    #[serde(rename = "shouldOverrideBuilder", skip_serializing_if = "Option::is_none")]
+    pub should_override_builder: Option<bool>,
 }
 
 impl ExecutionPayloadEnvelope {
