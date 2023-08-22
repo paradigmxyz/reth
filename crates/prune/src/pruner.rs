@@ -887,7 +887,7 @@ impl<DB: Database> Pruner<DB> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{pruner::BatchSizes, Pruner};
+    use crate::Pruner;
     use assert_matches::assert_matches;
     use itertools::{
         FoldWhile::{Continue, Done},
@@ -901,7 +901,8 @@ mod tests {
         },
     };
     use reth_primitives::{
-        BlockNumber, PruneCheckpoint, PruneMode, PruneModes, PrunePart, TxNumber, H256, MAINNET,
+        BlockNumber, PruneBatchSizes, PruneCheckpoint, PruneMode, PruneModes, PrunePart, TxNumber,
+        H256, MAINNET,
     };
     use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::TestTransaction;
@@ -911,14 +912,14 @@ mod tests {
     fn is_pruning_needed() {
         let db = create_test_rw_db();
         let pruner =
-            Pruner::new(db, MAINNET.clone(), 5, PruneModes::default(), BatchSizes::default());
+            Pruner::new(db, MAINNET.clone(), 5, PruneModes::default(), PruneBatchSizes::default());
 
         // No last pruned block number was set before
         let first_block_number = 1;
         assert!(pruner.is_pruning_needed(first_block_number));
 
         // Delta is not less than min block interval
-        let second_block_number = first_block_number + pruner.min_block_interval;
+        let second_block_number = first_block_number + pruner.min_block_interval as u64;
         assert!(pruner.is_pruning_needed(second_block_number));
 
         // Delta is less than min block interval
@@ -957,13 +958,10 @@ mod tests {
             let pruner = Pruner::new(
                 tx.inner_raw(),
                 MAINNET.clone(),
-                5,
+                1,
                 PruneModes { receipts: Some(prune_mode), ..Default::default() },
-                BatchSizes {
-                    // Less than total amount of blocks to prune to test the batching logic
-                    receipts: 10,
-                    ..Default::default()
-                },
+                // Less than total amount of blocks to prune to test the batching logic
+                PruneBatchSizes::default().with_receipts(10),
             );
 
             let next_tx_number_to_prune = tx
@@ -974,11 +972,12 @@ mod tests {
                 .map(|tx_number| tx_number + 1)
                 .unwrap_or_default();
 
-            let last_pruned_tx_number = blocks
-                .iter()
-                .map(|block| block.body.len())
-                .sum::<usize>()
-                .min(next_tx_number_to_prune as usize + pruner.batch_sizes.receipts - 1);
+            let last_pruned_tx_number =
+                blocks.iter().map(|block| block.body.len()).sum::<usize>().min(
+                    next_tx_number_to_prune as usize +
+                        pruner.batch_sizes.receipts(pruner.min_block_interval) -
+                        1,
+                );
 
             let last_pruned_block_number = blocks
                 .iter()
@@ -1053,13 +1052,10 @@ mod tests {
             let pruner = Pruner::new(
                 tx.inner_raw(),
                 MAINNET.clone(),
-                5,
+                1,
                 PruneModes { transaction_lookup: Some(prune_mode), ..Default::default() },
-                BatchSizes {
-                    // Less than total amount of blocks to prune to test the batching logic
-                    transaction_lookup: 10,
-                    ..Default::default()
-                },
+                // Less than total amount of blocks to prune to test the batching logic
+                PruneBatchSizes::default().with_transaction_lookup(10),
             );
 
             let next_tx_number_to_prune = tx
@@ -1072,7 +1068,9 @@ mod tests {
 
             let last_pruned_tx_number =
                 blocks.iter().map(|block| block.body.len()).sum::<usize>().min(
-                    next_tx_number_to_prune as usize + pruner.batch_sizes.transaction_lookup - 1,
+                    next_tx_number_to_prune as usize +
+                        pruner.batch_sizes.transaction_lookup(pruner.min_block_interval) -
+                        1,
                 );
 
             let last_pruned_block_number = blocks
@@ -1151,13 +1149,10 @@ mod tests {
             let pruner = Pruner::new(
                 tx.inner_raw(),
                 MAINNET.clone(),
-                5,
+                1,
                 PruneModes { sender_recovery: Some(prune_mode), ..Default::default() },
-                BatchSizes {
-                    // Less than total amount of blocks to prune to test the batching logic
-                    transaction_senders: 10,
-                    ..Default::default()
-                },
+                // Less than total amount of blocks to prune to test the batching logic
+                PruneBatchSizes::default().with_transaction_senders(10),
             );
 
             let next_tx_number_to_prune = tx
@@ -1170,7 +1165,9 @@ mod tests {
 
             let last_pruned_tx_number =
                 blocks.iter().map(|block| block.body.len()).sum::<usize>().min(
-                    next_tx_number_to_prune as usize + pruner.batch_sizes.transaction_senders - 1,
+                    next_tx_number_to_prune as usize +
+                        pruner.batch_sizes.transaction_senders(pruner.min_block_interval) -
+                        1,
                 );
 
             let last_pruned_block_number = blocks
@@ -1258,13 +1255,10 @@ mod tests {
             let pruner = Pruner::new(
                 tx.inner_raw(),
                 MAINNET.clone(),
-                5,
+                1,
                 PruneModes { account_history: Some(prune_mode), ..Default::default() },
-                BatchSizes {
-                    // Less than total amount of blocks to prune to test the batching logic
-                    account_history: 2000,
-                    ..Default::default()
-                },
+                // Less than total amount of blocks to prune to test the batching logic
+                PruneBatchSizes::default().with_account_history(2000),
             );
 
             let provider = tx.inner_rw();
@@ -1286,7 +1280,7 @@ mod tests {
                 .iter()
                 .enumerate()
                 .skip_while(|(i, (block_number, _))| {
-                    *i < pruner.batch_sizes.account_history * run &&
+                    *i < pruner.batch_sizes.account_history(pruner.min_block_interval) * run &&
                         *block_number <= to_block as usize
                 })
                 .next()
@@ -1388,13 +1382,10 @@ mod tests {
             let pruner = Pruner::new(
                 tx.inner_raw(),
                 MAINNET.clone(),
-                5,
+                1,
                 PruneModes { storage_history: Some(prune_mode), ..Default::default() },
-                BatchSizes {
-                    // Less than total amount of blocks to prune to test the batching logic
-                    storage_history: 2000,
-                    ..Default::default()
-                },
+                // Less than total amount of blocks to prune to test the batching logic
+                PruneBatchSizes::default().with_storage_history(2000),
             );
 
             let provider = tx.inner_rw();
@@ -1418,7 +1409,7 @@ mod tests {
                 .iter()
                 .enumerate()
                 .skip_while(|(i, (block_number, _, _))| {
-                    *i < pruner.batch_sizes.storage_history * run &&
+                    *i < pruner.batch_sizes.storage_history(pruner.min_block_interval) * run &&
                         *block_number <= to_block as usize
                 })
                 .next()
