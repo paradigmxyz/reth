@@ -2,7 +2,7 @@
 
 use super::*;
 use reth_primitives::Hardfork;
-use reth_revm::{executor, optimism::L1BlockInfo};
+use reth_revm::{executor, optimism::L1BlockInfo, to_reth_acc};
 
 /// Constructs an Ethereum transaction payload from the transactions sent through the
 /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -153,9 +153,84 @@ where
         evm.database(&mut db);
 
         let ResultAndState { result, state } = match evm.transact() {
-            Ok(res) => res,
+            Ok(res) => {
+                if !res.result.is_success() && sequencer_tx.is_deposit() {
+                    // Manually bump the nonce and include a receipt for the deposit transaction.
+                    // TODO(clabby): Proper error
+                    let sender_account = db
+                        .load_account(sequencer_tx.signer())
+                        .map_err(|_| PayloadBuilderError::L1BlockInfoParseFailed)?;
+                    let old_sender_info = to_reth_acc(&sender_account.info);
+                    sender_account.info.nonce += 1;
+                    let new_sender_info = to_reth_acc(&sender_account.info);
+
+                    post_state.change_account(
+                        parent_block.number + 1,
+                        sequencer_tx.signer(),
+                        old_sender_info,
+                        new_sender_info,
+                    );
+                    let sender_info = sender_account.info.clone();
+                    db.insert_account_info(sequencer_tx.signer(), sender_info);
+
+                    // System transactions do not contribute to the cumulative gas used on failure.
+                    if is_regolith || !sequencer_tx.is_deposit() {
+                        cumulative_gas_used += res.result.gas_used()
+                    } else if sequencer_tx.is_deposit() && !sequencer_tx.is_system_transaction() {
+                        cumulative_gas_used += sequencer_tx.gas_limit();
+                    }
+
+                    post_state.add_receipt(
+                        block_number,
+                        Receipt {
+                            tx_type: sequencer_tx.tx_type(),
+                            success: false,
+                            cumulative_gas_used,
+                            logs: vec![],
+                            deposit_nonce: if is_regolith && sequencer_tx.is_deposit() {
+                                // Recovering the signer from the deposit transaction is only
+                                // fetching the `from` address.
+                                // Deposit transactions have no signature.
+                                let from = sequencer_tx.signer();
+                                let account = db.load_account(from)?;
+                                // The deposit nonce is the account's nonce - 1. The account's nonce
+                                // was incremented during the execution of the deposit transaction
+                                // above.
+                                Some(account.info.nonce.saturating_sub(1))
+                            } else {
+                                None
+                            },
+                        },
+                    );
+                    continue
+                }
+                res
+            }
             Err(err) => {
                 if sequencer_tx.is_deposit() {
+                    // Manually bump the nonce and include a receipt for the deposit transaction.
+                    // TODO(clabby): Proper error
+                    let sender_account = db
+                        .load_account(sequencer_tx.signer())
+                        .map_err(|_| PayloadBuilderError::L1BlockInfoParseFailed)?;
+                    let old_sender_info = to_reth_acc(&sender_account.info);
+                    sender_account.info.nonce += 1;
+                    let new_sender_info = to_reth_acc(&sender_account.info);
+
+                    post_state.change_account(
+                        parent_block.number + 1,
+                        sequencer_tx.signer(),
+                        old_sender_info,
+                        new_sender_info,
+                    );
+                    let sender_info = sender_account.info.clone();
+                    db.insert_account_info(sequencer_tx.signer(), sender_info);
+
+                    // System transactions do not contribute to the cumulative gas used on failure.
+                    if !sequencer_tx.is_system_transaction() {
+                        cumulative_gas_used += sequencer_tx.gas_limit();
+                    }
+
                     post_state.add_receipt(
                         block_number,
                         Receipt {
