@@ -249,7 +249,6 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         hardforks: BTreeMap::from([
             (Hardfork::Frontier, ForkCondition::Block(0)),
             (Hardfork::Homestead, ForkCondition::Block(0)),
-            (Hardfork::Dao, ForkCondition::Block(0)),
             (Hardfork::Tangerine, ForkCondition::Block(0)),
             (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
             (Hardfork::Byzantium, ForkCondition::Block(0)),
@@ -288,7 +287,6 @@ pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         hardforks: BTreeMap::from([
             (Hardfork::Frontier, ForkCondition::Block(0)),
             (Hardfork::Homestead, ForkCondition::Block(0)),
-            (Hardfork::Dao, ForkCondition::Block(0)),
             (Hardfork::Tangerine, ForkCondition::Block(0)),
             (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
             (Hardfork::Byzantium, ForkCondition::Block(0)),
@@ -327,7 +325,6 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         hardforks: BTreeMap::from([
             (Hardfork::Frontier, ForkCondition::Block(0)),
             (Hardfork::Homestead, ForkCondition::Block(0)),
-            (Hardfork::Dao, ForkCondition::Block(0)),
             (Hardfork::Tangerine, ForkCondition::Block(0)),
             (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
             (Hardfork::Byzantium, ForkCondition::Block(0)),
