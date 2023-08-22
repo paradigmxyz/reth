@@ -51,7 +51,7 @@ pub struct ExecutionPayloadEnvelope {
     /// The expected value to be received by the feeRecipient in wei
     #[serde(rename = "blockValue")]
     pub block_value: U256,
-    /// TODO: docs
+    /// The blobs, commitments, and proofs associated with the executed payload.
     #[serde(rename = "blobsBundle", skip_serializing_if = "Option::is_none")]
     pub blobs_bundle: Option<BlobsBundleV1>,
     /// Introduced in V3, this represents a suggestion from the execution layer if the payload
