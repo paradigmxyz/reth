@@ -373,6 +373,7 @@ impl<DB: Database> Pruner<DB> {
         let (deleted, done) = provider.prune_table_with_range::<tables::Receipts>(
             tx_range,
             self.batch_sizes.receipts,
+            |_| false,
             |row| last_pruned_transaction = row.0,
         )?;
         trace!(target: "pruner", %deleted, %done, "Pruned receipts");
@@ -499,7 +500,7 @@ impl<DB: Database> Pruner<DB> {
 
             last_pruned_transaction = Some(tx_range_end);
             let deleted;
-            (deleted, done) = provider.prune_table_with_iterator::<tables::Receipts>(
+            (deleted, done) = provider.prune_table_with_range::<tables::Receipts>(
                 tx_range,
                 limit,
                 |receipt| {
@@ -628,7 +629,6 @@ impl<DB: Database> Pruner<DB> {
         let (deleted, done) = provider.prune_table_with_iterator::<tables::TxHashNumber>(
             hashes,
             self.batch_sizes.transaction_lookup,
-            |_| false,
             |row| last_pruned_transaction = row.1,
         )?;
         trace!(target: "pruner", %deleted, %done, "Pruned transaction lookup");
@@ -678,6 +678,7 @@ impl<DB: Database> Pruner<DB> {
         let (deleted, done) = provider.prune_table_with_range::<tables::TxSenders>(
             tx_range,
             self.batch_sizes.transaction_senders,
+            |_| false,
             |row| last_pruned_transaction = row.0,
         )?;
         trace!(target: "pruner", %deleted, %done, "Pruned transaction senders");
@@ -726,6 +727,7 @@ impl<DB: Database> Pruner<DB> {
         let (rows, done) = provider.prune_table_with_range::<tables::AccountChangeSet>(
             range,
             self.batch_sizes.account_history,
+            |_| false,
             |row| last_pruned_block_number = Some(row.0),
         )?;
         trace!(target: "pruner", %rows, %done, "Pruned account history (changesets)");
@@ -777,6 +779,7 @@ impl<DB: Database> Pruner<DB> {
         let (rows, done) = provider.prune_table_with_range::<tables::StorageChangeSet>(
             BlockNumberAddress::range(range),
             self.batch_sizes.storage_history,
+            |_| false,
             |row| last_pruned_block_number = Some(row.0.block_number()),
         )?;
         trace!(target: "pruner", %rows, %done, "Pruned storage history (changesets)");
