@@ -661,55 +661,59 @@ impl<DB: Database> Pruner<DB> {
         while let Some(result) = cursor.next()? {
             let (key, blocks): (T::Key, BlockNumberList) = result;
 
+            // If shard consists only of block numbers less than the target one, delete shard
+            // completely.
             if key.as_ref().highest_block_number <= to_block {
-                // If shard consists only of block numbers less than the target one, delete shard
-                // completely.
                 cursor.delete_current()?;
                 if key.as_ref().highest_block_number == to_block {
-                    // Shard contains only block numbers up to the target one, so we can skip to the
-                    // next sharded key. It is guaranteed that further shards for this sharded key
-                    // will not contain the target block number, as it's in this shard.
+                    // Shard contains only block numbers up to the target one, so we can skip to
+                    // the last shard for this key. It is guaranteed that further shards for this
+                    // sharded key will not contain the target block number, as it's in this shard.
                     cursor.seek_exact(last_key(&key))?;
                 }
-            } else {
-                // Shard contains block numbers that are higher than the target one, so we need to
-                // filter it. It is guaranteed that further shards for this sharded key will not
-                // contain the target block number, as it's in this shard.
+            }
+            // Shard contains block numbers that are higher than the target one, so we need to
+            // filter it. It is guaranteed that further shards for this sharded key will not
+            // contain the target block number, as it's in this shard.
+            else {
                 let new_blocks = blocks
                     .iter(0)
                     .skip_while(|block| *block <= to_block as usize)
                     .collect::<Vec<_>>();
 
+                // If there were blocks less than or equal to the target one
+                // (so the shard has changed), update the shard.
                 if blocks.len() != new_blocks.len() {
-                    // If there were blocks less than or equal to the target one
-                    // (so the shard has changed), update the shard.
+                    // If there are no more blocks in this shard, we need to remove it, as empty
+                    // shards are not allowed.
                     if new_blocks.is_empty() {
-                        // If there are no more blocks in this shard, we need to remove it, as empty
-                        // shards are not allowed.
                         if key.as_ref().highest_block_number == u64::MAX {
-                            if let Some(prev_value) = cursor
-                                .prev()?
-                                .filter(|(prev_key, _)| key_matches(prev_key, &key))
-                                .map(|(_, prev_value)| prev_value)
-                            {
-                                // If current shard is the last shard for the sharded key that has
-                                // previous shards, replace it with the previous shard.
-                                cursor.delete_current()?;
-                                // Upsert will replace the last shard for this sharded key with the
-                                // previous value.
-                                cursor.upsert(key.clone(), prev_value)?;
-                            } else {
+                            let prev_row = cursor.prev()?;
+                            match prev_row {
+                                // If current shard is the last shard for the sharded key that
+                                // has previous shards, replace it with the previous shard.
+                                Some((prev_key, prev_value)) if key_matches(&prev_key, &key) => {
+                                    cursor.delete_current()?;
+                                    // Upsert will replace the last shard for this sharded key with
+                                    // the previous value.
+                                    cursor.upsert(key.clone(), prev_value)?;
+                                }
                                 // If there's no previous shard for this sharded key,
                                 // just delete last shard completely.
-
-                                // Jump back to the original last shard.
-                                cursor.next()?;
-                                // Delete shard.
-                                cursor.delete_current()?;
+                                _ => {
+                                    // If we successfully moved the cursor to a previous row,
+                                    // jump to the original last shard.
+                                    if prev_row.is_some() {
+                                        cursor.next()?;
+                                    }
+                                    // Delete shard.
+                                    cursor.delete_current()?;
+                                }
                             }
-                        } else {
-                            // If current shard is not the last shard for this sharded key,
-                            // just delete it.
+                        }
+                        // If current shard is not the last shard for this sharded key,
+                        // just delete it.
+                        else {
                             cursor.delete_current()?;
                         }
                     } else {
@@ -717,8 +721,10 @@ impl<DB: Database> Pruner<DB> {
                     }
                 }
 
-                // Jump to the next address.
-                cursor.seek_exact(last_key(&key))?;
+                // Jump to the last shard for this key, if current key isn't already the last shard.
+                if key.as_ref().highest_block_number != u64::MAX {
+                    cursor.seek_exact(last_key(&key))?;
+                }
             }
 
             processed += 1;
