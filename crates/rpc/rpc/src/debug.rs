@@ -12,7 +12,9 @@ use crate::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_primitives::{Account, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H256};
+use reth_primitives::{
+    Account, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H160, H256,
+};
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderBox};
 use reth_revm::{
     database::{State, SubState},
@@ -650,6 +652,213 @@ where
     }
 
     async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_account_range(
+        &self,
+        _block_number: BlockNumberOrTag,
+        _start: Bytes,
+        _max_results: u64,
+        _nocode: bool,
+        _nostorage: bool,
+        _incompletes: bool,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_block_profile(&self, _file: String, _seconds: u64) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_chaindb_compact(&self) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_chaindb_property(&self, _property: String) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_cpu_profile(&self, _file: String, _seconds: u64) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_db_ancient(&self, _kind: String, _number: u64) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_db_ancients(&self) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_db_get(&self, _key: String) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_dump_block(&self, _number: BlockId) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_free_os_memory(&self) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_freeze_client(&self, _node: String) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_gc_stats(&self) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_get_accessible_state(
+        &self,
+        _from: BlockNumberOrTag,
+        _to: BlockNumberOrTag,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_get_modified_accounts_by_hash(
+        &self,
+        _start_hash: H256,
+        _end_hash: H256,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_get_modified_accounts_by_number(
+        &self,
+        _start_number: u64,
+        _end_number: u64,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_go_trace(&self, _file: String, _seconds: u64) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_intermediate_roots(
+        &self,
+        _block_hash: H256,
+        _opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_mem_stats(&self) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_mutex_profile(&self, _file: String, _nsec: u64) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_preimage(&self, _hash: H256) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_print_block(&self, _number: u64) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_seed_hash(&self, _number: u64) -> RpcResult<H256> {
+        Ok(Default::default())
+    }
+
+    async fn debug_set_block_profile_rate(&self, _rate: u64) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_set_gc_percent(&self, _v: i32) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_set_head(&self, _number: u64) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_set_mutex_profile_fraction(&self, _rate: i32) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_set_trie_flush_interval(&self, _interval: String) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_stacks(&self) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_standard_trace_bad_block_to_file(
+        &self,
+        _block: BlockNumberOrTag,
+        _opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_standard_trace_block_to_file(
+        &self,
+        _block: BlockNumberOrTag,
+        _opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_start_cpu_profile(&self, _file: String) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_start_go_trace(&self, _file: String) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_stop_cpu_profile(&self) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_stop_go_trace(&self) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_storage_range_at(
+        &self,
+        _block_hash: H256,
+        _tx_idx: usize,
+        _contract_address: H160,
+        _key_start: H256,
+        _max_result: u64,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_trace_bad_block(
+        &self,
+        _block_hash: H256,
+        _opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_verbosity(&self, _level: usize) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_vmodule(&self, _pattern: String) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_write_block_profile(&self, _file: String) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_write_mem_profile(&self, _file: String) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_write_mutex_profile(&self, _file: String) -> RpcResult<()> {
         Ok(())
     }
 
