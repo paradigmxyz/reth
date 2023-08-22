@@ -314,6 +314,25 @@ Database:
       --auto-mine
           Automatically mine blocks for new transactions
 
+Dev testnet:
+      --dev
+          Start the node in dev mode
+
+          This mode uses a local proof-of-authority consensus engine with either fixed block times
+          or automatically mined blocks.
+          Disables network discovery and enables local http server.
+          Prefunds 20 accounts derived by mnemonic "test test test test test test test test test test
+          test junk" with 10 000 ETH each.
+
+      --dev.block-max-transactions <BLOCK_MAX_TRANSACTIONS>
+          How many transactions to mine per block
+
+      --dev.block-time <BLOCK_TIME>
+          Interval between blocks.
+          
+          Parses strings using [humantime::parse_duration]
+          --dev.block-time 12s
+
 Logging:
       --log.persistent
           The flag to enable persistent logs
