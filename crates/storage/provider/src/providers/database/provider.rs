@@ -444,7 +444,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
                     transactions.iter().skip(start_index).map(|(_, tx)| tx).collect::<Vec<_>>(),
                     missing_senders,
                 )
-                .unwrap(),
+                .ok_or(Error::Custom("Invalid Signature(s)".to_string()))?,
             ),
         );
 
