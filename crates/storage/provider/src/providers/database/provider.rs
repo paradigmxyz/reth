@@ -659,7 +659,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         &self,
         keys: impl RangeBounds<T::Key> + Clone + Debug,
         limit: usize,
-        skip_filter: impl Fn(&T::Value) -> bool,
+        mut skip_filter: impl FnMut(&TableRow<T>) -> bool,
         mut delete_callback: impl FnMut(TableRow<T>),
     ) -> std::result::Result<(usize, bool), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
@@ -667,7 +667,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         let mut deleted = 0;
 
         while let Some(row) = walker.next().transpose()? {
-            if !skip_filter(&row.1) {
+            if !skip_filter(&row) {
                 walker.delete_current()?;
                 deleted += 1;
                 delete_callback(row);

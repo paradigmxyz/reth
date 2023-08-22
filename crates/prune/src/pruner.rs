@@ -419,14 +419,25 @@ impl<DB: Database> Pruner<DB> {
             .map(|(bn, _)| bn)
             .unwrap_or_default();
 
-        // Figure out what receipts have already been pruned, so we can have an accurate
-        // `address_filter`
-        let pruned_block = provider
+        // Get status checkpoint from latest run
+        let mut last_pruned_block = provider
             .get_prune_checkpoint(PrunePart::ContractLogs)?
             .and_then(|checkpoint| checkpoint.block_number);
 
+        let initial_last_pruned_block = last_pruned_block;
+
+        let mut from_tx_number = match initial_last_pruned_block {
+            Some(block) => provider
+                .block_body_indices(block)?
+                .map(|block| block.last_tx_num() + 1)
+                .unwrap_or(0),
+            None => 0,
+        };
+
+        // Figure out what receipts have already been pruned, so we can have an accurate
+        // `address_filter`
         let address_filter =
-            self.modes.contract_logs_filter.group_by_block(tip_block_number, pruned_block)?;
+            self.modes.contract_logs_filter.group_by_block(tip_block_number, last_pruned_block)?;
 
         // Splits all transactions in different block ranges. Each block range will have its own
         // filter address list and will check it while going through the table
@@ -455,9 +466,13 @@ impl<DB: Database> Pruner<DB> {
         while let Some((start_block, addresses)) = blocks_iter.next() {
             filtered_addresses.extend_from_slice(addresses);
 
-            // This will clear all receipts before the first  appearance of a contract log
+            // This will clear all receipts before the first  appearance of a contract log or since
+            // the block after the last pruned one.
             if block_ranges.is_empty() {
-                block_ranges.push((0, *start_block - 1, 0));
+                let init = last_pruned_block.and_then(|b| Some(b + 1)).unwrap_or_default();
+                if init <= *start_block - 1 {
+                    block_ranges.push((init, *start_block - 1, 0));
+                }
             }
 
             let end_block =
@@ -477,16 +492,13 @@ impl<DB: Database> Pruner<DB> {
 
         let mut limit = self.batch_sizes.receipts;
         let mut done = true;
-        let mut last_pruned_block = None;
         let mut last_pruned_transaction = None;
         for (start_block, end_block, num_addresses) in block_ranges {
             let block_range = start_block..=end_block;
-            let tx_range = match self.get_next_tx_num_range_from_checkpoint(
-                provider,
-                PrunePart::ContractLogs,
-                end_block,
-            )? {
-                Some(range) => range,
+
+            // Calculate the transaction range from this block range
+            let tx_range_end = match provider.block_body_indices(end_block)? {
+                Some(body) => body.last_tx_num(),
                 None => {
                     trace!(
                         target: "pruner",
@@ -496,18 +508,24 @@ impl<DB: Database> Pruner<DB> {
                     continue
                 }
             };
-            let tx_range_end = *tx_range.end();
+            let tx_range = from_tx_number..=tx_range_end;
 
-            last_pruned_transaction = Some(tx_range_end);
+            // Delete receipts, except the ones in the inclusion list
+            let mut last_skipped_transaction = 0;
             let deleted;
             (deleted, done) = provider.prune_table_with_range::<tables::Receipts>(
                 tx_range,
                 limit,
-                |receipt| {
-                    num_addresses > 0 &&
+                |(tx_num, receipt)| {
+                    let skip = num_addresses > 0 &&
                         receipt.logs.iter().any(|log| {
                             filtered_addresses[..num_addresses].contains(&&log.address)
-                        })
+                        });
+
+                    if skip {
+                        last_skipped_transaction = *tx_num;
+                    }
+                    skip
                 },
                 |row| last_pruned_transaction = Some(row.0),
             )?;
@@ -515,31 +533,27 @@ impl<DB: Database> Pruner<DB> {
 
             limit = limit.saturating_sub(deleted);
 
-            last_pruned_block = provider
-                .transaction_block(last_pruned_transaction.unwrap())?
-                .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
-                // If there's more receipts to prune, set the checkpoint block number to previous,
-                // so we could finish pruning its receipts on the next run.
-                .checked_sub(if done { 0 } else { 1 });
-
-            // If this is the last block range, avoid writing an unused checkpoint
-            if last_pruned_block != Some(to_block) {
-                // This allows us to query for the transactions in the next block range with
-                // [`get_next_tx_num_range_from_checkpoint`]. It's just a temporary intermediate
-                // checkpoint, which should be adjusted in the end.
-                provider.save_prune_checkpoint(
-                    PrunePart::ContractLogs,
-                    PruneCheckpoint {
-                        block_number: last_pruned_block,
-                        tx_number: last_pruned_transaction,
-                        prune_mode: PruneMode::Before(end_block + 1),
-                    },
-                )?;
-            }
+            // For accurate checkpoints we need to know that we have checked every transaction.
+            // Example: we reached the end of the range, and the last receipt is supposed to skip
+            // its deletion.
+            last_pruned_transaction =
+                Some(last_pruned_transaction.unwrap_or_default().max(last_skipped_transaction));
+            last_pruned_block = Some(
+                provider
+                    .transaction_block(last_pruned_transaction.expect("qed"))?
+                    .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
+                    // If there's more receipts to prune, set the checkpoint block number to
+                    // previous, so we could finish pruning its receipts on the
+                    // next run.
+                    .saturating_sub(if done { 0 } else { 1 }),
+            );
 
             if limit == 0 {
+                done &= end_block == to_block;
                 break
             }
+
+            from_tx_number = last_pruned_transaction.expect("qed") + 1;
         }
 
         // If there are contracts using `PruneMode::Distance(_)` there will be receipts before
@@ -548,41 +562,23 @@ impl<DB: Database> Pruner<DB> {
         // This ensures that in future pruner runs we can prune all these receipts between the
         // previous `lowest_block_with_distance` and the new one using
         // `get_next_tx_num_range_from_checkpoint`.
+        //
+        // Only applies if we were able to prune everything intended for this run, otherwise the
+        // checkpoing is the `last_pruned_block`.
         let prune_mode_block = self
             .modes
             .contract_logs_filter
-            .lowest_block_with_distance(tip_block_number, pruned_block)?
+            .lowest_block_with_distance(tip_block_number, initial_last_pruned_block)?
             .unwrap_or(to_block);
-
-        let (checkpoint_block, checkpoint_transaction) = if done {
-            let Some(prune_mode_block) = prune_mode_block.checked_sub(1) else { return Ok(done) };
-            (
-                Some(prune_mode_block),
-                provider
-                    .block_body_indices(prune_mode_block)?
-                    .ok_or(PrunerError::InconsistentData(
-                        "Block body indices for prune mode block not found",
-                    ))?
-                    .last_tx_num(),
-            )
-        } else {
-            (
-                last_pruned_block,
-                last_pruned_transaction.ok_or(PrunerError::InconsistentData(
-                    "Last pruned transaction is not present",
-                ))?,
-            )
-        };
 
         provider.save_prune_checkpoint(
             PrunePart::ContractLogs,
             PruneCheckpoint {
-                block_number: checkpoint_block,
-                tx_number: Some(checkpoint_transaction),
+                block_number: Some(prune_mode_block.min(last_pruned_block.unwrap_or(u64::MAX))),
+                tx_number: last_pruned_transaction,
                 prune_mode: PruneMode::Before(prune_mode_block),
             },
         )?;
-
         Ok(done)
     }
 
@@ -916,17 +912,22 @@ mod tests {
         FoldWhile::{Continue, Done},
         Itertools,
     };
-    use reth_db::{tables, test_utils::create_test_rw_db, BlockNumberList};
+    use reth_db::{
+        cursor::DbCursorRO, tables, test_utils::create_test_rw_db, transaction::DbTx,
+        BlockNumberList,
+    };
     use reth_interfaces::test_utils::{
         generators,
         generators::{
-            random_block_range, random_changeset_range, random_eoa_account_range, random_receipt,
+            random_block_range, random_changeset_range, random_eoa_account,
+            random_eoa_account_range, random_log, random_receipt,
         },
     };
     use reth_primitives::{
-        BlockNumber, PruneCheckpoint, PruneMode, PruneModes, PrunePart, TxNumber, H256, MAINNET,
+        BlockNumber, ContractLogsPruneConfig, PruneCheckpoint, PruneMode, PruneModes, PrunePart,
+        TxNumber, H256, MAINNET,
     };
-    use reth_provider::PruneCheckpointReader;
+    use reth_provider::{PruneCheckpointReader, TransactionsProvider};
     use reth_stages::test_utils::TestTransaction;
     use std::{collections::BTreeMap, ops::AddAssign};
 
@@ -1501,5 +1502,105 @@ mod tests {
         test_prune(2300, 1, false);
         test_prune(2300, 2, true);
         test_prune(3000, 3, true);
+    }
+
+    #[test]
+    fn prune_receipts_by_logs() {
+        let tx = TestTransaction::default();
+        let mut rng = generators::rng();
+
+        let tip = 300;
+        let blocks = random_block_range(&mut rng, 0..=tip, H256::zero(), 1..5);
+        tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
+
+        let mut receipts = Vec::new();
+
+        let (deposit_contract_addr, _) = random_eoa_account(&mut rng);
+        for block in &blocks {
+            assert!(!block.body.is_empty());
+            for (txi, transaction) in block.body.iter().enumerate() {
+                let mut receipt = random_receipt(&mut rng, transaction, Some(1));
+                receipt.logs.push(random_log(
+                    &mut rng,
+                    if txi == (block.body.len() - 1) { Some(deposit_contract_addr) } else { None },
+                    Some(1),
+                ));
+                receipts.push((receipts.len() as u64, receipt));
+            }
+        }
+        tx.insert_receipts(receipts).expect("insert receipts");
+
+        assert_eq!(
+            tx.table::<tables::Transactions>().unwrap().len(),
+            blocks.iter().map(|block| block.body.len()).sum::<usize>()
+        );
+        assert_eq!(
+            tx.table::<tables::Transactions>().unwrap().len(),
+            tx.table::<tables::Receipts>().unwrap().len()
+        );
+
+        let run_prune = || {
+            let provider = tx.inner_rw();
+
+            let prune_before_block: usize = 20;
+            let prune_mode = PruneMode::Before(prune_before_block as u64);
+            let contract_logs_filter =
+                ContractLogsPruneConfig(BTreeMap::from([(deposit_contract_addr, prune_mode)]));
+            let pruner = Pruner::new(
+                tx.inner_raw(),
+                MAINNET.clone(),
+                5,
+                PruneModes {
+                    contract_logs_filter: contract_logs_filter.clone(),
+                    ..Default::default()
+                },
+                BatchSizes {
+                    // Less than total amount of blocks to prune to test the batching logic
+                    receipts: 10,
+                    ..Default::default()
+                },
+            );
+
+            let result = pruner.prune_receipts_by_logs(&provider, tip);
+            assert_matches!(result, Ok(_));
+            let done = result.unwrap();
+            provider.commit().expect("commit");
+
+            let (pruned_block, pruned_tx) = tx
+                .inner()
+                .get_prune_checkpoint(PrunePart::ContractLogs)
+                .unwrap()
+                .and_then(|checkpoint| {
+                    Some((checkpoint.block_number.unwrap(), checkpoint.tx_number.unwrap()))
+                })
+                .unwrap_or_default();
+
+            // All receipts are in the end of the block
+            let unprunable = pruned_block.saturating_sub(prune_before_block as u64 - 1);
+
+            assert_eq!(
+                tx.table::<tables::Receipts>().unwrap().len(),
+                blocks.iter().map(|block| block.body.len()).sum::<usize>() -
+                    ((pruned_tx + 1) - unprunable) as usize
+            );
+
+            return done
+        };
+
+        while !run_prune() {}
+
+        let provider = tx.inner();
+        let mut cursor = provider.tx_ref().cursor_read::<tables::Receipts>().unwrap();
+        let walker = cursor.walk(None).unwrap();
+        for receipt in walker {
+            let (tx_num, receipt) = receipt.unwrap();
+
+            // Either we only find our contract, or the receipt is part of the unprunable receipts
+            // set by tip - 128
+            assert!(
+                receipt.logs.iter().any(|l| l.address == deposit_contract_addr) ||
+                    provider.transaction_block(tx_num).unwrap().unwrap() > tip - 128,
+            );
+        }
     }
 }
