@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 /// Batch sizes for configuring the pruner.
-/// The batch size for each prune part should be both large enough to prune the data that generated
-/// with each new block, and small enough to not generate excessive load on the database due to
-/// deleting too many rows at once.
+/// The batch size for each prune part should be both large enough to prune the data which was
+/// generated with each new block, and small enough to not generate an excessive load on the
+/// database due to deletion of too many rows at once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PruneBatchSizes {
     /// Maximum number of receipts to prune, per block.
