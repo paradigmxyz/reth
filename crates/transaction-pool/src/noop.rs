@@ -4,13 +4,16 @@
 //! to be generic over it.
 
 use crate::{
-    blobstore::BlobStoreError, error::PoolError, traits::PendingTransactionListenerKind,
-    validate::ValidTransaction, AllPoolTransactions, AllTransactionsEvents, BestTransactions,
-    BlockInfo, EthPooledTransaction, NewTransactionEvent, PoolResult, PoolSize, PoolTransaction,
-    PropagatedTransactions, TransactionEvents, TransactionOrigin, TransactionPool,
-    TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
+    blobstore::BlobStoreError,
+    error::PoolError,
+    traits::{GetPooledTransactionLimit, PendingTransactionListenerKind},
+    validate::ValidTransaction,
+    AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPooledTransaction,
+    NewTransactionEvent, PoolResult, PoolSize, PoolTransaction, PropagatedTransactions,
+    TransactionEvents, TransactionOrigin, TransactionPool, TransactionValidationOutcome,
+    TransactionValidator, ValidPoolTransaction,
 };
-use reth_primitives::{Address, BlobTransactionSidecar, TxHash};
+use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash};
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
@@ -105,6 +108,14 @@ impl TransactionPool for NoopTransactionPool {
         &self,
         _max: usize,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
+    fn get_pooled_transaction_elements(
+        &self,
+        _tx_hashes: Vec<TxHash>,
+        _limit: GetPooledTransactionLimit,
+    ) -> Vec<PooledTransactionsElement> {
         vec![]
     }
 

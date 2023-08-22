@@ -10,24 +10,48 @@ use crate::{
 use reth_primitives::{
     constants::{eip4844::KZG_TRUSTED_SETUP, ETHEREUM_BLOCK_GAS_LIMIT},
     kzg::KzgSettings,
-    ChainSpec, InvalidTransactionError, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
-    LEGACY_TX_TYPE_ID,
+    ChainSpec, InvalidTransactionError, SealedBlock, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
+    EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 use reth_provider::{AccountReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
-use std::{marker::PhantomData, sync::Arc};
+use std::{
+    marker::PhantomData,
+    sync::{atomic::AtomicBool, Arc},
+};
 use tokio::sync::Mutex;
 
 /// Validator for Ethereum transactions.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EthTransactionValidator<Client, T> {
     /// The type that performs the actual validation.
-    pub inner: Arc<EthTransactionValidatorInner<Client, T>>,
+    inner: Arc<EthTransactionValidatorInner<Client, T>>,
+}
+
+#[async_trait::async_trait]
+impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
+where
+    Client: StateProviderFactory,
+    Tx: PoolTransaction,
+{
+    type Transaction = Tx;
+
+    async fn validate_transaction(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> TransactionValidationOutcome<Self::Transaction> {
+        self.inner.validate_transaction(origin, transaction).await
+    }
+
+    fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
+        self.inner.on_new_head_block(new_tip_block)
+    }
 }
 
 /// A [TransactionValidator] implementation that validates ethereum transaction.
 #[derive(Debug)]
-pub struct EthTransactionValidatorInner<Client, T> {
+pub(crate) struct EthTransactionValidatorInner<Client, T> {
     /// Spec of the chain
     chain_spec: Arc<ChainSpec>,
     /// This type fetches account info from the db
@@ -35,10 +59,8 @@ pub struct EthTransactionValidatorInner<Client, T> {
     /// Blobstore used for fetching re-injected blob transactions.
     #[allow(unused)]
     blob_store: Box<dyn BlobStore>,
-    /// Fork indicator whether we are in the Shanghai stage.
-    shanghai: bool,
-    /// Fork indicator whether we are in the Cancun hardfork.
-    cancun: bool,
+    /// tracks activated forks relevant for transaction validation
+    fork_tracker: ForkTracker,
     /// Fork indicator whether we are using EIP-2718 type transactions.
     eip2718: bool,
     /// Fork indicator whether we are using EIP-1559 type transactions.
@@ -62,7 +84,7 @@ pub struct EthTransactionValidatorInner<Client, T> {
 
 impl<Client, Tx> EthTransactionValidatorInner<Client, Tx> {
     /// Returns the configured chain id
-    pub fn chain_id(&self) -> u64 {
+    pub(crate) fn chain_id(&self) -> u64 {
         self.chain_spec.chain().id()
     }
 }
@@ -131,7 +153,7 @@ where
         }
 
         // Check whether the init code size has been exceeded.
-        if self.shanghai {
+        if self.fork_tracker.is_shanghai_activated() {
             if let Err(err) = self.ensure_max_init_code_size(&transaction, MAX_INIT_CODE_SIZE) {
                 return TransactionValidationOutcome::Invalid(transaction, err)
             }
@@ -177,8 +199,15 @@ where
         }
 
         // blob tx checks
-        if self.cancun {
-            // TODO: validate blob txs, if missing try load from blob store
+        if transaction.is_eip4844() {
+            // Cancun fork is required for blob txs
+            if !self.fork_tracker.is_cancun_activated() {
+                return TransactionValidationOutcome::Invalid(
+                    transaction,
+                    InvalidTransactionError::TxTypeNotSupported.into(),
+                )
+            }
+            // TODO add checks for blob tx
         }
 
         let account = match self
@@ -235,6 +264,17 @@ where
             },
         }
     }
+
+    fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
+        // update all forks
+        if self.chain_spec.is_cancun_activated_at_timestamp(new_tip_block.timestamp) {
+            self.fork_tracker.cancun.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+
+        if self.chain_spec.is_shanghai_activated_at_timestamp(new_tip_block.timestamp) {
+            self.fork_tracker.shanghai.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
 }
 
 /// A builder for [TransactionValidationTaskExecutor]
@@ -245,11 +285,11 @@ pub struct EthTransactionValidatorBuilder {
     shanghai: bool,
     /// Fork indicator whether we are in the Cancun hardfork.
     cancun: bool,
-    /// Fork indicator whether we are using EIP-2718 type transactions.
+    /// Whether using EIP-2718 type transactions is allowed
     eip2718: bool,
-    /// Fork indicator whether we are using EIP-1559 type transactions.
+    /// Whether using EIP-1559 type transactions is allowed
     eip1559: bool,
-    /// Fork indicator whether we are using EIP-4844 blob transactions.
+    /// Whether using EIP-4844 type transactions is allowed
     eip4844: bool,
     /// The current max gas limit
     block_gas_limit: u64,
@@ -271,9 +311,6 @@ impl EthTransactionValidatorBuilder {
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self {
             chain_spec,
-            shanghai: true,
-            eip2718: true,
-            eip1559: true,
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             minimum_priority_fee: None,
             additional_tasks: 1,
@@ -281,9 +318,16 @@ impl EthTransactionValidatorBuilder {
             propagate_local_transactions: true,
             kzg_settings: Arc::clone(&KZG_TRUSTED_SETUP),
 
-            // TODO: can hard enable by default once transitioned
+            // by default all transaction types are allowed
+            eip2718: true,
+            eip1559: true,
+            eip4844: true,
+
+            // shanghai is activated by default
+            shanghai: true,
+
+            // TODO: can hard enable by default once mainnet transitioned
             cancun: false,
-            eip4844: false,
         }
     }
 
@@ -338,7 +382,7 @@ impl EthTransactionValidatorBuilder {
     }
 
     /// Sets toggle to propagate transactions received locally by this client (e.g
-    /// transactions from eth_Sendtransaction to this nodes' RPC server)
+    /// transactions from eth_sendTransaction to this nodes' RPC server)
     ///
     ///  If set to false, only transactions received by network peers (via
     /// p2p) will be marked as propagated in the local transaction pool and returned on a
@@ -347,7 +391,7 @@ impl EthTransactionValidatorBuilder {
         self.propagate_local_transactions = propagate_local_txs;
         self
     }
-    /// Disables propagating transactions recieved locally by this client
+    /// Disables propagating transactions received locally by this client
     ///
     /// For more information, check docs for set_propagate_local_transactions
     pub fn no_local_transaction_propagation(mut self) -> Self {
@@ -397,13 +441,15 @@ impl EthTransactionValidatorBuilder {
             kzg_settings,
         } = self;
 
+        let fork_tracker =
+            ForkTracker { shanghai: AtomicBool::new(shanghai), cancun: AtomicBool::new(cancun) };
+
         let inner = EthTransactionValidatorInner {
             chain_spec,
             client,
-            shanghai,
             eip2718,
             eip1559,
-            cancun,
+            fork_tracker,
             eip4844,
             block_gas_limit,
             minimum_priority_fee,
@@ -436,5 +482,26 @@ impl EthTransactionValidatorBuilder {
             validator: EthTransactionValidator { inner: Arc::new(inner) },
             to_validation_task,
         }
+    }
+}
+
+/// Keeps track of whether certain forks are activated
+#[derive(Debug)]
+pub(crate) struct ForkTracker {
+    /// Tracks if shanghai is activated at the block's timestamp.
+    pub(crate) shanghai: AtomicBool,
+    /// Tracks if cancun is activated at the block's timestamp.
+    pub(crate) cancun: AtomicBool,
+}
+
+impl ForkTracker {
+    /// Returns true if the Shanghai fork is activated.
+    pub(crate) fn is_shanghai_activated(&self) -> bool {
+        self.shanghai.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Returns true if the Shanghai fork is activated.
+    pub(crate) fn is_cancun_activated(&self) -> bool {
+        self.cancun.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
