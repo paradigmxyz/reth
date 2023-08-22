@@ -486,12 +486,20 @@ where
         self.pool.set_block_info(info)
     }
 
-    fn on_canonical_state_change(&self, update: CanonicalStateUpdate) {
+    fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_>) {
         self.pool.on_canonical_state_change(update);
     }
 
     fn update_accounts(&self, accounts: Vec<ChangedAccount>) {
         self.pool.update_accounts(accounts);
+    }
+
+    fn delete_blob(&self, tx: TxHash) {
+        self.pool.delete_blob(tx)
+    }
+
+    fn delete_blobs(&self, txs: Vec<TxHash>) {
+        self.pool.delete_blobs(txs)
     }
 }
 

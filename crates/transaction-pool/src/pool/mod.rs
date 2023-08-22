@@ -270,23 +270,14 @@ where
     }
 
     /// Updates the entire pool after a new block was executed.
-    pub(crate) fn on_canonical_state_change(&self, update: CanonicalStateUpdate) {
+    pub(crate) fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_>) {
         trace!(target: "txpool", %update, "updating pool on canonical state change");
 
-        let CanonicalStateUpdate {
-            hash,
-            number,
-            pending_block_base_fee,
-            changed_accounts,
-            mined_transactions,
-            timestamp: _,
-        } = update;
+        let block_info = update.block_info();
+        let CanonicalStateUpdate { new_tip, changed_accounts, mined_transactions, .. } = update;
+        self.validator.on_new_head_block(new_tip);
+
         let changed_senders = self.changed_senders(changed_accounts.into_iter());
-        let block_info = BlockInfo {
-            last_seen_block_hash: hash,
-            last_seen_block_number: number,
-            pending_basefee: pending_block_base_fee,
-        };
 
         // update the pool
         let outcome = self.pool.write().on_canonical_state_change(
@@ -659,14 +650,33 @@ where
             warn!(target: "txpool", ?err, "[{:?}] failed to insert blob", hash);
             self.blob_store_metrics.blobstore_failed_inserts.increment(1);
         }
+        self.update_blob_store_metrics();
     }
 
     /// Delete a blob from the blob store
-    fn delete_blob(&self, blob: TxHash) {
+    pub(crate) fn delete_blob(&self, blob: TxHash) {
         if let Err(err) = self.blob_store.delete(blob) {
             warn!(target: "txpool", ?err, "[{:?}] failed to delete blobs", blob);
             self.blob_store_metrics.blobstore_failed_deletes.increment(1);
         }
+        self.update_blob_store_metrics();
+    }
+
+    /// Delete all blobs from the blob store
+    pub(crate) fn delete_blobs(&self, txs: Vec<TxHash>) {
+        let num = txs.len();
+        if let Err(err) = self.blob_store.delete_all(txs) {
+            warn!(target: "txpool", ?err,?num, "failed to delete blobs");
+            self.blob_store_metrics.blobstore_failed_deletes.increment(num as u64);
+        }
+        self.update_blob_store_metrics();
+    }
+
+    fn update_blob_store_metrics(&self) {
+        if let Some(data_size) = self.blob_store.data_size_hint() {
+            self.blob_store_metrics.blobstore_byte_size.set(data_size as f64);
+        }
+        self.blob_store_metrics.blobstore_entries.set(self.blob_store.blobs_len() as f64);
     }
 }
 

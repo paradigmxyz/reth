@@ -8,7 +8,7 @@ The database is a central component to Reth, enabling persistent storage for dat
 
 Within Reth, the database is organized via "tables". A table is any struct that implements the `Table` trait.
 
-[File: crates/storage/db/src/abstraction/table.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/table.rs#L56-L65)
+[File: crates/storage/db/src/abstraction/table.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/storage/db/src/abstraction/table.rs#L55-L82)
 
 ```rust ignore
 pub trait Table: Send + Sync + Debug + 'static {
@@ -23,7 +23,7 @@ pub trait Table: Send + Sync + Debug + 'static {
 }
 
 //--snip--
-pub trait Key: Encode + Decode + Ord {}
+pub trait Key: Encode + Decode + Ord + Clone + Serialize + for<'a> Deserialize<'a> {}
 
 //--snip--
 pub trait Value: Compress + Decompress + Serialize {}
@@ -32,38 +32,42 @@ pub trait Value: Compress + Decompress + Serialize {}
 
 The `Table` trait has two generic values, `Key` and `Value`, which need to implement the `Key` and `Value` traits, respectively. The `Encode` trait is responsible for transforming data into bytes so it can be stored in the database, while the `Decode` trait transforms the bytes back into its original form. Similarly, the `Compress` and `Decompress` traits transform the data to and from a compressed format when storing or reading data from the database.
 
-There are many tables within the node, all used to store different types of data from `Headers` to `Transactions` and more. Below is a list of all of the tables. You can follow [this link](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/tables/mod.rs#L36) if you would like to see the table definitions for any of the tables below.
+There are many tables within the node, all used to store different types of data from `Headers` to `Transactions` and more. Below is a list of all of the tables. You can follow [this link](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/storage/db/src/tables/mod.rs#L161-L188) if you would like to see the table definitions for any of the tables below.
 
 - CanonicalHeaders
 - HeaderTD
 - HeaderNumbers
 - Headers
-- BlockBodies
+- BlockBodyIndices
 - BlockOmmers
+- BlockWithdrawals
+- TransactionBlock
 - Transactions
 - TxHashNumber
 - Receipts
-- Logs
 - PlainAccountState
 - PlainStorageState
 - Bytecodes
-- BlockTransitionIndex
-- TxTransitionIndex
 - AccountHistory
 - StorageHistory
 - AccountChangeSet
 - StorageChangeSet
+- HashedAccount
+- HashedStorage
+- AccountsTrie
+- StoragesTrie
 - TxSenders
-- Config
 - SyncStage
+- SyncStageProgress
+- PruneCheckpoints
 
 <br>
 
 ## Database
 
-Reth's database design revolves around it's main [Database trait](https://github.com/paradigmxyz/reth/blob/0d9b9a392d4196793736522f3fc2ac804991b45d/crates/interfaces/src/db/mod.rs#L33), which takes advantage of [generic associated types](https://blog.rust-lang.org/2022/10/28/gats-stabilization.html) and [a few design tricks](https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats) to implement the database's functionality across many types. Let's take a quick look at the `Database` trait and how it works.
+Reth's database design revolves around it's main [Database trait](https://github.com/paradigmxyz/reth/blob/eaca2a4a7fbbdc2f5cd15eab9a8a18ede1891bda/crates/storage/db/src/abstraction/database.rs#L21), which takes advantage of [generic associated types](https://blog.rust-lang.org/2022/10/28/gats-stabilization.html) and [a few design tricks](https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats) to implement the database's functionality across many types. Let's take a quick look at the `Database` trait and how it works.
 
-[File: crates/storage/db/src/abstraction/database.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/database.rs#L19)
+[File: crates/storage/db/src/abstraction/database.rs](https://github.com/paradigmxyz/reth/blob/eaca2a4a7fbbdc2f5cd15eab9a8a18ede1891bda/crates/storage/db/src/abstraction/database.rs#L21)
 
 ```rust ignore
 /// Main Database trait that spawns transactions to be executed.

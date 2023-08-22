@@ -110,7 +110,10 @@ impl GethTraceBuilder {
     /// Generate a geth-style traces for the call tracer.
     ///
     /// This decodes all call frames from the recorded traces.
-    pub fn geth_call_traces(&self, opts: CallConfig) -> CallFrame {
+    ///
+    /// This expects the gas used and return value for the
+    /// [ExecutionResult](revm::primitives::ExecutionResult) of the executed transaction.
+    pub fn geth_call_traces(&self, opts: CallConfig, gas_used: u64) -> CallFrame {
         if self.nodes.is_empty() {
             return Default::default()
         }
@@ -119,6 +122,7 @@ impl GethTraceBuilder {
         // first fill up the root
         let main_trace_node = &self.nodes[0];
         let mut root_call_frame = main_trace_node.geth_empty_call_frame(include_logs);
+        root_call_frame.gas_used = U256::from(gas_used);
 
         // selfdestructs are not recorded as individual call traces but are derived from
         // the call trace and are added as additional `CallFrame` objects to the parent call

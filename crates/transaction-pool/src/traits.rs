@@ -6,8 +6,9 @@ use crate::{
 };
 use futures_util::{ready, Stream};
 use reth_primitives::{
-    Address, BlobTransactionSidecar, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId,
-    PooledTransactionsElement, PooledTransactionsElementEcRecovered, Transaction, TransactionKind,
+    Address, BlobTransactionSidecar, FromRecoveredPooledTransaction, FromRecoveredTransaction,
+    IntoRecoveredTransaction, PeerId, PooledTransactionsElement,
+    PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionKind,
     TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, H256, U256,
 };
 use reth_rlp::Encodable;
@@ -294,10 +295,16 @@ pub trait TransactionPoolExt: TransactionPool {
     /// Implementers need to update the pool accordingly.
     /// For example the base fee of the pending block is determined after a block is mined which
     /// affects the dynamic fee requirement of pending transactions in the pool.
-    fn on_canonical_state_change(&self, update: CanonicalStateUpdate);
+    fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_>);
 
     /// Updates the accounts in the pool
     fn update_accounts(&self, accounts: Vec<ChangedAccount>);
+
+    /// Deletes the blob sidecar for the given transaction from the blob store
+    fn delete_blob(&self, tx: H256);
+
+    /// Deletes multiple blob sidecars from the blob store
+    fn delete_blobs(&self, txs: Vec<H256>);
 }
 
 /// Determines what kind of new pending transactions should be emitted by a stream of pending
@@ -443,11 +450,9 @@ impl TransactionOrigin {
 ///
 /// This is used to update the pool state accordingly.
 #[derive(Debug, Clone)]
-pub struct CanonicalStateUpdate {
+pub struct CanonicalStateUpdate<'a> {
     /// Hash of the tip block.
-    pub hash: H256,
-    /// Number of the tip block.
-    pub number: u64,
+    pub new_tip: &'a SealedBlock,
     /// EIP-1559 Base fee of the _next_ (pending) block
     ///
     /// The base fee of a block depends on the utilization of the last block and its base fee.
@@ -456,14 +461,38 @@ pub struct CanonicalStateUpdate {
     pub changed_accounts: Vec<ChangedAccount>,
     /// All mined transactions in the block range.
     pub mined_transactions: Vec<H256>,
-    /// Timestamp of the latest chain update
-    pub timestamp: u64,
 }
 
-impl fmt::Display for CanonicalStateUpdate {
+impl<'a> CanonicalStateUpdate<'a> {
+    /// Returns the number of the tip block.
+    pub fn number(&self) -> u64 {
+        self.new_tip.number
+    }
+
+    /// Returns the hash of the tip block.
+    pub fn hash(&self) -> H256 {
+        self.new_tip.hash
+    }
+
+    /// Timestamp of the latest chain update
+    pub fn timestamp(&self) -> u64 {
+        self.new_tip.timestamp
+    }
+
+    /// Returns the block info for the tip block.
+    pub fn block_info(&self) -> BlockInfo {
+        BlockInfo {
+            last_seen_block_hash: self.hash(),
+            last_seen_block_number: self.number(),
+            pending_basefee: self.pending_block_base_fee,
+        }
+    }
+}
+
+impl<'a> fmt::Display for CanonicalStateUpdate<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{{ hash: {}, number: {}, pending_block_base_fee: {}, changed_accounts: {}, mined_transactions: {} }}",
-            self.hash, self.number, self.pending_block_base_fee, self.changed_accounts.len(), self.mined_transactions.len())
+            self.hash(), self.number(), self.pending_block_base_fee, self.changed_accounts.len(), self.mined_transactions.len())
     }
 }
 
@@ -502,16 +531,30 @@ pub trait BestTransactions: Iterator + Send {
     /// In other words, this must remove the given transaction _and_ drain all transaction that
     /// depend on it.
     fn mark_invalid(&mut self, transaction: &Self::Item);
+
+    /// An iterator may be able to receive additional pending transactions that weren't present it
+    /// the pool when it was created.
+    ///
+    /// This ensures that iterator will return the best transaction that it currently knows and not
+    /// listen to pool updates.
+    fn no_updates(&mut self);
 }
 
 /// A no-op implementation that yields no transactions.
 impl<T> BestTransactions for std::iter::Empty<T> {
     fn mark_invalid(&mut self, _tx: &T) {}
+
+    fn no_updates(&mut self) {}
 }
 
 /// Trait for transaction types used inside the pool
 pub trait PoolTransaction:
-    fmt::Debug + Send + Sync + FromRecoveredTransaction + IntoRecoveredTransaction
+    fmt::Debug
+    + Send
+    + Sync
+    + FromRecoveredPooledTransaction
+    + FromRecoveredTransaction
+    + IntoRecoveredTransaction
 {
     /// Hash of the transaction.
     fn hash(&self) -> &TxHash;
@@ -755,6 +798,12 @@ impl PoolTransaction for EthPooledTransaction {
 impl FromRecoveredTransaction for EthPooledTransaction {
     fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
         EthPooledTransaction::new(tx)
+    }
+}
+
+impl FromRecoveredPooledTransaction for EthPooledTransaction {
+    fn from_recovered_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
+        EthPooledTransaction::from(tx)
     }
 }
 

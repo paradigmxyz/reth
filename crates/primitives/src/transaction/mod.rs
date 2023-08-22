@@ -388,6 +388,30 @@ impl Transaction {
             Transaction::Eip4844(tx) => tx.size(),
         }
     }
+
+    /// Returns true if the transaction is a legacy transaction.
+    #[inline]
+    pub fn is_legacy(&self) -> bool {
+        matches!(self, Transaction::Legacy(_))
+    }
+
+    /// Returns true if the transaction is an EIP-2930 transaction.
+    #[inline]
+    pub fn is_eip2930(&self) -> bool {
+        matches!(self, Transaction::Eip2930(_))
+    }
+
+    /// Returns true if the transaction is an EIP-1559 transaction.
+    #[inline]
+    pub fn is_eip1559(&self) -> bool {
+        matches!(self, Transaction::Eip1559(_))
+    }
+
+    /// Returns true if the transaction is an EIP-4844 transaction.
+    #[inline]
+    pub fn is_eip4844(&self) -> bool {
+        matches!(self, Transaction::Eip4844(_))
+    }
 }
 
 impl Compact for Transaction {
@@ -1087,6 +1111,16 @@ impl FromRecoveredTransaction for TransactionSignedEcRecovered {
     fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
         tx
     }
+}
+
+/// A transaction type that can be created from a [`PooledTransactionsElementEcRecovered`]
+/// transaction.
+///
+/// This is a conversion trait that'll ensure transactions received via P2P can be converted to the
+/// transaction type that the transaction pool uses.
+pub trait FromRecoveredPooledTransaction {
+    /// Converts to this type from the given [`PooledTransactionsElementEcRecovered`].
+    fn from_recovered_transaction(tx: PooledTransactionsElementEcRecovered) -> Self;
 }
 
 /// The inverse of [`FromRecoveredTransaction`] that ensure the transaction can be sent over the
