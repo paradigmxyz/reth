@@ -324,7 +324,7 @@ Dev testnet:
           Prefunds 20 accounts derived by mnemonic "test test test test test test test test test test
           test junk" with 10 000 ETH each.
 
-      --dev.block_max_transactions <BLOCK_MAX_TRANSACTIONS>
+      --dev.block-max-transactions <BLOCK_MAX_TRANSACTIONS>
           How many transactions to mine per block
 
       --dev.block-time <BLOCK_TIME>
