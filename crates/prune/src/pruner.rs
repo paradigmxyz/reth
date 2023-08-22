@@ -343,7 +343,12 @@ impl<DB: Database> Pruner<DB> {
         }
         .last_tx_num();
 
-        Ok(Some(from_tx_number..=to_tx_number))
+        let range = from_tx_number..=to_tx_number;
+        if range.is_empty() {
+            return Ok(None)
+        }
+
+        Ok(Some(range))
     }
 
     /// Prune receipts up to the provided block, inclusive, respecting the batch size.
