@@ -1,24 +1,53 @@
+use serde::{Deserialize, Serialize};
+
 /// Batch sizes for configuring the pruner.
 /// The batch size for each prune part should be both large enough to prune the data that generated
 /// with each new block, and small enough to not generate excessive load on the database due to
 /// deleting too many rows at once.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PruneBatchSizes {
-    /// Maximum number of receipts to prune in one run.
-    pub receipts: usize,
-    /// Maximum number of transaction lookup entries to prune in one run.
-    pub transaction_lookup: usize,
-    /// Maximum number of transaction senders to prune in one run.
-    pub transaction_senders: usize,
-    /// Maximum number of account history entries to prune in one run.
+    /// Maximum number of receipts to prune, per block.
+    receipts: usize,
+    /// Maximum number of transaction lookup entries to prune, per block.
+    transaction_lookup: usize,
+    /// Maximum number of transaction senders to prune, per block.
+    transaction_senders: usize,
+    /// Maximum number of account history entries to prune, per block.
     /// Measured in the number of `AccountChangeSet` table rows.
-    pub account_history: usize,
-    /// Maximum number of storage history entries to prune in one run.
+    account_history: usize,
+    /// Maximum number of storage history entries to prune, per block.
     /// Measured in the number of `StorageChangeSet` table rows.
-    pub storage_history: usize,
+    storage_history: usize,
 }
 
 impl PruneBatchSizes {
+    /// Maximum number of receipts to prune, accounting for the block interval.
+    pub fn receipts(&self, block_interval: usize) -> usize {
+        self.receipts * block_interval
+    }
+
+    /// Maximum number of transaction lookup entries to prune, accounting for the block interval.
+    pub fn transaction_lookup(&self, block_interval: usize) -> usize {
+        self.transaction_lookup * block_interval
+    }
+
+    /// Maximum number of transaction senders to prune, accounting for the block interval.
+    pub fn transaction_senders(&self, block_interval: usize) -> usize {
+        self.transaction_senders * block_interval
+    }
+
+    /// Maximum number of account history entries to prune, accounting for the block interval.
+    /// Measured in the number of `AccountChangeSet` table rows.
+    pub fn account_history(&self, block_interval: usize) -> usize {
+        self.account_history * block_interval
+    }
+
+    /// Maximum number of storage history entries to prune, accounting for the block interval.
+    /// Measured in the number of `StorageChangeSet` table rows.
+    pub fn storage_history(&self, block_interval: usize) -> usize {
+        self.storage_history * block_interval
+    }
+
     /// Default prune batch sizes for Ethereum mainnet.
     /// These settings are sufficient to prune more data than generated with each new block.
     pub const fn mainnet() -> Self {

@@ -37,12 +37,12 @@ pub struct Pruner<DB> {
     provider_factory: ProviderFactory<DB>,
     /// Minimum pruning interval measured in blocks. All prune parts are checked and, if needed,
     /// pruned, when the chain advances by the specified number of blocks.
-    min_block_interval: u64,
+    min_block_interval: usize,
     /// Last pruned block number. Used in conjunction with `min_block_interval` to determine
     /// when the pruning needs to be initiated.
     last_pruned_block_number: Option<BlockNumber>,
     modes: PruneModes,
-    /// Maximum entries to prune per one run, per prune part.
+    /// Maximum entries to prune per block, per prune part.
     batch_sizes: PruneBatchSizes,
 }
 
@@ -51,7 +51,7 @@ impl<DB: Database> Pruner<DB> {
     pub fn new(
         db: DB,
         chain_spec: Arc<ChainSpec>,
-        min_block_interval: u64,
+        min_block_interval: usize,
         modes: PruneModes,
         batch_sizes: PruneBatchSizes,
     ) -> Self {
@@ -236,7 +236,8 @@ impl<DB: Database> Pruner<DB> {
             // Saturating subtraction is needed for the case when the chain was reverted, meaning
             // current block number might be less than the previously pruned block number. If
             // that's the case, no pruning is needed as outdated data is also reverted.
-            tip_block_number.saturating_sub(last_pruned_block_number) >= self.min_block_interval
+            tip_block_number.saturating_sub(last_pruned_block_number) >=
+                self.min_block_interval as u64
         }) {
             debug!(
                 target: "pruner",
@@ -345,7 +346,7 @@ impl<DB: Database> Pruner<DB> {
         let mut last_pruned_transaction = tx_range_end;
         let (deleted, done) = provider.prune_table_with_range::<tables::Receipts>(
             tx_range,
-            self.batch_sizes.receipts,
+            self.batch_sizes.receipts(self.min_block_interval),
             |_| false,
             |row| last_pruned_transaction = row.0,
         )?;
@@ -448,7 +449,7 @@ impl<DB: Database> Pruner<DB> {
             "Calculated block ranges and filtered addresses",
         );
 
-        let mut limit = self.batch_sizes.receipts;
+        let mut limit = self.batch_sizes.receipts(self.min_block_interval);
         let mut done = true;
         let mut last_pruned_block = None;
         let mut last_pruned_transaction = None;
@@ -580,7 +581,10 @@ impl<DB: Database> Pruner<DB> {
             }
         }
         .into_inner();
-        let tx_range = start..=(end.min(start + self.batch_sizes.transaction_lookup as u64 - 1));
+        let tx_range = start..=
+            (end.min(
+                start + self.batch_sizes.transaction_lookup(self.min_block_interval) as u64 - 1,
+            ));
         let tx_range_end = *tx_range.end();
 
         // Retrieve transactions in the range and calculate their hashes in parallel
@@ -601,7 +605,7 @@ impl<DB: Database> Pruner<DB> {
         let mut last_pruned_transaction = tx_range_end;
         let (deleted, done) = provider.prune_table_with_iterator::<tables::TxHashNumber>(
             hashes,
-            self.batch_sizes.transaction_lookup,
+            self.batch_sizes.transaction_lookup(self.min_block_interval),
             |row| last_pruned_transaction = row.1,
         )?;
         trace!(target: "pruner", %deleted, %done, "Pruned transaction lookup");
@@ -650,7 +654,7 @@ impl<DB: Database> Pruner<DB> {
         let mut last_pruned_transaction = tx_range_end;
         let (deleted, done) = provider.prune_table_with_range::<tables::TxSenders>(
             tx_range,
-            self.batch_sizes.transaction_senders,
+            self.batch_sizes.transaction_senders(self.min_block_interval),
             |_| false,
             |row| last_pruned_transaction = row.0,
         )?;
@@ -699,7 +703,7 @@ impl<DB: Database> Pruner<DB> {
         let mut last_pruned_block_number = None;
         let (rows, done) = provider.prune_table_with_range::<tables::AccountChangeSet>(
             range,
-            self.batch_sizes.account_history,
+            self.batch_sizes.account_history(self.min_block_interval),
             |_| false,
             |row| last_pruned_block_number = Some(row.0),
         )?;
@@ -751,7 +755,7 @@ impl<DB: Database> Pruner<DB> {
         let mut last_pruned_block_number = None;
         let (rows, done) = provider.prune_table_with_range::<tables::StorageChangeSet>(
             BlockNumberAddress::range(range),
-            self.batch_sizes.storage_history,
+            self.batch_sizes.storage_history(self.min_block_interval),
             |_| false,
             |row| last_pruned_block_number = Some(row.0.block_number()),
         )?;

@@ -257,7 +257,9 @@ pub struct ChainSpec {
     /// The parameters that configure how a block's base fee is computed
     pub base_fee_params: BaseFeeParams,
 
-    /// The batch sizes for pruner
+    /// The batch sizes for pruner, per block. In the actual pruner run it will be multiplied by
+    /// the amount of blocks between pruner runs to account for the difference in amount of new
+    /// data coming in.
     #[serde(default)]
     pub prune_batch_sizes: PruneBatchSizes,
 }
