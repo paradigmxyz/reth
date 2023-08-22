@@ -165,8 +165,8 @@ use std::{
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
 
-use crate::blobstore::{BlobStore, BlobStoreError};
 pub use crate::{
+    blobstore::{BlobStore, BlobStoreError},
     config::{
         PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP, REPLACE_BLOB_PRICE_BUMP,
         TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER, TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
