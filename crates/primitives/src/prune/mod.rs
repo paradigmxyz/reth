@@ -1,9 +1,11 @@
+mod batch_sizes;
 mod checkpoint;
 mod mode;
 mod part;
 mod target;
 
 use crate::{Address, BlockNumber};
+pub use batch_sizes::PruneBatchSizes;
 pub use checkpoint::PruneCheckpoint;
 pub use mode::PruneMode;
 pub use part::{PrunePart, PrunePartError};

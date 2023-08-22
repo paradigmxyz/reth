@@ -12,8 +12,8 @@ use reth_db::{
     BlockNumberList,
 };
 use reth_primitives::{
-    BlockNumber, ChainSpec, PruneCheckpoint, PruneMode, PruneModes, PrunePart, TxNumber,
-    MINIMUM_PRUNING_DISTANCE,
+    BlockNumber, ChainSpec, PruneBatchSizes, PruneCheckpoint, PruneMode, PruneModes, PrunePart,
+    TxNumber, MINIMUM_PRUNING_DISTANCE,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
@@ -31,33 +31,6 @@ pub type PrunerResult = Result<bool, PrunerError>;
 /// The pruner type itself with the result of [Pruner::run]
 pub type PrunerWithResult<DB> = (Pruner<DB>, PrunerResult);
 
-pub struct BatchSizes {
-    /// Maximum number of receipts to prune in one run.
-    receipts: usize,
-    /// Maximum number of transaction lookup entries to prune in one run.
-    transaction_lookup: usize,
-    /// Maximum number of transaction senders to prune in one run.
-    transaction_senders: usize,
-    /// Maximum number of account history entries to prune in one run.
-    /// Measured in the number of [tables::AccountChangeSet] rows.
-    account_history: usize,
-    /// Maximum number of storage history entries to prune in one run.
-    /// Measured in the number of [tables::StorageChangeSet] rows.
-    storage_history: usize,
-}
-
-impl Default for BatchSizes {
-    fn default() -> Self {
-        Self {
-            receipts: 1000,
-            transaction_lookup: 1000,
-            transaction_senders: 1000,
-            account_history: 1000,
-            storage_history: 1000,
-        }
-    }
-}
-
 /// Pruning routine. Main pruning logic happens in [Pruner::run].
 pub struct Pruner<DB> {
     metrics: Metrics,
@@ -70,7 +43,7 @@ pub struct Pruner<DB> {
     last_pruned_block_number: Option<BlockNumber>,
     modes: PruneModes,
     /// Maximum entries to prune per one run, per prune part.
-    batch_sizes: BatchSizes,
+    batch_sizes: PruneBatchSizes,
 }
 
 impl<DB: Database> Pruner<DB> {
@@ -80,7 +53,7 @@ impl<DB: Database> Pruner<DB> {
         chain_spec: Arc<ChainSpec>,
         min_block_interval: u64,
         modes: PruneModes,
-        batch_sizes: BatchSizes,
+        batch_sizes: PruneBatchSizes,
     ) -> Self {
         Self {
             metrics: Metrics::default(),
