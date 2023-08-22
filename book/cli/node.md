@@ -327,7 +327,7 @@ Dev testnet:
       --dev.block_max_transactions <BLOCK_MAX_TRANSACTIONS>
           How many transactions to mine per block
 
-      --dev.block_time <BLOCK_TIME>
+      --dev.block-time <BLOCK_TIME>
           Interval between blocks.
           
           Parses strings using [humantime::parse_duration]
