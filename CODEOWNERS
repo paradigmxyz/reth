@@ -17,4 +17,5 @@ crates/blockchain-tree      @rakita @rkrasiuk
 crates/metrics              @onbjerg
 crates/tracing              @onbjerg
 crates/tasks                @mattsse
+crates/prune                @shekhirin @joshieDo
 .github/                    @onbjerg @gakonst
