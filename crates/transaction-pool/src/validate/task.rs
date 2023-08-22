@@ -7,7 +7,7 @@ use crate::{
     TransactionValidator,
 };
 use futures_util::{lock::Mutex, StreamExt};
-use reth_primitives::ChainSpec;
+use reth_primitives::{ChainSpec, SealedBlock};
 use reth_provider::StateProviderFactory;
 use reth_tasks::TaskSpawner;
 use std::{future::Future, pin::Pin, sync::Arc};
@@ -132,11 +132,6 @@ impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Clien
             .with_additional_tasks(num_additional_tasks)
             .build_with_tasks::<Client, Tx, T, S>(client, tasks, blob_store)
     }
-
-    /// Returns the configured chain id
-    pub fn chain_id(&self) -> u64 {
-        self.validator.inner.chain_id()
-    }
 }
 
 impl<V: TransactionValidator + Clone> TransactionValidationTaskExecutor<V> {
@@ -169,7 +164,7 @@ where
         {
             let to_validation_task = self.to_validation_task.clone();
             let to_validation_task = to_validation_task.lock().await;
-            let validator = Arc::clone(&self.validator.inner);
+            let validator = self.validator.clone();
             let res = to_validation_task
                 .send(Box::pin(async move {
                     let res = validator.validate_transaction(origin, transaction).await;
@@ -191,5 +186,9 @@ where
                 Box::new(TransactionValidatorError::ValidationServiceUnreachable),
             ),
         }
+    }
+
+    fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
+        self.validator.on_new_head_block(new_tip_block)
     }
 }

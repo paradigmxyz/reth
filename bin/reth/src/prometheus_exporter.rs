@@ -91,11 +91,13 @@ pub(crate) async fn initialize(
                 let overflow_pages = stats.overflow_pages();
                 let num_pages = leaf_pages + branch_pages + overflow_pages;
                 let table_size = page_size * num_pages;
+                let entries = stats.entries();
 
                 absolute_counter!("db.table_size", table_size as u64, "table" => table);
                 absolute_counter!("db.table_pages", leaf_pages as u64, "table" => table, "type" => "leaf");
                 absolute_counter!("db.table_pages", branch_pages as u64, "table" => table, "type" => "branch");
                 absolute_counter!("db.table_pages", overflow_pages as u64, "table" => table, "type" => "overflow");
+                absolute_counter!("db.table_entries", entries as u64, "table" => table);
             }
 
             Ok::<(), eyre::Report>(())

@@ -20,7 +20,7 @@ pub struct DevArgs {
 
     /// How many transactions to mine per block.
     #[arg(
-        long = "dev.block_max_transactions",
+        long = "dev.block-max-transactions",
         help_heading = "Dev testnet",
         conflicts_with = "block_time"
     )]
@@ -31,7 +31,7 @@ pub struct DevArgs {
     /// Parses strings using [humantime::parse_duration]
     /// --dev.block_time 12s
     #[arg(
-        long = "dev.block_time",
+        long = "dev.block-time",
         help_heading = "Dev testnet", 
         conflicts_with = "block_max_transactions",
         value_parser = parse_duration,
@@ -66,14 +66,14 @@ mod tests {
         let args = CommandParser::<DevArgs>::parse_from([
             "reth",
             "--dev",
-            "--dev.block_max_transactions",
+            "--dev.block-max-transactions",
             "2",
         ])
         .args;
         assert_eq!(args, DevArgs { dev: true, block_max_transactions: Some(2), block_time: None });
 
         let args =
-            CommandParser::<DevArgs>::parse_from(["reth", "--dev", "--dev.block_time", "1s"]).args;
+            CommandParser::<DevArgs>::parse_from(["reth", "--dev", "--dev.block-time", "1s"]).args;
         assert_eq!(
             args,
             DevArgs {
@@ -89,9 +89,9 @@ mod tests {
         let args = CommandParser::<DevArgs>::try_parse_from([
             "reth",
             "--dev",
-            "--dev.block_max_transactions",
+            "--dev.block-max-transactions",
             "2",
-            "--dev.block_time",
+            "--dev.block-time",
             "1s",
         ]);
         assert!(args.is_err());
