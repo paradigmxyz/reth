@@ -82,7 +82,10 @@ use crate::{
 };
 use best::BestTransactions;
 use parking_lot::{Mutex, RwLock};
-use reth_primitives::{Address, BlobTransactionSidecar, TxHash, H256};
+use reth_primitives::{
+    Address, BlobTransaction, BlobTransactionSidecar, IntoRecoveredTransaction,
+    PooledTransactionsElement, TransactionSigned, TxHash, H256,
+};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -97,10 +100,14 @@ pub use events::{FullTransactionEvent, TransactionEvent};
 
 mod listener;
 use crate::{
-    blobstore::BlobStore, metrics::BlobStoreMetrics, pool::txpool::UpdateOutcome,
-    traits::PendingTransactionListenerKind, validate::ValidTransaction,
+    blobstore::BlobStore,
+    metrics::BlobStoreMetrics,
+    pool::txpool::UpdateOutcome,
+    traits::{GetPooledTransactionLimit, PendingTransactionListenerKind},
+    validate::ValidTransaction,
 };
 pub use listener::{AllTransactionsEvents, TransactionEvents};
+use reth_rlp::Encodable;
 
 mod best;
 mod parked;
@@ -267,6 +274,50 @@ where
     pub(crate) fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let pool = self.pool.read();
         pool.all().transactions_iter().filter(|tx| tx.propagate).collect()
+    }
+
+    /// Returns the [BlobTransaction] for the given transaction if the sidecar exists.
+    ///
+    /// Caution: this assumes the given transaction is eip-4844
+    fn get_blob_transaction(&self, transaction: TransactionSigned) -> Option<BlobTransaction> {
+        if let Ok(Some(sidecar)) = self.blob_store.get(transaction.hash()) {
+            if let Ok(blob) = BlobTransaction::try_from_signed(transaction, sidecar) {
+                return Some(blob)
+            }
+        }
+        None
+    }
+
+    /// Returns converted [PooledTransactionsElement] for the given transaction hashes.
+    pub(crate) fn get_pooled_transaction_elements(
+        &self,
+        tx_hashes: Vec<TxHash>,
+        limit: GetPooledTransactionLimit,
+    ) -> Vec<PooledTransactionsElement> {
+        let transactions = self.get_all(tx_hashes);
+        let mut elements = Vec::with_capacity(transactions.len());
+        let mut size = 0;
+        for transaction in transactions {
+            let tx = transaction.to_recovered_transaction().into_signed();
+            let pooled = if tx.is_eip4844() {
+                if let Some(blob) = self.get_blob_transaction(tx) {
+                    PooledTransactionsElement::BlobTransaction(blob)
+                } else {
+                    continue
+                }
+            } else {
+                PooledTransactionsElement::from(tx)
+            };
+
+            size += pooled.length();
+            elements.push(pooled);
+
+            if limit.exceeds(size) {
+                break
+            }
+        }
+
+        elements
     }
 
     /// Updates the entire pool after a new block was executed.

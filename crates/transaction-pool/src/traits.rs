@@ -171,7 +171,12 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Returns the _full_ transaction objects all transactions in the pool.
     ///
+    /// This is intended to be used by the network for the initial exchange of pooled transaction
+    /// _hashes_
+    ///
     /// Note: This returns a `Vec` but should guarantee that all transactions are unique.
+    ///
+    /// Caution: In case of blob transactions, this does not include the sidecar.
     ///
     /// Consumer: P2P
     fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
@@ -183,6 +188,21 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
         max: usize,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns converted [PooledTransactionsElement] for the given transaction hashes.
+    ///
+    /// This adheres to the expected behavior of [`GetPooledTransactions`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09):
+    /// The transactions must be in same order as in the request, but it is OK to skip transactions
+    /// which are not available.
+    ///
+    /// If the transaction is a blob transaction, the sidecar will be included.
+    ///
+    /// Consumer: P2P
+    fn get_pooled_transaction_elements(
+        &self,
+        tx_hashes: Vec<TxHash>,
+        limit: GetPooledTransactionLimit,
+    ) -> Vec<PooledTransactionsElement>;
 
     /// Returns an iterator that yields transactions that are ready for block production.
     ///
@@ -249,10 +269,7 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Returns all transactions objects for the given hashes.
     ///
-    /// TODO(mattsse): this will no longer be accurate and we need a new function specifically for
-    /// pooled txs This adheres to the expected behavior of [`GetPooledTransactions`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09):
-    /// The transactions must be in same order as in the request, but it is OK to skip transactions
-    /// which are not available.
+    /// Caution: This in case of blob transactions, this does not include the sidecar.
     fn get_all(&self, txs: Vec<TxHash>) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Notify the pool about transactions that are propagated to peers.
@@ -846,6 +863,26 @@ pub struct BlockInfo {
     /// Note: this is the derived base fee of the _next_ block that builds on the clock the pool is
     /// currently tracking.
     pub pending_basefee: u64,
+}
+
+/// The limit to enforce for [TransactionPool::get_pooled_transaction_elements].
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum GetPooledTransactionLimit {
+    /// No limit, return all transactions.
+    None,
+    /// Enforce a size limit on the returned transactions, for example 2MB
+    SizeSoftLimit(usize),
+}
+
+impl GetPooledTransactionLimit {
+    /// Returns true if the given size exceeds the limit.
+    #[inline]
+    pub fn exceeds(&self, size: usize) -> bool {
+        match self {
+            GetPooledTransactionLimit::None => false,
+            GetPooledTransactionLimit::SizeSoftLimit(limit) => size > *limit,
+        }
+    }
 }
 
 /// A Stream that yields full transactions the subpool

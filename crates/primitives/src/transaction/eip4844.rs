@@ -288,6 +288,24 @@ pub struct BlobTransaction {
 }
 
 impl BlobTransaction {
+    /// Constructs a new [BlobTransaction] from a [TransactionSigned] and a
+    /// [BlobTransactionSidecar].
+    ///
+    /// Returns an error if the signed transaction is not [TxEip4844]
+    pub fn try_from_signed(
+        tx: TransactionSigned,
+        sidecar: BlobTransactionSidecar,
+    ) -> Result<Self, (TransactionSigned, BlobTransactionSidecar)> {
+        let TransactionSigned { transaction, signature, hash } = tx;
+        match transaction {
+            Transaction::Eip4844(transaction) => Ok(Self { hash, transaction, signature, sidecar }),
+            transaction => {
+                let tx = TransactionSigned { transaction, signature, hash };
+                Err((tx, sidecar))
+            }
+        }
+    }
+
     /// Verifies that the transaction's blob data, commitments, and proofs are all valid.
     ///
     /// Takes as input the [KzgSettings], which should contain the the parameters derived from the
