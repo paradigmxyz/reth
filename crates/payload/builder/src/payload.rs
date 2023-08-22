@@ -103,7 +103,7 @@ impl From<BuiltPayload> for ExecutionPayloadEnvelope {
             // Spec:
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: Some(false),
-            blobs_bundle: Some(sidecars.into()),
+            blobs_bundle: sidecars.map(Into::into),
         }
     }
 }
