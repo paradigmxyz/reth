@@ -471,6 +471,11 @@ impl<DB: Database> Pruner<DB> {
         let mut last_pruned_transaction = None;
         for (start_block, end_block, num_addresses) in block_ranges {
             let block_range = start_block..=end_block;
+            if block_range.is_empty() {
+                trace!(target: "pruner", "No receipts by logs to prune");
+                return Ok(true)
+            }
+
             let tx_range = match self.get_next_tx_num_range_from_checkpoint(
                 provider,
                 PrunePart::ContractLogs,
