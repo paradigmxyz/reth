@@ -63,6 +63,13 @@ impl BuiltPayload {
 
     /// Converts the type into the response expected by `engine_getPayloadV2`
     pub fn into_v2_payload(self) -> ExecutionPayloadEnvelope {
+        let mut envelope: ExecutionPayloadEnvelope = self.into();
+        envelope.blobs_bundle = None;
+        envelope
+    }
+
+    /// Converts the type into the response expected by `engine_getPayloadV2`
+    pub fn into_v3_payload(self) -> ExecutionPayloadEnvelope {
         self.into()
     }
 }
@@ -75,6 +82,10 @@ impl From<BuiltPayload> for ExecutionPayload {
 }
 
 // V2 engine_getPayloadV2 response
+// TODO(rjected): we could improve this by wrapping envelope / payload types by version, so we can
+// have explicitly versioned return types for getPayload. Then BuiltPayload could essentially be a
+// builder for those types, and it would not be possible to e.g. return cancun fields for a
+// pre-cancun endpoint.
 impl From<BuiltPayload> for ExecutionPayloadEnvelope {
     fn from(value: BuiltPayload) -> Self {
         let BuiltPayload { block, fees, sidecars, .. } = value;
