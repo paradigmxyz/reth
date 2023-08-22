@@ -357,7 +357,7 @@ where
 
         let opts = opts.unwrap_or_default();
         let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-        let GethDebugTracingCallOptions { tracing_options, state_overrides, .. } = opts;
+        let GethDebugTracingCallOptions { tracing_options, mut state_overrides, .. } = opts;
         let gas_limit = self.inner.eth_api.call_gas_limit();
 
         // we're essentially replaying the transactions in the block here, hence we need the state
@@ -399,18 +399,22 @@ where
                 while let Some(bundle) = bundles.next() {
                     //let mut result = Vec::with_capacity(bundle.len());
                     let Bundle { transactions, block_override } = bundle;
-                    let overrides =
-                        EvmOverrides::new(state_overrides.clone(), block_override.map(Box::new));
+
+                    let block_overrides = block_override.map(Box::new);
 
                     let mut transactions = transactions.into_iter().peekable();
                     while let Some(tx) = transactions.next() {
+                        // apply state overrides only once, before the first transaction
+                        let state_overrides = state_overrides.take();
+                        let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
+
                         let env = prepare_call_env(
                             cfg.clone(),
                             block_env.clone(),
                             tx,
                             gas_limit,
                             &mut db,
-                            overrides.clone(),
+                            overrides,
                         )?;
 
                         let (trace, state) = this.trace_transaction(
