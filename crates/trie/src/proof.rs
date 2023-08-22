@@ -41,7 +41,7 @@ pub struct Proof<'a, 'b, TX, H> {
     hashed_cursor_factory: &'b H,
 }
 
-impl<'a, 'tx, TX> Proof<'a, 'a, TX, TX> {
+impl<'a, TX> Proof<'a, 'a, TX, TX> {
     /// Create a new [Proof] instance.
     pub fn new(tx: &'a TX) -> Self {
         Self { tx, hashed_cursor_factory: tx }
