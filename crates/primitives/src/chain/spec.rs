@@ -258,7 +258,7 @@ pub struct ChainSpec {
     pub base_fee_params: BaseFeeParams,
 
     /// The batch sizes for pruner
-    #[serde(skip)]
+    #[serde(default)]
     pub prune_batch_sizes: PruneBatchSizes,
 }
 
