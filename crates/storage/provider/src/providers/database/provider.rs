@@ -24,7 +24,7 @@ use reth_db::{
 };
 use reth_interfaces::{
     executor::{BlockExecutionError, BlockValidationError},
-    Result,
+    Error, Result,
 };
 use reth_primitives::{
     keccak256,
