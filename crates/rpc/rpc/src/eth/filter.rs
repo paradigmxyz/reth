@@ -273,7 +273,6 @@ where
                     );
                 }
                 Ok(all_logs)
-                // Ok(FilterChanges::Logs(all_logs))
             }
             FilterBlockOption::Range { from_block, to_block } => {
                 // compute the range
@@ -392,7 +391,6 @@ where
         }
 
         Ok(all_logs)
-        // Ok(FilterChanges::Logs(all_logs))
     }
 }
 
