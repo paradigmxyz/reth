@@ -75,7 +75,7 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     propagate_local_transactions: bool,
     /// Stores the setup and parameters needed for validating KZG proofs.
     #[allow(unused)]
-    kzg_settings: Arc<KzgSettings>,
+    kzg_settings: Arc<std::sync::Mutex<KzgSettings>>,
     /// Marker for the transaction type
     _marker: PhantomData<T>,
 }
@@ -113,7 +113,7 @@ where
                     return TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip1559Disabled.into(),
-                    )
+                    );
                 }
             }
             EIP1559_TX_TYPE_ID => {
@@ -122,7 +122,7 @@ where
                     return TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip1559Disabled.into(),
-                    )
+                    );
                 }
             }
             EIP4844_TX_TYPE_ID => {
@@ -131,7 +131,7 @@ where
                     return TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip4844Disabled.into(),
-                    )
+                    );
                 }
             }
 
@@ -149,13 +149,13 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::OversizedData(size, TX_MAX_SIZE),
-            )
+            );
         }
 
         // Check whether the init code size has been exceeded.
         if self.fork_tracker.is_shanghai_activated() {
             if let Err(err) = self.ensure_max_init_code_size(&transaction, MAX_INIT_CODE_SIZE) {
-                return TransactionValidationOutcome::Invalid(transaction, err)
+                return TransactionValidationOutcome::Invalid(transaction, err);
             }
         }
 
@@ -165,7 +165,7 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::ExceedsGasLimit(gas_limit, self.block_gas_limit),
-            )
+            );
         }
 
         // Ensure max_priority_fee_per_gas (if EIP1559) is less than max_fee_per_gas if any.
@@ -173,19 +173,19 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::TipAboveFeeCap.into(),
-            )
+            );
         }
 
         // Drop non-local transactions with a fee lower than the configured fee for acceptance into
         // the pool.
-        if !origin.is_local() &&
-            transaction.is_eip1559() &&
-            transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
+        if !origin.is_local()
+            && transaction.is_eip1559()
+            && transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
         {
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::Underpriced,
-            )
+            );
         }
 
         // Checks for chainid
@@ -194,7 +194,7 @@ where
                 return TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidTransactionError::ChainIdMismatch.into(),
-                )
+                );
             }
         }
 
@@ -205,7 +205,7 @@ where
                 return TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidTransactionError::TxTypeNotSupported.into(),
-                )
+                );
             }
             // TODO add checks for blob tx
         }
@@ -227,7 +227,7 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::SignerAccountHasBytecode.into(),
-            )
+            );
         }
 
         // Checks for nonce
@@ -235,7 +235,7 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::NonceNotConsistent.into(),
-            )
+            );
         }
 
         // Checks for max cost
@@ -248,7 +248,7 @@ where
                     available_funds: account.balance,
                 }
                 .into(),
-            )
+            );
         }
 
         // Return the valid transaction
@@ -303,7 +303,7 @@ pub struct EthTransactionValidatorBuilder {
     propagate_local_transactions: bool,
 
     /// Stores the setup and parameters needed for validating KZG proofs.
-    kzg_settings: Arc<KzgSettings>,
+    kzg_settings: Arc<std::sync::Mutex<KzgSettings>>,
 }
 
 impl EthTransactionValidatorBuilder {
@@ -376,7 +376,7 @@ impl EthTransactionValidatorBuilder {
     }
 
     /// Sets the [KzgSettings] to use for validating KZG proofs.
-    pub fn kzg_settings(mut self, kzg_settings: Arc<KzgSettings>) -> Self {
+    pub fn kzg_settings(mut self, kzg_settings: Arc<std::sync::Mutex<KzgSettings>>) -> Self {
         self.kzg_settings = kzg_settings;
         self
     }

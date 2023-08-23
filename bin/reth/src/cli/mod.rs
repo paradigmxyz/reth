@@ -11,13 +11,17 @@ use crate::{
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
-use reth_primitives::ChainSpec;
+use reth_primitives::{
+    constants::eip4844::{LoadKzgSettingsError, KZG_TRUSTED_SETUP},
+    kzg::KzgSettings,
+    ChainSpec,
+};
 use reth_tracing::{
     tracing::{metadata::LevelFilter, Level, Subscriber},
     tracing_subscriber::{filter::Directive, registry::LookupSpan, EnvFilter},
     BoxedLayer, FileWorkerGuard,
 };
-use std::{fmt, fmt::Display, sync::Arc};
+use std::{fmt, fmt::Display, path::PathBuf, sync::Arc};
 
 pub mod config;
 pub mod ext;
@@ -56,6 +60,10 @@ pub struct Cli<Ext: RethCliExt = ()> {
 
     #[clap(flatten)]
     verbosity: Verbosity,
+
+    /// Overrides the KZG trusted setup by reading from the supplied file.
+    #[arg(long, value_name = "PATH", global = true)]
+    trusted_setup_file: Option<PathBuf>,
 }
 
 impl<Ext: RethCliExt> Cli<Ext> {
@@ -65,6 +73,10 @@ impl<Ext: RethCliExt> Cli<Ext> {
         self.logs.log_directory = self.logs.log_directory.join(self.chain.chain.to_string());
 
         let _guard = self.init_tracing()?;
+
+        if let Some(ref trusted_setup_file) = self.trusted_setup_file {
+            self.override_trusted_file(trusted_setup_file)?;
+        };
 
         let runner = CliRunner::default();
         match self.command {
@@ -95,6 +107,15 @@ impl<Ext: RethCliExt> Cli<Ext> {
 
         reth_tracing::init(layers);
         Ok(guard.flatten())
+    }
+
+    fn override_trusted_file(&self, trusted_setup_file: &PathBuf) -> eyre::Result<()> {
+        let trusted_setup =
+            KzgSettings::load_trusted_setup_file(trusted_setup_file.as_path().into())
+                .map_err(LoadKzgSettingsError::KzgError)?;
+        *KZG_TRUSTED_SETUP.lock().unwrap() = trusted_setup;
+
+        Ok(())
     }
 }
 
@@ -301,5 +322,14 @@ mod tests {
         reth.logs.log_directory = reth.logs.log_directory.join(reth.chain.chain.to_string());
         let log_dir = reth.logs.log_directory;
         assert!(log_dir.as_ref().ends_with("reth/logs/sepolia"), "{:?}", log_dir);
+    }
+
+    #[test]
+    fn override_trusted_setup_file() {
+        // We already have a test that asserts that this has been initialized,
+        // so we cheat a little bit and check that loading a random file errors.
+        let reth = Cli::<()>::try_parse_from(["reth", "node", "--trusted-setup-file", "README.md"])
+            .unwrap();
+        assert!(reth.run().is_err());
     }
 }
