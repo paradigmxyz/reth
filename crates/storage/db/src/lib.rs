@@ -241,15 +241,13 @@ mod tests {
         let path = tempdir().unwrap();
         // Database is empty
         {
-            let non_core_tables: Option<Vec<Tables>> = None;
-            let db = init_db(&path, None, non_core_tables);
+            let db = init_db(&path, None, NO_TABLES);
             assert_matches!(db, Ok(_));
         }
 
         // Database is not empty, current version is the same as in the file
         {
-            let non_core_tables: Option<Vec<Tables>> = None;
-            let db = init_db(&path, None, non_core_tables);
+            let db = init_db(&path, None, NO_TABLES);
             assert_matches!(db, Ok(_));
         }
 
@@ -257,8 +255,7 @@ mod tests {
         {
             std::fs::write(path.path().join(db_version_file_path(&path)), "invalid-version")
                 .unwrap();
-            let non_core_tables: Option<Vec<Tables>> = None;
-            let db = init_db(&path, None, non_core_tables);
+            let db = init_db(&path, None, NO_TABLES);
             assert!(db.is_err());
             assert_matches!(
                 db.unwrap_err().downcast_ref::<DatabaseVersionError>(),
@@ -269,8 +266,7 @@ mod tests {
         // Database is not empty, version file contains not matching version
         {
             std::fs::write(path.path().join(db_version_file_path(&path)), "0").unwrap();
-            let non_core_tables: Option<Vec<Tables>> = None;
-            let db = init_db(&path, None, non_core_tables);
+            let db = init_db(&path, None, NO_TABLES);
             assert!(db.is_err());
             assert_matches!(
                 db.unwrap_err().downcast_ref::<DatabaseVersionError>(),

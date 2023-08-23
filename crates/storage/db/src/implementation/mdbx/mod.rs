@@ -179,7 +179,7 @@ mod tests {
         tables::{AccountHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState},
         test_utils::*,
         transaction::{DbTx, DbTxMut},
-        AccountChangeSet, DatabaseError, NUM_TABLES,
+        AccountChangeSet, DatabaseError, NUM_TABLES, NO_TABLES,
     };
     use reth_interfaces::db::DatabaseWriteOperation;
     use reth_libmdbx::{NoWriteMap, WriteMap};
@@ -189,11 +189,10 @@ mod tests {
 
     /// Create database for testing
     fn create_test_db<E: EnvironmentKind>(kind: EnvKind) -> Arc<Env<E>> {
-        let non_core_tables: Option<Vec<Tables>> = None;
         Arc::new(create_test_db_with_path(
             kind,
             &tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
-            non_core_tables,
+            NO_TABLES,
         ))
     }
 

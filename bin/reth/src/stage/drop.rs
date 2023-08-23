@@ -6,7 +6,7 @@ use crate::{
     utils::DbTool,
 };
 use clap::Parser;
-use reth_db::{database::Database, open_db, tables, transaction::DbTxMut, DatabaseEnv};
+use reth_db::{database::Database, open_db, tables, transaction::DbTxMut, DatabaseEnv, NO_TABLES};
 use reth_primitives::{fs, stage::StageId, ChainSpec};
 use std::sync::Arc;
 use tracing::info;
@@ -55,7 +55,7 @@ impl Command {
         let db_path = data_dir.db_path();
         fs::create_dir_all(&db_path)?;
 
-        let db = open_db(db_path.as_ref(), self.db.log_level)?;
+        let db = open_db(db_path.as_ref(), self.db.log_level, NO_TABLES)?;
 
         let tool = DbTool::new(&db, self.chain.clone())?;
 

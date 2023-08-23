@@ -9,7 +9,7 @@ use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
-use reth_db::{cursor::DbCursorRO, init_db, tables, transaction::DbTx, DatabaseEnv};
+use reth_db::{cursor::DbCursorRO, init_db, tables, transaction::DbTx, DatabaseEnv, NO_TABLES};
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_interfaces::{consensus::Consensus, p2p::full_block::FullBlockClient};
 use reth_network::NetworkHandle;
@@ -124,7 +124,7 @@ impl Command {
         fs::create_dir_all(&db_path)?;
 
         // initialize the database
-        let db = Arc::new(init_db(db_path, self.db.log_level)?);
+        let db = Arc::new(init_db(db_path, self.db.log_level, NO_TABLES)?);
         let factory = ProviderFactory::new(&db, self.chain.clone());
         let provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
 

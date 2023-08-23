@@ -12,7 +12,7 @@ use reth_db::{
     database::Database,
     open_db, open_db_read_only,
     version::{get_db_version, DatabaseVersionError, DB_VERSION},
-    Tables,
+    TableMetadata, Tables, NO_TABLES,
 };
 use reth_primitives::ChainSpec;
 use std::{
@@ -100,7 +100,7 @@ impl Command {
         match self.command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats { .. } => {
-                let db = open_db_read_only(&db_path, self.db.log_level)?;
+                let db = open_db_read_only(&db_path, self.db.log_level, NO_TABLES)?;
                 let tool = DbTool::new(&db, self.chain.clone())?;
                 let mut stats_table = ComfyTable::new();
                 stats_table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
@@ -114,8 +114,10 @@ impl Command {
                 ]);
 
                 tool.db.view(|tx| {
-                    let mut tables =
-                        Tables::ALL.iter().map(|table| table.name()).collect::<Vec<_>>();
+                    let mut tables = Tables::all_tables_in_group()
+                        .into_iter()
+                        .map(|table| table.name())
+                        .collect::<Vec<_>>();
                     tables.sort();
                     let mut total_size = 0;
                     for table in tables {
@@ -171,17 +173,17 @@ impl Command {
                 println!("{stats_table}");
             }
             Subcommands::List(command) => {
-                let db = open_db_read_only(&db_path, self.db.log_level)?;
+                let db = open_db_read_only(&db_path, self.db.log_level, NO_TABLES)?;
                 let tool = DbTool::new(&db, self.chain.clone())?;
                 command.execute(&tool)?;
             }
             Subcommands::Diff(command) => {
-                let db = open_db_read_only(&db_path, self.db.log_level)?;
+                let db = open_db_read_only(&db_path, self.db.log_level, NO_TABLES)?;
                 let tool = DbTool::new(&db, self.chain.clone())?;
                 command.execute(&tool)?;
             }
             Subcommands::Get(command) => {
-                let db = open_db_read_only(&db_path, self.db.log_level)?;
+                let db = open_db_read_only(&db_path, self.db.log_level, NO_TABLES)?;
                 let tool = DbTool::new(&db, self.chain.clone())?;
                 command.execute(&tool)?;
             }
@@ -201,12 +203,12 @@ impl Command {
                     }
                 }
 
-                let db = open_db(&db_path, self.db.log_level)?;
+                let db = open_db(&db_path, self.db.log_level, NO_TABLES)?;
                 let mut tool = DbTool::new(&db, self.chain.clone())?;
                 tool.drop(db_path)?;
             }
             Subcommands::Clear(command) => {
-                let db = open_db(&db_path, self.db.log_level)?;
+                let db = open_db(&db_path, self.db.log_level, NO_TABLES)?;
                 command.execute(&db)?;
             }
             Subcommands::Version => {

@@ -6,7 +6,7 @@ use hyper::{
 };
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
-use reth_db::{database::Database, tables, DatabaseEnv};
+use reth_db::{database::Database, tables, DatabaseEnv, TableMetadata};
 use reth_metrics::metrics::{self, absolute_counter, describe_counter, Unit};
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 
@@ -76,7 +76,8 @@ pub(crate) async fn initialize(
         // TODO: A generic stats abstraction for other DB types to deduplicate this and `reth db
         //  stats`
         let _ = db.view(|tx| {
-            for table in tables::Tables::ALL.iter().map(|table| table.name()) {
+            for t in &tables::Tables::all_tables_in_group() {
+                let table = t.name();
                 let table_db =
                     tx.inner.open_db(Some(table)).wrap_err("Could not open db.")?;
 

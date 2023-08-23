@@ -2,7 +2,7 @@ use super::tui::DbListTUI;
 use crate::utils::{DbTool, ListFilter};
 use clap::Parser;
 use eyre::WrapErr;
-use reth_db::{database::Database, table::Table, DatabaseEnvRO, TableType, TableViewer, Tables};
+use reth_db::{database::Database, table::Table, DatabaseEnvRO, TableType, TableViewer, Tables, TableMetadata};
 use std::cell::RefCell;
 use tracing::error;
 

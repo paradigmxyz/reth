@@ -52,6 +52,11 @@ pub enum TableType {
 /// Number of tables that should be present inside database.
 pub const NUM_TABLES: usize = 26;
 
+/// An alias used in core stages to represent non-core tables (which aren't required).
+///
+/// This allows core stages to be unaware of non-core table types.
+pub const NO_TABLES: Option<Vec<Tables>> = None;
+
 /// The general purpose of this is to use with a combination of Tables enum,
 /// by implementing a `TableViewer` trait you can operate on db tables in an abstract way.
 ///
@@ -89,7 +94,7 @@ pub trait TableViewer<R> {
 }
 
 /// Information about a table.
-pub trait TableMetadata {
+pub trait TableMetadata: PartialEq {
     /// Number of tables
     const NUM_TABLES: usize;
 
@@ -97,10 +102,10 @@ pub trait TableMetadata {
     /// Note that other table-containing enums may exist.
     fn all_tables_in_group() -> Vec<Self>
     where
-        Self: Sized;
+        Self: Sized + 'static;
 
     /// The name of the given table in database
-    fn name(&self) -> &str;
+    fn name(&self) -> &'static str;
 
     /// The type of the given table in database
     fn table_type(&self) -> TableType;
@@ -139,7 +144,7 @@ macro_rules! tables {
             }
 
             /// The name of the given table in database
-            fn name(&self) -> &str {
+            fn name(&self) -> &'static str {
                 match self {
                     $($enum_name::$table => {
                         $table::NAME

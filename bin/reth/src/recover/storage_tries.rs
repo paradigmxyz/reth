@@ -8,7 +8,7 @@ use clap::Parser;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRW},
     init_db, tables,
-    transaction::DbTx,
+    transaction::DbTx, NO_TABLES,
 };
 use reth_primitives::ChainSpec;
 use reth_provider::{BlockNumReader, HeaderProvider, ProviderError, ProviderFactory};
@@ -53,7 +53,7 @@ impl Command {
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
         fs::create_dir_all(&db_path)?;
-        let db = Arc::new(init_db(db_path, None)?);
+        let db = Arc::new(init_db(db_path, None, NO_TABLES)?);
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
         init_genesis(db.clone(), self.chain.clone())?;

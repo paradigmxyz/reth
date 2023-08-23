@@ -12,7 +12,7 @@ use reth_provider::{ProviderFactory, StageCheckpointReader};
 
 use crate::args::{utils::genesis_value_parser, DatabaseArgs};
 use reth_config::Config;
-use reth_db::{database::Database, init_db};
+use reth_db::{database::Database, init_db, NO_TABLES};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::FileClient,
@@ -90,7 +90,7 @@ impl ImportCommand {
         let db_path = data_dir.db_path();
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(db_path, self.db.log_level)?);
+        let db = Arc::new(init_db(db_path, self.db.log_level, NO_TABLES)?);
         info!(target: "reth::cli", "Database opened");
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");

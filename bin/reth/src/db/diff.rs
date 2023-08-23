@@ -19,8 +19,9 @@ use reth_db::{
     AccountChangeSet, AccountHistory, AccountsTrie, BlockBodyIndices, BlockOmmers,
     BlockWithdrawals, Bytecodes, CanonicalHeaders, DatabaseEnvRO, HashedAccount, HashedStorage,
     HeaderNumbers, HeaderTD, Headers, PlainAccountState, PlainStorageState, PruneCheckpoints,
-    Receipts, StorageChangeSet, StorageHistory, StoragesTrie, SyncStage, SyncStageProgress, Tables,
-    TransactionBlock, Transactions, TxHashNumber, TxSenders,
+    Receipts, StorageChangeSet, StorageHistory, StoragesTrie, SyncStage, SyncStageProgress,
+    TableMetadata, Tables, TransactionBlock, Transactions, TxHashNumber, TxSenders,
+    NO_TABLES,
 };
 use tracing::info;
 
@@ -61,11 +62,11 @@ impl Command {
     pub fn execute(self, tool: &DbTool<'_, DatabaseEnvRO>) -> eyre::Result<()> {
         // open second db
         let second_db_path: PathBuf = self.secondary_datadir.join("db").into();
-        let second_db = open_db_read_only(&second_db_path, self.second_db.log_level)?;
+        let second_db = open_db_read_only(&second_db_path, self.second_db.log_level, NO_TABLES)?;
 
         let tables = match self.table {
             Some(table) => vec![table],
-            None => Tables::ALL.to_vec(),
+            None => Tables::all_tables_in_group(),
         };
 
         for table in tables {

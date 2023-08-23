@@ -1,7 +1,7 @@
 use crate::utils::DbTool;
 use clap::Parser;
 
-use reth_db::{database::Database, table::Table, TableType, TableViewer, Tables};
+use reth_db::{database::Database, table::Table, TableType, TableViewer, Tables, TableMetadata};
 use tracing::error;
 
 /// The arguments for the `reth db get` command
@@ -13,7 +13,7 @@ pub struct Command {
     #[arg()]
     pub table: Tables,
 
-    /// The key to get content for   
+    /// The key to get content for
     #[arg(value_parser = maybe_json_value_parser)]
     pub key: String,
 }

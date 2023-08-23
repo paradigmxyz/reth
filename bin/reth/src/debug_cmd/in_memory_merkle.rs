@@ -8,7 +8,7 @@ use crate::{
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_config::Config;
-use reth_db::{init_db, DatabaseEnv};
+use reth_db::{init_db, DatabaseEnv, NO_TABLES};
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
@@ -114,7 +114,7 @@ impl Command {
         fs::create_dir_all(&db_path)?;
 
         // initialize the database
-        let db = Arc::new(init_db(db_path, self.db.log_level)?);
+        let db = Arc::new(init_db(db_path, self.db.log_level, NO_TABLES)?);
         let factory = ProviderFactory::new(&db, self.chain.clone());
         let provider = factory.provider()?;
 
