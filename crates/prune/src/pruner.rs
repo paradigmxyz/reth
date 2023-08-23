@@ -103,7 +103,7 @@ impl<DB: Database> Pruner<DB> {
                 .record(part_start.elapsed())
         }
 
-        if !self.modes.contract_logs_filter.is_empty() {
+        if !self.modes.receipts_log_filter.is_empty() {
             let part_start = Instant::now();
             self.prune_receipts_by_logs(&provider, tip_block_number)?;
             self.metrics
@@ -305,7 +305,7 @@ impl<DB: Database> Pruner<DB> {
             .map(|checkpoint| checkpoint.block_number);
 
         let address_filter =
-            self.modes.contract_logs_filter.group_by_block(tip_block_number, pruned)?;
+            self.modes.receipts_log_filter.group_by_block(tip_block_number, pruned)?;
 
         // Splits all transactions in different block ranges. Each block range will have its own
         // filter address list and will check it while going through the table
@@ -411,7 +411,7 @@ impl<DB: Database> Pruner<DB> {
         // one using `get_next_tx_num_range_from_checkpoint`.
         let checkpoint_block = self
             .modes
-            .contract_logs_filter
+            .receipts_log_filter
             .lowest_block_with_distance(tip_block_number, pruned)?
             .unwrap_or(to_block);
 
