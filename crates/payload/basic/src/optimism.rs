@@ -174,6 +174,7 @@ where
                         is_regolith,
                         PayloadBuilderError::AccountLoadFailed(sender)
                     );
+                    executed_txs.push(sequencer_tx.into_signed());
                     continue
                 }
 
