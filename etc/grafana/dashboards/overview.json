@@ -27,7 +27,13 @@
       "type": "grafana",
       "id": "grafana",
       "name": "Grafana",
-      "version": "10.0.2"
+      "version": "10.1.0"
+    },
+    {
+      "type": "panel",
+      "id": "graph",
+      "name": "Graph (old)",
+      "version": ""
     },
     {
       "type": "panel",
@@ -159,7 +165,7 @@
         "showThresholdLabels": false,
         "showThresholdMarkers": true
       },
-      "pluginVersion": "10.0.1",
+      "pluginVersion": "10.1.0",
       "targets": [
         {
           "datasource": {
@@ -226,7 +232,7 @@
         "showUnfilled": true,
         "valueMode": "color"
       },
-      "pluginVersion": "10.0.1",
+      "pluginVersion": "10.1.0",
       "targets": [
         {
           "datasource": {
@@ -270,6 +276,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -361,6 +368,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -470,6 +478,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -609,7 +618,7 @@
           "unit": "percentunit"
         }
       },
-      "pluginVersion": "10.0.1",
+      "pluginVersion": "10.1.0",
       "targets": [
         {
           "datasource": {
@@ -727,6 +736,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -1006,7 +1016,7 @@
         },
         "showHeader": true
       },
-      "pluginVersion": "10.0.1",
+      "pluginVersion": "10.1.0",
       "targets": [
         {
           "datasource": {
@@ -1066,6 +1076,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -1207,6 +1218,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -1300,6 +1312,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -1418,6 +1431,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -1718,6 +1732,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -1825,6 +1840,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -1980,6 +1996,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -2098,6 +2115,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -2218,6 +2236,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -2417,6 +2436,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -2532,6 +2552,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -2637,6 +2658,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -2776,6 +2798,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -2894,6 +2917,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -3011,6 +3035,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -3148,6 +3173,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -3242,6 +3268,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -3389,6 +3416,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -3549,6 +3577,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -3643,6 +3672,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -3737,6 +3767,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -3846,6 +3877,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -3939,6 +3971,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -4044,6 +4077,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -4152,6 +4186,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 3,
             "pointSize": 5,
@@ -4245,6 +4280,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 3,
             "pointSize": 5,
@@ -4338,6 +4374,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 3,
             "pointSize": 5,
@@ -4443,6 +4480,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -4503,7 +4541,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_jemalloc_active",
+          "expr": "reth_jemalloc_active{instance=~\"$instance\"}",
           "instant": false,
           "legendFormat": "Active",
           "range": true,
@@ -4515,7 +4553,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_jemalloc_allocated",
+          "expr": "reth_jemalloc_allocated{instance=~\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Allocated",
@@ -4528,7 +4566,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_jemalloc_mapped",
+          "expr": "reth_jemalloc_mapped{instance=~\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Mapped",
@@ -4541,7 +4579,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_jemalloc_metadata",
+          "expr": "reth_jemalloc_metadata{instance=~\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Metadata",
@@ -4554,7 +4592,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_jemalloc_resident",
+          "expr": "reth_jemalloc_resident{instance=~\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Resident",
@@ -4567,7 +4605,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_jemalloc_retained",
+          "expr": "reth_jemalloc_retained{instance=~\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Retained",
@@ -4603,6 +4641,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -4663,7 +4702,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_process_resident_memory_bytes",
+          "expr": "reth_process_resident_memory_bytes{instance=~\"$instance\"}",
           "instant": false,
           "legendFormat": "Resident",
           "range": true,
@@ -4698,6 +4737,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -4757,8 +4797,8 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "editorMode": "code",
-          "expr": "avg(rate(reth_process_cpu_seconds_total[1m]))",
+          "editorMode": "builder",
+          "expr": "avg(rate(reth_process_cpu_seconds_total{instance=~\"$instance\"}[1m]))",
           "instant": false,
           "legendFormat": "Process",
           "range": true,
@@ -4793,6 +4833,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -4852,8 +4893,8 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "editorMode": "code",
-          "expr": "reth_process_open_fds",
+          "editorMode": "builder",
+          "expr": "reth_process_open_fds{instance=~\"$instance\"}",
           "instant": false,
           "legendFormat": "Open",
           "range": true,
@@ -4900,6 +4941,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -4995,6 +5037,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -5074,60 +5117,188 @@
         "x": 0,
         "y": 204
       },
-      "id": 97,
+      "id": 108,
       "panels": [],
       "title": "RPC server",
       "type": "row"
     },
     {
-      "title": "Active Requests",
-      "description": "The number of active requests.", 
-      "type": "graph",
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "targets": [
-        {
-          "expr": "reth_rpc_server_requests_started - reth_rpc_server_requests_finished",
-          "format": "time_series",
-          "legendFormat": "Active Requests",
-          "refId": "A"
-        }
-      ],
+      "description": "The number of active requests.",
+      "fill": 1,
+      "fillGradient": 0,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
         "y": 205
+      },
+      "hiddenSeries": false,
+      "id": 109,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "10.1.0",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_rpc_server_requests_started{instance=~\"$instance\"} - reth_rpc_server_requests_finished{instance=~\"$instance\"}",
+          "format": "time_series",
+          "legendFormat": "Active Requests",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "thresholds": [],
+      "timeRegions": [],
+      "title": "Active Requests",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "mode": "time",
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "logBase": 1,
+          "show": true
+        },
+        {
+          "format": "short",
+          "logBase": 1,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false
       }
     },
     {
-      "title": "Active Websocket Connections",
-      "description": "The number of active websocket connections.", 
-      "type": "graph",
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "targets": [
-        {
-          "expr": "reth_rpc_server_ws_session_opened - reth_rpc_server_ws_session_closed",
-          "format": "time_series",
-          "legendFormat": "Active Websocket Connections",
-          "refId": "A"
-        }
-      ],
+      "description": "The number of active websocket connections.",
+      "fill": 1,
+      "fillGradient": 0,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
         "y": 205
+      },
+      "hiddenSeries": false,
+      "id": 110,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "10.1.0",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_rpc_server_ws_session_opened{instance=~\"$instance\"} - reth_rpc_server_ws_session_closed{instance=~\"$instance\"}",
+          "format": "time_series",
+          "legendFormat": "Active Websocket Connections",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "thresholds": [],
+      "timeRegions": [],
+      "title": "Active Websocket Connections",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "mode": "time",
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "logBase": 1,
+          "show": true
+        },
+        {
+          "format": "short",
+          "logBase": 1,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false
       }
     },
     {
-      "title": "Request Latency time",
-      "type": "heatmap",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -5154,7 +5325,7 @@
         "x": 0,
         "y": 213
       },
-      "id": 42,
+      "id": 111,
       "maxDataPoints": 25,
       "options": {
         "calculate": false,
@@ -5196,7 +5367,7 @@
           "unit": "percentunit"
         }
       },
-      "pluginVersion": "10.0.2",
+      "pluginVersion": "10.1.0",
       "targets": [
         {
           "datasource": {
@@ -5212,11 +5383,11 @@
           "range": true,
           "refId": "A"
         }
-      ]
+      ],
+      "title": "Request Latency time",
+      "type": "heatmap"
     },
     {
-      "title": "Call Latency time",
-      "type": "heatmap",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -5243,7 +5414,7 @@
         "x": 12,
         "y": 213
       },
-      "id": 42,
+      "id": 112,
       "maxDataPoints": 25,
       "options": {
         "calculate": false,
@@ -5285,7 +5456,7 @@
           "unit": "percentunit"
         }
       },
-      "pluginVersion": "10.0.2",
+      "pluginVersion": "10.1.0",
       "targets": [
         {
           "datasource": {
@@ -5301,7 +5472,9 @@
           "range": true,
           "refId": "A"
         }
-      ]
+      ],
+      "title": "Call Latency time",
+      "type": "heatmap"
     }
   ],
   "refresh": "30s",
@@ -5343,6 +5516,6 @@
   "timezone": "",
   "title": "reth",
   "uid": "2k8BXz24x",
-  "version": 4,
+  "version": 5,
   "weekStart": ""
 }
