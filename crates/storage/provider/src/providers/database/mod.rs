@@ -5,7 +5,9 @@ use crate::{
     HeaderProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
     TransactionsProvider, WithdrawalsProvider,
 };
-use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
+use reth_db::{
+    database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv, TableMetadata,
+};
 use reth_interfaces::Result;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
@@ -60,13 +62,14 @@ impl<DB> ProviderFactory<DB> {
 impl<DB: Database> ProviderFactory<DB> {
     /// create new database provider by passing a path. [`ProviderFactory`] will own the database
     /// instance.
-    pub fn new_with_database_path<P: AsRef<std::path::Path>>(
+    pub fn new_with_database_path<P: AsRef<std::path::Path>, T: TableMetadata>(
         path: P,
         chain_spec: Arc<ChainSpec>,
         log_level: Option<LogLevel>,
+        non_core_tables: Option<Vec<T>>,
     ) -> Result<ProviderFactory<DatabaseEnv>> {
         Ok(ProviderFactory::<DatabaseEnv> {
-            db: init_db(path, log_level)
+            db: init_db(path, log_level, non_core_tables)
                 .map_err(|e| reth_interfaces::Error::Custom(e.to_string()))?,
             chain_spec,
         })
@@ -392,7 +395,7 @@ mod tests {
     use crate::{BlockHashReader, BlockNumReader};
     use reth_db::{
         test_utils::{create_test_rw_db, ERROR_TEMPDIR},
-        DatabaseEnv,
+        DatabaseEnv, Tables,
     };
     use reth_primitives::{ChainSpecBuilder, H256};
     use std::sync::Arc;
@@ -436,6 +439,7 @@ mod tests {
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
             Arc::new(chain_spec),
             None,
+            None::<Vec<Tables>>,
         )
         .unwrap();
 

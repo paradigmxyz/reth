@@ -19,7 +19,6 @@ pub(crate) mod utils;
 
 use crate::abstraction::table::Table;
 pub use raw::{RawDupSort, RawKey, RawTable, RawValue, TableRawRow};
-use std::{fmt::Display, str::FromStr};
 
 /// Declaration of all Database tables.
 use crate::{
@@ -89,65 +88,101 @@ pub trait TableViewer<R> {
     fn view<T: Table>(&self) -> Result<R, Self::Error>;
 }
 
+/// Information about a table.
+pub trait TableMetadata {
+    /// Number of tables
+    const NUM_TABLES: usize;
+
+    /// Gets every variant in the enum where the table is defined.
+    /// Note that other table-containing enums may exist.
+    fn all_tables_in_group() -> Vec<Self>
+    where
+        Self: Sized;
+
+    /// The name of the given table in database
+    fn name(&self) -> &str;
+
+    /// The type of the given table in database
+    fn table_type(&self) -> TableType;
+
+    /// Allows to operate on specific table type
+    fn view<T, R>(&self, visitor: &T) -> Result<R, T::Error>
+    where
+        T: TableViewer<R>;
+}
+
+/// Helper methods for table documentation
+///
+/// Useage: `tables!(tables_enum_name, num_tables, [(table_struct, table_type), ...])`
+#[macro_export]
 macro_rules! tables {
-    ([$(($table:ident, $type:expr)),*]) => {
+
+    ($enum_name:ident, $count:expr, [$(($table:ident, $type:expr)),*]) => {
+        use std::fmt::Debug;
+
+
         #[derive(Debug, PartialEq, Copy, Clone)]
         /// Default tables that should be present inside database.
-        pub enum Tables {
+        pub enum $enum_name {
             $(
                 #[doc = concat!("Represents a ", stringify!($table), " table")]
                 $table,
             )*
         }
 
-        impl Tables {
+        impl $crate::TableMetadata for $enum_name {
+            const NUM_TABLES: usize = $count;
+
             /// Array of all tables in database
-            pub const ALL: [Tables; NUM_TABLES] = [$(Tables::$table,)*];
+            fn all_tables_in_group() -> Vec<$enum_name> {
+                vec![$($enum_name::$table,)*]
+            }
 
             /// The name of the given table in database
-            pub const fn name(&self) -> &str {
+            fn name(&self) -> &str {
                 match self {
-                    $(Tables::$table => {
+                    $($enum_name::$table => {
                         $table::NAME
                     },)*
                 }
             }
 
             /// The type of the given table in database
-            pub const fn table_type(&self) -> TableType {
+            fn table_type(&self) -> $crate::TableType {
                 match self {
-                    $(Tables::$table => {
+                    $($enum_name::$table => {
                         $type
                     },)*
                 }
             }
 
             /// Allows to operate on specific table type
-            pub fn view<T, R>(&self, visitor: &T) -> Result<R, T::Error>
+            fn view<T, R>(&self, visitor: &T) -> Result<R, T::Error>
             where
-                T: TableViewer<R>,
+                T: $crate::TableViewer<R>,
             {
                 match self {
-                    $(Tables::$table => {
+                    $($enum_name::$table => {
                         visitor.view::<$table>()
                     },)*
                 }
             }
         }
 
-        impl Display for Tables {
+
+        impl std::fmt::Display for $enum_name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(f, "{}", self.name())
             }
         }
 
-        impl FromStr for Tables {
+        impl std::str::FromStr for $enum_name {
             type Err = String;
 
             fn from_str(s: &str) -> Result<Self, Self::Err> {
                 match s {
                     $($table::NAME => {
-                        return Ok(Tables::$table)
+                        return Ok($enum_name::$table)
                     },)*
                     _ => {
                         return Err("Unknown table".to_string())
@@ -158,34 +193,38 @@ macro_rules! tables {
     };
 }
 
-tables!([
-    (CanonicalHeaders, TableType::Table),
-    (HeaderTD, TableType::Table),
-    (HeaderNumbers, TableType::Table),
-    (Headers, TableType::Table),
-    (BlockBodyIndices, TableType::Table),
-    (BlockOmmers, TableType::Table),
-    (BlockWithdrawals, TableType::Table),
-    (TransactionBlock, TableType::Table),
-    (Transactions, TableType::Table),
-    (TxHashNumber, TableType::Table),
-    (Receipts, TableType::Table),
-    (PlainAccountState, TableType::Table),
-    (PlainStorageState, TableType::DupSort),
-    (Bytecodes, TableType::Table),
-    (AccountHistory, TableType::Table),
-    (StorageHistory, TableType::Table),
-    (AccountChangeSet, TableType::DupSort),
-    (StorageChangeSet, TableType::DupSort),
-    (HashedAccount, TableType::Table),
-    (HashedStorage, TableType::DupSort),
-    (AccountsTrie, TableType::Table),
-    (StoragesTrie, TableType::DupSort),
-    (TxSenders, TableType::Table),
-    (SyncStage, TableType::Table),
-    (SyncStageProgress, TableType::Table),
-    (PruneCheckpoints, TableType::Table)
-]);
+tables!(
+    Tables,
+    NUM_TABLES,
+    [
+        (CanonicalHeaders, TableType::Table),
+        (HeaderTD, TableType::Table),
+        (HeaderNumbers, TableType::Table),
+        (Headers, TableType::Table),
+        (BlockBodyIndices, TableType::Table),
+        (BlockOmmers, TableType::Table),
+        (BlockWithdrawals, TableType::Table),
+        (TransactionBlock, TableType::Table),
+        (Transactions, TableType::Table),
+        (TxHashNumber, TableType::Table),
+        (Receipts, TableType::Table),
+        (PlainAccountState, TableType::Table),
+        (PlainStorageState, TableType::DupSort),
+        (Bytecodes, TableType::Table),
+        (AccountHistory, TableType::Table),
+        (StorageHistory, TableType::Table),
+        (AccountChangeSet, TableType::DupSort),
+        (StorageChangeSet, TableType::DupSort),
+        (HashedAccount, TableType::Table),
+        (HashedStorage, TableType::DupSort),
+        (AccountsTrie, TableType::Table),
+        (StoragesTrie, TableType::DupSort),
+        (TxSenders, TableType::Table),
+        (SyncStage, TableType::Table),
+        (SyncStageProgress, TableType::Table),
+        (PruneCheckpoints, TableType::Table)
+    ]
+);
 
 #[macro_export]
 /// Macro to declare key value table.
@@ -472,5 +511,10 @@ mod tests {
             assert_eq!(table.table_type(), table_type);
             assert_eq!(table.name(), table_name);
         }
+    }
+
+    #[test]
+    fn check_tables_length() {
+        assert_eq!(Tables::all_tables_in_group().len(), NUM_TABLES);
     }
 }

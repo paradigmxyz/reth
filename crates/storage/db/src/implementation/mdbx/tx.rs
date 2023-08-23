@@ -3,7 +3,7 @@
 use super::cursor::Cursor;
 use crate::{
     table::{Compress, DupSort, Encode, Table, TableImporter},
-    tables::{utils::decode_one, Tables, NUM_TABLES},
+    tables::{utils::decode_one, Tables},
     transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
     DatabaseError,
 };
@@ -19,7 +19,7 @@ pub struct Tx<'a, K: TransactionKind, E: EnvironmentKind> {
     /// Libmdbx-sys transaction.
     pub inner: Transaction<'a, K, E>,
     /// Database table handle cache
-    pub db_handles: Arc<RwLock<[Option<DBI>; NUM_TABLES]>>,
+    pub db_handles: Arc<RwLock<Vec<Option<DBI>>>>,
 }
 
 impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
@@ -42,17 +42,17 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
 
         let table = Tables::from_str(T::NAME).expect("Requested table should be part of `Tables`.");
 
-        let dbi_handle = handles.get_mut(table as usize).expect("should exist");
-        if dbi_handle.is_none() {
-            *dbi_handle = Some(
-                self.inner
+        match handles.get_mut(table as usize) {
+            Some(Some(index)) => return Ok(*index),
+            Some(None) | None => {
+                // Either guard contains no table handle, or no available handle guard.
+                return Ok(self
+                    .inner
                     .open_db(Some(T::NAME))
                     .map_err(|e| DatabaseError::InitCursor(e.into()))?
-                    .dbi(),
-            );
+                    .dbi())
+            }
         }
-
-        Ok(dbi_handle.expect("is some; qed"))
     }
 
     /// Create db Cursor

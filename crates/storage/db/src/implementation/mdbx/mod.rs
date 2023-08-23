@@ -4,7 +4,7 @@ use crate::{
     database::{Database, DatabaseGAT},
     tables::{TableType, Tables},
     utils::default_page_size,
-    DatabaseError,
+    DatabaseError, TableMetadata,
 };
 use reth_interfaces::db::LogLevel;
 use reth_libmdbx::{
@@ -66,6 +66,7 @@ impl<E: EnvironmentKind> Env<E> {
         path: &Path,
         kind: EnvKind,
         log_level: Option<LogLevel>,
+        max_tables: usize,
     ) -> Result<Env<E>, DatabaseError> {
         let mode = match kind {
             EnvKind::RO => Mode::ReadOnly,
@@ -73,7 +74,7 @@ impl<E: EnvironmentKind> Env<E> {
         };
 
         let mut inner_env = Environment::new();
-        inner_env.set_max_dbs(Tables::ALL.len());
+        inner_env.set_max_dbs(max_tables);
         inner_env.set_geometry(Geometry {
             // Maximum database size of 4 terabytes
             size: Some(0..(4 * TERABYTE)),
@@ -127,19 +128,32 @@ impl<E: EnvironmentKind> Env<E> {
     }
 
     /// Creates all the defined tables, if necessary.
-    pub fn create_tables(&self) -> Result<(), DatabaseError> {
+    pub fn create_tables<T: TableMetadata>(
+        &self,
+        non_core_tables: Option<Vec<T>>,
+    ) -> Result<(), DatabaseError> {
         let tx = self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTransaction(e.into()))?;
-
-        for table in Tables::ALL {
+        // Core
+        for table in Tables::all_tables_in_group() {
             let flags = match table.table_type() {
                 TableType::Table => DatabaseFlags::default(),
                 TableType::DupSort => DatabaseFlags::DUP_SORT,
             };
-
             tx.create_db(Some(table.name()), flags)
                 .map_err(|e| DatabaseError::TableCreation(e.into()))?;
         }
+        // Non-core
+        if let Some(tables) = non_core_tables {
+            for table in tables {
+                let flags = match table.table_type() {
+                    TableType::Table => DatabaseFlags::default(),
+                    TableType::DupSort => DatabaseFlags::DUP_SORT,
+                };
 
+                tx.create_db(Some(table.name()), flags)
+                    .map_err(|e| DatabaseError::TableCreation(e.into()))?;
+            }
+        }
         tx.commit().map_err(|e| DatabaseError::Commit(e.into()))?;
 
         Ok(())
@@ -165,7 +179,7 @@ mod tests {
         tables::{AccountHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState},
         test_utils::*,
         transaction::{DbTx, DbTxMut},
-        AccountChangeSet, DatabaseError,
+        AccountChangeSet, DatabaseError, NUM_TABLES,
     };
     use reth_interfaces::db::DatabaseWriteOperation;
     use reth_libmdbx::{NoWriteMap, WriteMap};
@@ -175,16 +189,26 @@ mod tests {
 
     /// Create database for testing
     fn create_test_db<E: EnvironmentKind>(kind: EnvKind) -> Arc<Env<E>> {
+        let non_core_tables: Option<Vec<Tables>> = None;
         Arc::new(create_test_db_with_path(
             kind,
             &tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
+            non_core_tables,
         ))
     }
 
     /// Create database for testing with specified path
-    fn create_test_db_with_path<E: EnvironmentKind>(kind: EnvKind, path: &Path) -> Env<E> {
-        let env = Env::<E>::open(path, kind, None).expect(ERROR_DB_CREATION);
-        env.create_tables().expect(ERROR_TABLE_CREATION);
+    fn create_test_db_with_path<E: EnvironmentKind, T: TableMetadata>(
+        kind: EnvKind,
+        path: &Path,
+        non_core_tables: Option<Vec<T>>,
+    ) -> Env<E> {
+        let mut max_tables = NUM_TABLES;
+        if let Some(non_core) = &non_core_tables {
+            max_tables += non_core.len();
+        };
+        let env = Env::<E>::open(path, kind, None, max_tables).expect(ERROR_DB_CREATION);
+        env.create_tables(non_core_tables).expect(ERROR_TABLE_CREATION);
         env
     }
 
@@ -784,7 +808,6 @@ mod tests {
     #[test]
     fn db_closure_put_get() {
         let path = TempDir::new().expect(ERROR_TEMPDIR).into_path();
-
         let value = Account {
             nonce: 18446744073709551615,
             bytecode_hash: Some(H256::random()),
@@ -794,7 +817,7 @@ mod tests {
             .expect(ERROR_ETH_ADDRESS);
 
         {
-            let env = create_test_db_with_path::<WriteMap>(EnvKind::RW, &path);
+            let env = create_test_db_with_path::<WriteMap, Tables>(EnvKind::RW, &path, None);
 
             // PUT
             let result = env.update(|tx| {
@@ -804,7 +827,8 @@ mod tests {
             assert!(result.expect(ERROR_RETURN_VALUE) == 200);
         }
 
-        let env = Env::<WriteMap>::open(&path, EnvKind::RO, None).expect(ERROR_DB_CREATION);
+        let env =
+            Env::<WriteMap>::open(&path, EnvKind::RO, None, NUM_TABLES).expect(ERROR_DB_CREATION);
 
         // GET
         let result =

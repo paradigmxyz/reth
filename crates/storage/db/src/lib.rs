@@ -105,7 +105,11 @@ use std::path::Path;
 
 /// Opens up an existing database or creates a new one at the specified path. Creates tables if
 /// necessary. Read/Write mode.
-pub fn init_db<P: AsRef<Path>>(path: P, log_level: Option<LogLevel>) -> eyre::Result<DatabaseEnv> {
+pub fn init_db<P: AsRef<Path>, T: TableMetadata>(
+    path: P,
+    log_level: Option<LogLevel>,
+    non_core_tables: Option<Vec<T>>,
+) -> eyre::Result<DatabaseEnv> {
     use crate::version::{check_db_version_file, create_db_version_file, DatabaseVersionError};
 
     let rpath = path.as_ref();
@@ -122,8 +126,12 @@ pub fn init_db<P: AsRef<Path>>(path: P, log_level: Option<LogLevel>) -> eyre::Re
     }
     #[cfg(feature = "mdbx")]
     {
-        let db = DatabaseEnv::open(rpath, EnvKind::RW, log_level)?;
-        db.create_tables()?;
+        let mut max_tables = Tables::NUM_TABLES;
+        if let Some(non_core) = &non_core_tables {
+            max_tables += non_core.len();
+        };
+        let db = DatabaseEnv::open(rpath, EnvKind::RW, log_level, max_tables)?;
+        db.create_tables(non_core_tables)?;
         Ok(db)
     }
     #[cfg(not(feature = "mdbx"))]
@@ -133,10 +141,18 @@ pub fn init_db<P: AsRef<Path>>(path: P, log_level: Option<LogLevel>) -> eyre::Re
 }
 
 /// Opens up an existing database. Read only mode. It doesn't create it or create tables if missing.
-pub fn open_db_read_only(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<DatabaseEnvRO> {
+pub fn open_db_read_only<T: TableMetadata>(
+    path: &Path,
+    log_level: Option<LogLevel>,
+    non_core_tables: Option<Vec<T>>,
+) -> eyre::Result<DatabaseEnvRO> {
     #[cfg(feature = "mdbx")]
     {
-        Env::<NoWriteMap>::open(path, EnvKind::RO, log_level)
+        let mut max_tables = NUM_TABLES;
+        if let Some(non_core) = non_core_tables {
+            max_tables += non_core.len();
+        };
+        Env::<NoWriteMap>::open(path, EnvKind::RO, log_level, max_tables)
             .with_context(|| format!("Could not open database at path: {}", path.display()))
     }
     #[cfg(not(feature = "mdbx"))]
@@ -147,10 +163,18 @@ pub fn open_db_read_only(path: &Path, log_level: Option<LogLevel>) -> eyre::Resu
 
 /// Opens up an existing database. Read/Write mode. It doesn't create it or create tables if
 /// missing.
-pub fn open_db(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<DatabaseEnv> {
+pub fn open_db<T: TableMetadata>(
+    path: &Path,
+    log_level: Option<LogLevel>,
+    non_core_tables: Option<Vec<T>>,
+) -> eyre::Result<DatabaseEnv> {
     #[cfg(feature = "mdbx")]
     {
-        Env::<WriteMap>::open(path, EnvKind::RW, log_level)
+        let mut max_tables = NUM_TABLES;
+        if let Some(non_core) = non_core_tables {
+            max_tables += non_core.len();
+        };
+        Env::<WriteMap>::open(path, EnvKind::RW, log_level, max_tables)
             .with_context(|| format!("Could not open database at path: {}", path.display()))
     }
     #[cfg(not(feature = "mdbx"))]
@@ -163,7 +187,7 @@ pub fn open_db(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<Databas
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {
     use super::*;
-    use std::sync::Arc;
+    use std::{path::Path, sync::Arc};
 
     /// Error during database open
     pub const ERROR_DB_OPEN: &str = "Not able to open the database file.";
@@ -177,28 +201,34 @@ pub mod test_utils {
     /// Create read/write database for testing
     pub fn create_test_rw_db() -> Arc<DatabaseEnv> {
         Arc::new(
-            init_db(tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(), None)
-                .expect(ERROR_DB_CREATION),
+            init_db::<_, Tables>(
+                tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
+                None,
+                None,
+            )
+            .expect(ERROR_DB_CREATION),
         )
     }
 
     /// Create read/write database for testing
     pub fn create_test_rw_db_with_path<P: AsRef<Path>>(path: P) -> Arc<DatabaseEnv> {
-        Arc::new(init_db(path.as_ref(), None).expect(ERROR_DB_CREATION))
+        Arc::new(init_db::<&Path, Tables>(path.as_ref(), None, None).expect(ERROR_DB_CREATION))
     }
 
     /// Create read only database for testing
-    pub fn create_test_ro_db() -> Arc<DatabaseEnvRO> {
+    pub fn create_test_ro_db<T: TableMetadata>() -> Arc<DatabaseEnvRO> {
         let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
         {
-            init_db(path.as_path(), None).expect(ERROR_DB_CREATION);
+            init_db::<&Path, T>(path.as_path(), None, None).expect(ERROR_DB_CREATION);
         }
-        Arc::new(open_db_read_only(path.as_path(), None).expect(ERROR_DB_OPEN))
+        Arc::new(open_db_read_only::<T>(path.as_path(), None, None).expect(ERROR_DB_OPEN))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use crate::{
         init_db,
         version::{db_version_file_path, DatabaseVersionError},
@@ -209,16 +239,17 @@ mod tests {
     #[test]
     fn db_version() {
         let path = tempdir().unwrap();
-
         // Database is empty
         {
-            let db = init_db(&path, None);
+            let non_core_tables: Option<Vec<Tables>> = None;
+            let db = init_db(&path, None, non_core_tables);
             assert_matches!(db, Ok(_));
         }
 
         // Database is not empty, current version is the same as in the file
         {
-            let db = init_db(&path, None);
+            let non_core_tables: Option<Vec<Tables>> = None;
+            let db = init_db(&path, None, non_core_tables);
             assert_matches!(db, Ok(_));
         }
 
@@ -226,7 +257,8 @@ mod tests {
         {
             std::fs::write(path.path().join(db_version_file_path(&path)), "invalid-version")
                 .unwrap();
-            let db = init_db(&path, None);
+            let non_core_tables: Option<Vec<Tables>> = None;
+            let db = init_db(&path, None, non_core_tables);
             assert!(db.is_err());
             assert_matches!(
                 db.unwrap_err().downcast_ref::<DatabaseVersionError>(),
@@ -237,7 +269,8 @@ mod tests {
         // Database is not empty, version file contains not matching version
         {
             std::fs::write(path.path().join(db_version_file_path(&path)), "0").unwrap();
-            let db = init_db(&path, None);
+            let non_core_tables: Option<Vec<Tables>> = None;
+            let db = init_db(&path, None, non_core_tables);
             assert!(db.is_err());
             assert_matches!(
                 db.unwrap_err().downcast_ref::<DatabaseVersionError>(),
