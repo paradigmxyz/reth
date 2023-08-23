@@ -101,22 +101,24 @@ where
         let sender = db.load_account(sequencer_tx.signer())?.clone();
         let mut sender_new = sender.clone();
 
-        // If the transaction is a deposit, we need to disable the base fee, balance check, and
-        // gas refund. We also need to disable the block gas limit if the Regolith hardfork is not
-        // active. In addition, we need to increase the sender's balance by the mint value of the
-        // deposit transaction if it is `Some(n)`.
+        // Before regolith, deposit transaction gas accounting was as follows:
+        // - System tx: 0 gas used
+        // - Regular Deposit tx: gas used = gas limit
         //
-        // Otherwise, we need to decrement the sender's balance by the L1 cost of the transaction
-        // prior to execution.
+        // After regolith, system transactions are deprecated and deposit transactions report the
+        // gas used during execution. All deposit transactions execute the gas refund for
+        // accounting (it is a noop because of the gas price), but still skip coinbase payments.
+        //
+        // Deposit transactions only report this gas - their gas is prepaid on L1 and
+        // the gas price is always 0. Deposit txs should not be subject to any regular
+        // balance checks, base fee checks, or block gas limit checks.
         if sequencer_tx.is_deposit() {
             cfg.disable_base_fee = true;
             cfg.disable_balance_check = true;
-            cfg.disable_gas_refund = true;
+            cfg.disable_block_gas_limit = true;
 
-            // If the Regolith hardfork is active, we do not need to disable the block gas limit.
-            // Otherwise, we allow for the block gas limit to be exceeded by deposit transactions.
             if !is_regolith {
-                cfg.disable_block_gas_limit = true;
+                cfg.disable_gas_refund = true;
             }
 
             // Increase the sender's balance in the database if the deposit transaction mints eth.
@@ -157,24 +159,7 @@ where
         evm.database(&mut db);
 
         let ResultAndState { result, state } = match evm.transact() {
-            Ok(res) => {
-                if !res.result.is_success() && sequencer_tx.is_deposit() {
-                    // Manually bump the nonce and include a receipt for the deposit transaction.
-                    let sender = sequencer_tx.signer();
-                    fail_deposit_tx!(
-                        db,
-                        sender,
-                        block_number,
-                        sequencer_tx,
-                        post_state,
-                        cumulative_gas_used,
-                        is_regolith,
-                        PayloadBuilderError::AccountLoadFailed(sender)
-                    );
-                    continue
-                }
-                res
-            }
+            Ok(res) => res,
             Err(err) => {
                 if sequencer_tx.is_deposit() {
                     // Manually bump the nonce and include a receipt for the deposit transaction.
@@ -184,8 +169,8 @@ where
                         sender,
                         block_number,
                         sequencer_tx,
-                        post_state,
-                        cumulative_gas_used,
+                        &mut post_state,
+                        &mut cumulative_gas_used,
                         is_regolith,
                         PayloadBuilderError::AccountLoadFailed(sender)
                     );
@@ -227,7 +212,9 @@ where
             // system transactions are not included in the cumulative gas and their execution
             // gas is ignored. Post regolith, system transactions are deprecated and no longer
             // exist.
-            if is_regolith || !sequencer_tx.is_deposit() {
+            if sequencer_tx.is_deposit() && !result.is_success() {
+                cumulative_gas_used += sequencer_tx.gas_limit();
+            } else if is_regolith || !sequencer_tx.is_deposit() {
                 cumulative_gas_used += result.gas_used()
             } else if sequencer_tx.is_deposit() && !sequencer_tx.is_system_transaction() {
                 cumulative_gas_used += sequencer_tx.gas_limit();

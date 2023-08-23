@@ -2,17 +2,16 @@ use crate::{
     database::SubState,
     env::{fill_cfg_and_block_env, fill_tx_env},
     eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
-    into_reth_log,
     stack::{InspectorStack, InspectorStackConfig},
     to_reth_acc,
 };
 use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
-    bytes::BytesMut, Account, Address, Block, BlockNumber, Bloom, Bytecode, ChainSpec, Hardfork,
-    Header, Receipt, ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
+    Account, Address, Block, BlockNumber, Bloom, Bytecode, ChainSpec, Hardfork, Header, Receipt,
+    ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
 };
-use reth_provider::{BlockExecutor, PostState, StateProvider};
+use reth_provider::{PostState, StateProvider};
 use revm::{
     db::{AccountState, CacheDB, DatabaseRef, DbAccount},
     primitives::{
@@ -26,6 +25,13 @@ use std::{
     sync::Arc,
 };
 
+#[cfg(not(feature = "optimism"))]
+use crate::into_reth_log;
+#[cfg(not(feature = "optimism"))]
+use reth_primitives::bytes::BytesMut;
+#[cfg(not(feature = "optimism"))]
+use reth_provider::BlockExecutor;
+
 #[cfg(feature = "optimism")]
 pub use crate::optimism;
 
@@ -36,8 +42,8 @@ where
 {
     /// The configured chain-spec
     pub chain_spec: Arc<ChainSpec>,
-    evm: EVM<SubState<DB>>,
-    stack: InspectorStack,
+    pub(crate) evm: EVM<SubState<DB>>,
+    pub(crate) stack: InspectorStack,
 }
 
 impl<DB> From<Arc<ChainSpec>> for Executor<DB>
@@ -75,7 +81,7 @@ where
         self.evm.db().expect("db to not be moved")
     }
 
-    fn recover_senders(
+    pub(crate) fn recover_senders(
         &self,
         body: &[TransactionSigned],
         senders: Option<Vec<Address>>,
@@ -93,7 +99,7 @@ where
     }
 
     /// Initializes the config and block env.
-    fn init_env(&mut self, header: &Header, total_difficulty: U256) {
+    pub(crate) fn init_env(&mut self, header: &Header, total_difficulty: U256) {
         fill_cfg_and_block_env(
             &mut self.evm.env.cfg,
             &mut self.evm.env.block,
@@ -105,7 +111,7 @@ where
 
     /// Commit change to the run-time database, and update the given [PostState] with the changes
     /// made in the transaction, which can be persisted to the database.
-    fn commit_changes(
+    pub(crate) fn commit_changes(
         &mut self,
         block_number: BlockNumber,
         changes: hash_map::HashMap<Address, RevmAccount>,
@@ -134,7 +140,7 @@ where
     }
 
     /// Irregular state change at Ethereum DAO hardfork
-    fn apply_dao_fork_changes(
+    pub(crate) fn apply_dao_fork_changes(
         &mut self,
         block_number: BlockNumber,
         post_state: &mut PostState,
@@ -163,7 +169,7 @@ where
     }
 
     /// Increment the balance for the given account in the [PostState].
-    fn increment_account_balance(
+    pub(crate) fn increment_account_balance(
         &mut self,
         block_number: BlockNumber,
         address: Address,
@@ -175,7 +181,7 @@ where
     }
 
     /// Decrement the balance for the given account in the [PostState].
-    fn decrement_account_balance(
+    pub(crate) fn decrement_account_balance(
         &mut self,
         block_number: BlockNumber,
         address: Address,
@@ -215,269 +221,6 @@ where
         out.map_err(|e| BlockValidationError::EVM { hash, message: format!("{e:?}") }.into())
     }
 
-    /// Runs the provided transactions and commits their state to the run-time database.
-    ///
-    /// The returned [PostState] can be used to persist the changes to disk, and contains the
-    /// changes made by each transaction.
-    ///
-    /// The changes in [PostState] have a transition ID associated with them: there is one
-    /// transition ID for each transaction (with the first executed tx having transition ID 0, and
-    /// so on).
-    ///
-    /// The second returned value represents the total gas used by this block of transactions.
-    pub fn execute_transactions(
-        &mut self,
-        block: &Block,
-        total_difficulty: U256,
-        senders: Option<Vec<Address>>,
-    ) -> Result<(PostState, u64), BlockExecutionError> {
-        // perf: do not execute empty blocks
-        if block.body.is_empty() {
-            return Ok((PostState::default(), 0))
-        }
-        let senders = self.recover_senders(&block.body, senders)?;
-
-        self.init_env(&block.header, total_difficulty);
-
-        #[cfg(feature = "optimism")]
-        let l1_block_info =
-            self.chain_spec.optimism.then(|| optimism::L1BlockInfo::try_from(block)).transpose()?;
-
-        // TODO(clabby): OP needs a gas pool.
-        let mut cumulative_gas_used = 0;
-        let mut post_state = PostState::with_tx_capacity(block.number, block.body.len());
-        for (transaction, sender) in block.body.iter().zip(senders) {
-            // The sum of the transaction’s gas limit, Tg, and the gas utilised in this block prior,
-            // must be no greater than the block’s gasLimit.
-            let block_available_gas = block.header.gas_limit - cumulative_gas_used;
-
-            #[cfg(feature = "optimism")]
-            {
-                let is_regolith =
-                    self.chain_spec.fork(Hardfork::Regolith).active_at_timestamp(block.timestamp);
-
-                if transaction.gas_limit() > block_available_gas &&
-                    (is_regolith || !transaction.is_system_transaction())
-                {
-                    return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                        transaction_gas_limit: transaction.gas_limit(),
-                        block_available_gas,
-                    }
-                    .into())
-                }
-
-                if transaction.is_deposit() && !is_regolith {
-                    self.evm.env.cfg.disable_base_fee = true;
-                    self.evm.env.cfg.disable_block_gas_limit = true;
-                    self.evm.env.cfg.disable_balance_check = true;
-                    self.evm.env.cfg.disable_gas_refund = true;
-                }
-
-                if let Some(m) = transaction.mint() {
-                    // Add balance to the caler account equal to the minted amount.
-                    // Note: This is unconditional, and will not be reverted if the tx fails
-                    // (unless the block can't be built at all due to gas limit constraints)
-                    self.increment_account_balance(
-                        block.number,
-                        sender,
-                        U256::from(m),
-                        &mut post_state,
-                    )?;
-                }
-
-                let chain_spec = Arc::clone(&self.chain_spec);
-                let db = self.db();
-
-                let mut encoded = BytesMut::default();
-                transaction.encode_enveloped(&mut encoded);
-                let l1_cost = l1_block_info.as_ref().map(|l1_block_info| {
-                    l1_block_info.calculate_tx_l1_cost(
-                        chain_spec,
-                        block.timestamp,
-                        &encoded.freeze().into(),
-                        transaction.is_deposit(),
-                    )
-                });
-
-                let sender_account = db
-                    .load_account(sender)
-                    .map_err(|_| BlockExecutionError::ProviderError)?
-                    .clone();
-
-                if let Some(l1_cost) = l1_cost {
-                    // Check if the sender balance can cover the L1 cost.
-                    // Deposits pay for their gas directly on L1 so they are exempt from the L2
-                    // tx fee.
-                    if !transaction.is_deposit() {
-                        if sender_account.info.balance.cmp(&l1_cost) == std::cmp::Ordering::Less {
-                            return Err(BlockExecutionError::InsufficientFundsForL1Cost {
-                                have: sender_account.info.balance.to::<u64>(),
-                                want: l1_cost.to::<u64>(),
-                            })
-                        }
-
-                        // Safely take l1_cost from sender (the rest will be deducted by the
-                        // internal EVM execution and included in result.gas_used())
-                        // TODO: need to handle calls with `disable_balance_check` flag set?
-                        self.decrement_account_balance(
-                            block.number,
-                            sender,
-                            l1_cost,
-                            &mut post_state,
-                        )?;
-                    }
-                }
-
-                // Execute transaction.
-                let ResultAndState { result, state } = match self.transact(transaction, sender) {
-                    Ok(res) => {
-                        if transaction.is_deposit() && !res.result.is_success() {
-                            let db = self.db();
-                            let block_number = block.number;
-                            optimism::executor::fail_deposit_tx!(
-                                db,
-                                sender,
-                                block_number,
-                                transaction,
-                                post_state,
-                                cumulative_gas_used,
-                                is_regolith,
-                                BlockExecutionError::ProviderError
-                            );
-                        }
-                        res
-                    }
-                    Err(err) => {
-                        if transaction.is_deposit() {
-                            let db = self.db();
-                            let block_number = block.number;
-                            optimism::executor::fail_deposit_tx!(
-                                db,
-                                sender,
-                                block_number,
-                                transaction,
-                                post_state,
-                                cumulative_gas_used,
-                                is_regolith,
-                                BlockExecutionError::ProviderError
-                            );
-                            continue
-                        }
-                        return Err(err)
-                    }
-                };
-
-                // commit changes
-                self.commit_changes(
-                    block.number,
-                    state,
-                    self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(block.number),
-                    &mut post_state,
-                );
-
-                // Pay out fees to Optimism vaults.
-                if self.chain_spec.optimism {
-                    if is_regolith || !transaction.is_deposit() {
-                        cumulative_gas_used += result.gas_used()
-                    } else if transaction.is_deposit() && !transaction.is_system_transaction() {
-                        cumulative_gas_used += transaction.gas_limit();
-                    }
-                    if !transaction.is_deposit() {
-                        // Route the l1 cost and base fee to the appropriate optimism vaults
-                        if let Some(l1_cost) = l1_cost {
-                            self.increment_account_balance(
-                                block.number,
-                                optimism::l1_cost_recipient(),
-                                l1_cost,
-                                &mut post_state,
-                            )?
-                        }
-                        self.increment_account_balance(
-                            block.number,
-                            optimism::base_fee_recipient(),
-                            U256::from(
-                                block
-                                    .base_fee_per_gas
-                                    .unwrap_or_default()
-                                    .saturating_mul(result.gas_used()),
-                            ),
-                            &mut post_state,
-                        )?;
-                    }
-                } else {
-                    cumulative_gas_used += result.gas_used();
-                }
-
-                // cast revm logs to reth logs
-                let logs = result.logs().into_iter().map(into_reth_log).collect();
-
-                // Push transaction changeset and calculate header bloom filter for receipt.
-                post_state.add_receipt(
-                    block.number,
-                    Receipt {
-                        tx_type: transaction.tx_type(),
-                        // Success flag was added in `EIP-658: Embedding transaction status code in
-                        // receipts`.
-                        success: result.is_success(),
-                        cumulative_gas_used,
-                        logs,
-                        // Deposit nonce is only recorded after Regolith for deposit transactions.
-                        deposit_nonce: (is_regolith && transaction.is_deposit())
-                            .then_some(sender_account.info.nonce),
-                    },
-                );
-
-                if transaction.is_deposit() && !is_regolith {
-                    self.evm.env.cfg.disable_base_fee = false;
-                    self.evm.env.cfg.disable_block_gas_limit = false;
-                    self.evm.env.cfg.disable_balance_check = false;
-                    self.evm.env.cfg.disable_gas_refund = false;
-                }
-            }
-
-            #[cfg(not(feature = "optimism"))]
-            {
-                if transaction.gas_limit() > block_available_gas {
-                    return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                        transaction_gas_limit: transaction.gas_limit(),
-                        block_available_gas,
-                    }
-                    .into())
-                }
-
-                // Execute transaction.
-                let ResultAndState { result, state } = self.transact(transaction, sender)?;
-
-                // commit changes
-                self.commit_changes(
-                    block.number,
-                    state,
-                    self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(block.number),
-                    &mut post_state,
-                );
-
-                // append gas used
-                cumulative_gas_used += result.gas_used();
-
-                // Push transaction changeset and calculate header bloom filter for receipt.
-                post_state.add_receipt(
-                    block.number,
-                    Receipt {
-                        tx_type: transaction.tx_type(),
-                        // Success flag was added in `EIP-658: Embedding transaction status code in
-                        // receipts`.
-                        success: result.is_success(),
-                        cumulative_gas_used,
-                        // convert to reth log
-                        logs: result.into_logs().into_iter().map(into_reth_log).collect(),
-                    },
-                );
-            }
-        }
-
-        Ok((post_state, cumulative_gas_used))
-    }
-
     /// Applies the post-block changes, assuming the poststate is generated after executing
     /// tranactions
     pub fn apply_post_block_changes(
@@ -500,6 +243,7 @@ where
     }
 }
 
+#[cfg(not(feature = "optimism"))]
 impl<DB> BlockExecutor<DB> for Executor<DB>
 where
     DB: StateProvider,
@@ -546,6 +290,65 @@ where
         }
 
         Ok(post_state)
+    }
+
+    fn execute_transactions(
+        &mut self,
+        block: &Block,
+        total_difficulty: U256,
+        senders: Option<Vec<Address>>,
+    ) -> Result<(PostState, u64), BlockExecutionError> {
+        // perf: do not execute empty blocks
+        if block.body.is_empty() {
+            return Ok((PostState::default(), 0))
+        }
+        let senders = self.recover_senders(&block.body, senders)?;
+
+        self.init_env(&block.header, total_difficulty);
+
+        let mut cumulative_gas_used = 0;
+        let mut post_state = PostState::with_tx_capacity(block.number, block.body.len());
+        for (transaction, sender) in block.body.iter().zip(senders) {
+            // The sum of the transaction’s gas limit, Tg, and the gas utilised in this block prior,
+            // must be no greater than the block’s gasLimit.
+            let block_available_gas = block.header.gas_limit - cumulative_gas_used;
+            if transaction.gas_limit() > block_available_gas {
+                return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                    transaction_gas_limit: transaction.gas_limit(),
+                    block_available_gas,
+                }
+                .into())
+            }
+            // Execute transaction.
+            let ResultAndState { result, state } = self.transact(transaction, sender)?;
+
+            // commit changes
+            self.commit_changes(
+                block.number,
+                state,
+                self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(block.number),
+                &mut post_state,
+            );
+
+            // append gas used
+            cumulative_gas_used += result.gas_used();
+
+            // Push transaction changeset and calculate header bloom filter for receipt.
+            post_state.add_receipt(
+                block.number,
+                Receipt {
+                    tx_type: transaction.tx_type(),
+                    // Success flag was added in `EIP-658: Embedding transaction status code in
+                    // receipts`.
+                    success: result.is_success(),
+                    cumulative_gas_used,
+                    // convert to reth log
+                    logs: result.into_logs().into_iter().map(into_reth_log).collect(),
+                },
+            );
+        }
+
+        Ok((post_state, cumulative_gas_used))
     }
 }
 
@@ -899,7 +702,7 @@ mod tests {
     };
     use reth_provider::{
         post_state::{AccountChanges, Storage, StorageTransition, StorageWipe},
-        AccountReader, BlockHashReader, StateProvider, StateRootProvider,
+        AccountReader, BlockExecutor, BlockHashReader, StateProvider, StateRootProvider,
     };
     use reth_rlp::Decodable;
     use std::{collections::HashMap, str::FromStr};
