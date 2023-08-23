@@ -10,8 +10,9 @@ use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hard
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadEnvelope, ForkchoiceUpdated,
-    PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration, CAPABILITIES,
+    ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadEnvelopeV2,
+    ExecutionPayloadEnvelopeV3, ForkchoiceUpdated, PayloadAttributes, PayloadId, PayloadStatus,
+    TransitionConfiguration, CAPABILITIES,
 };
 use reth_tasks::TaskSpawner;
 use std::sync::Arc;
@@ -183,7 +184,7 @@ where
     pub async fn get_payload_v2(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<ExecutionPayloadEnvelope> {
+    ) -> EngineApiResult<ExecutionPayloadEnvelopeV2> {
         Ok(self
             .inner
             .payload_store
@@ -203,7 +204,7 @@ where
     pub async fn get_payload_v3(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<ExecutionPayloadEnvelope> {
+    ) -> EngineApiResult<ExecutionPayloadEnvelopeV3> {
         Ok(self
             .inner
             .payload_store
@@ -534,7 +535,7 @@ where
     ///
     /// Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
-    async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelope> {
+    async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelopeV2> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV2");
         Ok(EngineApi::get_payload_v2(self, payload_id).await?)
     }
@@ -548,7 +549,10 @@ where
     ///
     /// Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
-    async fn get_payload_v3(&self, _payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelope> {
+    async fn get_payload_v3(
+        &self,
+        _payload_id: PayloadId,
+    ) -> RpcResult<ExecutionPayloadEnvelopeV3> {
         Err(jsonrpsee_types::error::ErrorCode::MethodNotFound.into())
     }
 

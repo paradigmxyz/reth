@@ -2,8 +2,9 @@ use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{Address, BlockHash, BlockId, BlockNumberOrTag, Bytes, H256, U256, U64};
 use reth_rpc_types::{
     engine::{
-        ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadEnvelope, ForkchoiceState,
-        ForkchoiceUpdated, PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration,
+        ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadEnvelopeV2,
+        ExecutionPayloadEnvelopeV3, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes,
+        PayloadId, PayloadStatus, TransitionConfiguration,
     },
     state::StateOverride,
     BlockOverrides, CallRequest, Filter, Log, RichBlock, SyncStatus,
@@ -78,7 +79,7 @@ pub trait EngineApi {
     /// payload build process at the time of receiving this call. Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
     #[method(name = "getPayloadV2")]
-    async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelope>;
+    async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelopeV2>;
 
     /// Post Cancun payload handler which also returns a blobs bundle.
     ///
@@ -88,7 +89,7 @@ pub trait EngineApi {
     /// payload build process at the time of receiving this call. Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
     #[method(name = "getPayloadV3")]
-    async fn get_payload_v3(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelope>;
+    async fn get_payload_v3(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelopeV3>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
     #[method(name = "getPayloadBodiesByHashV1")]

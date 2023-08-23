@@ -6,7 +6,8 @@ use reth_primitives::{
 use reth_revm_primitives::config::revm_spec_by_timestamp_after_merge;
 use reth_rlp::Encodable;
 use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadEnvelope, PayloadAttributes, PayloadId,
+    ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, PayloadAttributes,
+    PayloadId,
 };
 use revm_primitives::{BlockEnv, CfgEnv};
 
@@ -62,15 +63,12 @@ impl BuiltPayload {
     }
 
     /// Converts the type into the response expected by `engine_getPayloadV2`
-    pub fn into_v2_payload(self) -> ExecutionPayloadEnvelope {
-        let mut envelope: ExecutionPayloadEnvelope = self.into();
-        envelope.blobs_bundle = None;
-        envelope.should_override_builder = None;
-        envelope
+    pub fn into_v2_payload(self) -> ExecutionPayloadEnvelopeV2 {
+        self.into()
     }
 
     /// Converts the type into the response expected by `engine_getPayloadV2`
-    pub fn into_v3_payload(self) -> ExecutionPayloadEnvelope {
+    pub fn into_v3_payload(self) -> ExecutionPayloadEnvelopeV3 {
         self.into()
     }
 }
@@ -87,13 +85,20 @@ impl From<BuiltPayload> for ExecutionPayload {
 // have explicitly versioned return types for getPayload. Then BuiltPayload could essentially be a
 // builder for those types, and it would not be possible to e.g. return cancun fields for a
 // pre-cancun endpoint.
-impl From<BuiltPayload> for ExecutionPayloadEnvelope {
+impl From<BuiltPayload> for ExecutionPayloadEnvelopeV2 {
+    fn from(value: BuiltPayload) -> Self {
+        let BuiltPayload { block, fees, .. } = value;
+
+        ExecutionPayloadEnvelopeV2 { block_value: fees, payload: block.into() }
+    }
+}
+
+impl From<BuiltPayload> for ExecutionPayloadEnvelopeV3 {
     fn from(value: BuiltPayload) -> Self {
         let BuiltPayload { block, fees, sidecars, .. } = value;
 
-        ExecutionPayloadEnvelope {
-            block_value: fees,
-            payload: block.into(),
+        ExecutionPayloadEnvelopeV3 {
+            payload_inner: ExecutionPayloadEnvelopeV2 { payload: block.into(), block_value: fees },
             // From the engine API spec:
             //
             // > Client software **MAY** use any heuristics to decide whether to set
@@ -102,8 +107,8 @@ impl From<BuiltPayload> for ExecutionPayloadEnvelope {
             //
             // Spec:
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
-            should_override_builder: Some(false),
-            blobs_bundle: sidecars.map(Into::into),
+            should_override_builder: false,
+            blobs_bundle: sidecars.into(),
         }
     }
 }

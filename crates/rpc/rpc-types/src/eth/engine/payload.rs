@@ -31,13 +31,12 @@ impl std::fmt::Display for PayloadId {
 }
 
 /// This structure maps for the return value of `engine_getPayload` of the beacon chain spec, for
-/// both V2 and V3.
+/// V2.
 ///
 /// See also:
 /// <https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadv2>
-/// <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_getpayloadv3>
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExecutionPayloadEnvelope {
+pub struct ExecutionPayloadEnvelopeV2 {
     /// Execution payload, which could be either V1 or V2
     ///
     /// V1 (_NO_ withdrawals) MUST be returned if the payload timestamp is lower than the Shanghai
@@ -50,22 +49,33 @@ pub struct ExecutionPayloadEnvelope {
     /// The expected value to be received by the feeRecipient in wei
     #[serde(rename = "blockValue")]
     pub block_value: U256,
-    /// The blobs, commitments, and proofs associated with the executed payload.
-    #[serde(rename = "blobsBundle", skip_serializing_if = "Option::is_none")]
-    pub blobs_bundle: Option<BlobsBundleV1>,
-    /// Introduced in V3, this represents a suggestion from the execution layer if the payload
-    /// should be used instead of an externally provided one.
-    #[serde(rename = "shouldOverrideBuilder", skip_serializing_if = "Option::is_none")]
-    pub should_override_builder: Option<bool>,
 }
 
-impl ExecutionPayloadEnvelope {
+impl ExecutionPayloadEnvelopeV2 {
     /// Returns the [ExecutionPayload] for the `engine_getPayloadV1` endpoint
     pub fn into_v1_payload(mut self) -> ExecutionPayload {
         // ensure withdrawals are removed
         self.payload.withdrawals.take();
         self.payload
     }
+}
+
+/// This structure maps for the return value of `engine_getPayload` of the beacon chain spec, for
+/// V3.
+///
+/// See also:
+/// <https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadv2>
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionPayloadEnvelopeV3 {
+    /// Execution payload V2
+    #[serde(flatten)]
+    pub payload_inner: ExecutionPayloadEnvelopeV2,
+    /// The blobs, commitments, and proofs associated with the executed payload.
+    pub blobs_bundle: BlobsBundleV1,
+    /// Introduced in V3, this represents a suggestion from the execution layer if the payload
+    /// should be used instead of an externally provided one.
+    pub should_override_builder: bool,
 }
 
 /// This structure maps on the ExecutionPayload structure of the beacon chain spec.
