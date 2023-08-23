@@ -20,12 +20,12 @@ use reth_interfaces::{
     test_utils::{NoopFullBlockClient, TestConsensus},
 };
 use reth_payload_builder::test_utils::spawn_test_payload_service;
-use reth_primitives::{BlockNumber, ChainSpec, PruneModes, H256, U256};
+use reth_primitives::{BlockNumber, ChainSpec, PruneBatchSizes, PruneModes, H256, U256};
 use reth_provider::{
     providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockExecutor, ExecutorFactory,
     ProviderFactory, StateProvider,
 };
-use reth_prune::{BatchSizes, Pruner};
+use reth_prune::Pruner;
 use reth_revm::Factory;
 use reth_rpc_types::engine::{ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
 use reth_stages::{
@@ -470,7 +470,7 @@ where
             self.base_config.chain_spec.clone(),
             5,
             PruneModes::default(),
-            BatchSizes::default(),
+            PruneBatchSizes::default(),
         );
 
         let (mut engine, handle) = BeaconConsensusEngine::new(

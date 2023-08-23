@@ -135,7 +135,7 @@ where
     /// Returns an error if no matching log filter exists.
     ///
     /// Handler for `eth_getFilterLogs`
-    pub async fn filter_logs(&self, id: FilterId) -> Result<Vec<Log>, FilterError> {
+    pub async fn filter_logs(&self, id: FilterId) -> Result<FilterChanges, FilterError> {
         let filter = {
             let filters = self.inner.active_filters.inner.lock().await;
             if let FilterKind::Log(ref filter) =
@@ -148,7 +148,8 @@ where
             }
         };
 
-        self.inner.logs_for_filter(filter).await
+        let logs = self.inner.logs_for_filter(filter).await?;
+        Ok(FilterChanges::Logs(logs))
     }
 }
 
@@ -187,7 +188,7 @@ where
     /// Returns an error if no matching log filter exists.
     ///
     /// Handler for `eth_getFilterLogs`
-    async fn filter_logs(&self, id: FilterId) -> RpcResult<Vec<Log>> {
+    async fn filter_logs(&self, id: FilterId) -> RpcResult<FilterChanges> {
         trace!(target: "rpc::eth", "Serving eth_getFilterLogs");
         Ok(EthFilter::filter_logs(self, id).await?)
     }
