@@ -49,10 +49,14 @@ impl ReceiptsLogPruneConfig {
             // the BTreeMap (block = 0), otherwise it will be excluded.
             // Reminder that this BTreeMap works as an inclusion list that excludes (prunes) all
             // other receipts.
+            //
+            // Reminder, that we increment because the [`BlockNumber`] key of the new map should be
+            // viewed as `PruneMode::Before(block)`
             let block = (pruned_block + 1).max(
                 mode.prune_target_block(tip, MINIMUM_PRUNING_DISTANCE, PrunePart::ContractLogs)?
                     .map(|(block, _)| block)
-                    .unwrap_or_default(),
+                    .unwrap_or_default() +
+                    1,
             );
 
             map.entry(block).or_insert_with(Vec::new).push(address)
