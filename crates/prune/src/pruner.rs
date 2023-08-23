@@ -469,8 +469,8 @@ impl<DB: Database> Pruner<DB> {
             // This will clear all receipts before the first  appearance of a contract log or since
             // the block after the last pruned one.
             if block_ranges.is_empty() {
-                let init = last_pruned_block.and_then(|b| Some(b + 1)).unwrap_or_default();
-                if init <= *start_block - 1 {
+                let init = last_pruned_block.map(|b| b + 1).unwrap_or_default();
+                if init < *start_block {
                     block_ranges.push((init, *start_block - 1, 0));
                 }
             }
