@@ -4,7 +4,7 @@
 > and available only on `main` branch of the main repository now.
 
 By default, Reth runs as an archive node. Such nodes have all historical blocks and the state at each of these blocks
-available for querying and tracing on top of.
+available for querying and tracing.
 
 Reth also supports pruning of historical data and running as a full node. This chapter will walk through
 the steps for running Reth as a full node, what caveats to expect and how to configure your own pruned node.
@@ -12,9 +12,9 @@ the steps for running Reth as a full node, what caveats to expect and how to con
 ## Basic concepts
 
 - Archive node – Reth node that has all historical data from genesis.
-- Pruned node – Reth node that has its historical data pruned partially or fully via
+- Pruned node – Reth node that has its historical data pruned partially or fully through
 a [custom configuration](./config.md#the-prune-section).
-- Full Node – Reth node that has latest state and historical data for the last 128 blocks available
+- Full Node – Reth node that has the latest state and historical data for only the last 128 blocks available
 for querying in the same way as an archive node.
 
 The node type that was chosen when first [running a node](./run-a-node.md) **can not** be changed after
@@ -39,7 +39,7 @@ RUST_LOG=info reth node \
 
 ### Pruned Node
 
-To run Reth as a pruned node configured via a [custom configuration](./config.md#the-prune-section),
+To run Reth as a pruned node configured through a [custom configuration](./config.md#the-prune-section),
 modify the `reth.toml` file and run Reth in the same way as archive node by following the steps from
 the previous chapter on [how to run on mainnet or official testnets](./mainnet.md).
 
@@ -53,7 +53,7 @@ which can be pruned independently of each other:
 - Account History
 - Storage History
 
-Pruning of each of these parts disable different RPC methods,  because the historical data or lookup indexes
+Pruning of each of these parts disables different RPC methods,  because the historical data or lookup indexes
 become unavailable.
 
 > TODO: `prune parts / RPC methods` table that shows which RPCs becomes unavailable when  certain parts of the data
