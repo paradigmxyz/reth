@@ -332,6 +332,10 @@ Dev testnet:
           
           Parses strings using [humantime::parse_duration]
           --dev.block-time 12s
+          
+Pruning:
+      --full
+          Run full node. Only the most recent 128 block states are stored. This flag takes priority over pruning configuration in reth.toml
 
 Logging:
       --log.persistent
