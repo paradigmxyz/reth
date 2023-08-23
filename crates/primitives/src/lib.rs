@@ -81,7 +81,7 @@ pub use net::{
 };
 pub use peer::{PeerId, WithPeerId};
 pub use prune::{
-    ContractLogsPruneConfig, PruneCheckpoint, PruneMode, PruneModes, PrunePart, PrunePartError,
+    PruneCheckpoint, PruneMode, PruneModes, PrunePart, PrunePartError, ReceiptsLogPruneConfig,
     MINIMUM_PRUNING_DISTANCE,
 };
 pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef};

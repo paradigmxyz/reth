@@ -1,6 +1,6 @@
 use crate::{
     prune::PrunePartError, serde_helper::deserialize_opt_prune_mode_with_min_blocks, BlockNumber,
-    ContractLogsPruneConfig, PruneMode, PrunePart,
+    PruneMode, PrunePart, ReceiptsLogPruneConfig,
 };
 use paste::paste;
 use serde::{Deserialize, Serialize};
@@ -23,8 +23,8 @@ pub struct PruneModes {
     /// Transaction Lookup pruning configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transaction_lookup: Option<PruneMode>,
-    /// Configuration for pruning of receipts. This setting overrides
-    /// `PruneModes::contract_logs_filter` and offers improved performance.
+    /// Receipts pruning configuration. This setting overrides `receipts_log_filter`
+    /// and offers improved performance.
     #[serde(
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<64, _>"
@@ -42,12 +42,12 @@ pub struct PruneModes {
         deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<64, _>"
     )]
     pub storage_history: Option<PruneMode>,
-    /// Retains only those receipts that contain logs emitted by the specified addresses,
-    /// discarding all others. Note that this setting is overridden by `PruneModes::receipts`.
+    /// Receipts pruning configuration by retaining only those receipts that contain logs emitted
+    /// by the specified addresses, discarding others. This setting is overridden by `receipts`.
     ///
     /// The [`BlockNumber`] represents the starting block from which point onwards the receipts are
     /// preserved.
-    pub contract_logs_filter: ContractLogsPruneConfig,
+    pub receipts_log_filter: ReceiptsLogPruneConfig,
 }
 
 macro_rules! impl_prune_parts {
@@ -90,7 +90,7 @@ macro_rules! impl_prune_parts {
                 $(
                     $part: Some(PruneMode::Full),
                 )+
-                contract_logs_filter: Default::default()
+                receipts_log_filter: Default::default()
             }
         }
 

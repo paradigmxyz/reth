@@ -27,6 +27,7 @@ The configuration file contains the following sections:
   - [`reputation_weights`](#reputation_weights)
   - [`backoff_durations`](#backoff_durations)
 - [`[sessions]`](#the-sessions-section)
+- [`[prune]`](#the-prune-section)
 
 ## The `[stages]` section
 
@@ -328,6 +329,58 @@ nanos = 0
 [sessions.protocol_breach_request_timeout]
 secs = 120
 nanos = 0
+```
+
+## The `[prune]` section
+
+The prune section configures the pruning configuration.
+
+You can configure the pruning of different parts of the data independently of others.
+For any unspecified parts, the default setting is no pruning.
+
+### Default config
+
+No pruning, run as archive node.
+
+### Example of the custom pruning configuration
+
+This configuration will:
+- Run pruning every 5 blocks
+- Continuously prune all transaction senders, account history and storage history before the block `head-128`, i.e. keep the data for the last 129 blocks
+- Prune all receipts before the block 1920000, i.e. keep receipts from the block 1920000
+
+```toml
+[prune]
+# Minimum pruning interval measured in blocks
+block_interval = 5
+
+[prune.parts]
+# Sender Recovery pruning configuration
+sender_recovery = { distance = 128 } # Prune all transaction senders before the block `head-128`, i.e. keep transaction senders for the last 129 blocks
+
+# Transaction Lookup pruning configuration
+transaction_lookup = "full" # Prune all TxNumber => TxHash mappings
+
+# Receipts pruning configuration. This setting overrides `receipts_log_filter`.
+receipts = { before = 1920000 } # Prune all receipts from transactions before the block 1920000, i.e. keep receipts from the block 1920000
+
+# Account History pruning configuration
+account_history = { distance = 128 } # Prune all historical account states before the block `head-128`
+
+# Storage History pruning configuration
+storage_history = { distance = 128 } # Prune all historical storage states before the block `head-128`
+```
+
+We can also prune receipts more granular, using the logs filtering:
+```toml
+# Receipts pruning configuration by retaining only those receipts that contain logs emitted
+# by the specified addresses, discarding all others. This setting is overridden by `receipts`.
+[prune.parts.receipts_log_filter]
+# Prune all receipts, leaving only those which:
+# - Contain logs from address `0x7ea2be2df7ba6e54b1a9c70676f668455e329d29`, starting from the block 17000000
+# - Contain logs from address `0xdac17f958d2ee523a2206206994597c13d831ec7` in the last 1001 blocks
+"0x7ea2be2df7ba6e54b1a9c70676f668455e329d29" = { before = 17000000 }
+"0xdac17f958d2ee523a2206206994597c13d831ec7" = { distance = 1000 }
 ```
 
 [TOML]: https://toml.io/
