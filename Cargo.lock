@@ -5265,6 +5265,7 @@ dependencies = [
  "reth-rpc-builder",
  "reth-rpc-engine-api",
  "reth-rpc-types",
+ "reth-stage-extensions",
  "reth-stages",
  "reth-tasks",
  "reth-tracing",
@@ -6096,6 +6097,23 @@ dependencies = [
  "reth-primitives",
  "reth-rlp",
  "reth-rpc-types",
+]
+
+[[package]]
+name = "reth-stage-extensions"
+version = "0.1.0-alpha.6"
+dependencies = [
+ "assert_matches",
+ "async-trait",
+ "reth-db",
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-provider",
+ "reth-revm",
+ "reth-rlp",
+ "reth-stages",
+ "serde",
+ "tokio",
 ]
 
 [[package]]

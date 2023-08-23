@@ -5,7 +5,7 @@ mod macros;
 pub(crate) use macros::*;
 
 mod runner;
-pub(crate) use runner::{
+pub use runner::{
     ExecuteStageTestRunner, StageTestRunner, TestRunnerError, UnwindStageTestRunner,
 };
 

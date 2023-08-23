@@ -7,7 +7,7 @@ use std::{borrow::Borrow, sync::Arc};
 use tokio::sync::oneshot;
 
 #[derive(thiserror::Error, Debug)]
-pub(crate) enum TestRunnerError {
+pub enum TestRunnerError {
     #[error("Database error occurred.")]
     Database(#[from] reth_interfaces::db::DatabaseError),
     #[error("Internal runner error occurred.")]
@@ -18,7 +18,7 @@ pub(crate) enum TestRunnerError {
 
 /// A generic test runner for stages.
 #[async_trait::async_trait]
-pub(crate) trait StageTestRunner {
+pub trait StageTestRunner {
     type S: Stage<DatabaseEnv> + 'static;
 
     /// Return a reference to the database.
@@ -29,7 +29,7 @@ pub(crate) trait StageTestRunner {
 }
 
 #[async_trait::async_trait]
-pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
+pub trait ExecuteStageTestRunner: StageTestRunner {
     type Seed: Send + Sync;
 
     /// Seed database for stage execution
@@ -64,7 +64,7 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
 }
 
 #[async_trait::async_trait]
-pub(crate) trait UnwindStageTestRunner: StageTestRunner {
+pub trait UnwindStageTestRunner: StageTestRunner {
     /// Validate the unwind
     fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError>;
 
