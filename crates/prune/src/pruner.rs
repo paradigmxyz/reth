@@ -719,16 +719,16 @@ impl<DB: Database> Pruner<DB> {
         };
         let range_end = *range.end();
 
-        let mut last_pruned_block_number = None;
+        let mut last_changeset_pruned_block = None;
         let (rows, done) = provider.prune_table_with_range::<tables::AccountChangeSet>(
             range,
             self.batch_sizes.account_history,
             |_| false,
-            |row| last_pruned_block_number = Some(row.0),
+            |row| last_changeset_pruned_block = Some(row.0),
         )?;
         trace!(target: "pruner", %rows, %done, "Pruned account history (changesets)");
 
-        let last_pruned_block = last_pruned_block_number
+        let last_changeset_pruned_block = last_changeset_pruned_block
             // If there's more account account changesets to prune, set the checkpoint block number
             // to previous, so we could finish pruning its account changesets on the next run.
             .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
@@ -736,7 +736,7 @@ impl<DB: Database> Pruner<DB> {
 
         let (processed, deleted) = self.prune_history_indices::<tables::AccountHistory, _>(
             provider,
-            last_pruned_block,
+            last_changeset_pruned_block,
             |a, b| a.key == b.key,
             |key| ShardedKey::last(key.key),
         )?;
@@ -744,7 +744,11 @@ impl<DB: Database> Pruner<DB> {
 
         provider.save_prune_checkpoint(
             PrunePart::AccountHistory,
-            PruneCheckpoint { block_number: Some(last_pruned_block), tx_number: None, prune_mode },
+            PruneCheckpoint {
+                block_number: Some(last_changeset_pruned_block),
+                tx_number: None,
+                prune_mode,
+            },
         )?;
 
         Ok(done)
@@ -771,16 +775,16 @@ impl<DB: Database> Pruner<DB> {
         };
         let range_end = *range.end();
 
-        let mut last_pruned_block_number = None;
+        let mut last_changeset_pruned_block = None;
         let (rows, done) = provider.prune_table_with_range::<tables::StorageChangeSet>(
             BlockNumberAddress::range(range),
             self.batch_sizes.storage_history,
             |_| false,
-            |row| last_pruned_block_number = Some(row.0.block_number()),
+            |row| last_changeset_pruned_block = Some(row.0.block_number()),
         )?;
         trace!(target: "pruner", %rows, %done, "Pruned storage history (changesets)");
 
-        let last_pruned_block = last_pruned_block_number
+        let last_changeset_pruned_block = last_changeset_pruned_block
             // If there's more account storage changesets to prune, set the checkpoint block number
             // to previous, so we could finish pruning its storage changesets on the next run.
             .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
@@ -788,7 +792,7 @@ impl<DB: Database> Pruner<DB> {
 
         let (processed, deleted) = self.prune_history_indices::<tables::StorageHistory, _>(
             provider,
-            last_pruned_block,
+            last_changeset_pruned_block,
             |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
             |key| StorageShardedKey::last(key.address, key.sharded_key.key),
         )?;
@@ -796,13 +800,19 @@ impl<DB: Database> Pruner<DB> {
 
         provider.save_prune_checkpoint(
             PrunePart::StorageHistory,
-            PruneCheckpoint { block_number: Some(last_pruned_block), tx_number: None, prune_mode },
+            PruneCheckpoint {
+                block_number: Some(last_changeset_pruned_block),
+                tx_number: None,
+                prune_mode,
+            },
         )?;
 
         Ok(done)
     }
 
     /// Prune history indices up to the provided block, inclusive.
+    ///
+    /// Returns total number of processed (walked) and deleted entities.
     fn prune_history_indices<T, SK>(
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
