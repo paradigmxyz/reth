@@ -332,83 +332,34 @@ where
                 let ResultAndState { result, state } = match self.transact(transaction, sender) {
                     Ok(res) => {
                         if transaction.is_deposit() && !res.result.is_success() {
-                            // If the Deposited transaction failed, the deposit must still be
-                            // included. In this case, we need to
-                            // increment the sender nonce and disregard the
-                            // state changes. The transaction is also recorded as using all gas.
                             let db = self.db();
-                            let sender_account = db
-                                .load_account(sender)
-                                .map_err(|_| BlockExecutionError::ProviderError)?;
-                            let old_sender_info = to_reth_acc(&sender_account.info);
-                            sender_account.info.nonce += 1;
-                            let new_sender_info = to_reth_acc(&sender_account.info);
-
-                            post_state.change_account(
-                                block.number,
+                            let block_number = block.number;
+                            optimism::executor::fail_deposit_tx!(
+                                db,
                                 sender,
-                                old_sender_info,
-                                new_sender_info,
+                                block_number,
+                                transaction,
+                                post_state,
+                                cumulative_gas_used,
+                                is_regolith,
+                                BlockExecutionError::ProviderError
                             );
-
-                            if is_regolith || !transaction.is_deposit() {
-                                cumulative_gas_used += res.result.gas_used()
-                            } else if transaction.is_deposit() &&
-                                !transaction.is_system_transaction()
-                            {
-                                cumulative_gas_used += transaction.gas_limit();
-                            }
-
-                            post_state.add_receipt(
-                                block.number,
-                                Receipt {
-                                    tx_type: transaction.tx_type(),
-                                    success: false,
-                                    cumulative_gas_used,
-                                    logs: vec![],
-                                    // Deposit nonces are only recorded after Regolith
-                                    deposit_nonce: is_regolith.then_some(old_sender_info.nonce),
-                                },
-                            );
-                            continue
                         }
                         res
                     }
                     Err(err) => {
                         if transaction.is_deposit() {
-                            // If the Deposited transaction failed, the deposit must still be
-                            // included. In this case, we need to
-                            // increment the sender nonce and disregard the
-                            // state changes. The transaction is also recorded as using all gas.
                             let db = self.db();
-                            let sender_account = db
-                                .load_account(sender)
-                                .map_err(|_| BlockExecutionError::ProviderError)?;
-                            let old_sender_info = to_reth_acc(&sender_account.info);
-                            sender_account.info.nonce += 1;
-                            let new_sender_info = to_reth_acc(&sender_account.info);
-
-                            post_state.change_account(
-                                block.number,
+                            let block_number = block.number;
+                            optimism::executor::fail_deposit_tx!(
+                                db,
                                 sender,
-                                old_sender_info,
-                                new_sender_info,
-                            );
-
-                            if !transaction.is_system_transaction() {
-                                cumulative_gas_used += transaction.gas_limit();
-                            }
-
-                            post_state.add_receipt(
-                                block.number,
-                                Receipt {
-                                    tx_type: transaction.tx_type(),
-                                    success: false,
-                                    cumulative_gas_used,
-                                    logs: vec![],
-                                    // Deposit nonces are only recorded after Regolith
-                                    deposit_nonce: is_regolith.then_some(old_sender_info.nonce),
-                                },
+                                block_number,
+                                transaction,
+                                post_state,
+                                cumulative_gas_used,
+                                is_regolith,
+                                BlockExecutionError::ProviderError
                             );
                             continue
                         }
