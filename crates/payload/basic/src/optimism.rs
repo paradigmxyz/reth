@@ -2,7 +2,11 @@
 
 use super::*;
 use reth_primitives::Hardfork;
-use reth_revm::{executor, optimism::L1BlockInfo};
+use reth_revm::{
+    executor,
+    optimism::{executor::fail_deposit_tx, L1BlockInfo},
+    to_reth_acc,
+};
 
 /// Constructs an Ethereum transaction payload from the transactions sent through the
 /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -13,7 +17,7 @@ use reth_revm::{executor, optimism::L1BlockInfo};
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
 #[inline]
-fn optimism_payload_builder<Pool, Client>(
+pub(crate) fn optimism_payload_builder<Pool, Client>(
     args: BuildArguments<Pool, Client>,
 ) -> Result<BuildOutcome, PayloadBuilderError>
 where
@@ -97,22 +101,24 @@ where
         let sender = db.load_account(sequencer_tx.signer())?.clone();
         let mut sender_new = sender.clone();
 
-        // If the transaction is a deposit, we need to disable the base fee, balance check, and
-        // gas refund. We also need to disable the block gas limit if the Regolith hardfork is not
-        // active. In addition, we need to increase the sender's balance by the mint value of the
-        // deposit transaction if it is `Some(n)`.
+        // Before regolith, deposit transaction gas accounting was as follows:
+        // - System tx: 0 gas used
+        // - Regular Deposit tx: gas used = gas limit
         //
-        // Otherwise, we need to decrement the sender's balance by the L1 cost of the transaction
-        // prior to execution.
+        // After regolith, system transactions are deprecated and deposit transactions report the
+        // gas used during execution. All deposit transactions execute the gas refund for
+        // accounting (it is a noop because of the gas price), but still skip coinbase payments.
+        //
+        // Deposit transactions only report this gas - their gas is prepaid on L1 and
+        // the gas price is always 0. Deposit txs should not be subject to any regular
+        // balance checks, base fee checks, or block gas limit checks.
         if sequencer_tx.is_deposit() {
             cfg.disable_base_fee = true;
             cfg.disable_balance_check = true;
-            cfg.disable_gas_refund = true;
+            cfg.disable_block_gas_limit = true;
 
-            // If the Regolith hardfork is active, we do not need to disable the block gas limit.
-            // Otherwise, we allow for the block gas limit to be exceeded by deposit transactions.
             if !is_regolith {
-                cfg.disable_block_gas_limit = true;
+                cfg.disable_gas_refund = true;
             }
 
             // Increase the sender's balance in the database if the deposit transaction mints eth.
@@ -156,28 +162,19 @@ where
             Ok(res) => res,
             Err(err) => {
                 if sequencer_tx.is_deposit() {
-                    post_state.add_receipt(
+                    // Manually bump the nonce and include a receipt for the deposit transaction.
+                    let sender = sequencer_tx.signer();
+                    fail_deposit_tx!(
+                        db,
+                        sender,
                         block_number,
-                        Receipt {
-                            tx_type: sequencer_tx.tx_type(),
-                            success: false,
-                            cumulative_gas_used,
-                            logs: vec![],
-                            deposit_nonce: if is_regolith && sequencer_tx.is_deposit() {
-                                // Recovering the signer from the deposit transaction is only
-                                // fetching the `from` address.
-                                // Deposit transactions have no signature.
-                                let from = sequencer_tx.signer();
-                                let account = db.load_account(from)?;
-                                // The deposit nonce is the account's nonce - 1. The account's nonce
-                                // was incremented during the execution of the deposit transaction
-                                // above.
-                                Some(account.info.nonce.saturating_sub(1))
-                            } else {
-                                None
-                            },
-                        },
+                        sequencer_tx,
+                        &mut post_state,
+                        &mut cumulative_gas_used,
+                        is_regolith,
+                        PayloadBuilderError::AccountLoadFailed(sender)
                     );
+                    executed_txs.push(sequencer_tx.into_signed());
                     continue
                 }
 
@@ -216,7 +213,9 @@ where
             // system transactions are not included in the cumulative gas and their execution
             // gas is ignored. Post regolith, system transactions are deprecated and no longer
             // exist.
-            if is_regolith || !sequencer_tx.is_deposit() {
+            if sequencer_tx.is_deposit() && !result.is_success() {
+                cumulative_gas_used += sequencer_tx.gas_limit();
+            } else if is_regolith || !sequencer_tx.is_deposit() {
                 cumulative_gas_used += result.gas_used()
             } else if sequencer_tx.is_deposit() && !sequencer_tx.is_system_transaction() {
                 cumulative_gas_used += sequencer_tx.gas_limit();
@@ -274,86 +273,93 @@ where
         executed_txs.push(sequencer_tx.into_signed());
     }
 
-    while let Some(pool_tx) = best_txs.next() {
-        // ensure we still have capacity for this transaction
-        if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
-            // we can't fit this transaction into the block, so we need to mark it as invalid
-            // which also removes all dependent transaction from the iterator before we can
-            // continue
-            best_txs.mark_invalid(&pool_tx);
-            continue
-        }
+    if !attributes.no_tx_pool {
+        while let Some(pool_tx) = best_txs.next() {
+            // ensure we still have capacity for this transaction
+            if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
+                // we can't fit this transaction into the block, so we need to mark it as invalid
+                // which also removes all dependent transaction from the iterator before we can
+                // continue
+                best_txs.mark_invalid(&pool_tx);
+                continue
+            }
 
-        // check if the job was cancelled, if so we can exit early
-        if cancel.is_cancelled() {
-            return Ok(BuildOutcome::Cancelled)
-        }
+            // check if the job was cancelled, if so we can exit early
+            if cancel.is_cancelled() {
+                return Ok(BuildOutcome::Cancelled)
+            }
 
-        // convert tx to a signed transaction
-        let tx = pool_tx.to_recovered_transaction();
+            // convert tx to a signed transaction
+            let tx = pool_tx.to_recovered_transaction();
 
-        // Configure the environment for the block.
-        let env = Env {
-            cfg: initialized_cfg.clone(),
-            block: initialized_block_env.clone(),
-            tx: tx_env_with_recovered(&tx),
-        };
+            // Configure the environment for the block.
+            let env = Env {
+                cfg: initialized_cfg.clone(),
+                block: initialized_block_env.clone(),
+                tx: tx_env_with_recovered(&tx),
+            };
 
-        let mut evm = revm::EVM::with_env(env);
-        evm.database(&mut db);
+            let mut evm = revm::EVM::with_env(env);
+            evm.database(&mut db);
 
-        let ResultAndState { result, state } = match evm.transact() {
-            Ok(res) => res,
-            Err(err) => {
-                match err {
-                    EVMError::Transaction(err) => {
-                        if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
-                            // if the nonce is too low, we can skip this transaction
-                            trace!(?err, ?tx, "skipping nonce too low transaction");
-                        } else {
-                            // if the transaction is invalid, we can skip it and all of its
-                            // descendants
-                            trace!(?err, ?tx, "skipping invalid transaction and its descendants");
-                            best_txs.mark_invalid(&pool_tx);
+            let ResultAndState { result, state } = match evm.transact() {
+                Ok(res) => res,
+                Err(err) => {
+                    match err {
+                        EVMError::Transaction(err) => {
+                            if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
+                                // if the nonce is too low, we can skip this transaction
+                                trace!(?err, ?tx, "skipping nonce too low transaction");
+                            } else {
+                                // if the transaction is invalid, we can skip it and all of its
+                                // descendants
+                                trace!(
+                                    ?err,
+                                    ?tx,
+                                    "skipping invalid transaction and its descendants"
+                                );
+                                best_txs.mark_invalid(&pool_tx);
+                            }
+                            continue
                         }
-                        continue
-                    }
-                    err => {
-                        // this is an error that we should treat as fatal for this attempt
-                        return Err(PayloadBuilderError::EvmExecutionError(err))
+                        err => {
+                            // this is an error that we should treat as fatal for this attempt
+                            return Err(PayloadBuilderError::EvmExecutionError(err))
+                        }
                     }
                 }
-            }
-        };
+            };
 
-        let gas_used = result.gas_used();
+            let gas_used = result.gas_used();
 
-        // commit changes
-        commit_state_changes(&mut db, &mut post_state, block_number, state, true);
+            // commit changes
+            commit_state_changes(&mut db, &mut post_state, block_number, state, true);
 
-        // add gas used by the transaction to cumulative gas used, before creating the receipt
-        cumulative_gas_used += gas_used;
+            // add gas used by the transaction to cumulative gas used, before creating the receipt
+            cumulative_gas_used += gas_used;
 
-        // Push transaction changeset and calculate header bloom filter for receipt.
-        post_state.add_receipt(
-            block_number,
-            Receipt {
-                tx_type: tx.tx_type(),
-                success: result.is_success(),
-                cumulative_gas_used,
-                logs: result.logs().into_iter().map(into_reth_log).collect(),
-                #[cfg(feature = "optimism")]
-                deposit_nonce: None,
-            },
-        );
+            // Push transaction changeset and calculate header bloom filter for receipt.
+            post_state.add_receipt(
+                block_number,
+                Receipt {
+                    tx_type: tx.tx_type(),
+                    success: result.is_success(),
+                    cumulative_gas_used,
+                    logs: result.logs().into_iter().map(into_reth_log).collect(),
+                    #[cfg(feature = "optimism")]
+                    deposit_nonce: None,
+                },
+            );
 
-        // update add to total fees
-        let miner_fee =
-            tx.effective_tip_per_gas(base_fee).expect("fee is always valid; execution succeeded");
-        total_fees += U256::from(miner_fee) * U256::from(gas_used);
+            // update add to total fees
+            let miner_fee = tx
+                .effective_tip_per_gas(base_fee)
+                .expect("fee is always valid; execution succeeded");
+            total_fees += U256::from(miner_fee) * U256::from(gas_used);
 
-        // append transaction to the list of executed transactions
-        executed_txs.push(tx.into_signed());
+            // append transaction to the list of executed transactions
+            executed_txs.push(tx.into_signed());
+        }
     }
 
     // check if we have a better block

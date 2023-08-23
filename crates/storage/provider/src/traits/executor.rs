@@ -42,4 +42,21 @@ pub trait BlockExecutor<SP: StateProvider> {
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<PostState, BlockExecutionError>;
+
+    /// Runs the provided transactions and commits their state to the run-time database.
+    ///
+    /// The returned [PostState] can be used to persist the changes to disk, and contains the
+    /// changes made by each transaction.
+    ///
+    /// The changes in [PostState] have a transition ID associated with them: there is one
+    /// transition ID for each transaction (with the first executed tx having transition ID 0, and
+    /// so on).
+    ///
+    /// The second returned value represents the total gas used by this block of transactions.
+    fn execute_transactions(
+        &mut self,
+        block: &Block,
+        total_difficulty: U256,
+        senders: Option<Vec<Address>>,
+    ) -> Result<(PostState, u64), BlockExecutionError>;
 }

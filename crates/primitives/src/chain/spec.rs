@@ -247,6 +247,10 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         fork_timestamps: ForkTimestamps::default(),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         hardforks: BTreeMap::from([
+            (Hardfork::Frontier, ForkCondition::Block(0)),
+            (Hardfork::Homestead, ForkCondition::Block(0)),
+            (Hardfork::Tangerine, ForkCondition::Block(0)),
+            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
             (Hardfork::Byzantium, ForkCondition::Block(0)),
             (Hardfork::Constantinople, ForkCondition::Block(0)),
             (Hardfork::Petersburg, ForkCondition::Block(0)),
@@ -254,6 +258,8 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::MuirGlacier, ForkCondition::Block(0)),
             (Hardfork::Berlin, ForkCondition::Block(0)),
             (Hardfork::London, ForkCondition::Block(0)),
+            (Hardfork::ArrowGlacier, ForkCondition::Block(0)),
+            (Hardfork::GrayGlacier, ForkCondition::Block(0)),
             (
                 Hardfork::Paris,
                 ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
@@ -281,6 +287,10 @@ pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         fork_timestamps: ForkTimestamps::default(),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         hardforks: BTreeMap::from([
+            (Hardfork::Frontier, ForkCondition::Block(0)),
+            (Hardfork::Homestead, ForkCondition::Block(0)),
+            (Hardfork::Tangerine, ForkCondition::Block(0)),
+            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
             (Hardfork::Byzantium, ForkCondition::Block(0)),
             (Hardfork::Constantinople, ForkCondition::Block(0)),
             (Hardfork::Petersburg, ForkCondition::Block(0)),
@@ -288,6 +298,8 @@ pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::MuirGlacier, ForkCondition::Block(0)),
             (Hardfork::Berlin, ForkCondition::Block(0)),
             (Hardfork::London, ForkCondition::Block(0)),
+            (Hardfork::ArrowGlacier, ForkCondition::Block(0)),
+            (Hardfork::GrayGlacier, ForkCondition::Block(0)),
             (
                 Hardfork::Paris,
                 ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
@@ -315,6 +327,10 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         fork_timestamps: ForkTimestamps::default(),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         hardforks: BTreeMap::from([
+            (Hardfork::Frontier, ForkCondition::Block(0)),
+            (Hardfork::Homestead, ForkCondition::Block(0)),
+            (Hardfork::Tangerine, ForkCondition::Block(0)),
+            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
             (Hardfork::Byzantium, ForkCondition::Block(0)),
             (Hardfork::Constantinople, ForkCondition::Block(0)),
             (Hardfork::Petersburg, ForkCondition::Block(0)),
@@ -322,6 +338,8 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::MuirGlacier, ForkCondition::Block(0)),
             (Hardfork::Berlin, ForkCondition::Block(0)),
             (Hardfork::London, ForkCondition::Block(0)),
+            (Hardfork::ArrowGlacier, ForkCondition::Block(0)),
+            (Hardfork::GrayGlacier, ForkCondition::Block(0)),
             (
                 Hardfork::Paris,
                 ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },

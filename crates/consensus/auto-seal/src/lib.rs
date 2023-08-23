@@ -31,7 +31,9 @@ use reth_primitives::{
     Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, EMPTY_OMMER_ROOT, H256,
     U256,
 };
-use reth_provider::{BlockReaderIdExt, CanonStateNotificationSender, PostState, StateProvider};
+use reth_provider::{
+    BlockExecutor, BlockReaderIdExt, CanonStateNotificationSender, PostState, StateProvider,
+};
 use reth_revm::executor::Executor;
 use reth_transaction_pool::TransactionPool;
 use std::{

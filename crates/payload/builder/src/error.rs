@@ -1,7 +1,7 @@
 //! Error types emitted by types or implementations of this crate.
 
 use reth_primitives::H256;
-use revm_primitives::EVMError;
+use revm_primitives::{EVMError, B160};
 use tokio::sync::oneshot;
 
 /// Possible error variants during payload building.
@@ -32,6 +32,10 @@ pub enum PayloadBuilderError {
     #[cfg(feature = "optimism")]
     #[error("failed to parse L1 block info from L1 info tx calldata")]
     L1BlockInfoParseFailed,
+    /// Thrown when a database account could not be loaded.
+    #[error("failed to load account {0:?}")]
+    #[cfg(feature = "optimism")]
+    AccountLoadFailed(B160),
 }
 
 impl From<oneshot::error::RecvError> for PayloadBuilderError {

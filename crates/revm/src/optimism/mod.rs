@@ -1,6 +1,8 @@
 use std::{ops::Mul, str::FromStr, sync::Arc};
 
-use reth_interfaces::executor;
+pub mod executor;
+
+use reth_interfaces::executor as reth_executor;
 use reth_primitives::{Address, Block, Bytes, ChainSpec, Hardfork, TransactionKind, U256};
 
 const L1_FEE_RECIPIENT: &str = "0x420000000000000000000000000000000000001A";
@@ -29,7 +31,7 @@ pub struct L1BlockInfo {
 }
 
 impl TryFrom<&Block> for L1BlockInfo {
-    type Error = executor::BlockExecutionError;
+    type Error = reth_executor::BlockExecutionError;
 
     fn try_from(block: &Block) -> Result<Self, Self::Error> {
         let l1_block_contract = Address::from_str(L1_BLOCK_CONTRACT).unwrap();
@@ -38,11 +40,11 @@ impl TryFrom<&Block> for L1BlockInfo {
             .body
             .iter()
             .find(|tx| matches!(tx.kind(), TransactionKind::Call(to) if to == &l1_block_contract))
-            .ok_or(executor::BlockExecutionError::L1BlockInfoError {
+            .ok_or(reth_executor::BlockExecutionError::L1BlockInfoError {
                 message: "could not find l1 block info tx in the L2 block".to_string(),
             })
             .and_then(|tx| {
-                tx.input().get(4..).ok_or(executor::BlockExecutionError::L1BlockInfoError {
+                tx.input().get(4..).ok_or(reth_executor::BlockExecutionError::L1BlockInfoError {
                     message: "could not get l1 block info tx calldata bytes".to_string(),
                 })
             })?;
@@ -52,7 +54,7 @@ impl TryFrom<&Block> for L1BlockInfo {
 }
 
 impl TryFrom<&[u8]> for L1BlockInfo {
-    type Error = executor::BlockExecutionError;
+    type Error = reth_executor::BlockExecutionError;
 
     fn try_from(l1_info_tx_data: &[u8]) -> Result<Self, Self::Error> {
         // The setL1BlockValues tx calldata must be exactly 260 bytes long, considering that
@@ -66,23 +68,23 @@ impl TryFrom<&[u8]> for L1BlockInfo {
         // + 32 bytes for the fee overhead
         // + 32 bytes for the fee scalar
         if l1_info_tx_data.len() != 256 {
-            return Err(executor::BlockExecutionError::L1BlockInfoError {
+            return Err(reth_executor::BlockExecutionError::L1BlockInfoError {
                 message: "unexpected l1 block info tx calldata length found".to_string(),
             })
         }
 
         let l1_base_fee = U256::try_from_be_slice(&l1_info_tx_data[64..96]).ok_or(
-            executor::BlockExecutionError::L1BlockInfoError {
+            reth_executor::BlockExecutionError::L1BlockInfoError {
                 message: "could not convert l1 base fee".to_string(),
             },
         )?;
         let l1_fee_overhead = U256::try_from_be_slice(&l1_info_tx_data[192..224]).ok_or(
-            executor::BlockExecutionError::L1BlockInfoError {
+            reth_executor::BlockExecutionError::L1BlockInfoError {
                 message: "could not convert l1 fee overhead".to_string(),
             },
         )?;
         let l1_fee_scalar = U256::try_from_be_slice(&l1_info_tx_data[224..256]).ok_or(
-            executor::BlockExecutionError::L1BlockInfoError {
+            reth_executor::BlockExecutionError::L1BlockInfoError {
                 message: "could not convert l1 fee scalar".to_string(),
             },
         )?;

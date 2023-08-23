@@ -200,6 +200,22 @@ where
             }
         }
     }
+
+    fn execute_transactions(
+        &mut self,
+        block: &reth_primitives::Block,
+        total_difficulty: U256,
+        senders: Option<Vec<reth_primitives::Address>>,
+    ) -> Result<(PostState, u64), BlockExecutionError> {
+        match self {
+            EitherBlockExecutor::Left(a) => {
+                a.execute_transactions(block, total_difficulty, senders)
+            }
+            EitherBlockExecutor::Right(b) => {
+                b.execute_transactions(block, total_difficulty, senders)
+            }
+        }
+    }
 }
 
 impl<A, B> ExecutorFactory for EitherExecutorFactory<A, B>

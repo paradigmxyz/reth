@@ -24,6 +24,15 @@ impl<SP: StateProvider> BlockExecutor<SP> for TestExecutor {
     ) -> Result<PostState, BlockExecutionError> {
         self.0.clone().ok_or(BlockExecutionError::UnavailableForTest)
     }
+
+    fn execute_transactions(
+        &mut self,
+        _block: &Block,
+        _total_difficulty: U256,
+        _senders: Option<Vec<Address>>,
+    ) -> Result<(PostState, u64), BlockExecutionError> {
+        Ok((self.0.clone().ok_or(BlockExecutionError::UnavailableForTest)?, 0))
+    }
 }
 
 /// Executor factory with pre-set execution results.
