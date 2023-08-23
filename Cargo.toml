@@ -101,6 +101,7 @@ reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat"}
 revm = { git = "https://github.com/bluealloy/revm.git", branch = "main" }
 revm-primitives = { git = "https://github.com/bluealloy/revm.git", branch = "main" }
 
+
 ## eth
 ethers-core = { version = "2.0.8", default-features = false }
 ethers-providers = { version = "2.0.8", default-features = false }
@@ -149,3 +150,7 @@ c-kzg = { git = "https://github.com/ethereum/c-kzg-4844" }
 ### misc-testing
 proptest = "1.0"
 arbitrary = "1.1"
+
+[patch."https://github.com/bluealloy/revm.git"]
+revm = { path = "../revm/crates/revm" }
+revm-primitives = { path = "../revm/crates/primitives" }

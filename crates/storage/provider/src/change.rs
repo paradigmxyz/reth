@@ -12,7 +12,8 @@ use reth_primitives::{
 };
 use reth_revm_primitives::{
     db::states::{
-        BundleState as RevmBundleState, StateChangeset as RevmChange, StateReverts as RevmReverts,
+        BundleState as RevmBundleState, RevertToSlot, StateChangeset as RevmChange,
+        StateReverts as RevmReverts,
     },
     into_reth_acc, into_revm_acc,
     primitives::AccountInfo,
@@ -433,7 +434,10 @@ impl StateReverts {
                     for (slot, old_value) in storage {
                         storage_changeset_cursor.append_dup(
                             storage_id,
-                            StorageEntry { key: H256(slot.to_be_bytes()), value: old_value },
+                            StorageEntry {
+                                key: H256(slot.to_be_bytes()),
+                                value: old_value.to_previous_value(),
+                            },
                         )?;
                     }
                 } else {
@@ -455,7 +459,7 @@ impl StateReverts {
                             }
                             (None, Some(r)) => {
                                 revert_item = revert_iter.next();
-                                r
+                                (r.0, r.1.to_previous_value())
                             }
                             (Some(w), Some(r)) => {
                                 match w.0.cmp(&r.0) {
@@ -467,13 +471,23 @@ impl StateReverts {
                                     std::cmp::Ordering::Greater => {
                                         // next key is from wiped storage
                                         revert_item = revert_iter.next();
-                                        r
+                                        (r.0, r.1.to_previous_value())
                                     }
                                     std::cmp::Ordering::Equal => {
                                         // priority goes for storage if key is same.
                                         wiped_item = wiped_iter.next();
                                         revert_item = revert_iter.next();
-                                        r
+
+                                        // If storage slot is RevertToSlot::Some, the storage
+                                        // used should be from Revert.
+                                        if let RevertToSlot::Some(revert_value) = r.1 {
+                                            (r.0, revert_value)
+                                        } else {
+                                            // If storage slot is RevertToSlot::Destroyed, the
+                                            // storage
+                                            // that we use should be on the storage from database.
+                                            w
+                                        }
                                     }
                                 }
                             }
