@@ -24,8 +24,8 @@ use reth_primitives::{
 };
 use reth_rlp::Encodable;
 use reth_transaction_pool::{
-    error::PoolResult, PoolTransaction, PropagateKind, PropagatedTransactions, TransactionPool,
-    ValidPoolTransaction,
+    error::PoolResult, GetPooledTransactionLimit, PoolTransaction, PropagateKind,
+    PropagatedTransactions, TransactionPool, ValidPoolTransaction,
 };
 use std::{
     collections::{hash_map::Entry, HashMap},
@@ -51,6 +51,10 @@ const MAX_FULL_TRANSACTIONS_PACKET_SIZE: usize = 100 * 1024;
 ///
 /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08>
 const GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES: usize = 256;
+
+/// Softlimit for the response size of a GetPooledTransactions message (2MB)
+const GET_POOLED_TRANSACTION_SOFT_LIMIT_SIZE: GetPooledTransactionLimit =
+    GetPooledTransactionLimit::SizeSoftLimit(2 * 1024 * 1024);
 
 /// The future for inserting a function into the pool
 pub type PoolImportFuture = Pin<Box<dyn Future<Output = PoolResult<TxHash>> + Send + 'static>>;
@@ -182,19 +186,15 @@ where
         response: oneshot::Sender<RequestResult<PooledTransactions>>,
     ) {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
-            // TODO softResponseLimit 2 * 1024 * 1024
             let transactions = self
                 .pool
-                .get_all(request.0)
-                .into_iter()
-                .map(|tx| tx.transaction.to_recovered_transaction().into_signed())
-                .collect::<Vec<_>>();
+                .get_pooled_transaction_elements(request.0, GET_POOLED_TRANSACTION_SOFT_LIMIT_SIZE);
 
-            // we sent a response at which point we assume that the peer is aware of the transaction
-            peer.transactions.extend(transactions.iter().map(|tx| tx.hash()));
+            // we sent a response at which point we assume that the peer is aware of the
+            // transactions
+            peer.transactions.extend(transactions.iter().map(|tx| *tx.hash()));
 
-            // TODO: remove this! this will be different when we introduce the blobpool
-            let resp = PooledTransactions(transactions.into_iter().map(Into::into).collect());
+            let resp = PooledTransactions(transactions);
             let _ = response.send(Ok(resp));
         }
     }

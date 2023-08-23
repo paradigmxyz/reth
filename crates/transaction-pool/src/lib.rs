@@ -165,10 +165,7 @@ use std::{
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
 
-use crate::{
-    blobstore::{BlobStore, BlobStoreError},
-    traits::GetPooledTransactionLimit,
-};
+use crate::blobstore::{BlobStore, BlobStoreError};
 pub use crate::{
     config::{
         PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP, REPLACE_BLOB_PRICE_BUMP,
@@ -183,9 +180,9 @@ pub use crate::{
     },
     traits::{
         AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
-        EthPooledTransaction, NewTransactionEvent, PendingTransactionListenerKind, PoolSize,
-        PoolTransaction, PropagateKind, PropagatedTransactions, TransactionOrigin, TransactionPool,
-        TransactionPoolExt,
+        EthPooledTransaction, GetPooledTransactionLimit, NewTransactionEvent,
+        PendingTransactionListenerKind, PoolSize, PoolTransaction, PropagateKind,
+        PropagatedTransactions, TransactionOrigin, TransactionPool, TransactionPoolExt,
     },
     validate::{
         EthTransactionValidator, TransactionValidationOutcome, TransactionValidationTaskExecutor,

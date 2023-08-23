@@ -8,7 +8,6 @@ use crate::{
 };
 use futures_util::{lock::Mutex, StreamExt};
 use reth_primitives::{ChainSpec, SealedBlock};
-use reth_provider::StateProviderFactory;
 use reth_tasks::TaskSpawner;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::{
@@ -134,7 +133,7 @@ impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Clien
     }
 }
 
-impl<V: TransactionValidator + Clone> TransactionValidationTaskExecutor<V> {
+impl<V> TransactionValidationTaskExecutor<V> {
     /// Creates a new executor instance with the given validator for transaction validation.
     ///
     /// Initializes the executor with the provided validator and sets up communication for
@@ -146,13 +145,11 @@ impl<V: TransactionValidator + Clone> TransactionValidationTaskExecutor<V> {
 }
 
 #[async_trait::async_trait]
-impl<Client, Tx> TransactionValidator
-    for TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx>>
+impl<V> TransactionValidator for TransactionValidationTaskExecutor<V>
 where
-    Client: StateProviderFactory + Clone + 'static,
-    Tx: PoolTransaction + Clone + 'static,
+    V: TransactionValidator + Clone + 'static,
 {
-    type Transaction = Tx;
+    type Transaction = <V as TransactionValidator>::Transaction;
 
     async fn validate_transaction(
         &self,

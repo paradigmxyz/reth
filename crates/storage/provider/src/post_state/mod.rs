@@ -661,7 +661,7 @@ impl PostState {
 
             let contract_log_pruner = self
                 .prune_modes
-                .contract_logs_filter
+                .receipts_log_filter
                 .group_by_block(tip, None)
                 .map_err(|e| Error::Custom(e.to_string()))?;
 
