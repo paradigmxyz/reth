@@ -41,21 +41,25 @@ pub struct Proof<'a, 'b, TX, H> {
     hashed_cursor_factory: &'b H,
 }
 
-impl<'a, 'tx, TX> Proof<'a, 'a, TX, TX>
-where
-    TX: DbTx<'tx> + HashedCursorFactory<'a>,
-{
+impl<'a, TX> Proof<'a, 'a, TX, TX> {
     /// Create a new [Proof] instance.
     pub fn new(tx: &'a TX) -> Self {
         Self { tx, hashed_cursor_factory: tx }
     }
+}
 
+impl<'a, 'b, 'tx, TX, H> Proof<'a, 'b, TX, H>
+where
+    TX: DbTx<'tx>,
+    H: HashedCursorFactory<'b>,
+{
     /// Generate an account proof from intermediate nodes.
     pub fn account_proof(&self, address: Address) -> Result<Vec<Bytes>, ProofError> {
         let hashed_address = keccak256(address);
         let target_nibbles = Nibbles::unpack(hashed_address);
 
-        let mut proof_restorer = ProofRestorer::new(self.hashed_cursor_factory)?;
+        let mut proof_restorer =
+            ProofRestorer::new(self.tx)?.with_hashed_cursor_factory(self.hashed_cursor_factory)?;
         let mut trie_cursor =
             AccountTrieCursor::new(self.tx.cursor_read::<tables::AccountsTrie>()?);
 
@@ -96,7 +100,7 @@ where
     fn traverse_path<T: DbCursorRO<'a, tables::AccountsTrie>>(
         &self,
         trie_cursor: &mut AccountTrieCursor<T>,
-        proof_restorer: &mut ProofRestorer<'a, 'a, TX, TX>,
+        proof_restorer: &mut ProofRestorer<'a, 'b, TX, H>,
         hashed_address: H256,
     ) -> Result<Vec<Bytes>, ProofError> {
         let mut intermediate_proofs = Vec::new();
@@ -142,7 +146,7 @@ where
 
 impl<'a, 'tx, TX> ProofRestorer<'a, 'a, TX, TX>
 where
-    TX: DbTx<'tx> + HashedCursorFactory<'a>,
+    TX: DbTx<'tx>,
 {
     fn new(tx: &'a TX) -> Result<Self, ProofError> {
         let hashed_account_cursor = tx.hashed_account_cursor()?;
@@ -152,6 +156,30 @@ where
             hashed_account_cursor,
             account_rlp_buf: Vec::with_capacity(128),
             node_rlp_buf: Vec::with_capacity(128),
+        })
+    }
+}
+
+impl<'a, 'b, 'tx, TX, H> ProofRestorer<'a, 'b, TX, H>
+where
+    TX: DbTx<'tx> + HashedCursorFactory<'a>,
+    H: HashedCursorFactory<'b>,
+{
+    /// Set the hashed cursor factory.
+    fn with_hashed_cursor_factory<'c, HF>(
+        self,
+        hashed_cursor_factory: &'c HF,
+    ) -> Result<ProofRestorer<'a, 'c, TX, HF>, ProofError>
+    where
+        HF: HashedCursorFactory<'c>,
+    {
+        let hashed_account_cursor = hashed_cursor_factory.hashed_account_cursor()?;
+        Ok(ProofRestorer {
+            tx: self.tx,
+            hashed_cursor_factory,
+            hashed_account_cursor,
+            account_rlp_buf: self.account_rlp_buf,
+            node_rlp_buf: self.node_rlp_buf,
         })
     }
 
