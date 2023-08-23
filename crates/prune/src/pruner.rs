@@ -130,7 +130,7 @@ impl<DB: Database> Pruner<DB> {
             trace!(target: "pruner", prune_part = ?PrunePart::Receipts, "No target block to prune");
         }
 
-        if !self.modes.contract_logs_filter.is_empty() {
+        if !self.modes.receipts_log_filter.is_empty() {
             let part_start = Instant::now();
             let part_done = self.prune_receipts_by_logs(&provider, tip_block_number)?;
             done = done && part_done;
@@ -437,7 +437,7 @@ impl<DB: Database> Pruner<DB> {
         // Figure out what receipts have already been pruned, so we can have an accurate
         // `address_filter`
         let address_filter =
-            self.modes.contract_logs_filter.group_by_block(tip_block_number, last_pruned_block)?;
+            self.modes.receipts_log_filter.group_by_block(tip_block_number, last_pruned_block)?;
 
         // Splits all transactions in different block ranges. Each block range will have its own
         // filter address list and will check it while going through the table
@@ -567,7 +567,7 @@ impl<DB: Database> Pruner<DB> {
         // checkpoing is the `last_pruned_block`.
         let prune_mode_block = self
             .modes
-            .contract_logs_filter
+            .receipts_log_filter
             .lowest_block_with_distance(tip_block_number, initial_last_pruned_block)?
             .unwrap_or(to_block);
 
@@ -934,7 +934,7 @@ mod tests {
         },
     };
     use reth_primitives::{
-        BlockNumber, ContractLogsPruneConfig, PruneCheckpoint, PruneMode, PruneModes, PrunePart,
+        BlockNumber, PruneCheckpoint, PruneMode, PruneModes, PrunePart, ReceiptsLogPruneConfig,
         TxNumber, H256, MAINNET,
     };
     use reth_provider::{PruneCheckpointReader, TransactionsProvider};
@@ -1554,14 +1554,14 @@ mod tests {
 
             let prune_before_block: usize = 20;
             let prune_mode = PruneMode::Before(prune_before_block as u64);
-            let contract_logs_filter =
-                ContractLogsPruneConfig(BTreeMap::from([(deposit_contract_addr, prune_mode)]));
+            let receipts_log_filter =
+                ReceiptsLogPruneConfig(BTreeMap::from([(deposit_contract_addr, prune_mode)]));
             let pruner = Pruner::new(
                 tx.inner_raw(),
                 MAINNET.clone(),
                 5,
                 PruneModes {
-                    contract_logs_filter: contract_logs_filter.clone(),
+                    receipts_log_filter: receipts_log_filter.clone(),
                     ..Default::default()
                 },
                 BatchSizes {

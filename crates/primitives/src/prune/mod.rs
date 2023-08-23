@@ -13,9 +13,9 @@ pub use target::{PruneModes, MINIMUM_PRUNING_DISTANCE};
 
 /// Configuration for pruning receipts not associated with logs emitted by the specified contracts.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct ContractLogsPruneConfig(pub BTreeMap<Address, PruneMode>);
+pub struct ReceiptsLogPruneConfig(pub BTreeMap<Address, PruneMode>);
 
-impl ContractLogsPruneConfig {
+impl ReceiptsLogPruneConfig {
     /// Checks if the configuration is empty
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()

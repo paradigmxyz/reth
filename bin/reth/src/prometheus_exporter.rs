@@ -4,10 +4,11 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Body, Request, Response, Server,
 };
+use metrics::gauge;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
 use reth_db::{database::Database, tables, DatabaseEnv};
-use reth_metrics::metrics::{absolute_counter, describe_counter, Unit};
+use reth_metrics::metrics::{describe_counter, Unit};
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 
 pub(crate) trait Hook: Fn() + Send + Sync {}
@@ -93,11 +94,11 @@ pub(crate) async fn initialize(
                 let table_size = page_size * num_pages;
                 let entries = stats.entries();
 
-                absolute_counter!("db.table_size", table_size as u64, "table" => table);
-                absolute_counter!("db.table_pages", leaf_pages as u64, "table" => table, "type" => "leaf");
-                absolute_counter!("db.table_pages", branch_pages as u64, "table" => table, "type" => "branch");
-                absolute_counter!("db.table_pages", overflow_pages as u64, "table" => table, "type" => "overflow");
-                absolute_counter!("db.table_entries", entries as u64, "table" => table);
+                gauge!("db.table_size", table_size as f64, "table" => table);
+                gauge!("db.table_pages", leaf_pages as f64, "table" => table, "type" => "leaf");
+                gauge!("db.table_pages", branch_pages as f64, "table" => table, "type" => "branch");
+                gauge!("db.table_pages", overflow_pages as f64, "table" => table, "type" => "overflow");
+                gauge!("db.table_entries", entries as f64, "table" => table);
             }
 
             Ok::<(), eyre::Report>(())
@@ -126,7 +127,6 @@ pub(crate) async fn initialize(
 #[cfg(all(feature = "jemalloc", unix))]
 fn collect_memory_stats() {
     use jemalloc_ctl::{epoch, stats};
-    use reth_metrics::metrics::gauge;
     use tracing::error;
 
     if epoch::advance().map_err(|error| error!(?error, "Failed to advance jemalloc epoch")).is_err()
