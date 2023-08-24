@@ -181,6 +181,11 @@ where
                             is_regolith,
                             BlockExecutionError::ProviderError
                         );
+                        // Reset all revm configuration flags for the next iteration.
+                        self.evm.env.cfg.disable_base_fee = false;
+                        self.evm.env.cfg.disable_block_gas_limit = false;
+                        self.evm.env.cfg.disable_balance_check = false;
+                        self.evm.env.cfg.disable_gas_refund = false;
                         continue
                     }
                     return Err(err)
