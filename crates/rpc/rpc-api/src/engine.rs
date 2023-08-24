@@ -3,8 +3,8 @@ use reth_primitives::{Address, BlockHash, BlockId, BlockNumberOrTag, Bytes, H256
 use reth_rpc_types::{
     engine::{
         ExecutionPayloadBodiesV1, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
-        ExecutionPayloadV1, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadId,
-        PayloadStatus, TransitionConfiguration,
+        ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated,
+        PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration,
     },
     state::StateOverride,
     BlockOverrides, CallRequest, Filter, Log, RichBlock, SyncStatus,
@@ -28,7 +28,7 @@ pub trait EngineApi {
     #[method(name = "newPayloadV3")]
     async fn new_payload_v3(
         &self,
-        payload: ExecutionPayloadV1,
+        payload: ExecutionPayloadV3,
         versioned_hashes: Vec<H256>,
         parent_beacon_block_root: H256,
     ) -> RpcResult<PayloadStatus>;
