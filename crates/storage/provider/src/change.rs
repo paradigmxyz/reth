@@ -1097,7 +1097,7 @@ mod tests {
         )]));
         state.merge_transitions();
 
-        BundleState::new(state.take_bundle(), Vec::new(), 0)
+        BundleState::new(state.take_bundle(), Vec::new(), 1)
             .write_to_db(provider.tx_ref(), false)
             .expect("Could not write bundle state to DB");
 
