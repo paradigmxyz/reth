@@ -60,7 +60,8 @@ Full node occupies 1TB at the peak, and slowly goes down to 920GB.
 
 ### Pruned
 
-Different parts take up different amounts of disk space. If pruned fully, these are the total freed space you'll get: 
+Different parts take up different amounts of disk space.
+If pruned fully, this is the total freed space you'll get, per part: 
 
 | Part               | Size  |
 |--------------------|-------|
