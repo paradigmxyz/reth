@@ -688,7 +688,6 @@ mod tests {
         cache_state.insert_account(address_b, account_b_changed.clone());
         let mut state = RevmStateBuilder::default().with_cached_prestate(cache_state).build();
 
-        // let mut post_state = PostState::new();
         // 0xff.. is destroyed
         state.commit(HashMap::from([(
             address_b,
