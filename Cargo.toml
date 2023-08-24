@@ -106,10 +106,10 @@ reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat"}
 
 
 ## eth
-ethers-core = { version = "2.0.8", default-features = false }
-ethers-providers = { version = "2.0.8", default-features = false }
-ethers-signers = { version = "2.0.8", default-features = false }
-ethers-middleware = { version = "2.0.8", default-features = false }
+ethers-core = { version = "2.0", default-features = false }
+ethers-providers = { version = "2.0", default-features = false }
+ethers-signers = { version = "2.0", default-features = false }
+ethers-middleware = { version = "2.0", default-features = false }
 
 ## misc
 bytes = "1.4"
