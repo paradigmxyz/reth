@@ -77,6 +77,7 @@ impl From<SealedBlock> for ExecutionPayloadFieldV2 {
 /// See also:
 /// <https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadv2>
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExecutionPayloadEnvelopeV2 {
     /// Execution payload, which could be either V1 or V2
     ///
@@ -85,17 +86,15 @@ pub struct ExecutionPayloadEnvelopeV2 {
     ///
     /// V2 (_WITH_ withdrawals) MUST be returned if the payload timestamp is greater or equal to
     /// the Shanghai timestamp
-    #[serde(rename = "executionPayload")]
-    pub payload: ExecutionPayloadFieldV2,
+    pub execution_payload: ExecutionPayloadFieldV2,
     /// The expected value to be received by the feeRecipient in wei
-    #[serde(rename = "blockValue")]
     pub block_value: U256,
 }
 
 impl ExecutionPayloadEnvelopeV2 {
     /// Returns the [ExecutionPayload] for the `engine_getPayloadV1` endpoint
     pub fn into_v1_payload(self) -> ExecutionPayloadV1 {
-        self.payload.into_v1_payload()
+        self.execution_payload.into_v1_payload()
     }
 }
 
