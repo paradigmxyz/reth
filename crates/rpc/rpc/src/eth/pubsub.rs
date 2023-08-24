@@ -14,7 +14,7 @@ use reth_rpc_types::{
     FilteredParams, Header, Log,
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
-use reth_transaction_pool::{NewTransactionEvent, TransactionPool};
+use reth_transaction_pool::{NewTransactionEvent, PendingTransactionListenerKind, TransactionPool};
 use serde::Serialize;
 use std::sync::Arc;
 use tokio_stream::{
@@ -267,9 +267,13 @@ impl<Provider, Pool, Events, Network> EthPubSubInner<Provider, Pool, Events, Net
 where
     Pool: TransactionPool + 'static,
 {
-    /// Returns a stream that yields all transactions emitted by the txpool.
+    /// Returns a stream that yields all transactions emitted by the txpool that are allowed to be
+    /// accessible via rpc.
     fn pending_transaction_hashes_stream(&self) -> impl Stream<Item = TxHash> {
-        ReceiverStream::new(self.pool.pending_transactions_listener())
+        ReceiverStream::new(
+            self.pool
+                .pending_transactions_listener_for(PendingTransactionListenerKind::PropagateOnly),
+        )
     }
 
     /// Returns a stream that yields all transactions emitted by the txpool.
