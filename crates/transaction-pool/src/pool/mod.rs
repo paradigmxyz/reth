@@ -351,7 +351,7 @@ where
         let mut listener = self.event_listener.write();
 
         promoted.iter().for_each(|tx| listener.pending(tx.hash(), None));
-        discarded.iter().for_each(|tx| listener.discarded(tx));
+        discarded.iter().for_each(|tx| listener.discarded(tx.hash()));
     }
 
     /// Add a single validated transaction into the pool.
@@ -568,7 +568,7 @@ where
 
         mined.iter().for_each(|tx| listener.mined(tx, block_hash));
         promoted.iter().for_each(|tx| listener.pending(tx.hash(), None));
-        discarded.iter().for_each(|tx| listener.discarded(tx));
+        discarded.iter().for_each(|tx| listener.discarded(tx.hash()));
     }
 
     /// Fire events for the newly added transaction if there are any.
@@ -581,7 +581,7 @@ where
 
                 listener.pending(transaction.hash(), replaced.clone());
                 promoted.iter().for_each(|tx| listener.pending(tx.hash(), None));
-                discarded.iter().for_each(|tx| listener.discarded(tx));
+                discarded.iter().for_each(|tx| listener.discarded(tx.hash()));
             }
             AddedTransaction::Parked { transaction, replaced, .. } => {
                 listener.queued(transaction.hash());
@@ -755,7 +755,7 @@ pub struct AddedPendingTransaction<T: PoolTransaction> {
     /// transactions promoted to the pending queue
     promoted: Vec<Arc<ValidPoolTransaction<T>>>,
     /// transaction that failed and became discarded
-    discarded: Vec<TxHash>,
+    discarded: Vec<Arc<ValidPoolTransaction<T>>>,
 }
 
 impl<T: PoolTransaction> AddedPendingTransaction<T> {
@@ -871,7 +871,7 @@ pub(crate) struct OnNewCanonicalStateOutcome<T: PoolTransaction> {
     /// Transactions promoted to the ready queue.
     pub(crate) promoted: Vec<Arc<ValidPoolTransaction<T>>>,
     /// transaction that were discarded during the update
-    pub(crate) discarded: Vec<TxHash>,
+    pub(crate) discarded: Vec<Arc<ValidPoolTransaction<T>>>,
 }
 
 impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
