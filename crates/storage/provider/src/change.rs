@@ -788,9 +788,8 @@ mod tests {
         ]));
 
         state.merge_transitions();
-        let revm_bundle_state = state.take_bundle();
 
-        BundleState::new(revm_bundle_state, vec![], 1)
+        BundleState::new(state.take_bundle(), Vec::new(), 1)
             .write_to_db(provider.tx_ref(), false)
             .expect("Could not write bundle state to DB");
 
@@ -889,9 +888,7 @@ mod tests {
         )]));
 
         state.merge_transitions();
-        let revm_bundle_state = state.take_bundle();
-
-        BundleState::new(revm_bundle_state, vec![], 2)
+        BundleState::new(state.take_bundle(), Vec::new(), 2)
             .write_to_db(provider.tx_ref(), false)
             .expect("Could not write bundle state to DB");
 
@@ -922,5 +919,311 @@ mod tests {
             None,
             "Account A should only be in the changeset 2 times on deletion"
         );
+    }
+
+    #[test]
+    fn write_to_db_multiple_selfdestructs() {
+        let db: Arc<DatabaseEnv> = create_test_rw_db();
+        let factory = ProviderFactory::new(db, MAINNET.clone());
+        let provider = factory.provider_rw().unwrap();
+
+        let address1 = Address::random();
+
+        // Block #0: initial state.
+        let mut init_state = RevmStateBuilder::default().build();
+        init_state.commit(HashMap::from([(
+            address1,
+            Account {
+                info: RevmAccountInfo::default(),
+                status: AccountStatus::Touched | AccountStatus::Created,
+                // 0x00 => 0 => 1
+                // 0x01 => 0 => 2
+                storage: HashMap::from([
+                    (
+                        U256::ZERO,
+                        StorageSlot { present_value: U256::from(1), ..Default::default() },
+                    ),
+                    (
+                        U256::from(1),
+                        StorageSlot { present_value: U256::from(2), ..Default::default() },
+                    ),
+                ]),
+            },
+        )]));
+        init_state.merge_transitions();
+        BundleState::new(init_state.take_bundle(), Vec::new(), 0)
+            .write_to_db(provider.tx_ref(), false)
+            .expect("Could not write init bundle state to DB");
+
+        let mut cache_state = CacheState::new(true);
+        cache_state.insert_account_with_storage(
+            address1,
+            RevmAccountInfo::default(),
+            HashMap::from([(U256::ZERO, U256::from(1)), (U256::from(1), U256::from(2))]),
+        );
+        let mut state = RevmStateBuilder::default().with_cached_prestate(cache_state).build();
+
+        // Block #1: change storage.
+        state.commit(HashMap::from([(
+            address1,
+            Account {
+                status: AccountStatus::Touched,
+                info: RevmAccountInfo::default(),
+                // 0x00 => 1 => 2
+                storage: HashMap::from([(
+                    U256::ZERO,
+                    StorageSlot {
+                        previous_or_original_value: U256::from(1),
+                        present_value: U256::from(2),
+                    },
+                )]),
+            },
+        )]));
+        state.merge_transitions();
+
+        // Block #2: destroy account.
+        state.commit(HashMap::from([(
+            address1,
+            Account {
+                status: AccountStatus::Touched | AccountStatus::SelfDestructed,
+                info: RevmAccountInfo::default(),
+                storage: HashMap::default(),
+            },
+        )]));
+        state.merge_transitions();
+
+        // Block #3: re-create account and change storage.
+        state.commit(HashMap::from([(
+            address1,
+            Account {
+                status: AccountStatus::Touched | AccountStatus::Created,
+                info: RevmAccountInfo::default(),
+                storage: HashMap::default(),
+            },
+        )]));
+        state.merge_transitions();
+
+        // Block #4: change storage.
+        state.commit(HashMap::from([(
+            address1,
+            Account {
+                status: AccountStatus::Touched,
+                info: RevmAccountInfo::default(),
+                // 0x00 => 0 => 2
+                // 0x02 => 0 => 4
+                // 0x06 => 0 => 6
+                storage: HashMap::from([
+                    (
+                        U256::ZERO,
+                        StorageSlot { present_value: U256::from(2), ..Default::default() },
+                    ),
+                    (
+                        U256::from(2),
+                        StorageSlot { present_value: U256::from(6), ..Default::default() },
+                    ),
+                    (
+                        U256::from(6),
+                        StorageSlot { present_value: U256::from(6), ..Default::default() },
+                    ),
+                ]),
+            },
+        )]));
+        state.merge_transitions();
+
+        // Block #5: Destroy account again.
+        state.commit(HashMap::from([(
+            address1,
+            Account {
+                status: AccountStatus::Touched | AccountStatus::SelfDestructed,
+                info: RevmAccountInfo::default(),
+                storage: HashMap::default(),
+            },
+        )]));
+        state.merge_transitions();
+
+        // Block #6: Create, change, destroy and re-create in the same block.
+        state.commit(HashMap::from([(
+            address1,
+            Account {
+                status: AccountStatus::Touched | AccountStatus::Created,
+                info: RevmAccountInfo::default(),
+                storage: HashMap::default(),
+            },
+        )]));
+        state.commit(HashMap::from([(
+            address1,
+            Account {
+                status: AccountStatus::Touched,
+                info: RevmAccountInfo::default(),
+                // 0x00 => 0 => 2
+                storage: HashMap::from([(
+                    U256::ZERO,
+                    StorageSlot { present_value: U256::from(2), ..Default::default() },
+                )]),
+            },
+        )]));
+        state.commit(HashMap::from([(
+            address1,
+            Account {
+                status: AccountStatus::Touched | AccountStatus::SelfDestructed,
+                info: RevmAccountInfo::default(),
+                storage: HashMap::default(),
+            },
+        )]));
+        state.commit(HashMap::from([(
+            address1,
+            Account {
+                status: AccountStatus::Touched | AccountStatus::Created,
+                info: RevmAccountInfo::default(),
+                storage: HashMap::default(),
+            },
+        )]));
+        state.merge_transitions();
+
+        // Block #7: Change storage.
+        state.commit(HashMap::from([(
+            address1,
+            Account {
+                status: AccountStatus::Touched,
+                info: RevmAccountInfo::default(),
+                // 0x00 => 0 => 9
+                storage: HashMap::from([(
+                    U256::ZERO,
+                    StorageSlot { present_value: U256::from(9), ..Default::default() },
+                )]),
+            },
+        )]));
+        state.merge_transitions();
+
+        BundleState::new(state.take_bundle(), Vec::new(), 0)
+            .write_to_db(provider.tx_ref(), false)
+            .expect("Could not write bundle state to DB");
+
+        let mut storage_changeset_cursor = provider
+            .tx_ref()
+            .cursor_dup_read::<tables::StorageChangeSet>()
+            .expect("Could not open plain storage state cursor");
+        let mut storage_changes = storage_changeset_cursor.walk_range(..).unwrap();
+
+        // Iterate through all storage changes
+
+        // Block <number>
+        // <slot>: <expected value before>
+        // ...
+
+        // Block #0
+        // 0x00: 0
+        // 0x01: 0
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((0, address1)),
+                StorageEntry { key: H256::from_low_u64_be(0), value: U256::ZERO }
+            )))
+        );
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((0, address1)),
+                StorageEntry { key: H256::from_low_u64_be(1), value: U256::ZERO }
+            )))
+        );
+
+        // Block #1
+        // 0x00: 1
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((1, address1)),
+                StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(1) }
+            )))
+        );
+
+        // Block #2 (destroyed)
+        // 0x00: 2
+        // 0x01: 2
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((2, address1)),
+                StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(2) }
+            )))
+        );
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((2, address1)),
+                StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(2) }
+            )))
+        );
+
+        // Block #3
+        // no storage changes
+
+        // Block #4
+        // 0x00: 0
+        // 0x02: 0
+        // 0x06: 0
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((4, address1)),
+                StorageEntry { key: H256::from_low_u64_be(0), value: U256::ZERO }
+            )))
+        );
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((4, address1)),
+                StorageEntry { key: H256::from_low_u64_be(2), value: U256::ZERO }
+            )))
+        );
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((4, address1)),
+                StorageEntry { key: H256::from_low_u64_be(6), value: U256::ZERO }
+            )))
+        );
+
+        // Block #5 (destroyed)
+        // 0x00: 2
+        // 0x02: 4
+        // 0x06: 6
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((5, address1)),
+                StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(2) }
+            )))
+        );
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((5, address1)),
+                StorageEntry { key: H256::from_low_u64_be(2), value: U256::from(4) }
+            )))
+        );
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((5, address1)),
+                StorageEntry { key: H256::from_low_u64_be(6), value: U256::from(6) }
+            )))
+        );
+
+        // Block #6
+        // no storage changes (only inter block changes)
+
+        // Block #7
+        // 0x00: 0
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((7, address1)),
+                StorageEntry { key: H256::from_low_u64_be(0), value: U256::ZERO }
+            )))
+        );
+        assert_eq!(storage_changes.next(), None);
     }
 }
