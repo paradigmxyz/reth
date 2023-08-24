@@ -6,7 +6,7 @@ pub(crate) enum PayloadOrAttributes<'a> {
     /// An [ExecutionPayload] and optional parent beacon block root.
     ExecutionPayload {
         /// The inner execution payload
-        payload: &'a ExecutionPayload,
+        payload: ExecutionPayload<'a>,
         /// The parent beacon block root
         parent_beacon_block_root: Option<H256>,
     },
@@ -15,27 +15,30 @@ pub(crate) enum PayloadOrAttributes<'a> {
 }
 
 impl<'a> PayloadOrAttributes<'a> {
-    /// Construct a [PayloadOrAttributes] from an [ExecutionPayload] and optional parent beacon
+    /// Construct a [PayloadOrAttributes] from an [ExecutionPayloadV3] and optional parent beacon
     /// block root.
-    pub(crate) fn from_execution_payload(
-        payload: &'a ExecutionPayload,
+    pub(crate) fn from_execution_payload<T>(
+        payload: &'a T,
         parent_beacon_block_root: Option<H256>,
-    ) -> Self {
-        Self::ExecutionPayload { payload, parent_beacon_block_root }
+    ) -> Self
+    where
+        &'a T: Into<ExecutionPayload<'a>>,
+    {
+        Self::ExecutionPayload { payload: payload.into(), parent_beacon_block_root }
     }
 
     /// Return the withdrawals for the payload or attributes.
-    pub(crate) fn withdrawals(&self) -> &Option<Vec<Withdrawal>> {
+    pub(crate) fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
         match self {
-            Self::ExecutionPayload { payload, .. } => &payload.withdrawals,
-            Self::PayloadAttributes(attributes) => &attributes.withdrawals,
+            Self::ExecutionPayload { payload, .. } => payload.withdrawals(),
+            Self::PayloadAttributes(attributes) => attributes.withdrawals.as_ref(),
         }
     }
 
     /// Return the timestamp for the payload or attributes.
     pub(crate) fn timestamp(&self) -> u64 {
         match self {
-            Self::ExecutionPayload { payload, .. } => payload.timestamp.as_u64(),
+            Self::ExecutionPayload { payload, .. } => payload.timestamp(),
             Self::PayloadAttributes(attributes) => attributes.timestamp.as_u64(),
         }
     }

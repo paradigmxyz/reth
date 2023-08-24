@@ -10,9 +10,9 @@ use reth_primitives::{
     Block, SealedBlock, TransactionSigned, H256, U256,
 };
 use reth_rlp::{Decodable, DecodeError};
-use reth_rpc_types::engine::{ExecutionPayload, ExecutionPayloadBodyV1, PayloadError};
+use reth_rpc_types::engine::{ExecutionPayloadBodyV1, ExecutionPayloadV1, PayloadError};
 
-fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> ExecutionPayload {
+fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> ExecutionPayloadV1 {
     let unsealed = src.unseal();
     let mut transformed: Block = f(unsealed);
     // Recalculate roots
@@ -81,7 +81,7 @@ fn payload_validation() {
     );
 
     // Invalid encoded transactions
-    let mut payload_with_invalid_txs: ExecutionPayload = block.clone().into();
+    let mut payload_with_invalid_txs: ExecutionPayloadV1 = block.clone().into();
     payload_with_invalid_txs.transactions.iter_mut().for_each(|tx| {
         *tx = Bytes::new().into();
     });

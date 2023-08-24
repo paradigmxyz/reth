@@ -6,7 +6,7 @@ use reth_primitives::{
 use reth_revm_primitives::config::revm_spec_by_timestamp_after_merge;
 use reth_rlp::Encodable;
 use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, PayloadAttributes,
+    ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, PayloadAttributes,
     PayloadId,
 };
 use revm_primitives::{BlockEnv, CfgEnv};
@@ -58,7 +58,7 @@ impl BuiltPayload {
     }
 
     /// Converts the type into the response expected by `engine_getPayloadV1`
-    pub fn into_v1_payload(self) -> ExecutionPayload {
+    pub fn into_v1_payload(self) -> ExecutionPayloadV1 {
         self.into()
     }
 
@@ -74,7 +74,7 @@ impl BuiltPayload {
 }
 
 // V1 engine_getPayloadV1 response
-impl From<BuiltPayload> for ExecutionPayload {
+impl From<BuiltPayload> for ExecutionPayloadV1 {
     fn from(value: BuiltPayload) -> Self {
         value.block.into()
     }
@@ -98,7 +98,8 @@ impl From<BuiltPayload> for ExecutionPayloadEnvelopeV3 {
         let BuiltPayload { block, fees, sidecars, .. } = value;
 
         ExecutionPayloadEnvelopeV3 {
-            payload_inner: ExecutionPayloadEnvelopeV2 { payload: block.into(), block_value: fees },
+            payload_inner: block.into(),
+            block_value: fees,
             // From the engine API spec:
             //
             // > Client software **MAY** use any heuristics to decide whether to set
