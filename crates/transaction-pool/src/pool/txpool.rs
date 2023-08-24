@@ -416,8 +416,9 @@ impl<T: TransactionOrdering> TxPool<T> {
             match destination {
                 Destination::Discard => {
                     // remove the transaction from the pool and subpool
-                    self.prune_transaction_by_hash(&hash);
-                    outcome.discarded.push(hash);
+                    if let Some(tx) = self.prune_transaction_by_hash(&hash) {
+                        outcome.discarded.push(tx);
+                    }
                     self.metrics.removed_transactions.increment(1);
                 }
                 Destination::Pool(move_to) => {
@@ -1336,7 +1337,7 @@ pub(crate) struct UpdateOutcome<T: PoolTransaction> {
     /// transactions promoted to the pending pool
     pub(crate) promoted: Vec<Arc<ValidPoolTransaction<T>>>,
     /// transaction that failed and were discarded
-    pub(crate) discarded: Vec<TxHash>,
+    pub(crate) discarded: Vec<Arc<ValidPoolTransaction<T>>>,
 }
 
 impl<T: PoolTransaction> Default for UpdateOutcome<T> {
