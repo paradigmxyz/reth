@@ -1,7 +1,6 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, H256};
 use reth_rpc_types::{
-    state::StateOverride,
     trace::geth::{
         BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
         TraceResult,
@@ -120,7 +119,12 @@ pub trait DebugApi {
         &self,
         bundles: Vec<Bundle>,
         state_context: Option<StateContext>,
-        opts: Option<GethDebugTracingOptions>,
-        state_override: Option<StateOverride>,
+        opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<GethTrace>>;
+
+    /// Sets the logging backtrace location. When a backtrace location is set and a log message is
+    /// emitted at that location,  the stack of the goroutine executing the log statement will
+    /// be printed to stderr.
+    #[method(name = "backtraceAt")]
+    async fn debug_backtrace_at(&self, location: &str) -> RpcResult<()>;
 }

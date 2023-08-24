@@ -25,7 +25,6 @@ use reth_revm::{
 use reth_rlp::{Decodable, Encodable};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::{
-    state::StateOverride,
     trace::geth::{
         BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
         GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult,
@@ -248,9 +247,10 @@ where
                             .inner
                             .eth_api
                             .spawn_with_call_at(call, at, overrides, move |db, env| {
-                                inspect(db, env, &mut inspector)?;
-                                let frame =
-                                    inspector.into_geth_builder().geth_call_traces(call_config);
+                                let (res, _) = inspect(db, env, &mut inspector)?;
+                                let frame = inspector
+                                    .into_geth_builder()
+                                    .geth_call_traces(call_config, res.result.gas_used());
                                 Ok(frame.into())
                             })
                             .await?;
@@ -340,8 +340,7 @@ where
         &self,
         bundles: Vec<Bundle>,
         state_context: Option<StateContext>,
-        opts: Option<GethDebugTracingOptions>,
-        state_override: Option<StateOverride>,
+        opts: Option<GethDebugTracingCallOptions>,
     ) -> EthResult<Vec<GethTrace>> {
         if bundles.is_empty() {
             return Err(EthApiError::InvalidParams(String::from("bundles are empty.")))
@@ -356,8 +355,9 @@ where
             self.inner.eth_api.block_by_id(target_block),
         )?;
 
+        let opts = opts.unwrap_or_default();
         let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-        let tracing_options = opts.unwrap_or_default();
+        let GethDebugTracingCallOptions { tracing_options, mut state_overrides, .. } = opts;
         let gas_limit = self.inner.eth_api.call_gas_limit();
 
         // we're essentially replaying the transactions in the block here, hence we need the state
@@ -399,18 +399,22 @@ where
                 while let Some(bundle) = bundles.next() {
                     //let mut result = Vec::with_capacity(bundle.len());
                     let Bundle { transactions, block_override } = bundle;
-                    let overrides =
-                        EvmOverrides::new(state_override.clone(), block_override.map(Box::new));
+
+                    let block_overrides = block_override.map(Box::new);
 
                     let mut transactions = transactions.into_iter().peekable();
                     while let Some(tx) = transactions.next() {
+                        // apply state overrides only once, before the first transaction
+                        let state_overrides = state_overrides.take();
+                        let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
+
                         let env = prepare_call_env(
                             cfg.clone(),
                             block_env.clone(),
                             tx,
                             gas_limit,
                             &mut db,
-                            overrides.clone(),
+                            overrides,
                         )?;
 
                         let (trace, state) = this.trace_transaction(
@@ -469,7 +473,9 @@ where
 
                         let (res, _) = inspect(db, env, &mut inspector)?;
 
-                        let frame = inspector.into_geth_builder().geth_call_traces(call_config);
+                        let frame = inspector
+                            .into_geth_builder()
+                            .geth_call_traces(call_config, res.result.gas_used());
 
                         return Ok((frame.into(), res.state))
                     }
@@ -643,6 +649,10 @@ where
         Ok(res.into())
     }
 
+    async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {
+        Ok(())
+    }
+
     /// Handler for `debug_getRawBlock`
     async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes> {
         let block = self.inner.provider.block_by_id(block_id).to_rpc_result()?;
@@ -758,12 +768,10 @@ where
         &self,
         bundles: Vec<Bundle>,
         state_context: Option<StateContext>,
-        opts: Option<GethDebugTracingOptions>,
-        state_override: Option<StateOverride>,
+        opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<GethTrace>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(DebugApi::debug_trace_call_many(self, bundles, state_context, opts, state_override)
-            .await?)
+        Ok(DebugApi::debug_trace_call_many(self, bundles, state_context, opts).await?)
     }
 }
 

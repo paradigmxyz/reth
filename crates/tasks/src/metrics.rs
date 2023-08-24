@@ -1,8 +1,5 @@
 //! Task Executor Metrics
-use reth_metrics::{
-    metrics::{self, Counter},
-    Metrics,
-};
+use reth_metrics::{metrics::Counter, Metrics};
 
 /// Task Executor Metrics
 #[derive(Metrics, Clone)]

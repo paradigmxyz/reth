@@ -386,6 +386,21 @@ impl CallTraceNode {
         }
     }
 
+    /// If the trace is a selfdestruct, returns the `CallFrame` for a geth call trace
+    pub(crate) fn geth_selfdestruct_call_trace(&self) -> Option<CallFrame> {
+        if self.is_selfdestruct() {
+            Some(CallFrame {
+                typ: "SELFDESTRUCT".to_string(),
+                from: self.trace.caller,
+                to: self.trace.selfdestruct_refund_target,
+                value: Some(self.trace.value),
+                ..Default::default()
+            })
+        } else {
+            None
+        }
+    }
+
     /// If the trace is a selfdestruct, returns the `TransactionTrace` for a parity trace.
     pub(crate) fn parity_selfdestruct_trace(
         &self,
