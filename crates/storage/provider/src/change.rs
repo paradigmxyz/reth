@@ -579,19 +579,19 @@ impl StateChange {
 #[cfg(test)]
 mod tests {
     use super::{StateChange, StateReverts};
-    use crate::{AccountReader, ProviderFactory};
+    use crate::{AccountReader, BundleState, ProviderFactory};
     use reth_db::{
         cursor::{DbCursorRO, DbDupCursorRO},
-        models::AccountBeforeTx,
+        models::{AccountBeforeTx, BlockNumberAddress},
         tables,
         test_utils::create_test_rw_db,
         transaction::DbTx,
         DatabaseEnv,
     };
-    use reth_primitives::{Address, MAINNET, U256};
+    use reth_primitives::{Address, StorageEntry, H256, MAINNET, U256};
     use reth_revm_primitives::{into_reth_acc, primitives::HashMap};
     use revm::{
-        primitives::{Account, AccountInfo as RevmAccountInfo, AccountStatus},
+        primitives::{Account, AccountInfo as RevmAccountInfo, AccountStatus, StorageSlot},
         CacheState, DatabaseCommit, StateBuilder as RevmStateBuilder,
     };
     use std::sync::Arc;
@@ -727,6 +727,200 @@ mod tests {
             changeset_cursor.seek_exact(2).expect("Could not read account change set"),
             Some((2, AccountBeforeTx { address: address_b, info: Some(reth_account_b_changed) })),
             "Account B changeset is wrong after deletion"
+        );
+    }
+
+    #[test]
+    fn write_to_db_storage() {
+        let db: Arc<DatabaseEnv> = create_test_rw_db();
+        let factory = ProviderFactory::new(db, MAINNET.clone());
+        let provider = factory.provider_rw().unwrap();
+
+        let address_a = Address::zero();
+        let address_b = Address::repeat_byte(0xff);
+
+        let account_b = RevmAccountInfo { balance: U256::from(2), nonce: 2, ..Default::default() };
+
+        let mut cache_state = CacheState::new(true);
+        cache_state.insert_not_existing(address_a);
+        cache_state.insert_account_with_storage(
+            address_b,
+            account_b.clone(),
+            HashMap::from([(U256::from(1), U256::from(1))]),
+        );
+        let mut state = RevmStateBuilder::default().with_cached_prestate(cache_state).build();
+
+        state.commit(HashMap::from([
+            (
+                address_a,
+                Account {
+                    status: AccountStatus::Touched | AccountStatus::Created,
+                    info: RevmAccountInfo::default(),
+                    // 0x00 => 0 => 1
+                    // 0x01 => 0 => 2
+                    storage: HashMap::from([
+                        (
+                            U256::from(0),
+                            StorageSlot { present_value: U256::from(1), ..Default::default() },
+                        ),
+                        (
+                            U256::from(1),
+                            StorageSlot { present_value: U256::from(2), ..Default::default() },
+                        ),
+                    ]),
+                },
+            ),
+            (
+                address_b,
+                Account {
+                    status: AccountStatus::Touched,
+                    info: account_b,
+                    // 0x01 => 1 => 2
+                    storage: HashMap::from([(
+                        U256::from(1),
+                        StorageSlot {
+                            present_value: U256::from(2),
+                            previous_or_original_value: U256::from(1),
+                        },
+                    )]),
+                },
+            ),
+        ]));
+
+        state.merge_transitions();
+        let revm_bundle_state = state.take_bundle();
+
+        BundleState::new(revm_bundle_state, vec![], 1)
+            .write_to_db(provider.tx_ref(), false)
+            .expect("Could not write bundle state to DB");
+
+        // Check plain storage state
+        let mut storage_cursor = provider
+            .tx_ref()
+            .cursor_dup_read::<tables::PlainStorageState>()
+            .expect("Could not open plain storage state cursor");
+
+        assert_eq!(
+            storage_cursor.seek_exact(address_a).unwrap(),
+            Some((address_a, StorageEntry { key: H256::zero(), value: U256::from(1) })),
+            "Slot 0 for account A should be 1"
+        );
+        assert_eq!(
+            storage_cursor.next_dup().unwrap(),
+            Some((
+                address_a,
+                StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(2) }
+            )),
+            "Slot 1 for account A should be 2"
+        );
+        assert_eq!(
+            storage_cursor.next_dup().unwrap(),
+            None,
+            "Account A should only have 2 storage slots"
+        );
+
+        assert_eq!(
+            storage_cursor.seek_exact(address_b).unwrap(),
+            Some((
+                address_b,
+                StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(2) }
+            )),
+            "Slot 1 for account B should be 2"
+        );
+        assert_eq!(
+            storage_cursor.next_dup().unwrap(),
+            None,
+            "Account B should only have 1 storage slot"
+        );
+
+        // Check change set
+        let mut changeset_cursor = provider
+            .tx_ref()
+            .cursor_dup_read::<tables::StorageChangeSet>()
+            .expect("Could not open storage changeset cursor");
+        assert_eq!(
+            changeset_cursor.seek_exact(BlockNumberAddress((1, address_a))).unwrap(),
+            Some((
+                BlockNumberAddress((1, address_a)),
+                StorageEntry { key: H256::zero(), value: U256::from(0) }
+            )),
+            "Slot 0 for account A should have changed from 0"
+        );
+        assert_eq!(
+            changeset_cursor.next_dup().unwrap(),
+            Some((
+                BlockNumberAddress((1, address_a)),
+                StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(0) }
+            )),
+            "Slot 1 for account A should have changed from 0"
+        );
+        assert_eq!(
+            changeset_cursor.next_dup().unwrap(),
+            None,
+            "Account A should only be in the changeset 2 times"
+        );
+
+        assert_eq!(
+            changeset_cursor.seek_exact(BlockNumberAddress((1, address_b))).unwrap(),
+            Some((
+                BlockNumberAddress((1, address_b)),
+                StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(1) }
+            )),
+            "Slot 1 for account B should have changed from 1"
+        );
+        assert_eq!(
+            changeset_cursor.next_dup().unwrap(),
+            None,
+            "Account B should only be in the changeset 1 time"
+        );
+
+        // Delete account A
+        let mut cache_state = CacheState::new(true);
+        cache_state.insert_account(address_a, RevmAccountInfo::default());
+        let mut state = RevmStateBuilder::default().with_cached_prestate(cache_state).build();
+
+        state.commit(HashMap::from([(
+            address_a,
+            Account {
+                status: AccountStatus::Touched | AccountStatus::SelfDestructed,
+                info: RevmAccountInfo::default(),
+                storage: HashMap::default(),
+            },
+        )]));
+
+        state.merge_transitions();
+        let revm_bundle_state = state.take_bundle();
+
+        BundleState::new(revm_bundle_state, vec![], 2)
+            .write_to_db(provider.tx_ref(), false)
+            .expect("Could not write bundle state to DB");
+
+        assert_eq!(
+            storage_cursor.seek_exact(address_a).unwrap(),
+            None,
+            "Account A should have no storage slots after deletion"
+        );
+
+        assert_eq!(
+            changeset_cursor.seek_exact(BlockNumberAddress((2, address_a))).unwrap(),
+            Some((
+                BlockNumberAddress((2, address_a)),
+                StorageEntry { key: H256::zero(), value: U256::from(1) }
+            )),
+            "Slot 0 for account A should have changed from 1 on deletion"
+        );
+        assert_eq!(
+            changeset_cursor.next_dup().unwrap(),
+            Some((
+                BlockNumberAddress((2, address_a)),
+                StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(2) }
+            )),
+            "Slot 1 for account A should have changed from 2 on deletion"
+        );
+        assert_eq!(
+            changeset_cursor.next_dup().unwrap(),
+            None,
+            "Account A should only be in the changeset 2 times on deletion"
         );
     }
 }
