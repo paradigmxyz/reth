@@ -43,6 +43,34 @@ To run Reth as a pruned node configured through a [custom configuration](./confi
 modify the `reth.toml` file and run Reth in the same way as archive node by following the steps from
 the previous chapter on [how to run on mainnet or official testnets](./mainnet.md).
 
+## Size
+
+All numbers are as of August 2023 at block number 17.9M for mainnet.
+
+### Archive
+
+Archive node occupies at least 2.1TB.
+
+You can track the growth of Reth archive node size with our
+[public Grafana dashboard](https://reth.paradigm.xyz/d/2k8BXz24k/reth?orgId=1&refresh=30s&viewPanel=52).
+
+### Full
+
+Full node occupies 1TB at the peak, and slowly goes down to 920GB.
+
+### Pruned
+
+Different parts take up different amounts of disk space.
+If pruned fully, this is the total freed space you'll get, per part: 
+
+| Part               | Size  |
+|--------------------|-------|
+| Sender Recovery    | 70GB  |
+| Transaction Lookup | 140GB |
+| Receipts           | 240GB |
+| Account History    | 230GB |
+| Storage History    | 680GB |
+
 ## RPC support
 
 As it was mentioned in the [pruning configuration chapter](./config.md#the-prune-section), there are several parts
