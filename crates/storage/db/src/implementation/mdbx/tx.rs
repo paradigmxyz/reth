@@ -8,8 +8,9 @@ use crate::{
     DatabaseError,
 };
 use parking_lot::RwLock;
+use reth_interfaces::db::DatabaseWriteOperation;
 use reth_libmdbx::{ffi::DBI, EnvironmentKind, Transaction, TransactionKind, WriteFlags, RW};
-use reth_metrics::metrics::{self, histogram};
+use reth_metrics::metrics::histogram;
 use std::{marker::PhantomData, str::FromStr, sync::Arc, time::Instant};
 
 /// Wrapper for the libmdbx transaction.
@@ -124,9 +125,15 @@ impl<'tx, K: TransactionKind, E: EnvironmentKind> DbTx<'tx> for Tx<'tx, K, E> {
 
 impl<E: EnvironmentKind> DbTxMut<'_> for Tx<'_, RW, E> {
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+        let key = key.encode();
         self.inner
-            .put(self.get_dbi::<T>()?, &key.encode(), &value.compress(), WriteFlags::UPSERT)
-            .map_err(|e| DatabaseError::Write(e.into()))
+            .put(self.get_dbi::<T>()?, key.as_ref(), &value.compress(), WriteFlags::UPSERT)
+            .map_err(|e| DatabaseError::Write {
+                code: e.into(),
+                operation: DatabaseWriteOperation::Put,
+                table_name: T::NAME,
+                key: Box::from(key.as_ref()),
+            })
     }
 
     fn delete<T: Table>(

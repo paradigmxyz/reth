@@ -247,10 +247,10 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Returns transactions for the multiple given hashes, if they exist.
-    pub(crate) fn get_all<'a>(
-        &'a self,
-        txs: impl IntoIterator<Item = TxHash> + 'a,
-    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + 'a {
+    pub(crate) fn get_all(
+        &self,
+        txs: Vec<TxHash>,
+    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
         txs.into_iter().filter_map(|tx| self.get(&tx))
     }
 
@@ -266,7 +266,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub(crate) fn update_accounts(
         &mut self,
         changed_senders: HashMap<SenderId, SenderInfo>,
-    ) -> UpdateOutcome {
+    ) -> UpdateOutcome<T::Transaction> {
         // track changed accounts
         self.sender_info.extend(changed_senders.clone());
         // Apply the state changes to the total set of transactions which triggers sub-pool updates.
@@ -287,7 +287,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         block_info: BlockInfo,
         mined_transactions: Vec<TxHash>,
         changed_senders: HashMap<SenderId, SenderInfo>,
-    ) -> OnNewCanonicalStateOutcome {
+    ) -> OnNewCanonicalStateOutcome<T::Transaction> {
         // update block info
         let block_hash = block_info.last_seen_block_hash;
         self.all_transactions.set_block_info(block_info);
@@ -409,19 +409,25 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Maintenance task to apply a series of updates.
     ///
     /// This will move/discard the given transaction according to the `PoolUpdate`
-    fn process_updates(&mut self, updates: impl IntoIterator<Item = PoolUpdate>) -> UpdateOutcome {
+    fn process_updates(&mut self, updates: Vec<PoolUpdate>) -> UpdateOutcome<T::Transaction> {
         let mut outcome = UpdateOutcome::default();
         for update in updates {
             let PoolUpdate { id, hash, current, destination } = update;
             match destination {
                 Destination::Discard => {
-                    outcome.discarded.push(hash);
+                    // remove the transaction from the pool and subpool
+                    if let Some(tx) = self.prune_transaction_by_hash(&hash) {
+                        outcome.discarded.push(tx);
+                    }
+                    self.metrics.removed_transactions.increment(1);
                 }
                 Destination::Pool(move_to) => {
                     debug_assert!(!move_to.eq(&current), "destination must be different");
-                    self.move_transaction(current, move_to, &id);
+                    let moved = self.move_transaction(current, move_to, &id);
                     if matches!(move_to, SubPool::Pending) {
-                        outcome.promoted.push(hash);
+                        if let Some(tx) = moved {
+                            outcome.promoted.push(tx);
+                        }
                     }
                 }
             }
@@ -433,10 +439,15 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///
     /// This will remove the given transaction from one sub-pool and insert it into the other
     /// sub-pool.
-    fn move_transaction(&mut self, from: SubPool, to: SubPool, id: &TransactionId) {
-        if let Some(tx) = self.remove_from_subpool(from, id) {
-            self.add_transaction_to_subpool(to, tx);
-        }
+    fn move_transaction(
+        &mut self,
+        from: SubPool,
+        to: SubPool,
+        id: &TransactionId,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let tx = self.remove_from_subpool(from, id)?;
+        self.add_transaction_to_subpool(to, tx.clone());
+        Some(tx)
     }
 
     /// Removes and returns all matching transactions from the pool.
@@ -445,7 +456,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// any additional updates.
     pub(crate) fn remove_transactions(
         &mut self,
-        hashes: impl IntoIterator<Item = TxHash>,
+        hashes: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         hashes.into_iter().filter_map(|hash| self.remove_transaction_by_hash(&hash)).collect()
     }
@@ -1321,12 +1332,18 @@ impl<T: PoolTransaction> PoolInternalTransaction<T> {
 }
 
 /// Tracks the result after updating the pool
-#[derive(Default, Debug)]
-pub(crate) struct UpdateOutcome {
-    /// transactions promoted to the ready queue
-    pub(crate) promoted: Vec<TxHash>,
-    /// transaction that failed and became discarded
-    pub(crate) discarded: Vec<TxHash>,
+#[derive(Debug)]
+pub(crate) struct UpdateOutcome<T: PoolTransaction> {
+    /// transactions promoted to the pending pool
+    pub(crate) promoted: Vec<Arc<ValidPoolTransaction<T>>>,
+    /// transaction that failed and were discarded
+    pub(crate) discarded: Vec<Arc<ValidPoolTransaction<T>>>,
+}
+
+impl<T: PoolTransaction> Default for UpdateOutcome<T> {
+    fn default() -> Self {
+        Self { promoted: vec![], discarded: vec![] }
+    }
 }
 
 /// Represents the outcome of a prune
@@ -1682,5 +1699,31 @@ mod tests {
         assert_eq!(pool.basefee_pool.len(), 1);
 
         assert_eq!(pool.all_transactions.txs.get(&id).unwrap().subpool, SubPool::BaseFee)
+    }
+
+    #[test]
+    fn discard_nonce_too_low() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let tx = MockTransaction::eip1559().inc_price_by(10);
+        let validated = f.validated(tx.clone());
+        let id = *validated.id();
+        pool.add_transaction(validated, U256::from(1_000), 0).unwrap();
+
+        let next = tx.next();
+        let validated = f.validated(next.clone());
+        pool.add_transaction(validated, U256::from(1_000), 0).unwrap();
+
+        assert_eq!(pool.pending_pool.len(), 2);
+
+        let mut changed_senders = HashMap::new();
+        changed_senders.insert(
+            id.sender,
+            SenderInfo { state_nonce: next.get_nonce(), balance: U256::from(1_000) },
+        );
+        let outcome = pool.update_accounts(changed_senders);
+        assert_eq!(outcome.discarded.len(), 1);
+        assert_eq!(pool.pending_pool.len(), 1);
     }
 }

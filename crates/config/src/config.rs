@@ -279,18 +279,18 @@ impl Default for IndexHistoryConfig {
 }
 
 /// Pruning configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct PruneConfig {
     /// Minimum pruning interval measured in blocks.
-    pub block_interval: u64,
+    pub block_interval: usize,
     /// Pruning configuration for every part of the data that can be pruned.
     pub parts: PruneModes,
 }
 
 impl Default for PruneConfig {
     fn default() -> Self {
-        Self { block_interval: 10, parts: PruneModes::default() }
+        Self { block_interval: 5, parts: PruneModes::default() }
     }
 }
 

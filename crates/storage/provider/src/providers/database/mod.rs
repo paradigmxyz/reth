@@ -111,14 +111,18 @@ impl<DB: Database> ProviderFactory<DB> {
 
         // If we pruned account or storage history, we can't return state on every historical block.
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune part.
-        if let Some(prune_checkpoint) = account_history_prune_checkpoint {
+        if let Some(prune_checkpoint_block_number) =
+            account_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
+        {
             state_provider = state_provider.with_lowest_available_account_history_block_number(
-                prune_checkpoint.block_number + 1,
+                prune_checkpoint_block_number + 1,
             );
         }
-        if let Some(prune_checkpoint) = storage_history_prune_checkpoint {
+        if let Some(prune_checkpoint_block_number) =
+            storage_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
+        {
             state_provider = state_provider.with_lowest_available_storage_history_block_number(
-                prune_checkpoint.block_number + 1,
+                prune_checkpoint_block_number + 1,
             );
         }
 

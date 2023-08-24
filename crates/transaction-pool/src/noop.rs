@@ -4,13 +4,16 @@
 //! to be generic over it.
 
 use crate::{
-    error::PoolError, traits::PendingTransactionListenerKind, AllPoolTransactions,
-    AllTransactionsEvents, BestTransactions, BlockInfo, NewTransactionEvent, PoolResult, PoolSize,
-    PoolTransaction, PooledTransaction, PropagatedTransactions, TransactionEvents,
-    TransactionOrigin, TransactionPool, TransactionValidationOutcome, TransactionValidator,
-    ValidPoolTransaction,
+    blobstore::BlobStoreError,
+    error::PoolError,
+    traits::{GetPooledTransactionLimit, PendingTransactionListenerKind},
+    validate::ValidTransaction,
+    AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPooledTransaction,
+    NewTransactionEvent, PoolResult, PoolSize, PoolTransaction, PropagatedTransactions,
+    TransactionEvents, TransactionOrigin, TransactionPool, TransactionValidationOutcome,
+    TransactionValidator, ValidPoolTransaction,
 };
-use reth_primitives::{Address, TxHash};
+use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash};
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
@@ -24,7 +27,7 @@ pub struct NoopTransactionPool;
 
 #[async_trait::async_trait]
 impl TransactionPool for NoopTransactionPool {
-    type Transaction = PooledTransaction;
+    type Transaction = EthPooledTransaction;
 
     fn pool_size(&self) -> PoolSize {
         Default::default()
@@ -108,6 +111,14 @@ impl TransactionPool for NoopTransactionPool {
         vec![]
     }
 
+    fn get_pooled_transaction_elements(
+        &self,
+        _tx_hashes: Vec<TxHash>,
+        _limit: GetPooledTransactionLimit,
+    ) -> Vec<PooledTransactionsElement> {
+        vec![]
+    }
+
     fn best_transactions(
         &self,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
@@ -135,7 +146,7 @@ impl TransactionPool for NoopTransactionPool {
 
     fn remove_transactions(
         &self,
-        _hashes: impl IntoIterator<Item = TxHash>,
+        _hashes: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         vec![]
     }
@@ -146,10 +157,7 @@ impl TransactionPool for NoopTransactionPool {
         None
     }
 
-    fn get_all(
-        &self,
-        _txs: impl IntoIterator<Item = TxHash>,
-    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+    fn get_all(&self, _txs: Vec<TxHash>) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         vec![]
     }
 
@@ -164,6 +172,17 @@ impl TransactionPool for NoopTransactionPool {
 
     fn unique_senders(&self) -> HashSet<Address> {
         Default::default()
+    }
+
+    fn get_blob(&self, _tx_hash: TxHash) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
+        Ok(None)
+    }
+
+    fn get_all_blobs(
+        &self,
+        _tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError> {
+        Ok(vec![])
     }
 }
 
@@ -187,7 +206,7 @@ impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
         TransactionValidationOutcome::Valid {
             balance: Default::default(),
             state_nonce: 0,
-            transaction,
+            transaction: ValidTransaction::Valid(transaction),
             propagate: match origin {
                 TransactionOrigin::External => true,
                 TransactionOrigin::Local => self.propagate_local,
@@ -215,16 +234,16 @@ impl<T> Default for MockTransactionValidator<T> {
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("Can't insert transaction into the noop pool that does nothing.")]
 pub struct NoopInsertError {
-    tx: PooledTransaction,
+    tx: EthPooledTransaction,
 }
 
 impl NoopInsertError {
-    fn new(tx: PooledTransaction) -> Self {
+    fn new(tx: EthPooledTransaction) -> Self {
         Self { tx }
     }
 
     /// Returns the transaction that failed to be inserted.
-    pub fn into_inner(self) -> PooledTransaction {
+    pub fn into_inner(self) -> EthPooledTransaction {
         self.tx
     }
 }

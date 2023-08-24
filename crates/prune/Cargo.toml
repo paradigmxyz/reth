@@ -16,7 +16,10 @@ reth-primitives.workspace = true
 reth-db.workspace = true
 reth-provider.workspace = true
 reth-interfaces.workspace = true
+
+# metrics
 reth-metrics.workspace = true
+metrics.workspace = true
 
 # misc
 tracing.workspace = true

@@ -972,6 +972,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             let canon_fork: BlockNumHash = new_canon_chain.fork_block();
             // sanity check
             if self.block_indices.canonical_hash(&canon_fork.number) != Some(canon_fork.hash) {
+                error!(
+                    target: "blockchain_tree",
+                    ?canon_fork,
+                    ?self.block_indices,
+                    "All chains should point to canonical chain"
+                );
                 unreachable!("all chains should point to canonical chain.");
             }
 

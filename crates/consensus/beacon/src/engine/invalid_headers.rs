@@ -1,5 +1,5 @@
 use reth_metrics::{
-    metrics::{self, Counter, Gauge},
+    metrics::{Counter, Gauge},
     Metrics,
 };
 use reth_primitives::{Header, SealedHeader, H256};

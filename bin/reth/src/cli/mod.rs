@@ -10,14 +10,14 @@ use crate::{
     stage, test_vectors,
     version::{LONG_VERSION, SHORT_VERSION},
 };
-use clap::{ArgAction, Args, Parser, Subcommand};
+use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use reth_primitives::ChainSpec;
 use reth_tracing::{
     tracing::{metadata::LevelFilter, Level, Subscriber},
     tracing_subscriber::{filter::Directive, registry::LookupSpan, EnvFilter},
     BoxedLayer, FileWorkerGuard,
 };
-use std::sync::Arc;
+use std::{fmt, fmt::Display, sync::Arc};
 
 pub mod config;
 pub mod ext;
@@ -86,7 +86,8 @@ impl<Ext: RethCliExt> Cli<Ext> {
     /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
     /// that all logs are flushed to disk.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
-        let mut layers = vec![reth_tracing::stdout(self.verbosity.directive())];
+        let mut layers =
+            vec![reth_tracing::stdout(self.verbosity.directive(), &self.logs.color.to_string())];
         let guard = self.logs.layer()?.map(|(layer, guard)| {
             layers.push(layer);
             guard
@@ -163,6 +164,16 @@ pub struct Logs {
     /// The filter to use for logs written to the log file.
     #[arg(long = "log.filter", value_name = "FILTER", global = true, default_value = "error")]
     filter: String,
+
+    /// Sets whether or not the formatter emits ANSI terminal escape codes for colors and other
+    /// text formatting.
+    #[arg(
+        long,
+        value_name = "COLOR",
+        global = true,
+        default_value_t = ColorMode::Always
+    )]
+    color: ColorMode,
 }
 
 impl Logs {
@@ -224,10 +235,37 @@ impl Verbosity {
     }
 }
 
+/// The color mode for the cli.
+#[derive(Debug, Copy, Clone, ValueEnum, Eq, PartialEq)]
+pub enum ColorMode {
+    /// Colors on
+    Always,
+    /// Colors on
+    Auto,
+    /// Colors off
+    Never,
+}
+
+impl Display for ColorMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ColorMode::Always => write!(f, "always"),
+            ColorMode::Auto => write!(f, "auto"),
+            ColorMode::Never => write!(f, "never"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn parse_color_mode() {
+        let reth = Cli::<()>::try_parse_from(["reth", "node", "--color", "always"]).unwrap();
+        assert_eq!(reth.logs.color, ColorMode::Always);
+    }
 
     /// Tests that the help message is parsed correctly. This ensures that clap args are configured
     /// correctly and no conflicts are introduced via attributes that would result in a panic at

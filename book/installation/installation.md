@@ -33,10 +33,11 @@ Prior to purchasing an NVMe drive, it is advisable to research and determine whe
 
 ### Disk
 
-There are multiple types of disks to sync Reth, with varying size requirements, depending on the syncing mode:
+There are multiple types of disks to sync Reth, with varying size requirements, depending on the syncing mode.
+As of August 2023 at block number 17.9M:
 
-* Archive Node: At least 2.1TB is required (as of July 2023, at block number 17.7M)
-* Full Node: TBD
+* Archive Node: At least 2.1TB is required
+* Full Node: At least 1TB is required
 
 NVMe drives are recommended for the best performance, with SSDs being a cheaper alternative. HDDs are the cheapest option, but they will take the longest to sync, and are not recommended.
 

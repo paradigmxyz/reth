@@ -30,7 +30,7 @@ impl Command {
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         match self.command {
             Subcommands::Execution(command) => command.execute(ctx).await,
-            Subcommands::Merkle(command) => command.execute().await,
+            Subcommands::Merkle(command) => command.execute(ctx).await,
             Subcommands::InMemoryMerkle(command) => command.execute(ctx).await,
         }
     }

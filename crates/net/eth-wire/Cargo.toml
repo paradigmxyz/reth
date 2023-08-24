@@ -24,7 +24,10 @@ reth-rlp = { workspace = true, features = [
     "ethereum-types",
     "smol_str",
 ] }
+
+# metrics
 reth-metrics.workspace = true
+metrics.workspace = true
 
 # used for Chain and builders
 ethers-core = { workspace = true, default-features = false }

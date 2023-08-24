@@ -32,7 +32,7 @@ async fn can_peer_with_geth() {
         "setting up reth networking stack in keepalive test"
     );
 
-    let config = NetworkConfig::<Arc<NoopProvider>>::builder(secret_key)
+    let config = NetworkConfig::builder(secret_key)
         .listener_addr(reth_p2p)
         .discovery_addr(reth_disc)
         .chain_spec(chainspec)

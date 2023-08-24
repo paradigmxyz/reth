@@ -7,6 +7,8 @@ use thiserror::Error;
 /// The Engine API result type
 pub type EngineApiResult<Ok> = Result<Ok, EngineApiError>;
 
+/// Payload unsupported fork code.
+pub const UNSUPPORTED_FORK_CODE: i32 = -38005;
 /// Payload unknown error code.
 pub const UNKNOWN_PAYLOAD_CODE: i32 = -38001;
 /// Request too large error code.
@@ -34,6 +36,10 @@ pub enum EngineApiError {
         /// requested number of items
         count: u64,
     },
+    /// Thrown if `PayloadAttributes` provided in engine_forkchoiceUpdated before V3 contains a
+    /// parent beacon block root
+    #[error("parent beacon block root not supported before V3")]
+    ParentBeaconBlockRootNotSupportedBeforeV3,
     /// Thrown if engine_forkchoiceUpdatedV1 contains withdrawals
     #[error("withdrawals not supported in V1")]
     WithdrawalsNotSupportedInV1,
@@ -43,6 +49,14 @@ pub enum EngineApiError {
     /// Thrown if engine_forkchoiceUpdated contains withdrawals before Shanghai
     #[error("withdrawals pre-shanghai")]
     HasWithdrawalsPreShanghai,
+    /// Thrown if the `PayloadAttributes` provided in engine_forkchoiceUpdated contains no parent
+    /// beacon block root after Cancun
+    #[error("no parent beacon block root post-cancun")]
+    NoParentBeaconBlockRootPostCancun,
+    /// Thrown if `PayloadAttributes` were provided with a timestamp, but the version of the engine
+    /// method called is meant for a fork that occurs after the provided timestamp.
+    #[error("unsupported fork")]
+    UnsupportedFork,
     /// Terminal total difficulty mismatch during transition configuration exchange.
     #[error(
         "Invalid transition terminal total difficulty. Execution: {execution}. Consensus: {consensus}"
@@ -82,10 +96,13 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
         let code = match error {
             EngineApiError::InvalidBodiesRange { .. } |
             EngineApiError::WithdrawalsNotSupportedInV1 |
+            EngineApiError::ParentBeaconBlockRootNotSupportedBeforeV3 |
+            EngineApiError::NoParentBeaconBlockRootPostCancun |
             EngineApiError::NoWithdrawalsPostShanghai |
             EngineApiError::HasWithdrawalsPreShanghai => INVALID_PARAMS_CODE,
             EngineApiError::UnknownPayload => UNKNOWN_PAYLOAD_CODE,
             EngineApiError::PayloadRequestTooLarge { .. } => REQUEST_TOO_LARGE_CODE,
+            EngineApiError::UnsupportedFork => UNSUPPORTED_FORK_CODE,
 
             // Error responses from the consensus engine
             EngineApiError::ForkChoiceUpdate(ref err) => match err {
