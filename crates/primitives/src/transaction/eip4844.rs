@@ -105,6 +105,61 @@ impl TxEip4844 {
         }
     }
 
+    /// Verifies that the given blob data, commitments, and proofs are all valid for this
+    /// transaction.
+    ///
+    /// Takes as input the [KzgSettings], which should contain the the parameters derived from the
+    /// KZG trusted setup.
+    ///
+    /// This ensures that the blob transaction payload has the same number of blob data elements,
+    /// commitments, and proofs. Each blob data element is verified against its commitment and
+    /// proof.
+    ///
+    /// Returns `false` if any blob KZG proof in the response fails to verify, or if the versioned
+    /// hashes in the transaction do not match the actual commitment versioned hashes.
+    pub fn validate_blob(
+        &self,
+        sidecar: &BlobTransactionSidecar,
+        proof_settings: &KzgSettings,
+    ) -> Result<bool, BlobTransactionValidationError> {
+        // Ensure the versioned hashes and commitments have the same length
+        if self.blob_versioned_hashes.len() != sidecar.commitments.len() {
+            return Err(kzg::Error::MismatchLength(format!(
+                "There are {} versioned commitment hashes and {} commitments",
+                self.blob_versioned_hashes.len(),
+                sidecar.commitments.len()
+            ))
+            .into())
+        }
+
+        // zip and iterate, calculating versioned hashes
+        for (versioned_hash, commitment) in
+            self.blob_versioned_hashes.iter().zip(sidecar.commitments.iter())
+        {
+            // convert to KzgCommitment
+            let commitment = KzgCommitment::from(*commitment.deref());
+
+            // Calculate the versioned hash
+            //
+            // TODO: should this method distinguish the type of validation failure? For example
+            // whether a certain versioned hash does not match, or whether the blob proof
+            // validation failed?
+            let calculated_versioned_hash = kzg_to_versioned_hash(commitment);
+            if *versioned_hash != calculated_versioned_hash {
+                return Ok(false)
+            }
+        }
+
+        // Verify as a batch
+        KzgProof::verify_blob_kzg_proof_batch(
+            sidecar.blobs.as_slice(),
+            sidecar.commitments.as_slice(),
+            sidecar.proofs.as_slice(),
+            proof_settings,
+        )
+        .map_err(Into::into)
+    }
+
     /// Returns the total gas for all blobs in this transaction.
     #[inline]
     pub fn blob_gas(&self) -> u64 {
@@ -308,57 +363,12 @@ impl BlobTransaction {
 
     /// Verifies that the transaction's blob data, commitments, and proofs are all valid.
     ///
-    /// Takes as input the [KzgSettings], which should contain the the parameters derived from the
-    /// KZG trusted setup.
-    ///
-    /// This ensures that the blob transaction payload has the same number of blob data elements,
-    /// commitments, and proofs. Each blob data element is verified against its commitment and
-    /// proof.
-    ///
-    /// Returns `false` if any blob KZG proof in the response fails to verify, or if the versioned
-    /// hashes in the transaction do not match the actual commitment versioned hashes.
+    /// See also [TxEip4844::validate_blob]
     pub fn validate(
         &self,
         proof_settings: &KzgSettings,
     ) -> Result<bool, BlobTransactionValidationError> {
-        let inner_tx = &self.transaction;
-
-        // Ensure the versioned hashes and commitments have the same length
-        if inner_tx.blob_versioned_hashes.len() != self.sidecar.commitments.len() {
-            return Err(kzg::Error::MismatchLength(format!(
-                "There are {} versioned commitment hashes and {} commitments",
-                inner_tx.blob_versioned_hashes.len(),
-                self.sidecar.commitments.len()
-            ))
-            .into())
-        }
-
-        // zip and iterate, calculating versioned hashes
-        for (versioned_hash, commitment) in
-            inner_tx.blob_versioned_hashes.iter().zip(self.sidecar.commitments.iter())
-        {
-            // convert to KzgCommitment
-            let commitment = KzgCommitment::from(*commitment.deref());
-
-            // Calculate the versioned hash
-            //
-            // TODO: should this method distinguish the type of validation failure? For example
-            // whether a certain versioned hash does not match, or whether the blob proof
-            // validation failed?
-            let calculated_versioned_hash = kzg_to_versioned_hash(commitment);
-            if *versioned_hash != calculated_versioned_hash {
-                return Ok(false)
-            }
-        }
-
-        // Verify as a batch
-        KzgProof::verify_blob_kzg_proof_batch(
-            self.sidecar.blobs.as_slice(),
-            self.sidecar.commitments.as_slice(),
-            self.sidecar.proofs.as_slice(),
-            proof_settings,
-        )
-        .map_err(Into::into)
+        self.transaction.validate_blob(&self.sidecar, proof_settings)
     }
 
     /// Splits the [BlobTransaction] into its [TransactionSigned] and [BlobTransactionSidecar]
