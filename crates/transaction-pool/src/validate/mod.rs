@@ -86,6 +86,17 @@ pub enum ValidTransaction<T> {
     },
 }
 
+impl<T> ValidTransaction<T> {
+    /// Creates a new valid transaction with an optional sidecar.
+    pub fn new(transaction: T, sidecar: Option<BlobTransactionSidecar>) -> Self {
+        if let Some(sidecar) = sidecar {
+            Self::ValidWithSidecar { transaction, sidecar }
+        } else {
+            Self::Valid(transaction)
+        }
+    }
+}
+
 impl<T: PoolTransaction> ValidTransaction<T> {
     #[inline]
     pub(crate) fn transaction(&self) -> &T {

@@ -3,9 +3,10 @@
 use crate::{
     blobstore::BlobStore,
     error::InvalidPoolTransactionError,
-    traits::{PoolTransaction, TransactionOrigin},
+    traits::TransactionOrigin,
     validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_SIZE, TX_MAX_SIZE},
-    TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
+    EthBlobTransactionSidecar, EthPoolTransaction, TransactionValidationOutcome,
+    TransactionValidationTaskExecutor, TransactionValidator,
 };
 use reth_primitives::{
     constants::{eip4844::KZG_TRUSTED_SETUP, ETHEREUM_BLOCK_GAS_LIMIT},
@@ -32,7 +33,7 @@ pub struct EthTransactionValidator<Client, T> {
 impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
 where
     Client: StateProviderFactory,
-    Tx: PoolTransaction,
+    Tx: EthPoolTransaction,
 {
     type Transaction = Tx;
 
@@ -57,7 +58,6 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     /// This type fetches account info from the db
     client: Client,
     /// Blobstore used for fetching re-injected blob transactions.
-    #[allow(unused)]
     blob_store: Box<dyn BlobStore>,
     /// tracks activated forks relevant for transaction validation
     fork_tracker: ForkTracker,
@@ -93,14 +93,14 @@ impl<Client, Tx> EthTransactionValidatorInner<Client, Tx> {
 impl<Client, Tx> TransactionValidator for EthTransactionValidatorInner<Client, Tx>
 where
     Client: StateProviderFactory,
-    Tx: PoolTransaction,
+    Tx: EthPoolTransaction,
 {
     type Transaction = Tx;
 
     async fn validate_transaction(
         &self,
         origin: TransactionOrigin,
-        transaction: Self::Transaction,
+        mut transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
         // Checks for tx_type
         match transaction.tx_type() {
@@ -198,6 +198,8 @@ where
             }
         }
 
+        let mut blob_sidecar = None;
+
         // blob tx checks
         if transaction.is_eip4844() {
             // Cancun fork is required for blob txs
@@ -207,7 +209,31 @@ where
                     InvalidTransactionError::TxTypeNotSupported.into(),
                 )
             }
-            // TODO add checks for blob tx
+
+            // extract the blob from the transaction
+            match transaction.take_blob() {
+                EthBlobTransactionSidecar::None => {
+                    // this should not happen
+                    return TransactionValidationOutcome::Invalid(
+                        transaction,
+                        InvalidTransactionError::TxTypeNotSupported.into(),
+                    )
+                }
+                EthBlobTransactionSidecar::Missing => {
+                    if let Ok(Some(_)) = self.blob_store.get(*transaction.hash()) {
+                        // validated transaction is already in the store
+                    } else {
+                        return TransactionValidationOutcome::Invalid(
+                            transaction,
+                            InvalidPoolTransactionError::MissingEip4844Blob,
+                        )
+                    }
+                }
+                EthBlobTransactionSidecar::Present(blob) => {
+                    //TODO(mattsse): verify the blob
+                    blob_sidecar = Some(blob);
+                }
+            }
         }
 
         let account = match self
@@ -255,7 +281,7 @@ where
         TransactionValidationOutcome::Valid {
             balance: account.balance,
             state_nonce: account.nonce,
-            transaction: ValidTransaction::Valid(transaction),
+            transaction: ValidTransaction::new(transaction, blob_sidecar),
             // by this point assume all external transactions should be propagated
             propagate: match origin {
                 TransactionOrigin::External => true,

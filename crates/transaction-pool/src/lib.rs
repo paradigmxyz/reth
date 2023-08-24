@@ -180,9 +180,10 @@ pub use crate::{
     },
     traits::{
         AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
-        EthPooledTransaction, GetPooledTransactionLimit, NewTransactionEvent,
-        PendingTransactionListenerKind, PoolSize, PoolTransaction, PropagateKind,
-        PropagatedTransactions, TransactionOrigin, TransactionPool, TransactionPoolExt,
+        EthBlobTransactionSidecar, EthPoolTransaction, EthPooledTransaction,
+        GetPooledTransactionLimit, NewTransactionEvent, PendingTransactionListenerKind, PoolSize,
+        PoolTransaction, PropagateKind, PropagatedTransactions, TransactionOrigin, TransactionPool,
+        TransactionPoolExt,
     },
     validate::{
         EthTransactionValidator, TransactionValidationOutcome, TransactionValidationTaskExecutor,
