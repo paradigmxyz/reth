@@ -575,3 +575,159 @@ impl StateChange {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{StateChange, StateReverts};
+    use crate::{AccountReader, ProviderFactory};
+    use reth_db::{
+        cursor::{DbCursorRO, DbDupCursorRO},
+        models::AccountBeforeTx,
+        tables,
+        test_utils::create_test_rw_db,
+        transaction::DbTx,
+        DatabaseEnv,
+    };
+    use reth_primitives::{Address, MAINNET, U256};
+    use reth_revm_primitives::{into_reth_acc, primitives::HashMap};
+    use revm::{
+        primitives::{Account, AccountInfo as RevmAccountInfo, AccountStatus},
+        CacheState, DatabaseCommit, StateBuilder as RevmStateBuilder,
+    };
+    use std::sync::Arc;
+
+    #[test]
+    fn write_to_db_account_info() {
+        let db: Arc<DatabaseEnv> = create_test_rw_db();
+        let factory = ProviderFactory::new(db, MAINNET.clone());
+        let provider = factory.provider_rw().unwrap();
+
+        let address_a = Address::zero();
+        let address_b = Address::repeat_byte(0xff);
+
+        let account_a = RevmAccountInfo { balance: U256::from(1), nonce: 1, ..Default::default() };
+        let account_b = RevmAccountInfo { balance: U256::from(2), nonce: 2, ..Default::default() };
+        let account_b_changed =
+            RevmAccountInfo { balance: U256::from(3), nonce: 3, ..Default::default() };
+
+        let mut cache_state = CacheState::new(true);
+        cache_state.insert_not_existing(address_a);
+        cache_state.insert_account(address_b, account_b.clone());
+        let mut state = RevmStateBuilder::default().with_cached_prestate(cache_state).build();
+
+        // 0x00.. is created
+        state.commit(HashMap::from([(
+            address_a,
+            Account {
+                info: account_a.clone(),
+                status: AccountStatus::Touched | AccountStatus::Created,
+                storage: HashMap::default(),
+            },
+        )]));
+
+        // 0xff.. is changed (balance + 1, nonce + 1)
+        state.commit(HashMap::from([(
+            address_b,
+            Account {
+                info: account_b_changed.clone(),
+                status: AccountStatus::Touched,
+                storage: HashMap::default(),
+            },
+        )]));
+
+        state.merge_transitions();
+        let mut revm_bundle_state = state.take_bundle();
+
+        // Write plain state and reverts separately.
+        let plain_state = revm_bundle_state.take_sorted_plain_change_inner(false);
+        assert!(plain_state.storage.is_empty());
+        assert!(plain_state.contracts.is_empty());
+        StateChange(plain_state)
+            .write_to_db(provider.tx_ref())
+            .expect("Could not write plain state to DB");
+
+        let reverts = revm_bundle_state.take_reverts();
+        assert_eq!(reverts.storage, [[]]);
+        StateReverts(reverts)
+            .write_to_db(provider.tx_ref(), 1)
+            .expect("Could not write reverts to DB");
+
+        let reth_account_a = into_reth_acc(account_a);
+        let reth_account_b = into_reth_acc(account_b);
+        let reth_account_b_changed = into_reth_acc(account_b_changed.clone());
+
+        // Check plain state
+        assert_eq!(
+            provider.basic_account(address_a).expect("Could not read account state"),
+            Some(reth_account_a),
+            "Account A state is wrong"
+        );
+        assert_eq!(
+            provider.basic_account(address_b).expect("Could not read account state"),
+            Some(reth_account_b_changed),
+            "Account B state is wrong"
+        );
+
+        // Check change set
+        let mut changeset_cursor = provider
+            .tx_ref()
+            .cursor_dup_read::<tables::AccountChangeSet>()
+            .expect("Could not open changeset cursor");
+        assert_eq!(
+            changeset_cursor.seek_exact(1).expect("Could not read account change set"),
+            Some((1, AccountBeforeTx { address: address_a, info: None })),
+            "Account A changeset is wrong"
+        );
+        assert_eq!(
+            changeset_cursor.next_dup().expect("Changeset table is malformed"),
+            Some((1, AccountBeforeTx { address: address_b, info: Some(reth_account_b) })),
+            "Account B changeset is wrong"
+        );
+
+        let mut cache_state = CacheState::new(true);
+        cache_state.insert_account(address_b, account_b_changed.clone());
+        let mut state = RevmStateBuilder::default().with_cached_prestate(cache_state).build();
+
+        // let mut post_state = PostState::new();
+        // 0xff.. is destroyed
+        state.commit(HashMap::from([(
+            address_b,
+            Account {
+                status: AccountStatus::Touched | AccountStatus::SelfDestructed,
+                info: account_b_changed,
+                storage: HashMap::default(),
+            },
+        )]));
+
+        state.merge_transitions();
+        let mut revm_bundle_state = state.take_bundle();
+
+        // Write plain state and reverts separately.
+        let plain_state = revm_bundle_state.take_sorted_plain_change_inner(false);
+        assert!(plain_state.storage.is_empty());
+        assert!(plain_state.contracts.is_empty());
+        StateChange(plain_state)
+            .write_to_db(provider.tx_ref())
+            .expect("Could not write plain state to DB");
+
+        let reverts = revm_bundle_state.take_reverts();
+        assert_eq!(reverts.storage, [[(address_b, true, vec![])]]);
+        StateReverts(reverts)
+            .write_to_db(provider.tx_ref(), 2)
+            .expect("Could not write reverts to DB");
+
+        // Check new plain state for account B
+        assert_eq!(
+            provider.basic_account(address_b).expect("Could not read account state"),
+            None,
+            "Account B should be deleted"
+        );
+
+        // Check change set
+        assert_eq!(
+            changeset_cursor.seek_exact(2).expect("Could not read account change set"),
+            Some((2, AccountBeforeTx { address: address_b, info: Some(reth_account_b_changed) })),
+            "Account B changeset is wrong after deletion"
+        );
+    }
+}
