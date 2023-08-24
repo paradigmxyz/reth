@@ -470,6 +470,9 @@ pub enum RpcPoolError {
     /// Custom pool error
     #[error("{0:?}")]
     PoolTransactionError(Box<dyn PoolTransactionError>),
+    /// Unable to find the blob for an EIP4844 transaction
+    #[error("blob not found for EIP4844 transaction")]
+    MissingEip4844Blob,
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
@@ -508,6 +511,7 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             InvalidPoolTransactionError::OversizedData(_, _) => RpcPoolError::OversizedData,
             InvalidPoolTransactionError::Underpriced => RpcPoolError::Underpriced,
             InvalidPoolTransactionError::Other(err) => RpcPoolError::PoolTransactionError(err),
+            InvalidPoolTransactionError::MissingEip4844Blob => RpcPoolError::MissingEip4844Blob,
         }
     }
 }

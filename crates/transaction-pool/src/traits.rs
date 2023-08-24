@@ -640,6 +640,13 @@ pub trait PoolTransaction:
     fn chain_id(&self) -> Option<u64>;
 }
 
+/// An extension trait that provides additional interfaces for the
+/// [EthTransactionValidator](crate::EthTransactionValidator).
+pub trait EthPoolTransaction: PoolTransaction {
+    /// Extracts the blob sidecar from the transaction.
+    fn take_blob(&mut self) -> EthBlobTransactionSidecar;
+}
+
 /// The default [PoolTransaction] for the [Pool](crate::Pool) for Ethereum.
 ///
 /// This type is essentially a wrapper around [TransactionSignedEcRecovered] with additional fields
@@ -659,7 +666,7 @@ pub struct EthPooledTransaction {
 
 /// Represents the blob sidecar of the [EthPooledTransaction].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum EthBlobTransactionSidecar {
+pub enum EthBlobTransactionSidecar {
     /// This transaction does not have a blob sidecar
     None,
     /// This transaction has a blob sidecar (EIP-4844) but it is missing
@@ -809,6 +816,16 @@ impl PoolTransaction for EthPooledTransaction {
     /// Returns chain_id
     fn chain_id(&self) -> Option<u64> {
         self.transaction.chain_id()
+    }
+}
+
+impl EthPoolTransaction for EthPooledTransaction {
+    fn take_blob(&mut self) -> EthBlobTransactionSidecar {
+        if self.is_eip4844() {
+            std::mem::replace(&mut self.blob_sidecar, EthBlobTransactionSidecar::Missing)
+        } else {
+            EthBlobTransactionSidecar::None
+        }
     }
 }
 
