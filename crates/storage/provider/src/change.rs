@@ -930,7 +930,9 @@ mod tests {
         let address1 = Address::random();
 
         // Block #0: initial state.
-        let mut init_state = RevmStateBuilder::default().build();
+        let mut cache_state = CacheState::new(true);
+        cache_state.insert_not_existing(address1);
+        let mut init_state = RevmStateBuilder::default().with_cached_prestate(cache_state).build();
         init_state.commit(HashMap::from([(
             address1,
             Account {
