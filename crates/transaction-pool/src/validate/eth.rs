@@ -314,7 +314,7 @@ impl EthTransactionValidatorBuilder {
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             minimum_priority_fee: None,
             additional_tasks: 1,
-            // default to true, can potentially take thisas a param in the future
+            // default to true, can potentially take this as a param in the future
             propagate_local_transactions: true,
             kzg_settings: Arc::clone(&*KZG_TRUSTED_SETUP),
 
