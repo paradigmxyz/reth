@@ -4,12 +4,13 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Body, Request, Response, Server,
 };
-use metrics::gauge;
+use metrics::{describe_gauge, gauge};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
 use reth_db::{database::Database, tables, DatabaseEnv};
-use reth_metrics::metrics::{describe_counter, Unit};
+use reth_metrics::metrics::Unit;
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
+use tracing::error;
 
 pub(crate) trait Hook: Fn() + Send + Sync {}
 impl<T: Fn() + Send + Sync> Hook for T {}
@@ -102,7 +103,13 @@ pub(crate) async fn initialize(
             }
 
             Ok::<(), eyre::Report>(())
-        });
+        }).map_err(|error| error!(?error, "Failed to read db table stats"));
+
+        if let Ok(freelist) =
+            db.freelist().map_err(|error| error!(?error, "Failed to read db.freelist"))
+        {
+            gauge!("db.freelist", freelist as f64);
+        }
     };
 
     // Clone `process` to move it into the hook and use the original `process` for describe below.
@@ -116,8 +123,10 @@ pub(crate) async fn initialize(
 
     // We describe the metrics after the recorder is installed, otherwise this information is not
     // registered
-    describe_counter!("db.table_size", Unit::Bytes, "The size of a database table (in bytes)");
-    describe_counter!("db.table_pages", "The number of database pages for a table");
+    describe_gauge!("db.table_size", Unit::Bytes, "The size of a database table (in bytes)");
+    describe_gauge!("db.table_pages", "The number of database pages for a table");
+    describe_gauge!("db.table_entries", "The number of entries for a table");
+    describe_gauge!("db.freelist", "The number of pages on the freelist");
     process.describe();
     describe_memory_stats();
 
@@ -127,7 +136,6 @@ pub(crate) async fn initialize(
 #[cfg(all(feature = "jemalloc", unix))]
 fn collect_memory_stats() {
     use jemalloc_ctl::{epoch, stats};
-    use tracing::error;
 
     if epoch::advance().map_err(|error| error!(?error, "Failed to advance jemalloc epoch")).is_err()
     {
@@ -173,8 +181,6 @@ fn collect_memory_stats() {
 
 #[cfg(all(feature = "jemalloc", unix))]
 fn describe_memory_stats() {
-    use reth_metrics::metrics::describe_gauge;
-
     describe_gauge!(
         "jemalloc.active",
         Unit::Bytes,
