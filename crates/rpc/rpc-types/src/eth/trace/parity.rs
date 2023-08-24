@@ -71,8 +71,8 @@ pub enum Delta<T> {
 #[serde(rename_all = "camelCase")]
 pub struct AccountDiff {
     pub balance: Delta<U256>,
-    pub nonce: Delta<U64>,
     pub code: Delta<Bytes>,
+    pub nonce: Delta<U64>,
     pub storage: BTreeMap<H256, Delta<H256>>,
 }
 
