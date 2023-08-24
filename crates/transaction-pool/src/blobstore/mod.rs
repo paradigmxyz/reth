@@ -4,7 +4,7 @@ pub use mem::InMemoryBlobStore;
 pub use noop::NoopBlobStore;
 use reth_primitives::{BlobTransactionSidecar, H256};
 use std::fmt;
-pub use tracker::BlobStoreCanonTracker;
+pub use tracker::{BlobStoreCanonTracker, BlobStoreUpdates};
 
 mod mem;
 mod noop;

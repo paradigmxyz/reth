@@ -13,7 +13,7 @@ pub struct BlobStoreCanonTracker {
 
 impl BlobStoreCanonTracker {
     /// Adds a block to the blob store maintenance.
-    pub(crate) fn add_block(
+    pub fn add_block(
         &mut self,
         block_number: BlockNumber,
         blob_txs: impl IntoIterator<Item = H256>,
@@ -22,7 +22,7 @@ impl BlobStoreCanonTracker {
     }
 
     /// Adds all blocks to the tracked list of blocks.
-    pub(crate) fn add_blocks(
+    pub fn add_blocks(
         &mut self,
         blocks: impl IntoIterator<Item = (BlockNumber, impl IntoIterator<Item = H256>)>,
     ) {
@@ -32,7 +32,7 @@ impl BlobStoreCanonTracker {
     }
 
     /// Adds all blob transactions from the given chain to the tracker.
-    pub(crate) fn add_new_chain_blocks(&mut self, blocks: &ChainBlocks<'_>) {
+    pub fn add_new_chain_blocks(&mut self, blocks: &ChainBlocks<'_>) {
         let blob_txs = blocks.iter().map(|(num, blocks)| {
             let iter =
                 blocks.body.iter().filter(|tx| tx.transaction.is_eip4844()).map(|tx| tx.hash);
@@ -42,8 +42,7 @@ impl BlobStoreCanonTracker {
     }
 
     /// Invoked when a block is finalized.
-    #[allow(unused)]
-    pub(crate) fn on_finalized_block(&mut self, number: BlockNumber) -> BlobStoreUpdates {
+    pub fn on_finalized_block(&mut self, number: BlockNumber) -> BlobStoreUpdates {
         let mut finalized = Vec::new();
         while let Some(entry) = self.blob_txs_in_blocks.first_entry() {
             if *entry.key() <= number {
@@ -63,7 +62,7 @@ impl BlobStoreCanonTracker {
 
 /// Updates that should be applied to the blob store.
 #[derive(Debug, Eq, PartialEq)]
-pub(crate) enum BlobStoreUpdates {
+pub enum BlobStoreUpdates {
     /// No updates.
     None,
     /// Delete the given finalized transactions from the blob store.
