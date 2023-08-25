@@ -24,7 +24,7 @@ use reth_db::{
 };
 use reth_interfaces::{
     executor::{BlockExecutionError, BlockValidationError},
-    Error, Result,
+    Result,
 };
 use reth_primitives::{
     keccak256,
@@ -444,7 +444,9 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
                     transactions.iter().skip(start_index).map(|(_, tx)| tx).collect::<Vec<_>>(),
                     missing_senders,
                 )
-                .ok_or(Error::Custom("Invalid Signature(s)".to_string()))?,
+                .ok_or(BlockExecutionError::Validation(
+                    BlockValidationError::SenderRecoveryError,
+                ))?,
             ),
         );
 
