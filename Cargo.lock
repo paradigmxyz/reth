@@ -721,6 +721,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "blst"
+version = "0.3.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c94087b935a822949d3291a9989ad2b2051ea141eda0fd4e478a75f6aa3e604b"
+dependencies = [
+ "cc",
+ "glob",
+ "threadpool",
+ "zeroize",
+]
+
+[[package]]
 name = "boa_ast"
 version = "0.17.0"
 source = "git+https://github.com/boa-dev/boa#b204dcb0014fe825a06a2683b01a29b886436c46"
@@ -932,9 +944,10 @@ dependencies = [
 [[package]]
 name = "c-kzg"
 version = "0.1.0"
-source = "git+https://github.com/rjected/c-kzg-4844?branch=dan/add-serde-feature#4c95d6b8850f4f22a25fed0cf207560711cefe2b"
+source = "git+https://github.com/ethereum/c-kzg-4844#666a9de002035eb7e929bceee3a70dee1b23aa93"
 dependencies = [
  "bindgen 0.64.0 (git+https://github.com/rust-lang/rust-bindgen?rev=0de11f0a521611ac8738b7b01d19dddaf3899e66)",
+ "blst",
  "cc",
  "glob",
  "hex",
@@ -7422,6 +7435,15 @@ checksum = "3fdd6f064ccff2d6567adcb3873ca630700f00b5ad3f060c25b5dcfd9a4ce152"
 dependencies = [
  "cfg-if",
  "once_cell",
+]
+
+[[package]]
+name = "threadpool"
+version = "1.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d050e60b33d41c19108b32cea32164033a9013fe3b46cbd4457559bfbf77afaa"
+dependencies = [
+ "num_cpus",
 ]
 
 [[package]]
