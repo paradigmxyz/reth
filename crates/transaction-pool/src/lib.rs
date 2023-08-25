@@ -381,8 +381,11 @@ where
         self.pool.add_pending_listener(kind)
     }
 
-    fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
-        self.pool.add_new_transaction_listener()
+    fn new_transactions_listener_for(
+        &self,
+        kind: PendingTransactionListenerKind,
+    ) -> Receiver<NewTransactionEvent<Self::Transaction>> {
+        self.pool.add_new_transaction_listener(kind)
     }
 
     fn pooled_transaction_hashes(&self) -> Vec<TxHash> {

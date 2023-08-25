@@ -1,6 +1,6 @@
 //! Transaction Pool internals.
 //!
-//! Incoming transactions validated are before they enter the pool first. The validation outcome can
+//! Incoming transactions are validated before they enter the pool first. The validation outcome can
 //! have 3 states:
 //!
 //!  1. Transaction can _never_ be valid
@@ -137,7 +137,7 @@ where
     /// Listeners for new pending transactions.
     pending_transaction_listener: Mutex<Vec<PendingTransactionListener>>,
     /// Listeners for new transactions added to the pool.
-    transaction_listener: Mutex<Vec<mpsc::Sender<NewTransactionEvent<T::Transaction>>>>,
+    transaction_listener: Mutex<Vec<TransactionListener<T::Transaction>>>,
     /// Metrics for the blob store
     blob_store_metrics: BlobStoreMetrics,
 }
@@ -236,10 +236,12 @@ where
     /// Adds a new transaction listener to the pool that gets notified about every new transaction.
     pub fn add_new_transaction_listener(
         &self,
+        kind: PendingTransactionListenerKind,
     ) -> mpsc::Receiver<NewTransactionEvent<T::Transaction>> {
         const TX_LISTENER_BUFFER_SIZE: usize = 1024;
-        let (tx, rx) = mpsc::channel(TX_LISTENER_BUFFER_SIZE);
-        self.transaction_listener.lock().push(tx);
+        let (sender, rx) = mpsc::channel(TX_LISTENER_BUFFER_SIZE);
+        let listener = TransactionListener { sender, kind };
+        self.transaction_listener.lock().push(listener);
         rx
     }
 
@@ -517,18 +519,25 @@ where
     /// Notify all listeners about a newly inserted pending transaction.
     fn on_new_transaction(&self, event: NewTransactionEvent<T::Transaction>) {
         let mut transaction_listeners = self.transaction_listener.lock();
+        transaction_listeners.retain_mut(|listener| {
+            if listener.kind.is_propagate_only() && !event.transaction.propagate {
+                // only emit this hash to listeners that are only allowed to receive propagate only
+                // transactions, such as network
+                return !listener.sender.is_closed()
+            }
 
-        transaction_listeners.retain_mut(|listener| match listener.try_send(event.clone()) {
-            Ok(()) => true,
-            Err(err) => {
-                if matches!(err, mpsc::error::TrySendError::Full(_)) {
-                    debug!(
-                        target: "txpool",
-                        "skipping transaction on full transaction listener",
-                    );
-                    true
-                } else {
-                    false
+            match listener.sender.try_send(event.clone()) {
+                Ok(()) => true,
+                Err(err) => {
+                    if matches!(err, mpsc::error::TrySendError::Full(_)) {
+                        debug!(
+                            target: "txpool",
+                            "skipping transaction on full transaction listener",
+                        );
+                        true
+                    } else {
+                        false
+                    }
                 }
             }
         });
@@ -745,6 +754,14 @@ struct PendingTransactionListener {
     kind: PendingTransactionListenerKind,
 }
 
+/// An active listener for new pending transactions.
+#[derive(Debug)]
+struct TransactionListener<T: PoolTransaction> {
+    sender: mpsc::Sender<NewTransactionEvent<T>>,
+    /// Whether to include transactions that should not be propagated over the network.
+    kind: PendingTransactionListenerKind,
+}
+
 /// Tracks an added transaction and all graph changes caused by adding it.
 #[derive(Debug, Clone)]
 pub struct AddedPendingTransaction<T: PoolTransaction> {
@@ -754,7 +771,7 @@ pub struct AddedPendingTransaction<T: PoolTransaction> {
     replaced: Option<Arc<ValidPoolTransaction<T>>>,
     /// transactions promoted to the pending queue
     promoted: Vec<Arc<ValidPoolTransaction<T>>>,
-    /// transaction that failed and became discarded
+    /// transactions that failed and became discarded
     discarded: Vec<Arc<ValidPoolTransaction<T>>>,
 }
 

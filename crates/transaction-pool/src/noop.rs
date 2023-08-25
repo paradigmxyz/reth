@@ -92,6 +92,13 @@ impl TransactionPool for NoopTransactionPool {
         mpsc::channel(1).1
     }
 
+    fn new_transactions_listener_for(
+        &self,
+        _kind: PendingTransactionListenerKind,
+    ) -> Receiver<NewTransactionEvent<Self::Transaction>> {
+        mpsc::channel(1).1
+    }
+
     fn pooled_transaction_hashes(&self) -> Vec<TxHash> {
         vec![]
     }

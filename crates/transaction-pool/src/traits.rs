@@ -129,7 +129,16 @@ pub trait TransactionPool: Send + Sync + Clone {
     ) -> Receiver<TxHash>;
 
     /// Returns a new stream that yields new valid transactions added to the pool.
-    fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>>;
+    fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
+        self.new_transactions_listener_for(PendingTransactionListenerKind::PropagateOnly)
+    }
+
+    /// Returns a new stream that yields new valid transactions added to the pool
+    /// depending on the given [PendingTransactionListenerKind] argument.
+    fn new_transactions_listener_for(
+        &self,
+        kind: PendingTransactionListenerKind,
+    ) -> Receiver<NewTransactionEvent<Self::Transaction>>;
 
     /// Returns a new Stream that yields new transactions added to the pending sub-pool.
     ///
@@ -138,7 +147,10 @@ pub trait TransactionPool: Send + Sync + Clone {
     fn new_pending_pool_transactions_listener(
         &self,
     ) -> NewSubpoolTransactionStream<Self::Transaction> {
-        NewSubpoolTransactionStream::new(self.new_transactions_listener(), SubPool::Pending)
+        NewSubpoolTransactionStream::new(
+            self.new_transactions_listener_for(PendingTransactionListenerKind::PropagateOnly),
+            SubPool::Pending,
+        )
     }
 
     /// Returns a new Stream that yields new transactions added to the basefee sub-pool.
