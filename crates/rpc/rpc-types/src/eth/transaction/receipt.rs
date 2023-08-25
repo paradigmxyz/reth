@@ -46,5 +46,5 @@ pub struct TransactionReceipt {
     /// Deposit nonce for deposit transactions post-regolith
     #[cfg(feature = "optimism")]
     #[serde(skip_serializing_if = "Option::is_none", rename = "depositNonce")]
-    pub deposit_nonce: Option<u64>,
+    pub deposit_nonce: Option<U64>,
 }
