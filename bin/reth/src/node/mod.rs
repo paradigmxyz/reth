@@ -71,7 +71,7 @@ use reth_transaction_pool::{
 use secp256k1::SecretKey;
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
@@ -586,10 +586,9 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .wrap_err_with(|| format!("Could not load config file {:?}", config_path))
     }
 
-    fn load_kzg_settings(&self, trusted_setup_file: &PathBuf) -> eyre::Result<KzgSettings> {
-        let trusted_setup =
-            KzgSettings::load_trusted_setup_file(trusted_setup_file.as_path().into())
-                .map_err(LoadKzgSettingsError::KzgError)?;
+    fn load_kzg_settings(&self, trusted_setup_file: &Path) -> eyre::Result<KzgSettings> {
+        let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file.into())
+            .map_err(LoadKzgSettingsError::KzgError)?;
 
         Ok(trusted_setup)
     }
