@@ -204,6 +204,21 @@ where
         // Fill revm structure.
         fill_tx_env(&mut self.evm.env.tx, transaction, sender);
 
+        #[cfg(feature = "optimism")]
+        if transaction.is_deposit() &&
+            self.chain_spec
+                .fork(Hardfork::Regolith)
+                .active_at_timestamp(self.evm.env.block.timestamp.as_limbs()[0])
+        {
+            let account = self
+                .db()
+                .load_account(
+                    transaction.recover_signer().ok_or(BlockExecutionError::ProviderError)?,
+                )
+                .map_err(|_| BlockExecutionError::ProviderError)?;
+            self.evm.env.tx.nonce = Some(account.info.nonce);
+        }
+
         let hash = transaction.hash();
         let out = if self.stack.should_inspect(&self.evm.env, hash) {
             // execution with inspector.

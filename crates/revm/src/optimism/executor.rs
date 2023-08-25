@@ -121,8 +121,6 @@ where
 
                 if !is_regolith {
                     self.evm.env.cfg.disable_gas_refund = true;
-                } else {
-                    self.evm.env.tx.nonce = Some(sender_account.info.nonce);
                 }
             }
 
