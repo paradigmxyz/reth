@@ -1,4 +1,6 @@
 //! Contains RPC handler implementations specific to transactions
+use std::ops::Div;
+
 use crate::{
     eth::{
         api::pending_block::PendingBlockEnv,
@@ -737,19 +739,23 @@ where
             let mut buf = BytesMut::default();
             tx.encode_enveloped(&mut buf);
             let data = &buf.freeze().into();
-            let l1_fee = l1_block_info.clone().map(|l1_block_info| {
-                l1_block_info.calculate_tx_l1_cost(
-                    self.inner.provider.chain_spec(),
-                    block_timestamp,
-                    data,
-                    tx.is_deposit(),
-                )
-            });
-            let l1_data_gas = l1_block_info.clone().map(|l1_block_info| {
-                l1_block_info.data_gas(&data, self.inner.provider.chain_spec(), block_timestamp)
-            });
+            if let Some(l1_block_info) = l1_block_info {
+                let l1_fee = (!tx.is_deposit()).then(|| {
+                    l1_block_info.calculate_tx_l1_cost(
+                        self.inner.provider.chain_spec(),
+                        block_timestamp,
+                        data,
+                        tx.is_deposit(),
+                    )
+                });
+                let l1_data_gas = (!tx.is_deposit()).then(|| {
+                    l1_block_info.data_gas(&data, self.inner.provider.chain_spec(), block_timestamp)
+                });
 
-            (l1_block_info, l1_fee, l1_data_gas)
+                (Some(l1_block_info), l1_fee, l1_data_gas)
+            } else {
+                (None, None, None)
+            }
         };
 
         build_transaction_receipt_with_block_receipts(
@@ -948,15 +954,19 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         status_code: if receipt.success { Some(U64::from(1)) } else { Some(U64::from(0)) },
         #[cfg(feature = "optimism")]
         deposit_nonce: receipt.deposit_nonce.map(U64::from),
-        #[cfg(feature = "optimism")]
-        l1_fee,
-        #[cfg(feature = "optimism")]
-        l1_gas_used: l1_block_info.clone().map(|info| info.l1_fee_overhead + data_gas.unwrap()),
-        #[cfg(feature = "optimism")]
-        l1_fee_scalar: l1_block_info.clone().map(|info| info.l1_fee_scalar),
-        #[cfg(feature = "optimism")]
-        l1_gas_price: l1_block_info.clone().map(|info| info.l1_base_fee),
+        ..Default::default()
     };
+
+    #[cfg(feature = "optimism")]
+    if let Some(l1_block_info) = l1_block_info {
+        if !tx.is_deposit() {
+            res_receipt.l1_fee = l1_fee;
+            res_receipt.l1_gas_used = data_gas.map(|dg| dg + l1_block_info.l1_fee_overhead);
+            res_receipt.l1_fee_scalar =
+                Some(l1_block_info.l1_fee_scalar.div(U256::from(1_000_000)));
+            res_receipt.l1_gas_price = Some(l1_block_info.l1_base_fee);
+        }
+    }
 
     match tx.transaction.kind() {
         Create => {

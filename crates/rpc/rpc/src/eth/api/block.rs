@@ -102,44 +102,52 @@ where
 
                     #[cfg(feature = "optimism")]
                     let (l1_fee, l1_data_gas) = {
-                        let mut buf = BytesMut::default();
-                        tx.encode_enveloped(&mut buf);
-                        let data = &buf.freeze().into();
-                        let l1_fee = l1_block_info.clone().map(|l1_block_info| {
-                            l1_block_info.calculate_tx_l1_cost(
-                                self.inner.provider.chain_spec(),
-                                block_timestamp,
-                                data,
-                                tx.is_deposit(),
-                            )
-                        });
-                        let l1_data_gas = l1_block_info.clone().map(|l1_block_info| {
-                            l1_block_info.data_gas(
-                                &data,
-                                self.inner.provider.chain_spec(),
-                                block_timestamp,
-                            )
-                        });
+                        if let Some(l1_block_info) = &l1_block_info {
+                            let mut buf = BytesMut::default();
+                            tx.encode_enveloped(&mut buf);
+                            let data = &buf.freeze().into();
+                            let l1_fee = (!tx.is_deposit()).then(|| {
+                                l1_block_info.calculate_tx_l1_cost(
+                                    self.inner.provider.chain_spec(),
+                                    block_timestamp,
+                                    data,
+                                    tx.is_deposit(),
+                                )
+                            });
+                            let l1_data_gas = (!tx.is_deposit()).then(|| {
+                                l1_block_info.data_gas(
+                                    &data,
+                                    self.inner.provider.chain_spec(),
+                                    block_timestamp,
+                                )
+                            });
 
-                        (l1_fee, l1_data_gas)
+                            (l1_fee, l1_data_gas)
+                        } else {
+                            (None, None)
+                        }
                     };
 
                     #[cfg(feature = "optimism")]
-                    return build_transaction_receipt_with_block_receipts(
-                        tx,
-                        meta,
-                        receipt,
-                        &receipts,
-                        &l1_block_info,
-                        l1_fee,
-                        l1_data_gas,
-                    );
+                    {
+                        return build_transaction_receipt_with_block_receipts(
+                            tx,
+                            meta,
+                            receipt,
+                            &receipts,
+                            &l1_block_info,
+                            l1_fee,
+                            l1_data_gas,
+                        )
+                    }
 
                     #[cfg(not(feature = "optimism"))]
-                    build_transaction_receipt_with_block_receipts(tx, meta, receipt, &receipts)
+                    return build_transaction_receipt_with_block_receipts(
+                        tx, meta, receipt, &receipts,
+                    )
                 })
                 .collect::<EthResult<Vec<_>>>();
-            return receipts.map(Some);
+            return receipts.map(Some)
         }
 
         Ok(None)
@@ -156,7 +164,7 @@ where
 
         if block_id.is_pending() {
             // Pending block can be fetched directly without need for caching;
-            return Ok(self.provider().pending_block()?.map(|block| block.body.len()));
+            return Ok(self.provider().pending_block()?.map(|block| block.body.len()))
         }
 
         let block_hash = match self.provider().block_hash_for_id(block_id)? {
@@ -178,10 +186,10 @@ where
             // Pending block can be fetched directly without need for caching
             let maybe_pending = self.provider().pending_block()?;
             return if maybe_pending.is_some() {
-                return Ok(maybe_pending);
+                return Ok(maybe_pending)
             } else {
                 self.local_pending_block().await
-            };
+            }
         }
 
         let block_hash = match self.provider().block_hash_for_id(block_id)? {
