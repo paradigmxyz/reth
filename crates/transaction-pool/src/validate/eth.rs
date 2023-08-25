@@ -75,7 +75,7 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     propagate_local_transactions: bool,
     /// Stores the setup and parameters needed for validating KZG proofs.
     #[allow(unused)]
-    kzg_settings: Arc<std::sync::Mutex<KzgSettings>>,
+    kzg_settings: Arc<KzgSettings>,
     /// Marker for the transaction type
     _marker: PhantomData<T>,
 }
@@ -303,7 +303,7 @@ pub struct EthTransactionValidatorBuilder {
     propagate_local_transactions: bool,
 
     /// Stores the setup and parameters needed for validating KZG proofs.
-    kzg_settings: Arc<std::sync::Mutex<KzgSettings>>,
+    kzg_settings: Arc<KzgSettings>,
 }
 
 impl EthTransactionValidatorBuilder {
@@ -316,7 +316,7 @@ impl EthTransactionValidatorBuilder {
             additional_tasks: 1,
             // default to true, can potentially take this as a param in the future
             propagate_local_transactions: true,
-            kzg_settings: Arc::clone(&*KZG_TRUSTED_SETUP),
+            kzg_settings: Arc::clone(&KZG_TRUSTED_SETUP),
 
             // by default all transaction types are allowed
             eip2718: true,
@@ -376,7 +376,7 @@ impl EthTransactionValidatorBuilder {
     }
 
     /// Sets the [KzgSettings] to use for validating KZG proofs.
-    pub fn kzg_settings(mut self, kzg_settings: Arc<std::sync::Mutex<KzgSettings>>) -> Self {
+    pub fn kzg_settings(mut self, kzg_settings: Arc<KzgSettings>) -> Self {
         self.kzg_settings = kzg_settings;
         self
     }

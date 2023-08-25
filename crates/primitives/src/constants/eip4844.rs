@@ -2,10 +2,7 @@
 
 use crate::kzg::KzgSettings;
 use once_cell::sync::Lazy;
-use std::{
-    io::Write,
-    sync::{Arc, Mutex},
-};
+use std::{io::Write, sync::Arc};
 
 /// Size a single field element in bytes.
 pub const FIELD_ELEMENT_BYTES: u64 = 32;
@@ -38,10 +35,10 @@ pub const VERSIONED_HASH_VERSION_KZG: u8 = 0x01;
 const TRUSTED_SETUP_RAW: &[u8] = include_bytes!("../../res/eip4844/trusted_setup.txt");
 
 /// KZG trusted setup
-pub static KZG_TRUSTED_SETUP: Lazy<Arc<Mutex<KzgSettings>>> = Lazy::new(|| {
-    Arc::new(Mutex::new(
+pub static KZG_TRUSTED_SETUP: Lazy<Arc<KzgSettings>> = Lazy::new(|| {
+    Arc::new(
         load_trusted_setup_from_bytes(TRUSTED_SETUP_RAW).expect("Failed to load trusted setup"),
-    ))
+    )
 });
 
 /// Loads the trusted setup parameters from the given bytes and returns the [KzgSettings].
