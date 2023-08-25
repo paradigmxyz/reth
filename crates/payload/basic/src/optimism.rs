@@ -118,10 +118,10 @@ where
             cfg.disable_balance_check = true;
             cfg.disable_block_gas_limit = true;
 
-            if !is_regolith {
-                cfg.disable_gas_refund = true;
-            } else {
+            if is_regolith {
                 tx_env.nonce = Some(sender.info.nonce);
+            } else {
+                cfg.disable_gas_refund = true;
             }
 
             // Increase the sender's balance in the database if the deposit transaction mints eth.
@@ -253,18 +253,8 @@ where
                 success: result.is_success(),
                 cumulative_gas_used,
                 logs: result.logs().into_iter().map(into_reth_log).collect(),
-                deposit_nonce: if is_regolith && sequencer_tx.is_deposit() {
-                    // Recovering the signer from the deposit transaction is only fetching
-                    // the `from` address. Deposit transactions have no signature.
-                    let from = sequencer_tx.signer();
-                    let account = db.load_account(from)?;
-                    // The deposit nonce is the account's nonce - 1. The account's nonce
-                    // was incremented during the execution of the deposit transaction
-                    // above.
-                    Some(account.info.nonce.saturating_sub(1))
-                } else {
-                    None
-                },
+                deposit_nonce: (is_regolith && sequencer_tx.is_deposit())
+                    .then_some(sender.info.nonce),
             },
         );
 
