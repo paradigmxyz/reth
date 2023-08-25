@@ -12,6 +12,7 @@ use crate::{
     EthApi, EthApiSpec,
 };
 use async_trait::async_trait;
+use bytes::BytesMut;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, Header,
@@ -27,6 +28,8 @@ use reth_provider::{
 use reth_revm::{
     database::{State, SubState},
     env::{fill_block_env_with_coinbase, tx_env_with_recovered},
+    executor,
+    optimism::L1BlockInfo,
     tracing::{TracingInspector, TracingInspectorConfig},
 };
 use reth_rpc_types::{
@@ -716,7 +719,48 @@ where
             Some(recpts) => recpts,
             None => return Err(EthApiError::UnknownBlockNumber),
         };
-        build_transaction_receipt_with_block_receipts(tx, meta, receipt, &all_receipts)
+
+        #[cfg(feature = "optimism")]
+        let (l1_block_info, l1_fee, l1_data_gas) = {
+            let block = self
+                .provider()
+                .block_by_number(meta.block_number)?
+                .ok_or(EthApiError::UnknownBlockNumber)?;
+
+            let block_timestamp = block.timestamp;
+
+            let l1_block_info: Option<executor::optimism::L1BlockInfo> =
+                block.body.get(0).ok_or(EthApiError::InternalEthError)?.input()[4..]
+                    .try_into()
+                    .map_err(|_| EthApiError::InternalEthError)
+                    .ok();
+            let mut buf = BytesMut::default();
+            tx.encode_enveloped(&mut buf);
+            let data = &buf.freeze().into();
+            let l1_fee = l1_block_info.clone().map(|l1_block_info| {
+                l1_block_info.calculate_tx_l1_cost(
+                    self.inner.provider.chain_spec(),
+                    block_timestamp,
+                    data,
+                    tx.is_deposit(),
+                )
+            });
+            let l1_data_gas = l1_block_info.clone().map(|l1_block_info| {
+                l1_block_info.data_gas(&data, self.inner.provider.chain_spec(), block_timestamp)
+            });
+
+            (l1_block_info, l1_fee, l1_data_gas)
+        };
+
+        build_transaction_receipt_with_block_receipts(
+            tx,
+            meta,
+            receipt,
+            &all_receipts,
+            &l1_block_info,
+            l1_fee,
+            l1_data_gas,
+        )
     }
 }
 
@@ -867,6 +911,9 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
     meta: TransactionMeta,
     receipt: Receipt,
     all_receipts: &[Receipt],
+    #[cfg(feature = "optimism")] l1_block_info: &Option<L1BlockInfo>,
+    #[cfg(feature = "optimism")] l1_fee: Option<U256>,
+    #[cfg(feature = "optimism")] data_gas: Option<U256>,
 ) -> EthResult<TransactionReceipt> {
     let transaction =
         tx.clone().into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
@@ -901,6 +948,14 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         status_code: if receipt.success { Some(U64::from(1)) } else { Some(U64::from(0)) },
         #[cfg(feature = "optimism")]
         deposit_nonce: receipt.deposit_nonce.map(U64::from),
+        #[cfg(feature = "optimism")]
+        l1_fee,
+        #[cfg(feature = "optimism")]
+        l1_gas_used: l1_block_info.clone().map(|info| info.l1_fee_overhead + data_gas.unwrap()),
+        #[cfg(feature = "optimism")]
+        l1_fee_scalar: l1_block_info.clone().map(|info| info.l1_fee_scalar),
+        #[cfg(feature = "optimism")]
+        l1_gas_price: l1_block_info.clone().map(|info| info.l1_base_fee),
     };
 
     match tx.transaction.kind() {

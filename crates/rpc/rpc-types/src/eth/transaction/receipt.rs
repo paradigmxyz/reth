@@ -47,4 +47,20 @@ pub struct TransactionReceipt {
     #[cfg(feature = "optimism")]
     #[serde(skip_serializing_if = "Option::is_none", rename = "depositNonce")]
     pub deposit_nonce: Option<U64>,
+    /// L1 fee for the transaction
+    #[cfg(feature = "optimism")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "l1Fee")]
+    pub l1_fee: Option<U256>,
+    /// L1 fee scalar for the transaction
+    #[cfg(feature = "optimism")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "l1FeeScalar")]
+    pub l1_fee_scalar: Option<U256>,
+    /// L1 gas price for the transaction
+    #[cfg(feature = "optimism")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "l1GasPrice")]
+    pub l1_gas_price: Option<U256>,
+    /// L1 gas used for the transaction
+    #[cfg(feature = "optimism")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "l1GasUsed")]
+    pub l1_gas_used: Option<U256>,
 }

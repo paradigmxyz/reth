@@ -23,11 +23,14 @@ const NON_ZERO_BYTE_COST: u64 = 16;
 /// uint64 _sequenceNumber, bytes32 _batcherHash, uint256 _l1FeeOverhead, uint256 _l1FeeScalar)
 ///
 /// For now, we only care about the fields necessary for L1 cost calculation.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct L1BlockInfo {
-    l1_base_fee: U256,
-    l1_fee_overhead: U256,
-    l1_fee_scalar: U256,
+    /// The base fee of the L1 origin block.
+    pub l1_base_fee: U256,
+    /// The current L1 fee overhead.
+    pub l1_fee_overhead: U256,
+    /// The current L1 fee scalar.
+    pub l1_fee_scalar: U256,
 }
 
 impl TryFrom<&Block> for L1BlockInfo {
@@ -94,14 +97,12 @@ impl TryFrom<&[u8]> for L1BlockInfo {
 }
 
 impl L1BlockInfo {
-    /// Calculate the gas cost of a transaction based on L1 block data posted on L2
-    pub fn calculate_tx_l1_cost(
-        &self,
-        chain_spec: Arc<ChainSpec>,
-        timestamp: u64,
-        input: &Bytes,
-        is_deposit: bool,
-    ) -> U256 {
+    /// Calculate the data gas for posting the transaction on L1. Calldata costs 16 gas per non-zero
+    /// byte and 4 gas per zero byte.
+    ///
+    /// Prior to regolith, an extra 68 non-zero bytes were included in the rollup data costs to
+    /// account for the empty signature.
+    pub fn data_gas(&self, input: &Bytes, chain_spec: Arc<ChainSpec>, timestamp: u64) -> U256 {
         let mut rollup_data_gas_cost = U256::from(input.iter().fold(0, |acc, byte| {
             acc + if *byte == 0x00 { ZERO_BYTE_COST } else { NON_ZERO_BYTE_COST }
         }));
@@ -110,6 +111,19 @@ impl L1BlockInfo {
         if !chain_spec.fork(Hardfork::Regolith).active_at_timestamp(timestamp) {
             rollup_data_gas_cost += U256::from(NON_ZERO_BYTE_COST).mul(U256::from(68));
         }
+
+        rollup_data_gas_cost
+    }
+
+    /// Calculate the gas cost of a transaction based on L1 block data posted on L2
+    pub fn calculate_tx_l1_cost(
+        &self,
+        chain_spec: Arc<ChainSpec>,
+        timestamp: u64,
+        input: &Bytes,
+        is_deposit: bool,
+    ) -> U256 {
+        let rollup_data_gas_cost = self.data_gas(input, chain_spec, timestamp);
 
         if is_deposit || rollup_data_gas_cost == U256::ZERO {
             return U256::ZERO
