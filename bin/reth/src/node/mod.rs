@@ -44,8 +44,10 @@ use reth_interfaces::{
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head,
-    SealedHeader, H256,
+    constants::eip4844::{LoadKzgSettingsError, KZG_TRUSTED_SETUP},
+    kzg::KzgSettings,
+    stage::StageId,
+    BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head, SealedHeader, H256,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
@@ -123,6 +125,10 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     #[arg(long, value_name = "SOCKET", value_parser = parse_socket_address, help_heading = "Metrics")]
     pub metrics: Option<SocketAddr>,
 
+    /// Overrides the KZG trusted setup by reading from the supplied file.
+    #[arg(long, value_name = "PATH")]
+    trusted_setup_file: Option<PathBuf>,
+
     /// All networking related arguments
     #[clap(flatten)]
     pub network: NetworkArgs,
@@ -168,6 +174,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             config,
             chain,
             metrics,
+            trusted_setup_file,
             network,
             rpc,
             txpool,
@@ -183,6 +190,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             config,
             chain,
             metrics,
+            trusted_setup_file,
             network,
             rpc,
             txpool,
@@ -208,6 +216,11 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let config_path = self.config.clone().unwrap_or(data_dir.config_path());
 
         let mut config: Config = self.load_config(config_path.clone())?;
+
+        if let Some(ref trusted_setup_file) = self.trusted_setup_file {
+            info!(target: "reth::cli", path = ?trusted_setup_file, "Trusted setup file overridden");
+            self.override_trusted_file(trusted_setup_file)?;
+        };
 
         // always store reth.toml in the data dir, not the chain specific data dir
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
@@ -565,6 +578,15 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     fn load_config(&self, config_path: PathBuf) -> eyre::Result<Config> {
         confy::load_path::<Config>(config_path.clone())
             .wrap_err_with(|| format!("Could not load config file {:?}", config_path))
+    }
+
+    fn override_trusted_file(&self, trusted_setup_file: &PathBuf) -> eyre::Result<()> {
+        let trusted_setup =
+            KzgSettings::load_trusted_setup_file(trusted_setup_file.as_path().into())
+                .map_err(LoadKzgSettingsError::KzgError)?;
+        *KZG_TRUSTED_SETUP.lock().unwrap() = trusted_setup;
+
+        Ok(())
     }
 
     fn init_trusted_nodes(&self, config: &mut Config) {

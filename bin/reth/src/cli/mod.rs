@@ -11,17 +11,13 @@ use crate::{
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
-use reth_primitives::{
-    constants::eip4844::{LoadKzgSettingsError, KZG_TRUSTED_SETUP},
-    kzg::KzgSettings,
-    ChainSpec,
-};
+use reth_primitives::ChainSpec;
 use reth_tracing::{
     tracing::{metadata::LevelFilter, Level, Subscriber},
     tracing_subscriber::{filter::Directive, registry::LookupSpan, EnvFilter},
     BoxedLayer, FileWorkerGuard,
 };
-use std::{fmt, fmt::Display, path::PathBuf, sync::Arc};
+use std::{fmt, fmt::Display, sync::Arc};
 
 pub mod config;
 pub mod ext;
@@ -60,10 +56,6 @@ pub struct Cli<Ext: RethCliExt = ()> {
 
     #[clap(flatten)]
     verbosity: Verbosity,
-
-    /// Overrides the KZG trusted setup by reading from the supplied file.
-    #[arg(long, value_name = "PATH", global = true)]
-    trusted_setup_file: Option<PathBuf>,
 }
 
 impl<Ext: RethCliExt> Cli<Ext> {
@@ -73,10 +65,6 @@ impl<Ext: RethCliExt> Cli<Ext> {
         self.logs.log_directory = self.logs.log_directory.join(self.chain.chain.to_string());
 
         let _guard = self.init_tracing()?;
-
-        if let Some(ref trusted_setup_file) = self.trusted_setup_file {
-            self.override_trusted_file(trusted_setup_file)?;
-        };
 
         let runner = CliRunner::default();
         match self.command {
@@ -107,15 +95,6 @@ impl<Ext: RethCliExt> Cli<Ext> {
 
         reth_tracing::init(layers);
         Ok(guard.flatten())
-    }
-
-    fn override_trusted_file(&self, trusted_setup_file: &PathBuf) -> eyre::Result<()> {
-        let trusted_setup =
-            KzgSettings::load_trusted_setup_file(trusted_setup_file.as_path().into())
-                .map_err(LoadKzgSettingsError::KzgError)?;
-        *KZG_TRUSTED_SETUP.lock().unwrap() = trusted_setup;
-
-        Ok(())
     }
 }
 
