@@ -115,13 +115,14 @@ impl TxEip4844 {
     /// commitments, and proofs. Each blob data element is verified against its commitment and
     /// proof.
     ///
-    /// Returns `false` if any blob KZG proof in the response fails to verify, or if the versioned
-    /// hashes in the transaction do not match the actual commitment versioned hashes.
+    /// Returns [BlobTransactionValidationError::InvalidProof] if any blob KZG proof in the response
+    /// fails to verify, or if the versioned hashes in the transaction do not match the actual
+    /// commitment versioned hashes.
     pub fn validate_blob(
         &self,
         sidecar: &BlobTransactionSidecar,
         proof_settings: &KzgSettings,
-    ) -> Result<bool, BlobTransactionValidationError> {
+    ) -> Result<(), BlobTransactionValidationError> {
         // Ensure the versioned hashes and commitments have the same length
         if self.blob_versioned_hashes.len() != sidecar.commitments.len() {
             return Err(kzg::Error::MismatchLength(format!(
@@ -146,18 +147,24 @@ impl TxEip4844 {
             // validation failed?
             let calculated_versioned_hash = kzg_to_versioned_hash(commitment);
             if *versioned_hash != calculated_versioned_hash {
-                return Ok(false)
+                return Err(BlobTransactionValidationError::InvalidProof)
             }
         }
 
         // Verify as a batch
-        KzgProof::verify_blob_kzg_proof_batch(
+        let res = KzgProof::verify_blob_kzg_proof_batch(
             sidecar.blobs.as_slice(),
             sidecar.commitments.as_slice(),
             sidecar.proofs.as_slice(),
             proof_settings,
         )
-        .map_err(Into::into)
+        .map_err(BlobTransactionValidationError::KZGError)?;
+
+        if res {
+            Ok(())
+        } else {
+            Err(BlobTransactionValidationError::InvalidProof)
+        }
     }
 
     /// Returns the total gas for all blobs in this transaction.
@@ -307,12 +314,17 @@ impl TxEip4844 {
 }
 
 /// An error that can occur when validating a [BlobTransaction].
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum BlobTransactionValidationError {
+    /// Proof validation failed.
+    #[error("invalid kzg proof")]
+    InvalidProof,
     /// An error returned by the [kzg] library
+    #[error("kzg error: {0:?}")]
     KZGError(kzg::Error),
     /// The inner transaction is not a blob transaction
-    NotBlobTransaction(TxType),
+    #[error("unable to verify proof for non blob transaction: {0}")]
+    NotBlobTransaction(u8),
 }
 
 impl From<kzg::Error> for BlobTransactionValidationError {
@@ -367,7 +379,7 @@ impl BlobTransaction {
     pub fn validate(
         &self,
         proof_settings: &KzgSettings,
-    ) -> Result<bool, BlobTransactionValidationError> {
+    ) -> Result<(), BlobTransactionValidationError> {
         self.transaction.validate_blob(&self.sidecar, proof_settings)
     }
 
