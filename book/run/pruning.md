@@ -92,71 +92,73 @@ The following tables describe the requirements for prune parts, per RPC method:
 
 | RPC / Part                 | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
 |----------------------------|-----------------|--------------------|----------|-----------------|-----------------|
-| `debug_getRawReceipts`     | ✅               | ✅                  | ❌        | ✅               | ✅               |
-| `debug_traceBlockByHash`   | ✅               | ✅                  | ✅        | ❌               | ❌               |
-| `debug_getRawHeader`       | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `debug_traceTransaction`   | ✅               | ✅                  | ✅        | ❌               | ❌               |
-| `debug_traceBlock`         | ✅               | ✅                  | ✅        | ❌               | ❌               |
 | `debug_getRawBlock`        | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `debug_getRawHeader`       | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `debug_getRawReceipts`     | ✅               | ✅                  | ❌        | ✅               | ✅               |
 | `debug_getRawTransaction`  | ✅               | ❌                  | ✅        | ✅               | ✅               |
+| `debug_traceBlock`         | ✅               | ✅                  | ✅        | ❌               | ❌               |
+| `debug_traceBlockByHash`   | ✅               | ✅                  | ✅        | ❌               | ❌               |
 | `debug_traceBlockByNumber` | ✅               | ✅                  | ✅        | ❌               | ❌               |
 | `debug_traceCall`          | ✅               | ✅                  | ✅        | ❌               | ❌               |
 | `debug_traceCallMany`      | ✅               | ✅                  | ✅        | ❌               | ❌               |
+| `debug_traceTransaction`   | ✅               | ✅                  | ✅        | ❌               | ❌               |
+
 
 ### `eth` namespace
 
 | RPC / Part                                | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
 |-------------------------------------------|-----------------|--------------------|----------|-----------------|-----------------|
-| `eth_getTransactionByBlockHashAndIndex`   | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_getBlockReceipts`                    | ✅               | ✅                  | ❌        | ✅               | ✅               |
+| `eth_accounts`                            | ✅               | ✅                  | ✅        | ✅               | ✅               |
 | `eth_blockNumber`                         | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_sendTransaction`                     | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_sendRawTransaction`                  | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_subscribe`                           | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_newPendingTransactionFilter`         | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_getUncleByBlockHashAndIndex`         | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_getBlockTransactionCountByNumber`    | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_call`                                | ✅               | ✅                  | ✅        | ❌               | ❌               |
+| `eth_chainId`                             | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_createAccessList`                    | ✅               | ✅                  | ✅        | ❌               | ❌               |
 | `eth_estimateGas`                         | ✅               | ✅                  | ✅        | ❌               | ❌               |
-| `eth_signTransaction`                     | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_getLogs`                             | ✅               | ✅                  | ❌        | ✅               | ✅               |
-| `eth_getFilterChanges`                    | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_newFilter`                           | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_unsubscribe`                         | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_maxPriorityFeePerGas`                | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_getUncleByBlockNumberAndIndex`       | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_getBlockTransactionCountByHash`      | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_mining`                              | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_uninstallFilter`                     | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_signTypedData`                       | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_sign`                                | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_feeHistory`                          | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_gasPrice`                            | ✅               | ✅                  | ✅        | ✅               | ✅               |
 | `eth_getBalance`                          | ✅               | ✅                  | ✅        | ❌               | ✅               |
+| `eth_getBlockByHash`                      | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_getBlockByNumber`                    | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_getBlockReceipts`                    | ✅               | ✅                  | ❌        | ✅               | ✅               |
+| `eth_getBlockTransactionCountByHash`      | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_getBlockTransactionCountByNumber`    | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_getCode`                             | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_getFilterChanges`                    | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_getFilterLogs`                       | ✅               | ✅                  | ❌        | ✅               | ✅               |
+| `eth_getLogs`                             | ✅               | ✅                  | ❌        | ✅               | ✅               |
+| `eth_getStorageAt`                        | ✅               | ✅                  | ✅        | ✅               | ❌               |
+| `eth_getTransactionByBlockHashAndIndex`   | ✅               | ✅                  | ✅        | ✅               | ✅               |
 | `eth_getTransactionByBlockNumberAndIndex` | ✅               | ✅                  | ✅        | ✅               | ✅               |
 | `eth_getTransactionByHash`                | ✅               | ❌                  | ✅        | ✅               | ✅               |
-| `eth_getStorageAt`                        | ✅               | ✅                  | ✅        | ✅               | ❌               |
 | `eth_getTransactionCount`                 | ✅               | ✅                  | ✅        | ❌               | ✅               |
-| `eth_syncing`                             | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_gasPrice`                            | ✅               | ✅                  | ✅        | ✅               | ✅               |
 | `eth_getTransactionReceipt`               | ✅               | ❌                  | ❌        | ✅               | ✅               |
-| `eth_accounts`                            | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_getUncleCountByBlockNumber`          | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_getBlockByNumber`                    | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_feeHistory`                          | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_getBlockByHash`                      | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_newBlockFilter`                      | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_getFilterLogs`                       | ✅               | ✅                  | ❌        | ✅               | ✅               |
-| `eth_getCode`                             | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_protocolVersion`                     | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_createAccessList`                    | ✅               | ✅                  | ✅        | ❌               | ❌               |
-| `eth_chainId`                             | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_getUncleByBlockHashAndIndex`         | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_getUncleByBlockNumberAndIndex`       | ✅               | ✅                  | ✅        | ✅               | ✅               |
 | `eth_getUncleCountByBlockHash`            | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `eth_call`                                | ✅               | ✅                  | ✅        | ❌               | ❌               |
+| `eth_getUncleCountByBlockNumber`          | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_maxPriorityFeePerGas`                | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_mining`                              | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_newBlockFilter`                      | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_newFilter`                           | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_newPendingTransactionFilter`         | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_protocolVersion`                     | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_sendRawTransaction`                  | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_sendTransaction`                     | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_sign`                                | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_signTransaction`                     | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_signTypedData`                       | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_subscribe`                           | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_syncing`                             | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_uninstallFilter`                     | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `eth_unsubscribe`                         | ✅               | ✅                  | ✅        | ✅               | ✅               |
 
 ### `net` namespace
+
 | RPC / Part      | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
 |-----------------|-----------------|--------------------|----------|-----------------|-----------------|
 | `net_listening` | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `net_version`   | ✅               | ✅                  | ✅        | ✅               | ✅               |
 | `net_peerCount` | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `net_version`   | ✅               | ✅                  | ✅        | ✅               | ✅               |
 
 ### `trace` namespace
 
@@ -165,17 +167,17 @@ The following tables describe the requirements for prune parts, per RPC method:
 | `trace_block`                   | ✅               | ✅                  | ✅        | ❌               | ❌               |
 | `trace_call`                    | ✅               | ✅                  | ✅        | ❌               | ❌               |
 | `trace_callMany`                | ✅               | ✅                  | ✅        | ❌               | ❌               |
+| `trace_get`                     | ✅               | ❌                  | ✅        | ❌               | ❌               |
 | `trace_rawTransaction`          | ✅               | ✅                  | ✅        | ❌               | ❌               |
 | `trace_replayBlockTransactions` | ✅               | ✅                  | ✅        | ❌               | ❌               |
 | `trace_replayTransaction`       | ✅               | ❌                  | ✅        | ❌               | ❌               |
-| `trace_get`                     | ✅               | ❌                  | ✅        | ❌               | ❌               |
 | `trace_transaction`             | ✅               | ❌                  | ✅        | ❌               | ❌               |
 
 ### `txpool` namespace
 
 | RPC / Part           | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
 |----------------------|-----------------|--------------------|----------|-----------------|-----------------|
-| `txpool_status`      | ✅               | ✅                  | ✅        | ✅               | ✅               |
-| `txpool_inspect`     | ✅               | ✅                  | ✅        | ✅               | ✅               |
 | `txpool_content`     | ✅               | ✅                  | ✅        | ✅               | ✅               |
 | `txpool_contentFrom` | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `txpool_inspect`     | ✅               | ✅                  | ✅        | ✅               | ✅               |
+| `txpool_status`      | ✅               | ✅                  | ✅        | ✅               | ✅               |
