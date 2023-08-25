@@ -1023,7 +1023,7 @@ mod tests {
                     ),
                     (
                         U256::from(2),
-                        StorageSlot { present_value: U256::from(6), ..Default::default() },
+                        StorageSlot { present_value: U256::from(4), ..Default::default() },
                     ),
                     (
                         U256::from(6),
@@ -1144,17 +1144,6 @@ mod tests {
                 StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(1) }
             )))
         );
-
-        // // key of block #1
-        // // 0x01: 2
-        // // DUPLICATE
-        // assert_eq!(
-        //     storage_changes.next(),
-        //     Some(Ok((
-        //         BlockNumberAddress((1, address1)),
-        //         StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(2) }
-        //     )))
-        // );
 
         // Block #2 (destroyed)
         // 0x00: 2
