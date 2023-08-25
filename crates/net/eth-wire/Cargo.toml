@@ -24,6 +24,7 @@ reth-rlp = { workspace = true, features = [
     "ethereum-types",
     "smol_str",
 ] }
+reth-discv4 = {path = "../discv4" }
 
 # metrics
 reth-metrics.workspace = true
