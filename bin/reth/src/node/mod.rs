@@ -218,8 +218,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let mut config: Config = self.load_config(config_path.clone())?;
 
         if let Some(ref trusted_setup_file) = self.trusted_setup_file {
-            info!(target: "reth::cli", path = ?trusted_setup_file, "Trusted setup file overridden");
             self.override_trusted_file(trusted_setup_file)?;
+            info!(target: "reth::cli", path = ?trusted_setup_file, "Trusted setup file overridden");
         };
 
         // always store reth.toml in the data dir, not the chain specific data dir
