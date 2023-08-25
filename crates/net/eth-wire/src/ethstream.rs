@@ -323,6 +323,7 @@ mod tests {
     };
     use ethers_core::types::Chain;
     use futures::{SinkExt, StreamExt};
+    use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use reth_ecies::{stream::ECIESStream, util::pk2id};
     use reth_primitives::{ForkFilter, Head, H256, U256};
     use secp256k1::{SecretKey, SECP256K1};
@@ -591,7 +592,7 @@ mod tests {
                 protocol_version: ProtocolVersion::V5,
                 client_version: "bitcoind/1.0.0".to_string(),
                 capabilities: vec![Capability::new("eth".into(), EthVersion::Eth67 as usize)],
-                port: 30303,
+                port: DEFAULT_DISCOVERY_PORT,
                 id: pk2id(&server_key.public_key(SECP256K1)),
             };
 
@@ -619,7 +620,7 @@ mod tests {
             protocol_version: ProtocolVersion::V5,
             client_version: "bitcoind/1.0.0".to_string(),
             capabilities: vec![Capability::new("eth".into(), EthVersion::Eth67 as usize)],
-            port: 30303,
+            port: DEFAULT_DISCOVERY_PORT,
             id: pk2id(&client_key.public_key(SECP256K1)),
         };
 

@@ -7,6 +7,7 @@ use crate::{
     NetworkError, NetworkInfo, PeerKind, Peers, PeersInfo, Reputation, ReputationChangeKind,
 };
 use async_trait::async_trait;
+use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_eth_wire::{DisconnectReason, ProtocolVersion};
 use reth_primitives::{Chain, NodeRecord, PeerId};
 use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
@@ -22,7 +23,7 @@ pub struct NoopNetwork;
 #[async_trait]
 impl NetworkInfo for NoopNetwork {
     fn local_addr(&self) -> SocketAddr {
-        (IpAddr::from(std::net::Ipv4Addr::UNSPECIFIED), 30303).into()
+        (IpAddr::from(std::net::Ipv4Addr::UNSPECIFIED), DEFAULT_DISCOVERY_PORT).into()
     }
 
     async fn network_status(&self) -> Result<NetworkStatus, NetworkError> {
