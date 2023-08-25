@@ -5542,6 +5542,7 @@ dependencies = [
  "proptest-derive",
  "rand 0.8.5",
  "reth-codecs",
+ "reth-discv4",
  "reth-ecies",
  "reth-metrics",
  "reth-primitives",
@@ -5738,6 +5739,7 @@ name = "reth-network-api"
 version = "0.1.0-alpha.7"
 dependencies = [
  "async-trait",
+ "reth-discv4",
  "reth-eth-wire",
  "reth-primitives",
  "reth-rpc-types",
