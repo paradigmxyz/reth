@@ -58,13 +58,11 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0-alpha.7"
 edition = "2021"
-rust-version = "1.70" # Remember to update .clippy.toml and README.md
+rust-version = "1.70"                              # Remember to update .clippy.toml and README.md
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
-exclude = [
-    ".github/",
-]
+exclude = [".github/"]
 
 # Like release, but with full debug symbols. Useful for e.g. `perf`.
 [profile.debug-fast]
@@ -102,14 +100,14 @@ reth-transaction-pool = { path = "./crates/transaction-pool" }
 reth-tasks = { path = "./crates/tasks" }
 reth-network = { path = "./crates/net/network" }
 reth-network-api = { path = "./crates/net/network-api" }
-reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat"}
+reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat" }
 
 
 ## eth
-ethers-core = { version = "2.0", default-features = false }
-ethers-providers = { version = "2.0", default-features = false }
-ethers-signers = { version = "2.0", default-features = false }
-ethers-middleware = { version = "2.0", default-features = false }
+ethers-core = { git = "https://github.com/gakonst/ethers-rs", rev = "fa3017715a298728d9fb341933818a5d0d84c2dc", default-features = false }
+ethers-providers = { git = "https://github.com/gakonst/ethers-rs", rev = "fa3017715a298728d9fb341933818a5d0d84c2dc", default-features = false }
+ethers-signers = { git = "https://github.com/gakonst/ethers-rs", rev = "fa3017715a298728d9fb341933818a5d0d84c2dc", default-features = false }
+ethers-middleware = { git = "https://github.com/gakonst/ethers-rs", rev = "fa3017715a298728d9fb341933818a5d0d84c2dc", default-features = false }
 
 ## misc
 bytes = "1.4"
@@ -124,7 +122,7 @@ strum = "0.25"
 rayon = "1.7"
 itertools = "0.11"
 parking_lot = "0.12"
-metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
+metrics = "0.21.1"                                    # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
 
 ### proc-macros
 proc-macro2 = "1.0"
@@ -147,7 +145,11 @@ jsonrpsee-core = { version = "0.20" }
 jsonrpsee-types = { version = "0.20" }
 
 ## crypto
-secp256k1 = { version = "0.27.0", default-features = false, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { version = "0.27.0", default-features = false, features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
 enr = { version = "0.9", default-features = false, features = ["k256"] }
 # for eip-4844
 c-kzg = { git = "https://github.com/ethereum/c-kzg-4844" }

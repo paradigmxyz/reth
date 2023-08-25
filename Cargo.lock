@@ -2202,15 +2202,15 @@ dependencies = [
 
 [[package]]
 name = "ethers-contract"
-version = "2.0.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02bb80fd2c22631a5eb8a02cbf373cc5fd86937fc966bb670b9a884580c8e71c"
+version = "2.0.8"
+source = "git+https://github.com/gakonst/ethers-rs?rev=fa3017715a298728d9fb341933818a5d0d84c2dc#fa3017715a298728d9fb341933818a5d0d84c2dc"
 dependencies = [
  "const-hex",
  "ethers-contract-abigen",
  "ethers-contract-derive",
  "ethers-core",
  "ethers-providers",
+ "ethers-signers",
  "futures-util",
  "once_cell",
  "pin-project",
@@ -2221,9 +2221,8 @@ dependencies = [
 
 [[package]]
 name = "ethers-contract-abigen"
-version = "2.0.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22c54db0d393393e732a5b20273e4f8ab89f0cce501c84e75fab9c126799a6e6"
+version = "2.0.8"
+source = "git+https://github.com/gakonst/ethers-rs?rev=fa3017715a298728d9fb341933818a5d0d84c2dc#fa3017715a298728d9fb341933818a5d0d84c2dc"
 dependencies = [
  "Inflector",
  "const-hex",
@@ -2243,9 +2242,8 @@ dependencies = [
 
 [[package]]
 name = "ethers-contract-derive"
-version = "2.0.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62ee4f216184a1304b707ed258f4f70aa40bf7e1522ab8963d127a8d516eaa1a"
+version = "2.0.8"
+source = "git+https://github.com/gakonst/ethers-rs?rev=fa3017715a298728d9fb341933818a5d0d84c2dc#fa3017715a298728d9fb341933818a5d0d84c2dc"
 dependencies = [
  "Inflector",
  "const-hex",
@@ -2259,9 +2257,8 @@ dependencies = [
 
 [[package]]
 name = "ethers-core"
-version = "2.0.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c29523f73c12753165781c6e5dc11c84d3e44c080a15f7c6cfbd70b514cb6f1"
+version = "2.0.8"
+source = "git+https://github.com/gakonst/ethers-rs?rev=fa3017715a298728d9fb341933818a5d0d84c2dc#fa3017715a298728d9fb341933818a5d0d84c2dc"
 dependencies = [
  "arrayvec",
  "bytes",
@@ -2289,9 +2286,8 @@ dependencies = [
 
 [[package]]
 name = "ethers-etherscan"
-version = "2.0.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4aab5af432b3fe5b7756b60df5c9ddeb85a13414575ad8a9acd707c24f0a77a5"
+version = "2.0.8"
+source = "git+https://github.com/gakonst/ethers-rs?rev=fa3017715a298728d9fb341933818a5d0d84c2dc#fa3017715a298728d9fb341933818a5d0d84c2dc"
 dependencies = [
  "ethers-core",
  "reqwest",
@@ -2304,9 +2300,8 @@ dependencies = [
 
 [[package]]
 name = "ethers-middleware"
-version = "2.0.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "356151d5ded56d4918146366abc9dfc9df367cf0096492a7a5477b21b7693615"
+version = "2.0.8"
+source = "git+https://github.com/gakonst/ethers-rs?rev=fa3017715a298728d9fb341933818a5d0d84c2dc#fa3017715a298728d9fb341933818a5d0d84c2dc"
 dependencies = [
  "async-trait",
  "auto_impl",
@@ -2331,9 +2326,8 @@ dependencies = [
 
 [[package]]
 name = "ethers-providers"
-version = "2.0.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00c84664b294e47fc2860d6db0db0246f79c4c724e552549631bb9505b834bee"
+version = "2.0.8"
+source = "git+https://github.com/gakonst/ethers-rs?rev=fa3017715a298728d9fb341933818a5d0d84c2dc#fa3017715a298728d9fb341933818a5d0d84c2dc"
 dependencies = [
  "async-trait",
  "auto_impl",
@@ -2369,9 +2363,8 @@ dependencies = [
 
 [[package]]
 name = "ethers-signers"
-version = "2.0.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "170b299698702ef1f53d2275af7d6d97409cfa4f9398ee9ff518f6bc9102d0ad"
+version = "2.0.8"
+source = "git+https://github.com/gakonst/ethers-rs?rev=fa3017715a298728d9fb341933818a5d0d84c2dc#fa3017715a298728d9fb341933818a5d0d84c2dc"
 dependencies = [
  "async-trait",
  "coins-bip32",
@@ -7552,9 +7545,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-tungstenite"
-version = "0.20.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b2dbec703c26b00d74844519606ef15d09a7d6857860f84ad223dec002ddea2"
+checksum = "ec509ac96e9a0c43427c74f003127d953a265737636129424288d27cb5c4b12c"
 dependencies = [
  "futures-util",
  "log",
@@ -7930,9 +7923,9 @@ dependencies = [
 
 [[package]]
 name = "tungstenite"
-version = "0.20.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e862a1c4128df0112ab625f55cd5c934bcb4312ba80b39ae4b4835a3fd58e649"
+checksum = "15fba1a6d6bb030745759a9a2a588bfe8490fc8b4751a277db3a0be1c9ebbf67"
 dependencies = [
  "byteorder",
  "bytes",
