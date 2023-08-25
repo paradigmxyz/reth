@@ -928,6 +928,8 @@ mod tests {
         let provider = factory.provider_rw().unwrap();
 
         let address1 = Address::random();
+        let mut account_info = RevmAccountInfo::default();
+        account_info.nonce = 1;
 
         // Block #0: initial state.
         let mut cache_state = CacheState::new(true);
@@ -936,7 +938,7 @@ mod tests {
         init_state.commit(HashMap::from([(
             address1,
             Account {
-                info: RevmAccountInfo::default(),
+                info: account_info.clone(),
                 status: AccountStatus::Touched | AccountStatus::Created,
                 // 0x00 => 0 => 1
                 // 0x01 => 0 => 2
@@ -960,7 +962,7 @@ mod tests {
         let mut cache_state = CacheState::new(true);
         cache_state.insert_account_with_storage(
             address1,
-            RevmAccountInfo::default(),
+            account_info.clone(),
             HashMap::from([(U256::ZERO, U256::from(1)), (U256::from(1), U256::from(2))]),
         );
         let mut state = RevmStateBuilder::default().with_cached_prestate(cache_state).build();
@@ -970,7 +972,7 @@ mod tests {
             address1,
             Account {
                 status: AccountStatus::Touched,
-                info: RevmAccountInfo::default(),
+                info: account_info.clone(),
                 // 0x00 => 1 => 2
                 storage: HashMap::from([(
                     U256::ZERO,
@@ -988,7 +990,7 @@ mod tests {
             address1,
             Account {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
-                info: RevmAccountInfo::default(),
+                info: account_info.clone(),
                 storage: HashMap::default(),
             },
         )]));
@@ -999,7 +1001,7 @@ mod tests {
             address1,
             Account {
                 status: AccountStatus::Touched | AccountStatus::Created,
-                info: RevmAccountInfo::default(),
+                info: account_info.clone(),
                 storage: HashMap::default(),
             },
         )]));
@@ -1010,7 +1012,7 @@ mod tests {
             address1,
             Account {
                 status: AccountStatus::Touched,
-                info: RevmAccountInfo::default(),
+                info: account_info.clone(),
                 // 0x00 => 0 => 2
                 // 0x02 => 0 => 4
                 // 0x06 => 0 => 6
@@ -1037,7 +1039,7 @@ mod tests {
             address1,
             Account {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
-                info: RevmAccountInfo::default(),
+                info: account_info.clone(),
                 storage: HashMap::default(),
             },
         )]));
@@ -1048,7 +1050,7 @@ mod tests {
             address1,
             Account {
                 status: AccountStatus::Touched | AccountStatus::Created,
-                info: RevmAccountInfo::default(),
+                info: account_info.clone(),
                 storage: HashMap::default(),
             },
         )]));
@@ -1056,7 +1058,7 @@ mod tests {
             address1,
             Account {
                 status: AccountStatus::Touched,
-                info: RevmAccountInfo::default(),
+                info: account_info.clone(),
                 // 0x00 => 0 => 2
                 storage: HashMap::from([(
                     U256::ZERO,
@@ -1068,7 +1070,7 @@ mod tests {
             address1,
             Account {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
-                info: RevmAccountInfo::default(),
+                info: account_info.clone(),
                 storage: HashMap::default(),
             },
         )]));
@@ -1076,7 +1078,7 @@ mod tests {
             address1,
             Account {
                 status: AccountStatus::Touched | AccountStatus::Created,
-                info: RevmAccountInfo::default(),
+                info: account_info.clone(),
                 storage: HashMap::default(),
             },
         )]));
@@ -1087,7 +1089,7 @@ mod tests {
             address1,
             Account {
                 status: AccountStatus::Touched,
-                info: RevmAccountInfo::default(),
+                info: account_info.clone(),
                 // 0x00 => 0 => 9
                 storage: HashMap::from([(
                     U256::ZERO,
@@ -1097,7 +1099,9 @@ mod tests {
         )]));
         state.merge_transitions();
 
-        BundleState::new(state.take_bundle(), Vec::new(), 1)
+        let bundle = state.take_bundle();
+        println!("BUNDLE: {bundle:#?}");
+        BundleState::new(bundle, Vec::new(), 1)
             .write_to_db(provider.tx_ref(), false)
             .expect("Could not write bundle state to DB");
 
@@ -1140,6 +1144,17 @@ mod tests {
                 StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(1) }
             )))
         );
+
+        // // key of block #1
+        // // 0x01: 2
+        // // DUPLICATE
+        // assert_eq!(
+        //     storage_changes.next(),
+        //     Some(Ok((
+        //         BlockNumberAddress((1, address1)),
+        //         StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(2) }
+        //     )))
+        // );
 
         // Block #2 (destroyed)
         // 0x00: 2
