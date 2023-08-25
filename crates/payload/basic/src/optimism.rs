@@ -97,6 +97,7 @@ where
         });
 
         let mut cfg = initialized_cfg.clone();
+        let mut tx_env = tx_env_with_recovered(&sequencer_tx);
 
         let sender = db.load_account(sequencer_tx.signer())?.clone();
         let mut sender_new = sender.clone();
@@ -119,6 +120,8 @@ where
 
             if !is_regolith {
                 cfg.disable_gas_refund = true;
+            } else {
+                tx_env.nonce = Some(sender.info.nonce);
             }
 
             // Increase the sender's balance in the database if the deposit transaction mints eth.
@@ -149,11 +152,7 @@ where
         }
 
         // Configure the environment for the block.
-        let env = Env {
-            cfg,
-            block: initialized_block_env.clone(),
-            tx: tx_env_with_recovered(&sequencer_tx),
-        };
+        let env = Env { cfg, block: initialized_block_env.clone(), tx: tx_env };
 
         let mut evm = revm::EVM::with_env(env);
         evm.database(&mut db);
