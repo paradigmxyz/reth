@@ -6,10 +6,11 @@ use crate::{
 };
 use futures_util::{ready, Stream};
 use reth_primitives::{
-    Address, BlobTransactionSidecar, FromRecoveredPooledTransaction, FromRecoveredTransaction,
-    IntoRecoveredTransaction, PeerId, PooledTransactionsElement,
-    PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionKind,
-    TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, H256, U256,
+    Address, BlobTransactionSidecar, BlobTransactionValidationError,
+    FromRecoveredPooledTransaction, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId,
+    PooledTransactionsElement, PooledTransactionsElementEcRecovered, SealedBlock, Transaction,
+    TransactionKind, TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
+    H256, U256,
 };
 use reth_rlp::Encodable;
 use std::{
@@ -22,6 +23,7 @@ use std::{
 use tokio::sync::mpsc::Receiver;
 
 use crate::blobstore::BlobStoreError;
+use reth_primitives::kzg::KzgSettings;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -645,6 +647,13 @@ pub trait PoolTransaction:
 pub trait EthPoolTransaction: PoolTransaction {
     /// Extracts the blob sidecar from the transaction.
     fn take_blob(&mut self) -> EthBlobTransactionSidecar;
+
+    /// Validates the blob sidecar of the transaction with the given settings.
+    fn validate_blob(
+        &self,
+        blob: &BlobTransactionSidecar,
+        settings: &KzgSettings,
+    ) -> Result<(), BlobTransactionValidationError>;
 }
 
 /// The default [PoolTransaction] for the [Pool](crate::Pool) for Ethereum.
@@ -825,6 +834,17 @@ impl EthPoolTransaction for EthPooledTransaction {
             std::mem::replace(&mut self.blob_sidecar, EthBlobTransactionSidecar::Missing)
         } else {
             EthBlobTransactionSidecar::None
+        }
+    }
+
+    fn validate_blob(
+        &self,
+        sidecar: &BlobTransactionSidecar,
+        settings: &KzgSettings,
+    ) -> Result<(), BlobTransactionValidationError> {
+        match &self.transaction.transaction {
+            Transaction::Eip4844(tx) => tx.validate_blob(sidecar, settings),
+            _ => Err(BlobTransactionValidationError::NotBlobTransaction(self.tx_type())),
         }
     }
 }
