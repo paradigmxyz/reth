@@ -273,7 +273,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         let validator = if let Some(ref trusted_setup_file) = self.trusted_setup_file {
             let kzg_settings = self.load_kzg_settings(trusted_setup_file)?;
-            info!(target: "reth::cli", "Trusted setup file loaded");
+            info!(target: "reth::cli", "KZG trusted setup file loaded");
 
             TransactionValidationTaskExecutor::eth_with_kzg_settings_and_tasks(
                 blockchain_db.clone(),
