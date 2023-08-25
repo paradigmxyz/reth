@@ -827,11 +827,11 @@ impl Decodable for ProtocolVersion {
 mod tests {
     use super::*;
     use crate::{DisconnectReason, EthVersion};
+    use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use reth_ecies::util::pk2id;
     use secp256k1::{SecretKey, SECP256K1};
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;
-    use reth_discv4::DEFAULT_DISCOVERY_PORT;
 
     /// Returns a testing `HelloMessage` and new secretkey
     fn eth_hello() -> (HelloMessage, SecretKey) {
