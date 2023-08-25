@@ -9,7 +9,6 @@ use crate::{
 use futures::{Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_codecs::derive_arbitrary;
-use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_metrics::metrics::counter;
 use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
