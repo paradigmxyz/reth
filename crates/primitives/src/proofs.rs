@@ -144,8 +144,8 @@ mod tests {
     use crate::{
         hex_literal::hex,
         proofs::{calculate_receipt_root, calculate_transaction_root, genesis_state_root},
-        Address, Block, Bloom, GenesisAccount, Log, Receipt, ReceiptWithBloom, TxType, H160, H256,
-        U256,
+        Address, Block, Bloom, Bytes, GenesisAccount, Log, Receipt, ReceiptWithBloom, TxType, H160,
+        H256, U256,
     };
     use reth_rlp::Decodable;
 
@@ -187,29 +187,29 @@ mod tests {
                         Log {
                             address: hex!("ddb6dcce6b794415145eb5caa6cd335aeda9c272").into(),
                             topics: vec![
-                                H256::from_str("c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62").unwrap()
-                                H256::from_str("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9").unwrap()
-                                H256::from_str("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9").unwrap()
-                                H256::from_str("0000000000000000000000000000000000000000000000000000000000000000").unwrap()
+                                H256::from_str("c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62").unwrap(),
+                                H256::from_str("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9").unwrap(),
+                                H256::from_str("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9").unwrap(),
+                                H256::from_str("0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
                             ],
                             data: Bytes::from_str("00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001").unwrap(),
                         },
                         Log {
                             address: hex!("ddb6dcce6b794415145eb5caa6cd335aeda9c272").into(),
                             topics: vec![
-                                H256::from_str("c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62").unwrap()
-                                H256::from_str("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9").unwrap()
-                                H256::from_str("0000000000000000000000000000000000000000000000000000000000000000").unwrap()
-                                H256::from_str("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9").unwrap()
+                                H256::from_str("c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62").unwrap(),
+                                H256::from_str("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9").unwrap(),
+                                H256::from_str("0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+                                H256::from_str("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9").unwrap(),
                             ],
                             data: Bytes::from_str("00000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000001").unwrap(),
                         },
                         Log {
                             address: hex!("ddb6dcce6b794415145eb5caa6cd335aeda9c272").into(),
                             topics: vec![
-                                H256::from_str("0eb774bb9698a73583fe07b6972cf2dcc08d1d97581a22861f45feb86b395820").unwrap()
-                                H256::from_str("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9").unwrap()
-                                H256::from_str("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9").unwrap()
+                                H256::from_str("0eb774bb9698a73583fe07b6972cf2dcc08d1d97581a22861f45feb86b395820").unwrap(),
+                                H256::from_str("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9").unwrap(),
+                                H256::from_str("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9").unwrap(),
                             ],
                             data: Bytes::from_str("0000000000000000000000000000000000000000000000000000000000000003").unwrap(),
                         },
@@ -229,29 +229,29 @@ mod tests {
                         Log {
                             address: hex!("ddb6dcce6b794415145eb5caa6cd335aeda9c272").into(),
                             topics: vec![
-                                H256::from_str("c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62").unwrap()
-                                H256::from_str("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec").unwrap()
-                                H256::from_str("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec").unwrap()
-                                H256::from_str("0000000000000000000000000000000000000000000000000000000000000000").unwrap()
+                                H256::from_str("c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62").unwrap(),
+                                H256::from_str("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec").unwrap(),
+                                H256::from_str("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec").unwrap(),
+                                H256::from_str("0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
                             ],
                             data: Bytes::from_str("00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001").unwrap(),
                         },
                         Log {
                             address: hex!("ddb6dcce6b794415145eb5caa6cd335aeda9c272").into(),
                             topics: vec![
-                                H256::from_str("c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62").unwrap()
-                                H256::from_str("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec").unwrap()
-                                H256::from_str("0000000000000000000000000000000000000000000000000000000000000000").unwrap()
-                                H256::from_str("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec").unwrap()
+                                H256::from_str("c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62").unwrap(),
+                                H256::from_str("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec").unwrap(),
+                                H256::from_str("0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+                                H256::from_str("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec").unwrap(),
                             ],
                             data: Bytes::from_str("00000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000001").unwrap(),
                         },
                         Log {
                             address: hex!("ddb6dcce6b794415145eb5caa6cd335aeda9c272").into(),
                             topics: vec![
-                                H256::from_str("0eb774bb9698a73583fe07b6972cf2dcc08d1d97581a22861f45feb86b395820").unwrap()
-                                H256::from_str("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec").unwrap()
-                                H256::from_str("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec").unwrap()
+                                H256::from_str("0eb774bb9698a73583fe07b6972cf2dcc08d1d97581a22861f45feb86b395820").unwrap(),
+                                H256::from_str("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec").unwrap(),
+                                H256::from_str("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec").unwrap(),
                             ],
                             data: Bytes::from_str("0000000000000000000000000000000000000000000000000000000000000003").unwrap(),
                         },
@@ -271,18 +271,18 @@ mod tests {
                         Log {
                             address: hex!("4200000000000000000000000000000000000006").into(),
                             topics: vec![
-                                H256::from_str("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef").unwrap()
-                                H256::from_str("000000000000000000000000c3feb4ef4c2a5af77add15c95bd98f6b43640cc8").unwrap()
-                                H256::from_str("0000000000000000000000002992607c1614484fe6d865088e5c048f0650afd4").unwrap()
+                                H256::from_str("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef").unwrap(),
+                                H256::from_str("000000000000000000000000c3feb4ef4c2a5af77add15c95bd98f6b43640cc8").unwrap(),
+                                H256::from_str("0000000000000000000000002992607c1614484fe6d865088e5c048f0650afd4").unwrap(),
                             ],
                             data: Bytes::from_str("0000000000000000000000000000000000000000000000000018de76816d8000").unwrap(),
                         },
                         Log {
                             address: hex!("cf8e7e6b26f407dee615fc4db18bf829e7aa8c09").into(),
                             topics: vec![
-                                H256::from_str("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef").unwrap()
-                                H256::from_str("0000000000000000000000002992607c1614484fe6d865088e5c048f0650afd4").unwrap()
-                                H256::from_str("0000000000000000000000008dbffe4c8bf3caf5deae3a99b50cfcf3648cbc09").unwrap()
+                                H256::from_str("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef").unwrap(),
+                                H256::from_str("0000000000000000000000002992607c1614484fe6d865088e5c048f0650afd4").unwrap(),
+                                H256::from_str("0000000000000000000000008dbffe4c8bf3caf5deae3a99b50cfcf3648cbc09").unwrap(),
                             ],
                             data: Bytes::from_str("000000000000000000000000000000000000000000000002d24d8e9ac1aa79e2").unwrap(),
                         },
@@ -296,18 +296,18 @@ mod tests {
                         Log {
                             address: hex!("2992607c1614484fe6d865088e5c048f0650afd4").into(),
                             topics: vec![
-                                H256::from_str("d78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822").unwrap()
-                                H256::from_str("00000000000000000000000029843613c7211d014f5dd5718cf32bcd314914cb").unwrap()
-                                H256::from_str("0000000000000000000000008dbffe4c8bf3caf5deae3a99b50cfcf3648cbc09").unwrap()
+                                H256::from_str("d78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822").unwrap(),
+                                H256::from_str("00000000000000000000000029843613c7211d014f5dd5718cf32bcd314914cb").unwrap(),
+                                H256::from_str("0000000000000000000000008dbffe4c8bf3caf5deae3a99b50cfcf3648cbc09").unwrap(),
                             ],
                             data: Bytes::from_str("0000000000000000000000000000000000000000000000000018de76816d800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002d24d8e9ac1aa79e2").unwrap(),
                         },
                         Log {
                             address: hex!("6d0f8d488b669aa9ba2d0f0b7b75a88bf5051cd3").into(),
                             topics: vec![
-                                H256::from_str("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef").unwrap()
-                                H256::from_str("0000000000000000000000008dbffe4c8bf3caf5deae3a99b50cfcf3648cbc09").unwrap()
-                                H256::from_str("000000000000000000000000c3feb4ef4c2a5af77add15c95bd98f6b43640cc8").unwrap()
+                                H256::from_str("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef").unwrap(),
+                                H256::from_str("0000000000000000000000008dbffe4c8bf3caf5deae3a99b50cfcf3648cbc09").unwrap(),
+                                H256::from_str("000000000000000000000000c3feb4ef4c2a5af77add15c95bd98f6b43640cc8").unwrap(),
                             ],
                             data: Bytes::from_str("0x00000000000000000000000000000000000000000000000014bc73062aea8093").unwrap(),
                         },
@@ -321,9 +321,9 @@ mod tests {
                         Log {
                             address: hex!("8dbffe4c8bf3caf5deae3a99b50cfcf3648cbc09").into(),
                             topics: vec![
-                                H256::from_str("d78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822").unwrap()
-                                H256::from_str("00000000000000000000000029843613c7211d014f5dd5718cf32bcd314914cb").unwrap()
-                                H256::from_str("000000000000000000000000c3feb4ef4c2a5af77add15c95bd98f6b43640cc8").unwrap()
+                                H256::from_str("d78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822").unwrap(),
+                                H256::from_str("00000000000000000000000029843613c7211d014f5dd5718cf32bcd314914cb").unwrap(),
+                                H256::from_str("000000000000000000000000c3feb4ef4c2a5af77add15c95bd98f6b43640cc8").unwrap(),
                             ],
                             data: Bytes::from_str("0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002d24d8e9ac1aa79e200000000000000000000000000000000000000000000000014bc73062aea80930000000000000000000000000000000000000000000000000000000000000000").unwrap(),
                         },
@@ -343,29 +343,29 @@ mod tests {
                         Log {
                             address: hex!("ac6564f3718837caadd42eed742d75c12b90a052").into(),
                             topics: vec![
-                                H256::from_str("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef").unwrap()
-                                H256::from_str("0000000000000000000000000000000000000000000000000000000000000000").unwrap()
-                                H256::from_str("000000000000000000000000a4fa7f3fbf0677f254ebdb1646146864c305b76e").unwrap()
-                                H256::from_str("000000000000000000000000000000000000000000000000000000000011a1d3").unwrap()
+                                H256::from_str("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef").unwrap(),
+                                H256::from_str("0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+                                H256::from_str("000000000000000000000000a4fa7f3fbf0677f254ebdb1646146864c305b76e").unwrap(),
+                                H256::from_str("000000000000000000000000000000000000000000000000000000000011a1d3").unwrap(),
                             ],
                             data: Default::default(),
                         },
                         Log {
                             address: hex!("ac6564f3718837caadd42eed742d75c12b90a052").into(),
                             topics: vec![
-                                H256::from_str("9d89e36eadf856db0ad9ffb5a569e07f95634dddd9501141ecf04820484ad0dc").unwrap()
-                                H256::from_str("000000000000000000000000a4fa7f3fbf0677f254ebdb1646146864c305b76e").unwrap()
-                                H256::from_str("000000000000000000000000000000000000000000000000000000000011a1d3").unwrap()
+                                H256::from_str("9d89e36eadf856db0ad9ffb5a569e07f95634dddd9501141ecf04820484ad0dc").unwrap(),
+                                H256::from_str("000000000000000000000000a4fa7f3fbf0677f254ebdb1646146864c305b76e").unwrap(),
+                                H256::from_str("000000000000000000000000000000000000000000000000000000000011a1d3").unwrap(),
                             ],
                             data: Bytes::from_str("00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000037697066733a2f2f516d515141646b33736538396b47716577395256567a316b68643548375562476d4d4a485a62566f386a6d346f4a2f30000000000000000000").unwrap(),
                         },
                          Log {
                             address: hex!("ac6564f3718837caadd42eed742d75c12b90a052").into(),
                             topics: vec![
-                                H256::from_str("110d160a1bedeea919a88fbc4b2a9fb61b7e664084391b6ca2740db66fef80fe").unwrap()
-                                H256::from_str("00000000000000000000000084d47f6eea8f8d87910448325519d1bb45c2972a").unwrap()
-                                H256::from_str("000000000000000000000000a4fa7f3fbf0677f254ebdb1646146864c305b76e").unwrap()
-                                H256::from_str("000000000000000000000000000000000000000000000000000000000011a1d3").unwrap()
+                                H256::from_str("110d160a1bedeea919a88fbc4b2a9fb61b7e664084391b6ca2740db66fef80fe").unwrap(),
+                                H256::from_str("00000000000000000000000084d47f6eea8f8d87910448325519d1bb45c2972a").unwrap(),
+                                H256::from_str("000000000000000000000000a4fa7f3fbf0677f254ebdb1646146864c305b76e").unwrap(),
+                                H256::from_str("000000000000000000000000000000000000000000000000000000000011a1d3").unwrap(),
                             ],
                             data: Bytes::from_str("0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000a4fa7f3fbf0677f254ebdb1646146864c305b76e00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007717500762343034303661353035646234633961386163316433306335633332303265370000000000000000000000000000000000000000000000000000000000000037697066733a2f2f516d515141646b33736538396b47716577395256567a316b68643548375562476d4d4a485a62566f386a6d346f4a2f30000000000000000000").unwrap(),
                         },
