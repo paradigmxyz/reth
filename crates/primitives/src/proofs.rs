@@ -100,7 +100,7 @@ pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> H256 {
         // encoding. This will be fixd in the next hardfork, however for now, we must strip
         // the deposit nonce from the receipts before calculating the receipt root.
         let receipts = receipts
-            .into_iter()
+            .iter()
             .map(|r| {
                 let mut r = r.clone();
                 r.receipt.deposit_nonce = None;
@@ -182,8 +182,8 @@ mod tests {
         assert_eq!(block.transactions_root, tx_root, "Must be the same");
     }
 
-    #[test]
     #[cfg(feature = "optimism")]
+    #[test]
     fn check_optimism_receipt_root() {
         let receipts = vec![
             // 0xb0d6ee650637911394396d81172bd1c637d568ed1fbddab0daddfca399c58b53

@@ -116,7 +116,7 @@ where
                             });
                             let l1_data_gas = (!tx.is_deposit()).then(|| {
                                 l1_block_info.data_gas(
-                                    &data,
+                                    data,
                                     self.inner.provider.chain_spec(),
                                     block_timestamp,
                                 )
@@ -130,7 +130,7 @@ where
 
                     #[cfg(feature = "optimism")]
                     {
-                        return build_transaction_receipt_with_block_receipts(
+                        build_transaction_receipt_with_block_receipts(
                             tx,
                             meta,
                             receipt,
@@ -142,9 +142,7 @@ where
                     }
 
                     #[cfg(not(feature = "optimism"))]
-                    return build_transaction_receipt_with_block_receipts(
-                        tx, meta, receipt, &receipts,
-                    )
+                    build_transaction_receipt_with_block_receipts(tx, meta, receipt, &receipts)
                 })
                 .collect::<EthResult<Vec<_>>>();
             return receipts.map(Some)
@@ -163,7 +161,7 @@ where
         let block_id = block_id.into();
 
         if block_id.is_pending() {
-            // Pending block can be fetched directly without need for caching;
+            // Pending block can be fetched directly without need for caching;;
             return Ok(self.provider().pending_block()?.map(|block| block.body.len()))
         }
 

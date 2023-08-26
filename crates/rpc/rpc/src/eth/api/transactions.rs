@@ -749,7 +749,7 @@ where
                     )
                 });
                 let l1_data_gas = (!tx.is_deposit()).then(|| {
-                    l1_block_info.data_gas(&data, self.inner.provider.chain_spec(), block_timestamp)
+                    l1_block_info.data_gas(data, self.inner.provider.chain_spec(), block_timestamp)
                 });
 
                 (Some(l1_block_info), l1_fee, l1_data_gas)
