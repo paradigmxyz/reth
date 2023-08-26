@@ -168,19 +168,19 @@ mod tests {
             // 0xb0d6ee650637911394396d81172bd1c637d568ed1fbddab0daddfca399c58b53
             ReceiptWithBloom {
                 receipt: Receipt {
-                    tx_type: TxType::EIP2930,
+                    tx_type: TxType::DEPOSIT,
                     success: true,
                     cumulative_gas_used: 46913,
                     logs: vec![],
                     #[cfg(feature = "optimism")]
-                    deposit_nonce: None,
+                    deposit_nonce: Some(4012991u64),
                 },
                 bloom: Bloom(hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
             },
             // 0x2f433586bae30573c393adfa02bc81d2a1888a3d6c9869f473fb57245166bd9a
             ReceiptWithBloom {
                 receipt: Receipt {
-                    tx_type: TxType::EIP2930,
+                    tx_type: TxType::EIP1559,
                     success: true,
                     cumulative_gas_used: 118083,
                     logs: vec![
@@ -222,7 +222,7 @@ mod tests {
             // 0x6c33676e8f6077f46a62eabab70bc6d1b1b18a624b0739086d77093a1ecf8266
             ReceiptWithBloom {
                 receipt: Receipt {
-                    tx_type: TxType::EIP2930,
+                    tx_type: TxType::EIP1559,
                     success: true,
                     cumulative_gas_used: 189253,
                     logs: vec![
@@ -264,7 +264,7 @@ mod tests {
             // 0x4d3ecbef04ba7ce7f5ab55be0c61978ca97c117d7da448ed9771d4ff0c720a3f
             ReceiptWithBloom {
                 receipt: Receipt {
-                    tx_type: TxType::EIP2930,
+                    tx_type: TxType::EIP1559,
                     success: true,
                     cumulative_gas_used: 346969,
                     logs: vec![
@@ -336,7 +336,7 @@ mod tests {
             // 0xf738af5eb00ba23dbc1be2dbce41dbc0180f0085b7fb46646e90bf737af90351
             ReceiptWithBloom {
                 receipt: Receipt {
-                    tx_type: TxType::EIP2930,
+                    tx_type: TxType::EIP1559,
                     success: true,
                     cumulative_gas_used: 623249,
                     logs: vec![
