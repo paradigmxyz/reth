@@ -128,21 +128,18 @@ where
                         }
                     };
 
-                    #[cfg(feature = "optimism")]
-                    {
-                        build_transaction_receipt_with_block_receipts(
-                            tx,
-                            meta,
-                            receipt,
-                            &receipts,
-                            &l1_block_info,
-                            l1_fee,
-                            l1_data_gas,
-                        )
-                    }
-
-                    #[cfg(not(feature = "optimism"))]
-                    build_transaction_receipt_with_block_receipts(tx, meta, receipt, &receipts)
+                    build_transaction_receipt_with_block_receipts(
+                        tx,
+                        meta,
+                        receipt,
+                        &receipts,
+                        #[cfg(feature = "optimism")]
+                        &l1_block_info,
+                        #[cfg(feature = "optimism")]
+                        l1_fee,
+                        #[cfg(feature = "optimism")]
+                        l1_data_gas,
+                    )
                 })
                 .collect::<EthResult<Vec<_>>>();
             return receipts.map(Some)

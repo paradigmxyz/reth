@@ -108,9 +108,7 @@ pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> H256 {
             })
             .collect::<Vec<_>>();
 
-        return ordered_trie_root_with_encoder(receipts.as_slice(), |r, buf| {
-            r.encode_inner(buf, false)
-        })
+        ordered_trie_root_with_encoder(receipts.as_slice(), |r, buf| r.encode_inner(buf, false))
     }
 
     #[cfg(not(feature = "optimism"))]

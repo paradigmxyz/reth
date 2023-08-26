@@ -1,6 +1,4 @@
 //! Contains RPC handler implementations specific to transactions
-use std::ops::Div;
-
 use crate::{
     eth::{
         api::pending_block::PendingBlockEnv,
@@ -14,7 +12,6 @@ use crate::{
     EthApi, EthApiSpec,
 };
 use async_trait::async_trait;
-use bytes::BytesMut;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, Header,
@@ -30,8 +27,6 @@ use reth_provider::{
 use reth_revm::{
     database::{State, SubState},
     env::{fill_block_env_with_coinbase, tx_env_with_recovered},
-    executor,
-    optimism::L1BlockInfo,
     tracing::{TracingInspector, TracingInspectorConfig},
 };
 use reth_rpc_types::{
@@ -47,9 +42,15 @@ use revm::{
 use revm_primitives::{utilities::create_address, Env, ResultAndState, SpecId};
 
 #[cfg(feature = "optimism")]
+use bytes::BytesMut;
+#[cfg(feature = "optimism")]
 use http::{header::CONTENT_TYPE, HeaderValue};
 #[cfg(feature = "optimism")]
 use hyper::{Body, Client, Method, Request};
+#[cfg(feature = "optimism")]
+use reth_revm::{executor, optimism::L1BlockInfo};
+#[cfg(feature = "optimism")]
+use std::ops::Div;
 
 /// Helper alias type for the state's [CacheDB]
 pub(crate) type StateCacheDB<'r> = CacheDB<State<StateProviderBox<'r>>>;
@@ -763,8 +764,11 @@ where
             meta,
             receipt,
             &all_receipts,
+            #[cfg(feature = "optimism")]
             &l1_block_info,
+            #[cfg(feature = "optimism")]
             l1_fee,
+            #[cfg(feature = "optimism")]
             l1_data_gas,
         )
     }
