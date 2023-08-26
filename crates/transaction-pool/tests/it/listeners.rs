@@ -64,3 +64,28 @@ async fn txpool_listener_propagate_only() {
     })
     .await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn txpool_listener_new_propagate_only() {
+    let txpool = testing_pool_with_validator(MockTransactionValidator::no_propagate_local());
+    let mut mock_tx_factory = MockTransactionFactory::default();
+    let transaction = mock_tx_factory.create_eip1559();
+    let expected = *transaction.hash();
+    let mut listener_network = txpool.new_transactions_listener();
+    let mut listener_all =
+        txpool.new_transactions_listener_for(PendingTransactionListenerKind::All);
+    let result =
+        txpool.add_transaction(TransactionOrigin::Local, transaction.transaction.clone()).await;
+    assert!(result.is_ok());
+
+    let inserted = listener_all.recv().await.unwrap();
+    let actual = *inserted.transaction.hash();
+    assert_eq!(actual, expected);
+
+    poll_fn(|cx| {
+        // no propagation
+        assert!(listener_network.poll_recv(cx).is_pending());
+        Poll::Ready(())
+    })
+    .await;
+}
