@@ -93,6 +93,24 @@ pub fn calculate_withdrawals_root(withdrawals: &[Withdrawal]) -> H256 {
 
 /// Calculates the receipt root for a header.
 pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> H256 {
+    #[cfg(feature = "optimism")]
+    let receipts = receipts
+        .into_iter()
+        .map(|r| {
+            let mut r = r.clone();
+            r.receipt.deposit_nonce = None;
+            r
+        })
+        .collect::<Vec<_>>();
+
+    #[cfg(feature = "optimism")]
+    {
+        return ordered_trie_root_with_encoder(receipts.as_slice(), |r, buf| {
+            r.encode_inner(buf, false)
+        });
+    }
+
+    #[cfg(not(feature = "optimism"))]
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
 }
 

@@ -9,7 +9,7 @@ use reth_db::{
 use reth_interfaces::Error;
 use reth_primitives::{
     bloom::logs_bloom, keccak256, proofs::calculate_receipt_root_ref, Account, Address,
-    BlockNumber, Bloom, Bytecode, Log, PruneMode, PruneModes, Receipt, StorageEntry, H256,
+    BlockNumber, Bloom, Bytecode, Log, PruneMode, PruneModes, Receipt, StorageEntry, TxType, H256,
     MINIMUM_PRUNING_DISTANCE, U256,
 };
 use reth_trie::{
@@ -193,6 +193,25 @@ impl PostState {
     /// TODO: This function hides an expensive operation (bloom). We should probably make it more
     /// explicit.
     pub fn receipts_root(&self, block: BlockNumber) -> H256 {
+        #[cfg(feature = "optimism")]
+        let receipts = self
+            .receipts(block)
+            .iter()
+            .map(|r| {
+                let mut r = r.clone();
+                if r.tx_type == TxType::DEPOSIT {
+                    r.deposit_nonce = None
+                }
+                r
+            })
+            .collect::<Vec<_>>();
+
+        #[cfg(feature = "optimism")]
+        {
+            return calculate_receipt_root_ref(receipts.as_slice())
+        }
+
+        #[cfg(not(feature = "optimism"))]
         calculate_receipt_root_ref(self.receipts(block))
     }
 
