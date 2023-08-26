@@ -375,8 +375,8 @@ impl BundleState {
         let reverts = self.bundle.take_reverts();
         StateReverts(reverts).write_to_db(tx, self.first_block)?;
 
-        StateChange(self.bundle.take_sorted_plain_change_inner(omit_changed_check))
-            .write_to_db(tx)?;
+        let bundle = std::mem::take(&mut self.bundle);
+        StateChange(bundle.into_plain_state_sorted(omit_changed_check)).write_to_db(tx)?;
 
         Ok(())
     }
@@ -639,14 +639,14 @@ mod tests {
         let mut revm_bundle_state = state.take_bundle();
 
         // Write plain state and reverts separately.
-        let plain_state = revm_bundle_state.take_sorted_plain_change_inner(false);
+        let reverts = revm_bundle_state.take_reverts();
+        let plain_state = revm_bundle_state.into_plain_state_sorted(false);
         assert!(plain_state.storage.is_empty());
         assert!(plain_state.contracts.is_empty());
         StateChange(plain_state)
             .write_to_db(provider.tx_ref())
             .expect("Could not write plain state to DB");
 
-        let reverts = revm_bundle_state.take_reverts();
         assert_eq!(reverts.storage, [[]]);
         StateReverts(reverts)
             .write_to_db(provider.tx_ref(), 1)
@@ -702,14 +702,14 @@ mod tests {
         let mut revm_bundle_state = state.take_bundle();
 
         // Write plain state and reverts separately.
-        let plain_state = revm_bundle_state.take_sorted_plain_change_inner(false);
+        let reverts = revm_bundle_state.take_reverts();
+        let plain_state = revm_bundle_state.into_plain_state_sorted(false);
         assert!(plain_state.storage.is_empty());
         assert!(plain_state.contracts.is_empty());
         StateChange(plain_state)
             .write_to_db(provider.tx_ref())
             .expect("Could not write plain state to DB");
 
-        let reverts = revm_bundle_state.take_reverts();
         assert_eq!(reverts.storage, [[(address_b, true, vec![])]]);
         StateReverts(reverts)
             .write_to_db(provider.tx_ref(), 2)
@@ -1100,7 +1100,7 @@ mod tests {
         state.merge_transitions();
 
         let bundle = state.take_bundle();
-        println!("BUNDLE: {bundle:#?}");
+
         BundleState::new(bundle, Vec::new(), 1)
             .write_to_db(provider.tx_ref(), false)
             .expect("Could not write bundle state to DB");
