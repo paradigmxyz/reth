@@ -42,9 +42,15 @@ use revm::{
 use revm_primitives::{utilities::create_address, Env, ResultAndState, SpecId};
 
 #[cfg(feature = "optimism")]
+use bytes::BytesMut;
+#[cfg(feature = "optimism")]
 use http::{header::CONTENT_TYPE, HeaderValue};
 #[cfg(feature = "optimism")]
 use hyper::{Body, Client, Method, Request};
+#[cfg(feature = "optimism")]
+use reth_revm::{executor, optimism::L1BlockInfo};
+#[cfg(feature = "optimism")]
+use std::ops::Div;
 
 /// Helper alias type for the state's [CacheDB]
 pub(crate) type StateCacheDB<'r> = CacheDB<State<StateProviderBox<'r>>>;
@@ -716,7 +722,55 @@ where
             Some(recpts) => recpts,
             None => return Err(EthApiError::UnknownBlockNumber),
         };
-        build_transaction_receipt_with_block_receipts(tx, meta, receipt, &all_receipts)
+
+        #[cfg(feature = "optimism")]
+        let (l1_block_info, l1_fee, l1_data_gas) = {
+            let block = self
+                .provider()
+                .block_by_number(meta.block_number)?
+                .ok_or(EthApiError::UnknownBlockNumber)?;
+
+            let block_timestamp = block.timestamp;
+
+            let l1_block_info: Option<executor::optimism::L1BlockInfo> =
+                block.body.get(0).ok_or(EthApiError::InternalEthError)?.input()[4..]
+                    .try_into()
+                    .map_err(|_| EthApiError::InternalEthError)
+                    .ok();
+            let mut buf = BytesMut::default();
+            tx.encode_enveloped(&mut buf);
+            let data = &buf.freeze().into();
+            if let Some(l1_block_info) = l1_block_info {
+                let l1_fee = (!tx.is_deposit()).then(|| {
+                    l1_block_info.calculate_tx_l1_cost(
+                        self.inner.provider.chain_spec(),
+                        block_timestamp,
+                        data,
+                        tx.is_deposit(),
+                    )
+                });
+                let l1_data_gas = (!tx.is_deposit()).then(|| {
+                    l1_block_info.data_gas(data, self.inner.provider.chain_spec(), block_timestamp)
+                });
+
+                (Some(l1_block_info), l1_fee, l1_data_gas)
+            } else {
+                (None, None, None)
+            }
+        };
+
+        build_transaction_receipt_with_block_receipts(
+            tx,
+            meta,
+            receipt,
+            &all_receipts,
+            #[cfg(feature = "optimism")]
+            &l1_block_info,
+            #[cfg(feature = "optimism")]
+            l1_fee,
+            #[cfg(feature = "optimism")]
+            l1_data_gas,
+        )
     }
 }
 
@@ -867,6 +921,9 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
     meta: TransactionMeta,
     receipt: Receipt,
     all_receipts: &[Receipt],
+    #[cfg(feature = "optimism")] l1_block_info: &Option<L1BlockInfo>,
+    #[cfg(feature = "optimism")] l1_fee: Option<U256>,
+    #[cfg(feature = "optimism")] data_gas: Option<U256>,
 ) -> EthResult<TransactionReceipt> {
     let transaction =
         tx.clone().into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
@@ -900,8 +957,20 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         logs_bloom: receipt.bloom_slow(),
         status_code: if receipt.success { Some(U64::from(1)) } else { Some(U64::from(0)) },
         #[cfg(feature = "optimism")]
-        deposit_nonce: receipt.deposit_nonce,
+        deposit_nonce: receipt.deposit_nonce.map(U64::from),
+        ..Default::default()
     };
+
+    #[cfg(feature = "optimism")]
+    if let Some(l1_block_info) = l1_block_info {
+        if !tx.is_deposit() {
+            res_receipt.l1_fee = l1_fee;
+            res_receipt.l1_gas_used = data_gas.map(|dg| dg + l1_block_info.l1_fee_overhead);
+            res_receipt.l1_fee_scalar =
+                Some(l1_block_info.l1_fee_scalar.div(U256::from(1_000_000)));
+            res_receipt.l1_gas_price = Some(l1_block_info.l1_base_fee);
+        }
+    }
 
     match tx.transaction.kind() {
         Create => {

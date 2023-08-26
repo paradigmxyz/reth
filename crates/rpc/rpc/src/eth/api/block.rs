@@ -7,6 +7,7 @@ use crate::{
     },
     EthApi,
 };
+use bytes::BytesMut;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockId, BlockNumberOrTag, TransactionMeta};
 
@@ -15,6 +16,10 @@ use reth_rpc_types::{Index, RichBlock, TransactionReceipt};
 
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 use reth_transaction_pool::TransactionPool;
+
+#[cfg(feature = "optimism")]
+use reth_revm::optimism::L1BlockInfo;
+
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Provider:
@@ -73,6 +78,14 @@ where
             let block_number = block.number;
             let base_fee = block.base_fee_per_gas;
             let block_hash = block.hash;
+
+            #[cfg(feature = "optimism")]
+            let (block_timestamp, l1_block_info): (_, Option<L1BlockInfo>) = {
+                let body =
+                    block.body.get(0).ok_or(EthApiError::InternalEthError)?.input()[4..].try_into();
+                (block.timestamp, body.ok())
+            };
+
             let receipts = block
                 .body
                 .into_iter()
@@ -86,7 +99,47 @@ where
                         block_number,
                         base_fee,
                     };
-                    build_transaction_receipt_with_block_receipts(tx, meta, receipt, &receipts)
+
+                    #[cfg(feature = "optimism")]
+                    let (l1_fee, l1_data_gas) = {
+                        if let Some(l1_block_info) = &l1_block_info {
+                            let mut buf = BytesMut::default();
+                            tx.encode_enveloped(&mut buf);
+                            let data = &buf.freeze().into();
+                            let l1_fee = (!tx.is_deposit()).then(|| {
+                                l1_block_info.calculate_tx_l1_cost(
+                                    self.inner.provider.chain_spec(),
+                                    block_timestamp,
+                                    data,
+                                    tx.is_deposit(),
+                                )
+                            });
+                            let l1_data_gas = (!tx.is_deposit()).then(|| {
+                                l1_block_info.data_gas(
+                                    data,
+                                    self.inner.provider.chain_spec(),
+                                    block_timestamp,
+                                )
+                            });
+
+                            (l1_fee, l1_data_gas)
+                        } else {
+                            (None, None)
+                        }
+                    };
+
+                    build_transaction_receipt_with_block_receipts(
+                        tx,
+                        meta,
+                        receipt,
+                        &receipts,
+                        #[cfg(feature = "optimism")]
+                        &l1_block_info,
+                        #[cfg(feature = "optimism")]
+                        l1_fee,
+                        #[cfg(feature = "optimism")]
+                        l1_data_gas,
+                    )
                 })
                 .collect::<EthResult<Vec<_>>>();
             return receipts.map(Some)
@@ -105,7 +158,7 @@ where
         let block_id = block_id.into();
 
         if block_id.is_pending() {
-            // Pending block can be fetched directly without need for caching
+            // Pending block can be fetched directly without need for caching;;
             return Ok(self.provider().pending_block()?.map(|block| block.body.len()))
         }
 

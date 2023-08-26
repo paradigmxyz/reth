@@ -466,6 +466,31 @@ mod tests {
         assert_eq!(receipt, expected);
     }
 
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn decode_deposit_receipt_regolith_roundtrip() {
+        let data = hex!("7ef9010c0182b741b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0833d3bbf");
+
+        // Deposit Receipt (post-regolith)
+        let expected = ReceiptWithBloom {
+            receipt: Receipt {
+                tx_type: TxType::DEPOSIT,
+                cumulative_gas_used: 46913,
+                logs: vec![],
+                success: true,
+                deposit_nonce: Some(4012991),
+            },
+            bloom: [0; 256].into(),
+        };
+
+        let receipt = ReceiptWithBloom::decode(&mut &data[..]).unwrap();
+        assert_eq!(receipt, expected);
+
+        let mut buf = BytesMut::default();
+        receipt.encode_inner(&mut buf, false);
+        assert_eq!(buf.freeze(), &data[..]);
+    }
+
     #[test]
     fn gigantic_receipt() {
         let receipt = Receipt {

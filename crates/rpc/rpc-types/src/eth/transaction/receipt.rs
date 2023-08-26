@@ -3,7 +3,7 @@ use reth_primitives::{Address, Bloom, H256, U128, U256, U64, U8};
 use serde::{Deserialize, Serialize};
 
 /// Transaction receipt
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionReceipt {
     /// Transaction Hash.
@@ -46,5 +46,21 @@ pub struct TransactionReceipt {
     /// Deposit nonce for deposit transactions post-regolith
     #[cfg(feature = "optimism")]
     #[serde(skip_serializing_if = "Option::is_none", rename = "depositNonce")]
-    pub deposit_nonce: Option<u64>,
+    pub deposit_nonce: Option<U64>,
+    /// L1 fee for the transaction
+    #[cfg(feature = "optimism")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "l1Fee")]
+    pub l1_fee: Option<U256>,
+    /// L1 fee scalar for the transaction
+    #[cfg(feature = "optimism")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "l1FeeScalar")]
+    pub l1_fee_scalar: Option<U256>,
+    /// L1 gas price for the transaction
+    #[cfg(feature = "optimism")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "l1GasPrice")]
+    pub l1_gas_price: Option<U256>,
+    /// L1 gas used for the transaction
+    #[cfg(feature = "optimism")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "l1GasUsed")]
+    pub l1_gas_used: Option<U256>,
 }

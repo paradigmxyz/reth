@@ -98,6 +98,11 @@ where
                 .into())
             }
 
+            let chain_spec = Arc::clone(&self.chain_spec);
+            let db = self.db();
+            let sender_account =
+                db.load_account(sender).map_err(|_| BlockExecutionError::ProviderError)?.clone();
+
             // Before regolith, deposit transaction gas accounting was as follows:
             // - System tx: 0 gas used
             // - Regular Deposit tx: gas used = gas limit
@@ -131,9 +136,6 @@ where
                 )?;
             }
 
-            let chain_spec = Arc::clone(&self.chain_spec);
-            let db = self.db();
-
             let mut encoded = BytesMut::default();
             transaction.encode_enveloped(&mut encoded);
             let l1_cost = l1_block_info.as_ref().map(|l1_block_info| {
@@ -144,9 +146,6 @@ where
                     transaction.is_deposit(),
                 )
             });
-
-            let sender_account =
-                db.load_account(sender).map_err(|_| BlockExecutionError::ProviderError)?.clone();
 
             if let Some(l1_cost) = l1_cost {
                 // Check if the sender balance can cover the L1 cost.
