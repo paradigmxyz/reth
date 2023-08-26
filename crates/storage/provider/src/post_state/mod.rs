@@ -194,20 +194,21 @@ impl PostState {
     /// explicit.
     pub fn receipts_root(&self, block: BlockNumber) -> H256 {
         #[cfg(feature = "optimism")]
-        let receipts = self
-            .receipts(block)
-            .iter()
-            .map(|r| {
-                let mut r = r.clone();
-                if r.tx_type == TxType::DEPOSIT {
-                    r.deposit_nonce = None
-                }
-                r
-            })
-            .collect::<Vec<_>>();
-
-        #[cfg(feature = "optimism")]
         {
+            // There is a minor bug in op-geth and op-erigon where in the Regolith hardfork,
+            // the receipt root calculation does not include the deposit nonce in the receipt
+            // encoding. This will be fixd in the next hardfork, however for now, we must strip
+            // the deposit nonce from the receipts before calculating the receipt root.
+            let receipts = self
+                .receipts(block)
+                .iter()
+                .map(|r| {
+                    let mut r = r.clone();
+                    r.deposit_nonce = None;
+                    r
+                })
+                .collect::<Vec<_>>();
+
             return calculate_receipt_root_ref(receipts.as_slice())
         }
 
