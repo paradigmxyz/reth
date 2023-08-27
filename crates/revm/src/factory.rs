@@ -4,7 +4,7 @@ use crate::{
     stack::{InspectorStack, InspectorStackConfig},
 };
 use reth_primitives::ChainSpec;
-use reth_provider::{BlockExecutor, BundleState, ExecutorFactory, StateProvider};
+use reth_provider::{BlockExecutor, ExecutorFactory, StateProvider};
 use std::sync::Arc;
 
 /// Factory that spawn Executor.
@@ -35,20 +35,8 @@ impl Factory {
 
 impl ExecutorFactory for Factory {
     fn with_sp<'a, SP: StateProvider + 'a>(&'a self, sp: SP) -> Box<dyn BlockExecutor + 'a> {
-        let mut evm = Box::new(EVMProcessor::new(self.chain_spec.clone(), State::new(sp)));
-        if let Some(ref stack) = self.stack {
-            evm.set_stack(stack.clone());
-        }
-        evm
-    }
-
-    fn with_sp_and_bundle<'a, SP: StateProvider + 'a>(
-        &'a self,
-        sp: SP,
-        bundle: BundleState,
-    ) -> Box<dyn BlockExecutor + 'a> {
-        let mut evm =
-            Box::new(EVMProcessor::new_with_state(self.chain_spec.clone(), State::new(sp), bundle));
+        let database_state = State::new(sp);
+        let mut evm = Box::new(EVMProcessor::new(self.chain_spec.clone(), database_state));
         if let Some(ref stack) = self.stack {
             evm.set_stack(stack.clone());
         }

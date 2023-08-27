@@ -1,3 +1,4 @@
+use reth_primitives::U256;
 use revm::{
     interpreter::{CallInputs, CreateInputs, Gas, InstructionResult, Interpreter},
     primitives::{db::Database, Bytes, B160, B256},
@@ -185,10 +186,10 @@ where
         (ret, address, remaining_gas, out)
     }
 
-    fn selfdestruct(&mut self, contract: B160, target: B160) {
+    fn selfdestruct(&mut self, contract: B160, target: B160, value: U256) {
         match self {
             MaybeOwnedInspector::Owned(insp) => {
-                return insp.borrow_mut().selfdestruct(contract, target)
+                return insp.borrow_mut().selfdestruct(contract, target, value)
             }
             MaybeOwnedInspector::Stacked(_) => {}
         }

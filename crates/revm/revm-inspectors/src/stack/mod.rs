@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use reth_primitives::{bytes::Bytes, Address, TxHash, H256};
+use reth_primitives::{bytes::Bytes, Address, TxHash, H256, U256};
 use revm::{
     inspectors::CustomPrintTracer,
     interpreter::{CallInputs, CreateInputs, Gas, InstructionResult, Interpreter},
@@ -242,9 +242,9 @@ where
         (ret, address, remaining_gas, out)
     }
 
-    fn selfdestruct(&mut self, contract: Address, target: Address) {
+    fn selfdestruct(&mut self, contract: Address, target: Address, value: U256) {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
-            Inspector::<DB>::selfdestruct(inspector, contract, target);
+            Inspector::<DB>::selfdestruct(inspector, contract, target, value);
         });
     }
 }

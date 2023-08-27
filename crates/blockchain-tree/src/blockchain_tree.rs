@@ -423,6 +423,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 let chain = AppendableChain::new_canonical_head_fork(
                     block,
                     &parent_header,
+                    canonical_chain.inner(),
                     parent,
                     &self.externals,
                 )?;
@@ -431,6 +432,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 let chain = AppendableChain::new_canonical_fork(
                     block,
                     &parent_header,
+                    canonical_chain.inner(),
                     parent,
                     &self.externals,
                 )?;
@@ -498,6 +500,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             parent_chain.append_block(
                 block,
                 block_hashes,
+                canonical_chain.inner(),
                 &self.externals,
                 canonical_fork,
                 block_kind,
@@ -518,6 +521,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             let chain = parent_chain.new_chain_fork(
                 block,
                 block_hashes,
+                canonical_chain.inner(),
                 canonical_fork,
                 &self.externals,
             )?;

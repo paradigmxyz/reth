@@ -517,7 +517,7 @@ where
         (status, address, gas, retdata)
     }
 
-    fn selfdestruct(&mut self, _contract: Address, target: Address) {
+    fn selfdestruct(&mut self, _contract: Address, target: Address, _value: U256) {
         let trace_idx = self.last_trace_idx();
         let trace = &mut self.traces.arena[trace_idx].trace;
         trace.selfdestruct_refund_target = Some(target)

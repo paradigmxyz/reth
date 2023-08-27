@@ -235,17 +235,6 @@ where
             EitherExecutorFactory::Right(b) => b.with_sp::<'a, SP>(sp),
         }
     }
-
-    fn with_sp_and_bundle<'a, SP: reth_provider::StateProvider + 'a>(
-        &'a self,
-        sp: SP,
-        bundle: BundleState,
-    ) -> Box<dyn BlockExecutor + 'a> {
-        match self {
-            EitherExecutorFactory::Left(a) => a.with_sp_and_bundle::<'a, SP>(sp, bundle),
-            EitherExecutorFactory::Right(b) => b.with_sp_and_bundle::<'a, SP>(sp, bundle),
-        }
-    }
 }
 
 /// The basic configuration for a `TestConsensusEngine`, without generics for the client or

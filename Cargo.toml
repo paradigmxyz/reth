@@ -78,6 +78,8 @@ codegen-units = 1
 incremental = false
 
 [workspace.dependencies]
+revm = { git = "https://github.com/bluealloy/revm.git", branch = "reth_alloy_revert" }
+revm-primitives = { git = "https://github.com/bluealloy/revm.git", branch = "reth_alloy_revert" }
 reth = { path = "./bin/reth" }
 reth-primitives = { path = "./crates/primitives" }
 reth-interfaces = { path = "./crates/interfaces" }
@@ -97,9 +99,6 @@ reth-network = { path = "./crates/net/network" }
 reth-network-api = { path = "./crates/net/network-api" }
 reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat"}
 
-#revm
-revm = { git = "https://github.com/bluealloy/revm.git", branch = "main" }
-revm-primitives = { git = "https://github.com/bluealloy/revm.git", branch = "main" }
 
 
 ## eth

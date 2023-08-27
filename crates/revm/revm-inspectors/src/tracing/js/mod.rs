@@ -470,7 +470,7 @@ where
         (ret, address, remaining_gas, out)
     }
 
-    fn selfdestruct(&mut self, _contract: B160, _target: B160) {
+    fn selfdestruct(&mut self, _contract: B160, _target: B160, _value: U256) {
         if self.enter_fn.is_some() {
             let call = self.active_call();
             let frame =

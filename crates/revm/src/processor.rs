@@ -57,14 +57,11 @@ impl<'a> EVMProcessor<'a> {
     pub fn new<DB: StateProvider + 'a>(chain_spec: Arc<ChainSpec>, db: State<DB>) -> Self {
         let revm_state =
             RevmStateBuilder::default().with_database(Box::new(db)).without_state_clear().build();
-        EVMProcessor::new_with_revm_state(chain_spec, revm_state)
+        EVMProcessor::new_with_state(chain_spec, revm_state)
     }
 
     /// Create new EVM processor with a given revm state.
-    pub fn new_with_revm_state(
-        chain_spec: Arc<ChainSpec>,
-        revm_state: RevmState<'a, Error>,
-    ) -> Self {
+    pub fn new_with_state(chain_spec: Arc<ChainSpec>, revm_state: RevmState<'a, Error>) -> Self {
         let mut evm = EVM::new();
         evm.database(revm_state);
         EVMProcessor {
@@ -73,30 +70,6 @@ impl<'a> EVMProcessor<'a> {
             stack: InspectorStack::new(InspectorStackConfig::default()),
             receipts: Vec::new(),
             first_block: 0,
-            stats: BlockExecutorStats::default(),
-        }
-    }
-
-    /// Create new EVM processor with a given bundle state.
-    pub fn new_with_state<DB: StateProvider + 'a>(
-        chain_spec: Arc<ChainSpec>,
-        db: State<DB>,
-        state: BundleState,
-    ) -> Self {
-        let mut evm = EVM::new();
-        let (bundle_state, receipts, block_number, block_hashes) = state.into_inner();
-        let revm_state = RevmStateBuilder::default()
-            .with_database(Box::new(db))
-            .with_bundle_prestate(bundle_state)
-            .with_block_hashes(block_hashes)
-            .build();
-        evm.database(revm_state);
-        EVMProcessor {
-            chain_spec,
-            evm,
-            stack: InspectorStack::new(InspectorStackConfig::default()),
-            receipts,
-            first_block: block_number,
             stats: BlockExecutorStats::default(),
         }
     }
