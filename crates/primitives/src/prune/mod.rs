@@ -1,9 +1,11 @@
+mod batch_sizes;
 mod checkpoint;
 mod mode;
 mod part;
 mod target;
 
 use crate::{Address, BlockNumber};
+pub use batch_sizes::PruneBatchSizes;
 pub use checkpoint::PruneCheckpoint;
 pub use mode::PruneMode;
 pub use part::{PrunePart, PrunePartError};
@@ -13,9 +15,9 @@ pub use target::{PruneModes, MINIMUM_PRUNING_DISTANCE};
 
 /// Configuration for pruning receipts not associated with logs emitted by the specified contracts.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct ContractLogsPruneConfig(pub BTreeMap<Address, PruneMode>);
+pub struct ReceiptsLogPruneConfig(pub BTreeMap<Address, PruneMode>);
 
-impl ContractLogsPruneConfig {
+impl ReceiptsLogPruneConfig {
     /// Checks if the configuration is empty
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
@@ -49,10 +51,14 @@ impl ContractLogsPruneConfig {
             // the BTreeMap (block = 0), otherwise it will be excluded.
             // Reminder that this BTreeMap works as an inclusion list that excludes (prunes) all
             // other receipts.
+            //
+            // Reminder, that we increment because the [`BlockNumber`] key of the new map should be
+            // viewed as `PruneMode::Before(block)`
             let block = (pruned_block + 1).max(
                 mode.prune_target_block(tip, MINIMUM_PRUNING_DISTANCE, PrunePart::ContractLogs)?
                     .map(|(block, _)| block)
-                    .unwrap_or_default(),
+                    .unwrap_or_default() +
+                    1,
             );
 
             map.entry(block).or_insert_with(Vec::new).push(address)

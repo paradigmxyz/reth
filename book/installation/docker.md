@@ -96,7 +96,7 @@ docker compose -f etc/docker-compose.yml -f etc/lighthouse.yml up -d
 To check if Reth is running correctly, run:
 
 ```bash
-docker compose logs -f reth
+docker compose -f etc/docker-compose.yml -f etc/lighthouse.yml logs -f reth
 ```
 
 The default `docker-compose.yml` file will create three containers:

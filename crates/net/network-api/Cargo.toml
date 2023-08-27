@@ -13,6 +13,7 @@ description = "Network interfaces"
 reth-primitives.workspace = true
 reth-eth-wire = { path = "../eth-wire" }
 reth-rpc-types.workspace = true
+reth-discv4 = { path = "../discv4" }
 
 # io
 serde = { workspace = true, features = ["derive"], optional = true }

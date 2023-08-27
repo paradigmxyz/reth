@@ -239,7 +239,7 @@ where
         // deposit in receiving account and update storage
         let (prev_to, storage): &mut (Account, BTreeMap<H256, U256>) = state.get_mut(&to).unwrap();
 
-        let old_entries = new_entries
+        let mut old_entries: Vec<_> = new_entries
             .into_iter()
             .filter_map(|entry| {
                 let old = if entry.value != U256::ZERO {
@@ -254,8 +254,11 @@ where
                 Some(StorageEntry { value: old.unwrap_or(U256::from(0)), ..entry })
             })
             .collect();
+        old_entries.sort_by_key(|entry| entry.key);
 
         changeset.push((to, *prev_to, old_entries));
+
+        changeset.sort_by_key(|(address, _, _)| *address);
 
         prev_to.balance = prev_to.balance.wrapping_add(transfer);
 

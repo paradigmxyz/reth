@@ -12,8 +12,9 @@ use rand::{
     prelude::Distribution,
 };
 use reth_primitives::{
-    constants::MIN_PROTOCOL_BASE_FEE, hex, Address, Bytes, FromRecoveredTransaction,
-    IntoRecoveredTransaction, Signature, Transaction, TransactionKind, TransactionSigned,
+    constants::MIN_PROTOCOL_BASE_FEE, hex, Address, Bytes, FromRecoveredPooledTransaction,
+    FromRecoveredTransaction, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
+    SealedBlock, Signature, Transaction, TransactionKind, TransactionSigned,
     TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxHash, TxLegacy, TxType, H256,
     U128, U256,
 };
@@ -577,6 +578,12 @@ impl FromRecoveredTransaction for MockTransaction {
                 unimplemented!()
             }
         }
+    }
+}
+
+impl FromRecoveredPooledTransaction for MockTransaction {
+    fn from_recovered_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
+        FromRecoveredTransaction::from_recovered_transaction(tx.into_ecrecovered_transaction())
     }
 }
 

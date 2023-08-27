@@ -138,6 +138,9 @@ pub enum InvalidPoolTransactionError {
     /// Thrown if the transaction's fee is below the minimum fee
     #[error("transaction underpriced")]
     Underpriced,
+    /// Thrown if we're unable to find the blob for a transaction that was previously extracted
+    #[error("blob not found for EIP4844 transaction")]
+    MissingEip4844Blob,
     /// Any other error that occurred while inserting/validating that is transaction specific
     #[error("{0:?}")]
     Other(Box<dyn PoolTransactionError>),
@@ -195,6 +198,11 @@ impl InvalidPoolTransactionError {
                 false
             }
             InvalidPoolTransactionError::Other(err) => err.is_bad_transaction(),
+            InvalidPoolTransactionError::MissingEip4844Blob => {
+                // this is only reachable when blob transactions are reinjected and we're unable to
+                // find the previously extracted blob
+                false
+            }
         }
     }
 }

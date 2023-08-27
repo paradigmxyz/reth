@@ -56,7 +56,7 @@ default-members = ["bin/reth"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 edition = "2021"
 rust-version = "1.70" # Remember to update .clippy.toml and README.md
 license = "MIT OR Apache-2.0"
@@ -106,10 +106,10 @@ reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat"}
 
 
 ## eth
-ethers-core = { version = "2.0.8", default-features = false }
-ethers-providers = { version = "2.0.8", default-features = false }
-ethers-signers = { version = "2.0.8", default-features = false }
-ethers-middleware = { version = "2.0.8", default-features = false }
+ethers-core = { version = "2.0", default-features = false }
+ethers-providers = { version = "2.0", default-features = false }
+ethers-signers = { version = "2.0", default-features = false }
+ethers-middleware = { version = "2.0", default-features = false }
 
 ## misc
 bytes = "1.4"
@@ -124,6 +124,7 @@ strum = "0.25"
 rayon = "1.7"
 itertools = "0.11"
 parking_lot = "0.12"
+metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
 
 ### proc-macros
 proc-macro2 = "1.0"
@@ -147,6 +148,7 @@ jsonrpsee-types = { version = "0.20" }
 
 ## crypto
 secp256k1 = { version = "0.27.0", default-features = false, features = ["global-context", "rand-std", "recovery"] }
+enr = { version = "0.9", default-features = false, features = ["k256"] }
 # for eip-4844
 c-kzg = { git = "https://github.com/ethereum/c-kzg-4844" }
 
