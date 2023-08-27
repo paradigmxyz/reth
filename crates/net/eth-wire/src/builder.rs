@@ -100,7 +100,6 @@ impl HelloBuilder {
                 // TODO: proper client versioning
                 client_version: "Ethereum/1.0.0".to_string(),
                 capabilities: vec![EthVersion::Eth68.into()],
-                // TODO: default port config
                 port: DEFAULT_DISCOVERY_PORT,
                 id: pubkey,
             },
