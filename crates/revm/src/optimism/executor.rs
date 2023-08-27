@@ -203,12 +203,13 @@ where
                 // Before Regolith, system transactions were a special type of deposit transaction
                 // that contributed no gas usage to the block. Regular deposits reported their gas
                 // usage as the gas limit of their transaction. After Regolith, system transactions
-                // are deprecated and all deposit transactions report the gas used during execution.
-                if transaction.is_deposit() && !result.is_success() {
-                    cumulative_gas_used += transaction.gas_limit();
-                } else if is_regolith || !transaction.is_deposit() {
-                    cumulative_gas_used += result.gas_used()
-                } else if transaction.is_deposit() && !transaction.is_system_transaction() {
+                // are deprecated and all deposit transactions report the gas used during execution
+                // regardless of whether or not the transaction reverts.
+                if is_regolith || !transaction.is_deposit() {
+                    cumulative_gas_used += result.gas_used();
+                } else if transaction.is_deposit() &&
+                    (!result.is_success() || !transaction.is_system_transaction())
+                {
                     cumulative_gas_used += transaction.gas_limit();
                 }
 

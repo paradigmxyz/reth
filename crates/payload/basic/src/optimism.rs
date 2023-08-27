@@ -204,19 +204,16 @@ where
         commit_state_changes(&mut db, &mut post_state, block_number, state, true);
 
         if chain_spec.optimism {
-            // If either Regolith is active or the transaction is not a deposit, we report the
-            // actual gas used in execution to the cumulative gas.
-            //
-            // Otherwise, if we are pre-Regolith and the transaction is a non-system-tx deposit,
-            // we report the gas limit of the transaction to the cumulative gas. Pre-Regolith,
-            // system transactions are not included in the cumulative gas and their execution
-            // gas is ignored. Post regolith, system transactions are deprecated and no longer
-            // exist.
-            if sequencer_tx.is_deposit() && !result.is_success() {
-                cumulative_gas_used += sequencer_tx.gas_limit();
-            } else if is_regolith || !sequencer_tx.is_deposit() {
-                cumulative_gas_used += result.gas_used()
-            } else if sequencer_tx.is_deposit() && !sequencer_tx.is_system_transaction() {
+            // Before Regolith, system transactions were a special type of deposit transaction
+            // that contributed no gas usage to the block. Regular deposits reported their gas
+            // usage as the gas limit of their transaction. After Regolith, system transactions
+            // are deprecated and all deposit transactions report the gas used during execution
+            // regardless of whether or not the transaction reverts.
+            if is_regolith || !sequencer_tx.is_deposit() {
+                cumulative_gas_used += result.gas_used();
+            } else if sequencer_tx.is_deposit() &&
+                (!result.is_success() || !sequencer_tx.is_system_transaction())
+            {
                 cumulative_gas_used += sequencer_tx.gas_limit();
             }
 
