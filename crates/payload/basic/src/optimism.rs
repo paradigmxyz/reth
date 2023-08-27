@@ -7,6 +7,7 @@ use reth_revm::{
     optimism::{executor::fail_deposit_tx, L1BlockInfo},
     to_reth_acc,
 };
+use revm::primitives::ExecutionResult;
 
 /// Constructs an Ethereum transaction payload from the transactions sent through the
 /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -209,7 +210,12 @@ where
             // usage as the gas limit of their transaction. After Regolith, system transactions
             // are deprecated and all deposit transactions report the gas used during execution
             // regardless of whether or not the transaction reverts.
-            if is_regolith || !sequencer_tx.is_deposit() {
+            if is_regolith &&
+                sequencer_tx.is_deposit() &&
+                matches!(result, ExecutionResult::Halt { .. })
+            {
+                cumulative_gas_used += sequencer_tx.gas_limit();
+            } else if is_regolith || !sequencer_tx.is_deposit() {
                 cumulative_gas_used += result.gas_used();
             } else if sequencer_tx.is_deposit() &&
                 (!result.is_success() || !sequencer_tx.is_system_transaction())

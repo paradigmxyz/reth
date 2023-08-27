@@ -8,7 +8,7 @@ use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{bytes::BytesMut, Address, Block, Hardfork, Receipt, U256};
 use reth_provider::{BlockExecutor, PostState, StateProvider};
 use reth_revm_primitives::into_reth_log;
-use revm::primitives::ResultAndState;
+use revm::primitives::{ExecutionResult, ResultAndState};
 use std::sync::Arc;
 
 impl<DB> BlockExecutor<DB> for Executor<DB>
@@ -205,7 +205,12 @@ where
                 // usage as the gas limit of their transaction. After Regolith, system transactions
                 // are deprecated and all deposit transactions report the gas used during execution
                 // regardless of whether or not the transaction reverts.
-                if is_regolith || !transaction.is_deposit() {
+                if is_regolith &&
+                    transaction.is_deposit() &&
+                    matches!(result, ExecutionResult::Halt { .. })
+                {
+                    cumulative_gas_used += transaction.gas_limit();
+                } else if is_regolith || !transaction.is_deposit() {
                     cumulative_gas_used += result.gas_used();
                 } else if transaction.is_deposit() &&
                     (!result.is_success() || !transaction.is_system_transaction())
