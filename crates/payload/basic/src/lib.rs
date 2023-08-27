@@ -934,3 +934,118 @@ fn is_better_payload(best_payload: Option<&BuiltPayload>, new_fees: U256) -> boo
         true
     }
 }
+
+/// Collection of payload test utilities
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils {
+    use super::*;
+
+    use reth_beacon_consensus::BeaconConsensus;
+    use reth_blockchain_tree::{
+        config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree,
+        ShareableBlockchainTree,
+    };
+    use reth_db::{
+        database::{Database, DatabaseError},
+        tables,
+        test_utils::create_test_rw_db,
+        transaction::{DbTx, DbTxMut},
+    };
+    use reth_primitives::ChainSpecBuilder;
+    use reth_provider::{providers::BlockchainProvider, BlockHashReader, ProviderFactory};
+    use reth_revm::Factory;
+    use reth_rpc_types::engine::PayloadAttributes;
+    use reth_transaction_pool::noop::NoopTransactionPool;
+
+    pub fn get_tx_pool() -> NoopTransactionPool {
+        NoopTransactionPool::default()
+    }
+
+    /// Inserts the genesis header information into the specified database.
+    pub fn commit_genesis_header(
+        db: impl DbTx,
+        chain: Arc<ChainSpec>,
+    ) -> Result<(), DatabaseError> {
+        // Insert the genesis header information
+        let tx = db.tx_mut()?;
+        let header = chain.sealed_genesis_header();
+        tx.put::<tables::CanonicalHeaders>(0, header.hash)?;
+        tx.put::<tables::HeaderNumbers>(header.hash, 0)?;
+        tx.put::<tables::BlockBodyIndices>(0, Default::default())?;
+        tx.put::<tables::HeaderTD>(0, header.difficulty.into())?;
+        tx.put::<tables::Headers>(0, header.header)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Construct default test build args.
+    pub fn construct_build_args() -> BuildArguments {
+
+    }
+
+    /// Construct test build args for the payload builder.
+    pub fn get_build_args(
+        client: Arc<BeaconConsensus>,
+        pool: ,
+    ) -> Result<BuildArguments> {
+        let pool = NoopTransactionPool::default();
+
+        let chain_spec = ChainSpecBuilder::mainnet().build();
+        let chain = Arc::new(chain_spec);
+        let db = create_test_rw_db();
+
+        let provider = ProviderFactory::new(db.clone(), Arc::clone(&chain));
+        let consensus = Arc::new(BeaconConsensus::new(Arc::clone(&chain)));
+        let tree_externals = TreeExternals::new(
+            db.clone(),
+            Arc::clone(&consensus),
+            Factory::new(chain.clone()),
+            Arc::clone(&chain),
+        );
+        let tree_config = BlockchainTreeConfig::default();
+        let (canon_state_notification_sender, _receiver) =
+            tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
+
+        let blockchain_tree = ShareableBlockchainTree::new(
+            BlockchainTree::new(
+                tree_externals,
+                canon_state_notification_sender.clone(),
+                tree_config,
+            )
+            .unwrap(),
+        );
+
+        let blockchain_db = BlockchainProvider::new(provider, blockchain_tree.clone()).unwrap();
+    
+
+        BuildArguments {
+            client: blockchain_db,
+            pool,
+            cached_reads: CachedReads::default(),
+            config: PayloadConfig {
+                initialized_block_env: BlockEnv { ..Default::default() },
+                initialized_cfg: CfgEnv { ..Default::default() },
+                parent_block: Arc::new(Default::default()),
+                extra_data: Bytes::default(),
+                attributes: PayloadBuilderAttributes::try_new(
+                    Default::default(),
+                    PayloadAttributes {
+                        timestamp: Default::default(),
+                        prev_randao: Default::default(),
+                        suggested_fee_recipient: Default::default(),
+                        withdrawals: None,
+                        parent_beacon_block_root: None,
+                        transactions: Some(vec![]),
+                        no_tx_pool: Some(false),
+                        gas_limit: Some(30_000_000u64),
+                    },
+                )
+                .unwrap(),
+                chain_spec: Arc::new(ChainSpec::default()),
+                compute_pending_block: false,
+            },
+            cancel: Default::default(),
+            best_payload: None,
+        }
+    }
+}
