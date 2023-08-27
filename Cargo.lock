@@ -5289,6 +5289,7 @@ dependencies = [
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-db",
+ "reth-interfaces",
  "reth-metrics",
  "reth-payload-builder",
  "reth-primitives",

@@ -34,7 +34,12 @@ metrics.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+reth-interfaces = { workspace = true }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-beacon-consensus = { path = "../../consensus/beacon" }
 reth-blockchain-tree = { workspace = true }
 reth-rpc-types = { workspace = true }
+
+[features]
+default = ["test-utils"]
+test-utils = []

@@ -946,13 +946,15 @@ pub mod test_utils {
         ShareableBlockchainTree,
     };
     use reth_db::{
-        database::{Database, DatabaseError},
+        database::Database,
         tables,
         test_utils::create_test_rw_db,
         transaction::{DbTx, DbTxMut},
+        DatabaseEnv, DatabaseError,
     };
+    use reth_interfaces::blockchain_tree::BlockchainTreeViewer;
     use reth_primitives::ChainSpecBuilder;
-    use reth_provider::{providers::BlockchainProvider, BlockHashReader, ProviderFactory};
+    use reth_provider::{providers::BlockchainProvider, ProviderFactory};
     use reth_revm::Factory;
     use reth_rpc_types::engine::PayloadAttributes;
     use reth_transaction_pool::noop::NoopTransactionPool;
@@ -962,8 +964,8 @@ pub mod test_utils {
     }
 
     /// Inserts the genesis header information into the specified database.
-    pub fn commit_genesis_header(
-        db: impl DbTx,
+    pub fn commit_genesis_header<DB: Database>(
+        db: Arc<DB>,
         chain: Arc<ChainSpec>,
     ) -> Result<(), DatabaseError> {
         // Insert the genesis header information
@@ -978,23 +980,31 @@ pub mod test_utils {
         Ok(())
     }
 
-    /// Construct default test build args.
-    pub fn construct_build_args() -> BuildArguments {
-
+    /// Constructs a test chain spec.
+    pub fn construct_chain_spec() -> Arc<ChainSpec> {
+        Arc::new(ChainSpecBuilder::mainnet().build())
     }
 
-    /// Construct test build args for the payload builder.
-    pub fn get_build_args(
-        client: Arc<BeaconConsensus>,
-        pool: ,
-    ) -> Result<BuildArguments> {
-        let pool = NoopTransactionPool::default();
-
-        let chain_spec = ChainSpecBuilder::mainnet().build();
-        let chain = Arc::new(chain_spec);
+    /// Constructs a test database.
+    pub fn construct_db(chain: Arc<ChainSpec>) -> Result<Arc<DatabaseEnv>, DatabaseError> {
         let db = create_test_rw_db();
+        commit_genesis_header(db.clone(), chain)?;
+        Ok(db)
+    }
 
-        let provider = ProviderFactory::new(db.clone(), Arc::clone(&chain));
+    /// Construct default test build args.
+    pub fn build_provider_factory(
+        db: Arc<DatabaseEnv>,
+        chain: Arc<ChainSpec>,
+    ) -> ProviderFactory<Arc<DatabaseEnv>> {
+        ProviderFactory::new(db, chain)
+    }
+
+    /// Constructs a blockchain tree.
+    pub fn build_tree(
+        db: Arc<DatabaseEnv>,
+        chain: Arc<ChainSpec>,
+    ) -> ShareableBlockchainTree<Arc<DatabaseEnv>, Arc<BeaconConsensus>, Factory> {
         let consensus = Arc::new(BeaconConsensus::new(Arc::clone(&chain)));
         let tree_externals = TreeExternals::new(
             db.clone(),
@@ -1006,20 +1016,32 @@ pub mod test_utils {
         let (canon_state_notification_sender, _receiver) =
             tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
 
-        let blockchain_tree = ShareableBlockchainTree::new(
+        ShareableBlockchainTree::new(
             BlockchainTree::new(
                 tree_externals,
                 canon_state_notification_sender.clone(),
                 tree_config,
             )
             .unwrap(),
-        );
+        )
+    }
 
-        let blockchain_db = BlockchainProvider::new(provider, blockchain_tree.clone()).unwrap();
-    
+    /// Constructs a test [StateProviderFactory] for building payload [BuildArguments].
+    pub fn get_test_client<Tree: BlockchainTreeViewer>(
+        database: ProviderFactory<Arc<DatabaseEnv>>,
+        tree: Tree,
+    ) -> reth_interfaces::Result<BlockchainProvider<Arc<DatabaseEnv>, Tree>> {
+        BlockchainProvider::new(database, tree)
+    }
 
+    /// Construct test build args for the payload builder.
+    pub fn get_build_args<C, P>(client: C, pool: P) -> BuildArguments<P, C>
+    where
+        C: StateProviderFactory,
+        P: TransactionPool,
+    {
         BuildArguments {
-            client: blockchain_db,
+            client,
             pool,
             cached_reads: CachedReads::default(),
             config: PayloadConfig {
@@ -1027,7 +1049,7 @@ pub mod test_utils {
                 initialized_cfg: CfgEnv { ..Default::default() },
                 parent_block: Arc::new(Default::default()),
                 extra_data: Bytes::default(),
-                attributes: PayloadBuilderAttributes::try_new(
+                attributes: PayloadBuilderAttributes::new(
                     Default::default(),
                     PayloadAttributes {
                         timestamp: Default::default(),
@@ -1035,17 +1057,44 @@ pub mod test_utils {
                         suggested_fee_recipient: Default::default(),
                         withdrawals: None,
                         parent_beacon_block_root: None,
-                        transactions: Some(vec![]),
-                        no_tx_pool: Some(false),
-                        gas_limit: Some(30_000_000u64),
                     },
-                )
-                .unwrap(),
+                ),
                 chain_spec: Arc::new(ChainSpec::default()),
-                compute_pending_block: false,
             },
             cancel: Default::default(),
             best_payload: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_default_payload_builder() {
+        let pool = test_utils::get_tx_pool();
+        let chain = test_utils::construct_chain_spec();
+        let db = test_utils::construct_db(chain.clone()).unwrap();
+
+        let provider = test_utils::build_provider_factory(db.clone(), chain.clone());
+        let tree = test_utils::build_tree(db, chain.clone());
+        let client = test_utils::get_test_client(provider, tree).unwrap();
+
+        // {
+        //     let parent_block: SealedBlock = Default::default();
+        //     println!("Fetching state for block hash: {:?}", parent_block.hash);
+        //     let state = client.state_by_block_hash(parent_block.hash).unwrap();
+        //     // println!("state: {:?}", state);
+        // }
+
+        let args = test_utils::get_build_args(client, pool);
+
+        let build_result = default_payload_builder(args);
+        println!("build_result: {:?}", build_result);
+
+        let err = build_result.err().unwrap();
+        println!("PayloadBuilderError: {:?}", err);
+        // assert_eq!(err.kind(), Some(PayloadBuilderError::SystemTransactionPostRegolith));
     }
 }
