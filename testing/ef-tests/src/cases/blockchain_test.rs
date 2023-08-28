@@ -4,7 +4,7 @@ use crate::{
     models::{BlockchainTest, ForkSpec, RootOrState},
     Case, Error, Suite,
 };
-use reth_db::test_utils::create_test_rw_db;
+use reth_db::{tables, test_utils::create_test_rw_db, transaction::DbTx};
 use reth_primitives::{BlockBody, SealedBlock};
 use reth_provider::{BlockWriter, ProviderFactory};
 use reth_rlp::Decodable;
@@ -111,7 +111,12 @@ impl Case for BlockchainTestCase {
             // Validate post state
             match &case.post_state {
                 Some(RootOrState::Root(root)) => {
-                    // TODO: We should really check the state root here...
+                    let last_block_number = last_block.unwrap();
+                    let header = provider.tx_ref().get::<tables::Headers>(last_block_number)?.ok_or_else(|| {
+                        Error::Assertion(format!("Expected header for block number ({last_block_number:?}) is missing from DB: {self:?}"))
+                    })?;
+                    let actual_root = header.state_root;
+                    assert_eq!(root, &actual_root);
                     println!("Post-state root: #{root:?}")
                 }
                 Some(RootOrState::State(state)) => {
