@@ -180,6 +180,12 @@ mod tests {
         assert_eq!(block.transactions_root, tx_root, "Must be the same");
     }
 
+    /// Tests that the receipt root is computed correctly for the regolith block.
+    /// This was implemented due to a minor bug in op-geth and op-erigon where in
+    /// the Regolith hardfork, the receipt root calculation does not include the
+    /// deposit nonce in the receipt encoding.
+    /// To fix this an op-reth patch was applied to the receipt root calculation
+    /// to strip the deposit nonce from each receipt before calculating the root.
     #[cfg(feature = "optimism")]
     #[test]
     fn check_optimism_receipt_root() {
