@@ -22,6 +22,10 @@
 //!   calls to the logging component is made.
 //! - `min-debug-logs`: Disables all logs below `debug` level.
 //! - `min-trace-logs`: Disables all logs below `trace` level.
+//! - `ethereum`: Mutually exclusive with `optimism`. Enabled by default.
+//! - `optimism`: Enables [OP-Stack](https://stack.optimism.io/) support for the node. Note that
+//!   this breaks compatibility with the Ethereum mainnet as a new deposit transaction type is
+//!   introduced as well as gas cost changes.
 
 pub mod args;
 pub mod chain;
