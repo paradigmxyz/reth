@@ -366,7 +366,7 @@ impl StorageInner {
             .with_database(Box::new(State::new(client.latest().unwrap())))
             .without_bundle_update()
             .build();
-        let mut executor = EVMProcessor::new_with_revm_state(chain_spec, db);
+        let mut executor = EVMProcessor::new_with_state(chain_spec, db);
 
         let (bundle_state, gas_used) = self.execute(&block, &mut executor, senders)?;
 

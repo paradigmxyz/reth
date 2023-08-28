@@ -359,7 +359,7 @@ pub enum ChainSplit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{H160, H256};
+    use reth_primitives::{Account, H160, H256};
     use reth_revm_primitives::{
         db::states::BundleState as RevmBundleState,
         primitives::{AccountInfo, HashMap},
