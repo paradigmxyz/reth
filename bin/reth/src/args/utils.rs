@@ -119,9 +119,18 @@ mod tests {
     use proptest::prelude::Rng;
     use secp256k1::rand::thread_rng;
 
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn pase_optimism_chain_spec() {
+        for chain in ["base-goerli", "base"] {
+            chain_spec_value_parser(chain).unwrap();
+            genesis_value_parser(chain).unwrap();
+        }
+    }
+
     #[test]
     fn parse_chain_spec() {
-        for chain in ["mainnet", "sepolia", "goerli", "base-goerli", "base"] {
+        for chain in ["mainnet", "sepolia", "goerli"] {
             chain_spec_value_parser(chain).unwrap();
             genesis_value_parser(chain).unwrap();
         }
