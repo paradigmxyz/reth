@@ -72,7 +72,6 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         prune_batch_sizes: PruneBatchSizes::mainnet(),
         #[cfg(feature = "optimism")]
         optimism: false,
-        ..Default::default()
     }
     .into()
 });
@@ -117,7 +116,6 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         prune_batch_sizes: PruneBatchSizes::testnet(),
         #[cfg(feature = "optimism")]
         optimism: false,
-        ..Default::default()
     }
     .into()
 });
@@ -167,7 +165,6 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         prune_batch_sizes: PruneBatchSizes::testnet(),
         #[cfg(feature = "optimism")]
         optimism: false,
-        ..Default::default()
     }
     .into()
 });
