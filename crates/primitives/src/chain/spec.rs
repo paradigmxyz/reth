@@ -18,11 +18,6 @@ use std::{
     sync::Arc,
 };
 
-#[cfg(feature = "optimism")]
-use crate::constants::{
-    OP_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR, OP_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
-};
-
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
@@ -228,13 +223,16 @@ impl BaseFeeParams {
         }
     }
 
+    /// Get the base fee parameters for optimism goerli
+    #[cfg(feature = "optimism")]
+    pub const fn optimism_goerli() -> BaseFeeParams {
+        BaseFeeParams { max_change_denominator: 50, elasticity_multiplier: 10 }
+    }
+
     /// Get the base fee parameters for optimism mainnet
     #[cfg(feature = "optimism")]
     pub const fn optimism() -> BaseFeeParams {
-        BaseFeeParams {
-            max_change_denominator: OP_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
-            elasticity_multiplier: OP_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
-        }
+        BaseFeeParams { max_change_denominator: 50, elasticity_multiplier: 6 }
     }
 }
 
@@ -312,7 +310,7 @@ pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Bedrock, ForkCondition::Block(0)),
             (Hardfork::Regolith, ForkCondition::Timestamp(1683219600)),
         ]),
-        base_fee_params: BaseFeeParams::optimism(),
+        base_fee_params: BaseFeeParams::optimism_goerli(),
         prune_batch_sizes: PruneBatchSizes::testnet(),
         optimism: true,
         ..Default::default()
@@ -326,7 +324,7 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::base_mainnet(),
         genesis: serde_json::from_str(include_str!("../../res/genesis/base.json"))
-            .expect("Can't deserialize Base Goerli genesis json"),
+            .expect("Can't deserialize Base genesis json"),
         genesis_hash: Some(H256(hex!(
             "f712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd"
         ))),
