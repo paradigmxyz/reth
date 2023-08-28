@@ -214,6 +214,20 @@ where
                 sequencer_tx.is_deposit() &&
                 matches!(result, ExecutionResult::Halt { .. })
             {
+                // Manually bump the nonce if the transaction was a contract creation.
+                if sequencer_tx.to().is_none() {
+                    let sender_account = db.load_account(sequencer_tx.signer())?.clone();
+                    let mut new_sender_account = sender_account.clone();
+                    new_sender_account.info.nonce += 1;
+                    post_state.change_account(
+                        parent_block.number + 1,
+                        sequencer_tx.signer(),
+                        to_reth_acc(&sender_account.info),
+                        to_reth_acc(&new_sender_account.info),
+                    );
+                    db.insert_account_info(sequencer_tx.signer(), sender_account.info);
+                }
+
                 cumulative_gas_used += sequencer_tx.gas_limit();
             } else if is_regolith || !sequencer_tx.is_deposit() {
                 cumulative_gas_used += result.gas_used();
