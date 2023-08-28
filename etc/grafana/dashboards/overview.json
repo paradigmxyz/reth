@@ -272,7 +272,6 @@
               "MerkleUnwind": 5,
               "SenderRecovery": 3,
               "StorageHashing": 7,
-              "Time": 13,
               "TotalDifficulty": 1,
               "TransactionLookup": 9
             }
