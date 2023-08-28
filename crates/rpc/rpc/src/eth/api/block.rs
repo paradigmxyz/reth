@@ -158,7 +158,7 @@ where
         let block_id = block_id.into();
 
         if block_id.is_pending() {
-            // Pending block can be fetched directly without need for caching;;
+            // Pending block can be fetched directly without need for caching
             return Ok(self.provider().pending_block()?.map(|block| block.body.len()))
         }
 

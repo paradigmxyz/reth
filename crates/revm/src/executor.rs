@@ -204,6 +204,8 @@ where
         // Fill revm structure.
         fill_tx_env(&mut self.evm.env.tx, transaction, sender);
 
+        // In order to support contract creation through deposit transactions,
+        // the tx nonce must be set to the nonce of the account.
         #[cfg(feature = "optimism")]
         if transaction.is_deposit() &&
             self.chain_spec
