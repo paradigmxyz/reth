@@ -9,7 +9,6 @@ use crate::{
     TransactionValidationTaskExecutor, TransactionValidator,
 };
 use reth_primitives::{
-    bytes::BytesMut,
     constants::{eip4844::KZG_TRUSTED_SETUP, ETHEREUM_BLOCK_GAS_LIMIT},
     kzg::KzgSettings,
     ChainSpec, InvalidTransactionError, SealedBlock, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
@@ -24,10 +23,11 @@ use std::{
 use tokio::sync::Mutex;
 
 #[cfg(feature = "optimism")]
-use reth_revm::optimism::L1BlockInfo;
-
+use reth_primitives::bytes::BytesMut;
 #[cfg(feature = "optimism")]
 use reth_primitives::BlockNumberOrTag;
+#[cfg(feature = "optimism")]
+use reth_revm::optimism::L1BlockInfo;
 
 /// Validator for Ethereum transactions.
 #[derive(Debug, Clone)]

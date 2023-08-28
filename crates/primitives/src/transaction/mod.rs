@@ -11,7 +11,6 @@ use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
 use reth_rlp::{Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
-use revm_primitives::U256;
 use serde::{Deserialize, Serialize};
 pub use signature::Signature;
 use std::mem;
@@ -43,6 +42,8 @@ pub(crate) mod util;
 mod optimism;
 #[cfg(feature = "optimism")]
 pub use optimism::TxDeposit;
+#[cfg(feature = "optimism")]
+use revm_primitives::U256;
 #[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
 

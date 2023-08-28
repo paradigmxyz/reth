@@ -28,8 +28,6 @@ use std::{
 #[cfg(not(feature = "optimism"))]
 use crate::into_reth_log;
 #[cfg(not(feature = "optimism"))]
-use reth_primitives::bytes::BytesMut;
-#[cfg(not(feature = "optimism"))]
 use reth_provider::BlockExecutor;
 
 #[cfg(feature = "optimism")]
@@ -181,6 +179,7 @@ where
     }
 
     /// Decrement the balance for the given account in the [PostState].
+    #[cfg(feature = "optimism")]
     pub(crate) fn decrement_account_balance(
         &mut self,
         block_number: BlockNumber,
