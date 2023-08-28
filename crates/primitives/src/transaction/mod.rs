@@ -1184,10 +1184,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
             signature
         };
 
-        let mut tx = TransactionSigned { hash: Default::default(), signature, transaction };
-        tx.hash = tx.recalculate_hash();
-
-        Ok(tx)
+        Ok(TransactionSigned::from_transaction_and_signature(transaction, signature))
     }
 }
 
