@@ -7,7 +7,7 @@ use crate::{
     header::Head,
     proofs::genesis_state_root,
     Address, BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, Hardfork, Header,
-    SealedHeader, H160, H256, U256,
+    PruneBatchSizes, SealedHeader, H160, H256, U256,
 };
 use hex_literal::hex;
 use once_cell::sync::Lazy;
@@ -68,9 +68,10 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             11052984,
             H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
         )),
+        base_fee_params: BaseFeeParams::ethereum(),
+        prune_batch_sizes: PruneBatchSizes::mainnet(),
         #[cfg(feature = "optimism")]
         optimism: false,
-        ..Default::default()
     }
     .into()
 });
@@ -111,9 +112,10 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             4367322,
             H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
         )),
+        base_fee_params: BaseFeeParams::ethereum(),
+        prune_batch_sizes: PruneBatchSizes::testnet(),
         #[cfg(feature = "optimism")]
         optimism: false,
-        ..Default::default()
     }
     .into()
 });
@@ -158,9 +160,11 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             1273020,
             H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
         )),
+
+        base_fee_params: BaseFeeParams::ethereum(),
+        prune_batch_sizes: PruneBatchSizes::testnet(),
         #[cfg(feature = "optimism")]
         optimism: false,
-        ..Default::default()
     }
     .into()
 });
@@ -216,7 +220,7 @@ pub struct BaseFeeParams {
 }
 
 impl BaseFeeParams {
-    /// Get the base fee parameters for ethereum mainnet
+    /// Get the base fee parameters for Ethereum mainnet
     pub const fn ethereum() -> BaseFeeParams {
         BaseFeeParams {
             max_change_denominator: EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
@@ -268,6 +272,7 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Regolith, ForkCondition::Timestamp(1679079600)),
         ]),
         base_fee_params: BaseFeeParams::optimism(),
+        prune_batch_sizes: PruneBatchSizes::testnet(),
         optimism: true,
         ..Default::default()
     }
@@ -308,6 +313,7 @@ pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Regolith, ForkCondition::Timestamp(1683219600)),
         ]),
         base_fee_params: BaseFeeParams::optimism(),
+        prune_batch_sizes: PruneBatchSizes::testnet(),
         optimism: true,
         ..Default::default()
     }
@@ -348,6 +354,7 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Regolith, ForkCondition::Timestamp(0)),
         ]),
         base_fee_params: BaseFeeParams::optimism(),
+        prune_batch_sizes: PruneBatchSizes::mainnet(),
         optimism: true,
         ..Default::default()
     }
@@ -389,12 +396,18 @@ pub struct ChainSpec {
     /// The active hard forks and their activation conditions
     pub hardforks: BTreeMap<Hardfork, ForkCondition>,
 
-    /// The deposit contract deployed for PoS.
+    /// The deposit contract deployed for PoS
     #[serde(skip, default)]
     pub deposit_contract: Option<DepositContract>,
 
     /// The parameters that configure how a block's base fee is computed
     pub base_fee_params: BaseFeeParams,
+
+    /// The batch sizes for pruner, per block. In the actual pruner run it will be multiplied by
+    /// the amount of blocks between pruner runs to account for the difference in amount of new
+    /// data coming in.
+    #[serde(default)]
+    pub prune_batch_sizes: PruneBatchSizes,
 
     /// Optimism configuration
     #[cfg(feature = "optimism")]
@@ -412,6 +425,7 @@ impl Default for ChainSpec {
             hardforks: Default::default(),
             deposit_contract: Default::default(),
             base_fee_params: BaseFeeParams::ethereum(),
+            prune_batch_sizes: Default::default(),
             #[cfg(feature = "optimism")]
             optimism: Default::default(),
         }

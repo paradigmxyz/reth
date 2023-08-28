@@ -156,7 +156,7 @@
 //! - `test-utils`: Export utilities for testing
 use crate::pool::PoolInner;
 use aquamarine as _;
-use reth_primitives::{Address, BlobTransactionSidecar, TxHash, U256};
+use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
 use reth_provider::StateProviderFactory;
 use std::{
     collections::{HashMap, HashSet},
@@ -180,7 +180,8 @@ pub use crate::{
     },
     traits::{
         AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
-        EthPooledTransaction, NewTransactionEvent, PendingTransactionListenerKind, PoolSize,
+        EthBlobTransactionSidecar, EthPoolTransaction, EthPooledTransaction,
+        GetPooledTransactionLimit, NewTransactionEvent, PendingTransactionListenerKind, PoolSize,
         PoolTransaction, PropagateKind, PropagatedTransactions, TransactionOrigin, TransactionPool,
         TransactionPoolExt,
     },
@@ -403,6 +404,14 @@ where
         self.pooled_transactions().into_iter().take(max).collect()
     }
 
+    fn get_pooled_transaction_elements(
+        &self,
+        tx_hashes: Vec<TxHash>,
+        limit: GetPooledTransactionLimit,
+    ) -> Vec<PooledTransactionsElement> {
+        self.pool.get_pooled_transaction_elements(tx_hashes, limit)
+    }
+
     fn best_transactions(
         &self,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
@@ -486,12 +495,20 @@ where
         self.pool.set_block_info(info)
     }
 
-    fn on_canonical_state_change(&self, update: CanonicalStateUpdate) {
+    fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_>) {
         self.pool.on_canonical_state_change(update);
     }
 
     fn update_accounts(&self, accounts: Vec<ChangedAccount>) {
         self.pool.update_accounts(accounts);
+    }
+
+    fn delete_blob(&self, tx: TxHash) {
+        self.pool.delete_blob(tx)
+    }
+
+    fn delete_blobs(&self, txs: Vec<TxHash>) {
+        self.pool.delete_blobs(txs)
     }
 }
 

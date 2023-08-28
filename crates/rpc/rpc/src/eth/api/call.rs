@@ -75,7 +75,7 @@ where
         &self,
         bundle: Bundle,
         state_context: Option<StateContext>,
-        state_override: Option<StateOverride>,
+        mut state_override: Option<StateOverride>,
     ) -> EthResult<Vec<EthCallResponse>> {
         let Bundle { transactions, block_override } = bundle;
         if transactions.is_empty() {
@@ -123,17 +123,21 @@ where
                 }
             }
 
-            let overrides = EvmOverrides::new(state_override.clone(), block_override.map(Box::new));
+            let block_overrides = block_override.map(Box::new);
 
             let mut transactions = transactions.into_iter().peekable();
             while let Some(tx) = transactions.next() {
+                // apply state overrides only once, before the first transaction
+                let state_overrides = state_override.take();
+                let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
+
                 let env = prepare_call_env(
                     cfg.clone(),
                     block_env.clone(),
                     tx,
                     gas_limit,
                     &mut db,
-                    overrides.clone(),
+                    overrides,
                 )?;
                 let (res, _) = transact(&mut db, env)?;
 

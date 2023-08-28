@@ -4,6 +4,7 @@
 use crate::{
     capability::Capability, hello::HelloMessage, p2pstream::ProtocolVersion, EthVersion, Status,
 };
+use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_primitives::{Chain, ForkId, PeerId, H256, U256};
 
 /// Builder for [`Status`](crate::types::Status) messages.
@@ -99,8 +100,7 @@ impl HelloBuilder {
                 // TODO: proper client versioning
                 client_version: "Ethereum/1.0.0".to_string(),
                 capabilities: vec![EthVersion::Eth68.into()],
-                // TODO: default port config
-                port: 30303,
+                port: DEFAULT_DISCOVERY_PORT,
                 id: pubkey,
             },
         }

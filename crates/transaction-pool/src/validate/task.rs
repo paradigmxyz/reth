@@ -7,8 +7,8 @@ use crate::{
     TransactionValidator,
 };
 use futures_util::{lock::Mutex, StreamExt};
-use reth_primitives::ChainSpec;
-use reth_provider::{BlockReaderIdExt, StateProviderFactory};
+use reth_primitives::{ChainSpec, SealedBlock};
+use reth_provider::BlockReaderIdExt;
 use reth_tasks::TaskSpawner;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::{
@@ -135,14 +135,9 @@ where
             .with_additional_tasks(num_additional_tasks)
             .build_with_tasks::<Client, Tx, T, S>(client, tasks, blob_store)
     }
-
-    /// Returns the configured chain id
-    pub fn chain_id(&self) -> u64 {
-        self.validator.inner.chain_id()
-    }
 }
 
-impl<V: TransactionValidator + Clone> TransactionValidationTaskExecutor<V> {
+impl<V> TransactionValidationTaskExecutor<V> {
     /// Creates a new executor instance with the given validator for transaction validation.
     ///
     /// Initializes the executor with the provided validator and sets up communication for
@@ -154,13 +149,11 @@ impl<V: TransactionValidator + Clone> TransactionValidationTaskExecutor<V> {
 }
 
 #[async_trait::async_trait]
-impl<Client, Tx> TransactionValidator
-    for TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx>>
+impl<V> TransactionValidator for TransactionValidationTaskExecutor<V>
 where
-    Client: StateProviderFactory + BlockReaderIdExt + Clone + 'static,
-    Tx: PoolTransaction + Clone + 'static,
+    V: TransactionValidator + Clone + 'static,
 {
-    type Transaction = Tx;
+    type Transaction = <V as TransactionValidator>::Transaction;
 
     async fn validate_transaction(
         &self,
@@ -172,7 +165,7 @@ where
         {
             let to_validation_task = self.to_validation_task.clone();
             let to_validation_task = to_validation_task.lock().await;
-            let validator = Arc::clone(&self.validator.inner);
+            let validator = self.validator.clone();
             let res = to_validation_task
                 .send(Box::pin(async move {
                     let res = validator.validate_transaction(origin, transaction).await;
@@ -194,5 +187,9 @@ where
                 Box::new(TransactionValidatorError::ValidationServiceUnreachable),
             ),
         }
+    }
+
+    fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
+        self.validator.on_new_head_block(new_tip_block)
     }
 }

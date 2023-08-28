@@ -4,9 +4,12 @@
 //! to be generic over it.
 
 use crate::{
-    blobstore::BlobStoreError, error::PoolError, traits::PendingTransactionListenerKind,
-    validate::ValidTransaction, AllPoolTransactions, AllTransactionsEvents, BestTransactions,
-    BlockInfo, EthPooledTransaction, NewTransactionEvent, PoolResult, PoolSize, PoolTransaction,
+    blobstore::BlobStoreError,
+    error::PoolError,
+    traits::{GetPooledTransactionLimit, PendingTransactionListenerKind},
+    validate::ValidTransaction,
+    AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPooledTransaction,
+    NewTransactionEvent, PoolResult, PoolSize, PoolTransaction, PooledTransactionsElement,
     PropagatedTransactions, TransactionEvents, TransactionOrigin, TransactionPool,
     TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
@@ -105,6 +108,14 @@ impl TransactionPool for NoopTransactionPool {
         &self,
         _max: usize,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
+    fn get_pooled_transaction_elements(
+        &self,
+        _tx_hashes: Vec<TxHash>,
+        _limit: GetPooledTransactionLimit,
+    ) -> Vec<PooledTransactionsElement> {
         vec![]
     }
 

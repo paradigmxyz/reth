@@ -61,7 +61,7 @@ metrics-exporter-prometheus = "0.12.1"
 metrics-util = "0.15.0"
 metrics-process = "1.0.9"
 reth-metrics.workspace = true
-metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
+metrics.workspace = true
 
 # test vectors generation
 proptest.workspace = true

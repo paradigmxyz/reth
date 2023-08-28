@@ -25,6 +25,10 @@ impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransaction
     fn mark_invalid(&mut self, tx: &Self::Item) {
         BestTransactions::mark_invalid(&mut self.best, tx)
     }
+
+    fn no_updates(&mut self) {
+        self.best.no_updates()
+    }
 }
 
 impl<T: TransactionOrdering> Iterator for BestTransactionsWithBasefee<T> {
@@ -67,7 +71,7 @@ pub(crate) struct BestTransactions<T: TransactionOrdering> {
     ///
     /// These new pending transactions are inserted into this iterator's pool before yielding the
     /// next value
-    pub(crate) new_transaction_reciever: Receiver<PendingTransaction<T>>,
+    pub(crate) new_transaction_receiver: Option<Receiver<PendingTransaction<T>>>,
 }
 
 impl<T: TransactionOrdering> BestTransactions<T> {
@@ -87,7 +91,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     /// Non-blocking read on the new pending transactions subscription channel
     fn try_recv(&mut self) -> Option<PendingTransaction<T>> {
         loop {
-            match self.new_transaction_reciever.try_recv() {
+            match self.new_transaction_receiver.as_mut()?.try_recv() {
                 Ok(tx) => return Some(tx),
                 // note TryRecvError::Lagged can be returned here, which is an error that attempts
                 // to correct itself on consecutive try_recv() attempts
@@ -125,6 +129,10 @@ impl<T: TransactionOrdering> BestTransactions<T> {
 impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactions<T> {
     fn mark_invalid(&mut self, tx: &Self::Item) {
         BestTransactions::mark_invalid(self, tx)
+    }
+
+    fn no_updates(&mut self) {
+        self.new_transaction_receiver.take();
     }
 }
 

@@ -2178,7 +2178,7 @@ mod tests {
 
         let v4: Ipv4Addr = "0.0.0.0".parse().unwrap();
         let v6 = v4.to_ipv6_mapped();
-        let addr: SocketAddr = (v6, 30303).into();
+        let addr: SocketAddr = (v6, DEFAULT_DISCOVERY_PORT).into();
 
         let ping = Ping {
             from: rng_endpoint(&mut rng),
@@ -2210,7 +2210,7 @@ mod tests {
 
         let v4: Ipv4Addr = "0.0.0.0".parse().unwrap();
         let v6 = v4.to_ipv6_mapped();
-        let addr: SocketAddr = (v6, 30303).into();
+        let addr: SocketAddr = (v6, DEFAULT_DISCOVERY_PORT).into();
 
         let ping = Ping {
             from: rng_endpoint(&mut rng),
