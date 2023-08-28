@@ -225,14 +225,14 @@ where
                     if let Some(l1_cost) = l1_cost {
                         self.increment_account_balance(
                             block.number,
-                            super::l1_cost_recipient(),
+                            *super::L1_FEE_RECIPIENT,
                             l1_cost,
                             &mut post_state,
                         )?
                     }
                     self.increment_account_balance(
                         block.number,
-                        super::base_fee_recipient(),
+                        *super::BASE_FEE_RECIPIENT,
                         U256::from(
                             block
                                 .base_fee_per_gas
