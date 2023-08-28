@@ -249,6 +249,35 @@
         }
       ],
       "title": "Stage checkpoints",
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {
+              "AccountHashing": 6,
+              "Bodies": 2,
+              "Execution": 4,
+              "Finish": 12,
+              "Headers": 0,
+              "IndexAccountHistory": 11,
+              "IndexStorageHistory": 10,
+              "MerkleExecute": 8,
+              "MerkleUnwind": 5,
+              "SenderRecovery": 3,
+              "StorageHashing": 7,
+              "TotalDifficulty": 1,
+              "TransactionLookup": 9
+            }
+          }
+        }
+      ],
       "transparent": true,
       "type": "bargauge"
     },
@@ -5611,6 +5640,6 @@
   "timezone": "",
   "title": "reth",
   "uid": "2k8BXz24x",
-  "version": 6,
+  "version": 7,
   "weekStart": ""
 }
