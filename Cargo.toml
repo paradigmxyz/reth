@@ -149,7 +149,3 @@ c-kzg = { git = "https://github.com/ethereum/c-kzg-4844" }
 ### misc-testing
 proptest = "1.0"
 arbitrary = "1.1"
-
-[patch."https://github.com/bluealloy/revm.git"]
-revm = { path = "../revm/crates/revm" }
-revm-primitives = { path = "../revm/crates/primitives" }
