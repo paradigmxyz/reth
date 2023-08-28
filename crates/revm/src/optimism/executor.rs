@@ -209,21 +209,23 @@ where
                     transaction.is_deposit() &&
                     matches!(result, ExecutionResult::Halt { .. })
                 {
-                    // Manually bump the nonce
-                    let sender_account = self
-                        .db()
-                        .load_account(sender)
-                        .map_err(|_| BlockExecutionError::ProviderError)?
-                        .clone();
-                    let mut new_sender_account = sender_account.clone();
-                    new_sender_account.info.nonce += 1;
-                    post_state.change_account(
-                        block.number,
-                        sender,
-                        to_reth_acc(&sender_account.info),
-                        to_reth_acc(&new_sender_account.info),
-                    );
-                    self.db().insert_account_info(sender, sender_account.info);
+                    // Manually bump the nonce if the transaction was a contract creation.
+                    if transaction.to().is_none() {
+                        let sender_account = self
+                            .db()
+                            .load_account(sender)
+                            .map_err(|_| BlockExecutionError::ProviderError)?
+                            .clone();
+                        let mut new_sender_account = sender_account.clone();
+                        new_sender_account.info.nonce += 1;
+                        post_state.change_account(
+                            block.number,
+                            sender,
+                            to_reth_acc(&sender_account.info),
+                            to_reth_acc(&new_sender_account.info),
+                        );
+                        self.db().insert_account_info(sender, sender_account.info);
+                    }
 
                     cumulative_gas_used += transaction.gas_limit();
                 } else if is_regolith || !transaction.is_deposit() {
