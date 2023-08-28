@@ -552,6 +552,11 @@ impl Compact for Transaction {
                 (Transaction::Eip1559(tx), buf)
             }
             3 => {
+                // An identifier of 3 indicates that the transaction type did not fit into
+                // the backwards compatible 2 bit identifier, their transaction types are
+                // larger than 2 bits (eg. 4844 and Deposit Transactions). In this case,
+                // we need to read the concrete transaction type from the buffer by
+                // reading the full 8 bits (single byte) and match on this transaction type.
                 let identifier = buf.get_u8() as usize;
                 match identifier {
                     3 => {
@@ -1179,10 +1184,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
             signature
         };
 
-        let mut tx = TransactionSigned { hash: Default::default(), signature, transaction };
-        tx.hash = tx.recalculate_hash();
-
-        Ok(tx)
+        Ok(TransactionSigned::from_transaction_and_signature(transaction, signature))
     }
 }
 
