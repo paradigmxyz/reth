@@ -350,8 +350,7 @@ impl BundleState {
         let reverts = self.bundle.take_reverts();
         StateReverts(reverts).write_to_db(tx, self.first_block)?;
 
-        StateChange(self.bundle.into_plain_state_sorted(omit_changed_check))
-            .write_to_db(tx)?;
+        StateChange(self.bundle.into_plain_state_sorted(omit_changed_check)).write_to_db(tx)?;
 
         Ok(())
     }
@@ -1203,6 +1202,113 @@ mod tests {
             Some(Ok((
                 BlockNumberAddress((7, address1)),
                 StorageEntry { key: H256::from_low_u64_be(0), value: U256::ZERO }
+            )))
+        );
+        assert_eq!(storage_changes.next(), None);
+    }
+
+    #[test]
+    fn storage_change_after_selfdestruct_within_block() {
+        let db: Arc<DatabaseEnv> = create_test_rw_db();
+        let factory = ProviderFactory::new(db, MAINNET.clone());
+        let provider = factory.provider_rw().unwrap();
+
+        let address1 = Address::random();
+        let account1 = RevmAccountInfo { nonce: 1, ..Default::default() };
+
+        // Block #0: initial state.
+        let mut cache_state = CacheState::new(true);
+        cache_state.insert_not_existing(address1);
+        let mut init_state = RevmStateBuilder::default().with_cached_prestate(cache_state).build();
+        init_state.commit(HashMap::from([(
+            address1,
+            Account {
+                info: account1.clone(),
+                status: AccountStatus::Touched | AccountStatus::Created,
+                // 0x00 => 0 => 1
+                // 0x01 => 0 => 2
+                storage: HashMap::from([
+                    (
+                        U256::ZERO,
+                        StorageSlot { present_value: U256::from(1), ..Default::default() },
+                    ),
+                    (
+                        U256::from(1),
+                        StorageSlot { present_value: U256::from(2), ..Default::default() },
+                    ),
+                ]),
+            },
+        )]));
+        init_state.merge_transitions();
+        BundleState::new(init_state.take_bundle(), Vec::new(), 0)
+            .write_to_db(provider.tx_ref(), false)
+            .expect("Could not write init bundle state to DB");
+
+        let mut cache_state = CacheState::new(true);
+        cache_state.insert_account_with_storage(
+            address1,
+            account1.clone(),
+            HashMap::from([(U256::ZERO, U256::from(1)), (U256::from(1), U256::from(2))]),
+        );
+        let mut state = RevmStateBuilder::default().with_cached_prestate(cache_state).build();
+
+        // Block #1: Destroy, re-create, change storage.
+        state.commit(HashMap::from([(
+            address1,
+            Account {
+                status: AccountStatus::Touched | AccountStatus::SelfDestructed,
+                info: account1.clone(),
+                storage: HashMap::default(),
+            },
+        )]));
+
+        state.commit(HashMap::from([(
+            address1,
+            Account {
+                status: AccountStatus::Touched | AccountStatus::Created,
+                info: account1.clone(),
+                storage: HashMap::default(),
+            },
+        )]));
+
+        state.commit(HashMap::from([(
+            address1,
+            Account {
+                status: AccountStatus::Touched,
+                info: account1.clone(),
+                // 0x01 => 0 => 5
+                storage: HashMap::from([(
+                    U256::from(1),
+                    StorageSlot { present_value: U256::from(5), ..Default::default() },
+                )]),
+            },
+        )]));
+
+        // Commit block #1 changes to the database.
+        state.merge_transitions();
+        BundleState::new(state.take_bundle(), Vec::new(), 1)
+            .write_to_db(provider.tx_ref(), false)
+            .expect("Could not write bundle state to DB");
+
+        let mut storage_changeset_cursor = provider
+            .tx_ref()
+            .cursor_dup_read::<tables::StorageChangeSet>()
+            .expect("Could not open plain storage state cursor");
+        let range = BlockNumberAddress::range(1..=1);
+        let mut storage_changes = storage_changeset_cursor.walk_range(range).unwrap();
+
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((1, address1)),
+                StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(1) }
+            )))
+        );
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((1, address1)),
+                StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(2) }
             )))
         );
         assert_eq!(storage_changes.next(), None);

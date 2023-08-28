@@ -78,8 +78,8 @@ codegen-units = 1
 incremental = false
 
 [workspace.dependencies]
-revm = { git = "https://github.com/bluealloy/revm.git", branch = "reth_alloy_revert" }
-revm-primitives = { git = "https://github.com/bluealloy/revm.git", branch = "reth_alloy_revert" }
+revm = { git = "https://github.com/bluealloy/revm.git" }
+revm-primitives = { git = "https://github.com/bluealloy/revm.git" }
 reth = { path = "./bin/reth" }
 reth-primitives = { path = "./crates/primitives" }
 reth-interfaces = { path = "./crates/interfaces" }
