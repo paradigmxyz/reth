@@ -7,7 +7,6 @@ use crate::{
     },
     EthApi,
 };
-use bytes::BytesMut;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockId, BlockNumberOrTag, TransactionMeta};
 
@@ -17,6 +16,8 @@ use reth_rpc_types::{Index, RichBlock, TransactionReceipt};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 use reth_transaction_pool::TransactionPool;
 
+#[cfg(feature = "optimism")]
+use bytes::BytesMut;
 #[cfg(feature = "optimism")]
 use reth_revm::optimism::L1BlockInfo;
 

@@ -1,8 +1,11 @@
 //! Error types emitted by types or implementations of this crate.
 
 use reth_primitives::H256;
-use revm_primitives::{EVMError, B160};
+use revm_primitives::EVMError;
 use tokio::sync::oneshot;
+
+#[cfg(feature = "optimism")]
+use revm_primitives::B160;
 
 /// Possible error variants during payload building.
 #[derive(Debug, thiserror::Error)]
