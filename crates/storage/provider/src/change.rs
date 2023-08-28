@@ -350,8 +350,7 @@ impl BundleState {
         let reverts = self.bundle.take_reverts();
         StateReverts(reverts).write_to_db(tx, self.first_block)?;
 
-        StateChange(self.bundle.into_plain_state_sorted(omit_changed_check))
-            .write_to_db(tx)?;
+        StateChange(self.bundle.into_plain_state_sorted(omit_changed_check)).write_to_db(tx)?;
 
         Ok(())
     }

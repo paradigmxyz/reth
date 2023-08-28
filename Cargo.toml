@@ -78,8 +78,8 @@ codegen-units = 1
 incremental = false
 
 [workspace.dependencies]
-revm = { git = "https://github.com/bluealloy/revm.git", branch = "reth_alloy_revert" }
-revm-primitives = { git = "https://github.com/bluealloy/revm.git", branch = "reth_alloy_revert" }
+revm = { git = "https://github.com/bluealloy/revm.git"}
+revm-primitives = { git = "https://github.com/bluealloy/revm.git"}
 reth = { path = "./bin/reth" }
 reth-primitives = { path = "./crates/primitives" }
 reth-interfaces = { path = "./crates/interfaces" }
@@ -149,3 +149,7 @@ c-kzg = { git = "https://github.com/ethereum/c-kzg-4844" }
 ### misc-testing
 proptest = "1.0"
 arbitrary = "1.1"
+
+[patch."https://github.com/bluealloy/revm.git"]
+revm = { path = "../revm/crates/revm"}
+revm-primitives = { path = "../revm/crates/primitives"}

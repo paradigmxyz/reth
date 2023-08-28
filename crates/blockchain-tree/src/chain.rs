@@ -312,7 +312,7 @@ impl AppendableChain {
         )
         .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
         // bundle state was already extended.
-        self.state = block_state;
+        self.state.extend(block_state);
         self.blocks.insert(block.number, block);
         Ok(())
     }

@@ -946,6 +946,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let old_tip = self.block_indices.canonical_tip();
         // Merge all chain into one chain.
         let mut new_canon_chain = chains_to_promote.pop().expect("There is at least one block");
+
         for chain in chains_to_promote.into_iter().rev() {
             new_canon_chain.append_chain(chain).expect("We have just build the chain.");
         }
