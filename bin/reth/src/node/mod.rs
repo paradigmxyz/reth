@@ -207,11 +207,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     pub async fn execute(mut self, ctx: CliContext) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
-        #[cfg(not(any(feature = "ethereum", feature = "optimism")))]
-        compile_error!(
-            "Either feature \"optimism\" or \"ethereum\" must be enabled for this crate."
-        );
-
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         raise_fd_limit();
