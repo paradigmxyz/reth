@@ -81,7 +81,7 @@ pub mod stages;
 
 pub mod sets;
 
+pub use crate::metrics::*;
 pub use error::*;
-pub use metrics::*;
 pub use pipeline::*;
 pub use stage::*;

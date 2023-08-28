@@ -135,7 +135,7 @@ impl Command {
                         None,
                     )?;
                 }
-                StageEnum::History => {
+                StageEnum::AccountHistory | StageEnum::StorageHistory => {
                     tx.clear::<tables::AccountHistory>()?;
                     tx.clear::<tables::StorageHistory>()?;
                     tx.put::<tables::SyncStage>(

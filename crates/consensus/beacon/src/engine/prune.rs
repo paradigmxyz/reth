@@ -3,7 +3,7 @@
 use futures::FutureExt;
 use reth_db::database::Database;
 use reth_primitives::BlockNumber;
-use reth_prune::{Pruner, PrunerError, PrunerWithResult};
+use reth_prune::{Pruner, PrunerResult, PrunerWithResult};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
 use tokio::sync::oneshot;
@@ -116,7 +116,7 @@ pub(crate) enum EnginePruneEvent {
     /// If this is returned, the pruner is idle.
     Finished {
         /// Final result of the pruner run.
-        result: Result<(), PrunerError>,
+        result: PrunerResult,
     },
     /// Pruner task was dropped after it was started, unable to receive it because channel
     /// closed. This would indicate a panicked pruner task

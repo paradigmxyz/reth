@@ -17,7 +17,7 @@ use reth_db::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
         ShardedKey, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals,
     },
-    table::Table,
+    table::{Table, TableRow},
     tables,
     transaction::{DbTx, DbTxMut},
     BlockNumberList, DatabaseError,
@@ -590,80 +590,61 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     }
 
     /// Prune the table for the specified pre-sorted key iterator.
+    ///
     /// Returns number of rows pruned.
     pub fn prune_table_with_iterator<T: Table>(
         &self,
         keys: impl IntoIterator<Item = T::Key>,
-    ) -> std::result::Result<usize, DatabaseError> {
-        self.prune_table_with_iterator_in_batches::<T>(keys, usize::MAX, |_| {})
-    }
-
-    /// Prune the table for the specified pre-sorted key iterator, calling `chunk_callback` after
-    /// every `batch_size` pruned rows with number of total rows pruned.
-    ///
-    /// Returns number of rows pruned.
-    pub fn prune_table_with_iterator_in_batches<T: Table>(
-        &self,
-        keys: impl IntoIterator<Item = T::Key>,
-        batch_size: usize,
-        mut batch_callback: impl FnMut(usize),
-    ) -> std::result::Result<usize, DatabaseError> {
+        limit: usize,
+        mut delete_callback: impl FnMut(TableRow<T>),
+    ) -> std::result::Result<(usize, bool), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut deleted = 0;
 
-        for key in keys {
-            if cursor.seek_exact(key)?.is_some() {
+        let mut keys = keys.into_iter();
+        for key in &mut keys {
+            let row = cursor.seek_exact(key.clone())?;
+            if let Some(row) = row {
                 cursor.delete_current()?;
+                deleted += 1;
+                delete_callback(row);
             }
-            deleted += 1;
 
-            if deleted % batch_size == 0 {
-                batch_callback(deleted);
+            if deleted == limit {
+                break
             }
         }
 
-        if deleted % batch_size != 0 {
-            batch_callback(deleted);
-        }
-
-        Ok(deleted)
+        Ok((deleted, keys.next().is_none()))
     }
 
-    /// Prune the table for the specified key range, calling `chunk_callback` after every
-    /// `batch_size` pruned rows with number of total unique keys and total rows pruned. For dupsort
-    /// tables, these numbers will be different as one key can correspond to multiple rows.
+    /// Prune the table for the specified key range.
     ///
-    /// Returns number of rows pruned.
-    pub fn prune_table_with_range_in_batches<T: Table>(
+    /// Returns number of total unique keys and total rows pruned pruned.
+    pub fn prune_table_with_range<T: Table>(
         &self,
-        keys: impl RangeBounds<T::Key>,
-        batch_size: usize,
-        mut batch_callback: impl FnMut(usize, usize),
-    ) -> std::result::Result<(), DatabaseError> {
+        keys: impl RangeBounds<T::Key> + Clone + Debug,
+        limit: usize,
+        mut skip_filter: impl FnMut(&TableRow<T>) -> bool,
+        mut delete_callback: impl FnMut(TableRow<T>),
+    ) -> std::result::Result<(usize, bool), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
-        let mut walker = cursor.walk_range(keys)?;
-        let mut deleted_keys = 0;
-        let mut deleted_rows = 0;
-        let mut previous_key = None;
+        let mut walker = cursor.walk_range(keys.clone())?;
+        let mut deleted = 0;
 
-        while let Some((key, _)) = walker.next().transpose()? {
-            walker.delete_current()?;
-            deleted_rows += 1;
-            if previous_key.as_ref().map(|previous_key| previous_key != &key).unwrap_or(true) {
-                deleted_keys += 1;
-                previous_key = Some(key);
+        while let Some(row) = walker.next().transpose()? {
+            if !skip_filter(&row) {
+                walker.delete_current()?;
+                deleted += 1;
+                delete_callback(row);
             }
 
-            if deleted_rows % batch_size == 0 {
-                batch_callback(deleted_keys, deleted_rows);
+            if deleted == limit {
+                break
             }
         }
 
-        if deleted_rows % batch_size != 0 {
-            batch_callback(deleted_keys, deleted_rows);
-        }
-
-        Ok(())
+        Ok((deleted, walker.next().transpose()?.is_none()))
     }
 
     /// Load shard and remove it. If list is empty, last shard was full or
@@ -904,14 +885,24 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
         }
     }
 
+    /// Returns the block with matching number from database.
+    ///
+    /// If the header for this block is not found, this returns `None`.
+    /// If the header is found, but the transactions either do not exist, or are not indexed, this
+    /// will return None.
     fn block(&self, id: BlockHashOrNumber) -> Result<Option<Block>> {
         if let Some(number) = self.convert_hash_or_number(id)? {
             if let Some(header) = self.header_by_number(number)? {
                 let withdrawals = self.withdrawals_by_block(number.into(), header.timestamp)?;
                 let ommers = self.ommers(number.into())?.unwrap_or_default();
-                let transactions = self
-                    .transactions_by_block(number.into())?
-                    .ok_or(ProviderError::BlockBodyIndicesNotFound(number))?;
+                // If the body indices are not found, this means that the transactions either do not
+                // exist in the database yet, or they do exit but are not indexed.
+                // If they exist but are not indexed, we don't have enough
+                // information to return the block anyways, so we return `None`.
+                let transactions = match self.transactions_by_block(number.into())? {
+                    Some(transactions) => transactions,
+                    None => return Ok(None),
+                };
 
                 return Ok(Some(Block { header, body: transactions, ommers, withdrawals }))
             }
@@ -952,7 +943,9 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
     /// **NOTE: The transactions have invalid hashes, since they would need to be calculated on the
     /// spot, and we want fast querying.**
     ///
-    /// Returns `None` if block is not found.
+    /// If the header for this block is not found, this returns `None`.
+    /// If the header is found, but the transactions either do not exist, or are not indexed, this
+    /// will return None.
     fn block_with_senders(&self, block_number: BlockNumber) -> Result<Option<BlockWithSenders>> {
         let header = self
             .header_by_number(block_number)?
@@ -962,9 +955,16 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
         let withdrawals = self.withdrawals_by_block(block_number.into(), header.timestamp)?;
 
         // Get the block body
-        let body = self
-            .block_body_indices(block_number)?
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(block_number))?;
+        //
+        // If the body indices are not found, this means that the transactions either do not exist
+        // in the database yet, or they do exit but are not indexed. If they exist but are not
+        // indexed, we don't have enough information to return the block anyways, so we return
+        // `None`.
+        let body = match self.block_body_indices(block_number)? {
+            Some(body) => body,
+            None => return Ok(None),
+        };
+
         let tx_range = body.tx_num_range();
 
         let (transactions, senders) = if tx_range.is_empty() {

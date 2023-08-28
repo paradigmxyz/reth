@@ -175,6 +175,8 @@ impl TracingInspector {
         if self.trace_stack.is_empty() {
             // this is the root call which should get the original gas limit of the transaction,
             // because initialization costs are already subtracted from gas_limit
+            // For the root call this value should use the transaction's gas limit
+            // See <https://github.com/paradigmxyz/reth/issues/3678> and <https://github.com/ethereum/go-ethereum/pull/27029>
             gas_limit = data.env.tx.gas_limit;
 
             // we set the spec id here because we only need to do this once and this condition is

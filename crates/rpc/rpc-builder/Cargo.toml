@@ -21,13 +21,16 @@ reth-rpc-engine-api = { path = "../rpc-engine-api" }
 reth-rpc-types.workspace = true
 reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
-reth-metrics = { workspace = true, features = ["common"] }
 
 # rpc/net
 jsonrpsee = { workspace = true, features = ["server"] }
 tower-http = { version = "0.4", features = ["full"] }
 tower = { version = "0.4", features = ["full"] }
 hyper = "0.14"
+
+# metrics
+reth-metrics = { workspace = true, features = ["common"] }
+metrics.workspace = true
 
 # misc
 strum = { workspace = true, features = ["derive"] }

@@ -496,7 +496,7 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{rng_endpoint, rng_ipv4_record, rng_ipv6_record, rng_message},
-        SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
+        DEFAULT_DISCOVERY_PORT, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
     };
     use enr::{EnrBuilder, EnrPublicKey};
     use rand::{thread_rng, Rng, RngCore};
@@ -773,7 +773,7 @@ mod tests {
 
         assert_eq!(enr.0.ip4(), Some(Ipv4Addr::new(127, 0, 0, 1)));
         assert_eq!(enr.0.id(), Some(String::from("v4")));
-        assert_eq!(enr.0.udp4(), Some(30303));
+        assert_eq!(enr.0.udp4(), Some(DEFAULT_DISCOVERY_PORT));
         assert_eq!(enr.0.tcp4(), None);
         assert_eq!(enr.0.signature(), &signature[..]);
         assert_eq!(pubkey.to_vec(), expected_pubkey);
@@ -808,7 +808,7 @@ mod tests {
 
         assert_eq!(enr.0.ip4(), Some(Ipv4Addr::new(127, 0, 0, 1)));
         assert_eq!(enr.0.id(), Some(String::from("v4")));
-        assert_eq!(enr.0.udp4(), Some(30303));
+        assert_eq!(enr.0.udp4(), Some(DEFAULT_DISCOVERY_PORT));
         assert_eq!(enr.0.tcp4(), None);
         assert_eq!(enr.0.signature(), &signature[..]);
         assert_eq!(pubkey.to_vec(), expected_pubkey);

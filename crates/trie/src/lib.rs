@@ -36,7 +36,10 @@ pub mod hashed_cursor;
 pub mod walker;
 
 mod errors;
-pub use errors::{StateRootError, StorageRootError};
+pub use errors::*;
+
+/// Merkle proof generation.
+pub mod proof;
 
 /// The implementation of the Merkle Patricia Trie.
 mod trie;

@@ -69,7 +69,11 @@ impl From<BuiltPayload> for ExecutionPayloadEnvelope {
     fn from(value: BuiltPayload) -> Self {
         let BuiltPayload { block, fees, .. } = value;
 
-        ExecutionPayloadEnvelope { block_value: fees, payload: block.into() }
+        ExecutionPayloadEnvelope {
+            block_value: fees,
+            payload: block.into(),
+            should_override_builder: None,
+        }
     }
 }
 
