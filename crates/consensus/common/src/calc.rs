@@ -61,7 +61,7 @@ pub fn base_block_reward(
 /// // The base block reward is 5 ETH, and the ommer inclusion reward is 1/32th of 5 ETH.
 /// assert_eq!(
 ///     reward.unwrap(),
-///     U256::from(ETH_TO_WEI * 5 + ((ETH_TO_WEI * 5) >> 5))
+///      ETH_TO_WEI * 5 + ((ETH_TO_WEI * 5) >> 5)
 /// );
 /// ```
 ///

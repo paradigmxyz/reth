@@ -175,7 +175,7 @@ impl Command {
         )?;
         let block_state = executor.take_output_state();
 
-        // Unpacked `PostState::state_root_slow` function
+        // Unpacked `BundleState::state_root_slow` function
         let hashed_post_state = block_state.hash_state_slow().sorted();
         let (account_prefix_set, storage_prefix_set) = hashed_post_state.construct_prefix_sets();
         let tx = provider.tx_ref();

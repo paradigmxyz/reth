@@ -39,9 +39,6 @@ pub use providers::{
     HistoricalStateProviderRef, LatestStateProvider, LatestStateProviderRef, ProviderFactory,
 };
 
-/// Helper types for interacting with the database
-mod transaction;
-
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking the Provider.
 pub mod test_utils;
