@@ -121,7 +121,7 @@ mod tests {
 
     #[cfg(feature = "optimism")]
     #[test]
-    fn pase_optimism_chain_spec() {
+    fn parse_optimism_chain_spec() {
         for chain in ["base-goerli", "base"] {
             chain_spec_value_parser(chain).unwrap();
             genesis_value_parser(chain).unwrap();
