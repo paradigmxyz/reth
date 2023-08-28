@@ -30,7 +30,7 @@ pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Er
         "sepolia" => SEPOLIA.clone(),
         "dev" => DEV.clone(),
         #[cfg(feature = "optimism")]
-        "base_goerli" => BASE_GOERLI.clone(),
+        "base-goerli" => BASE_GOERLI.clone(),
         #[cfg(feature = "optimism")]
         "base" => BASE_MAINNET.clone(),
         _ => {
@@ -49,7 +49,7 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
         "sepolia" => SEPOLIA.clone(),
         "dev" => DEV.clone(),
         #[cfg(feature = "optimism")]
-        "base_goerli" => BASE_GOERLI.clone(),
+        "base-goerli" => BASE_GOERLI.clone(),
         #[cfg(feature = "optimism")]
         "base" => BASE_MAINNET.clone(),
         _ => {
@@ -118,6 +118,15 @@ mod tests {
     use super::*;
     use proptest::prelude::Rng;
     use secp256k1::rand::thread_rng;
+
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn parse_optimism_chain_spec() {
+        for chain in ["base-goerli", "base"] {
+            chain_spec_value_parser(chain).unwrap();
+            genesis_value_parser(chain).unwrap();
+        }
+    }
 
     #[test]
     fn parse_chain_spec() {
