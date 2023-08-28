@@ -232,7 +232,7 @@ where
                         &mut db,
                         &mut post_state,
                         parent_block.number + 1,
-                        executor::optimism::l1_cost_recipient(),
+                        *executor::optimism::L1_FEE_RECIPIENT,
                         l1_cost,
                     )?
                 }
@@ -240,7 +240,7 @@ where
                     &mut db,
                     &mut post_state,
                     parent_block.number + 1,
-                    executor::optimism::base_fee_recipient(),
+                    *executor::optimism::BASE_FEE_RECIPIENT,
                     U256::from(base_fee.saturating_mul(result.gas_used())),
                 )?;
             }
