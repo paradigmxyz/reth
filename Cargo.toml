@@ -155,6 +155,3 @@ c-kzg = { git = "https://github.com/ethereum/c-kzg-4844" }
 ### misc-testing
 proptest = "1.0"
 arbitrary = "1.1"
-
-[patch."https://github.com/ethereum/c-kzg-4844"]
-c-kzg = { git = "https://github.com/rjected/c-kzg-4844", branch = "dan/add-serde-feature" }
