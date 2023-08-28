@@ -72,7 +72,6 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         prune_batch_sizes: PruneBatchSizes::mainnet(),
         #[cfg(feature = "optimism")]
         optimism: false,
-        ..Default::default()
     }
     .into()
 });
@@ -117,7 +116,6 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         prune_batch_sizes: PruneBatchSizes::testnet(),
         #[cfg(feature = "optimism")]
         optimism: false,
-        ..Default::default()
     }
     .into()
 });
@@ -167,7 +165,6 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         prune_batch_sizes: PruneBatchSizes::testnet(),
         #[cfg(feature = "optimism")]
         optimism: false,
-        ..Default::default()
     }
     .into()
 });
@@ -275,6 +272,7 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Regolith, ForkCondition::Timestamp(1679079600)),
         ]),
         base_fee_params: BaseFeeParams::optimism(),
+        prune_batch_sizes: PruneBatchSizes::testnet(),
         optimism: true,
         ..Default::default()
     }
@@ -315,6 +313,7 @@ pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Regolith, ForkCondition::Timestamp(1683219600)),
         ]),
         base_fee_params: BaseFeeParams::optimism(),
+        prune_batch_sizes: PruneBatchSizes::testnet(),
         optimism: true,
         ..Default::default()
     }
@@ -355,6 +354,7 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Regolith, ForkCondition::Timestamp(0)),
         ]),
         base_fee_params: BaseFeeParams::optimism(),
+        prune_batch_sizes: PruneBatchSizes::mainnet(),
         optimism: true,
         ..Default::default()
     }
