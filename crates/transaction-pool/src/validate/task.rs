@@ -7,7 +7,7 @@ use crate::{
     TransactionValidator,
 };
 use futures_util::{lock::Mutex, StreamExt};
-use reth_primitives::{kzg::KzgSettings, ChainSpec, SealedBlock};
+use reth_primitives::{ChainSpec, SealedBlock};
 use reth_tasks::TaskSpawner;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::{
@@ -172,7 +172,7 @@ where
                 return TransactionValidationOutcome::Error(
                     hash,
                     Box::new(TransactionValidatorError::ValidationServiceUnreachable),
-                )
+                );
             }
         }
 
