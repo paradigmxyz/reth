@@ -795,7 +795,7 @@ where
     let mut excess_blob_gas = None;
     let mut blob_gas_used = None;
 
-    // only determine
+    // only determine cancun fields when active
     if chain_spec.is_cancun_activated_at_timestamp(attributes.timestamp) {
         // grab the blob sidecars from the executed txs
         let blobs = pool.get_all_blobs(executed_txs.iter().map(|tx| tx.hash).collect())?;
