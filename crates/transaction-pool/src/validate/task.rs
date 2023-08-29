@@ -131,32 +131,6 @@ impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Clien
             .with_additional_tasks(num_additional_tasks)
             .build_with_tasks::<Client, Tx, T, S>(client, tasks, blob_store)
     }
-
-    /// Creates a new instance for the given [ChainSpec]
-    ///
-    /// By default this will enable support for:
-    ///   - shanghai
-    ///   - eip1559
-    ///   - eip2930
-    ///
-    /// This will always spawn a validation task that performs the actual validation. It will spawn
-    /// `num_additional_tasks` additional tasks. It will override the `kzg_settings`.
-    pub fn eth_with_kzg_settings_and_tasks<T, S: BlobStore>(
-        client: Client,
-        chain_spec: Arc<ChainSpec>,
-        blob_store: S,
-        tasks: T,
-        num_additional_tasks: usize,
-        kzg_settings: KzgSettings,
-    ) -> Self
-    where
-        T: TaskSpawner,
-    {
-        EthTransactionValidatorBuilder::new(chain_spec)
-            .kzg_settings(Arc::new(kzg_settings))
-            .with_additional_tasks(num_additional_tasks)
-            .build_with_tasks::<Client, Tx, T, S>(client, tasks, blob_store)
-    }
 }
 
 impl<V> TransactionValidationTaskExecutor<V> {

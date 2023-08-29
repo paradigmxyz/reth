@@ -271,27 +271,22 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let blockchain_db = BlockchainProvider::new(factory, blockchain_tree.clone())?;
         let blob_store = InMemoryBlobStore::default();
 
-        let validator = if let Some(ref trusted_setup_file) = self.trusted_setup_file {
-            let kzg_settings = self.load_kzg_settings(trusted_setup_file)?;
-            info!(target: "reth::cli", "KZG trusted setup file loaded");
+        let eth_builder = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain));
+        // Overwrites the trusted setup file.
+        let eth_builder = match self.trusted_setup_file {
+            Some(ref trusted_setup_file) => {
+                let kzg_settings = self.load_kzg_settings(trusted_setup_file)?;
+                info!(target: "reth::cli", "KZG trusted setup file loaded");
 
-            TransactionValidationTaskExecutor::eth_with_kzg_settings_and_tasks(
-                blockchain_db.clone(),
-                Arc::clone(&self.chain),
-                blob_store.clone(),
-                ctx.task_executor.clone(),
-                1,
-                kzg_settings,
-            )
-        } else {
-            TransactionValidationTaskExecutor::eth_with_additional_tasks(
-                blockchain_db.clone(),
-                Arc::clone(&self.chain),
-                blob_store.clone(),
-                ctx.task_executor.clone(),
-                1,
-            )
+                eth_builder.kzg_settings(kzg_settings)
+            }
+            None => eth_builder,
         };
+        let validator = eth_builder.with_additional_tasks(1).build_with_tasks(
+            blockchain_db.clone(),
+            ctx.task_executor.clone(),
+            blob_store.clone(),
+        );
 
         let transaction_pool =
             reth_transaction_pool::Pool::eth_pool(validator, blob_store, self.txpool.pool_config());
@@ -586,11 +581,12 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .wrap_err_with(|| format!("Could not load config file {:?}", config_path))
     }
 
-    fn load_kzg_settings(&self, trusted_setup_file: &Path) -> eyre::Result<KzgSettings> {
+    /// Loads the trusted setup params from a given file path.
+    fn load_kzg_settings(&self, trusted_setup_file: &Path) -> eyre::Result<Arc<KzgSettings>> {
         let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file.into())
             .map_err(LoadKzgSettingsError::KzgError)?;
 
-        Ok(trusted_setup)
+        Ok(Arc::new(trusted_setup))
     }
 
     fn init_trusted_nodes(&self, config: &mut Config) {
