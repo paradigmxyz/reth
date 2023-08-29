@@ -66,7 +66,7 @@ mod optimism;
 pub use optimism::OptimismPayloadBuilder;
 
 /// The [`PayloadJobGenerator`] that creates [`BasicPayloadJob`]s.
-pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder = ()> {
+pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
     /// The client that can interact with the chain.
     client: Client,
     /// txpool
