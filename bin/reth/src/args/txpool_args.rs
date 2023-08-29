@@ -35,7 +35,7 @@ pub struct TxPoolArgs {
     pub max_account_slots: usize,
 
     /// Price bump (in %) for the transaction pool underpriced check.
-    #[arg(long = "txpool.price_bump", help_heading = "TxPool", default_value_t = DEFAULT_PRICE_BUMP)]
+    #[arg(long = "txpool.pricebump", help_heading = "TxPool", default_value_t = DEFAULT_PRICE_BUMP)]
     pub price_bump: u128,
 }
 

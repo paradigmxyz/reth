@@ -854,6 +854,7 @@ where
         extra_data,
         blob_gas_used: None,
         excess_blob_gas: None,
+        parent_beacon_block_root: None,
     };
 
     // seal the block
@@ -916,9 +917,10 @@ where
         gas_limit: block_gas_limit,
         difficulty: U256::ZERO,
         gas_used: 0,
+        extra_data,
         blob_gas_used: None,
         excess_blob_gas: None,
-        extra_data,
+        parent_beacon_block_root: None,
     };
 
     let block = Block { header, body: vec![], ommers: vec![], withdrawals };
