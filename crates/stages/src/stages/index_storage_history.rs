@@ -21,14 +21,14 @@ pub struct IndexStorageHistoryStage {
 
 impl IndexStorageHistoryStage {
     /// Create new instance of [IndexStorageHistoryStage].
-    pub fn new(commit_threshold: u64) -> Self {
-        Self { commit_threshold, prune_modes: PruneModes::default() }
+    pub fn new(commit_threshold: u64, prune_modes: PruneModes) -> Self {
+        Self { commit_threshold, prune_modes }
     }
 }
 
 impl Default for IndexStorageHistoryStage {
     fn default() -> Self {
-        Self { commit_threshold: 100_000, prune_modes: PruneModes::default() }
+        Self { commit_threshold: 100_000, prune_modes: PruneModes::none() }
     }
 }
 
@@ -407,7 +407,7 @@ mod tests {
             Self {
                 tx: TestTransaction::default(),
                 commit_threshold: 1000,
-                prune_modes: PruneModes::default(),
+                prune_modes: PruneModes::none(),
             }
         }
     }
@@ -420,7 +420,10 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            Self::S { commit_threshold: self.commit_threshold, prune_modes: self.prune_modes }
+            Self::S {
+                commit_threshold: self.commit_threshold,
+                prune_modes: self.prune_modes.clone(),
+            }
         }
     }
 
