@@ -534,7 +534,6 @@ impl PostState {
             }
 
             for (address, mut storage) in storage_changes.into_iter() {
-
                 let storage_id = BlockNumberAddress((block_number, address));
 
                 // If the account was created and wiped at the same block, skip all storage changes
