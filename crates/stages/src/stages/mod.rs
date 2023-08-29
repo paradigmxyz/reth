@@ -16,8 +16,6 @@ mod index_account_history;
 mod index_storage_history;
 /// Stage for computing state root.
 mod merkle;
-/// Non-core stage.
-mod non_core;
 /// The sender recovery stage.
 mod sender_recovery;
 /// The total difficulty stage
@@ -34,7 +32,6 @@ pub use headers::*;
 pub use index_account_history::*;
 pub use index_storage_history::*;
 pub use merkle::*;
-pub use non_core::*;
 pub use sender_recovery::*;
 pub use total_difficulty::*;
 pub use tx_lookup::*;
