@@ -180,7 +180,7 @@ where
     ///
     /// Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
-    async fn get_payload_v2(
+    pub async fn get_payload_v2(
         &self,
         payload_id: PayloadId,
     ) -> EngineApiResult<ExecutionPayloadEnvelope> {
@@ -191,6 +191,26 @@ where
             .await
             .ok_or(EngineApiError::UnknownPayload)?
             .map(|payload| (*payload).clone().into_v2_payload())?)
+    }
+
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_getpayloadv3>
+    ///
+    /// Note:
+    /// > Provider software MAY stop the corresponding build process after serving this call.
+    pub async fn get_payload_v3(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<ExecutionPayloadEnvelope> {
+        Ok(self
+            .inner
+            .payload_store
+            .resolve(payload_id)
+            .await
+            .ok_or(EngineApiError::UnknownPayload)?
+            .map(|payload| (*payload).clone().into_v3_payload())?)
     }
 
     /// Returns the execution payload bodies by the range starting at `start`, containing `count`

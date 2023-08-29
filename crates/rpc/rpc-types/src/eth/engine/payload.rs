@@ -1,8 +1,9 @@
 use reth_primitives::{
     constants::{MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
+    kzg::{Blob, Bytes48},
     proofs::{self, EMPTY_LIST_HASH},
-    Address, Block, Bloom, Bytes, Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawal,
-    H256, H64, U256, U64,
+    Address, BlobTransactionSidecar, Block, Bloom, Bytes, Header, SealedBlock, TransactionSigned,
+    UintTryTo, Withdrawal, H256, H64, U256, U64,
 };
 use reth_rlp::Decodable;
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
@@ -49,10 +50,9 @@ pub struct ExecutionPayloadEnvelope {
     /// The expected value to be received by the feeRecipient in wei
     #[serde(rename = "blockValue")]
     pub block_value: U256,
-    //
-    // // TODO(mattsse): for V3
-    // #[serde(rename = "blobsBundle", skip_serializing_if = "Option::is_none")]
-    // pub blobs_bundle: Option<BlobsBundleV1>,
+    /// The blobs, commitments, and proofs associated with the executed payload.
+    #[serde(rename = "blobsBundle", skip_serializing_if = "Option::is_none")]
+    pub blobs_bundle: Option<BlobsBundleV1>,
     /// Introduced in V3, this represents a suggestion from the execution layer if the payload
     /// should be used instead of an externally provided one.
     #[serde(rename = "shouldOverrideBuilder", skip_serializing_if = "Option::is_none")]
@@ -214,9 +214,24 @@ impl ExecutionPayload {
 /// This includes all bundled blob related data of an executed payload.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlobsBundleV1 {
-    pub commitments: Vec<Bytes>,
-    pub proofs: Vec<Bytes>,
-    pub blobs: Vec<Bytes>,
+    pub commitments: Vec<Bytes48>,
+    pub proofs: Vec<Bytes48>,
+    pub blobs: Vec<Blob>,
+}
+
+impl From<Vec<BlobTransactionSidecar>> for BlobsBundleV1 {
+    fn from(sidecars: Vec<BlobTransactionSidecar>) -> Self {
+        let (commitments, proofs, blobs) = sidecars.into_iter().fold(
+            (Vec::new(), Vec::new(), Vec::new()),
+            |(mut commitments, mut proofs, mut blobs), sidecar| {
+                commitments.extend(sidecar.commitments);
+                proofs.extend(sidecar.proofs);
+                blobs.extend(sidecar.blobs);
+                (commitments, proofs, blobs)
+            },
+        );
+        Self { commitments, proofs, blobs }
+    }
 }
 
 /// Error that can occur when handling payloads.
