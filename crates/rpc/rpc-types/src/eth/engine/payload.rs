@@ -1,7 +1,6 @@
-use std::ops::Deref;
-
 use reth_primitives::{
     constants::{MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
+    kzg::{Blob, Bytes48},
     proofs::{self, EMPTY_LIST_HASH},
     Address, BlobTransactionSidecar, Block, Bloom, Bytes, Header, SealedBlock, TransactionSigned,
     UintTryTo, Withdrawal, H256, H64, U256, U64,
@@ -215,9 +214,9 @@ impl ExecutionPayload {
 /// This includes all bundled blob related data of an executed payload.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlobsBundleV1 {
-    pub commitments: Vec<Bytes>,
-    pub proofs: Vec<Bytes>,
-    pub blobs: Vec<Bytes>,
+    pub commitments: Vec<Bytes48>,
+    pub proofs: Vec<Bytes48>,
+    pub blobs: Vec<Blob>,
 }
 
 impl From<Vec<BlobTransactionSidecar>> for BlobsBundleV1 {
@@ -226,10 +225,9 @@ impl From<Vec<BlobTransactionSidecar>> for BlobsBundleV1 {
         let (commitments, proofs, blobs) = sidecars.into_iter().fold(
             (Vec::new(), Vec::new(), Vec::new()),
             |(mut commitments, mut proofs, mut blobs), sidecar| {
-                commitments
-                    .extend(sidecar.commitments.iter().map(|sidecar| Bytes::from(sidecar.deref())));
-                proofs.extend(sidecar.proofs.iter().map(|proof| Bytes::from(proof.deref())));
-                blobs.extend(sidecar.blobs.iter().map(|blob| Bytes::from(blob.deref())));
+                commitments.extend(sidecar.commitments.into_iter());
+                proofs.extend(sidecar.proofs.into_iter());
+                blobs.extend(sidecar.blobs.into_iter());
                 (commitments, proofs, blobs)
             },
         );
