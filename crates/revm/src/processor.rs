@@ -11,8 +11,8 @@ use reth_interfaces::{
     Error,
 };
 use reth_primitives::{
-    Address, Block, BlockNumber, Bloom, ChainSpec, Hardfork, Header, Receipt, ReceiptWithBloom,
-    TransactionSigned, H256, U256,
+    Address, Block, BlockNumber, Bloom, ChainSpec, Hardfork, Header, PruneModes, Receipt,
+    ReceiptWithBloom, TransactionSigned, H256, U256,
 };
 use reth_provider::{change::BundleState, BlockExecutor, BlockExecutorStats, StateProvider};
 use revm::{
@@ -32,6 +32,10 @@ pub struct EVMProcessor<'a> {
     /// First block will be initialized to ZERO
     /// and be set to the block number of first block executed.
     first_block: BlockNumber,
+    /// The maximum known block .
+    tip: Option<BlockNumber>,
+    /// Pruning configuration.
+    prune_modes: PruneModes,
     /// Execution stats
     stats: BlockExecutorStats,
 }
@@ -47,6 +51,8 @@ impl<'a> From<Arc<ChainSpec>> for EVMProcessor<'a> {
             stack: InspectorStack::new(InspectorStackConfig::default()),
             receipts: Vec::new(),
             first_block: 0,
+            tip: None,
+            prune_modes: PruneModes::default(),
             stats: BlockExecutorStats::default(),
         }
     }
@@ -70,6 +76,8 @@ impl<'a> EVMProcessor<'a> {
             stack: InspectorStack::new(InspectorStackConfig::default()),
             receipts: Vec::new(),
             first_block: 0,
+            tip: None,
+            prune_modes: PruneModes::default(),
             stats: BlockExecutorStats::default(),
         }
     }
@@ -294,7 +302,11 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         self.stats.apply_post_execution_changes_duration += time.elapsed();
 
         let time = Instant::now();
-        self.db().merge_transitions();
+        let with_reverts = self.tip.map_or(true, |tip| {
+            !self.prune_modes.should_prune_account_history(block.number, tip) &&
+                !self.prune_modes.should_prune_storage_history(block.number, tip)
+        });
+        self.db().merge_transitions(with_reverts);
         self.stats.merge_transitions_duration += time.elapsed();
 
         if self.first_block == 0 {
@@ -335,6 +347,14 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         }
 
         Ok(())
+    }
+
+    fn set_prune_modes(&mut self, prune_modes: PruneModes) {
+        self.prune_modes = prune_modes;
+    }
+
+    fn set_tip(&mut self, tip: BlockNumber) {
+        self.tip = Some(tip);
     }
 
     fn take_output_state(&mut self) -> BundleState {

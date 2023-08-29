@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crate::{change::BundleState, StateProvider};
 use reth_interfaces::executor::BlockExecutionError;
-use reth_primitives::{Address, Block, ChainSpec, U256};
+use reth_primitives::{Address, Block, BlockNumber, ChainSpec, PruneModes, U256};
 use tracing::info;
 
 /// Executor factory that would create the EVM with particular state provider.
@@ -77,9 +77,15 @@ pub trait BlockExecutor {
         senders: Option<Vec<Address>>,
     ) -> Result<(), BlockExecutionError>;
 
-    /// Internal statistics of execution.
-    fn stats(&self) -> BlockExecutorStats;
+    /// Set prune modes.
+    fn set_prune_modes(&mut self, prune_modes: PruneModes);
+
+    /// Set tip - highest known block number.
+    fn set_tip(&mut self, tip: BlockNumber);
 
     /// Return bundle state. This is output of the execution.
     fn take_output_state(&mut self) -> BundleState;
+
+    /// Internal statistics of execution.
+    fn stats(&self) -> BlockExecutorStats;
 }

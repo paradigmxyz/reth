@@ -3,7 +3,7 @@ use crate::{
 };
 use parking_lot::Mutex;
 use reth_interfaces::executor::BlockExecutionError;
-use reth_primitives::{Address, Block, ChainSpec, U256};
+use reth_primitives::{Address, Block, BlockNumber, ChainSpec, U256};
 use std::sync::Arc;
 /// Test executor with mocked result.
 pub struct TestExecutor(pub Option<BundleState>);
@@ -32,6 +32,10 @@ impl BlockExecutor for TestExecutor {
         }
         Ok(())
     }
+
+    fn set_prune_modes(&mut self, _prune_modes: reth_primitives::PruneModes) {}
+
+    fn set_tip(&mut self, _tip: BlockNumber) {}
 
     fn take_output_state(&mut self) -> BundleState {
         self.0.clone().unwrap_or_default()

@@ -309,7 +309,7 @@ impl StorageInner {
         executor.post_execution_state_change(block, U256::ZERO)?;
 
         // merge transitions
-        executor.db().merge_transitions();
+        executor.db().merge_transitions(true);
 
         // apply post block changes
         Ok((executor.take_output_state(), gas_used))

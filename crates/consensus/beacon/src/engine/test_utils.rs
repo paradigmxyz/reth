@@ -199,17 +199,31 @@ where
         }
     }
 
-    fn stats(&self) -> reth_provider::BlockExecutorStats {
-        match self {
-            EitherBlockExecutor::Left(a) => a.stats(),
-            EitherBlockExecutor::Right(b) => b.stats(),
-        }
-    }
-
     fn take_output_state(&mut self) -> reth_provider::BundleState {
         match self {
             EitherBlockExecutor::Left(a) => a.take_output_state(),
             EitherBlockExecutor::Right(b) => b.take_output_state(),
+        }
+    }
+
+    fn set_prune_modes(&mut self, prune_modes: PruneModes) {
+        match self {
+            EitherBlockExecutor::Left(a) => a.set_prune_modes(prune_modes),
+            EitherBlockExecutor::Right(b) => b.set_prune_modes(prune_modes),
+        }
+    }
+
+    fn set_tip(&mut self, tip: BlockNumber) {
+        match self {
+            EitherBlockExecutor::Left(a) => a.set_tip(tip),
+            EitherBlockExecutor::Right(b) => b.set_tip(tip),
+        }
+    }
+
+    fn stats(&self) -> reth_provider::BlockExecutorStats {
+        match self {
+            EitherBlockExecutor::Left(a) => a.stats(),
+            EitherBlockExecutor::Right(b) => b.stats(),
         }
     }
 }

@@ -618,7 +618,7 @@ mod tests {
             },
         )]));
 
-        state.merge_transitions();
+        state.merge_transitions(true);
         let mut revm_bundle_state = state.take_bundle();
 
         // Write plain state and reverts separately.
@@ -681,7 +681,7 @@ mod tests {
             },
         )]));
 
-        state.merge_transitions();
+        state.merge_transitions(true);
         let mut revm_bundle_state = state.take_bundle();
 
         // Write plain state and reverts separately.
@@ -770,7 +770,7 @@ mod tests {
             ),
         ]));
 
-        state.merge_transitions();
+        state.merge_transitions(true);
 
         BundleState::new(state.take_bundle(), Vec::new(), 1)
             .write_to_db(provider.tx_ref(), false)
@@ -870,7 +870,7 @@ mod tests {
             },
         )]));
 
-        state.merge_transitions();
+        state.merge_transitions(true);
         BundleState::new(state.take_bundle(), Vec::new(), 2)
             .write_to_db(provider.tx_ref(), false)
             .expect("Could not write bundle state to DB");
@@ -937,7 +937,7 @@ mod tests {
                 ]),
             },
         )]));
-        init_state.merge_transitions();
+        init_state.merge_transitions(true);
         BundleState::new(init_state.take_bundle(), Vec::new(), 0)
             .write_to_db(provider.tx_ref(), false)
             .expect("Could not write init bundle state to DB");
@@ -966,7 +966,7 @@ mod tests {
                 )]),
             },
         )]));
-        state.merge_transitions();
+        state.merge_transitions(true);
 
         // Block #2: destroy account.
         state.commit(HashMap::from([(
@@ -977,7 +977,7 @@ mod tests {
                 storage: HashMap::default(),
             },
         )]));
-        state.merge_transitions();
+        state.merge_transitions(true);
 
         // Block #3: re-create account and change storage.
         state.commit(HashMap::from([(
@@ -988,7 +988,7 @@ mod tests {
                 storage: HashMap::default(),
             },
         )]));
-        state.merge_transitions();
+        state.merge_transitions(true);
 
         // Block #4: change storage.
         state.commit(HashMap::from([(
@@ -1015,7 +1015,7 @@ mod tests {
                 ]),
             },
         )]));
-        state.merge_transitions();
+        state.merge_transitions(true);
 
         // Block #5: Destroy account again.
         state.commit(HashMap::from([(
@@ -1026,7 +1026,7 @@ mod tests {
                 storage: HashMap::default(),
             },
         )]));
-        state.merge_transitions();
+        state.merge_transitions(true);
 
         // Block #6: Create, change, destroy and re-create in the same block.
         state.commit(HashMap::from([(
@@ -1065,7 +1065,7 @@ mod tests {
                 storage: HashMap::default(),
             },
         )]));
-        state.merge_transitions();
+        state.merge_transitions(true);
 
         // Block #7: Change storage.
         state.commit(HashMap::from([(
@@ -1080,7 +1080,7 @@ mod tests {
                 )]),
             },
         )]));
-        state.merge_transitions();
+        state.merge_transitions(true);
 
         let bundle = state.take_bundle();
 
@@ -1248,7 +1248,7 @@ mod tests {
                 ]),
             },
         )]));
-        init_state.merge_transitions();
+        init_state.merge_transitions(true);
         BundleState::new(init_state.take_bundle(), Vec::new(), 0)
             .write_to_db(provider.tx_ref(), false)
             .expect("Could not write init bundle state to DB");
@@ -1294,7 +1294,7 @@ mod tests {
         )]));
 
         // Commit block #1 changes to the database.
-        state.merge_transitions();
+        state.merge_transitions(true);
         BundleState::new(state.take_bundle(), Vec::new(), 1)
             .write_to_db(provider.tx_ref(), false)
             .expect("Could not write bundle state to DB");

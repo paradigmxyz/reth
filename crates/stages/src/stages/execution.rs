@@ -119,12 +119,13 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         let start_block = input.next_block();
         let max_block = input.target();
-        // TODO(rakita) integrate
-        let _prune_modes = self.adjust_prune_modes(provider, start_block, max_block)?;
+        let prune_modes = self.adjust_prune_modes(provider, start_block, max_block)?;
 
         // Build executor
         let mut executor =
             self.executor_factory.with_sp(LatestStateProviderRef::new(provider.tx_ref()));
+        executor.set_prune_modes(prune_modes);
+        executor.set_tip(max_block);
 
         // Progress tracking
         let mut stage_progress = start_block;
@@ -138,8 +139,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         let mut cumulative_gas = 0;
 
-        // TODO(rakita) integrate prunning.
-        //state.add_prune_modes(prune_modes);
         for block_number in start_block..=max_block {
             let time = Instant::now();
             let td = provider
