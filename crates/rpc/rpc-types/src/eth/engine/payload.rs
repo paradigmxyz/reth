@@ -221,7 +221,6 @@ pub struct BlobsBundleV1 {
 
 impl From<Vec<BlobTransactionSidecar>> for BlobsBundleV1 {
     fn from(sidecars: Vec<BlobTransactionSidecar>) -> Self {
-        // TODO: either upstream a conversion or upstream QUANTITY serde impls
         let (commitments, proofs, blobs) = sidecars.into_iter().fold(
             (Vec::new(), Vec::new(), Vec::new()),
             |(mut commitments, mut proofs, mut blobs), sidecar| {
