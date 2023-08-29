@@ -103,7 +103,7 @@ use crate::{
     blobstore::BlobStore,
     metrics::BlobStoreMetrics,
     pool::txpool::UpdateOutcome,
-    traits::{GetPooledTransactionLimit, PendingTransactionListenerKind},
+    traits::{GetPooledTransactionLimit, TransactionListenerKind},
     validate::ValidTransaction,
 };
 pub use listener::{AllTransactionsEvents, TransactionEvents};
@@ -222,10 +222,7 @@ where
 
     /// Adds a new transaction listener to the pool that gets notified about every new _pending_
     /// transaction inserted into the pool
-    pub fn add_pending_listener(
-        &self,
-        kind: PendingTransactionListenerKind,
-    ) -> mpsc::Receiver<TxHash> {
+    pub fn add_pending_listener(&self, kind: TransactionListenerKind) -> mpsc::Receiver<TxHash> {
         const TX_LISTENER_BUFFER_SIZE: usize = 2048;
         let (sender, rx) = mpsc::channel(TX_LISTENER_BUFFER_SIZE);
         let listener = PendingTransactionListener { sender, kind };
@@ -236,7 +233,7 @@ where
     /// Adds a new transaction listener to the pool that gets notified about every new transaction.
     pub fn add_new_transaction_listener(
         &self,
-        kind: PendingTransactionListenerKind,
+        kind: TransactionListenerKind,
     ) -> mpsc::Receiver<NewTransactionEvent<T::Transaction>> {
         const TX_LISTENER_BUFFER_SIZE: usize = 1024;
         let (sender, rx) = mpsc::channel(TX_LISTENER_BUFFER_SIZE);
@@ -751,7 +748,7 @@ impl<V, T: TransactionOrdering, S> fmt::Debug for PoolInner<V, T, S> {
 struct PendingTransactionListener {
     sender: mpsc::Sender<TxHash>,
     /// Whether to include transactions that should not be propagated over the network.
-    kind: PendingTransactionListenerKind,
+    kind: TransactionListenerKind,
 }
 
 /// An active listener for new pending transactions.
@@ -759,7 +756,7 @@ struct PendingTransactionListener {
 struct TransactionListener<T: PoolTransaction> {
     sender: mpsc::Sender<NewTransactionEvent<T>>,
     /// Whether to include transactions that should not be propagated over the network.
-    kind: PendingTransactionListenerKind,
+    kind: TransactionListenerKind,
 }
 
 /// Tracks an added transaction and all graph changes caused by adding it.
@@ -777,13 +774,13 @@ pub struct AddedPendingTransaction<T: PoolTransaction> {
 
 impl<T: PoolTransaction> AddedPendingTransaction<T> {
     /// Returns all transactions that were promoted to the pending pool and adhere to the given
-    /// [PendingTransactionListenerKind].
+    /// [TransactionListenerKind].
     ///
-    /// If the kind is [PendingTransactionListenerKind::PropagateOnly], then only transactions that
+    /// If the kind is [TransactionListenerKind::PropagateOnly], then only transactions that
     /// are allowed to be propagated are returned.
     pub(crate) fn pending_transactions(
         &self,
-        kind: PendingTransactionListenerKind,
+        kind: TransactionListenerKind,
     ) -> impl Iterator<Item = H256> + '_ {
         let iter = std::iter::once(&self.transaction).chain(self.promoted.iter());
         PendingTransactionIter { kind, iter }
@@ -796,7 +793,7 @@ impl<T: PoolTransaction> AddedPendingTransaction<T> {
 }
 
 pub(crate) struct PendingTransactionIter<Iter> {
-    kind: PendingTransactionListenerKind,
+    kind: TransactionListenerKind,
     iter: Iter,
 }
 
@@ -893,13 +890,13 @@ pub(crate) struct OnNewCanonicalStateOutcome<T: PoolTransaction> {
 
 impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
     /// Returns all transactions that were promoted to the pending pool and adhere to the given
-    /// [PendingTransactionListenerKind].
+    /// [TransactionListenerKind].
     ///
-    /// If the kind is [PendingTransactionListenerKind::PropagateOnly], then only transactions that
+    /// If the kind is [TransactionListenerKind::PropagateOnly], then only transactions that
     /// are allowed to be propagated are returned.
     pub(crate) fn pending_transactions(
         &self,
-        kind: PendingTransactionListenerKind,
+        kind: TransactionListenerKind,
     ) -> impl Iterator<Item = H256> + '_ {
         let iter = self.promoted.iter();
         PendingTransactionIter { kind, iter }

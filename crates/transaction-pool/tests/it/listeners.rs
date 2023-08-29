@@ -2,7 +2,7 @@ use assert_matches::assert_matches;
 use reth_transaction_pool::{
     noop::MockTransactionValidator,
     test_utils::{testing_pool, testing_pool_with_validator, MockTransactionFactory},
-    FullTransactionEvent, PendingTransactionListenerKind, TransactionEvent, TransactionOrigin,
+    FullTransactionEvent, TransactionEvent, TransactionListenerKind, TransactionOrigin,
     TransactionPool,
 };
 use std::{future::poll_fn, task::Poll};
@@ -48,8 +48,7 @@ async fn txpool_listener_propagate_only() {
     let transaction = mock_tx_factory.create_eip1559();
     let expected = *transaction.hash();
     let mut listener_network = txpool.pending_transactions_listener();
-    let mut listener_all =
-        txpool.pending_transactions_listener_for(PendingTransactionListenerKind::All);
+    let mut listener_all = txpool.pending_transactions_listener_for(TransactionListenerKind::All);
     let result =
         txpool.add_transaction(TransactionOrigin::Local, transaction.transaction.clone()).await;
     assert!(result.is_ok());
@@ -72,8 +71,7 @@ async fn txpool_listener_new_propagate_only() {
     let transaction = mock_tx_factory.create_eip1559();
     let expected = *transaction.hash();
     let mut listener_network = txpool.new_transactions_listener();
-    let mut listener_all =
-        txpool.new_transactions_listener_for(PendingTransactionListenerKind::All);
+    let mut listener_all = txpool.new_transactions_listener_for(TransactionListenerKind::All);
     let result =
         txpool.add_transaction(TransactionOrigin::Local, transaction.transaction.clone()).await;
     assert!(result.is_ok());
