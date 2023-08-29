@@ -135,7 +135,7 @@ mod tests {
                 Factory::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build())),
                 ExecutionStageThresholds { max_blocks: Some(100), max_changes: None },
                 MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
-                prune_modes,
+                prune_modes.clone(),
             );
 
             execution_stage.execute(&provider, input).await.unwrap();
@@ -156,7 +156,7 @@ mod tests {
 
             // Check AccountHistory
             let mut acc_indexing_stage =
-                IndexAccountHistoryStage { prune_modes, ..Default::default() };
+                IndexAccountHistoryStage { prune_modes: prune_modes.clone(), ..Default::default() };
 
             if let Some(PruneMode::Full) = prune_modes.account_history {
                 // Full is not supported
@@ -170,7 +170,7 @@ mod tests {
 
             // Check StorageHistory
             let mut storage_indexing_stage =
-                IndexStorageHistoryStage { prune_modes, ..Default::default() };
+                IndexStorageHistoryStage { prune_modes: prune_modes.clone(), ..Default::default() };
 
             if let Some(PruneMode::Full) = prune_modes.storage_history {
                 // Full is not supported

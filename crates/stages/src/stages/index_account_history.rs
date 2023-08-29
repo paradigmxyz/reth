@@ -2,9 +2,12 @@ use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput}
 use reth_db::database::Database;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
-    PruneModes,
+    PruneCheckpoint, PruneModes, PrunePart,
 };
-use reth_provider::{AccountExtReader, DatabaseProviderRW, HistoryWriter};
+use reth_provider::{
+    AccountExtReader, DatabaseProviderRW, HistoryWriter, PruneCheckpointReader,
+    PruneCheckpointWriter,
+};
 use std::fmt::Debug;
 
 /// Stage is indexing history the account changesets generated in
@@ -45,11 +48,24 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         provider: &DatabaseProviderRW<'_, &DB>,
         mut input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        if let Some((target_prunable_block, _)) =
+        if let Some((target_prunable_block, prune_mode)) =
             self.prune_modes.prune_target_block_account_history(input.target())?
         {
             if target_prunable_block > input.checkpoint().block_number {
                 input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
+
+                // Save prune checkpoint only if we don't have one already.
+                // Otherwise, pruner may skip the unpruned range of blocks.
+                if provider.get_prune_checkpoint(PrunePart::AccountHistory)?.is_none() {
+                    provider.save_prune_checkpoint(
+                        PrunePart::AccountHistory,
+                        PruneCheckpoint {
+                            block_number: Some(target_prunable_block),
+                            tx_number: None,
+                            prune_mode,
+                        },
+                    )?;
+                }
             }
         }
 
