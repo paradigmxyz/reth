@@ -13,7 +13,8 @@ use crate::{
         AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
     },
     traits::{BlockInfo, PoolSize},
-    PoolConfig, PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
+    PoolConfig, PoolResult, PoolTransaction, PriceBumpConfig, TransactionOrdering,
+    ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
 use reth_primitives::{
@@ -99,7 +100,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             pending_pool: PendingPool::new(ordering),
             queued_pool: Default::default(),
             basefee_pool: Default::default(),
-            all_transactions: AllTransactions::new(config.max_account_slots),
+            all_transactions: AllTransactions::new(&config),
             config,
             metrics: Default::default(),
         }
@@ -682,12 +683,18 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     last_seen_block_hash: H256,
     /// Expected base fee for the pending block.
     pending_basefee: u64,
+    /// Configured price bump settings for replacements
+    price_bumps: PriceBumpConfig,
 }
 
 impl<T: PoolTransaction> AllTransactions<T> {
     /// Create a new instance
-    fn new(max_account_slots: usize) -> Self {
-        Self { max_account_slots, ..Default::default() }
+    fn new(config: &PoolConfig) -> Self {
+        Self {
+            max_account_slots: config.max_account_slots,
+            price_bumps: config.price_bumps,
+            ..Default::default()
+        }
     }
 
     /// Returns an iterator over all _unique_ hashes in the pool
@@ -1031,23 +1038,26 @@ impl<T: PoolTransaction> AllTransactions<T> {
         Ok(transaction)
     }
 
-    /// Returns true if `transaction_a` is underpriced compared to `transaction_B`.
+    /// Returns true if the replacement candidate is underpriced and can't replace the existing
+    /// transaction.
     fn is_underpriced(
-        transaction_a: &ValidPoolTransaction<T>,
-        transaction_b: &ValidPoolTransaction<T>,
-        price_bump: u128,
+        existing_transaction: &ValidPoolTransaction<T>,
+        maybe_replacement: &ValidPoolTransaction<T>,
+        price_bumps: &PriceBumpConfig,
     ) -> bool {
-        let tx_a_max_priority_fee_per_gas =
-            transaction_a.transaction.max_priority_fee_per_gas().unwrap_or(0);
-        let tx_b_max_priority_fee_per_gas =
-            transaction_b.transaction.max_priority_fee_per_gas().unwrap_or(0);
+        let price_bump = price_bumps.price_bump(existing_transaction.tx_type());
 
-        transaction_a.max_fee_per_gas() <=
-            transaction_b.max_fee_per_gas() * (100 + price_bump) / 100 ||
-            (tx_a_max_priority_fee_per_gas <=
-                tx_b_max_priority_fee_per_gas * (100 + price_bump) / 100 &&
-                tx_a_max_priority_fee_per_gas != 0 &&
-                tx_b_max_priority_fee_per_gas != 0)
+        let existing_max_priority_fee_per_gas =
+            maybe_replacement.transaction.max_priority_fee_per_gas().unwrap_or(0);
+        let replacement_max_priority_fee_per_gas =
+            existing_transaction.transaction.max_priority_fee_per_gas().unwrap_or(0);
+
+        maybe_replacement.max_fee_per_gas() <=
+            existing_transaction.max_fee_per_gas() * (100 + price_bump) / 100 ||
+            (existing_max_priority_fee_per_gas <=
+                replacement_max_priority_fee_per_gas * (100 + price_bump) / 100 &&
+                existing_max_priority_fee_per_gas != 0 &&
+                replacement_max_priority_fee_per_gas != 0)
     }
 
     /// Inserts a new transaction into the pool.
@@ -1117,11 +1127,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
             Entry::Occupied(mut entry) => {
                 // Transaction already exists
                 // Ensure the new transaction is not underpriced
-
                 if Self::is_underpriced(
-                    transaction.as_ref(),
                     entry.get().transaction.as_ref(),
-                    PoolConfig::default().price_bump,
+                    transaction.as_ref(),
+                    &self.price_bumps,
                 ) {
                     return Err(InsertErr::Underpriced {
                         transaction: pool_tx.transaction,
@@ -1257,6 +1266,7 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
             last_seen_block_number: 0,
             last_seen_block_hash: Default::default(),
             pending_basefee: Default::default(),
+            price_bumps: Default::default(),
         }
     }
 }

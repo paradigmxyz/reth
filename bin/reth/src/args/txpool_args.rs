@@ -56,7 +56,7 @@ impl TxPoolArgs {
                 max_size: self.queued_max_size * 1024 * 1024,
             },
             max_account_slots: self.max_account_slots,
-            price_bump: self.price_bump,
+            price_bumps: self.price_bump,
         }
     }
 }
