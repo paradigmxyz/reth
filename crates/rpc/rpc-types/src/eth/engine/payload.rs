@@ -338,7 +338,8 @@ impl TryFrom<ExecutionPayloadV1> for SealedBlock {
             timestamp: payload.timestamp.as_u64(),
             mix_hash: payload.prev_randao,
             base_fee_per_gas: Some(
-                payload.base_fee_per_gas
+                payload
+                    .base_fee_per_gas
                     .uint_try_to()
                     .map_err(|_| PayloadError::BaseFee(payload.base_fee_per_gas))?,
             ),
