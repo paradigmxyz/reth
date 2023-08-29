@@ -29,7 +29,7 @@ use reth_primitives::{
         ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
     },
     proofs, Block, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
-    SealedBlock, Transaction, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
+    SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
 };
 use reth_provider::{BlockReaderIdExt, BlockSource, PostState, StateProviderFactory};
 use reth_revm::{
@@ -682,7 +682,7 @@ where
         // convert tx to a signed transaction
         let tx = pool_tx.to_recovered_transaction();
 
-        if let Transaction::Eip4844(blob_tx) = &tx.transaction {
+        if let Some(blob_tx) = tx.transaction.as_eip4844() {
             let tx_blob_gas = blob_tx.blob_versioned_hashes.len() as u64 * DATA_GAS_PER_BLOB;
             if sum_blob_gas_used + tx_blob_gas > MAX_DATA_GAS_PER_BLOCK {
                 // we can't fit this _blob_ transaction into the block, so we mark it as invalid,
@@ -790,7 +790,9 @@ where
     // only determine cancun fields when active
     if chain_spec.is_cancun_activated_at_timestamp(attributes.timestamp) {
         // grab the blob sidecars from the executed txs
-        let blobs = pool.get_all_blobs(executed_txs.iter().map(|tx| tx.hash).collect())?;
+        let blobs = pool.get_all_blobs(
+            executed_txs.iter().filter(|tx| tx.is_eip4844()).map(|tx| tx.hash).collect(),
+        )?;
 
         // map to just the sidecars
         blob_sidecars = blobs.into_iter().map(|(_, sidecars)| sidecars).collect();
