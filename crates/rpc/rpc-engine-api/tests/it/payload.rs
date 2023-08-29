@@ -57,7 +57,7 @@ fn payload_validation() {
         b.header.extra_data = BytesMut::zeroed(32).freeze().into();
         b
     });
-    assert_matches!(TryInto::<SealedBlock>::try_into(block_with_valid_extra_data), Ok(_));
+    assert_matches!(block_with_valid_extra_data.try_into_sealed_block(None), Ok(_));
 
     // Invalid extra data
     let block_with_invalid_extra_data: Bytes = BytesMut::zeroed(33).freeze();
@@ -66,7 +66,7 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-        TryInto::<SealedBlock>::try_into(invalid_extra_data_block),
+        invalid_extra_data_block.try_into_sealed_block(None),
         Err(PayloadError::ExtraData(data)) if data == block_with_invalid_extra_data
     );
 
@@ -76,7 +76,7 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-        TryInto::<SealedBlock>::try_into(block_with_zero_base_fee),
+        block_with_zero_base_fee.try_into_sealed_block(None),
         Err(PayloadError::BaseFee(val)) if val == U256::ZERO
     );
 
@@ -86,7 +86,7 @@ fn payload_validation() {
         *tx = Bytes::new().into();
     });
     assert_matches!(
-        TryInto::<SealedBlock>::try_into(payload_with_invalid_txs),
+        payload_with_invalid_txs.try_into_sealed_block(None),
         Err(PayloadError::Decode(DecodeError::InputTooShort))
     );
 
@@ -96,7 +96,7 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-        TryInto::<SealedBlock>::try_into(block_with_ommers.clone()),
+        block_with_ommers.clone().try_into_sealed_block(None),
         Err(PayloadError::BlockHash { consensus, .. })
             if consensus == block_with_ommers.block_hash
     );
@@ -107,7 +107,7 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-        TryInto::<SealedBlock>::try_into(block_with_difficulty.clone()),
+        block_with_difficulty.clone().try_into_sealed_block(None),
         Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_difficulty.block_hash
     );
 
@@ -117,7 +117,7 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-        TryInto::<SealedBlock>::try_into(block_with_nonce.clone()),
+        block_with_nonce.clone().try_into_sealed_block(None),
         Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_nonce.block_hash
     );
 

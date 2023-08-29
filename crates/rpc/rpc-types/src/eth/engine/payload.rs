@@ -135,27 +135,28 @@ impl From<SealedBlock> for ExecutionPayload {
     }
 }
 
-/// Try to construct a block from given payload. Perform addition validation of `extra_data` and
-/// `base_fee_per_gas` fields.
-///
-/// NOTE: The log bloom is assumed to be validated during serialization.
-/// NOTE: Empty ommers, nonce and difficulty values are validated upon computing block hash and
-/// comparing the value with `payload.block_hash`.
-///
-/// See <https://github.com/ethereum/go-ethereum/blob/79a478bb6176425c2400e949890e668a3d9a3d05/core/beacon/types.go#L145>
-impl TryFrom<ExecutionPayload> for SealedBlock {
-    type Error = PayloadError;
-
-    fn try_from(payload: ExecutionPayload) -> Result<Self, Self::Error> {
-        if payload.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
-            return Err(PayloadError::ExtraData(payload.extra_data))
+impl ExecutionPayload {
+    /// Tries to create a new block from the given payload and optional parent beacon block root.
+    /// Perform additional validation of `extra_data` and `base_fee_per_gas` fields.
+    ///
+    /// NOTE: The log bloom is assumed to be validated during serialization.
+    /// NOTE: Empty ommers, nonce and difficulty values are validated upon computing block hash and
+    /// comparing the value with `payload.block_hash`.
+    ///
+    /// See <https://github.com/ethereum/go-ethereum/blob/79a478bb6176425c2400e949890e668a3d9a3d05/core/beacon/types.go#L145>
+    pub fn try_into_sealed_block(
+        self,
+        parent_beacon_block_root: Option<H256>,
+    ) -> Result<SealedBlock, PayloadError> {
+        if self.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
+            return Err(PayloadError::ExtraData(self.extra_data))
         }
 
-        if payload.base_fee_per_gas < MIN_PROTOCOL_BASE_FEE_U256 {
-            return Err(PayloadError::BaseFee(payload.base_fee_per_gas))
+        if self.base_fee_per_gas < MIN_PROTOCOL_BASE_FEE_U256 {
+            return Err(PayloadError::BaseFee(self.base_fee_per_gas))
         }
 
-        let transactions = payload
+        let transactions = self
             .transactions
             .iter()
             .map(|tx| TransactionSigned::decode(&mut tx.as_ref()))
@@ -163,32 +164,30 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
         let transactions_root = proofs::calculate_transaction_root(&transactions);
 
         let withdrawals_root =
-            payload.withdrawals.as_ref().map(|w| proofs::calculate_withdrawals_root(w));
+            self.withdrawals.as_ref().map(|w| proofs::calculate_withdrawals_root(w));
 
         let header = Header {
-            parent_hash: payload.parent_hash,
-            beneficiary: payload.fee_recipient,
-            state_root: payload.state_root,
+            parent_hash: self.parent_hash,
+            beneficiary: self.fee_recipient,
+            state_root: self.state_root,
             transactions_root,
-            receipts_root: payload.receipts_root,
+            receipts_root: self.receipts_root,
             withdrawals_root,
-            logs_bloom: payload.logs_bloom,
-            number: payload.block_number.as_u64(),
-            gas_limit: payload.gas_limit.as_u64(),
-            gas_used: payload.gas_used.as_u64(),
-            timestamp: payload.timestamp.as_u64(),
-            mix_hash: payload.prev_randao,
+            parent_beacon_block_root,
+            logs_bloom: self.logs_bloom,
+            number: self.block_number.as_u64(),
+            gas_limit: self.gas_limit.as_u64(),
+            gas_used: self.gas_used.as_u64(),
+            timestamp: self.timestamp.as_u64(),
+            mix_hash: self.prev_randao,
             base_fee_per_gas: Some(
-                payload
-                    .base_fee_per_gas
+                self.base_fee_per_gas
                     .uint_try_to()
-                    .map_err(|_| PayloadError::BaseFee(payload.base_fee_per_gas))?,
+                    .map_err(|_| PayloadError::BaseFee(self.base_fee_per_gas))?,
             ),
-            blob_gas_used: payload.blob_gas_used.map(|blob_gas_used| blob_gas_used.as_u64()),
-            excess_blob_gas: payload
-                .excess_blob_gas
-                .map(|excess_blob_gas| excess_blob_gas.as_u64()),
-            extra_data: payload.extra_data,
+            blob_gas_used: self.blob_gas_used.map(|blob_gas_used| blob_gas_used.as_u64()),
+            excess_blob_gas: self.excess_blob_gas.map(|excess_blob_gas| excess_blob_gas.as_u64()),
+            extra_data: self.extra_data,
             // Defaults
             ommers_hash: EMPTY_LIST_HASH,
             difficulty: Default::default(),
@@ -196,17 +195,17 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
         }
         .seal_slow();
 
-        if payload.block_hash != header.hash() {
+        if self.block_hash != header.hash() {
             return Err(PayloadError::BlockHash {
                 execution: header.hash(),
-                consensus: payload.block_hash,
+                consensus: self.block_hash,
             })
         }
 
         Ok(SealedBlock {
             header,
             body: transactions,
-            withdrawals: payload.withdrawals,
+            withdrawals: self.withdrawals,
             ommers: Default::default(),
         })
     }

@@ -75,7 +75,7 @@ where
             EngineApiMessageVersion::V1,
             PayloadOrAttributes::from_execution_payload(&payload, None),
         )?;
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+        Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_newpayloadv2>
@@ -87,7 +87,7 @@ where
             EngineApiMessageVersion::V2,
             PayloadOrAttributes::from_execution_payload(&payload, None),
         )?;
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+        Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
@@ -103,7 +103,7 @@ where
         )?;
 
         // TODO: validate versioned hashes and figure out what to do with parent_beacon_block_root
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+        Ok(self.inner.beacon_consensus.new_payload(payload, Some(parent_beacon_block_root)).await?)
     }
 
     /// Sends a message to the beacon consensus engine to update the fork choice _without_
@@ -443,6 +443,8 @@ where
         Ok(EngineApi::new_payload_v2(self, payload).await?)
     }
 
+    /// Handler for `engine_newPayloadV3`
+    /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
     async fn new_payload_v3(
         &self,
         _payload: ExecutionPayload,
@@ -517,6 +519,15 @@ where
         Ok(EngineApi::get_payload_v2(self, payload_id).await?)
     }
 
+    /// Handler for `engine_getPayloadV3`
+    ///
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_getpayloadv3>
+    ///
+    /// Note:
+    /// > Provider software MAY stop the corresponding build process after serving this call.
     async fn get_payload_v3(&self, _payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelope> {
         Err(jsonrpsee_types::error::ErrorCode::MethodNotFound.into())
     }
