@@ -27,7 +27,7 @@ use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
 use reth_config::{config::PruneConfig, Config};
-use reth_db::{database::Database, init_db, DatabaseEnv};
+use reth_db::{database::Database, init_db, DatabaseEnv, TableMetadata};
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
@@ -194,7 +194,10 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     }
 
     /// Execute `node` command
-    pub async fn execute(mut self, ctx: CliContext) -> eyre::Result<()> {
+    pub async fn execute<T>(mut self, ctx: CliContext) -> eyre::Result<()>
+    where
+        T: TableMetadata,
+    {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         // Raise the fd limit of the process.
@@ -212,7 +215,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let optional_tables = self.ext.get_custom_tables();
+        let optional_tables: Option<Vec<T>> = self.ext.get_custom_tables();
         let db = Arc::new(init_db(&db_path, self.db.log_level, optional_tables)?);
         info!(target: "reth::cli", "Database opened");
 

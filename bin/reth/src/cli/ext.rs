@@ -3,7 +3,9 @@
 use crate::cli::config::{PayloadBuilderConfig, RethRpcConfig};
 use clap::Args;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_db::{database::Database, TableMetadata, NO_TABLES};
+use reth_db::{
+    database::Database, table::Table, TableMetadata, TableType, TableViewer, Tables, NO_TABLES,
+};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::ChainSpec;
@@ -28,11 +30,14 @@ pub trait RethCliExt {
     ///
     /// If no additional CLI arguments are required, the [NoArgs] wrapper type can be used.
     type Node: RethNodeCommandExt;
+    /// Provides additional non-core tables for the node CLI extension.
+    type TableExt: TableMetadata;
 }
 
 /// The default CLI extension.
 impl RethCliExt for () {
     type Node = DefaultRethNodeCommandConfig;
+    type TableExt = DefaultRethTablesConfig;
 }
 
 /// A trait that allows for extending and customizing parts of the node command
@@ -107,20 +112,14 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     ///
     /// Usage: In an external binary, implement the RethNodeCommandConfig trait for a node command.
     /// Define a stage set, and then add it to the pipeline builder.
-    fn add_custom_stage<DB>(
-        &self,
-        pipeline_builder: &mut PipelineBuilder<DB>,
-    ) -> eyre::Result<()>
+    fn add_custom_stage<DB>(&self, pipeline_builder: &mut PipelineBuilder<DB>) -> eyre::Result<()>
     where
         DB: Database,
     {
         Ok(())
     }
     /// Gets information about non-core tables so they can be instantiated.
-    fn get_custom_tables<T: TableMetadata>(
-        &self,
-    ) -> Option<Vec<T>>
-    {
+    fn get_custom_tables<T: TableMetadata>(&self) -> Option<Vec<T>> {
         NO_TABLES
     }
 }
@@ -140,6 +139,37 @@ pub struct DefaultRethNodeCommandConfig;
 impl RethNodeCommandConfig for DefaultRethNodeCommandConfig {}
 
 impl RethNodeCommandConfig for () {}
+
+/// The default configuration for starting Reth with no non-core tables.
+#[derive(PartialEq)]
+pub struct DefaultRethTablesConfig;
+
+impl TableMetadata for DefaultRethTablesConfig {
+    const NUM_TABLES: usize = 0;
+
+    fn all_tables_in_group() -> Vec<Self>
+    where
+        Self: Sized + 'static,
+    {
+        vec![]
+    }
+
+    fn name(&self) -> &'static str {
+        "no extra tables"
+    }
+
+    fn table_type(&self) -> reth_db::TableType {
+        TableType::Table
+    }
+
+    fn view<T, R>(&self, visitor: &T) -> Result<R, T::Error>
+    where
+        T: TableViewer<R>,
+    {
+        let no_table: R;
+        Ok(no_table)
+    }
+}
 
 /// A helper struct that allows for wrapping a [RethNodeCommandConfig] value without providing
 /// additional CLI arguments.
