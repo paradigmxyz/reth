@@ -118,18 +118,24 @@ pub trait TransactionPool: Send + Sync + Clone {
     ///
     /// Consumer: RPC/P2P
     fn pending_transactions_listener(&self) -> Receiver<TxHash> {
-        self.pending_transactions_listener_for(PendingTransactionListenerKind::PropagateOnly)
+        self.pending_transactions_listener_for(TransactionListenerKind::PropagateOnly)
     }
 
     /// Returns a new Stream that yields transactions hashes for new __pending__ transactions
-    /// inserted into the pool depending on the given [PendingTransactionListenerKind] argument.
-    fn pending_transactions_listener_for(
-        &self,
-        kind: PendingTransactionListenerKind,
-    ) -> Receiver<TxHash>;
+    /// inserted into the pool depending on the given [TransactionListenerKind] argument.
+    fn pending_transactions_listener_for(&self, kind: TransactionListenerKind) -> Receiver<TxHash>;
 
     /// Returns a new stream that yields new valid transactions added to the pool.
-    fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>>;
+    fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
+        self.new_transactions_listener_for(TransactionListenerKind::PropagateOnly)
+    }
+
+    /// Returns a new stream that yields new valid transactions added to the pool
+    /// depending on the given [TransactionListenerKind] argument.
+    fn new_transactions_listener_for(
+        &self,
+        kind: TransactionListenerKind,
+    ) -> Receiver<NewTransactionEvent<Self::Transaction>>;
 
     /// Returns a new Stream that yields new transactions added to the pending sub-pool.
     ///
@@ -138,7 +144,10 @@ pub trait TransactionPool: Send + Sync + Clone {
     fn new_pending_pool_transactions_listener(
         &self,
     ) -> NewSubpoolTransactionStream<Self::Transaction> {
-        NewSubpoolTransactionStream::new(self.new_transactions_listener(), SubPool::Pending)
+        NewSubpoolTransactionStream::new(
+            self.new_transactions_listener_for(TransactionListenerKind::PropagateOnly),
+            SubPool::Pending,
+        )
     }
 
     /// Returns a new Stream that yields new transactions added to the basefee sub-pool.
@@ -326,12 +335,11 @@ pub trait TransactionPoolExt: TransactionPool {
     fn delete_blobs(&self, txs: Vec<H256>);
 }
 
-/// Determines what kind of new pending transactions should be emitted by a stream of pending
-/// transactions.
+/// Determines what kind of new transactions should be emitted by a stream of transactions.
 ///
 /// This gives control whether to include transactions that are allowed to be propagated.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum PendingTransactionListenerKind {
+pub enum TransactionListenerKind {
     /// Any new pending transactions
     All,
     /// Only transactions that are allowed to be propagated.
@@ -340,7 +348,7 @@ pub enum PendingTransactionListenerKind {
     PropagateOnly,
 }
 
-impl PendingTransactionListenerKind {
+impl TransactionListenerKind {
     /// Returns true if we're only interested in transactions that are allowed to be propagated.
     #[inline]
     pub fn is_propagate_only(&self) -> bool {

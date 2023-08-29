@@ -43,7 +43,6 @@ pub struct Cli<Ext: RethCliExt = ()> {
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        global = true,
         verbatim_doc_comment,
         default_value = "mainnet",
         value_parser = genesis_value_parser,

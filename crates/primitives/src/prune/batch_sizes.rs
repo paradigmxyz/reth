@@ -57,7 +57,7 @@ impl PruneBatchSizes {
         Self {
             receipts: 250,
             transaction_lookup: 250,
-            transaction_senders: 250,
+            transaction_senders: 1000,
             account_history: 1000,
             storage_history: 1000,
         }
@@ -69,7 +69,7 @@ impl PruneBatchSizes {
         Self {
             receipts: 100,
             transaction_lookup: 100,
-            transaction_senders: 100,
+            transaction_senders: 500,
             account_history: 500,
             storage_history: 500,
         }
