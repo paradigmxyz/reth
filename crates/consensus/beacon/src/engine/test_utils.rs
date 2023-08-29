@@ -69,8 +69,9 @@ impl<DB> TestEnv<DB> {
     pub async fn send_new_payload(
         &self,
         payload: ExecutionPayload,
+        parent_beacon_block_root: Option<H256>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
-        self.engine_handle.new_payload(payload).await
+        self.engine_handle.new_payload(payload, parent_beacon_block_root).await
     }
 
     /// Sends the `ExecutionPayload` message to the consensus engine and retries if the engine
@@ -78,9 +79,10 @@ impl<DB> TestEnv<DB> {
     pub async fn send_new_payload_retry_on_syncing(
         &self,
         payload: ExecutionPayload,
+        parent_beacon_block_root: Option<H256>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         loop {
-            let result = self.send_new_payload(payload.clone()).await?;
+            let result = self.send_new_payload(payload.clone(), parent_beacon_block_root).await?;
             if !result.is_syncing() {
                 return Ok(result)
             }
