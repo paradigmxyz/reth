@@ -7,7 +7,7 @@ use crate::{
 use futures::TryFutureExt;
 use reth_primitives::H256;
 use reth_rpc_types::engine::{
-    ExecutionPayloadV1, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
+    ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
 };
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -34,7 +34,7 @@ impl BeaconConsensusEngineHandle {
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_newpayloadv2>
     pub async fn new_payload(
         &self,
-        payload: ExecutionPayloadV1,
+        payload: ExecutionPayload,
         parent_beacon_block_root: Option<H256>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();

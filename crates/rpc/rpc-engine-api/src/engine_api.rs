@@ -10,9 +10,9 @@ use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hard
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
-    ExecutionPayloadBodiesV1, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
-    ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceUpdated, PayloadAttributes, PayloadId,
-    PayloadStatus, TransitionConfiguration, CAPABILITIES,
+    ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadEnvelopeV2,
+    ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceUpdated,
+    PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration, CAPABILITIES,
 };
 use reth_tasks::TaskSpawner;
 use std::sync::Arc;
@@ -72,10 +72,9 @@ where
         &self,
         payload: ExecutionPayloadV1,
     ) -> EngineApiResult<PayloadStatus> {
-        self.validate_version_specific_fields(
-            EngineApiMessageVersion::V1,
-            PayloadOrAttributes::from_execution_payload(&payload, None),
-        )?;
+        let payload = ExecutionPayload::from(payload);
+        let payload_or_attrs = PayloadOrAttributes::from_execution_payload(&payload, None);
+        self.validate_version_specific_fields(EngineApiMessageVersion::V1, &payload_or_attrs)?;
         Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
     }
 
@@ -84,10 +83,9 @@ where
         &self,
         payload: ExecutionPayloadV1,
     ) -> EngineApiResult<PayloadStatus> {
-        self.validate_version_specific_fields(
-            EngineApiMessageVersion::V2,
-            PayloadOrAttributes::from_execution_payload(&payload, None),
-        )?;
+        let payload = ExecutionPayload::from(payload);
+        let payload_or_attrs = PayloadOrAttributes::from_execution_payload(&payload, None);
+        self.validate_version_specific_fields(EngineApiMessageVersion::V2, &payload_or_attrs)?;
         Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
     }
 
@@ -98,10 +96,10 @@ where
         _versioned_hashes: Vec<H256>,
         parent_beacon_block_root: H256,
     ) -> EngineApiResult<PayloadStatus> {
-        self.validate_version_specific_fields(
-            EngineApiMessageVersion::V3,
-            PayloadOrAttributes::from_execution_payload(&payload, Some(parent_beacon_block_root)),
-        )?;
+        let payload = ExecutionPayload::from(payload);
+        let payload_or_attrs =
+            PayloadOrAttributes::from_execution_payload(&payload, Some(parent_beacon_block_root));
+        self.validate_version_specific_fields(EngineApiMessageVersion::V3, &payload_or_attrs)?;
 
         // TODO: validate versioned hashes and figure out what to do with parent_beacon_block_root
         Ok(self.inner.beacon_consensus.new_payload(payload, Some(parent_beacon_block_root)).await?)
@@ -119,7 +117,7 @@ where
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(ref attrs) = payload_attrs {
-            self.validate_version_specific_fields(EngineApiMessageVersion::V1, attrs.into())?;
+            self.validate_version_specific_fields(EngineApiMessageVersion::V1, &attrs.into())?;
         }
         Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
     }
@@ -134,7 +132,7 @@ where
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(ref attrs) = payload_attrs {
-            self.validate_version_specific_fields(EngineApiMessageVersion::V2, attrs.into())?;
+            self.validate_version_specific_fields(EngineApiMessageVersion::V2, &attrs.into())?;
         }
         Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
     }
@@ -149,7 +147,7 @@ where
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(ref attrs) = payload_attrs {
-            self.validate_version_specific_fields(EngineApiMessageVersion::V3, attrs.into())?;
+            self.validate_version_specific_fields(EngineApiMessageVersion::V3, &attrs.into())?;
         }
 
         Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
@@ -432,7 +430,7 @@ where
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_>,
+        payload_or_attrs: &PayloadOrAttributes<'_>,
     ) -> EngineApiResult<()> {
         self.validate_withdrawals_presence(
             version,

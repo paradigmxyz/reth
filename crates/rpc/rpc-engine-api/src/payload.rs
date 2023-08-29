@@ -6,7 +6,7 @@ pub(crate) enum PayloadOrAttributes<'a> {
     /// An [ExecutionPayload] and optional parent beacon block root.
     ExecutionPayload {
         /// The inner execution payload
-        payload: ExecutionPayload<'a>,
+        payload: &'a ExecutionPayload,
         /// The parent beacon block root
         parent_beacon_block_root: Option<H256>,
     },
@@ -17,14 +17,11 @@ pub(crate) enum PayloadOrAttributes<'a> {
 impl<'a> PayloadOrAttributes<'a> {
     /// Construct a [PayloadOrAttributes] from an [ExecutionPayloadV3] and optional parent beacon
     /// block root.
-    pub(crate) fn from_execution_payload<T>(
-        payload: &'a T,
+    pub(crate) fn from_execution_payload(
+        payload: &'a ExecutionPayload,
         parent_beacon_block_root: Option<H256>,
-    ) -> Self
-    where
-        &'a T: Into<ExecutionPayload<'a>>,
-    {
-        Self::ExecutionPayload { payload: payload.into(), parent_beacon_block_root }
+    ) -> Self {
+        Self::ExecutionPayload { payload, parent_beacon_block_root }
     }
 
     /// Return the withdrawals for the payload or attributes.

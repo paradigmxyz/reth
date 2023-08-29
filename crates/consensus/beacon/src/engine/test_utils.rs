@@ -27,9 +27,7 @@ use reth_provider::{
 };
 use reth_prune::Pruner;
 use reth_revm::Factory;
-use reth_rpc_types::engine::{
-    ExecutionPayloadV1, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
-};
+use reth_rpc_types::engine::{ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
 use reth_stages::{
     sets::DefaultStages, stages::HeaderSyncMode, test_utils::TestStages, ExecOutput, Pipeline,
     StageError,
@@ -68,23 +66,24 @@ impl<DB> TestEnv<DB> {
         Self { db, tip_rx, engine_handle }
     }
 
-    pub async fn send_new_payload(
+    pub async fn send_new_payload<T: Into<ExecutionPayload>>(
         &self,
-        payload: ExecutionPayloadV1,
+        payload: T,
         parent_beacon_block_root: Option<H256>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
-        self.engine_handle.new_payload(payload, parent_beacon_block_root).await
+        self.engine_handle.new_payload(payload.into(), parent_beacon_block_root).await
     }
 
     /// Sends the `ExecutionPayload` message to the consensus engine and retries if the engine
     /// is syncing.
-    pub async fn send_new_payload_retry_on_syncing(
+    pub async fn send_new_payload_retry_on_syncing<T: Clone + Into<ExecutionPayload>>(
         &self,
-        payload: ExecutionPayloadV1,
+        payload: T,
         parent_beacon_block_root: Option<H256>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         loop {
-            let result = self.send_new_payload(payload.clone(), parent_beacon_block_root).await?;
+            let result =
+                self.send_new_payload(payload.clone().into(), parent_beacon_block_root).await?;
             if !result.is_syncing() {
                 return Ok(result)
             }
