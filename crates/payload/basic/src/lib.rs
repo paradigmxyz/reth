@@ -683,14 +683,6 @@ where
         let tx = pool_tx.to_recovered_transaction();
 
         if let Transaction::Eip4844(blob_tx) = &tx.transaction {
-            // only process this tx if cancun is active
-            if chain_spec.is_cancun_activated_at_timestamp(attributes.timestamp) {
-                // mark tx and all dependent txs as invalid because we can't process blob txs
-                // until cancun is active
-                best_txs.mark_invalid(&pool_tx);
-                continue
-            }
-
             let tx_blob_gas = blob_tx.blob_versioned_hashes.len() as u64 * DATA_GAS_PER_BLOB;
             if sum_blob_gas_used + tx_blob_gas > MAX_DATA_GAS_PER_BLOCK {
                 // we can't fit this _blob_ transaction into the block, so we mark it as invalid,
