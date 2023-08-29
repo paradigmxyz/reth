@@ -34,7 +34,7 @@ pub struct TransactionLookupStage {
 
 impl Default for TransactionLookupStage {
     fn default() -> Self {
-        Self { commit_threshold: 5_000_000, prune_modes: PruneModes::default() }
+        Self { commit_threshold: 5_000_000, prune_modes: PruneModes::none() }
     }
 }
 
@@ -473,7 +473,7 @@ mod tests {
             Self {
                 tx: TestTransaction::default(),
                 commit_threshold: 1000,
-                prune_modes: PruneModes::default(),
+                prune_modes: PruneModes::none(),
             }
         }
     }

@@ -770,6 +770,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         let factory = factory.with_stack_config(stack_config);
 
+        let prune_modes = prune_config.map(|prune| prune.parts).unwrap_or_default();
+
         let header_mode =
             if continuous { HeaderSyncMode::Continuous } else { HeaderSyncMode::Tip(tip_rx) };
         let pipeline = builder
@@ -802,7 +804,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                             .clean_threshold
                             .max(stage_config.account_hashing.clean_threshold)
                             .max(stage_config.storage_hashing.clean_threshold),
-                        prune_config.map(|prune| prune.parts).unwrap_or_default(),
+                        prune_modes.clone(),
                     )
                     .with_metrics_tx(metrics_tx),
                 )
@@ -815,7 +817,10 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     stage_config.storage_hashing.commit_threshold,
                 ))
                 .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
-                .set(TransactionLookupStage::new(stage_config.transaction_lookup.commit_threshold))
+                .set(TransactionLookupStage::new(
+                    stage_config.transaction_lookup.commit_threshold,
+                    prune_modes,
+                ))
                 .set(IndexAccountHistoryStage::new(
                     stage_config.index_account_history.commit_threshold,
                 ))

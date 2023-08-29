@@ -94,7 +94,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             executor_factory,
             ExecutionStageThresholds::default(),
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
-            PruneModes::default(),
+            PruneModes::none(),
         )
     }
 

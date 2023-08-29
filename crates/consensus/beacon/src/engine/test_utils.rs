@@ -469,7 +469,7 @@ where
             db.clone(),
             self.base_config.chain_spec.clone(),
             5,
-            PruneModes::default(),
+            PruneModes::none(),
             PruneBatchSizes::default(),
         );
 
