@@ -21,7 +21,7 @@ reth-net-nat = { path = "../nat" }
 # ethereum
 discv5 = { git = "https://github.com/sigp/discv5" }
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery", "serde"] }
-enr = { version = "0.8.1", default-features = false, features = ["rust-secp256k1"] }
+enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }
 
 # async/futures
 tokio = { workspace = true, features = ["io-util", "net", "time"] }
@@ -30,6 +30,7 @@ tokio-stream.workspace = true
 # misc
 tracing.workspace = true
 thiserror.workspace = true
+parking_lot.workspace = true
 hex = "0.4"
 rand = { workspace = true, optional = true }
 generic-array = "0.14"

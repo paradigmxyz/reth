@@ -16,27 +16,30 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! This crate defines the abstractions to create and update payloads:
-//!   - [PayloadJobGenerator]: a type that knows how to create new jobs for creating payloads based
-//!     on [PayloadAttributes](reth_rpc_types::engine::PayloadAttributes).
-//!   - [PayloadJob]: a type that can yields (better) payloads over time.
+//! This crate defines abstractions to create and update payloads (blocks):
+//! - [`PayloadJobGenerator`]: a type that knows how to create new jobs for creating payloads based
+//!   on [`PayloadAttributes`](reth_rpc_types::engine::PayloadAttributes).
+//! - [`PayloadJob`]: a type that yields (better) payloads over time.
 //!
-//! This crate comes with the generic [PayloadBuilderService] responsible for managing payload jobs.
+//! This crate comes with the generic [`PayloadBuilderService`] responsible for managing payload
+//! jobs.
 //!
 //! ## Node integration
 //!
-//! In a standard node the [PayloadBuilderService] sits downstream of the engine API or rather the
-//! component that handles requests from the Beacon Node like `engine_forkchoiceUpdatedV1`.
+//! In a standard node the [`PayloadBuilderService`] sits downstream of the engine API, or rather
+//! the component that handles requests from the consensus layer like `engine_forkchoiceUpdatedV1`.
+//!
 //! Payload building is enabled if the forkchoice update request contains payload attributes.
-//! See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#engine_forkchoiceupdatedv2>
-//! If the forkchoice update request is VALID and contains payload attributes the
-//! [PayloadBuilderService] will create a new [PayloadJob] via the [PayloadJobGenerator] and start
-//! polling it until the payload is requested by the CL and the payload job is resolved:
-//! [PayloadJob::resolve]
+//!
+//! See also [the engine API docs](https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#engine_forkchoiceupdatedv2)
+//! If the forkchoice update request is `VALID` and contains payload attributes the
+//! [`PayloadBuilderService`] will create a new [`PayloadJob`] via the given [`PayloadJobGenerator`]
+//! and start polling it until the payload is requested by the CL and the payload job is resolved
+//! (see [`PayloadJob::resolve`]).
 //!
 //! ## Example
 //!
-//! A simple example of a [PayloadJobGenerator] that creates empty blocks:
+//! A simple example of a [`PayloadJobGenerator`] that creates empty blocks:
 //!
 //! ```
 //! use std::future::Future;

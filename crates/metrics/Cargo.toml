@@ -13,7 +13,7 @@ description = "reth metrics utilities"
 reth-metrics-derive = { path = "./metrics-derive" }
 
 # metrics
-metrics = "0.20.1"
+metrics.workspace = true
 
 # async
 tokio = { workspace = true, features = ["full"], optional = true }

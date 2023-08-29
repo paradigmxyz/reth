@@ -186,8 +186,8 @@ where
     ///
     /// Note:
     ///
-    /// * LMDB stores all the freelists in the designated database 0 in each environment, and the
-    ///   freelist count is stored at the beginning of the value as `libc::size_t` in the native
+    /// * MDBX stores all the freelists in the designated database 0 in each environment, and the
+    ///   freelist count is stored at the beginning of the value as `libc::uint32_t` in the native
     ///   byte order.
     ///
     /// * It will create a read transaction to traverse the freelist database.
@@ -199,16 +199,12 @@ where
 
         for result in cursor {
             let (_key, value) = result?;
-            if value.len() < mem::size_of::<usize>() {
+            if value.len() < size_of::<usize>() {
                 return Err(Error::Corrupted)
             }
 
-            let s = &value[..mem::size_of::<usize>()];
-            if cfg!(target_pointer_width = "64") {
-                freelist += NativeEndian::read_u64(s) as usize;
-            } else {
-                freelist += NativeEndian::read_u32(s) as usize;
-            }
+            let s = &value[..size_of::<usize>()];
+            freelist += NativeEndian::read_u32(s) as usize;
         }
 
         Ok(freelist)

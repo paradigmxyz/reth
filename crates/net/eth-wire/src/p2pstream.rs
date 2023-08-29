@@ -9,7 +9,7 @@ use crate::{
 use futures::{Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_codecs::derive_arbitrary;
-use reth_metrics::metrics::{self, counter};
+use reth_metrics::metrics::counter;
 use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
     hex,
@@ -827,6 +827,7 @@ impl Decodable for ProtocolVersion {
 mod tests {
     use super::*;
     use crate::{DisconnectReason, EthVersion};
+    use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use reth_ecies::util::pk2id;
     use secp256k1::{SecretKey, SECP256K1};
     use tokio::net::{TcpListener, TcpStream};
@@ -839,7 +840,7 @@ mod tests {
             protocol_version: ProtocolVersion::V5,
             client_version: "bitcoind/1.0.0".to_string(),
             capabilities: vec![EthVersion::Eth67.into()],
-            port: 30303,
+            port: DEFAULT_DISCOVERY_PORT,
             id: pk2id(&server_key.public_key(SECP256K1)),
         };
         (hello, server_key)

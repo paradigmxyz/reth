@@ -244,8 +244,21 @@ pub trait BlockWriter: Send + Sync {
         senders: Option<Vec<Address>>,
     ) -> Result<StoredBlockBodyIndices>;
 
-    /// Append blocks and insert its post state.
-    /// This will insert block data to all related tables and will update pipeline progress.
+    /// Appends a batch of sealed blocks to the blockchain, including sender information, and
+    /// updates the post-state.
+    ///
+    /// Inserts the blocks into the database and updates the state with
+    /// provided `PostState`.
+    ///
+    /// # Parameters
+    ///
+    /// - `blocks`: Vector of `SealedBlockWithSenders` instances to append.
+    /// - `state`: Post-state information to update after appending.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or an error if any operation fails.
+
     fn append_blocks_with_post_state(
         &self,
         blocks: Vec<SealedBlockWithSenders>,

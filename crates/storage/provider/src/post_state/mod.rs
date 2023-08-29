@@ -6,9 +6,11 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DatabaseError as DbError,
 };
+use reth_interfaces::Error;
 use reth_primitives::{
     bloom::logs_bloom, keccak256, proofs::calculate_receipt_root_ref, Account, Address,
-    BlockNumber, Bloom, Bytecode, Log, PruneMode, PruneModes, Receipt, StorageEntry, H256, U256,
+    BlockNumber, Bloom, Bytecode, Log, PruneMode, PruneModes, Receipt, StorageEntry, H256,
+    MINIMUM_PRUNING_DISTANCE, U256,
 };
 use reth_trie::{
     hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
@@ -600,7 +602,7 @@ impl PostState {
         mut self,
         tx: &TX,
         tip: BlockNumber,
-    ) -> Result<(), DbError> {
+    ) -> Result<(), Error> {
         self.write_history_to_db(tx, tip)?;
 
         // Write new storage state
@@ -657,21 +659,64 @@ impl PostState {
             let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
             let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
 
+            let contract_log_pruner = self
+                .prune_modes
+                .receipts_log_filter
+                .group_by_block(tip, None)
+                .map_err(|e| Error::Custom(e.to_string()))?;
+
+            // Empty implies that there is going to be
+            // addresses to include in the filter in a future block. None means there isn't any kind
+            // of configuration.
+            let mut address_filter: Option<(u64, Vec<&Address>)> = None;
+
             for (block, receipts) in self.receipts {
-                if self.prune_modes.should_prune_receipts(block, tip) {
+                // [`PrunePart::Receipts`] takes priority over [`PrunePart::ContractLogs`]
+                if receipts.is_empty() || self.prune_modes.should_prune_receipts(block, tip) {
                     continue
+                }
+
+                // All receipts from the last 128 blocks are required for blockchain tree, even with
+                // [`PrunePart::ContractLogs`].
+                let prunable_receipts =
+                    PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(block, tip);
+
+                if prunable_receipts && !contract_log_pruner.is_empty() {
+                    if address_filter.is_none() {
+                        address_filter = Some((0, vec![]));
+                    }
+
+                    // Get all addresses higher than the previous checked block up to the current
+                    // one
+                    if let Some((prev_block, filter)) = &mut address_filter {
+                        for (_, addresses) in contract_log_pruner.range(*prev_block..=block) {
+                            filter.extend_from_slice(addresses.as_slice())
+                        }
+
+                        *prev_block = block;
+                    }
                 }
 
                 let (_, body_indices) =
                     bodies_cursor.seek_exact(block)?.expect("body indices exist");
                 let tx_range = body_indices.tx_num_range();
                 assert_eq!(receipts.len(), tx_range.clone().count(), "Receipt length mismatch");
+
                 for (tx_num, receipt) in tx_range.zip(receipts) {
+                    if prunable_receipts {
+                        // If there is an address_filter, and it does not contain any of the
+                        // contract addresses, then skip writing this
+                        // receipt.
+                        if let Some((_, filter)) = &address_filter {
+                            if !receipt.logs.iter().any(|log| filter.contains(&&log.address)) {
+                                continue
+                            }
+                        }
+                    }
                     receipts_cursor.append(tx_num, receipt)?;
                 }
             }
         }
-
         Ok(())
     }
 }

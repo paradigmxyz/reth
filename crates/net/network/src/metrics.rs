@@ -1,6 +1,6 @@
 use reth_eth_wire::DisconnectReason;
 use reth_metrics::{
-    metrics::{self, Counter, Gauge},
+    metrics::{Counter, Gauge},
     Metrics,
 };
 

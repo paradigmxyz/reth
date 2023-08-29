@@ -31,7 +31,7 @@ pub struct Discv4Config {
     /// The number of allowed failures for `FindNode` requests. Default: 5.
     pub max_find_node_failures: u8,
     /// The interval to use when checking for expired nodes that need to be re-pinged. Default:
-    /// 300sec, 5min.
+    /// 10min.
     pub ping_interval: Duration,
     /// The duration of we consider a ping timed out.
     pub ping_expiration: Duration,
@@ -69,6 +69,8 @@ pub struct Discv4Config {
     /// If configured and a `external_ip_resolver` is configured, try to resolve the external ip
     /// using this interval.
     pub resolve_external_ip_interval: Option<Duration>,
+    /// The duration after which we consider a bond expired.
+    pub bond_expiration: Duration,
 }
 
 impl Discv4Config {
@@ -121,16 +123,17 @@ impl Default for Discv4Config {
             /// Every outgoing request will eventually lead to an incoming response
             udp_ingress_message_buffer: 1024,
             max_find_node_failures: 5,
-            ping_interval: Duration::from_secs(300),
+            ping_interval: Duration::from_secs(60 * 10),
             /// unified expiration and timeout durations, mirrors geth's `expiration` duration
             ping_expiration: Duration::from_secs(20),
+            bond_expiration: Duration::from_secs(60 * 60),
             enr_expiration: Duration::from_secs(20),
             neighbours_expiration: Duration::from_secs(20),
             request_timeout: Duration::from_secs(20),
 
             lookup_interval: Duration::from_secs(20),
             ban_list: Default::default(),
-            ban_duration: Some(Duration::from_secs(3600)), // 1 hour
+            ban_duration: Some(Duration::from_secs(60 * 60)), // 1 hour
             bootstrap_nodes: Default::default(),
             enable_dht_random_walk: true,
             enable_lookup: true,
@@ -197,6 +200,12 @@ impl Discv4ConfigBuilder {
     /// Sets the expiration duration for enr requests
     pub fn enr_request_expiration(&mut self, duration: Duration) -> &mut Self {
         self.config.enr_expiration = duration;
+        self
+    }
+
+    /// Sets the expiration duration for a bond with a peer
+    pub fn bond_expiration(&mut self, duration: Duration) -> &mut Self {
+        self.config.bond_expiration = duration;
         self
     }
 

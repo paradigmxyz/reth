@@ -76,15 +76,17 @@ pub struct NetworkConfig<C> {
 
 // === impl NetworkConfig ===
 
-impl<C> NetworkConfig<C> {
-    /// Create a new instance with all mandatory fields set, rest is field with defaults.
-    pub fn new(client: C, secret_key: SecretKey) -> Self {
-        Self::builder(secret_key).build(client)
-    }
-
+impl NetworkConfig<()> {
     /// Convenience method for creating the corresponding builder type
     pub fn builder(secret_key: SecretKey) -> NetworkConfigBuilder {
         NetworkConfigBuilder::new(secret_key)
+    }
+}
+
+impl<C> NetworkConfig<C> {
+    /// Create a new instance with all mandatory fields set, rest is field with defaults.
+    pub fn new(client: C, secret_key: SecretKey) -> Self {
+        NetworkConfig::builder(secret_key).build(client)
     }
 
     /// Sets the config to use for the discovery v4 protocol.

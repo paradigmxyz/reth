@@ -15,7 +15,6 @@ reth-rpc-types.workspace = true
 reth-rlp.workspace = true
 reth-interfaces.workspace = true
 reth-revm-primitives = { path = "../../revm/revm-primitives" }
-reth-metrics.workspace = true
 
 ## ethereum
 revm-primitives.workspace = true
@@ -24,6 +23,10 @@ revm-primitives.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
 futures-util.workspace = true
+
+## metrics
+reth-metrics.workspace = true
+metrics.workspace = true
 
 ## misc
 thiserror.workspace = true
