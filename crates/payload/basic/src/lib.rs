@@ -11,7 +11,7 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! reth basic payload job generator
+//! A basic payload generator for reth.
 
 use crate::metrics::PayloadBuilderMetrics;
 use futures_core::ready;
@@ -65,7 +65,7 @@ mod optimism;
 #[cfg(feature = "optimism")]
 pub use optimism::OptimismPayloadBuilder;
 
-/// The [PayloadJobGenerator] that creates [BasicPayloadJob]s.
+/// The [`PayloadJobGenerator`] that creates [`BasicPayloadJob`]s.
 pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
     /// The client that can interact with the chain.
     client: Client,

@@ -1,7 +1,8 @@
 # Pruning
 
-> WARNING: pruning and full node are experimental features of Reth, 
-> and available only on `main` branch of the main repository now.
+> Pruning and full node are new features of Reth,
+> and we will be happy to hear about your experience using them either
+> on [GitHub](https://github.com/paradigmxyz/reth/issues) or in the [Telegram group](https://t.me/paradigm_reth).  
 
 By default, Reth runs as an archive node. Such nodes have all historical blocks and the state at each of these blocks
 available for querying and tracing.
