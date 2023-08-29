@@ -4,9 +4,7 @@ use reth_codecs::{main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_STRING_CODE};
 use std::mem;
 
-/// Deposited transactions, also known as deposits are transactions which are initiated on L1, and
-/// executed on L2. This document outlines a new transaction type for deposits. It also describes
-/// how deposits are initiated on L1, along with the authorization and validation conditions on L2.
+/// Deposit transactions, also known as deposits are initiated on L1, and executed on L2.
 #[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TxDeposit {
