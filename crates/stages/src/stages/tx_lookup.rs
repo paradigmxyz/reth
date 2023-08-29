@@ -64,19 +64,23 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             if target_prunable_block > input.checkpoint().block_number {
                 input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
 
-                let target_prunable_tx_number = provider
-                    .block_body_indices(target_prunable_block)?
-                    .ok_or(ProviderError::BlockBodyIndicesNotFound(target_prunable_block))?
-                    .last_tx_num();
+                // Save prune checkpoint only if we don't have one already.
+                // Otherwise, pruner may skip the unpruned range of blocks.
+                if provider.get_prune_checkpoint(PrunePart::TransactionLookup)?.is_none() {
+                    let target_prunable_tx_number = provider
+                        .block_body_indices(target_prunable_block)?
+                        .ok_or(ProviderError::BlockBodyIndicesNotFound(target_prunable_block))?
+                        .last_tx_num();
 
-                provider.save_prune_checkpoint(
-                    PrunePart::TransactionLookup,
-                    PruneCheckpoint {
-                        block_number: Some(target_prunable_block),
-                        tx_number: Some(target_prunable_tx_number),
-                        prune_mode,
-                    },
-                )?;
+                    provider.save_prune_checkpoint(
+                        PrunePart::TransactionLookup,
+                        PruneCheckpoint {
+                            block_number: Some(target_prunable_block),
+                            tx_number: Some(target_prunable_tx_number),
+                            prune_mode,
+                        },
+                    )?;
+                }
             }
         }
         if input.target_reached() {
