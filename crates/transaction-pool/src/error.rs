@@ -1,6 +1,6 @@
 //! Transaction pool errors
 
-use reth_primitives::{Address, InvalidTransactionError, TxHash};
+use reth_primitives::{Address, BlobTransactionValidationError, InvalidTransactionError, TxHash};
 
 /// Transaction pool result type.
 pub type PoolResult<T> = Result<T, PoolError>;
@@ -141,6 +141,9 @@ pub enum InvalidPoolTransactionError {
     /// Thrown if we're unable to find the blob for a transaction that was previously extracted
     #[error("blob not found for EIP4844 transaction")]
     MissingEip4844Blob,
+    /// Thrown if validating the blob sidecar for the transaction failed.
+    #[error(transparent)]
+    InvalidEip4844Blob(BlobTransactionValidationError),
     /// Any other error that occurred while inserting/validating that is transaction specific
     #[error("{0:?}")]
     Other(Box<dyn PoolTransactionError>),
@@ -202,6 +205,10 @@ impl InvalidPoolTransactionError {
                 // this is only reachable when blob transactions are reinjected and we're unable to
                 // find the previously extracted blob
                 false
+            }
+            InvalidPoolTransactionError::InvalidEip4844Blob(_) => {
+                // This is only reachable when the blob is invalid
+                true
             }
         }
     }

@@ -7,7 +7,7 @@ use reth_primitives::{Address, U64};
 use reth_rpc_types::{trace::parity::*, TransactionInfo};
 use revm::{
     db::DatabaseRef,
-    interpreter::opcode::spec_opcode_gas,
+    interpreter::opcode::{self, spec_opcode_gas},
     primitives::{AccountInfo, ExecutionResult, ResultAndState, SpecId, KECCAK_EMPTY},
 };
 use std::collections::{HashSet, VecDeque};
@@ -363,16 +363,91 @@ impl ParityTraceBuilder {
             val: storage_change.value,
         });
 
-        let maybe_memory = match step.memory.len() {
-            0 => None,
-            _ => {
-                Some(MemoryDelta { off: step.memory_size, data: step.memory.data().clone().into() })
+        let maybe_memory = if step.memory.is_empty() {
+            None
+        } else {
+            Some(MemoryDelta { off: step.memory_size, data: step.memory.data().clone().into() })
+        };
+
+        // Calculate the stack items at this step
+        let push_stack = {
+            let step_op = step.op.u8();
+            let show_stack: usize;
+            if (opcode::PUSH0..=opcode::PUSH32).contains(&step_op) {
+                show_stack = 1;
+            } else if (opcode::SWAP1..=opcode::SWAP16).contains(&step_op) {
+                show_stack = (step_op - opcode::SWAP1) as usize + 2;
+            } else if (opcode::DUP1..=opcode::DUP16).contains(&step_op) {
+                show_stack = (step_op - opcode::DUP1) as usize + 2;
+            } else {
+                show_stack = match step_op {
+                    opcode::CALLDATALOAD |
+                    opcode::SLOAD |
+                    opcode::MLOAD |
+                    opcode::CALLDATASIZE |
+                    opcode::LT |
+                    opcode::GT |
+                    opcode::DIV |
+                    opcode::SDIV |
+                    opcode::SAR |
+                    opcode::AND |
+                    opcode::EQ |
+                    opcode::CALLVALUE |
+                    opcode::ISZERO |
+                    opcode::ADD |
+                    opcode::EXP |
+                    opcode::CALLER |
+                    opcode::SHA3 |
+                    opcode::SUB |
+                    opcode::ADDRESS |
+                    opcode::GAS |
+                    opcode::MUL |
+                    opcode::RETURNDATASIZE |
+                    opcode::NOT |
+                    opcode::SHR |
+                    opcode::SHL |
+                    opcode::EXTCODESIZE |
+                    opcode::SLT |
+                    opcode::OR |
+                    opcode::NUMBER |
+                    opcode::PC |
+                    opcode::TIMESTAMP |
+                    opcode::BALANCE |
+                    opcode::SELFBALANCE |
+                    opcode::MULMOD |
+                    opcode::ADDMOD |
+                    opcode::BASEFEE |
+                    opcode::BLOCKHASH |
+                    opcode::BYTE |
+                    opcode::XOR |
+                    opcode::ORIGIN |
+                    opcode::CODESIZE |
+                    opcode::MOD |
+                    opcode::SIGNEXTEND |
+                    opcode::GASLIMIT |
+                    opcode::DIFFICULTY |
+                    opcode::SGT |
+                    opcode::GASPRICE |
+                    opcode::MSIZE |
+                    opcode::EXTCODEHASH |
+                    opcode::SMOD |
+                    opcode::CHAINID |
+                    opcode::COINBASE => 1,
+                    _ => 0,
+                }
+            };
+            let mut push_stack = step.push_stack.clone().unwrap_or_default();
+            for idx in (0..show_stack).rev() {
+                if step.stack.len() > idx {
+                    push_stack.push(step.stack.peek(idx).unwrap_or_default())
+                }
             }
+            push_stack
         };
 
         let maybe_execution = Some(VmExecutedOperation {
             used: step.gas_remaining,
-            push: step.push_stack.clone().unwrap_or_default(),
+            push: push_stack,
             mem: maybe_memory,
             store: maybe_storage,
         });

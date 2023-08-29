@@ -5,6 +5,7 @@ use crate::{
     BeaconForkChoiceUpdateError, BeaconOnNewPayloadError,
 };
 use futures::TryFutureExt;
+use reth_primitives::H256;
 use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
 };
@@ -34,9 +35,14 @@ impl BeaconConsensusEngineHandle {
     pub async fn new_payload(
         &self,
         payload: ExecutionPayload,
+        parent_beacon_block_root: Option<H256>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx });
+        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload {
+            payload,
+            parent_beacon_block_root,
+            tx,
+        });
         rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
     }
 
