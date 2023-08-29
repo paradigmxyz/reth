@@ -5,9 +5,16 @@ use crate::{
 pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
+pub use eip1559::TxEip1559;
+pub use eip2930::TxEip2930;
+pub use eip4844::{
+    BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError, TxEip4844,
+};
 pub use error::InvalidTransactionError;
+pub use legacy::TxLegacy;
 pub use meta::TransactionMeta;
 use once_cell::sync::Lazy;
+pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
 use reth_rlp::{Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
@@ -17,14 +24,6 @@ use std::mem;
 pub use tx_type::{
     TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
-
-pub use eip1559::TxEip1559;
-pub use eip2930::TxEip2930;
-pub use eip4844::{
-    BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError, TxEip4844,
-};
-pub use legacy::TxLegacy;
-pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 
 mod access_list;
 mod eip1559;
