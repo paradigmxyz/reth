@@ -224,9 +224,9 @@ impl From<Vec<BlobTransactionSidecar>> for BlobsBundleV1 {
         let (commitments, proofs, blobs) = sidecars.into_iter().fold(
             (Vec::new(), Vec::new(), Vec::new()),
             |(mut commitments, mut proofs, mut blobs), sidecar| {
-                commitments.extend(sidecar.commitments.into_iter());
-                proofs.extend(sidecar.proofs.into_iter());
-                blobs.extend(sidecar.blobs.into_iter());
+                commitments.extend(sidecar.commitments);
+                proofs.extend(sidecar.proofs);
+                blobs.extend(sidecar.blobs);
                 (commitments, proofs, blobs)
             },
         );
