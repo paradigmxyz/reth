@@ -35,7 +35,6 @@ members = [
     "crates/rpc/rpc-types",
     "crates/rpc/rpc-testing-util",
     "crates/stages",
-    "crates/stage-extensions",
     "crates/storage/codecs",
     "crates/storage/db",
     "crates/storage/libmdbx-rs",
@@ -49,6 +48,7 @@ members = [
     "crates/rpc/rpc-types-compat",
     "examples",
     "examples/additional-rpc-namespace-in-cli",
+    "examples/additional-stage",
 ]
 default-members = ["bin/reth"]
 

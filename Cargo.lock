@@ -24,6 +24,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "additional-stage"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "clap",
+ "eyre",
+ "jsonrpsee",
+ "reth",
+ "reth-db",
+ "reth-primitives",
+ "reth-stages",
+ "reth-transaction-pool",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5265,7 +5280,6 @@ dependencies = [
  "reth-rpc-builder",
  "reth-rpc-engine-api",
  "reth-rpc-types",
- "reth-stage-extensions",
  "reth-stages",
  "reth-tasks",
  "reth-tracing",
@@ -6097,23 +6111,6 @@ dependencies = [
  "reth-primitives",
  "reth-rlp",
  "reth-rpc-types",
-]
-
-[[package]]
-name = "reth-stage-extensions"
-version = "0.1.0-alpha.6"
-dependencies = [
- "assert_matches",
- "async-trait",
- "reth-db",
- "reth-interfaces",
- "reth-primitives",
- "reth-provider",
- "reth-revm",
- "reth-rlp",
- "reth-stages",
- "serde",
- "tokio",
 ]
 
 [[package]]

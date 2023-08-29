@@ -27,7 +27,7 @@ use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
 use reth_config::{config::PruneConfig, Config};
-use reth_db::{database::Database, init_db, DatabaseEnv, TableMetadata};
+use reth_db::{database::Database, init_db, DatabaseEnv};
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
@@ -55,13 +55,12 @@ use reth_prune::BatchSizes;
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
-use reth_stage_extensions::{AddressStage, NonCoreTable};
 use reth_stages::{
     prelude::*,
     stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, HeaderSyncMode,
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
-        StorageHashingStage, TotalDifficultyStage, TransactionLookupStage, NonCoreStage,
+        StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
     },
     MetricEventsSender, MetricsListener,
 };
@@ -213,7 +212,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let optional_tables = Some(NonCoreTable::all_tables_in_group());
+        let optional_tables = self.ext.get_custom_tables();
         let db = Arc::new(init_db(&db_path, self.db.log_level, optional_tables)?);
         info!(target: "reth::cli", "Database opened");
 
@@ -769,10 +768,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         let header_mode =
             if continuous { HeaderSyncMode::Continuous } else { HeaderSyncMode::Tip(tip_rx) };
-        let mut pipeline_builder = builder
-            .with_tip_sender(tip_tx)
-            .with_metrics_tx(metrics_tx.clone())
-            .add_stages(
+        let mut pipeline_builder =
+            builder.with_tip_sender(tip_tx).with_metrics_tx(metrics_tx.clone()).add_stages(
                 DefaultStages::new(
                     header_mode,
                     Arc::clone(&consensus),
@@ -818,14 +815,10 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 ))
                 .set(IndexStorageHistoryStage::new(
                     stage_config.index_storage_history.commit_threshold,
-                ))
+                )),
             );
-            // TODO: Get non-core stages from CLI args or config file.
-            let non_core_stages = vec![AddressStage::new()];
-            for stage in non_core_stages {
-                pipeline_builder = pipeline_builder.add_stage(stage);
-            };
-            let pipeline = pipeline_builder.build(db, self.chain.clone());
+        self.ext.add_custom_stage(&mut pipeline_builder)?;
+        let pipeline = pipeline_builder.build(db, self.chain.clone());
 
         Ok(pipeline)
     }

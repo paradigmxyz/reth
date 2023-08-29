@@ -201,10 +201,10 @@ pub mod test_utils {
     /// Create read/write database for testing
     pub fn create_test_rw_db() -> Arc<DatabaseEnv> {
         Arc::new(
-            init_db::<_, Tables>(
+            init_db(
                 tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
                 None,
-                None,
+                NO_TABLES,
             )
             .expect(ERROR_DB_CREATION),
         )
@@ -212,16 +212,16 @@ pub mod test_utils {
 
     /// Create read/write database for testing
     pub fn create_test_rw_db_with_path<P: AsRef<Path>>(path: P) -> Arc<DatabaseEnv> {
-        Arc::new(init_db::<&Path, Tables>(path.as_ref(), None, None).expect(ERROR_DB_CREATION))
+        Arc::new(init_db(path.as_ref(), None, NO_TABLES).expect(ERROR_DB_CREATION))
     }
 
     /// Create read only database for testing
-    pub fn create_test_ro_db<T: TableMetadata>() -> Arc<DatabaseEnvRO> {
+    pub fn create_test_ro_db() -> Arc<DatabaseEnvRO> {
         let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
         {
-            init_db::<&Path, T>(path.as_path(), None, None).expect(ERROR_DB_CREATION);
+            init_db(path.as_path(), None, NO_TABLES).expect(ERROR_DB_CREATION);
         }
-        Arc::new(open_db_read_only::<T>(path.as_path(), None, None).expect(ERROR_DB_OPEN))
+        Arc::new(open_db_read_only(path.as_path(), None, NO_TABLES).expect(ERROR_DB_OPEN))
     }
 }
 

@@ -3,6 +3,7 @@
 use crate::cli::config::{PayloadBuilderConfig, RethRpcConfig};
 use clap::Args;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
+use reth_db::{database::Database, TableMetadata, NO_TABLES};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::ChainSpec;
@@ -11,6 +12,7 @@ use reth_provider::{
     StateProviderFactory,
 };
 use reth_rpc_builder::{RethModuleRegistry, TransportRpcModules};
+use reth_stages::PipelineBuilder;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::{fmt, sync::Arc};
@@ -100,6 +102,26 @@ pub trait RethNodeCommandConfig: fmt::Debug {
         executor.spawn_critical("payload builder service", Box::pin(payload_service));
 
         Ok(payload_builder)
+    }
+    /// Add a new stage to be executed after native Reth stages.
+    ///
+    /// Usage: In an external binary, implement the RethNodeCommandConfig trait for a node command.
+    /// Define a stage set, and then add it to the pipeline builder.
+    fn add_custom_stage<DB>(
+        &self,
+        pipeline_builder: &mut PipelineBuilder<DB>,
+    ) -> eyre::Result<()>
+    where
+        DB: Database,
+    {
+        Ok(())
+    }
+    /// Gets information about non-core tables so they can be instantiated.
+    fn get_custom_tables<T: TableMetadata>(
+        &self,
+    ) -> Option<Vec<T>>
+    {
+        NO_TABLES
     }
 }
 

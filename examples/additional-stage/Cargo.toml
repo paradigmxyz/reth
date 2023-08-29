@@ -1,0 +1,20 @@
+[package]
+name = "additional-stage"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# reth
+reth.workspace = true
+reth-db = { workspace = true, features = ["mdbx", "test-utils"] }
+reth-primitives.workspace = true
+reth-stages = { path = "../../crates/stages" }
+reth-transaction-pool.workspace = true
+
+# misc
+async-trait.workspace = true
+clap = { version = "4", features = ["derive"] }
+jsonrpsee = { workspace = true, features = ["server", "macros"] }
+eyre = "0.6"
