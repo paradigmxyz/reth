@@ -9,8 +9,8 @@ use reth_primitives::{
     Address, BlobTransactionSidecar, BlobTransactionValidationError,
     FromRecoveredPooledTransaction, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId,
     PooledTransactionsElement, PooledTransactionsElementEcRecovered, SealedBlock, Transaction,
-    TransactionKind, TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
-    H256, U256,
+    TransactionKind, TransactionSignedEcRecovered, TxEip4844, TxHash, EIP1559_TX_TYPE_ID,
+    EIP4844_TX_TYPE_ID, H256, U256,
 };
 use reth_rlp::Encodable;
 use std::{
@@ -656,6 +656,9 @@ pub trait EthPoolTransaction: PoolTransaction {
     /// Extracts the blob sidecar from the transaction.
     fn take_blob(&mut self) -> EthBlobTransactionSidecar;
 
+    /// Returns the transaction as EIP-4844 transaction if it is one.
+    fn as_eip4844(&self) -> Option<&TxEip4844>;
+
     /// Validates the blob sidecar of the transaction with the given settings.
     fn validate_blob(
         &self,
@@ -843,6 +846,10 @@ impl EthPoolTransaction for EthPooledTransaction {
         } else {
             EthBlobTransactionSidecar::None
         }
+    }
+
+    fn as_eip4844(&self) -> Option<&TxEip4844> {
+        self.transaction.as_eip4844()
     }
 
     fn validate_blob(

@@ -74,7 +74,6 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     /// Toggle to determine if a local transaction should be propagated
     propagate_local_transactions: bool,
     /// Stores the setup and parameters needed for validating KZG proofs.
-    #[allow(unused)]
     kzg_settings: Arc<KzgSettings>,
     /// Marker for the transaction type
     _marker: PhantomData<T>,
@@ -198,7 +197,7 @@ where
             }
         }
 
-        let mut blob_sidecar = None;
+        let mut maybe_blob_sidecar = None;
 
         // blob tx checks
         if transaction.is_eip4844() {
@@ -230,8 +229,23 @@ where
                     }
                 }
                 EthBlobTransactionSidecar::Present(blob) => {
-                    //TODO(mattsse): verify the blob
-                    blob_sidecar = Some(blob);
+                    if let Some(eip4844) = transaction.as_eip4844() {
+                        // validate the blob
+                        if let Err(err) = eip4844.validate_blob(&blob, &self.kzg_settings) {
+                            return TransactionValidationOutcome::Invalid(
+                                transaction,
+                                InvalidPoolTransactionError::InvalidEip4844Blob(err),
+                            )
+                        }
+                        // store the extracted blob
+                        maybe_blob_sidecar = Some(blob);
+                    } else {
+                        // this should not happen
+                        return TransactionValidationOutcome::Invalid(
+                            transaction,
+                            InvalidTransactionError::TxTypeNotSupported.into(),
+                        )
+                    }
                 }
             }
         }
@@ -281,7 +295,7 @@ where
         TransactionValidationOutcome::Valid {
             balance: account.balance,
             state_nonce: account.nonce,
-            transaction: ValidTransaction::new(transaction, blob_sidecar),
+            transaction: ValidTransaction::new(transaction, maybe_blob_sidecar),
             // by this point assume all external transactions should be propagated
             propagate: match origin {
                 TransactionOrigin::External => true,
