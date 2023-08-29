@@ -213,12 +213,14 @@ fn stage_checkpoint<DB: Database>(
     let pruned_entries = provider
         .get_prune_checkpoint(PrunePart::TransactionLookup)?
         .and_then(|checkpoint| checkpoint.tx_number)
+        // `+1` is needed because `TxNumber` is 0-indexed
+        .map(|tx_number| tx_number + 1)
         .unwrap_or_default();
     Ok(EntitiesCheckpoint {
         // If `TxHashNumber` table was pruned, we will have a number of entries in it not matching
         // the actual number of processed transactions. To fix that, we add the number of pruned
-        // `TxHashNumber` entries. `+1` is needed because `TxNumber` is 0-indexed.
-        processed: provider.tx_ref().entries::<tables::TxHashNumber>()? as u64 + pruned_entries + 1,
+        // `TxHashNumber` entries.
+        processed: provider.tx_ref().entries::<tables::TxHashNumber>()? as u64 + pruned_entries,
         total: provider.tx_ref().entries::<tables::Transactions>()? as u64,
     })
 }
