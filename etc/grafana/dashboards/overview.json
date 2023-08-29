@@ -249,35 +249,6 @@
         }
       ],
       "title": "Stage checkpoints",
-      "transformations": [
-        {
-          "id": "joinByField",
-          "options": {
-            "mode": "outer"
-          }
-        },
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {},
-            "indexByName": {
-              "AccountHashing": 6,
-              "Bodies": 2,
-              "Execution": 4,
-              "Finish": 12,
-              "Headers": 0,
-              "IndexAccountHistory": 11,
-              "IndexStorageHistory": 10,
-              "MerkleExecute": 8,
-              "MerkleUnwind": 5,
-              "SenderRecovery": 3,
-              "StorageHashing": 7,
-              "TotalDifficulty": 1,
-              "TransactionLookup": 9
-            }
-          }
-        }
-      ],
       "transparent": true,
       "type": "bargauge"
     },
@@ -3962,6 +3933,101 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 144
+      },
+      "id": 114,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "rate(reth_consensus_engine_beacon_make_canonical_committed_latency_sum{instance=~\"$instance\"}[$__rate_interval]) / rate(reth_consensus_engine_beacon_make_canonical_committed_latency_count{instance=~\"$instance\"}[$__rate_interval])",
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Canonical Commit Latency time",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -5500,7 +5566,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(increase(reth_rpc_server_request_latency{instance=~\"$instance\"}[$__interval])) by (quantile)",
+          "expr": "sum(increase(reth_rpc_server_request_latency{instance=~\"$instance\"}[$__rate_interval])) by (quantile)",
           "format": "time_series",
           "instant": false,
           "legendFormat": "{{quantile}}",
@@ -5589,7 +5655,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(increase(reth_rpc_server_call_latency{instance=~\"$instance\"}[$__interval])) by (quantile)",
+          "expr": "sum(increase(reth_rpc_server_call_latency{instance=~\"$instance\"}[$__rate_interval])) by (quantile)",
           "format": "time_series",
           "instant": false,
           "legendFormat": "{{quantile}}",
@@ -5640,6 +5706,6 @@
   "timezone": "",
   "title": "reth",
   "uid": "2k8BXz24x",
-  "version": 7,
+  "version": 8,
   "weekStart": ""
 }
