@@ -1,5 +1,3 @@
-use std::ops::Deref;
-
 use reth_primitives::{
     constants::{MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
     proofs::{self, EMPTY_LIST_HASH},
@@ -53,7 +51,7 @@ pub struct ExecutionPayloadEnvelope {
     pub block_value: U256,
     /// The blobs, commitments, and proofs associated with the executed payload.
     #[serde(rename = "blobsBundle", skip_serializing_if = "Option::is_none")]
-    pub blobs_bundle: Option<BlobsBundleV1>,
+    pub blobs_bundle: Option<BlobTransactionSidecar>,
     /// Introduced in V3, this represents a suggestion from the execution layer if the payload
     /// should be used instead of an externally provided one.
     #[serde(rename = "shouldOverrideBuilder", skip_serializing_if = "Option::is_none")]
@@ -209,31 +207,6 @@ impl ExecutionPayload {
             withdrawals: self.withdrawals,
             ommers: Default::default(),
         })
-    }
-}
-
-/// This includes all bundled blob related data of an executed payload.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BlobsBundleV1 {
-    pub commitments: Vec<Bytes>,
-    pub proofs: Vec<Bytes>,
-    pub blobs: Vec<Bytes>,
-}
-
-impl From<Vec<BlobTransactionSidecar>> for BlobsBundleV1 {
-    fn from(sidecars: Vec<BlobTransactionSidecar>) -> Self {
-        // TODO: either upstream a conversion or upstream QUANTITY serde impls
-        let (commitments, proofs, blobs) = sidecars.into_iter().fold(
-            (Vec::new(), Vec::new(), Vec::new()),
-            |(mut commitments, mut proofs, mut blobs), sidecar| {
-                commitments
-                    .extend(sidecar.commitments.iter().map(|sidecar| Bytes::from(sidecar.deref())));
-                proofs.extend(sidecar.proofs.iter().map(|proof| Bytes::from(proof.deref())));
-                blobs.extend(sidecar.blobs.iter().map(|blob| Bytes::from(blob.deref())));
-                (commitments, proofs, blobs)
-            },
-        );
-        Self { commitments, proofs, blobs }
     }
 }
 
