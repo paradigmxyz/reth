@@ -17,7 +17,6 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-revm = { path = "../../crates/revm" }
 reth-revm-inspectors = { path = "../../crates/revm/revm-inspectors" }
 reth-stages = { path = "../../crates/stages" }
-reth-stage-extensions = { path = "../../crates/stage-extensions" }
 reth-interfaces = { workspace = true, features = ["test-utils", "clap"] }
 reth-transaction-pool.workspace = true
 reth-beacon-consensus = { path = "../../crates/consensus/beacon" }
