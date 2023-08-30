@@ -557,6 +557,9 @@ pub enum PayloadError {
         /// The block hash provided with the payload.
         consensus: H256,
     },
+    /// Expected blob versioned hashes do not match the given transactions.
+    #[error("Expected blob versioned hashes do not match the given transactions")]
+    InvalidVersionedHashes,
     /// Encountered decoding error.
     #[error(transparent)]
     Decode(#[from] reth_rlp::DecodeError),
