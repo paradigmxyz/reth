@@ -1,5 +1,6 @@
 use crate::{
     compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR},
+    constants::eip4844::DATA_GAS_PER_BLOB,
     keccak256, Address, Bytes, TxHash, H256,
 };
 pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
@@ -230,6 +231,15 @@ impl Transaction {
             }
             _ => None,
         }
+    }
+
+    /// Returns the blob gas used for all blobs of the EIP-4844 transaction if it is an EIP-4844
+    /// transaction.
+    ///
+    /// This is the number of blobs times the [DATA_GAS_PER_BLOB] a single blob consumes.
+    pub fn blob_gas_used(&self) -> Option<u128> {
+        let tx = self.as_eip4844()?;
+        Some(tx.blob_versioned_hashes.len() as u128 * DATA_GAS_PER_BLOB as u128)
     }
 
     /// Return the max priority fee per gas if the transaction is an EIP-1559 transaction, and
