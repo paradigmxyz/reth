@@ -15,7 +15,7 @@ pub(crate) enum PayloadOrAttributes<'a> {
 }
 
 impl<'a> PayloadOrAttributes<'a> {
-    /// Construct a [PayloadOrAttributes] from an [ExecutionPayloadV3] and optional parent beacon
+    /// Construct a [PayloadOrAttributes] from an [ExecutionPayload] and optional parent beacon
     /// block root.
     pub(crate) fn from_execution_payload(
         payload: &'a ExecutionPayload,
