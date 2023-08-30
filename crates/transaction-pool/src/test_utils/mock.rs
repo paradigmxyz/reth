@@ -399,6 +399,10 @@ impl PoolTransaction for MockTransaction {
         }
     }
 
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        None
+    }
+
     fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
         let base_fee = base_fee as u128;
         let max_fee_per_gas = self.max_fee_per_gas();

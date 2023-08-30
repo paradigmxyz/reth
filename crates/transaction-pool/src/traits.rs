@@ -613,6 +613,11 @@ pub trait PoolTransaction:
     /// This will return `None` for non-EIP1559 transactions
     fn max_priority_fee_per_gas(&self) -> Option<u128>;
 
+    /// Returns the EIP-4844 max fee per data gas
+    ///
+    /// This will return `None` for non-EIP4844 transactions
+    fn max_fee_per_blob_gas(&self) -> Option<u128>;
+
     /// Returns the effective tip for this transaction.
     ///
     /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
@@ -796,6 +801,10 @@ impl PoolTransaction for EthPooledTransaction {
             Transaction::Eip1559(tx) => Some(tx.max_priority_fee_per_gas),
             Transaction::Eip4844(tx) => Some(tx.max_priority_fee_per_gas),
         }
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        self.transaction.max_fee_per_blob_gas()
     }
 
     /// Returns the effective tip for this transaction.
