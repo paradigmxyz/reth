@@ -1,10 +1,10 @@
 use crate::{
-    BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
-    CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider,
-    PostStateDataProvider, ProviderError, PruneCheckpointReader, ReceiptProvider,
-    ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox, StateProviderFactory,
-    TransactionsProvider, WithdrawalsProvider,
+    traits::DatabaseReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
+    BlockReaderIdExt, BlockchainTreePendingStateProvider, CanonChainTracker,
+    CanonStateNotifications, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
+    EvmEnvProvider, HeaderProvider, PostStateDataProvider, ProviderError, PruneCheckpointReader,
+    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox,
+    StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, models::StoredBlockBodyIndices};
 use reth_interfaces::{
@@ -835,5 +835,16 @@ where
 {
     fn account_block_changeset(&self, block_number: BlockNumber) -> Result<Vec<AccountBeforeTx>> {
         self.database.provider()?.account_block_changeset(block_number)
+    }
+}
+
+impl<DB, Tree> DatabaseReader<DB> for BlockchainProvider<DB, Tree>
+where
+    DB: Database,
+    Tree: Sync + Send,
+{
+    fn database(&self) -> Result<DatabaseProviderRO<'_, &DB>> {
+        let provider = self.database.provider()?;
+        Ok(provider)
     }
 }
