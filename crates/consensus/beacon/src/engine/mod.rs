@@ -31,7 +31,8 @@ use reth_provider::{
 };
 use reth_prune::Pruner;
 use reth_rpc_types::engine::{
-    ExecutionPayload, PayloadAttributes, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
+    CancunPayloadFields, ExecutionPayload, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
+    PayloadValidationError,
 };
 use reth_stages::{ControlFlow, Pipeline, PipelineError};
 use reth_tasks::TaskSpawner;
@@ -1049,13 +1050,16 @@ where
     ///
     /// This returns a [`PayloadStatus`] that represents the outcome of a processed new payload and
     /// returns an error if an internal error occurred.
-    #[instrument(level = "trace", skip(self, payload, parent_beacon_block_root), fields(block_hash= ?payload.block_hash(), block_number = %payload.block_number(), is_pipeline_idle = %self.sync.is_pipeline_idle()), target = "consensus::engine")]
+    #[instrument(level = "trace", skip(self, payload, cancun_fields), fields(block_hash= ?payload.block_hash(), block_number = %payload.block_number(), is_pipeline_idle = %self.sync.is_pipeline_idle()), target = "consensus::engine")]
     fn on_new_payload(
         &mut self,
         payload: ExecutionPayload,
-        parent_beacon_block_root: Option<H256>,
+        cancun_fields: Option<CancunPayloadFields>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
-        let block = match self.ensure_well_formed_payload(payload, parent_beacon_block_root) {
+        let block = match self.ensure_well_formed_payload(
+            payload,
+            cancun_fields.map(|fields| fields.parent_beacon_block_root),
+        ) {
             Ok(block) => block,
             Err(status) => return Ok(status),
         };
@@ -1727,9 +1731,9 @@ where
                             }
                         }
                     }
-                    BeaconEngineMessage::NewPayload { payload, parent_beacon_block_root, tx } => {
+                    BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {
                         this.metrics.new_payload_messages.increment(1);
-                        let res = this.on_new_payload(payload, parent_beacon_block_root);
+                        let res = this.on_new_payload(payload, cancun_fields);
                         let _ = tx.send(res);
                     }
                     BeaconEngineMessage::TransitionConfigurationExchanged => {
