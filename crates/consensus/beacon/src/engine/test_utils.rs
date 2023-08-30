@@ -76,14 +76,15 @@ impl<DB> TestEnv<DB> {
 
     /// Sends the `ExecutionPayload` message to the consensus engine and retries if the engine
     /// is syncing.
-    pub async fn send_new_payload_retry_on_syncing<T: Clone + Into<ExecutionPayload>>(
+    pub async fn send_new_payload_retry_on_syncing<T: Into<ExecutionPayload>>(
         &self,
         payload: T,
         parent_beacon_block_root: Option<H256>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
+        let payload: ExecutionPayload = payload.into();
         loop {
             let result =
-                self.send_new_payload(payload.clone().into(), parent_beacon_block_root).await?;
+                self.send_new_payload(payload.clone(), parent_beacon_block_root).await?;
             if !result.is_syncing() {
                 return Ok(result)
             }
