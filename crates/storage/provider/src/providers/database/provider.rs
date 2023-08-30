@@ -454,6 +454,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         // middle or in the end, so it's safe to do `senders_recovered.extend(senders.iter())`
         senders_recovered.extend(senders.iter());
         senders = senders_recovered;
+        debug_assert_eq!(senders.len(), transactions_len, "missing one or more senders");
 
         if TAKE {
             // Remove TxHashNumber
