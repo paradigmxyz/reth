@@ -1197,7 +1197,7 @@ where
 
             // we can use `zip` safely here because we already compared their length
             let zipped_versioned_hashes =
-                fields.versioned_hashes.iter().zip(block_versioned_hashes.into_iter());
+                fields.versioned_hashes.iter().zip(block_versioned_hashes);
             for (payload_versioned_hash, block_versioned_hash) in zipped_versioned_hashes {
                 if payload_versioned_hash != block_versioned_hash {
                     // One of the hashes does not match - return invalid
