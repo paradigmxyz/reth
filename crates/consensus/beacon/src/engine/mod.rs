@@ -1165,7 +1165,7 @@ where
     ///
     /// This validates versioned hashes according to the Engine API Cancun spec:
     /// <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification>
-   fn validate_versioned_hashes(
+    fn validate_versioned_hashes(
         &self,
         parent_hash: H256,
         block_versioned_hashes: Vec<&H256>,
