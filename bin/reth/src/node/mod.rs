@@ -215,7 +215,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let optional_tables: Option<Vec<T>> = self.ext.get_custom_tables();
+        let optional_tables = self.ext.get_custom_tables();
         let db = Arc::new(init_db(&db_path, self.db.log_level, optional_tables)?);
         info!(target: "reth::cli", "Database opened");
 

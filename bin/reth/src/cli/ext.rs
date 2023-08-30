@@ -31,18 +31,24 @@ pub trait RethCliExt {
     /// If no additional CLI arguments are required, the [NoArgs] wrapper type can be used.
     type Node: RethNodeCommandExt;
     /// Provides additional non-core tables for the node CLI extension.
+    ///
+    /// For no extra tables, use: `type TableExt = NoAdditionalTablesConfig`
     type TableExt: TableMetadata;
 }
 
 /// The default CLI extension.
 impl RethCliExt for () {
     type Node = DefaultRethNodeCommandConfig;
-    type TableExt = DefaultRethTablesConfig;
+    type TableExt = NoAdditionalTablesConfig;
 }
 
 /// A trait that allows for extending and customizing parts of the node command
 /// [NodeCommand](crate::node::NodeCommand).
 pub trait RethNodeCommandConfig: fmt::Debug {
+    /// Provides additional non-core tables for the node CLI extension.
+    ///
+    /// For no extra tables, use: `type TableExt = NoAdditionalTablesConfig`
+    type TableExt: TableMetadata + 'static;
     /// Allows for registering additional RPC modules for the transports.
     ///
     /// This is expected to call the merge functions of [TransportRpcModules], for example
@@ -112,15 +118,19 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     ///
     /// Usage: In an external binary, implement the RethNodeCommandConfig trait for a node command.
     /// Define a stage set, and then add it to the pipeline builder.
-    fn add_custom_stage<DB>(&self, pipeline_builder: &mut PipelineBuilder<DB>) -> eyre::Result<()>
+    fn add_custom_stage<DB>(&self, _pipeline_builder: &mut PipelineBuilder<DB>) -> eyre::Result<()>
     where
         DB: Database,
     {
         Ok(())
     }
     /// Gets information about non-core tables so they can be instantiated.
-    fn get_custom_tables<T: TableMetadata>(&self) -> Option<Vec<T>> {
-        NO_TABLES
+    fn get_custom_tables(&self) -> Option<Vec<Self::TableExt>> {
+        let extra_tables = Self::TableExt::all_tables_in_group();
+        if extra_tables.is_empty() {
+            return None
+        }
+        Some(extra_tables)
     }
 }
 
@@ -136,15 +146,19 @@ impl<T> RethNodeCommandExt for T where T: RethNodeCommandConfig + fmt::Debug + c
 #[derive(Debug, Clone, Copy, Default, Args)]
 pub struct DefaultRethNodeCommandConfig;
 
-impl RethNodeCommandConfig for DefaultRethNodeCommandConfig {}
+impl RethNodeCommandConfig for DefaultRethNodeCommandConfig {
+    type TableExt = NoAdditionalTablesConfig;
+}
 
-impl RethNodeCommandConfig for () {}
+impl RethNodeCommandConfig for () {
+    type TableExt = NoAdditionalTablesConfig;
+}
 
 /// The default configuration for starting Reth with no non-core tables.
 #[derive(PartialEq)]
-pub struct DefaultRethTablesConfig;
+pub struct NoAdditionalTablesConfig;
 
-impl TableMetadata for DefaultRethTablesConfig {
+impl TableMetadata for NoAdditionalTablesConfig {
     const NUM_TABLES: usize = 0;
 
     fn all_tables_in_group() -> Vec<Self>
@@ -162,12 +176,11 @@ impl TableMetadata for DefaultRethTablesConfig {
         TableType::Table
     }
 
-    fn view<T, R>(&self, visitor: &T) -> Result<R, T::Error>
+    fn view<T, R>(&self, _visitor: &T) -> Result<R, T::Error>
     where
         T: TableViewer<R>,
     {
-        let no_table: R;
-        Ok(no_table)
+        unimplemented!("Called view on helper implementation")
     }
 }
 
@@ -215,6 +228,8 @@ impl<T> NoArgs<T> {
 }
 
 impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
+    type TableExt = NoAdditionalTablesConfig;
+
     fn extend_rpc_modules<Conf, Provider, Pool, Network, Tasks, Events>(
         &mut self,
         config: &Conf,

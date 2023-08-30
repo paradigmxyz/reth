@@ -1,4 +1,5 @@
-//! Example of how to add an additional stage to Reth.
+//! Example of how to add a custom index to Reth. The index is populated by a custom stage,
+//! and can be queried by a custom JSON-RPC endpoint.
 //!
 //! Run with
 //!
@@ -32,7 +33,7 @@ use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth::{
     cli::{
         config::RethRpcConfig,
-        ext::{RethCliExt, RethNodeCommandConfig},
+        ext::{NoAdditionalTablesConfig, RethCliExt, RethNodeCommandConfig},
         Cli,
     },
     db,
@@ -66,6 +67,8 @@ struct MyRethCliExt;
 impl RethCliExt for MyRethCliExt {
     /// This tells the reth CLI to install the `mynamespace` rpc namespace via `RethCliNamespaceExt`
     type Node = RethCliNamespaceExt;
+    /// This tells the reth CLI to use additional non-core tables.
+    type TableExt = NonCoreTable;
 }
 
 /// Our custom cli args extension that adds one flag to reth default CLI.
@@ -78,6 +81,8 @@ struct RethCliNamespaceExt {
 
 // Note: For all the methods in this trait, the method arguments are provided by Reth.
 impl RethNodeCommandConfig for RethCliNamespaceExt {
+    type TableExt = NonCoreTable;
+
     // This is the entrypoint for the CLI to extend the RPC server with custom rpc namespaces.
     fn extend_rpc_modules<Conf, Provider, Pool, Network, Tasks, Events>(
         &mut self,
@@ -123,9 +128,6 @@ impl RethNodeCommandConfig for RethCliNamespaceExt {
         // Add set to pipeline.
         pipeline_builder.add_stages(set);
         Ok(())
-    }
-    fn get_custom_tables<T: TableMetadata>(&self) -> Option<Vec<T>> {
-        Some(NonCoreTable::all_tables_in_group())
     }
 }
 
