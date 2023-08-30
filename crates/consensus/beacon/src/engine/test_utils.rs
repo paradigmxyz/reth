@@ -83,8 +83,7 @@ impl<DB> TestEnv<DB> {
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let payload: ExecutionPayload = payload.into();
         loop {
-            let result =
-                self.send_new_payload(payload.clone(), parent_beacon_block_root).await?;
+            let result = self.send_new_payload(payload.clone(), parent_beacon_block_root).await?;
             if !result.is_syncing() {
                 return Ok(result)
             }
