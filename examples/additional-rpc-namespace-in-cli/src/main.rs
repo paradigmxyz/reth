@@ -22,11 +22,12 @@ use reth::{
     network::{NetworkInfo, Peers},
     providers::{
         BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-        EvmEnvProvider, StateProviderFactory,
+        DatabaseReader, EvmEnvProvider, StateProviderFactory,
     },
     rpc::builder::{RethModuleRegistry, TransportRpcModules},
     tasks::TaskSpawner,
 };
+use reth_db::database::Database;
 use reth_transaction_pool::TransactionPool;
 
 fn main() {
@@ -54,7 +55,7 @@ struct RethCliTxpoolExt {
 impl RethNodeCommandConfig for RethCliTxpoolExt {
     type TableExt = NoAdditionalTablesConfig;
     // This is the entrypoint for the CLI to extend the RPC server with custom rpc namespaces.
-    fn extend_rpc_modules<Conf, Provider, Pool, Network, Tasks, Events>(
+    fn extend_rpc_modules<Conf, Provider, Pool, Network, Tasks, Events, DB>(
         &mut self,
         _config: &Conf,
         registry: &mut RethModuleRegistry<Provider, Pool, Network, Tasks, Events>,
@@ -62,7 +63,9 @@ impl RethNodeCommandConfig for RethCliTxpoolExt {
     ) -> eyre::Result<()>
     where
         Conf: RethRpcConfig,
-        Provider: BlockReaderIdExt
+        DB: Database + 'static,
+        Provider: DatabaseReader<DB>
+            + BlockReaderIdExt
             + StateProviderFactory
             + EvmEnvProvider
             + ChainSpecProvider

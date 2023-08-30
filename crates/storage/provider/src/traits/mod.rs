@@ -15,6 +15,9 @@ pub use block_hash::BlockHashReader;
 mod block_id;
 pub use block_id::{BlockIdReader, BlockNumReader};
 
+mod database;
+pub use database::DatabaseReader;
+
 mod evm_env;
 pub use evm_env::EvmEnvProvider;
 

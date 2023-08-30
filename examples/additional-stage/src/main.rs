@@ -26,6 +26,7 @@
 //! Specifically, the example adds a new stage that records the most recent block that a miner
 //! produced. A new table stores this data. The JSON-RPC method returns the latest block produced
 //! (if any) for any given address.
+
 use std::sync::Arc;
 
 use clap::Parser;
@@ -33,19 +34,18 @@ use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth::{
     cli::{
         config::RethRpcConfig,
-        ext::{NoAdditionalTablesConfig, RethCliExt, RethNodeCommandConfig},
+        ext::{RethCliExt, RethNodeCommandConfig},
         Cli,
     },
-    db,
     network::{NetworkInfo, Peers},
     providers::{
         BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-        EvmEnvProvider, StateProviderFactory,
+        DatabaseProvider, DatabaseProviderRO, DatabaseReader, EvmEnvProvider, StateProviderFactory,
     },
     rpc::builder::{RethModuleRegistry, TransportRpcModules},
     tasks::TaskSpawner,
 };
-use reth_db::{database::Database, transaction::DbTx, TableMetadata};
+use reth_db::{database::Database, transaction::DbTx};
 use reth_primitives::{Address, BlockNumber};
 use reth_stages::{PipelineBuilder, StageSet};
 use reth_transaction_pool::TransactionPool;
@@ -84,7 +84,7 @@ impl RethNodeCommandConfig for RethCliNamespaceExt {
     type TableExt = NonCoreTable;
 
     // This is the entrypoint for the CLI to extend the RPC server with custom rpc namespaces.
-    fn extend_rpc_modules<Conf, Provider, Pool, Network, Tasks, Events>(
+    fn extend_rpc_modules<Conf, Provider, Pool, Network, Tasks, Events, DB>(
         &mut self,
         _config: &Conf,
         registry: &mut RethModuleRegistry<Provider, Pool, Network, Tasks, Events>,
@@ -92,7 +92,9 @@ impl RethNodeCommandConfig for RethCliNamespaceExt {
     ) -> eyre::Result<()>
     where
         Conf: RethRpcConfig,
-        Provider: BlockReaderIdExt
+        DB: Database + 'static,
+        Provider: DatabaseReader<DB>
+            + BlockReaderIdExt
             + StateProviderFactory
             + EvmEnvProvider
             + ChainSpecProvider
@@ -109,8 +111,10 @@ impl RethNodeCommandConfig for RethCliNamespaceExt {
             return Ok(())
         }
 
-        let database = todo!("Get reference to database");
-        let ext = MyNamespace { database };
+        let database = registry.provider().database()?;
+        let tx = database.into_tx();
+        let db_provider = DatabaseProvider::new(tx, registry.provider().chain_spec());
+        let ext: MyNamespace<'_, DB> = MyNamespace { database: Arc::new(db_provider) };
 
         // now we merge our extension namespace into all configured transports
         modules.merge_configured(ext.into_rpc())?;
@@ -150,16 +154,13 @@ pub trait MyNamespaceApi {
 #[derive(Debug, Clone)]
 pub struct MyNamespace<'a, DB: Database> {
     /// A reference to the reth database. Used by MyNamespace to construct responses.
-    database: &'a DatabaseProviderRO<'a, &'a DB>,
+    database: Arc<DatabaseProviderRO<'a, &'a DB>>,
 }
 
 impl<DB: Database> MyNamespaceApiServer for MyNamespace<'static, DB> {
     fn my_method(&self, my_param: Address) -> RpcResult<MyMethodResponse> {
-        let response: Option<BlockNumber> = self
-            .database
-            .tx_ref()
-            .get::<MyTable>(my_param)
-            .expect("Couldn't read MyTable");
+        let response: Option<BlockNumber> =
+            self.database.tx_ref().get::<MyTable>(my_param).expect("Couldn't read MyTable");
         Ok(response)
     }
 }
