@@ -10,7 +10,7 @@ use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hard
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadEnvelopeV2,
+    CancunPayloadFields, ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadEnvelopeV2,
     ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceUpdated,
     PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration, CAPABILITIES,
 };
@@ -92,8 +92,8 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
     pub async fn new_payload_v3(
         &self,
-        payload: ExecutionPayloadV1,
-        _versioned_hashes: Vec<H256>,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<H256>,
         parent_beacon_block_root: H256,
     ) -> EngineApiResult<PayloadStatus> {
         let payload = ExecutionPayload::from(payload);
@@ -101,8 +101,10 @@ where
             PayloadOrAttributes::from_execution_payload(&payload, Some(parent_beacon_block_root));
         self.validate_version_specific_fields(EngineApiMessageVersion::V3, &payload_or_attrs)?;
 
+        let cancun_fields = CancunPayloadFields { versioned_hashes, parent_beacon_block_root };
+
         // TODO: validate versioned hashes and figure out what to do with parent_beacon_block_root
-        Ok(self.inner.beacon_consensus.new_payload(payload, Some(parent_beacon_block_root)).await?)
+        Ok(self.inner.beacon_consensus.new_payload(payload, Some(cancun_fields)).await?)
     }
 
     /// Sends a message to the beacon consensus engine to update the fork choice _without_
