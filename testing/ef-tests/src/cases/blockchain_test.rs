@@ -114,7 +114,7 @@ impl Case for BlockchainTestCase {
                 Some(RootOrState::Root(root)) => {
                     let actual_root = StateRoot::new(provider.tx_ref())
                         .root()
-                        .map_err(|err| <StateRootError as Into<DatabaseError>>::into(err))?;
+                        .map_err(<StateRootError as Into<DatabaseError>>::into)?;
                     assert_eq!(root, &actual_root);
                 }
                 Some(RootOrState::State(state)) => {
