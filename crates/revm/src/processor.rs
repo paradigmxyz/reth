@@ -52,7 +52,7 @@ impl<'a> From<Arc<ChainSpec>> for EVMProcessor<'a> {
             receipts: Vec::new(),
             first_block: 0,
             tip: None,
-            prune_modes: PruneModes::default(),
+            prune_modes: PruneModes::none(),
             stats: BlockExecutorStats::default(),
         }
     }
