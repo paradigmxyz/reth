@@ -1983,9 +1983,7 @@ mod tests {
         let factory = ProviderFactory::new(db, chain);
         let provider = factory.provider_rw().unwrap();
         blocks
-            .try_for_each(|b| {
-                provider.insert_block(b.clone(), None, &PruneModes::none()).map(|_| ())
-            })
+            .try_for_each(|b| provider.insert_block(b.clone(), None, None).map(|_| ()))
             .expect("failed to insert");
         provider.commit().unwrap();
     }

@@ -465,7 +465,7 @@ mod tests {
 
         {
             let provider = factory.provider_rw().unwrap();
-            assert_matches!(provider.insert_block(block.clone(), None, &PruneModes::none()), Ok(_));
+            assert_matches!(provider.insert_block(block.clone(), None, None), Ok(_));
             assert_matches!(provider.transaction_id(block.body[0].hash), Ok(Some(0)));
         }
 
@@ -475,7 +475,10 @@ mod tests {
                 provider.insert_block(
                     block.clone(),
                     None,
-                    &PruneModes { transaction_lookup: Some(PruneMode::Full), ..PruneModes::none() }
+                    Some(&PruneModes {
+                        transaction_lookup: Some(PruneMode::Full),
+                        ..PruneModes::none()
+                    })
                 ),
                 Ok(_)
             );

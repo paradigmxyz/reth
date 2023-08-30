@@ -1871,7 +1871,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
         &self,
         block: SealedBlock,
         senders: Option<Vec<Address>>,
-        prune_modes: &PruneModes,
+        prune_modes: Option<&PruneModes>,
     ) -> Result<StoredBlockBodyIndices> {
         let block_number = block.number;
         self.tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
@@ -1924,7 +1924,11 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
             self.tx.put::<tables::TxSenders>(next_tx_num, sender)?;
             self.tx.put::<tables::Transactions>(next_tx_num, transaction.into())?;
 
-            if prune_modes.transaction_lookup.filter(|prune_mode| prune_mode.is_full()).is_none() {
+            if prune_modes
+                .and_then(|modes| modes.transaction_lookup)
+                .filter(|prune_mode| prune_mode.is_full())
+                .is_none()
+            {
                 self.tx.put::<tables::TxHashNumber>(hash, next_tx_num)?;
             }
             next_tx_num += 1;
@@ -1953,7 +1957,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
         &self,
         blocks: Vec<SealedBlockWithSenders>,
         state: PostState,
-        prune_modes: &PruneModes,
+        prune_modes: Option<&PruneModes>,
     ) -> Result<()> {
         if blocks.is_empty() {
             return Ok(())
