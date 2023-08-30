@@ -494,7 +494,7 @@ impl ExecutionPayload {
         let payload = base_payload.seal_slow();
 
         if block_hash != payload.hash() {
-            return Err(PayloadError::BlockHash { execution: block_hash, consensus: payload.hash() })
+            return Err(PayloadError::BlockHash { execution: payload.hash(), consensus: block_hash })
         }
 
         Ok(payload)
