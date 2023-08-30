@@ -16,7 +16,7 @@ use reth_interfaces::{
     Error,
 };
 use reth_primitives::{
-    BlockHash, BlockNumHash, BlockNumber, ForkBlock, Hardfork, Receipt, SealedBlock,
+    BlockHash, BlockNumHash, BlockNumber, ForkBlock, Hardfork, PruneModes, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
@@ -93,6 +93,7 @@ pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
     metrics: TreeMetrics,
     /// Metrics for sync stages.
     sync_metrics_tx: Option<MetricEventsSender>,
+    prune_modes: PruneModes,
 }
 
 /// A container that wraps chains and block indices to allow searching for block hashes across all
@@ -110,6 +111,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         externals: TreeExternals<DB, C, EF>,
         canon_state_notification_sender: CanonStateNotificationSender,
         config: BlockchainTreeConfig,
+        prune_modes: PruneModes,
     ) -> Result<Self, Error> {
         let max_reorg_depth = config.max_reorg_depth();
 
@@ -145,6 +147,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             canon_state_notification_sender,
             metrics: Default::default(),
             sync_metrics_tx: None,
+            prune_modes,
         })
     }
 
@@ -1048,7 +1051,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let (blocks, state) = chain.into_inner();
 
         provider
-            .append_blocks_with_post_state(blocks.into_blocks().collect(), state)
+            .append_blocks_with_post_state(blocks.into_blocks().collect(), state, &self.prune_modes)
             .map_err(|e| BlockExecutionError::CanonicalCommit { inner: e.to_string() })?;
 
         provider.commit()?;
