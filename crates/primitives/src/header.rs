@@ -100,8 +100,13 @@ pub struct Header {
     /// with above-target blob gas consumption increase this value, blocks with below-target blob
     /// gas consumption decrease it (bounded at 0). This was added in EIP-4844.
     pub excess_blob_gas: Option<u64>,
-    /// TODO: Docs
-    /// This was added in EIP-4788.
+    /// The hash of the parent beacon block's root is included in execution blocks, as proposed by
+    /// EIP-4788.
+    ///
+    /// This enables trust-minimized access to consensus state, supporting staking pools, bridges,
+    /// and more.
+    ///
+    /// The beacon roots contract handles root storage, enhancing Ethereum's functionalities.
     pub parent_beacon_block_root: Option<H256>,
     /// An arbitrary byte array containing data relevant to this block. This must be 32 bytes or
     /// fewer; formally Hx.
