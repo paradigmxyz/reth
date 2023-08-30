@@ -1805,7 +1805,9 @@ mod tests {
         BeaconForkChoiceUpdateError,
     };
     use assert_matches::assert_matches;
-    use reth_primitives::{stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, H256, MAINNET};
+    use reth_primitives::{
+        stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, PruneModes, H256, MAINNET,
+    };
     use reth_provider::{BlockWriter, ProviderFactory};
     use reth_rpc_types::engine::{
         ExecutionPayloadV1, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
@@ -1981,7 +1983,9 @@ mod tests {
         let factory = ProviderFactory::new(db, chain);
         let provider = factory.provider_rw().unwrap();
         blocks
-            .try_for_each(|b| provider.insert_block(b.clone(), None).map(|_| ()))
+            .try_for_each(|b| {
+                provider.insert_block(b.clone(), None, &PruneModes::none()).map(|_| ())
+            })
             .expect("failed to insert");
         provider.commit().unwrap();
     }

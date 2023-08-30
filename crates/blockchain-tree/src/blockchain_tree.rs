@@ -1176,7 +1176,7 @@ mod tests {
         let factory = ProviderFactory::new(&db, MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
-        provider.insert_block(genesis, None).unwrap();
+        provider.insert_block(genesis, None, &PruneModes::none()).unwrap();
 
         // insert first 10 blocks
         for i in 0..10 {

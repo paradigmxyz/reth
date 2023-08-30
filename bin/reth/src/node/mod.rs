@@ -266,7 +266,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 tree_externals,
                 canon_state_notification_sender.clone(),
                 tree_config,
-                prune_config.map(|config| config.parts).unwrap_or_default(),
+                prune_config.clone().map(|config| config.parts).unwrap_or_default(),
             )?
             .with_sync_metrics_tx(metrics_tx.clone()),
         );

@@ -12,7 +12,7 @@ use reth_db::{init_db, DatabaseEnv};
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec};
+use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec, PruneModes};
 use reth_provider::{
     AccountExtReader, BlockExecutor, BlockWriter, ExecutorFactory, HashingWriter, HeaderProvider,
     LatestStateProviderRef, ProviderFactory, StageCheckpointReader, StorageReader,
@@ -193,7 +193,7 @@ impl Command {
         let provider_rw = factory.provider_rw()?;
 
         // Insert block, state and hashes
-        provider_rw.insert_block(block.clone(), None)?;
+        provider_rw.insert_block(block.clone(), None, &PruneModes::none())?;
         block_state.write_to_db(provider_rw.tx_ref(), block.number)?;
         let storage_lists = provider_rw.changed_storages_with_range(block.number..=block.number)?;
         let storages = provider_rw.plainstate_storages(storage_lists)?;
