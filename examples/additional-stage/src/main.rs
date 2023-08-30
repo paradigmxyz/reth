@@ -119,7 +119,10 @@ impl RethNodeCommandConfig for RethCliNamespaceExt {
         Ok(())
     }
 
-    fn add_custom_stage<DB>(&self, pipeline_builder: &mut PipelineBuilder<DB>) -> eyre::Result<()>
+    fn add_custom_stage<'a, DB>(
+        &self,
+        pipeline_builder: &'a mut PipelineBuilder<DB>,
+    ) -> eyre::Result<&'a mut PipelineBuilder<DB>>
     where
         DB: Database,
     {
@@ -127,7 +130,7 @@ impl RethNodeCommandConfig for RethCliNamespaceExt {
         let set = MyStageSet::new().set(MyStage::new());
         // Add set to pipeline.
         pipeline_builder.add_stages(set);
-        Ok(())
+        Ok(pipeline_builder)
     }
 }
 
@@ -144,17 +147,17 @@ pub trait MyNamespaceApi {
 /// The type that implements the `mynamespace` rpc namespace trait
 ///
 /// Usage: Members of this struct hold data for constructing the response.
-pub struct MyNamespace<DB: Database + 'static> {
+#[derive(Debug, Clone)]
+pub struct MyNamespace<'a, DB: Database> {
     /// A reference to the reth database. Used by MyNamespace to construct responses.
-    database: Arc<DB>,
+    database: &'a DatabaseProviderRO<'a, &'a DB>,
 }
 
-impl<DB: Database> MyNamespaceApiServer for MyNamespace<DB> {
+impl<DB: Database> MyNamespaceApiServer for MyNamespace<'static, DB> {
     fn my_method(&self, my_param: Address) -> RpcResult<MyMethodResponse> {
         let response: Option<BlockNumber> = self
             .database
-            .tx()
-            .expect("Couldn't get DB Tx")
+            .tx_ref()
             .get::<MyTable>(my_param)
             .expect("Couldn't read MyTable");
         Ok(response)
