@@ -30,14 +30,55 @@ impl std::fmt::Display for PayloadId {
     }
 }
 
+/// This represents the `executionPayload` field in the return value of `engine_getPayloadV2`,
+/// specified as:
+///
+///  - `executionPayload`: `ExecutionPayloadV1` | `ExecutionPayloadV2` where:
+///    - `ExecutionPayloadV1` **MUST** be returned if the payload `timestamp` is lower than the
+///    Shanghai timestamp
+///    - `ExecutionPayloadV2` **MUST** be returned if the payload `timestamp` is greater or equal
+///    to the Shanghai timestamp
+///
+/// See:
+/// <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/shanghai.md#response>
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ExecutionPayloadFieldV2 {
+    /// V1 payload
+    V1(ExecutionPayloadV1),
+    /// V2 payload
+    V2(ExecutionPayloadV2),
+}
+
+impl ExecutionPayloadFieldV2 {
+    /// Returns the inner [ExecutionPayloadV1]
+    pub fn into_v1_payload(self) -> ExecutionPayloadV1 {
+        match self {
+            ExecutionPayloadFieldV2::V1(payload) => payload,
+            ExecutionPayloadFieldV2::V2(payload) => payload.payload_inner,
+        }
+    }
+}
+
+impl From<SealedBlock> for ExecutionPayloadFieldV2 {
+    fn from(value: SealedBlock) -> Self {
+        // if there are withdrawals, return V2
+        if value.withdrawals.is_some() {
+            ExecutionPayloadFieldV2::V2(value.into())
+        } else {
+            ExecutionPayloadFieldV2::V1(value.into())
+        }
+    }
+}
+
 /// This structure maps for the return value of `engine_getPayload` of the beacon chain spec, for
-/// both V2 and V3.
+/// V2.
 ///
 /// See also:
 /// <https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadv2>
-/// <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_getpayloadv3>
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExecutionPayloadEnvelope {
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionPayloadEnvelopeV2 {
     /// Execution payload, which could be either V1 or V2
     ///
     /// V1 (_NO_ withdrawals) MUST be returned if the payload timestamp is lower than the Shanghai
@@ -45,27 +86,36 @@ pub struct ExecutionPayloadEnvelope {
     ///
     /// V2 (_WITH_ withdrawals) MUST be returned if the payload timestamp is greater or equal to
     /// the Shanghai timestamp
-    #[serde(rename = "executionPayload")]
-    pub payload: ExecutionPayload,
+    pub execution_payload: ExecutionPayloadFieldV2,
     /// The expected value to be received by the feeRecipient in wei
-    #[serde(rename = "blockValue")]
     pub block_value: U256,
-    /// The blobs, commitments, and proofs associated with the executed payload.
-    #[serde(rename = "blobsBundle", skip_serializing_if = "Option::is_none")]
-    pub blobs_bundle: Option<BlobsBundleV1>,
-    /// Introduced in V3, this represents a suggestion from the execution layer if the payload
-    /// should be used instead of an externally provided one.
-    #[serde(rename = "shouldOverrideBuilder", skip_serializing_if = "Option::is_none")]
-    pub should_override_builder: Option<bool>,
 }
 
-impl ExecutionPayloadEnvelope {
+impl ExecutionPayloadEnvelopeV2 {
     /// Returns the [ExecutionPayload] for the `engine_getPayloadV1` endpoint
-    pub fn into_v1_payload(mut self) -> ExecutionPayload {
-        // ensure withdrawals are removed
-        self.payload.withdrawals.take();
-        self.payload
+    pub fn into_v1_payload(self) -> ExecutionPayloadV1 {
+        self.execution_payload.into_v1_payload()
     }
+}
+
+/// This structure maps for the return value of `engine_getPayload` of the beacon chain spec, for
+/// V3.
+///
+/// See also:
+/// <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#response-2>
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionPayloadEnvelopeV3 {
+    /// Execution payload V3
+    #[serde(flatten)]
+    pub payload_inner: ExecutionPayloadV3,
+    /// The expected value to be received by the feeRecipient in wei
+    pub block_value: U256,
+    /// The blobs, commitments, and proofs associated with the executed payload.
+    pub blobs_bundle: BlobsBundleV1,
+    /// Introduced in V3, this represents a suggestion from the execution layer if the payload
+    /// should be used instead of an externally provided one.
+    pub should_override_builder: bool,
 }
 
 /// This structure maps on the ExecutionPayload structure of the beacon chain spec.
@@ -73,7 +123,7 @@ impl ExecutionPayloadEnvelope {
 /// See also: <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#executionpayloadv1>
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ExecutionPayload {
+pub struct ExecutionPayloadV1 {
     pub parent_hash: H256,
     pub fee_recipient: Address,
     pub state_root: H256,
@@ -88,21 +138,9 @@ pub struct ExecutionPayload {
     pub base_fee_per_gas: U256,
     pub block_hash: H256,
     pub transactions: Vec<Bytes>,
-    /// Array of [`Withdrawal`] enabled with V2
-    /// See <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#executionpayloadv2>
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub withdrawals: Option<Vec<Withdrawal>>,
-    /// Array of [`U64`] representing blob gas used, enabled with V3
-    /// See <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#ExecutionPayloadV3>
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub blob_gas_used: Option<U64>,
-    /// Array of [`U64`] representing excess blob gas, enabled with V3
-    /// See <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#ExecutionPayloadV3>
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub excess_blob_gas: Option<U64>,
 }
 
-impl From<SealedBlock> for ExecutionPayload {
+impl From<SealedBlock> for ExecutionPayloadV1 {
     fn from(value: SealedBlock) -> Self {
         let transactions = value
             .body
@@ -113,7 +151,7 @@ impl From<SealedBlock> for ExecutionPayload {
                 encoded.into()
             })
             .collect();
-        ExecutionPayload {
+        ExecutionPayloadV1 {
             parent_hash: value.parent_hash,
             fee_recipient: value.beneficiary,
             state_root: value.state_root,
@@ -126,88 +164,226 @@ impl From<SealedBlock> for ExecutionPayload {
             timestamp: value.timestamp.into(),
             extra_data: value.extra_data.clone(),
             base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
-            blob_gas_used: value.blob_gas_used.map(U64::from),
-            excess_blob_gas: value.excess_blob_gas.map(U64::from),
             block_hash: value.hash(),
             transactions,
-            withdrawals: value.withdrawals,
         }
     }
 }
 
-impl ExecutionPayload {
-    /// Tries to create a new block from the given payload and optional parent beacon block root.
-    /// Perform additional validation of `extra_data` and `base_fee_per_gas` fields.
-    ///
-    /// NOTE: The log bloom is assumed to be validated during serialization.
-    /// NOTE: Empty ommers, nonce and difficulty values are validated upon computing block hash and
-    /// comparing the value with `payload.block_hash`.
-    ///
-    /// See <https://github.com/ethereum/go-ethereum/blob/79a478bb6176425c2400e949890e668a3d9a3d05/core/beacon/types.go#L145>
-    pub fn try_into_sealed_block(
-        self,
-        parent_beacon_block_root: Option<H256>,
-    ) -> Result<SealedBlock, PayloadError> {
-        if self.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
-            return Err(PayloadError::ExtraData(self.extra_data))
+/// Try to construct a block from given payload. Perform addition validation of `extra_data` and
+/// `base_fee_per_gas` fields.
+///
+/// NOTE: The log bloom is assumed to be validated during serialization.
+/// NOTE: Empty ommers, nonce and difficulty values are validated upon computing block hash and
+/// comparing the value with `payload.block_hash`.
+///
+/// See <https://github.com/ethereum/go-ethereum/blob/79a478bb6176425c2400e949890e668a3d9a3d05/core/beacon/types.go#L145>
+impl TryFrom<ExecutionPayloadV1> for Block {
+    type Error = PayloadError;
+
+    fn try_from(payload: ExecutionPayloadV1) -> Result<Self, Self::Error> {
+        if payload.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
+            return Err(PayloadError::ExtraData(payload.extra_data))
         }
 
-        if self.base_fee_per_gas < MIN_PROTOCOL_BASE_FEE_U256 {
-            return Err(PayloadError::BaseFee(self.base_fee_per_gas))
+        if payload.base_fee_per_gas < MIN_PROTOCOL_BASE_FEE_U256 {
+            return Err(PayloadError::BaseFee(payload.base_fee_per_gas))
         }
 
-        let transactions = self
+        let transactions = payload
             .transactions
             .iter()
             .map(|tx| TransactionSigned::decode(&mut tx.as_ref()))
             .collect::<Result<Vec<_>, _>>()?;
         let transactions_root = proofs::calculate_transaction_root(&transactions);
 
-        let withdrawals_root =
-            self.withdrawals.as_ref().map(|w| proofs::calculate_withdrawals_root(w));
-
         let header = Header {
-            parent_hash: self.parent_hash,
-            beneficiary: self.fee_recipient,
-            state_root: self.state_root,
+            parent_hash: payload.parent_hash,
+            beneficiary: payload.fee_recipient,
+            state_root: payload.state_root,
             transactions_root,
-            receipts_root: self.receipts_root,
-            withdrawals_root,
-            parent_beacon_block_root,
-            logs_bloom: self.logs_bloom,
-            number: self.block_number.as_u64(),
-            gas_limit: self.gas_limit.as_u64(),
-            gas_used: self.gas_used.as_u64(),
-            timestamp: self.timestamp.as_u64(),
-            mix_hash: self.prev_randao,
+            receipts_root: payload.receipts_root,
+            withdrawals_root: None,
+            logs_bloom: payload.logs_bloom,
+            number: payload.block_number.as_u64(),
+            gas_limit: payload.gas_limit.as_u64(),
+            gas_used: payload.gas_used.as_u64(),
+            timestamp: payload.timestamp.as_u64(),
+            mix_hash: payload.prev_randao,
             base_fee_per_gas: Some(
-                self.base_fee_per_gas
+                payload
+                    .base_fee_per_gas
                     .uint_try_to()
-                    .map_err(|_| PayloadError::BaseFee(self.base_fee_per_gas))?,
+                    .map_err(|_| PayloadError::BaseFee(payload.base_fee_per_gas))?,
             ),
-            blob_gas_used: self.blob_gas_used.map(|blob_gas_used| blob_gas_used.as_u64()),
-            excess_blob_gas: self.excess_blob_gas.map(|excess_blob_gas| excess_blob_gas.as_u64()),
-            extra_data: self.extra_data,
+            blob_gas_used: None,
+            excess_blob_gas: None,
+            parent_beacon_block_root: None,
+            extra_data: payload.extra_data,
             // Defaults
             ommers_hash: EMPTY_LIST_HASH,
             difficulty: Default::default(),
             nonce: Default::default(),
-        }
-        .seal_slow();
+        };
 
-        if self.block_hash != header.hash() {
-            return Err(PayloadError::BlockHash {
-                execution: header.hash(),
-                consensus: self.block_hash,
+        Ok(Block { header, body: transactions, withdrawals: None, ommers: Default::default() })
+    }
+}
+
+/// This structure maps on the ExecutionPayloadV2 structure of the beacon chain spec.
+///
+/// See also: <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#executionpayloadv2>
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionPayloadV2 {
+    /// Inner V1 payload
+    #[serde(flatten)]
+    pub payload_inner: ExecutionPayloadV1,
+
+    /// Array of [`Withdrawal`] enabled with V2
+    /// See <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#executionpayloadv2>
+    pub withdrawals: Vec<Withdrawal>,
+}
+
+impl ExecutionPayloadV2 {
+    /// Returns the timestamp for the execution payload.
+    pub fn timestamp(&self) -> u64 {
+        self.payload_inner.timestamp.as_u64()
+    }
+}
+
+impl From<SealedBlock> for ExecutionPayloadV2 {
+    fn from(value: SealedBlock) -> Self {
+        let transactions = value
+            .body
+            .iter()
+            .map(|tx| {
+                let mut encoded = Vec::new();
+                tx.encode_enveloped(&mut encoded);
+                encoded.into()
             })
-        }
+            .collect();
 
-        Ok(SealedBlock {
-            header,
-            body: transactions,
-            withdrawals: self.withdrawals,
-            ommers: Default::default(),
-        })
+        ExecutionPayloadV2 {
+            payload_inner: ExecutionPayloadV1 {
+                parent_hash: value.parent_hash,
+                fee_recipient: value.beneficiary,
+                state_root: value.state_root,
+                receipts_root: value.receipts_root,
+                logs_bloom: value.logs_bloom,
+                prev_randao: value.mix_hash,
+                block_number: value.number.into(),
+                gas_limit: value.gas_limit.into(),
+                gas_used: value.gas_used.into(),
+                timestamp: value.timestamp.into(),
+                extra_data: value.extra_data.clone(),
+                base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
+                block_hash: value.hash(),
+                transactions,
+            },
+            withdrawals: value.withdrawals.unwrap_or_default(),
+        }
+    }
+}
+
+impl TryFrom<ExecutionPayloadV2> for Block {
+    type Error = PayloadError;
+
+    fn try_from(payload: ExecutionPayloadV2) -> Result<Self, Self::Error> {
+        // this performs the same conversion as the underlying V1 payload, but calculates the
+        // withdrawals root and adds withdrawals
+        let mut base_sealed_block = Block::try_from(payload.payload_inner)?;
+
+        let withdrawals_root = proofs::calculate_withdrawals_root(&payload.withdrawals);
+        base_sealed_block.withdrawals = Some(payload.withdrawals);
+        base_sealed_block.header.withdrawals_root = Some(withdrawals_root);
+        Ok(base_sealed_block)
+    }
+}
+
+/// This structure maps on the ExecutionPayloadV3 structure of the beacon chain spec.
+///
+/// See also: <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#executionpayloadv2>
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionPayloadV3 {
+    /// Inner V2 payload
+    #[serde(flatten)]
+    pub payload_inner: ExecutionPayloadV2,
+
+    /// Array of [`U64`] representing blob gas used, enabled with V3
+    /// See <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#ExecutionPayloadV3>
+    pub blob_gas_used: U64,
+    /// Array of [`U64`] representing excess blob gas, enabled with V3
+    /// See <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#ExecutionPayloadV3>
+    pub excess_blob_gas: U64,
+}
+
+impl ExecutionPayloadV3 {
+    /// Returns the withdrawals for the payload.
+    pub fn withdrawals(&self) -> &Vec<Withdrawal> {
+        &self.payload_inner.withdrawals
+    }
+
+    /// Returns the timestamp for the payload.
+    pub fn timestamp(&self) -> u64 {
+        self.payload_inner.payload_inner.timestamp.as_u64()
+    }
+}
+
+impl From<SealedBlock> for ExecutionPayloadV3 {
+    fn from(mut value: SealedBlock) -> Self {
+        let transactions = value
+            .body
+            .iter()
+            .map(|tx| {
+                let mut encoded = Vec::new();
+                tx.encode_enveloped(&mut encoded);
+                encoded.into()
+            })
+            .collect();
+
+        let withdrawals = value.withdrawals.take().unwrap_or_default();
+
+        ExecutionPayloadV3 {
+            payload_inner: ExecutionPayloadV2 {
+                payload_inner: ExecutionPayloadV1 {
+                    parent_hash: value.parent_hash,
+                    fee_recipient: value.beneficiary,
+                    state_root: value.state_root,
+                    receipts_root: value.receipts_root,
+                    logs_bloom: value.logs_bloom,
+                    prev_randao: value.mix_hash,
+                    block_number: value.number.into(),
+                    gas_limit: value.gas_limit.into(),
+                    gas_used: value.gas_used.into(),
+                    timestamp: value.timestamp.into(),
+                    extra_data: value.extra_data.clone(),
+                    base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
+                    block_hash: value.hash(),
+                    transactions,
+                },
+                withdrawals,
+            },
+
+            blob_gas_used: value.blob_gas_used.unwrap_or_default().into(),
+            excess_blob_gas: value.excess_blob_gas.unwrap_or_default().into(),
+        }
+    }
+}
+
+impl TryFrom<ExecutionPayloadV3> for Block {
+    type Error = PayloadError;
+
+    fn try_from(payload: ExecutionPayloadV3) -> Result<Self, Self::Error> {
+        // this performs the same conversion as the underlying V2 payload, but inserts the blob gas
+        // used and excess blob gas
+        let mut base_block = Block::try_from(payload.payload_inner)?;
+
+        base_block.header.blob_gas_used = Some(payload.blob_gas_used.as_u64());
+        base_block.header.excess_blob_gas = Some(payload.excess_blob_gas.as_u64());
+
+        Ok(base_block)
     }
 }
 
@@ -231,6 +407,130 @@ impl From<Vec<BlobTransactionSidecar>> for BlobsBundleV1 {
             },
         );
         Self { commitments, proofs, blobs }
+    }
+}
+
+/// An execution payload, which can be either [ExecutionPayloadV1], [ExecutionPayloadV2], or
+/// [ExecutionPayloadV3].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExecutionPayload {
+    /// V1 payload
+    V1(ExecutionPayloadV1),
+    /// V2 payload
+    V2(ExecutionPayloadV2),
+    /// V3 payload
+    V3(ExecutionPayloadV3),
+}
+
+impl ExecutionPayload {
+    /// Returns the withdrawals for the payload.
+    pub fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
+        match self {
+            ExecutionPayload::V1(_) => None,
+            ExecutionPayload::V2(payload) => Some(&payload.withdrawals),
+            ExecutionPayload::V3(payload) => Some(payload.withdrawals()),
+        }
+    }
+
+    /// Returns the timestamp for the payload.
+    pub fn timestamp(&self) -> u64 {
+        match self {
+            ExecutionPayload::V1(payload) => payload.timestamp.as_u64(),
+            ExecutionPayload::V2(payload) => payload.timestamp(),
+            ExecutionPayload::V3(payload) => payload.timestamp(),
+        }
+    }
+
+    /// Returns the parent hash for the payload.
+    pub fn parent_hash(&self) -> H256 {
+        match self {
+            ExecutionPayload::V1(payload) => payload.parent_hash,
+            ExecutionPayload::V2(payload) => payload.payload_inner.parent_hash,
+            ExecutionPayload::V3(payload) => payload.payload_inner.payload_inner.parent_hash,
+        }
+    }
+
+    /// Returns the block hash for the payload.
+    pub fn block_hash(&self) -> H256 {
+        match self {
+            ExecutionPayload::V1(payload) => payload.block_hash,
+            ExecutionPayload::V2(payload) => payload.payload_inner.block_hash,
+            ExecutionPayload::V3(payload) => payload.payload_inner.payload_inner.block_hash,
+        }
+    }
+
+    /// Returns the block number for this payload.
+    pub fn block_number(&self) -> u64 {
+        match self {
+            ExecutionPayload::V1(payload) => payload.block_number.as_u64(),
+            ExecutionPayload::V2(payload) => payload.payload_inner.block_number.as_u64(),
+            ExecutionPayload::V3(payload) => {
+                payload.payload_inner.payload_inner.block_number.as_u64()
+            }
+        }
+    }
+
+    /// Tries to create a new block from the given payload and optional parent beacon block root.
+    /// Perform additional validation of `extra_data` and `base_fee_per_gas` fields.
+    ///
+    /// NOTE: The log bloom is assumed to be validated during serialization.
+    /// NOTE: Empty ommers, nonce and difficulty values are validated upon computing block hash and
+    /// comparing the value with `payload.block_hash`.
+    ///
+    /// See <https://github.com/ethereum/go-ethereum/blob/79a478bb6176425c2400e949890e668a3d9a3d05/core/beacon/types.go#L145>
+    pub fn try_into_sealed_block(
+        self,
+        parent_beacon_block_root: Option<H256>,
+    ) -> Result<SealedBlock, PayloadError> {
+        let block_hash = self.block_hash();
+        let mut base_payload = match self {
+            ExecutionPayload::V1(payload) => Block::try_from(payload)?,
+            ExecutionPayload::V2(payload) => Block::try_from(payload)?,
+            ExecutionPayload::V3(payload) => Block::try_from(payload)?,
+        };
+
+        base_payload.header.parent_beacon_block_root = parent_beacon_block_root;
+
+        let payload = base_payload.seal_slow();
+
+        if block_hash != payload.hash() {
+            return Err(PayloadError::BlockHash { execution: payload.hash(), consensus: block_hash })
+        }
+
+        Ok(payload)
+    }
+}
+
+impl From<ExecutionPayloadV1> for ExecutionPayload {
+    fn from(payload: ExecutionPayloadV1) -> Self {
+        Self::V1(payload)
+    }
+}
+
+impl From<ExecutionPayloadV2> for ExecutionPayload {
+    fn from(payload: ExecutionPayloadV2) -> Self {
+        Self::V2(payload)
+    }
+}
+
+impl From<ExecutionPayloadV3> for ExecutionPayload {
+    fn from(payload: ExecutionPayloadV3) -> Self {
+        Self::V3(payload)
+    }
+}
+
+impl From<SealedBlock> for ExecutionPayload {
+    fn from(block: SealedBlock) -> Self {
+        if block.header.parent_beacon_block_root.is_some() {
+            // block with parent beacon block root: V3
+            Self::V3(block.into())
+        } else if block.withdrawals.is_some() {
+            // block with withdrawals: V2
+            Self::V2(block.into())
+        } else {
+            // otherwise V1
+            Self::V1(block.into())
+        }
     }
 }
 
@@ -555,18 +855,34 @@ mod tests {
     }
 
     #[test]
-    fn serde_roundtrip_legacy_txs_payload() {
-        // pulled from hive tests - modified with 4844 fields
-        let s = r#"{"parentHash":"0x67ead97eb79b47a1638659942384143f36ed44275d4182799875ab5a87324055","feeRecipient":"0x0000000000000000000000000000000000000000","stateRoot":"0x0000000000000000000000000000000000000000000000000000000000000000","receiptsRoot":"0x4e3c608a9f2e129fccb91a1dae7472e78013b8e654bccc8d224ce3d63ae17006","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prevRandao":"0x44bb4b98c59dbb726f96ffceb5ee028dcbe35b9bba4f9ffd56aeebf8d1e4db62","blockNumber":"0x1","gasLimit":"0x2fefd8","gasUsed":"0xa860","timestamp":"0x1235","extraData":"0x8b726574682f76302e312e30","baseFeePerGas":"0x342770c0","blockHash":"0x5655011482546f16b2312ef18e9fad03d6a52b1be95401aea884b222477f9e64","transactions":["0xf865808506fc23ac00830124f8940000000000000000000000000000000000000316018032a044b25a8b9b247d01586b3d59c71728ff49c9b84928d9e7fa3377ead3b5570b5da03ceac696601ff7ee6f5fe8864e2998db9babdf5eeba1a0cd5b4d44b3fcbd181b"],"blobGasUsed":"0xb10b","excessBlobGas":"0xb10b"}"#;
-        let payload: ExecutionPayload = serde_json::from_str(s).unwrap();
+    fn serde_roundtrip_legacy_txs_payload_v1() {
+        // pulled from hive tests
+        let s = r#"{"parentHash":"0x67ead97eb79b47a1638659942384143f36ed44275d4182799875ab5a87324055","feeRecipient":"0x0000000000000000000000000000000000000000","stateRoot":"0x0000000000000000000000000000000000000000000000000000000000000000","receiptsRoot":"0x4e3c608a9f2e129fccb91a1dae7472e78013b8e654bccc8d224ce3d63ae17006","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prevRandao":"0x44bb4b98c59dbb726f96ffceb5ee028dcbe35b9bba4f9ffd56aeebf8d1e4db62","blockNumber":"0x1","gasLimit":"0x2fefd8","gasUsed":"0xa860","timestamp":"0x1235","extraData":"0x8b726574682f76302e312e30","baseFeePerGas":"0x342770c0","blockHash":"0x5655011482546f16b2312ef18e9fad03d6a52b1be95401aea884b222477f9e64","transactions":["0xf865808506fc23ac00830124f8940000000000000000000000000000000000000316018032a044b25a8b9b247d01586b3d59c71728ff49c9b84928d9e7fa3377ead3b5570b5da03ceac696601ff7ee6f5fe8864e2998db9babdf5eeba1a0cd5b4d44b3fcbd181b"]}"#;
+        let payload: ExecutionPayloadV1 = serde_json::from_str(s).unwrap();
         assert_eq!(serde_json::to_string(&payload).unwrap(), s);
     }
 
     #[test]
-    fn serde_roundtrip_enveloped_txs_payload() {
+    fn serde_roundtrip_legacy_txs_payload_v3() {
         // pulled from hive tests - modified with 4844 fields
-        let s = r#"{"parentHash":"0x67ead97eb79b47a1638659942384143f36ed44275d4182799875ab5a87324055","feeRecipient":"0x0000000000000000000000000000000000000000","stateRoot":"0x76a03cbcb7adce07fd284c61e4fa31e5e786175cefac54a29e46ec8efa28ea41","receiptsRoot":"0x4e3c608a9f2e129fccb91a1dae7472e78013b8e654bccc8d224ce3d63ae17006","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prevRandao":"0x028111cb7d25918386a69656b3d17b2febe95fd0f11572c1a55c14f99fdfe3df","blockNumber":"0x1","gasLimit":"0x2fefd8","gasUsed":"0xa860","timestamp":"0x1235","extraData":"0x8b726574682f76302e312e30","baseFeePerGas":"0x342770c0","blockHash":"0xa6f40ed042e61e88e76125dede8fff8026751ea14454b68fb534cea99f2b2a77","transactions":["0xf865808506fc23ac00830124f8940000000000000000000000000000000000000316018032a044b25a8b9b247d01586b3d59c71728ff49c9b84928d9e7fa3377ead3b5570b5da03ceac696601ff7ee6f5fe8864e2998db9babdf5eeba1a0cd5b4d44b3fcbd181b"],"blobGasUsed":"0xb10b","excessBlobGas":"0xb10b"}"#;
-        let payload: ExecutionPayload = serde_json::from_str(s).unwrap();
+        let s = r#"{"parentHash":"0x67ead97eb79b47a1638659942384143f36ed44275d4182799875ab5a87324055","feeRecipient":"0x0000000000000000000000000000000000000000","stateRoot":"0x0000000000000000000000000000000000000000000000000000000000000000","receiptsRoot":"0x4e3c608a9f2e129fccb91a1dae7472e78013b8e654bccc8d224ce3d63ae17006","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prevRandao":"0x44bb4b98c59dbb726f96ffceb5ee028dcbe35b9bba4f9ffd56aeebf8d1e4db62","blockNumber":"0x1","gasLimit":"0x2fefd8","gasUsed":"0xa860","timestamp":"0x1235","extraData":"0x8b726574682f76302e312e30","baseFeePerGas":"0x342770c0","blockHash":"0x5655011482546f16b2312ef18e9fad03d6a52b1be95401aea884b222477f9e64","transactions":["0xf865808506fc23ac00830124f8940000000000000000000000000000000000000316018032a044b25a8b9b247d01586b3d59c71728ff49c9b84928d9e7fa3377ead3b5570b5da03ceac696601ff7ee6f5fe8864e2998db9babdf5eeba1a0cd5b4d44b3fcbd181b"],"withdrawals":[],"blobGasUsed":"0xb10b","excessBlobGas":"0xb10b"}"#;
+        let payload: ExecutionPayloadV3 = serde_json::from_str(s).unwrap();
+        assert_eq!(serde_json::to_string(&payload).unwrap(), s);
+    }
+
+    #[test]
+    fn serde_roundtrip_enveloped_txs_payload_v1() {
+        // pulled from hive tests
+        let s = r#"{"parentHash":"0x67ead97eb79b47a1638659942384143f36ed44275d4182799875ab5a87324055","feeRecipient":"0x0000000000000000000000000000000000000000","stateRoot":"0x76a03cbcb7adce07fd284c61e4fa31e5e786175cefac54a29e46ec8efa28ea41","receiptsRoot":"0x4e3c608a9f2e129fccb91a1dae7472e78013b8e654bccc8d224ce3d63ae17006","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prevRandao":"0x028111cb7d25918386a69656b3d17b2febe95fd0f11572c1a55c14f99fdfe3df","blockNumber":"0x1","gasLimit":"0x2fefd8","gasUsed":"0xa860","timestamp":"0x1235","extraData":"0x8b726574682f76302e312e30","baseFeePerGas":"0x342770c0","blockHash":"0xa6f40ed042e61e88e76125dede8fff8026751ea14454b68fb534cea99f2b2a77","transactions":["0xf865808506fc23ac00830124f8940000000000000000000000000000000000000316018032a044b25a8b9b247d01586b3d59c71728ff49c9b84928d9e7fa3377ead3b5570b5da03ceac696601ff7ee6f5fe8864e2998db9babdf5eeba1a0cd5b4d44b3fcbd181b"]}"#;
+        let payload: ExecutionPayloadV1 = serde_json::from_str(s).unwrap();
+        assert_eq!(serde_json::to_string(&payload).unwrap(), s);
+    }
+
+    #[test]
+    fn serde_roundtrip_enveloped_txs_payload_v3() {
+        // pulled from hive tests - modified with 4844 fields
+        let s = r#"{"parentHash":"0x67ead97eb79b47a1638659942384143f36ed44275d4182799875ab5a87324055","feeRecipient":"0x0000000000000000000000000000000000000000","stateRoot":"0x76a03cbcb7adce07fd284c61e4fa31e5e786175cefac54a29e46ec8efa28ea41","receiptsRoot":"0x4e3c608a9f2e129fccb91a1dae7472e78013b8e654bccc8d224ce3d63ae17006","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prevRandao":"0x028111cb7d25918386a69656b3d17b2febe95fd0f11572c1a55c14f99fdfe3df","blockNumber":"0x1","gasLimit":"0x2fefd8","gasUsed":"0xa860","timestamp":"0x1235","extraData":"0x8b726574682f76302e312e30","baseFeePerGas":"0x342770c0","blockHash":"0xa6f40ed042e61e88e76125dede8fff8026751ea14454b68fb534cea99f2b2a77","transactions":["0xf865808506fc23ac00830124f8940000000000000000000000000000000000000316018032a044b25a8b9b247d01586b3d59c71728ff49c9b84928d9e7fa3377ead3b5570b5da03ceac696601ff7ee6f5fe8864e2998db9babdf5eeba1a0cd5b4d44b3fcbd181b"],"withdrawals":[],"blobGasUsed":"0xb10b","excessBlobGas":"0xb10b"}"#;
+        let payload: ExecutionPayloadV3 = serde_json::from_str(s).unwrap();
         assert_eq!(serde_json::to_string(&payload).unwrap(), s);
     }
 }

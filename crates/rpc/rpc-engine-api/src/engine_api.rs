@@ -10,7 +10,8 @@ use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hard
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadEnvelope, ForkchoiceUpdated,
+    ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadEnvelopeV2,
+    ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceUpdated,
     PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration, CAPABILITIES,
 };
 use reth_tasks::TaskSpawner;
@@ -69,38 +70,36 @@ where
     /// Caution: This should not accept the `withdrawals` field
     pub async fn new_payload_v1(
         &self,
-        payload: ExecutionPayload,
+        payload: ExecutionPayloadV1,
     ) -> EngineApiResult<PayloadStatus> {
-        self.validate_version_specific_fields(
-            EngineApiMessageVersion::V1,
-            PayloadOrAttributes::from_execution_payload(&payload, None),
-        )?;
+        let payload = ExecutionPayload::from(payload);
+        let payload_or_attrs = PayloadOrAttributes::from_execution_payload(&payload, None);
+        self.validate_version_specific_fields(EngineApiMessageVersion::V1, &payload_or_attrs)?;
         Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_newpayloadv2>
     pub async fn new_payload_v2(
         &self,
-        payload: ExecutionPayload,
+        payload: ExecutionPayloadV1,
     ) -> EngineApiResult<PayloadStatus> {
-        self.validate_version_specific_fields(
-            EngineApiMessageVersion::V2,
-            PayloadOrAttributes::from_execution_payload(&payload, None),
-        )?;
+        let payload = ExecutionPayload::from(payload);
+        let payload_or_attrs = PayloadOrAttributes::from_execution_payload(&payload, None);
+        self.validate_version_specific_fields(EngineApiMessageVersion::V2, &payload_or_attrs)?;
         Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
     pub async fn new_payload_v3(
         &self,
-        payload: ExecutionPayload,
+        payload: ExecutionPayloadV1,
         _versioned_hashes: Vec<H256>,
         parent_beacon_block_root: H256,
     ) -> EngineApiResult<PayloadStatus> {
-        self.validate_version_specific_fields(
-            EngineApiMessageVersion::V3,
-            PayloadOrAttributes::from_execution_payload(&payload, Some(parent_beacon_block_root)),
-        )?;
+        let payload = ExecutionPayload::from(payload);
+        let payload_or_attrs =
+            PayloadOrAttributes::from_execution_payload(&payload, Some(parent_beacon_block_root));
+        self.validate_version_specific_fields(EngineApiMessageVersion::V3, &payload_or_attrs)?;
 
         // TODO: validate versioned hashes and figure out what to do with parent_beacon_block_root
         Ok(self.inner.beacon_consensus.new_payload(payload, Some(parent_beacon_block_root)).await?)
@@ -118,7 +117,7 @@ where
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(ref attrs) = payload_attrs {
-            self.validate_version_specific_fields(EngineApiMessageVersion::V1, attrs.into())?;
+            self.validate_version_specific_fields(EngineApiMessageVersion::V1, &attrs.into())?;
         }
         Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
     }
@@ -133,7 +132,7 @@ where
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(ref attrs) = payload_attrs {
-            self.validate_version_specific_fields(EngineApiMessageVersion::V2, attrs.into())?;
+            self.validate_version_specific_fields(EngineApiMessageVersion::V2, &attrs.into())?;
         }
         Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
     }
@@ -148,7 +147,7 @@ where
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(ref attrs) = payload_attrs {
-            self.validate_version_specific_fields(EngineApiMessageVersion::V3, attrs.into())?;
+            self.validate_version_specific_fields(EngineApiMessageVersion::V3, &attrs.into())?;
         }
 
         Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
@@ -163,7 +162,10 @@ where
     ///
     /// Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
-    pub async fn get_payload_v1(&self, payload_id: PayloadId) -> EngineApiResult<ExecutionPayload> {
+    pub async fn get_payload_v1(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<ExecutionPayloadV1> {
         Ok(self
             .inner
             .payload_store
@@ -183,7 +185,7 @@ where
     pub async fn get_payload_v2(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<ExecutionPayloadEnvelope> {
+    ) -> EngineApiResult<ExecutionPayloadEnvelopeV2> {
         Ok(self
             .inner
             .payload_store
@@ -203,7 +205,7 @@ where
     pub async fn get_payload_v3(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<ExecutionPayloadEnvelope> {
+    ) -> EngineApiResult<ExecutionPayloadEnvelopeV3> {
         Ok(self
             .inner
             .payload_store
@@ -428,7 +430,7 @@ where
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_>,
+        payload_or_attrs: &PayloadOrAttributes<'_>,
     ) -> EngineApiResult<()> {
         self.validate_withdrawals_presence(
             version,
@@ -451,14 +453,14 @@ where
     /// Handler for `engine_newPayloadV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
-    async fn new_payload_v1(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus> {
+    async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV1");
         Ok(EngineApi::new_payload_v1(self, payload).await?)
     }
 
     /// Handler for `engine_newPayloadV2`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_newpayloadv2>
-    async fn new_payload_v2(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus> {
+    async fn new_payload_v2(&self, payload: ExecutionPayloadV1) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV2");
         Ok(EngineApi::new_payload_v2(self, payload).await?)
     }
@@ -467,7 +469,7 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
     async fn new_payload_v3(
         &self,
-        _payload: ExecutionPayload,
+        _payload: ExecutionPayloadV3,
         _versioned_hashes: Vec<H256>,
         _parent_beacon_block_root: H256,
     ) -> RpcResult<PayloadStatus> {
@@ -520,7 +522,7 @@ where
     ///
     /// Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
-    async fn get_payload_v1(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayload> {
+    async fn get_payload_v1(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV1");
         Ok(EngineApi::get_payload_v1(self, payload_id).await?)
     }
@@ -534,7 +536,7 @@ where
     ///
     /// Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
-    async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelope> {
+    async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelopeV2> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV2");
         Ok(EngineApi::get_payload_v2(self, payload_id).await?)
     }
@@ -548,7 +550,10 @@ where
     ///
     /// Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
-    async fn get_payload_v3(&self, _payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelope> {
+    async fn get_payload_v3(
+        &self,
+        _payload_id: PayloadId,
+    ) -> RpcResult<ExecutionPayloadEnvelopeV3> {
         Err(jsonrpsee_types::error::ErrorCode::MethodNotFound.into())
     }
 

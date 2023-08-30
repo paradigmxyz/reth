@@ -1049,7 +1049,7 @@ where
     ///
     /// This returns a [`PayloadStatus`] that represents the outcome of a processed new payload and
     /// returns an error if an internal error occurred.
-    #[instrument(level = "trace", skip(self, payload, parent_beacon_block_root), fields(block_hash= ?payload.block_hash, block_number = %payload.block_number.as_u64(), is_pipeline_idle = %self.sync.is_pipeline_idle()), target = "consensus::engine")]
+    #[instrument(level = "trace", skip(self, payload, parent_beacon_block_root), fields(block_hash= ?payload.block_hash(), block_number = %payload.block_number(), is_pipeline_idle = %self.sync.is_pipeline_idle()), target = "consensus::engine")]
     fn on_new_payload(
         &mut self,
         payload: ExecutionPayload,
@@ -1121,7 +1121,7 @@ where
         payload: ExecutionPayload,
         parent_beacon_block_root: Option<H256>,
     ) -> Result<SealedBlock, PayloadStatus> {
-        let parent_hash = payload.parent_hash;
+        let parent_hash = payload.parent_hash();
         let block = match payload.try_into_sealed_block(parent_beacon_block_root) {
             Ok(block) => block,
             Err(error) => {
@@ -1807,7 +1807,9 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_primitives::{stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, H256, MAINNET};
     use reth_provider::{BlockWriter, ProviderFactory};
-    use reth_rpc_types::engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
+    use reth_rpc_types::engine::{
+        ExecutionPayloadV1, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
+    };
     use reth_stages::{ExecOutput, PipelineError, StageError};
     use std::{collections::VecDeque, sync::Arc, time::Duration};
     use tokio::sync::oneshot::error::TryRecvError;
@@ -1867,7 +1869,7 @@ mod tests {
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
         // consensus engine is still idle because no FCUs were received
-        let _ = env.send_new_payload(SealedBlock::default().into(), None).await;
+        let _ = env.send_new_payload(ExecutionPayloadV1::from(SealedBlock::default()), None).await;
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
         // consensus engine is still idle because pruning is running
@@ -2282,14 +2284,20 @@ mod tests {
 
             // Send new payload
             let res = env
-                .send_new_payload(random_block(&mut rng, 0, None, None, Some(0)).into(), None)
+                .send_new_payload(
+                    ExecutionPayloadV1::from(random_block(&mut rng, 0, None, None, Some(0))),
+                    None,
+                )
                 .await;
             // Invalid, because this is a genesis block
             assert_matches!(res, Ok(result) => assert_matches!(result.status, PayloadStatusEnum::Invalid { .. }));
 
             // Send new payload
             let res = env
-                .send_new_payload(random_block(&mut rng, 1, None, None, Some(0)).into(), None)
+                .send_new_payload(
+                    ExecutionPayloadV1::from(random_block(&mut rng, 1, None, None, Some(0))),
+                    None,
+                )
                 .await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
@@ -2339,8 +2347,10 @@ mod tests {
             assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
 
             // Send new payload
-            let result =
-                env.send_new_payload_retry_on_syncing(block2.clone().into(), None).await.unwrap();
+            let result = env
+                .send_new_payload_retry_on_syncing(ExecutionPayloadV1::from(block2.clone()), None)
+                .await
+                .unwrap();
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Valid)
                 .with_latest_valid_hash(block2.hash);
             assert_eq!(result, expected_result);
@@ -2438,7 +2448,7 @@ mod tests {
 
             // Send new payload
             let block = random_block(&mut rng, 2, Some(H256::random()), None, Some(0));
-            let res = env.send_new_payload(block.into(), None).await;
+            let res = env.send_new_payload(ExecutionPayloadV1::from(block), None).await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
 
@@ -2500,8 +2510,10 @@ mod tests {
             assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
 
             // Send new payload
-            let result =
-                env.send_new_payload_retry_on_syncing(block2.clone().into(), None).await.unwrap();
+            let result = env
+                .send_new_payload_retry_on_syncing(ExecutionPayloadV1::from(block2.clone()), None)
+                .await
+                .unwrap();
 
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                 validation_error: BlockValidationError::BlockPreMerge { hash: block2.hash }
