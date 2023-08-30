@@ -301,4 +301,13 @@ mod tests {
         let log_dir = reth.logs.log_directory;
         assert!(log_dir.as_ref().ends_with("reth/logs/sepolia"), "{:?}", log_dir);
     }
+
+    #[test]
+    fn override_trusted_setup_file() {
+        // We already have a test that asserts that this has been initialized,
+        // so we cheat a little bit and check that loading a random file errors.
+        let reth = Cli::<()>::try_parse_from(["reth", "node", "--trusted-setup-file", "README.md"])
+            .unwrap();
+        assert!(reth.run().is_err());
+    }
 }
