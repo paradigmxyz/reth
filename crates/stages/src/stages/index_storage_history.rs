@@ -122,7 +122,7 @@ mod tests {
         generators::{random_block_range, random_changeset_range, random_contract_account_range},
     };
     use reth_primitives::{
-        hex_literal::hex, Address, BlockNumber, StorageEntry, H160, H256, MAINNET, U256,
+        hex_literal::hex, Address, BlockNumber, PruneMode, StorageEntry, H160, H256, MAINNET, U256,
     };
 
     const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));
@@ -407,6 +407,61 @@ mod tests {
                 (shard(u64::MAX), vec![2, 3])
             ])
         );
+    }
+
+    #[tokio::test]
+    async fn insert_index_with_prune_modes() {
+        // init
+        let tx = TestTransaction::default();
+
+        // setup
+        tx.commit(|tx| {
+            // we just need first and last
+            tx.put::<tables::BlockBodyIndices>(
+                0,
+                StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+            )
+            .unwrap();
+
+            tx.put::<tables::BlockBodyIndices>(
+                100,
+                StoredBlockBodyIndices { tx_count: 5, ..Default::default() },
+            )
+            .unwrap();
+
+            // setup changeset that are going to be applied to history index
+            tx.put::<tables::StorageChangeSet>(trns(20), storage(STORAGE_KEY)).unwrap();
+            tx.put::<tables::StorageChangeSet>(trns(36), storage(STORAGE_KEY)).unwrap();
+            tx.put::<tables::StorageChangeSet>(trns(100), storage(STORAGE_KEY)).unwrap();
+            Ok(())
+        })
+        .unwrap();
+
+        // run
+        let input = ExecInput { target: Some(100), ..Default::default() };
+        let mut stage = IndexStorageHistoryStage {
+            prune_modes: PruneModes {
+                storage_history: Some(PruneMode::Before(36)),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
+        let provider = factory.provider_rw().unwrap();
+        let out = stage.execute(&provider, input).await.unwrap();
+        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(100), done: true });
+        provider.commit().unwrap();
+
+        // verify
+        let table = cast(tx.table::<tables::StorageHistory>().unwrap());
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![36, 100]),]));
+
+        // unwind
+        unwind(&tx, 100, 0).await;
+
+        // verify initial state
+        let table = tx.table::<tables::StorageHistory>().unwrap();
+        assert!(table.is_empty());
     }
 
     stage_test_suite_ext!(IndexStorageHistoryTestRunner, index_storage_history);
