@@ -3,10 +3,12 @@
 use async_trait::async_trait;
 use reth::providers::{BlockReader, DatabaseProviderRW};
 use reth_db::{database::Database, transaction::DbTxMut};
-use reth_primitives::stage::StageId;
+use reth_primitives::stage::{StageCheckpoint, StageId};
 use reth_stages::{
     ExecInput, ExecOutput, Stage, StageError, StageSet, StageSetBuilder, UnwindInput, UnwindOutput,
 };
+
+use crate::table::MyTable;
 
 /// A single stage.
 #[derive(Debug, Default)]
@@ -29,11 +31,19 @@ impl<DB: Database> Stage<DB> for MyStage {
         provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        // For demonstration, the stage stores the most recent block that a "miner" produces.
-        if let Some(block) = provider.block_by_number(input.next_block()?)? {
-            provider.tx_mut().put(block.beneficiary, block.number)?;
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
-        todo!("Return ExecOutput");
+        // For demonstration, the stage stores the most recent block that a "miner" produces.
+        let range = input.next_block_range();
+        let Some(range_end) = range.last() else { return Ok(ExecOutput::done(input.checkpoint())) };
+        for block_number in range {
+            if let Some(block) = provider.block_by_number(block_number)? {
+                provider.tx_mut().put::<MyTable>(block.beneficiary, block.number)?;
+                provider.commit()?;
+            }
+        }
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(range_end), done: input.target_reached() })
     }
 
     async fn unwind(
