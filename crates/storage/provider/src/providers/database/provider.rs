@@ -450,6 +450,8 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
                 ))?,
             )
             .collect();
+        // It's only possible to have missing senders at the beginning of the range, and not in the
+        // middle or in the end, so it's safe to do `senders_recovered.extend(senders.iter())`
         senders_recovered.extend(senders.iter());
         senders = senders_recovered;
 
