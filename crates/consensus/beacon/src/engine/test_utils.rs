@@ -419,8 +419,9 @@ where
 
         // Setup pipeline
         let (tip_tx, tip_rx) = watch::channel(H256::default());
-        let mut pipeline = match self.base_config.pipeline_config {
-            TestPipelineConfig::Test(outputs) => Pipeline::builder()
+        let mut pipeline = Pipeline::builder();
+        match self.base_config.pipeline_config {
+            TestPipelineConfig::Test(outputs) => pipeline
                 .add_stages(TestStages::new(outputs, Default::default()))
                 .with_tip_sender(tip_tx),
             TestPipelineConfig::Real => {
@@ -432,7 +433,7 @@ where
                     .build(client.clone(), consensus.clone(), db.clone())
                     .into_task();
 
-                Pipeline::builder().add_stages(DefaultStages::new(
+                pipeline.add_stages(DefaultStages::new(
                     HeaderSyncMode::Tip(tip_rx.clone()),
                     Arc::clone(&consensus) as Arc<dyn Consensus>,
                     header_downloader,
@@ -443,7 +444,7 @@ where
         };
 
         if let Some(max_block) = self.base_config.max_block {
-            pipeline = pipeline.with_max_block(max_block);
+            pipeline.with_max_block(max_block);
         }
 
         let pipeline = pipeline.build(db.clone(), self.base_config.chain_spec.clone());

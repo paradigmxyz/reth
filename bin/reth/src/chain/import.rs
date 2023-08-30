@@ -160,7 +160,8 @@ impl ImportCommand {
         let factory = reth_revm::Factory::new(self.chain.clone());
 
         let max_block = file_client.max_block().unwrap_or(0);
-        let mut pipeline = Pipeline::builder()
+        let mut pipeline = Pipeline::builder();
+        pipeline
             .with_tip_sender(tip_tx)
             // we want to sync all blocks the file client provides or 0 if empty
             .with_max_block(max_block)
@@ -193,8 +194,8 @@ impl ImportCommand {
                         .max(config.stages.storage_hashing.clean_threshold),
                     config.prune.map(|prune| prune.parts).unwrap_or_default(),
                 )),
-            )
-            .build(db, self.chain.clone());
+            );
+        let mut pipeline = pipeline.build(db, self.chain.clone());
 
         let events = pipeline.events().map(Into::into);
 

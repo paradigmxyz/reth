@@ -457,12 +457,13 @@ mod tests {
 
             // Setup pipeline
             let (tip_tx, _tip_rx) = watch::channel(H256::default());
-            let mut pipeline = Pipeline::builder()
+            let mut pipeline = Pipeline::builder();
+            pipeline
                 .add_stages(TestStages::new(self.pipeline_exec_outputs, Default::default()))
                 .with_tip_sender(tip_tx);
 
             if let Some(max_block) = self.max_block {
-                pipeline = pipeline.with_max_block(max_block);
+                pipeline.with_max_block(max_block);
             }
 
             pipeline.build(db, chain_spec)

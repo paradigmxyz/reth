@@ -116,35 +116,34 @@ impl Command {
         let factory = reth_revm::Factory::new(self.chain.clone());
 
         let header_mode = HeaderSyncMode::Tip(tip_rx);
-        let pipeline = Pipeline::builder()
-            .with_tip_sender(tip_tx)
-            .add_stages(
-                DefaultStages::new(
-                    header_mode,
-                    Arc::clone(&consensus),
-                    header_downloader,
-                    body_downloader,
-                    factory.clone(),
-                )
-                .set(
-                    TotalDifficultyStage::new(consensus)
-                        .with_commit_threshold(stage_conf.total_difficulty.commit_threshold),
-                )
-                .set(SenderRecoveryStage {
-                    commit_threshold: stage_conf.sender_recovery.commit_threshold,
-                })
-                .set(ExecutionStage::new(
-                    factory,
-                    ExecutionStageThresholds { max_blocks: None, max_changes: None },
-                    stage_conf
-                        .merkle
-                        .clean_threshold
-                        .max(stage_conf.account_hashing.clean_threshold)
-                        .max(stage_conf.storage_hashing.clean_threshold),
-                    config.prune.map(|prune| prune.parts).unwrap_or_default(),
-                )),
+        let mut pipeline = Pipeline::builder();
+        pipeline.with_tip_sender(tip_tx).add_stages(
+            DefaultStages::new(
+                header_mode,
+                Arc::clone(&consensus),
+                header_downloader,
+                body_downloader,
+                factory.clone(),
             )
-            .build(db, self.chain.clone());
+            .set(
+                TotalDifficultyStage::new(consensus)
+                    .with_commit_threshold(stage_conf.total_difficulty.commit_threshold),
+            )
+            .set(SenderRecoveryStage {
+                commit_threshold: stage_conf.sender_recovery.commit_threshold,
+            })
+            .set(ExecutionStage::new(
+                factory,
+                ExecutionStageThresholds { max_blocks: None, max_changes: None },
+                stage_conf
+                    .merkle
+                    .clean_threshold
+                    .max(stage_conf.account_hashing.clean_threshold)
+                    .max(stage_conf.storage_hashing.clean_threshold),
+                config.prune.map(|prune| prune.parts).unwrap_or_default(),
+            )),
+        );
+        let pipeline = pipeline.build(db, self.chain.clone());
 
         Ok(pipeline)
     }

@@ -9,10 +9,11 @@ use clap::{
     Arg, Args, Command,
 };
 use futures::TryFutureExt;
+use reth_db::database::Database;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider,
-    HeaderProvider, StateProviderFactory,
+    BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseReader,
+    EvmEnvProvider, HeaderProvider, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{
@@ -223,7 +224,7 @@ impl RpcServerArgs {
     /// for the auth server that handles the `engine_` API that's accessed by the consensus
     /// layer.
     #[allow(clippy::too_many_arguments)]
-    pub async fn start_servers<Provider, Pool, Network, Tasks, Events, Engine, Conf>(
+    pub async fn start_servers<Provider, Pool, Network, Tasks, Events, Engine, Conf, DB>(
         &self,
         provider: Provider,
         pool: Pool,
@@ -235,7 +236,9 @@ impl RpcServerArgs {
         conf: &mut Conf,
     ) -> eyre::Result<(RpcServerHandle, AuthServerHandle)>
     where
-        Provider: BlockReaderIdExt
+        DB: Database + 'static,
+        Provider: DatabaseReader<DB>
+            + BlockReaderIdExt
             + HeaderProvider
             + StateProviderFactory
             + EvmEnvProvider

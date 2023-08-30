@@ -550,7 +550,8 @@ mod tests {
     async fn run_pipeline() {
         let db = create_test_rw_db();
 
-        let mut pipeline = Pipeline::builder()
+        let mut pipeline = Pipeline::builder();
+        pipeline
             .add_stage(
                 TestStage::new(StageId::Other("A"))
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(20), done: true })),
@@ -559,8 +560,8 @@ mod tests {
                 TestStage::new(StageId::Other("B"))
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
-            .with_max_block(10)
-            .build(db, MAINNET.clone());
+            .with_max_block(10);
+        let mut pipeline = pipeline.build(db, MAINNET.clone());
         let events = pipeline.events();
 
         // Run pipeline
@@ -605,7 +606,9 @@ mod tests {
     async fn unwind_pipeline() {
         let db = create_test_rw_db();
 
-        let mut pipeline = Pipeline::builder()
+        let mut pipeline = Pipeline::builder();
+
+        pipeline
             .add_stage(
                 TestStage::new(StageId::Other("A"))
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(100), done: true }))
@@ -621,8 +624,8 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(20), done: true }))
                     .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) })),
             )
-            .with_max_block(10)
-            .build(db, MAINNET.clone());
+            .with_max_block(10);
+        let mut pipeline = pipeline.build(db, MAINNET.clone());
         let events = pipeline.events();
 
         // Run pipeline
@@ -721,7 +724,8 @@ mod tests {
     async fn unwind_pipeline_with_intermediate_progress() {
         let db = create_test_rw_db();
 
-        let mut pipeline = Pipeline::builder()
+        let mut pipeline = Pipeline::builder();
+        pipeline
             .add_stage(
                 TestStage::new(StageId::Other("A"))
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(100), done: true }))
@@ -731,8 +735,8 @@ mod tests {
                 TestStage::new(StageId::Other("B"))
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
-            .with_max_block(10)
-            .build(db, MAINNET.clone());
+            .with_max_block(10);
+        let mut pipeline = pipeline.build(db, MAINNET.clone());
         let events = pipeline.events();
 
         // Run pipeline
@@ -808,7 +812,8 @@ mod tests {
     async fn run_pipeline_with_unwind() {
         let db = create_test_rw_db();
 
-        let mut pipeline = Pipeline::builder()
+        let mut pipeline = Pipeline::builder();
+        pipeline
             .add_stage(
                 TestStage::new(StageId::Other("A"))
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true }))
@@ -824,8 +829,8 @@ mod tests {
                     .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(0) }))
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
-            .with_max_block(10)
-            .build(db, MAINNET.clone());
+            .with_max_block(10);
+        let mut pipeline = pipeline.build(db, MAINNET.clone());
         let events = pipeline.events();
 
         // Run pipeline
@@ -901,24 +906,25 @@ mod tests {
     async fn pipeline_error_handling() {
         // Non-fatal
         let db = create_test_rw_db();
-        let mut pipeline = Pipeline::builder()
+        let mut pipeline = Pipeline::builder();
+        pipeline
             .add_stage(
                 TestStage::new(StageId::Other("NonFatal"))
                     .add_exec(Err(StageError::Recoverable(Box::new(std::fmt::Error))))
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
-            .with_max_block(10)
-            .build(db, MAINNET.clone());
+            .with_max_block(10);
+        let mut pipeline = pipeline.build(db, MAINNET.clone());
         let result = pipeline.run().await;
         assert_matches!(result, Ok(()));
 
         // Fatal
         let db = create_test_rw_db();
-        let mut pipeline = Pipeline::builder()
-            .add_stage(TestStage::new(StageId::Other("Fatal")).add_exec(Err(
-                StageError::DatabaseIntegrity(ProviderError::BlockBodyIndicesNotFound(5)),
-            )))
-            .build(db, MAINNET.clone());
+        let mut pipeline = Pipeline::builder();
+        pipeline.add_stage(TestStage::new(StageId::Other("Fatal")).add_exec(Err(
+            StageError::DatabaseIntegrity(ProviderError::BlockBodyIndicesNotFound(5)),
+        )));
+        let mut pipeline = pipeline.build(db, MAINNET.clone());
         let result = pipeline.run().await;
         assert_matches!(
             result,

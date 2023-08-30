@@ -3,15 +3,13 @@
 use crate::cli::config::{PayloadBuilderConfig, RethRpcConfig};
 use clap::Args;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_db::{
-    database::Database, table::Table, TableMetadata, TableType, TableViewer, Tables, NO_TABLES,
-};
+use reth_db::{database::Database, TableMetadata, TableType, TableViewer};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::ChainSpec;
 use reth_provider::{
-    BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider,
-    StateProviderFactory,
+    BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseReader,
+    EvmEnvProvider, StateProviderFactory,
 };
 use reth_rpc_builder::{RethModuleRegistry, TransportRpcModules};
 use reth_stages::PipelineBuilder;
@@ -53,15 +51,17 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     ///
     /// This is expected to call the merge functions of [TransportRpcModules], for example
     /// [TransportRpcModules::merge_configured]
-    fn extend_rpc_modules<Conf, Provider, Pool, Network, Tasks, Events>(
+    fn extend_rpc_modules<Conf, Provider, Pool, Network, Tasks, Events, DB>(
         &mut self,
         _config: &Conf,
         _registry: &mut RethModuleRegistry<Provider, Pool, Network, Tasks, Events>,
         _modules: &mut TransportRpcModules,
     ) -> eyre::Result<()>
     where
+        DB: Database + 'static,
         Conf: RethRpcConfig,
-        Provider: BlockReaderIdExt
+        Provider: DatabaseReader<DB>
+            + BlockReaderIdExt
             + StateProviderFactory
             + EvmEnvProvider
             + ChainSpecProvider
@@ -118,11 +118,14 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     ///
     /// Usage: In an external binary, implement the RethNodeCommandConfig trait for a node command.
     /// Define a stage set, and then add it to the pipeline builder.
-    fn add_custom_stage<DB>(&self, _pipeline_builder: &mut PipelineBuilder<DB>) -> eyre::Result<()>
+    fn add_custom_stage<'a, DB>(
+        &self,
+        pipeline_builder: &'a mut PipelineBuilder<DB>,
+    ) -> eyre::Result<&'a mut PipelineBuilder<DB>>
     where
         DB: Database,
     {
-        Ok(())
+        Ok(pipeline_builder)
     }
     /// Gets information about non-core tables so they can be instantiated.
     fn get_custom_tables(&self) -> Option<Vec<Self::TableExt>> {
@@ -230,15 +233,17 @@ impl<T> NoArgs<T> {
 impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
     type TableExt = NoAdditionalTablesConfig;
 
-    fn extend_rpc_modules<Conf, Provider, Pool, Network, Tasks, Events>(
+    fn extend_rpc_modules<Conf, Provider, Pool, Network, Tasks, Events, DB>(
         &mut self,
         config: &Conf,
         registry: &mut RethModuleRegistry<Provider, Pool, Network, Tasks, Events>,
         modules: &mut TransportRpcModules<()>,
     ) -> eyre::Result<()>
     where
+        DB: Database + 'static,
         Conf: RethRpcConfig,
-        Provider: BlockReaderIdExt
+        Provider: DatabaseReader<DB>
+            + BlockReaderIdExt
             + StateProviderFactory
             + EvmEnvProvider
             + ChainSpecProvider

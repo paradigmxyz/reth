@@ -25,7 +25,7 @@ where
     DB: Database,
 {
     /// Add a stage to the pipeline.
-    pub fn add_stage<S>(mut self, stage: S) -> Self
+    pub fn add_stage<S>(&mut self, stage: S) -> &mut Self
     where
         S: Stage<DB> + 'static,
     {
@@ -40,7 +40,7 @@ where
     /// To customize the stages in the set (reorder, disable, insert a stage) call
     /// [`builder`][StageSet::builder] on the set which will convert it to a
     /// [`StageSetBuilder`][crate::StageSetBuilder].
-    pub fn add_stages<Set: StageSet<DB>>(mut self, set: Set) -> Self {
+    pub fn add_stages<Set: StageSet<DB>>(&mut self, set: Set) -> &mut Self {
         for stage in set.builder().build() {
             self.stages.push(stage);
         }
@@ -50,19 +50,19 @@ where
     /// Set the target block.
     ///
     /// Once this block is reached, the pipeline will stop.
-    pub fn with_max_block(mut self, block: BlockNumber) -> Self {
+    pub fn with_max_block(&mut self, block: BlockNumber) -> &mut Self {
         self.max_block = Some(block);
         self
     }
 
     /// Set the tip sender.
-    pub fn with_tip_sender(mut self, tip_tx: watch::Sender<H256>) -> Self {
+    pub fn with_tip_sender(&mut self, tip_tx: watch::Sender<H256>) -> &mut Self {
         self.tip_tx = Some(tip_tx);
         self
     }
 
     /// Set the metric events sender.
-    pub fn with_metrics_tx(mut self, metrics_tx: MetricEventsSender) -> Self {
+    pub fn with_metrics_tx(&mut self, metrics_tx: MetricEventsSender) -> &mut Self {
         self.metrics_tx = Some(metrics_tx);
         self
     }

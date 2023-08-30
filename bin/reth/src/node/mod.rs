@@ -747,7 +747,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         if let Some(max_block) = max_block {
             debug!(target: "reth::cli", max_block, "Configuring builder to use max block");
-            builder = builder.with_max_block(max_block)
+            builder.with_max_block(max_block);
         }
 
         let (tip_tx, tip_rx) = watch::channel(H256::zero());
@@ -771,57 +771,55 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         let header_mode =
             if continuous { HeaderSyncMode::Continuous } else { HeaderSyncMode::Tip(tip_rx) };
-        let mut pipeline_builder =
-            builder.with_tip_sender(tip_tx).with_metrics_tx(metrics_tx.clone()).add_stages(
-                DefaultStages::new(
-                    header_mode,
-                    Arc::clone(&consensus),
-                    header_downloader,
-                    body_downloader,
-                    factory.clone(),
+
+        builder.with_tip_sender(tip_tx).with_metrics_tx(metrics_tx.clone()).add_stages(
+            DefaultStages::new(
+                header_mode,
+                Arc::clone(&consensus),
+                header_downloader,
+                body_downloader,
+                factory.clone(),
+            )
+            .set(
+                TotalDifficultyStage::new(consensus)
+                    .with_commit_threshold(stage_config.total_difficulty.commit_threshold),
+            )
+            .set(SenderRecoveryStage {
+                commit_threshold: stage_config.sender_recovery.commit_threshold,
+            })
+            .set(
+                ExecutionStage::new(
+                    factory,
+                    ExecutionStageThresholds {
+                        max_blocks: stage_config.execution.max_blocks,
+                        max_changes: stage_config.execution.max_changes,
+                    },
+                    stage_config
+                        .merkle
+                        .clean_threshold
+                        .max(stage_config.account_hashing.clean_threshold)
+                        .max(stage_config.storage_hashing.clean_threshold),
+                    prune_config.map(|prune| prune.parts).unwrap_or_default(),
                 )
-                .set(
-                    TotalDifficultyStage::new(consensus)
-                        .with_commit_threshold(stage_config.total_difficulty.commit_threshold),
-                )
-                .set(SenderRecoveryStage {
-                    commit_threshold: stage_config.sender_recovery.commit_threshold,
-                })
-                .set(
-                    ExecutionStage::new(
-                        factory,
-                        ExecutionStageThresholds {
-                            max_blocks: stage_config.execution.max_blocks,
-                            max_changes: stage_config.execution.max_changes,
-                        },
-                        stage_config
-                            .merkle
-                            .clean_threshold
-                            .max(stage_config.account_hashing.clean_threshold)
-                            .max(stage_config.storage_hashing.clean_threshold),
-                        prune_config.map(|prune| prune.parts).unwrap_or_default(),
-                    )
-                    .with_metrics_tx(metrics_tx),
-                )
-                .set(AccountHashingStage::new(
-                    stage_config.account_hashing.clean_threshold,
-                    stage_config.account_hashing.commit_threshold,
-                ))
-                .set(StorageHashingStage::new(
-                    stage_config.storage_hashing.clean_threshold,
-                    stage_config.storage_hashing.commit_threshold,
-                ))
-                .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
-                .set(TransactionLookupStage::new(stage_config.transaction_lookup.commit_threshold))
-                .set(IndexAccountHistoryStage::new(
-                    stage_config.index_account_history.commit_threshold,
-                ))
-                .set(IndexStorageHistoryStage::new(
-                    stage_config.index_storage_history.commit_threshold,
-                )),
-            );
-        self.ext.add_custom_stage(&mut pipeline_builder)?;
-        let pipeline = pipeline_builder.build(db, self.chain.clone());
+                .with_metrics_tx(metrics_tx),
+            )
+            .set(AccountHashingStage::new(
+                stage_config.account_hashing.clean_threshold,
+                stage_config.account_hashing.commit_threshold,
+            ))
+            .set(StorageHashingStage::new(
+                stage_config.storage_hashing.clean_threshold,
+                stage_config.storage_hashing.commit_threshold,
+            ))
+            .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
+            .set(TransactionLookupStage::new(stage_config.transaction_lookup.commit_threshold))
+            .set(IndexAccountHistoryStage::new(stage_config.index_account_history.commit_threshold))
+            .set(IndexStorageHistoryStage::new(
+                stage_config.index_storage_history.commit_threshold,
+            )),
+        );
+        self.ext.add_custom_stage(&mut builder)?;
+        let pipeline = builder.build(db, self.chain.clone());
 
         Ok(pipeline)
     }
