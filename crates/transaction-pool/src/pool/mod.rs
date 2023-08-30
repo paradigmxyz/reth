@@ -336,6 +336,15 @@ where
             changed_senders,
         );
 
+        let discarded = &outcome.discarded;
+        // For each discarded EIP-4844 transaction, delete the blob txs from the blob store
+        let blob_hashes = discarded
+            .iter()
+            .filter(|tx| tx.transaction.is_eip4844())
+            .map(|tx| *tx.hash())
+            .collect::<Vec<_>>();
+        self.delete_blobs(blob_hashes);
+
         // notify listeners about updates
         self.notify_on_new_state(outcome);
     }
