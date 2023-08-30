@@ -477,7 +477,7 @@ impl TypedValueParser for RpcModuleSelectionValueParser {
     ) -> Result<Self::Value, clap::Error> {
         let val =
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
-        val.parse::<RpcModuleSelection>().map_err(|err| {
+          val.split(',').map(str::trim).collect::<std::collections::HashSet<_>>().into_iter().collect::<Vec<_>>().join(", ").parse::<RpcModuleSelection>().map_err(|err| {
             let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
             let possible_values = RethRpcModule::all_variants().to_vec().join(",");
             let msg = format!(
