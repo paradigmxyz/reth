@@ -44,8 +44,10 @@ use reth_interfaces::{
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head,
-    SealedHeader, H256,
+    constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
+    kzg::KzgSettings,
+    stage::StageId,
+    BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head, SealedHeader, H256,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
@@ -122,6 +124,10 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     #[arg(long, value_name = "SOCKET", value_parser = parse_socket_address, help_heading = "Metrics")]
     pub metrics: Option<SocketAddr>,
 
+    /// Overrides the KZG trusted setup by reading from the supplied file.
+    #[arg(long, value_name = "PATH")]
+    trusted_setup_file: Option<PathBuf>,
+
     /// All networking related arguments
     #[clap(flatten)]
     pub network: NetworkArgs,
@@ -167,6 +173,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             config,
             chain,
             metrics,
+            trusted_setup_file,
             network,
             rpc,
             txpool,
@@ -182,6 +189,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             config,
             chain,
             metrics,
+            trusted_setup_file,
             network,
             rpc,
             txpool,
@@ -262,19 +270,14 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // setup the blockchain provider
         let factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
         let blockchain_db = BlockchainProvider::new(factory, blockchain_tree.clone())?;
-
         let blob_store = InMemoryBlobStore::default();
-        let transaction_pool = reth_transaction_pool::Pool::eth_pool(
-            TransactionValidationTaskExecutor::eth_with_additional_tasks(
-                blockchain_db.clone(),
-                Arc::clone(&self.chain),
-                blob_store.clone(),
-                ctx.task_executor.clone(),
-                1,
-            ),
-            blob_store,
-            self.txpool.pool_config(),
-        );
+        let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
+            .kzg_settings(self.kzg_settings()?)
+            .with_additional_tasks(1)
+            .build_with_tasks(blockchain_db.clone(), ctx.task_executor.clone(), blob_store.clone());
+
+        let transaction_pool =
+            reth_transaction_pool::Pool::eth_pool(validator, blob_store, self.txpool.pool_config());
         info!(target: "reth::cli", "Transaction pool initialized");
 
         // spawn txpool maintenance task
@@ -564,6 +567,18 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     fn load_config(&self, config_path: PathBuf) -> eyre::Result<Config> {
         confy::load_path::<Config>(config_path.clone())
             .wrap_err_with(|| format!("Could not load config file {:?}", config_path))
+    }
+
+    /// Loads the trusted setup params from a given file path or falls back to
+    /// `MAINNET_KZG_TRUSTED_SETUP`.
+    fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
+        if let Some(ref trusted_setup_file) = self.trusted_setup_file {
+            let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file.into())
+                .map_err(LoadKzgSettingsError::KzgError)?;
+            Ok(Arc::new(trusted_setup))
+        } else {
+            Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
+        }
     }
 
     fn init_trusted_nodes(&self, config: &mut Config) {

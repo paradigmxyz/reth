@@ -35,7 +35,7 @@ pub const VERSIONED_HASH_VERSION_KZG: u8 = 0x01;
 const TRUSTED_SETUP_RAW: &[u8] = include_bytes!("../../res/eip4844/trusted_setup.txt");
 
 /// KZG trusted setup
-pub static KZG_TRUSTED_SETUP: Lazy<Arc<KzgSettings>> = Lazy::new(|| {
+pub static MAINNET_KZG_TRUSTED_SETUP: Lazy<Arc<KzgSettings>> = Lazy::new(|| {
     Arc::new(
         load_trusted_setup_from_bytes(TRUSTED_SETUP_RAW).expect("Failed to load trusted setup"),
     )
@@ -69,6 +69,6 @@ mod tests {
 
     #[test]
     fn ensure_load_kzg_settings() {
-        let _settings = Arc::clone(&KZG_TRUSTED_SETUP);
+        let _settings = Arc::clone(&MAINNET_KZG_TRUSTED_SETUP);
     }
 }

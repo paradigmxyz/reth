@@ -9,8 +9,8 @@ use reth_primitives::{
     Address, BlobTransactionSidecar, BlobTransactionValidationError,
     FromRecoveredPooledTransaction, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId,
     PooledTransactionsElement, PooledTransactionsElementEcRecovered, SealedBlock, Transaction,
-    TransactionKind, TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
-    H256, U256,
+    TransactionKind, TransactionSignedEcRecovered, TxEip4844, TxHash, EIP1559_TX_TYPE_ID,
+    EIP4844_TX_TYPE_ID, H256, U256,
 };
 use reth_rlp::Encodable;
 use std::{
@@ -118,18 +118,24 @@ pub trait TransactionPool: Send + Sync + Clone {
     ///
     /// Consumer: RPC/P2P
     fn pending_transactions_listener(&self) -> Receiver<TxHash> {
-        self.pending_transactions_listener_for(PendingTransactionListenerKind::PropagateOnly)
+        self.pending_transactions_listener_for(TransactionListenerKind::PropagateOnly)
     }
 
     /// Returns a new Stream that yields transactions hashes for new __pending__ transactions
-    /// inserted into the pool depending on the given [PendingTransactionListenerKind] argument.
-    fn pending_transactions_listener_for(
-        &self,
-        kind: PendingTransactionListenerKind,
-    ) -> Receiver<TxHash>;
+    /// inserted into the pool depending on the given [TransactionListenerKind] argument.
+    fn pending_transactions_listener_for(&self, kind: TransactionListenerKind) -> Receiver<TxHash>;
 
     /// Returns a new stream that yields new valid transactions added to the pool.
-    fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>>;
+    fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
+        self.new_transactions_listener_for(TransactionListenerKind::PropagateOnly)
+    }
+
+    /// Returns a new stream that yields new valid transactions added to the pool
+    /// depending on the given [TransactionListenerKind] argument.
+    fn new_transactions_listener_for(
+        &self,
+        kind: TransactionListenerKind,
+    ) -> Receiver<NewTransactionEvent<Self::Transaction>>;
 
     /// Returns a new Stream that yields new transactions added to the pending sub-pool.
     ///
@@ -138,7 +144,10 @@ pub trait TransactionPool: Send + Sync + Clone {
     fn new_pending_pool_transactions_listener(
         &self,
     ) -> NewSubpoolTransactionStream<Self::Transaction> {
-        NewSubpoolTransactionStream::new(self.new_transactions_listener(), SubPool::Pending)
+        NewSubpoolTransactionStream::new(
+            self.new_transactions_listener_for(TransactionListenerKind::PropagateOnly),
+            SubPool::Pending,
+        )
     }
 
     /// Returns a new Stream that yields new transactions added to the basefee sub-pool.
@@ -326,12 +335,11 @@ pub trait TransactionPoolExt: TransactionPool {
     fn delete_blobs(&self, txs: Vec<H256>);
 }
 
-/// Determines what kind of new pending transactions should be emitted by a stream of pending
-/// transactions.
+/// Determines what kind of new transactions should be emitted by a stream of transactions.
 ///
 /// This gives control whether to include transactions that are allowed to be propagated.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum PendingTransactionListenerKind {
+pub enum TransactionListenerKind {
     /// Any new pending transactions
     All,
     /// Only transactions that are allowed to be propagated.
@@ -340,7 +348,7 @@ pub enum PendingTransactionListenerKind {
     PropagateOnly,
 }
 
-impl PendingTransactionListenerKind {
+impl TransactionListenerKind {
     /// Returns true if we're only interested in transactions that are allowed to be propagated.
     #[inline]
     pub fn is_propagate_only(&self) -> bool {
@@ -648,6 +656,9 @@ pub trait EthPoolTransaction: PoolTransaction {
     /// Extracts the blob sidecar from the transaction.
     fn take_blob(&mut self) -> EthBlobTransactionSidecar;
 
+    /// Returns the transaction as EIP-4844 transaction if it is one.
+    fn as_eip4844(&self) -> Option<&TxEip4844>;
+
     /// Validates the blob sidecar of the transaction with the given settings.
     fn validate_blob(
         &self,
@@ -835,6 +846,10 @@ impl EthPoolTransaction for EthPooledTransaction {
         } else {
             EthBlobTransactionSidecar::None
         }
+    }
+
+    fn as_eip4844(&self) -> Option<&TxEip4844> {
+        self.transaction.as_eip4844()
     }
 
     fn validate_blob(
