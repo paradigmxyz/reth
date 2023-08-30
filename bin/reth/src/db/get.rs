@@ -1,7 +1,7 @@
 use crate::utils::DbTool;
 use clap::Parser;
 
-use reth_db::{database::Database, table::Table, TableType, TableViewer, Tables, TableMetadata};
+use reth_db::{database::Database, table::Table, TableMetadata, TableType, TableViewer, Tables};
 use tracing::error;
 
 /// The arguments for the `reth db get` command

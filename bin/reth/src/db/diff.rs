@@ -20,8 +20,7 @@ use reth_db::{
     BlockWithdrawals, Bytecodes, CanonicalHeaders, DatabaseEnvRO, HashedAccount, HashedStorage,
     HeaderNumbers, HeaderTD, Headers, PlainAccountState, PlainStorageState, PruneCheckpoints,
     Receipts, StorageChangeSet, StorageHistory, StoragesTrie, SyncStage, SyncStageProgress,
-    TableMetadata, Tables, TransactionBlock, Transactions, TxHashNumber, TxSenders,
-    NO_TABLES,
+    TableMetadata, Tables, TransactionBlock, Transactions, TxHashNumber, TxSenders, NO_TABLES,
 };
 use tracing::info;
 

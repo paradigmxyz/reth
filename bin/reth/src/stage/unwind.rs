@@ -5,7 +5,9 @@ use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::{Parser, Subcommand};
-use reth_db::{cursor::DbCursorRO, database::Database, open_db, tables, transaction::DbTx, NO_TABLES};
+use reth_db::{
+    cursor::DbCursorRO, database::Database, open_db, tables, transaction::DbTx, NO_TABLES,
+};
 use reth_primitives::{BlockHashOrNumber, ChainSpec};
 use reth_provider::{BlockExecutionWriter, ProviderFactory};
 use std::{ops::RangeInclusive, sync::Arc};

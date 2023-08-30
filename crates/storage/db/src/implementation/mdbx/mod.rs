@@ -179,7 +179,7 @@ mod tests {
         tables::{AccountHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState},
         test_utils::*,
         transaction::{DbTx, DbTxMut},
-        AccountChangeSet, DatabaseError, NUM_TABLES, NO_TABLES,
+        AccountChangeSet, DatabaseError, NO_TABLES, NUM_TABLES,
     };
     use reth_interfaces::db::DatabaseWriteOperation;
     use reth_libmdbx::{NoWriteMap, WriteMap};

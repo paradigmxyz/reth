@@ -201,12 +201,8 @@ pub mod test_utils {
     /// Create read/write database for testing
     pub fn create_test_rw_db() -> Arc<DatabaseEnv> {
         Arc::new(
-            init_db(
-                tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
-                None,
-                NO_TABLES,
-            )
-            .expect(ERROR_DB_CREATION),
+            init_db(tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(), None, NO_TABLES)
+                .expect(ERROR_DB_CREATION),
         )
     }
 

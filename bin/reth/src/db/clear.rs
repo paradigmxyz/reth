@@ -4,7 +4,7 @@ use reth_db::{
     database::Database,
     table::Table,
     transaction::{DbTx, DbTxMut},
-    TableViewer, Tables, TableMetadata,
+    TableMetadata, TableViewer, Tables,
 };
 
 /// The arguments for the `reth db clear` command

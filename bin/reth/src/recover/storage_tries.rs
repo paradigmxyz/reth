@@ -8,7 +8,8 @@ use clap::Parser;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRW},
     init_db, tables,
-    transaction::DbTx, NO_TABLES,
+    transaction::DbTx,
+    NO_TABLES,
 };
 use reth_primitives::ChainSpec;
 use reth_provider::{BlockNumReader, HeaderProvider, ProviderError, ProviderFactory};
