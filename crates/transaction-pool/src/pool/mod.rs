@@ -351,6 +351,14 @@ where
 
         promoted.iter().for_each(|tx| listener.pending(tx.hash(), None));
         discarded.iter().for_each(|tx| listener.discarded(tx.hash()));
+
+        // For each discarded EIP-4844 transaction, delete the blob txs from the blob store
+        let blob_hashes = discarded
+            .iter()
+            .filter(|tx| tx.transaction.is_eip4844())
+            .map(|tx| *tx.hash())
+            .collect::<Vec<_>>();
+        self.delete_blobs(blob_hashes);
     }
 
     /// Add a single validated transaction into the pool.
@@ -575,6 +583,14 @@ where
         mined.iter().for_each(|tx| listener.mined(tx, block_hash));
         promoted.iter().for_each(|tx| listener.pending(tx.hash(), None));
         discarded.iter().for_each(|tx| listener.discarded(tx.hash()));
+
+        // For each discarded EIP-4844 transaction, delete the blob txs from the blob store
+        let blob_hashes = discarded
+            .iter()
+            .filter(|tx| tx.transaction.is_eip4844())
+            .map(|tx| *tx.hash())
+            .collect::<Vec<_>>();
+        self.delete_blobs(blob_hashes);
     }
 
     /// Fire events for the newly added transaction if there are any.
@@ -588,6 +604,14 @@ where
                 listener.pending(transaction.hash(), replaced.clone());
                 promoted.iter().for_each(|tx| listener.pending(tx.hash(), None));
                 discarded.iter().for_each(|tx| listener.discarded(tx.hash()));
+
+                // For each discarded EIP-4844 transaction, delete the blob txs from the blob store
+                let blob_hashes = discarded
+                    .iter()
+                    .filter(|tx| tx.transaction.is_eip4844())
+                    .map(|tx| *tx.hash())
+                    .collect::<Vec<_>>();
+                self.delete_blobs(blob_hashes);
             }
             AddedTransaction::Parked { transaction, replaced, .. } => {
                 listener.queued(transaction.hash());
