@@ -19,6 +19,7 @@ reth-stages = { path = "../../crates/stages" }
 reth-rlp.workspace = true
 reth-interfaces.workspace = true
 reth-revm = { path = "../../crates/revm" }
+reth-trie = { path = "../../crates/trie" }
 tokio = "1.28.1"
 walkdir = "2.3.3"
 serde = "1.0.163"

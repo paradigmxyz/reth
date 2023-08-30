@@ -1969,6 +1969,7 @@ dependencies = [
  "reth-revm",
  "reth-rlp",
  "reth-stages",
+ "reth-trie",
  "serde",
  "serde_json",
  "thiserror",
