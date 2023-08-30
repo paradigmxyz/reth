@@ -9,7 +9,7 @@ use crate::{
     TransactionValidationTaskExecutor, TransactionValidator,
 };
 use reth_primitives::{
-    constants::{eip4844::KZG_TRUSTED_SETUP, ETHEREUM_BLOCK_GAS_LIMIT},
+    constants::{eip4844::MAINNET_KZG_TRUSTED_SETUP, ETHEREUM_BLOCK_GAS_LIMIT},
     kzg::KzgSettings,
     ChainSpec, InvalidTransactionError, SealedBlock, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
     EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
@@ -356,7 +356,7 @@ impl EthTransactionValidatorBuilder {
             additional_tasks: 1,
             // default to true, can potentially take this as a param in the future
             propagate_local_transactions: true,
-            kzg_settings: Arc::clone(&KZG_TRUSTED_SETUP),
+            kzg_settings: Arc::clone(&MAINNET_KZG_TRUSTED_SETUP),
 
             // by default all transaction types are allowed
             eip2718: true,
