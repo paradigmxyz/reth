@@ -33,8 +33,8 @@ use reth_primitives::{
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
     ChainInfo, ChainSpec, Hardfork, Head, Header, PruneCheckpoint, PrunePart, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta, TransactionSigned,
-    TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256,
-    U256,
+    TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H160,
+    H256, U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
@@ -435,20 +435,23 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)?;
 
         // Recover senders manually if not found in db
-        let start_index = senders.len();
-        let end_index = transactions.len();
-        let missing_senders = end_index - start_index;
-        senders.extend(
-            (start_index as u64..end_index as u64).zip(
+        let senders_len = senders.len();
+        let transactions_len = transactions.len();
+        let missing_senders = transactions_len - senders_len;
+        let mut senders_recovered: Vec<(u64, H160)> = (first_transaction..
+            first_transaction + missing_senders as u64)
+            .zip(
                 TransactionSigned::recover_signers(
-                    transactions.iter().skip(start_index).map(|(_, tx)| tx).collect::<Vec<_>>(),
+                    transactions.iter().take(missing_senders).map(|(_, tx)| tx).collect::<Vec<_>>(),
                     missing_senders,
                 )
                 .ok_or(BlockExecutionError::Validation(
                     BlockValidationError::SenderRecoveryError,
                 ))?,
-            ),
-        );
+            )
+            .collect();
+        senders_recovered.extend(senders.iter());
+        senders = senders_recovered;
 
         if TAKE {
             // Remove TxHashNumber
