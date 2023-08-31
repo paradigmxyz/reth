@@ -38,6 +38,7 @@ impl TransactionPool for NoopTransactionPool {
             last_seen_block_hash: Default::default(),
             last_seen_block_number: 0,
             pending_basefee: 0,
+            pending_blob_fee: None,
         }
     }
 

@@ -484,6 +484,10 @@ pub struct CanonicalStateUpdate<'a> {
     ///
     /// The base fee of a block depends on the utilization of the last block and its base fee.
     pub pending_block_base_fee: u64,
+    /// EIP-4844 blob fee of the _next_ (pending) block
+    ///
+    /// Only after Cancun
+    pub pending_block_blob_fee: Option<u64>,
     /// A set of changed accounts across a range of blocks.
     pub changed_accounts: Vec<ChangedAccount>,
     /// All mined transactions in the block range.
@@ -512,14 +516,15 @@ impl<'a> CanonicalStateUpdate<'a> {
             last_seen_block_hash: self.hash(),
             last_seen_block_number: self.number(),
             pending_basefee: self.pending_block_base_fee,
+            pending_blob_fee: self.pending_block_blob_fee,
         }
     }
 }
 
 impl<'a> fmt::Display for CanonicalStateUpdate<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{{ hash: {}, number: {}, pending_block_base_fee: {}, changed_accounts: {}, mined_transactions: {} }}",
-            self.hash(), self.number(), self.pending_block_base_fee, self.changed_accounts.len(), self.mined_transactions.len())
+        write!(f, "{{ hash: {}, number: {}, pending_block_base_fee: {}, pending_block_blob_fee: {:?}, changed_accounts: {}, mined_transactions: {} }}",
+            self.hash(), self.number(), self.pending_block_base_fee, self.pending_block_blob_fee,  self.changed_accounts.len(), self.mined_transactions.len())
     }
 }
 
@@ -921,9 +926,14 @@ pub struct BlockInfo {
     pub last_seen_block_number: u64,
     /// Currently enforced base fee: the threshold for the basefee sub-pool.
     ///
-    /// Note: this is the derived base fee of the _next_ block that builds on the clock the pool is
+    /// Note: this is the derived base fee of the _next_ block that builds on the block the pool is
     /// currently tracking.
     pub pending_basefee: u64,
+    /// Currently enforced blob fee: the threshold for eip-4844 blob transactions.
+    ///
+    /// Note: this is the derived blob fee of the _next_ block that builds on the block the pool is
+    /// currently tracking
+    pub pending_blob_fee: Option<u64>,
 }
 
 /// The limit to enforce for [TransactionPool::get_pooled_transaction_elements].
