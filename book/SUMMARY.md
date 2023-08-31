@@ -13,7 +13,7 @@
    1. [Metrics](./run/observability.md)
    1. [Configuring Reth](./run/config.md)
    1. [Transaction types](./run/transactions.md)
-   1. [Pruning](./run/pruning.md)
+   1. [Pruning & Full Node](./run/pruning.md)
    1. [Ports](./run/ports.md)
    1. [Troubleshooting](./run/troubleshooting.md)
 1. [Interacting with Reth over JSON-RPC](./jsonrpc/intro.md)
