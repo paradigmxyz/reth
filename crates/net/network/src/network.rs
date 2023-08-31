@@ -178,7 +178,7 @@ impl NetworkHandle {
 }
 
 // === API Implementations ===
-
+#[async_trait]
 impl PeersInfo for NetworkHandle {
     fn num_connected_peers(&self) -> usize {
         self.inner.num_active_peers.load(Ordering::Relaxed)
@@ -198,6 +198,10 @@ impl PeersInfo for NetworkHandle {
         }
 
         NodeRecord::new(socket_addr, id)
+    }
+
+    async fn all_peers(&self) -> Vec<NodeRecord> {
+        self.inner.peers.all_peers().await
     }
 }
 

@@ -7,6 +7,10 @@ use reth_rpc_types::NodeInfo;
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "admin"))]
 #[async_trait::async_trait]
 pub trait AdminApi {
+    /// Returns all nodes in the peerset.
+    #[method(name = "peers")]
+    async fn all_peers(&self) -> RpcResult<Vec<NodeRecord>>;
+
     /// Adds the given node record to the peerset.
     #[method(name = "addPeer")]
     fn add_peer(&self, record: NodeRecord) -> RpcResult<bool>;

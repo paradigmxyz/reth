@@ -26,6 +26,12 @@ impl<N> AdminApiServer for AdminApi<N>
 where
     N: NetworkInfo + Peers + 'static,
 {
+    /// Handler for `admin_peers`
+    async fn all_peers(&self) -> RpcResult<Vec<NodeRecord>> {
+        let peers = self.network.all_peers().await;
+        Ok(peers)
+    }
+
     /// Handler for `admin_addPeer`
     fn add_peer(&self, record: NodeRecord) -> RpcResult<bool> {
         self.network.add_peer(record.id, record.tcp_addr());

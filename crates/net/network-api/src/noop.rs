@@ -52,6 +52,7 @@ impl NetworkInfo for NoopNetwork {
     }
 }
 
+#[async_trait]
 impl PeersInfo for NoopNetwork {
     fn num_connected_peers(&self) -> usize {
         0
@@ -59,6 +60,10 @@ impl PeersInfo for NoopNetwork {
 
     fn local_node_record(&self) -> NodeRecord {
         NodeRecord::new(self.local_addr(), PeerId::random())
+    }
+
+    async fn all_peers(&self) -> Vec<NodeRecord> {
+        vec![]
     }
 }
 
