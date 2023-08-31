@@ -529,11 +529,11 @@ impl PostState {
         for (block_number, storage_changes) in
             std::mem::take(&mut self.storage_changes).inner.into_iter()
         {
-            for (address, mut storage) in storage_changes.into_iter() {
-                if self.prune_modes.should_prune_storage_history(block_number, tip) {
-                    continue
-                }
+            if self.prune_modes.should_prune_storage_history(block_number, tip) {
+                continue
+            }
 
+            for (address, mut storage) in storage_changes.into_iter() {
                 let storage_id = BlockNumberAddress((block_number, address));
 
                 // If the account was created and wiped at the same block, skip all storage changes
