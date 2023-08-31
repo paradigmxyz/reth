@@ -83,9 +83,7 @@ pub trait Peers: PeersInfo {
     fn add_peer_kind(&self, peer: PeerId, kind: PeerKind, addr: SocketAddr);
 
     /// Returns the rpc [PeerInfo] for all connected peers.
-    ///
-    /// This is intended for RPC.
-    async fn get_peers_info(&self) -> Result<Vec<PeerInfo>, NetworkError>;
+    async fn get_peers(&self) -> Result<Vec<PeerInfo>, NetworkError>;
 
     /// Removes a peer from the peer set that corresponds to given kind.
     fn remove_peer(&self, peer: PeerId, kind: PeerKind);

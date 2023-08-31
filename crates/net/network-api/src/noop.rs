@@ -67,7 +67,7 @@ impl PeersInfo for NoopNetwork {
 impl Peers for NoopNetwork {
     fn add_peer_kind(&self, _peer: PeerId, _kind: PeerKind, _addr: SocketAddr) {}
 
-    async fn get_peers_info(&self) -> Result<Vec<PeerInfo>, NetworkError> {
+    async fn get_peers(&self) -> Result<Vec<PeerInfo>, NetworkError> {
         Ok(vec![])
     }
 

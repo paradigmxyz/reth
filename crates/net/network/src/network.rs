@@ -203,7 +203,7 @@ impl Peers for NetworkHandle {
         self.send_message(NetworkHandleMessage::AddPeerAddress(peer, kind, addr));
     }
 
-    async fn get_peers_info(&self) -> Result<Vec<PeerInfo>, NetworkError> {
+    async fn get_peers(&self) -> Result<Vec<PeerInfo>, NetworkError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.manager().send(NetworkHandleMessage::GetPeerInfo(tx));
         Ok(rx.await?)
