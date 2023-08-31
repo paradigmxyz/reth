@@ -6,8 +6,8 @@ use crate::{
     forkid::ForkFilterKey,
     header::Head,
     proofs::genesis_state_root,
-    Address, BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, Hardfork, Header,
-    PruneBatchSizes, SealedHeader, H160, H256, U256,
+    Address, BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, GenesisAccount, Hardfork,
+    Header, PruneBatchSizes, SealedHeader, H160, H256, U256,
 };
 use hex_literal::hex;
 use once_cell::sync::Lazy;
@@ -717,6 +717,17 @@ impl ChainSpecBuilder {
     pub fn cancun_activated(mut self) -> Self {
         self = self.paris_activated();
         self.hardforks.insert(Hardfork::Cancun, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Extend the genesis alloc with the given account.
+    pub fn extend_genesis_alloc(
+        mut self,
+        accounts: impl Iterator<Item = (H160, GenesisAccount)>,
+    ) -> Self {
+        let mut genesis = self.genesis.expect("genesis is required to extend the genesis alloc");
+        genesis.alloc.extend(accounts);
+        self.genesis = Some(genesis);
         self
     }
 

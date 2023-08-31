@@ -749,8 +749,10 @@ mod tests {
     use once_cell::sync::Lazy;
     use reth_consensus_common::calc;
     use reth_primitives::{
-        constants::ETH_TO_WEI, hex_literal::hex, keccak256, Account, Address, BlockNumber,
-        Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, H256, MAINNET, U256,
+        constants::{BEACON_ROOTS_ADDRESS, ETH_TO_WEI},
+        hex_literal::hex,
+        keccak256, Account, Address, BlockNumber, Bytecode, Bytes, ChainSpecBuilder, ForkCondition,
+        GenesisAccount, StorageKey, H256, MAINNET, U256,
     };
     use reth_provider::{
         post_state::{AccountChanges, Storage, StorageTransition, StorageWipe},
@@ -1026,6 +1028,47 @@ mod tests {
             &Some(ommer_beneficiary_info),
             "Ommer beneficiary state is wrong"
         );
+    }
+
+    #[test]
+    fn eip_4788_non_genesis_call() {
+        let header = Header { timestamp: 1, ..Header::default() };
+
+        let db = StateProviderTest::default();
+
+        let beacon_root_contract_genesis = GenesisAccount {
+            balance: U256::ZERO,
+            code: Some(Bytes::from_str("0x3373fffffffffffffffffffffffffffffffffffffffe14604457602036146024575f5ffd5b620180005f350680545f35146037575f5ffd5b6201800001545f5260205ff35b42620180004206555f3562018000420662018000015500").unwrap()),
+            nonce: Some(1),
+            ..Default::default()
+        };
+
+        // deploy the contract at genesis
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+                .extend_genesis_alloc(
+                    vec![(BEACON_ROOTS_ADDRESS, beacon_root_contract_genesis)].into_iter(),
+                )
+                .build(),
+        );
+
+        let db = SubState::new(State::new(db));
+
+        // execute chain and verify receipts
+        let mut executor = Executor::new(chain_spec, db);
+        let _out = executor
+            .execute_and_verify_receipt(
+                &Block { header, body: vec![], ommers: vec![], withdrawals: None },
+                U256::ZERO,
+                None,
+            )
+            .unwrap();
+
+        // Check if cache is set
+        // beneficiary
+        let _db = executor.db();
     }
 
     #[test]

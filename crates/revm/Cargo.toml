@@ -9,7 +9,7 @@ repository.workspace = true
 description = "reth specific revm utilities"
 
 [dependencies]
-# reth 
+# reth
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-provider.workspace = true
