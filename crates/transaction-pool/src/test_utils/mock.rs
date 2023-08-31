@@ -580,7 +580,7 @@ impl IntoRecoveredTransaction for MockTransaction {
             to: TransactionKind::Call(Address::from_slice(
                 &hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046")[..],
             )),
-            value: 693361000000000u64.into(),
+            value: U256::from(693361000000000u64),
             input: Default::default(),
         });
 

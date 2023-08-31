@@ -1,4 +1,4 @@
-use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, B256};
+use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, B256, U256};
 use alloy_rlp::{length_of_length, Encodable, Header};
 use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
@@ -33,11 +33,7 @@ pub struct TxLegacy {
     /// be transferred to the message call’s recipient or,
     /// in the case of contract creation, as an endowment
     /// to the newly created account; formally Tv.
-    ///
-    /// As ethereum circulation is around 120mil eth as of 2022 that is around
-    /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
-    /// 340282366920938463463374607431768211455
-    pub value: u128,
+    pub value: U256,
     /// Input has two uses depending if transaction is Create or Call (if `to` field is None or
     /// Some). pub init: An unlimited size byte array specifying the
     /// EVM-code for the account initialisation procedure CREATE,
@@ -55,7 +51,7 @@ impl TxLegacy {
         mem::size_of::<u128>() + // gas_price
         mem::size_of::<u64>() + // gas_limit
         self.to.size() + // to
-        mem::size_of::<u128>() + // value
+        mem::size_of::<U256>() + // value
         self.input.len() // input
     }
 
@@ -183,7 +179,7 @@ mod tests {
             gas_price: 0xfa56ea00,
             gas_limit: 119902,
             to: TransactionKind::Call( hex!("06012c8cf97bead5deae237070f9587f8e7a266d").into()),
-            value: 0x1c6bf526340000u64.into(),
+            value: U256::from(0x1c6bf526340000u64),
             input:  hex!("f7d8c88300000000000000000000000000000000000000000000000000000000000cee6100000000000000000000000000000000000000000000000000000000000ac3e1").into(),
         });
 

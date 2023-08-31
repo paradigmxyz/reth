@@ -576,7 +576,7 @@ mod tests {
             gas_price: 0x28f000fff,
             gas_limit: 10,
             to: TransactionKind::Call(Address::default()),
-            value: 3,
+            value: U256::from(3),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),
         });
