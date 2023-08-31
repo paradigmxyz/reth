@@ -1,6 +1,6 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::NodeRecord;
-use reth_rpc_types::NodeInfo;
+use reth_rpc_types::{NodeInfo, PeerInfo};
 
 /// Admin namespace rpc interface that gives access to several non-standard RPC methods.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "admin"))]
@@ -28,11 +28,18 @@ pub trait AdminApi {
     #[method(name = "removeTrustedPeer")]
     fn remove_trusted_peer(&self, record: NodeRecord) -> RpcResult<bool>;
 
+    /// The peers administrative property can be queried for all the information known about the
+    /// connected remote nodes at the networking granularity. These include general information
+    /// about the nodes themselves as participants of the devp2p P2P overlay protocol, as well as
+    /// specialized information added by each of the running application protocols
+    #[method(name = "peers")]
+    async fn peers(&self) -> RpcResult<Vec<PeerInfo>>;
+
     /// Creates an RPC subscription which serves events received from the network.
     #[subscription(
-    name = "peerEvents",
-    unsubscribe = "peerEvents_unsubscribe",
-    item = String
+        name = "peerEvents",
+        unsubscribe = "peerEvents_unsubscribe",
+        item = String
     )]
     async fn subscribe_peer_events(&self) -> jsonrpsee::core::SubscriptionResult;
 

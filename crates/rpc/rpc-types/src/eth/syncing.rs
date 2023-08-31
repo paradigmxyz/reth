@@ -42,7 +42,7 @@ pub enum PeerCount {
 }
 
 /// Peer connection information
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PeerInfo {
     /// Public node id
     pub id: Option<String>,
@@ -57,7 +57,7 @@ pub struct PeerInfo {
 }
 
 /// Peer network information
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PeerNetworkInfo {
     /// Remote endpoint address
@@ -67,11 +67,12 @@ pub struct PeerNetworkInfo {
 }
 
 /// Peer protocols information
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PeerProtocolsInfo {
     /// Ethereum protocol information
     pub eth: Option<PeerEthProtocolInfo>,
     /// PIP protocol information.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pip: Option<PipProtocolInfo>,
 }
 
@@ -87,7 +88,7 @@ pub struct PeerEthProtocolInfo {
 }
 
 /// Peer PIP protocol information
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PipProtocolInfo {
     /// Negotiated PIP protocol version
     pub version: u32,

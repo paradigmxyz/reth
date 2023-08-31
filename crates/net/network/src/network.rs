@@ -1,6 +1,6 @@
 use crate::{
     config::NetworkMode, discovery::DiscoveryEvent, manager::NetworkEvent, message::PeerRequest,
-    peers::PeersHandle, session::PeerInfo, FetchClient,
+    peers::PeersHandle, FetchClient,
 };
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -8,7 +8,8 @@ use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, Shar
 use reth_interfaces::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::{
-    NetworkError, NetworkInfo, PeerKind, Peers, PeersInfo, Reputation, ReputationChangeKind,
+    NetworkError, NetworkInfo, PeerInfo, PeerKind, Peers, PeersInfo, Reputation,
+    ReputationChangeKind,
 };
 use reth_primitives::{Head, NodeRecord, PeerId, TransactionSigned, H256};
 use reth_rpc_types::NetworkStatus;
@@ -99,13 +100,6 @@ impl NetworkHandle {
     pub async fn fetch_client(&self) -> Result<FetchClient, oneshot::error::RecvError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.manager().send(NetworkHandleMessage::FetchClient(tx));
-        rx.await
-    }
-
-    /// Returns [`PeerInfo`] for all connected peers
-    pub async fn get_peers(&self) -> Result<Vec<PeerInfo>, oneshot::error::RecvError> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.manager().send(NetworkHandleMessage::GetPeerInfo(tx));
         rx.await
     }
 
@@ -207,6 +201,12 @@ impl Peers for NetworkHandle {
     /// set, with the given kind.
     fn add_peer_kind(&self, peer: PeerId, kind: PeerKind, addr: SocketAddr) {
         self.send_message(NetworkHandleMessage::AddPeerAddress(peer, kind, addr));
+    }
+
+    async fn get_peers(&self) -> Result<Vec<PeerInfo>, NetworkError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.manager().send(NetworkHandleMessage::GetPeerInfo(tx));
+        Ok(rx.await?)
     }
 
     /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to remove a peer from the

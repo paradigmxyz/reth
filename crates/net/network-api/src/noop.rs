@@ -4,7 +4,8 @@
 //! generic over it.
 
 use crate::{
-    NetworkError, NetworkInfo, PeerKind, Peers, PeersInfo, Reputation, ReputationChangeKind,
+    NetworkError, NetworkInfo, PeerInfo, PeerKind, Peers, PeersInfo, Reputation,
+    ReputationChangeKind,
 };
 use async_trait::async_trait;
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
@@ -65,6 +66,10 @@ impl PeersInfo for NoopNetwork {
 #[async_trait]
 impl Peers for NoopNetwork {
     fn add_peer_kind(&self, _peer: PeerId, _kind: PeerKind, _addr: SocketAddr) {}
+
+    async fn get_peers(&self) -> Result<Vec<PeerInfo>, NetworkError> {
+        Ok(vec![])
+    }
 
     fn remove_peer(&self, _peer: PeerId, _kind: PeerKind) {}
 

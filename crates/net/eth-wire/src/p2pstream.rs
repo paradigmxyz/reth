@@ -75,6 +75,11 @@ impl<S> UnauthedP2PStream<S> {
     pub fn new(inner: S) -> Self {
         Self { inner }
     }
+
+    /// Returns a reference to the inner stream.
+    pub fn inner(&self) -> &S {
+        &self.inner
+    }
 }
 
 impl<S> UnauthedP2PStream<S>
@@ -240,6 +245,11 @@ impl<S> P2PStream<S> {
             outgoing_message_buffer_capacity: MAX_P2P_CAPACITY,
             disconnecting: false,
         }
+    }
+
+    /// Returns a reference to the inner stream.
+    pub fn inner(&self) -> &S {
+        &self.inner
     }
 
     /// Sets a custom outgoing message buffer capacity.
