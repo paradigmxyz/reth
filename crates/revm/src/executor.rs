@@ -392,26 +392,29 @@ where
         let post_state = self.apply_pre_block_call(block, post_state)?;
 
         // perf: do not execute empty blocks
-        if block.body.is_empty() {
-            return Ok(post_state)
-        }
-        let senders = self.recover_senders(&block.body, senders)?;
+        let post_state = if block.body.is_empty() {
+            post_state
+        } else {
+            let senders = self.recover_senders(&block.body, senders)?;
 
-        let (post_state, cumulative_gas_used) = self.execute_transactions_with_post_state(
-            block,
-            total_difficulty,
-            senders,
-            post_state,
-        )?;
+            let (post_state, cumulative_gas_used) = self.execute_transactions_with_post_state(
+                block,
+                total_difficulty,
+                senders,
+                post_state,
+            )?;
 
-        // Check if gas used matches the value set in header.
-        if block.gas_used != cumulative_gas_used {
-            return Err(BlockValidationError::BlockGasUsed {
-                got: cumulative_gas_used,
-                expected: block.gas_used,
+            // Check if gas used matches the value set in header.
+            if block.gas_used != cumulative_gas_used {
+                return Err(BlockValidationError::BlockGasUsed {
+                    got: cumulative_gas_used,
+                    expected: block.gas_used,
+                }
+                .into())
             }
-            .into())
-        }
+
+            post_state
+        };
 
         self.apply_post_block_changes(block, total_difficulty, post_state)
     }

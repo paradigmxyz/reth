@@ -1,6 +1,6 @@
 //! Ethereum protocol-related constants
 
-use crate::{Address, H160, H256, U256};
+use crate::{H160, H256, U256};
 use hex_literal::hex;
 use std::time::Duration;
 
