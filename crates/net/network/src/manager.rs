@@ -271,7 +271,7 @@ where
     ///     let local_key = rng_secret_key();
     ///
     ///     let config =
-    ///         NetworkConfig::<NoopProvider>::builder(local_key).boot_nodes(mainnet_nodes()).build(client.clone());
+    ///         NetworkConfig::builder(local_key).boot_nodes(mainnet_nodes()).build(client.clone());
     ///
     ///     // create the network instance
     ///     let (handle, network, transactions, request_handler) = NetworkManager::builder(config)

@@ -17,7 +17,6 @@ reth-rlp.workspace = true
 reth-provider.workspace = true
 reth-payload-builder.workspace = true
 reth-tasks.workspace = true
-reth-metrics.workspace = true
 
 ## ethereum
 revm.workspace = true
@@ -26,6 +25,10 @@ revm.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
 futures-core = "0.3"
 futures-util.workspace = true
+
+# metrics
+reth-metrics.workspace = true
+metrics.workspace = true
 
 ## misc
 tracing.workspace = true

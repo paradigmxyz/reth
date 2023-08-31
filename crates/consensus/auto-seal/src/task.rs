@@ -135,7 +135,9 @@ where
                     {
                         Ok((new_header, post_state)) => {
                             // clear all transactions from pool
-                            pool.remove_transactions(transactions.iter().map(|tx| tx.hash()));
+                            pool.remove_transactions(
+                                transactions.iter().map(|tx| tx.hash()).collect(),
+                            );
 
                             let state = ForkchoiceState {
                                 head_block_hash: new_header.hash,

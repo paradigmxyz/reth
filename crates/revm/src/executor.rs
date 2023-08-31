@@ -84,11 +84,8 @@ where
                 Err(BlockValidationError::SenderRecoveryError.into())
             }
         } else {
-            body.iter()
-                .map(|tx| {
-                    tx.recover_signer().ok_or(BlockValidationError::SenderRecoveryError.into())
-                })
-                .collect()
+            TransactionSigned::recover_signers(body, body.len())
+                .ok_or(BlockValidationError::SenderRecoveryError.into())
         }
     }
 
@@ -253,6 +250,13 @@ where
 
             // append gas used
             cumulative_gas_used += result.gas_used();
+
+            tracing::trace!(
+                target: "revm::executor",
+                hash = ?transaction.hash,
+                gas_used = result.gas_used(),
+                "transaction executed"
+            );
 
             // Push transaction changeset and calculate header bloom filter for receipt.
             post_state.add_receipt(

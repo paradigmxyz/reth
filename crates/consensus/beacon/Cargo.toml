@@ -18,13 +18,16 @@ reth-provider.workspace = true
 reth-rpc-types.workspace = true
 reth-tasks.workspace = true
 reth-payload-builder.workspace = true
-reth-metrics.workspace = true
 reth-prune = { path = "../../prune" }
 
 # async
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
 futures.workspace = true
+
+# metrics
+reth-metrics.workspace = true
+metrics.workspace = true
 
 # misc
 tracing.workspace = true

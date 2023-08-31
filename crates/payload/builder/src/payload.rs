@@ -1,10 +1,13 @@
 //! Contains types required for building a payload.
 
-use reth_primitives::{Address, ChainSpec, Header, SealedBlock, Withdrawal, H256, U256};
+use reth_primitives::{
+    Address, BlobTransactionSidecar, ChainSpec, Header, SealedBlock, Withdrawal, H256, U256,
+};
 use reth_revm_primitives::config::revm_spec_by_timestamp_after_merge;
 use reth_rlp::Encodable;
 use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadEnvelope, PayloadAttributes, PayloadId,
+    ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, PayloadAttributes,
+    PayloadId,
 };
 use revm_primitives::{BlockEnv, CfgEnv};
 
@@ -21,6 +24,9 @@ pub struct BuiltPayload {
     pub(crate) block: SealedBlock,
     /// The fees of the block
     pub(crate) fees: U256,
+    /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
+    /// empty.
+    pub(crate) sidecars: Vec<BlobTransactionSidecar>,
 }
 
 // === impl BuiltPayload ===
@@ -28,7 +34,7 @@ pub struct BuiltPayload {
 impl BuiltPayload {
     /// Initializes the payload with the given initial block.
     pub fn new(id: PayloadId, block: SealedBlock, fees: U256) -> Self {
-        Self { id, block, fees }
+        Self { id, block, fees, sidecars: Vec::new() }
     }
 
     /// Returns the identifier of the payload.
@@ -46,30 +52,65 @@ impl BuiltPayload {
         self.fees
     }
 
+    /// Adds sidecars to the payload.
+    pub fn extend_sidecars(&mut self, sidecars: Vec<BlobTransactionSidecar>) {
+        self.sidecars.extend(sidecars)
+    }
+
     /// Converts the type into the response expected by `engine_getPayloadV1`
-    pub fn into_v1_payload(self) -> ExecutionPayload {
+    pub fn into_v1_payload(self) -> ExecutionPayloadV1 {
         self.into()
     }
 
     /// Converts the type into the response expected by `engine_getPayloadV2`
-    pub fn into_v2_payload(self) -> ExecutionPayloadEnvelope {
+    pub fn into_v2_payload(self) -> ExecutionPayloadEnvelopeV2 {
+        self.into()
+    }
+
+    /// Converts the type into the response expected by `engine_getPayloadV2`
+    pub fn into_v3_payload(self) -> ExecutionPayloadEnvelopeV3 {
         self.into()
     }
 }
 
 // V1 engine_getPayloadV1 response
-impl From<BuiltPayload> for ExecutionPayload {
+impl From<BuiltPayload> for ExecutionPayloadV1 {
     fn from(value: BuiltPayload) -> Self {
         value.block.into()
     }
 }
 
 // V2 engine_getPayloadV2 response
-impl From<BuiltPayload> for ExecutionPayloadEnvelope {
+// TODO(rjected): we could improve this by wrapping envelope / payload types by version, so we can
+// have explicitly versioned return types for getPayload. Then BuiltPayload could essentially be a
+// builder for those types, and it would not be possible to e.g. return cancun fields for a
+// pre-cancun endpoint.
+impl From<BuiltPayload> for ExecutionPayloadEnvelopeV2 {
     fn from(value: BuiltPayload) -> Self {
         let BuiltPayload { block, fees, .. } = value;
 
-        ExecutionPayloadEnvelope { block_value: fees, payload: block.into() }
+        ExecutionPayloadEnvelopeV2 { block_value: fees, execution_payload: block.into() }
+    }
+}
+
+impl From<BuiltPayload> for ExecutionPayloadEnvelopeV3 {
+    fn from(value: BuiltPayload) -> Self {
+        let BuiltPayload { block, fees, sidecars, .. } = value;
+
+        ExecutionPayloadEnvelopeV3 {
+            payload_inner: block.into(),
+            block_value: fees,
+            // From the engine API spec:
+            //
+            // > Client software **MAY** use any heuristics to decide whether to set
+            // `shouldOverrideBuilder` flag or not. If client software does not implement any
+            // heuristic this flag **SHOULD** be set to `false`.
+            //
+            // Spec:
+            // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
+            should_override_builder: false,
+            blobs_bundle: sidecars.into(),
+        }
     }
 }
 

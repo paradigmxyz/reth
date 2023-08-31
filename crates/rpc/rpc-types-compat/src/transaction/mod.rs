@@ -1,12 +1,12 @@
 //! Compatibility functions for rpc `Transaction` type.
-
+mod signature;
 use reth_primitives::{
     AccessListItem, BlockNumber, Transaction as PrimitiveTransaction,
     TransactionKind as PrimitiveTransactionKind, TransactionSignedEcRecovered, TxType, H256, U128,
     U256, U64,
 };
-use reth_rpc_types::{Signature, Transaction};
-
+use reth_rpc_types::Transaction;
+use signature::from_primitive_signature;
 /// Create a new rpc transaction result for a mined transaction, using the given block hash,
 /// number, and tx index fields to populate the corresponding fields in the rpc result.
 ///
@@ -38,7 +38,7 @@ fn fill(
     transaction_index: Option<U256>,
 ) -> Transaction {
     let signer = tx.signer();
-    let signed_tx = tx.into_signed();
+    let mut signed_tx = tx.into_signed();
 
     let to = match signed_tx.kind() {
         PrimitiveTransactionKind::Create => None,
@@ -62,7 +62,9 @@ fn fill(
     };
 
     let chain_id = signed_tx.chain_id().map(U64::from);
-    let access_list = match &signed_tx.transaction {
+    let mut blob_versioned_hashes = Vec::new();
+
+    let access_list = match &mut signed_tx.transaction {
         PrimitiveTransaction::Legacy(_) => None,
         PrimitiveTransaction::Eip2930(tx) => Some(
             tx.access_list
@@ -84,23 +86,25 @@ fn fill(
                 })
                 .collect(),
         ),
-        PrimitiveTransaction::Eip4844(tx) => Some(
-            tx.access_list
-                .0
-                .iter()
-                .map(|item| AccessListItem {
-                    address: item.address.0.into(),
-                    storage_keys: item.storage_keys.iter().map(|key| key.0.into()).collect(),
-                })
-                .collect(),
-        ),
+        PrimitiveTransaction::Eip4844(tx) => {
+            // extract the blob hashes from the transaction
+            blob_versioned_hashes = std::mem::take(&mut tx.blob_versioned_hashes);
+
+            Some(
+                tx.access_list
+                    .0
+                    .iter()
+                    .map(|item| AccessListItem {
+                        address: item.address.0.into(),
+                        storage_keys: item.storage_keys.iter().map(|key| key.0.into()).collect(),
+                    })
+                    .collect(),
+            )
+        }
     };
 
-    let signature = Signature::from_primitive_signature(
-        *signed_tx.signature(),
-        signed_tx.tx_type(),
-        signed_tx.chain_id(),
-    );
+    let signature =
+        from_primitive_signature(*signed_tx.signature(), signed_tx.tx_type(), signed_tx.chain_id());
 
     Transaction {
         hash: signed_tx.hash(),
@@ -122,5 +126,9 @@ fn fill(
         block_hash,
         block_number: block_number.map(U256::from),
         transaction_index,
+
+        // EIP-4844 fields
+        max_fee_per_blob_gas: signed_tx.max_fee_per_blob_gas().map(U128::from),
+        blob_versioned_hashes,
     }
 }

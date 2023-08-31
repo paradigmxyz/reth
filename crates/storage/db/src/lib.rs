@@ -84,7 +84,7 @@ pub mod mdbx {
 }
 
 pub use abstraction::*;
-pub use reth_interfaces::db::DatabaseError;
+pub use reth_interfaces::db::{DatabaseError, DatabaseWriteOperation};
 pub use tables::*;
 pub use utils::is_database_empty;
 

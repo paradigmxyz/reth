@@ -6,11 +6,11 @@ use std::fmt::Debug;
 /// A helper like `assert_eq!` that instead returns `Err(Error::Assertion)` on failure.
 pub fn assert_equal<T>(left: T, right: T, msg: &str) -> Result<(), Error>
 where
-    T: Eq + Debug,
+    T: PartialEq + Debug,
 {
-    if left != right {
-        return Err(Error::Assertion(format!("{msg}. Left {:?}, right {:?}", left, right)))
+    if left == right {
+        Ok(())
+    } else {
+        Err(Error::Assertion(format!("{msg}\n  left `{left:?}`,\n right `{right:?}`")))
     }
-
-    Ok(())
 }

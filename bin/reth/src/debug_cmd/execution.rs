@@ -78,12 +78,6 @@ pub struct Command {
     #[clap(flatten)]
     db: DatabaseArgs,
 
-    /// Set the chain tip manually for testing purposes.
-    ///
-    /// NOTE: This is a temporary flag
-    #[arg(long = "debug.tip", help_heading = "Debug")]
-    pub tip: Option<H256>,
-
     /// The maximum block height.
     #[arg(long)]
     pub to: u64,
@@ -147,7 +141,7 @@ impl Command {
                         .clean_threshold
                         .max(stage_conf.account_hashing.clean_threshold)
                         .max(stage_conf.storage_hashing.clean_threshold),
-                    config.prune.map(|prune| prune.parts).unwrap_or_default(),
+                    config.prune.as_ref().map(|prune| prune.parts.clone()).unwrap_or_default(),
                 )),
             )
             .build(db, self.chain.clone());

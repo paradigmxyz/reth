@@ -1,9 +1,21 @@
 //! Transaction pool errors
 
-use reth_primitives::{Address, InvalidTransactionError, TxHash};
+use reth_primitives::{Address, BlobTransactionValidationError, InvalidTransactionError, TxHash};
 
 /// Transaction pool result type.
 pub type PoolResult<T> = Result<T, PoolError>;
+
+/// A trait for additional errors that can be thrown by the transaction pool.
+///
+/// For example during validation
+/// [TransactionValidator::validate_transaction](crate::validate::TransactionValidator::validate_transaction)
+pub trait PoolTransactionError: std::error::Error + Send + Sync {
+    /// Returns `true` if the error was caused by a transaction that is considered bad in the
+    /// context of the transaction pool and warrants peer penalization.
+    ///
+    /// See [PoolError::is_bad_transaction].
+    fn is_bad_transaction(&self) -> bool;
+}
 
 /// All errors the Transaction pool can throw.
 #[derive(Debug, thiserror::Error)]
@@ -105,7 +117,7 @@ impl PoolError {
 /// Represents errors that can happen when validating transactions for the pool
 ///
 /// See [TransactionValidator](crate::TransactionValidator).
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum InvalidPoolTransactionError {
     /// Hard consensus errors
     #[error(transparent)]
@@ -126,6 +138,23 @@ pub enum InvalidPoolTransactionError {
     /// Thrown if the transaction's fee is below the minimum fee
     #[error("transaction underpriced")]
     Underpriced,
+    /// Thrown if we're unable to find the blob for a transaction that was previously extracted
+    #[error("blob not found for EIP4844 transaction")]
+    MissingEip4844Blob,
+    /// Thrown if validating the blob sidecar for the transaction failed.
+    #[error(transparent)]
+    InvalidEip4844Blob(BlobTransactionValidationError),
+    /// EIP-4844 transactions are only accepted if they're gapless, meaning the previous nonce of
+    /// the transaction (`tx.nonce -1`) must either be in the pool or match the on chain nonce of
+    /// the sender.
+    ///
+    /// This error is thrown on validation if a valid blob transaction arrives with a nonce that
+    /// would introduce gap in the nonce sequence.
+    #[error("Nonce too high.")]
+    Eip4844NonceGap,
+    /// Any other error that occurred while inserting/validating that is transaction specific
+    #[error("{0:?}")]
+    Other(Box<dyn PoolTransactionError>),
 }
 
 // === impl InvalidPoolTransactionError ===
@@ -160,7 +189,8 @@ impl InvalidPoolTransactionError {
                         false
                     }
                     InvalidTransactionError::Eip2930Disabled |
-                    InvalidTransactionError::Eip1559Disabled => {
+                    InvalidTransactionError::Eip1559Disabled |
+                    InvalidTransactionError::Eip4844Disabled => {
                         // settings
                         false
                     }
@@ -176,6 +206,21 @@ impl InvalidPoolTransactionError {
             InvalidPoolTransactionError::OversizedData(_, _) => true,
             InvalidPoolTransactionError::Underpriced => {
                 // local setting
+                false
+            }
+            InvalidPoolTransactionError::Other(err) => err.is_bad_transaction(),
+            InvalidPoolTransactionError::MissingEip4844Blob => {
+                // this is only reachable when blob transactions are reinjected and we're unable to
+                // find the previously extracted blob
+                false
+            }
+            InvalidPoolTransactionError::InvalidEip4844Blob(_) => {
+                // This is only reachable when the blob is invalid
+                true
+            }
+            InvalidPoolTransactionError::Eip4844NonceGap => {
+                // it is possible that the pool sees `nonce n` before `nonce n-1` and this is only
+                // thrown for valid(good) blob transactions
                 false
             }
         }

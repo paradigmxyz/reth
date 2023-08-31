@@ -12,12 +12,12 @@ repository.workspace = true
 name = "reth_libmdbx"
 
 [dependencies]
-bitflags = "2"
+bitflags.workspace = true
 byteorder = "1"
 derive_more = "0.99"
 indexmap = "1"
 libc = "0.2"
-parking_lot = "0.12"
+parking_lot.workspace = true
 thiserror.workspace = true
 
 ffi = { package = "reth-mdbx-sys", path = "./mdbx-sys" }

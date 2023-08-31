@@ -1,6 +1,6 @@
 use reth_eth_wire::DisconnectReason;
 use reth_metrics::{
-    metrics::{self, Counter, Gauge},
+    metrics::{Counter, Gauge},
     Metrics,
 };
 
@@ -67,6 +67,8 @@ pub struct TransactionsManagerMetrics {
     pub(crate) messages_with_already_seen_transactions: Counter,
     /// Number of transactions about to be imported into the pool.
     pub(crate) pending_pool_imports: Gauge,
+    /// How often we failed to send a request to the peer because the channel was full.
+    pub(crate) egress_peer_channel_full: Counter,
 }
 
 /// Metrics for Disconnection types

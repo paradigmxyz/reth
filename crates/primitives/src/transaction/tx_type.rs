@@ -13,8 +13,7 @@ pub const EIP2930_TX_TYPE_ID: u8 = 1;
 pub const EIP1559_TX_TYPE_ID: u8 = 2;
 
 /// Identifier for [TxEip4844](crate::TxEip4844) transaction.
-#[allow(unused)]
-pub(crate) const EIP4844_TX_TYPE_ID: u8 = 3;
+pub const EIP4844_TX_TYPE_ID: u8 = 3;
 
 /// Transaction Type
 ///

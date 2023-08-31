@@ -7,7 +7,7 @@ use reth_primitives::{Address, U64};
 use reth_rpc_types::{trace::parity::*, TransactionInfo};
 use revm::{
     db::DatabaseRef,
-    interpreter::opcode::spec_opcode_gas,
+    interpreter::opcode::{self, spec_opcode_gas},
     primitives::{AccountInfo, ExecutionResult, ResultAndState, SpecId, KECCAK_EMPTY},
 };
 use std::collections::{HashSet, VecDeque};
@@ -273,28 +273,37 @@ impl ParityTraceBuilder {
         self.into_transaction_traces_iter().collect()
     }
 
+    /// Returns the last recorded step
+    #[inline]
+    fn last_step(&self) -> Option<&CallTraceStep> {
+        self.nodes.last().and_then(|node| node.trace.steps.last())
+    }
+
+    /// Returns true if the last recorded step is a STOP
+    #[inline]
+    fn is_last_step_stop_op(&self) -> bool {
+        self.last_step().map(|step| step.is_stop()).unwrap_or(false)
+    }
+
     /// Creates a VM trace by walking over `CallTraceNode`s
     ///
     /// does not have the code fields filled in
     pub fn vm_trace(&self) -> VmTrace {
-        match self.nodes.get(0) {
-            Some(current) => self.make_vm_trace(current),
-            None => VmTrace { code: Default::default(), ops: Vec::new() },
-        }
+        self.nodes.first().map(|node| self.make_vm_trace(node)).unwrap_or_default()
     }
 
-    /// returns a VM trace without the code filled in
+    /// Returns a VM trace without the code filled in
     ///
-    /// iteratively creaters a VM trace by traversing an arena
+    /// Iteratively creates a VM trace by traversing the recorded nodes in the arena
     fn make_vm_trace(&self, start: &CallTraceNode) -> VmTrace {
-        let mut child_idx_stack: Vec<usize> = Vec::with_capacity(self.nodes.len());
-        let mut sub_stack: VecDeque<Option<VmTrace>> = VecDeque::with_capacity(self.nodes.len());
+        let mut child_idx_stack = Vec::with_capacity(self.nodes.len());
+        let mut sub_stack = VecDeque::with_capacity(self.nodes.len());
 
         let mut current = start;
         let mut child_idx: usize = 0;
 
         // finds the deepest nested calls of each call frame and fills them up bottom to top
-        let instructions = loop {
+        let instructions = 'outer: loop {
             match current.children.get(child_idx) {
                 Some(child) => {
                     child_idx_stack.push(child_idx + 1);
@@ -303,17 +312,23 @@ impl ParityTraceBuilder {
                     current = self.nodes.get(*child).expect("there should be a child");
                 }
                 None => {
-                    let mut instructions: Vec<VmInstruction> =
-                        Vec::with_capacity(current.trace.steps.len());
+                    let mut instructions = Vec::with_capacity(current.trace.steps.len());
 
                     for step in &current.trace.steps {
-                        let maybe_sub = if step.is_calllike_op() {
-                            sub_stack.pop_front().expect("there should be a sub trace")
+                        let maybe_sub_call = if step.is_calllike_op() {
+                            sub_stack.pop_front().flatten()
                         } else {
                             None
                         };
 
-                        instructions.push(self.make_instruction(step, maybe_sub));
+                        if step.is_stop() && instructions.is_empty() && self.is_last_step_stop_op()
+                        {
+                            // This is a special case where there's a single STOP which is
+                            // "optimised away", transfers for example
+                            break 'outer instructions
+                        }
+
+                        instructions.push(self.make_instruction(step, maybe_sub_call));
                     }
 
                     match current.parent {
@@ -338,22 +353,101 @@ impl ParityTraceBuilder {
 
     /// Creates a VM instruction from a [CallTraceStep] and a [VmTrace] for the subcall if there is
     /// one
-    fn make_instruction(&self, step: &CallTraceStep, maybe_sub: Option<VmTrace>) -> VmInstruction {
+    fn make_instruction(
+        &self,
+        step: &CallTraceStep,
+        maybe_sub_call: Option<VmTrace>,
+    ) -> VmInstruction {
         let maybe_storage = step.storage_change.map(|storage_change| StorageDelta {
             key: storage_change.key,
             val: storage_change.value,
         });
 
-        let maybe_memory = match step.memory.len() {
-            0 => None,
-            _ => {
-                Some(MemoryDelta { off: step.memory_size, data: step.memory.data().clone().into() })
+        let maybe_memory = if step.memory.is_empty() {
+            None
+        } else {
+            Some(MemoryDelta { off: step.memory_size, data: step.memory.data().clone().into() })
+        };
+
+        // Calculate the stack items at this step
+        let push_stack = {
+            let step_op = step.op.u8();
+            let show_stack: usize;
+            if (opcode::PUSH0..=opcode::PUSH32).contains(&step_op) {
+                show_stack = 1;
+            } else if (opcode::SWAP1..=opcode::SWAP16).contains(&step_op) {
+                show_stack = (step_op - opcode::SWAP1) as usize + 2;
+            } else if (opcode::DUP1..=opcode::DUP16).contains(&step_op) {
+                show_stack = (step_op - opcode::DUP1) as usize + 2;
+            } else {
+                show_stack = match step_op {
+                    opcode::CALLDATALOAD |
+                    opcode::SLOAD |
+                    opcode::MLOAD |
+                    opcode::CALLDATASIZE |
+                    opcode::LT |
+                    opcode::GT |
+                    opcode::DIV |
+                    opcode::SDIV |
+                    opcode::SAR |
+                    opcode::AND |
+                    opcode::EQ |
+                    opcode::CALLVALUE |
+                    opcode::ISZERO |
+                    opcode::ADD |
+                    opcode::EXP |
+                    opcode::CALLER |
+                    opcode::SHA3 |
+                    opcode::SUB |
+                    opcode::ADDRESS |
+                    opcode::GAS |
+                    opcode::MUL |
+                    opcode::RETURNDATASIZE |
+                    opcode::NOT |
+                    opcode::SHR |
+                    opcode::SHL |
+                    opcode::EXTCODESIZE |
+                    opcode::SLT |
+                    opcode::OR |
+                    opcode::NUMBER |
+                    opcode::PC |
+                    opcode::TIMESTAMP |
+                    opcode::BALANCE |
+                    opcode::SELFBALANCE |
+                    opcode::MULMOD |
+                    opcode::ADDMOD |
+                    opcode::BASEFEE |
+                    opcode::BLOCKHASH |
+                    opcode::BYTE |
+                    opcode::XOR |
+                    opcode::ORIGIN |
+                    opcode::CODESIZE |
+                    opcode::MOD |
+                    opcode::SIGNEXTEND |
+                    opcode::GASLIMIT |
+                    opcode::DIFFICULTY |
+                    opcode::SGT |
+                    opcode::GASPRICE |
+                    opcode::MSIZE |
+                    opcode::EXTCODEHASH |
+                    opcode::SMOD |
+                    opcode::CHAINID |
+                    opcode::COINBASE => 1,
+                    _ => 0,
+                }
+            };
+            let mut push_stack = step.push_stack.clone().unwrap_or_default();
+            for idx in (0..show_stack).rev() {
+                if step.stack.len() > idx {
+                    push_stack.push(step.stack.peek(idx).unwrap_or_default())
+                }
             }
+            push_stack
         };
 
         let maybe_execution = Some(VmExecutedOperation {
             used: step.gas_remaining,
-            push: step.push_stack.clone().unwrap_or_default(),
+            push: push_stack,
             mem: maybe_memory,
             store: maybe_storage,
         });
@@ -369,7 +463,7 @@ impl ParityTraceBuilder {
             pc: step.pc,
             cost: cost as u64,
             ex: maybe_execution,
-            sub: maybe_sub,
+            sub: maybe_sub_call,
             op: Some(step.op.to_string()),
             idx: None,
         }
@@ -440,7 +534,7 @@ where
 
         let code_hash = if db_acc.code_hash != KECCAK_EMPTY { db_acc.code_hash } else { continue };
 
-        curr_ref.code = db.code_by_hash(code_hash)?.bytecode.into();
+        curr_ref.code = db.code_by_hash(code_hash)?.original_bytes().into();
     }
 
     Ok(())

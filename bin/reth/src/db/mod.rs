@@ -188,7 +188,7 @@ impl Command {
             Subcommands::Drop { force } => {
                 if !force {
                     // Ask for confirmation
-                    print!("Are you sure you want to drop the database? This cannot be undone. (y/N): ");
+                    print!("Are you sure you want to drop the database at {db_path:?}? This cannot be undone. (y/N): ");
                     // Flush the buffer to ensure the message is printed immediately
                     io::stdout().flush().unwrap();
 

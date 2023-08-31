@@ -25,7 +25,7 @@ where
     T::Key: Default + Clone + for<'de> serde::Deserialize<'de>,
     T::Value: Default + Clone + for<'de> serde::Deserialize<'de>,
 {
-    let list: Vec<(T::Key, T::Value)> = serde_json::from_reader(std::io::BufReader::new(
+    let list: Vec<TableRow<T>> = serde_json::from_reader(std::io::BufReader::new(
         std::fs::File::open(format!(
             "{}/../../../testdata/micro/db/{}.json",
             env!("CARGO_MANIFEST_DIR"),
