@@ -44,11 +44,7 @@ use revm_primitives::{utilities::create_address, Env, ResultAndState, SpecId};
 #[cfg(feature = "optimism")]
 use bytes::BytesMut;
 #[cfg(feature = "optimism")]
-use http::{header::CONTENT_TYPE, HeaderValue};
-#[cfg(feature = "optimism")]
-use hyper::{Body, Client, Method, Request};
-#[cfg(feature = "optimism")]
-use hyper_tls::HttpsConnector;
+use http::header::CONTENT_TYPE;
 #[cfg(feature = "optimism")]
 use reth_revm::{executor, optimism::L1BlockInfo};
 #[cfg(feature = "optimism")]
@@ -430,29 +426,28 @@ where
     }
 
     async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256> {
-        let recovered = recover_raw_transaction(tx.clone())?;
-
         #[cfg(feature = "optimism")]
         if let Some(endpoint) = self.network().sequencer_endpoint() {
-            let https = HttpsConnector::new();
-            let client = Client::builder().build(https);
-
-            let body = serde_json::json!({
+            let body = serde_json::to_string(&serde_json::json!({
                 "jsonrpc": "2.0",
                 "method": "eth_sendRawTransaction",
-                "params": [hex::encode(tx.clone())],
+                "params": [format!("0x{}", hex::encode(tx.clone()))],
                 "id": self.network().chain_id()
-            });
+            }))
+            .map_err(|_| EthApiError::InternalEthError)?;
 
-            let req = Request::builder()
-                .method(Method::POST)
-                .uri(endpoint)
-                .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
-                .body(Body::from(serde_json::to_string(&body).unwrap()))?;
+            let client = reqwest::Client::new();
 
-            client.request(req).await?;
+            client
+                .post(endpoint)
+                .header(CONTENT_TYPE, "application/json")
+                .body(body)
+                .send()
+                .await
+                .map_err(|_| EthApiError::InternalEthError)?;
         }
 
+        let recovered = recover_raw_transaction(tx)?;
         let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered);
 
         // submit the transaction to the pool with a `Local` origin
