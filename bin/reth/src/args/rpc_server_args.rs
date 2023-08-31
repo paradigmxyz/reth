@@ -315,6 +315,18 @@ impl RpcServerArgs {
 }
 
 impl RethRpcConfig for RpcServerArgs {
+    fn is_ipc_enabled(&self) -> bool {
+        // By default IPC is enabled therefor it is enabled if the `ipcdisable` is false.
+        !self.ipcdisable
+    }
+
+    fn eth_config(&self) -> EthConfig {
+        EthConfig::default()
+            .max_tracing_requests(self.rpc_max_tracing_requests)
+            .rpc_gas_cap(self.rpc_gas_cap)
+            .gpo_config(self.gas_price_oracle_config())
+    }
+
     fn rpc_max_request_size_bytes(&self) -> u32 {
         self.rpc_max_request_size * 1024 * 1024
     }
@@ -330,24 +342,6 @@ impl RethRpcConfig for RpcServerArgs {
             self.gas_price_oracle.max_price,
             self.gas_price_oracle.percentile,
         )
-    }
-
-    fn jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError> {
-        match self.auth_jwtsecret.as_ref() {
-            Some(fpath) => {
-                debug!(target: "reth::cli", user_path=?fpath, "Reading JWT auth secret file");
-                JwtSecret::from_file(fpath)
-            }
-            None => {
-                if default_jwt_path.exists() {
-                    debug!(target: "reth::cli", ?default_jwt_path, "Reading JWT auth secret file");
-                    JwtSecret::from_file(&default_jwt_path)
-                } else {
-                    info!(target: "reth::cli", ?default_jwt_path, "Creating JWT auth secret file");
-                    JwtSecret::try_create(&default_jwt_path)
-                }
-            }
-        }
     }
 
     fn transport_rpc_module_config(&self) -> TransportRpcModuleConfig {
@@ -424,16 +418,22 @@ impl RethRpcConfig for RpcServerArgs {
         Ok(AuthServerConfig::builder(jwt_secret).socket_addr(address).build())
     }
 
-    fn is_ipc_enabled(&self) -> bool {
-        // By default IPC is enabled therefor it is enabled if the `ipcdisable` is false.
-        !self.ipcdisable
-    }
-
-    fn eth_config(&self) -> EthConfig {
-        EthConfig::default()
-            .max_tracing_requests(self.rpc_max_tracing_requests)
-            .rpc_gas_cap(self.rpc_gas_cap)
-            .gpo_config(self.gas_price_oracle_config())
+    fn jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError> {
+        match self.auth_jwtsecret.as_ref() {
+            Some(fpath) => {
+                debug!(target: "reth::cli", user_path=?fpath, "Reading JWT auth secret file");
+                JwtSecret::from_file(fpath)
+            }
+            None => {
+                if default_jwt_path.exists() {
+                    debug!(target: "reth::cli", ?default_jwt_path, "Reading JWT auth secret file");
+                    JwtSecret::from_file(&default_jwt_path)
+                } else {
+                    info!(target: "reth::cli", ?default_jwt_path, "Creating JWT auth secret file");
+                    JwtSecret::try_create(&default_jwt_path)
+                }
+            }
+        }
     }
 }
 
