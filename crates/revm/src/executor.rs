@@ -13,6 +13,7 @@ use reth_primitives::{
     ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
 };
 use reth_provider::{BlockExecutor, PostState, StateProvider};
+use reth_revm_primitives::env::fill_tx_env_with_beacon_root_contract_call;
 use revm::{
     db::{AccountState, CacheDB, DatabaseRef},
     primitives::{
@@ -210,22 +211,20 @@ where
     /// so on).
     ///
     /// The second returned value represents the total gas used by this block of transactions.
-    pub fn execute_transactions(
+    ///
+    /// This can be used in case there are existing changes in [PostState] that need to be
+    /// applied before executing transactions.
+    /// TODO: clarify this ^
+    pub fn execute_transactions_with_post_state(
         &mut self,
         block: &Block,
         total_difficulty: U256,
-        senders: Option<Vec<Address>>,
+        senders: Vec<Address>,
+        mut post_state: PostState,
     ) -> Result<(PostState, u64), BlockExecutionError> {
-        // perf: do not execute empty blocks
-        if block.body.is_empty() {
-            return Ok((PostState::default(), 0))
-        }
-        let senders = self.recover_senders(&block.body, senders)?;
-
         self.init_env(&block.header, total_difficulty);
 
         let mut cumulative_gas_used = 0;
-        let mut post_state = PostState::with_tx_capacity(block.number, block.body.len());
         for (transaction, sender) in block.body.iter().zip(senders) {
             // The sum of the transaction’s gas limit, Tg, and the gas utilised in this block prior,
             // must be no greater than the block’s gasLimit.
@@ -276,8 +275,34 @@ where
         Ok((post_state, cumulative_gas_used))
     }
 
+    /// Runs the provided transactions and commits their state to the run-time database.
+    ///
+    /// The returned [PostState] can be used to persist the changes to disk, and contains the
+    /// changes made by each transaction.
+    ///
+    /// The changes in [PostState] have a transition ID associated with them: there is one
+    /// transition ID for each transaction (with the first executed tx having transition ID 0, and
+    /// so on).
+    ///
+    /// The second returned value represents the total gas used by this block of transactions.
+    pub fn execute_transactions(
+        &mut self,
+        block: &Block,
+        total_difficulty: U256,
+        senders: Option<Vec<Address>>,
+    ) -> Result<(PostState, u64), BlockExecutionError> {
+        // perf: do not execute empty blocks
+        if block.body.is_empty() {
+            return Ok((PostState::default(), 0))
+        }
+        let senders = self.recover_senders(&block.body, senders)?;
+
+        let post_state = PostState::with_tx_capacity(block.number, block.body.len());
+        self.execute_transactions_with_post_state(block, total_difficulty, senders, post_state)
+    }
+
     /// Applies the post-block changes, assuming the poststate is generated after executing
-    /// tranactions
+    /// transactions
     pub fn apply_post_block_changes(
         &mut self,
         block: &Block,
@@ -298,30 +323,57 @@ where
     }
 
     /// Applies the pre-block call to the EIP-4788 beacon block root contract.
+    ///
+    /// If cancun is not activated or the block is the genesis block, then this is a no-op.
     pub fn apply_pre_block_call(
         &mut self,
         block: &Block,
         mut post_state: PostState,
     ) -> Result<PostState, BlockExecutionError> {
         if self.chain_spec.fork(Hardfork::Cancun).active_at_timestamp(block.timestamp) {
-            // requirements:
-            // the call must execute to completion
-            // the call does not count against the block’s gas limit
-            // the call does not follow the EIP-1559 burn semantics - no value should be transferred
-            // as part of the call if no code exists at BEACON_ROOTS_ADDRESS, the call
-            // must fail silently
-            //
-            // solution:
-            // configure tx env manually
-            // with helper fn
-            // set nonce to None (no nonce checks happen then)
-            // set gas price to 0 (then there's no value transfer)
-            // still not sure about "if no code exists then the call must fail silently"
-            //
-            // let result_and_state = self.evm.transact()?;
-        }
+            // if the block number is zero (genesis block) then the parent beacon block root must
+            // be 0x0 and no system transaction may occur as per EIP-4788
+            if block.number == 0 && block.parent_beacon_block_root != Some(H256::zero()) {
+                if block.parent_beacon_block_root != Some(H256::zero()) {
+                    return Err(
+                        BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero.into()
+                    )
+                }
 
-        Ok(post_state)
+                Ok(post_state)
+            } else {
+                let parent_beacon_block_root = block.parent_beacon_block_root.ok_or(
+                    BlockExecutionError::from(BlockValidationError::MissingParentBeaconBlockRoot),
+                )?;
+                fill_tx_env_with_beacon_root_contract_call(
+                    &mut self.evm.env.tx,
+                    parent_beacon_block_root,
+                );
+
+                // TODO: "if no code exists then the call must fail silently"
+                // TODO: determine if error is appropriate here
+                let ResultAndState { result: _result, state } =
+                    self.evm.transact().map_err(|e| {
+                        BlockExecutionError::from(BlockValidationError::EVM {
+                            hash: Default::default(),
+                            message: format!("{e:?}"),
+                        })
+                    })?;
+
+                // commit changes
+                self.commit_changes(
+                    block.number,
+                    state,
+                    self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(block.number),
+                    &mut post_state,
+                );
+
+                Ok(post_state)
+            }
+        } else {
+            // Cancun is not active
+            Ok(post_state)
+        }
     }
 }
 
@@ -335,8 +387,21 @@ where
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<PostState, BlockExecutionError> {
-        let (post_state, cumulative_gas_used) =
-            self.execute_transactions(block, total_difficulty, senders)?;
+        let post_state = PostState::with_tx_capacity(block.number, block.body.len());
+        let post_state = self.apply_pre_block_call(block, post_state)?;
+
+        // perf: do not execute empty blocks
+        if block.body.is_empty() {
+            return Ok(PostState::default())
+        }
+        let senders = self.recover_senders(&block.body, senders)?;
+
+        let (post_state, cumulative_gas_used) = self.execute_transactions_with_post_state(
+            block,
+            total_difficulty,
+            senders,
+            post_state,
+        )?;
 
         // Check if gas used matches the value set in header.
         if block.gas_used != cumulative_gas_used {

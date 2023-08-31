@@ -299,6 +299,8 @@ impl StorageInner {
         senders: Vec<Address>,
     ) -> Result<(PostState, u64), BlockExecutionError> {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
+        // TODO: there isn't really a parent beacon block root here, so not sure whether or not to
+        // call the 4788 beacon contract
 
         let (post_state, gas_used) =
             executor.execute_transactions(block, U256::ZERO, Some(senders))?;
