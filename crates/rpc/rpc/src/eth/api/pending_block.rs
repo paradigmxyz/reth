@@ -7,10 +7,7 @@ use reth_primitives::{
     EMPTY_OMMER_ROOT, H256, U256,
 };
 use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
-use reth_revm::{
-    database::RevmDatabase, env::tx_env_with_recovered, into_reth_log,
-    StateBuilder,
-};
+use reth_revm::{database::RevmDatabase, env::tx_env_with_recovered, into_reth_log, StateBuilder};
 use reth_transaction_pool::TransactionPool;
 use revm::DatabaseCommit;
 use revm_primitives::{BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState};
@@ -62,7 +59,7 @@ impl PendingBlockEnv {
                 // which also removes all dependent transaction from the iterator before we can
                 // continue
                 best_txs.mark_invalid(&pool_tx);
-                continue;
+                continue
             }
 
             // convert tx to a signed transaction
@@ -87,11 +84,11 @@ impl PendingBlockEnv {
                                 // descendants
                                 best_txs.mark_invalid(&pool_tx);
                             }
-                            continue;
+                            continue
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
-                            return Err(err.into());
+                            return Err(err.into())
                         }
                     }
                 }

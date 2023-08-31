@@ -248,7 +248,7 @@ pub trait BlockWriter: Send + Sync {
     /// updates the post-state.
     ///
     /// Inserts the blocks into the database and updates the state with
-    /// provided `PostState`.
+    /// provided `BundleState`.
     ///
     /// # Parameters
     ///

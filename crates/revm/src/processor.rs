@@ -14,11 +14,10 @@ use reth_primitives::{
     Address, Block, BlockNumber, Bloom, ChainSpec, Hardfork, Header, PruneModes, Receipt,
     ReceiptWithBloom, TransactionSigned, H256, U256,
 };
-use reth_provider::{change::BundleStateWithReceipts, BlockExecutor, BlockExecutorStats, StateProvider};
-use revm::{
-    primitives::ResultAndState, DatabaseCommit, db::State,
-    StateBuilder, EVM,
+use reth_provider::{
+    change::BundleStateWithReceipts, BlockExecutor, BlockExecutorStats, StateProvider,
 };
+use revm::{db::State, primitives::ResultAndState, DatabaseCommit, StateBuilder, EVM};
 use std::{sync::Arc, time::Instant};
 use tracing::{debug, trace};
 
@@ -62,7 +61,10 @@ impl<'a> EVMProcessor<'a> {
     }
 
     /// Creates a new executor from the given chain spec and database.
-    pub fn new_with_db<DB: StateProvider + 'a>(chain_spec: Arc<ChainSpec>, db: RevmDatabase<DB>) -> Self {
+    pub fn new_with_db<DB: StateProvider + 'a>(
+        chain_spec: Arc<ChainSpec>,
+        db: RevmDatabase<DB>,
+    ) -> Self {
         let revm_state =
             StateBuilder::default().with_database(Box::new(db)).without_state_clear().build();
         EVMProcessor::new_with_state(chain_spec, revm_state)
@@ -200,12 +202,12 @@ impl<'a> EVMProcessor<'a> {
 
     /// Runs the provided transactions and commits their state to the run-time database.
     ///
-    /// The returned [PostState] can be used to persist the changes to disk, and contains the
-    /// changes made by each transaction.
+    /// The returned [BundleStateWithReceipts] can be used to persist the changes to disk, and
+    /// contains the changes made by each transaction.
     ///
-    /// The changes in [PostState] have a transition ID associated with them: there is one
-    /// transition ID for each transaction (with the first executed tx having transition ID 0, and
-    /// so on).
+    /// The changes in [BundleStateWithReceipts] have a transition ID associated with them: there is
+    /// one transition ID for each transaction (with the first executed tx having transition ID
+    /// 0, and so on).
     ///
     /// The second returned value represents the total gas used by this block of transactions.
     pub fn execute_transactions(
@@ -217,7 +219,7 @@ impl<'a> EVMProcessor<'a> {
         // perf: do not execute empty blocks
         if block.body.is_empty() {
             self.receipts.push(Vec::new());
-            return Ok(0);
+            return Ok(0)
         }
         let senders = self.recover_senders(&block.body, senders)?;
 
@@ -235,7 +237,7 @@ impl<'a> EVMProcessor<'a> {
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into());
+                .into())
             }
             // Execute transaction.
             let ResultAndState { result, state } = self.transact(transaction, sender)?;
@@ -297,7 +299,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                     })
                     .unwrap_or_default(),
             }
-            .into());
+            .into())
         }
         let time = Instant::now();
         self.post_execution_state_change(block, total_difficulty)?;
@@ -305,8 +307,8 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
 
         let time = Instant::now();
         let with_reverts = self.tip.map_or(true, |tip| {
-            !self.prune_modes.should_prune_account_history(block.number, tip)
-                && !self.prune_modes.should_prune_storage_history(block.number, tip)
+            !self.prune_modes.should_prune_account_history(block.number, tip) &&
+                !self.prune_modes.should_prune_storage_history(block.number, tip)
         });
         self.db().merge_transitions(with_reverts);
         self.stats.merge_transitions_duration += time.elapsed();
@@ -343,7 +345,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                     e,
                     self.receipts.last().unwrap()
                 );
-                return Err(e);
+                return Err(e)
             };
             self.stats.receipt_root_duration += time.elapsed();
         }
@@ -361,7 +363,11 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
 
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
         let receipts = std::mem::take(&mut self.receipts);
-        BundleStateWithReceipts::new(self.evm.db().unwrap().take_bundle(), receipts, self.first_block)
+        BundleStateWithReceipts::new(
+            self.evm.db().unwrap().take_bundle(),
+            receipts,
+            self.first_block,
+        )
     }
 
     fn stats(&self) -> BlockExecutorStats {
@@ -383,7 +389,7 @@ pub fn verify_receipt<'a>(
             got: receipts_root,
             expected: expected_receipts_root,
         }
-        .into());
+        .into())
     }
 
     // Create header log bloom.
@@ -393,7 +399,7 @@ pub fn verify_receipt<'a>(
             expected: Box::new(expected_logs_bloom),
             got: Box::new(logs_bloom),
         }
-        .into());
+        .into())
     }
 
     Ok(())

@@ -12,8 +12,7 @@ use reth_primitives::{
 };
 use reth_revm_primitives::{
     db::states::{
-        BundleState, RevertToSlot, StateChangeset as RevmChange,
-        StateReverts as RevmReverts,
+        BundleState, RevertToSlot, StateChangeset as RevmChange, StateReverts as RevmReverts,
     },
     into_reth_acc, into_revm_acc,
     primitives::AccountInfo,
@@ -48,11 +47,7 @@ pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>
 
 impl BundleStateWithReceipts {
     /// Create Bundle State.
-    pub fn new(
-        bundle: BundleState,
-        receipts: Vec<Vec<Receipt>>,
-        first_block: BlockNumber,
-    ) -> Self {
+    pub fn new(bundle: BundleState, receipts: Vec<Vec<Receipt>>, first_block: BlockNumber) -> Self {
         Self { bundle, receipts, first_block }
     }
 

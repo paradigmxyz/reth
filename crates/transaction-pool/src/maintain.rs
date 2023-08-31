@@ -14,7 +14,8 @@ use reth_primitives::{
     Address, BlockHash, BlockNumber, BlockNumberOrTag, FromRecoveredTransaction,
 };
 use reth_provider::{
-    BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotification, ChainSpecProvider, StateProviderFactory,
+    BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotification, ChainSpecProvider,
+    StateProviderFactory,
 };
 use reth_tasks::TaskSpawner;
 use std::{
@@ -488,8 +489,10 @@ where
     Ok(res)
 }
 
-/// Extracts all changed accounts from the PostState
-fn changed_accounts_iter(state: &BundleStateWithReceipts) -> impl Iterator<Item = ChangedAccount> + '_ {
+/// Extracts all changed accounts from the BundleState
+fn changed_accounts_iter(
+    state: &BundleStateWithReceipts,
+) -> impl Iterator<Item = ChangedAccount> + '_ {
     state
         .accounts_iter()
         .filter_map(|(addr, acc)| acc.map(|acc| (addr, acc)))

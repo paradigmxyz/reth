@@ -1,5 +1,5 @@
 use crate::{
-    change::{BundleStateWithReceipts, RevertsInit, BundleStateInit},
+    change::{BundleStateInit, BundleStateWithReceipts, RevertsInit},
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
@@ -341,7 +341,13 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             receipts.push(block_receipt);
         }
 
-        Ok(BundleStateWithReceipts::new_init(state, reverts, Vec::new(), receipts, start_block_number))
+        Ok(BundleStateWithReceipts::new_init(
+            state,
+            reverts,
+            Vec::new(),
+            receipts,
+            start_block_number,
+        ))
     }
 
     /// Return list of entries from table

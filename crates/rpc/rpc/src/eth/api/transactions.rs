@@ -28,7 +28,7 @@ use reth_provider::{
 use reth_revm::{
     database::RevmDatabase,
     env::{fill_block_env_with_coinbase, tx_env_with_recovered},
-    revm::{State as RevmState, StateBuilder},
+    revm::{State, StateBuilder},
     tracing::{TracingInspector, TracingInspectorConfig},
 };
 use reth_rpc_types::{
@@ -43,7 +43,7 @@ use revm::{
 use revm_primitives::{utilities::create_address, Env, ResultAndState, SpecId};
 
 /// Helper alias type for the state's [CacheDB]
-pub(crate) type StateCacheDB<'r> = RevmState<'r, Error>;
+pub(crate) type StateCacheDB<'r> = State<'r, Error>;
 
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace.
 ///
@@ -731,7 +731,7 @@ where
                 return match signer.sign_transaction(request, from) {
                     Ok(tx) => Ok(tx),
                     Err(e) => Err(e.into()),
-                };
+                }
             }
         }
         Err(EthApiError::InvalidTransactionSignature)
@@ -759,7 +759,7 @@ where
                     block.header.number,
                     block.header.base_fee_per_gas,
                     index.into(),
-                )));
+                )))
             }
         }
 

@@ -23,13 +23,13 @@ mod traits;
 pub use traits::{
     AccountExtReader, AccountReader, BlockExecutionWriter, BlockExecutor, BlockExecutorStats,
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
-    BlockWriter, BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotification,
-    CanonStateNotificationSender, CanonStateNotifications, CanonStateSubscriptions,
-    ChainSpecProvider, ChangeSetReader, EvmEnvProvider, ExecutorFactory, HashingWriter,
-    HeaderProvider, HistoryWriter, PostStateDataProvider, PruneCheckpointReader,
-    PruneCheckpointWriter, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
-    StageCheckpointWriter, StateProvider, StateProviderBox, StateProviderFactory,
-    StateRootProvider, StorageReader, TransactionsProvider, WithdrawalsProvider,
+    BlockWriter, BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonChainTracker,
+    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
+    CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider, ExecutorFactory,
+    HashingWriter, HeaderProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
+    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StageCheckpointWriter,
+    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, StorageReader,
+    TransactionsProvider, WithdrawalsProvider,
 };
 
 /// Provider trait implementations.

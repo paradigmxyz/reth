@@ -11,7 +11,7 @@ use reth_rpc_types::{
     BlockOverrides, CallRequest,
 };
 use revm::{
-    db::{states::CacheAccount, AccountStatus, EmptyDBTyped, State as RevmState},
+    db::{states::CacheAccount, AccountStatus, EmptyDBTyped, State},
     precompile::{Precompiles, SpecId as PrecompilesSpecId},
     primitives::{BlockEnv, CfgEnv, Env, ResultAndState, SpecId, TransactTo, TxEnv},
     Database, Inspector,
@@ -164,7 +164,7 @@ where
 ///
 /// Note: This assumes the target transaction is in the given iterator.
 pub(crate) fn replay_transactions_until<DB, I, Tx>(
-    db: &mut RevmState<'_, DB::Error>,
+    db: &mut State<'_, DB::Error>,
     cfg: CfgEnv,
     block_env: BlockEnv,
     transactions: I,
@@ -200,7 +200,7 @@ pub(crate) fn prepare_call_env(
     block: BlockEnv,
     request: CallRequest,
     gas_limit: u64,
-    db: &mut RevmState<'_, Error>,
+    db: &mut State<'_, Error>,
     overrides: EvmOverrides,
 ) -> EthResult<Env>
 where
@@ -434,7 +434,7 @@ fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
 }
 
 /// Applies the given state overrides (a set of [AccountOverride]) to the [CacheDB].
-fn apply_state_overrides(overrides: StateOverride, db: &mut RevmState<'_, Error>) -> EthResult<()>
+fn apply_state_overrides(overrides: StateOverride, db: &mut State<'_, Error>) -> EthResult<()>
 where
     EthApiError: From<Error>,
 {
@@ -448,7 +448,7 @@ where
 fn apply_account_override(
     address: Address,
     account_override: AccountOverride,
-    db: &mut RevmState<'_, Error>,
+    db: &mut State<'_, Error>,
 ) -> EthResult<()>
 where
     EthApiError: From<Error>,
@@ -504,10 +504,10 @@ where
 /// [CacheDB] with [EmptyDB] as the database type
 #[inline]
 pub(crate) fn clone_into_empty_db<DBError: Send + 'static>(
-    db: &RevmState<'_, DBError>,
-) -> RevmState<'static, DBError> {
+    db: &State<'_, DBError>,
+) -> State<'static, DBError> {
     let database = Box::new(EmptyDBTyped::<DBError>::new());
-    RevmState {
+    State {
         cache: db.cache.clone(),
         database,
         transition_state: db.transition_state.clone(),

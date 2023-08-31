@@ -315,7 +315,7 @@ impl StorageInner {
         Ok((executor.take_output_state(), gas_used))
     }
 
-    /// Fills in the post-execution header fields based on the given PostState and gas used.
+    /// Fills in the post-execution header fields based on the given BundleState and gas used.
     /// In doing this, the state root is calculated and the final header is returned.
     pub(crate) fn complete_header(
         &self,

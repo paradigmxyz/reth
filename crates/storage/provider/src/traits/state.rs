@@ -170,7 +170,7 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     /// Used to inspect or execute transaction on the pending state.
     fn pending_with_provider(
         &self,
-        post_state_data: Box<dyn PostStateDataProvider>,
+        post_state_data: Box<dyn BundleStateDataProvider>,
     ) -> Result<StateProviderBox<'_>>;
 }
 
@@ -184,7 +184,7 @@ pub trait BlockchainTreePendingStateProvider: Send + Sync {
     fn pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> Result<Box<dyn PostStateDataProvider>> {
+    ) -> Result<Box<dyn BundleStateDataProvider>> {
         Ok(self
             .find_pending_state_provider(block_hash)
             .ok_or(ProviderError::StateForHashNotFound(block_hash))?)
@@ -194,18 +194,18 @@ pub trait BlockchainTreePendingStateProvider: Send + Sync {
     fn find_pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> Option<Box<dyn PostStateDataProvider>>;
+    ) -> Option<Box<dyn BundleStateDataProvider>>;
 }
 
 /// Post state data needs for execution on it.
 /// This trait is used to create a state provider over pending state.
 ///
 /// Pending state contains:
-/// * [`PostState`] contains all changed of accounts and storage of pending chain
+/// * [`BundleStateWithReceipts`] contains all changed of accounts and storage of pending chain
 /// * block hashes of pending chain and canonical blocks.
 /// * canonical fork, the block on what pending chain was forked from.
 #[auto_impl[Box,&]]
-pub trait PostStateDataProvider: Send + Sync {
+pub trait BundleStateDataProvider: Send + Sync {
     /// Return post state
     fn state(&self) -> &BundleStateWithReceipts;
     /// Return block hash by block number of pending or canonical chain.
@@ -219,6 +219,6 @@ pub trait PostStateDataProvider: Send + Sync {
 /// A type that can compute the state root of a given post state.
 #[auto_impl[Box,&, Arc]]
 pub trait StateRootProvider: Send + Sync {
-    /// Returns the state root of the PostState on top of the current state.
+    /// Returns the state root of the BundleState on top of the current state.
     fn state_root(&self, post_state: BundleStateWithReceipts) -> Result<H256>;
 }

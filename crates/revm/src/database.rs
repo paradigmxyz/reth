@@ -11,7 +11,7 @@ use revm::{
 #[derive(Debug, Clone)]
 pub struct RevmDatabase<DB: StateProvider>(pub DB);
 
-impl<DB: StateProvider>  RevmDatabase<DB> {
+impl<DB: StateProvider> RevmDatabase<DB> {
     /// Create new State with generic StateProvider.
     pub fn new(db: DB) -> Self {
         Self(db)

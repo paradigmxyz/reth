@@ -1,5 +1,6 @@
 use crate::{
-    change::BundleStateWithReceipts, BlockExecutor, BlockExecutorStats, ExecutorFactory, StateProvider,
+    change::BundleStateWithReceipts, BlockExecutor, BlockExecutorStats, ExecutorFactory,
+    StateProvider,
 };
 use parking_lot::Mutex;
 use reth_interfaces::executor::BlockExecutionError;

@@ -22,7 +22,7 @@ use reth_revm::{
     env::tx_env_with_recovered,
     revm::{
         primitives::{db::DatabaseCommit, BlockEnv, CfgEnv, Env},
-        State as RevmState, StateBuilder,
+        State, StateBuilder,
     },
     tracing::{
         js::{JsDbRequest, JsInspector},
@@ -192,12 +192,10 @@ where
                 let tx = transaction.into_recovered();
 
                 let provider = Box::new(RevmDatabase::new(state));
-                let mut db = StateBuilder::default()
-                    .with_database(provider)
-                    .without_bundle_update()
-                    .build();
+                let mut db =
+                    StateBuilder::default().with_database(provider).without_bundle_update().build();
                 // replay all transactions prior to the targeted transaction
-                replay_transactions_until::<RevmState<'_, Error>, _, _>(
+                replay_transactions_until::<State<'_, Error>, _, _>(
                     &mut db,
                     cfg.clone(),
                     block_env.clone(),
@@ -463,7 +461,7 @@ where
         opts: GethDebugTracingOptions,
         env: Env,
         at: BlockId,
-        mut db: &mut RevmState<'_, Error>,
+        mut db: &mut State<'_, Error>,
     ) -> EthResult<(GethTrace, revm_primitives::State)> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
@@ -555,7 +553,7 @@ where
     fn spawn_js_trace_service(
         &self,
         at: BlockId,
-        db: Option<RevmState<'static, Error>>,
+        db: Option<State<'static, Error>>,
     ) -> EthResult<mpsc::Sender<JsDbRequest>> {
         let (to_db_service, rx) = mpsc::channel(1);
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
@@ -582,7 +580,7 @@ where
         at: BlockId,
         rx: mpsc::Receiver<JsDbRequest>,
         on_ready: std::sync::mpsc::Sender<EthResult<()>>,
-        db: Option<RevmState<'_, Error>>,
+        db: Option<State<'_, Error>>,
     ) {
         let state = match self.inner.eth_api.state_at(at) {
             Ok(state) => {
@@ -598,7 +596,7 @@ where
         let database = Box::new(RevmDatabase::new(state));
 
         let mut db = if let Some(db) = db {
-            let RevmState {
+            let State {
                 cache,
                 block_hashes,
                 use_preloaded_bundle,
@@ -606,7 +604,7 @@ where
                 bundle_state,
                 ..
             } = db;
-            RevmState {
+            State {
                 cache,
                 transition_state,
                 bundle_state,

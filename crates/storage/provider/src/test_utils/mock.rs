@@ -2,9 +2,9 @@ use crate::{
     change::BundleStateWithReceipts,
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    ChainSpecProvider, EvmEnvProvider, HeaderProvider, PostStateDataProvider, ReceiptProviderIdExt,
-    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
-    WithdrawalsProvider,
+    BundleStateDataProvider, ChainSpecProvider, EvmEnvProvider, HeaderProvider,
+    ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider,
+    TransactionsProvider, WithdrawalsProvider,
 };
 use parking_lot::Mutex;
 use reth_db::models::StoredBlockBodyIndices;
@@ -499,7 +499,7 @@ impl StateProviderFactory for MockEthProvider {
 
     fn pending_with_provider<'a>(
         &'a self,
-        _post_state_data: Box<dyn PostStateDataProvider + 'a>,
+        _post_state_data: Box<dyn BundleStateDataProvider + 'a>,
     ) -> Result<StateProviderBox<'a>> {
         todo!()
     }
@@ -532,7 +532,7 @@ impl StateProviderFactory for Arc<MockEthProvider> {
 
     fn pending_with_provider<'a>(
         &'a self,
-        _post_state_data: Box<dyn PostStateDataProvider + 'a>,
+        _post_state_data: Box<dyn BundleStateDataProvider + 'a>,
     ) -> Result<StateProviderBox<'a>> {
         todo!()
     }

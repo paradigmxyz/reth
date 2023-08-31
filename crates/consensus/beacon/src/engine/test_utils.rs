@@ -81,7 +81,7 @@ impl<DB> TestEnv<DB> {
         loop {
             let result = self.send_new_payload(payload.clone()).await?;
             if !result.is_syncing() {
-                return Ok(result);
+                return Ok(result)
             }
         }
     }
@@ -102,7 +102,7 @@ impl<DB> TestEnv<DB> {
         loop {
             let result = self.engine_handle.fork_choice_updated(state, None).await?;
             if !result.is_syncing() {
-                return Ok(result);
+                return Ok(result)
             }
         }
     }

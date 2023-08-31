@@ -37,7 +37,7 @@ use reth_revm::{
     database::RevmDatabase,
     env::tx_env_with_recovered,
     into_reth_log,
-    revm::{State as RevmState, StateBuilder},
+    revm::{State, StateBuilder},
     state_change::post_block_withdrawals_balance_increments,
 };
 use reth_rlp::Encodable;
@@ -818,7 +818,7 @@ where
     debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number,  "building empty payload");
 
     let state = client.state_by_block_hash(parent_block.hash)?;
-    let mut db: RevmState<'_, Error> =
+    let mut db: State<'_, Error> =
         StateBuilder::default().with_database(Box::new(RevmDatabase::new(&state))).build();
 
     let base_fee = initialized_block_env.basefee.to::<u64>();
@@ -882,13 +882,13 @@ impl WithdrawalsOutcome {
     }
 }
 
-/// Executes the withdrawals and commits them to the _runtime_ Database and PostState.
+/// Executes the withdrawals and commits them to the _runtime_ Database and BundleState.
 ///
 /// Returns the withdrawals root.
 ///
 /// Returns `None` values pre shanghai
 fn commit_withdrawals(
-    db: &mut RevmState<'_, Error>,
+    db: &mut State<'_, Error>,
     chain_spec: &ChainSpec,
     timestamp: u64,
     withdrawals: Vec<Withdrawal>,
