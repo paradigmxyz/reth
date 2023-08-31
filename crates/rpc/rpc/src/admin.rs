@@ -57,12 +57,7 @@ where
             .map(|peer| PeerInfo {
                 id: Some(format!("{:?}", peer.remote_id)),
                 name: peer.client_version.to_string(),
-                caps: peer
-                    .capabilities
-                    .capabilities()
-                    .iter()
-                    .map(|cap| cap.name.to_string())
-                    .collect(),
+                caps: peer.capabilities.capabilities().iter().map(|cap| cap.to_string()).collect(),
                 network: PeerNetworkInfo {
                     remote_address: peer.remote_addr.to_string(),
                     local_address: peer
