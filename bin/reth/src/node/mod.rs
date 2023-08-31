@@ -20,7 +20,7 @@ use crate::{
     utils::get_single_header,
     version::SHORT_VERSION,
 };
-use clap::Parser;
+use clap::{value_parser, Parser};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{future::Either, pin_mut, stream, stream_select, StreamExt};
@@ -127,9 +127,25 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     #[arg(long, value_name = "SOCKET", value_parser = parse_socket_address, help_heading = "Metrics")]
     pub metrics: Option<SocketAddr>,
 
+    /// Add a new instance of a node.
+    ///
+    /// Configures the ports of the node to avoid conflicts with the defaults.
+    /// This is useful for running multiple nodes on the same machine.
+    ///
+    /// Max number of instances is 200. It is chosen in a way so that it's not possible to have
+    /// port numbers that conflict with each other.
+    ///
+    /// Changes to the following port numbers:
+    /// - DISCOVERY_PORT: default + `instance` - 1
+    /// - AUTH_PORT: default + `instance` * 100 - 100
+    /// - HTTP_RPC_PORT: default - `instance` + 1
+    /// - WS_RPC_PORT: default + `instance` * 2 - 2
+    #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
+    pub instance: u16,
+
     /// Overrides the KZG trusted setup by reading from the supplied file.
     #[arg(long, value_name = "PATH")]
-    trusted_setup_file: Option<PathBuf>,
+    pub trusted_setup_file: Option<PathBuf>,
 
     /// All networking related arguments
     #[clap(flatten)]
@@ -177,6 +193,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             chain,
             metrics,
             trusted_setup_file,
+            instance,
             network,
             rpc,
             txpool,
@@ -192,6 +209,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             config,
             chain,
             metrics,
+            instance,
             trusted_setup_file,
             network,
             rpc,
@@ -487,6 +505,9 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let default_jwt_path = data_dir.jwt_path();
         let jwt_secret = self.rpc.jwt_secret(default_jwt_path)?;
 
+        // adjust rpc port numbers based on instance number
+        self.adjust_instance_ports();
+
         // Start RPC servers
         let (_rpc_server, _auth_server) = self
             .rpc
@@ -733,11 +754,19 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .set_head(head)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::UNSPECIFIED,
-                self.network.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
+                // set discovery port based on instance number
+                match self.network.port {
+                    Some(port) => port + self.instance - 1,
+                    None => DEFAULT_DISCOVERY_PORT + self.instance - 1,
+                },
             )))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::UNSPECIFIED,
-                self.network.discovery.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
+                // set discovery port based on instance number
+                match self.network.port {
+                    Some(port) => port + self.instance - 1,
+                    None => DEFAULT_DISCOVERY_PORT + self.instance - 1,
+                },
             )))
             .build(ProviderFactory::new(db, self.chain.clone()))
     }
@@ -844,6 +873,16 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .build(db, self.chain.clone());
 
         Ok(pipeline)
+    }
+
+    /// Change rpc port numbers based on the instance number.
+    fn adjust_instance_ports(&mut self) {
+        // auth port is scaled by a factor of instance * 100
+        self.rpc.auth_port += self.instance * 100 - 100;
+        // http port is scaled by a factor of -instance
+        self.rpc.http_port -= self.instance - 1;
+        // ws port is scaled by a factor of instance * 2
+        self.rpc.ws_port += self.instance * 2 - 2;
     }
 }
 
@@ -975,5 +1014,38 @@ mod tests {
         assert!(cmd.network.discovery.disable_discovery);
 
         assert!(cmd.dev.dev);
+    }
+
+    #[test]
+    fn parse_instance() {
+        let mut cmd = NodeCommand::<()>::parse_from(["reth"]);
+        cmd.adjust_instance_ports();
+        cmd.network.port = Some(DEFAULT_DISCOVERY_PORT + cmd.instance - 1);
+        // check rpc port numbers
+        assert_eq!(cmd.rpc.auth_port, 8551);
+        assert_eq!(cmd.rpc.http_port, 8545);
+        assert_eq!(cmd.rpc.ws_port, 8546);
+        // check network listening port number
+        assert_eq!(cmd.network.port.unwrap(), 30303);
+
+        let mut cmd = NodeCommand::<()>::parse_from(["reth", "--instance", "2"]);
+        cmd.adjust_instance_ports();
+        cmd.network.port = Some(DEFAULT_DISCOVERY_PORT + cmd.instance - 1);
+        // check rpc port numbers
+        assert_eq!(cmd.rpc.auth_port, 8651);
+        assert_eq!(cmd.rpc.http_port, 8544);
+        assert_eq!(cmd.rpc.ws_port, 8548);
+        // check network listening port number
+        assert_eq!(cmd.network.port.unwrap(), 30304);
+
+        let mut cmd = NodeCommand::<()>::parse_from(["reth", "--instance", "3"]);
+        cmd.adjust_instance_ports();
+        cmd.network.port = Some(DEFAULT_DISCOVERY_PORT + cmd.instance - 1);
+        // check rpc port numbers
+        assert_eq!(cmd.rpc.auth_port, 8751);
+        assert_eq!(cmd.rpc.http_port, 8543);
+        assert_eq!(cmd.rpc.ws_port, 8550);
+        // check network listening port number
+        assert_eq!(cmd.network.port.unwrap(), 30305);
     }
 }
