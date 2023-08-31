@@ -392,7 +392,7 @@ where
 
         // perf: do not execute empty blocks
         if block.body.is_empty() {
-            return Ok(PostState::default())
+            return Ok(post_state)
         }
         let senders = self.recover_senders(&block.body, senders)?;
 
