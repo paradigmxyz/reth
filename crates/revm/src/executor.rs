@@ -1032,7 +1032,7 @@ mod tests {
 
     #[test]
     fn eip_4788_non_genesis_call() {
-        let mut header = Header { timestamp: 1, ..Header::default() };
+        let mut header = Header { timestamp: 1, number: 1, ..Header::default() };
 
         let db = StateProviderTest::default();
 
