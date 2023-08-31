@@ -22,7 +22,7 @@ use reth_revm::{
     env::tx_env_with_recovered,
     revm::{
         primitives::{db::DatabaseCommit, BlockEnv, CfgEnv, Env},
-        State as RevmState, StateBuilder as RevmStateBuilder,
+        State as RevmState, StateBuilder,
     },
     tracing::{
         js::{JsDbRequest, JsInspector},
@@ -94,7 +94,7 @@ where
             .spawn_with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(transactions.len());
                 //let mut db = SubState::new(State::new(state));
-                let mut db = RevmStateBuilder::default()
+                let mut db = StateBuilder::default()
                     .with_database(Box::new(RevmDatabase::new(state)))
                     .without_bundle_update()
                     .build();
@@ -192,7 +192,7 @@ where
                 let tx = transaction.into_recovered();
 
                 let provider = Box::new(RevmDatabase::new(state));
-                let mut db = RevmStateBuilder::default()
+                let mut db = StateBuilder::default()
                     .with_database(provider)
                     .without_bundle_update()
                     .build();
@@ -294,7 +294,7 @@ where
                     // because JSTracer and all JS types are not Send
                     let (_, _, at) = self.inner.eth_api.evm_env_at(at).await?;
                     let state = self.inner.eth_api.state_at(at)?;
-                    let db = RevmStateBuilder::default()
+                    let db = StateBuilder::default()
                         .with_database(Box::new(RevmDatabase::new(state)))
                         .without_bundle_update()
                         .build();
@@ -388,7 +388,7 @@ where
             .spawn_with_state_at_block(at.into(), move |state| {
                 let mut results = Vec::with_capacity(bundles.len());
                 //let mut db = SubState::new(State::new(state));
-                let mut db = RevmStateBuilder::default()
+                let mut db = StateBuilder::default()
                     .with_database(Box::new(RevmDatabase::new(state)))
                     .without_bundle_update()
                     .build();
@@ -615,7 +615,7 @@ where
                 block_hashes,
             }
         } else {
-            RevmStateBuilder::default().with_database(database).build()
+            StateBuilder::default().with_database(database).build()
         };
 
         let mut stream = ReceiverStream::new(rx);

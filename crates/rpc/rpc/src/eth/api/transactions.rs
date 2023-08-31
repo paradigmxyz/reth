@@ -28,7 +28,7 @@ use reth_provider::{
 use reth_revm::{
     database::RevmDatabase,
     env::{fill_block_env_with_coinbase, tx_env_with_recovered},
-    revm::{State as RevmState, StateBuilder as RevmStateBuilder},
+    revm::{State as RevmState, StateBuilder},
     tracing::{TracingInspector, TracingInspectorConfig},
 };
 use reth_rpc_types::{
@@ -522,7 +522,7 @@ where
             .tracing_call_pool
             .spawn(move || {
                 let state = this.state_at(at)?;
-                let mut db = RevmStateBuilder::default()
+                let mut db = StateBuilder::default()
                     .with_database(Box::new(RevmDatabase::new(state)))
                     .without_bundle_update()
                     .build();
@@ -576,7 +576,7 @@ where
         F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>,
     {
         self.with_state_at_block(at, |state| {
-            let mut db = RevmStateBuilder::default()
+            let mut db = StateBuilder::default()
                 .with_database(Box::new(RevmDatabase::new(state)))
                 .without_bundle_update()
                 .build();
@@ -602,7 +602,7 @@ where
         R: Send + 'static,
     {
         self.spawn_with_state_at_block(at, move |state| {
-            let mut db = RevmStateBuilder::default()
+            let mut db = StateBuilder::default()
                 .with_database(Box::new(RevmDatabase::new(state)))
                 .without_bundle_update()
                 .build();
@@ -663,7 +663,7 @@ where
         let block_txs = block.body;
 
         self.spawn_with_state_at_block(parent_block.into(), move |state| {
-            let mut db = RevmStateBuilder::default()
+            let mut db = StateBuilder::default()
                 .with_database(Box::new(RevmDatabase::new(state)))
                 .without_bundle_update()
                 .build();

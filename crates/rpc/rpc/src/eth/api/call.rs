@@ -21,7 +21,7 @@ use reth_revm::{
     access_list::AccessListInspector,
     database::RevmDatabase,
     env::tx_env_with_recovered,
-    revm::{State as RevmState, StateBuilder as RevmStateBuilder},
+    revm::{State as RevmState, StateBuilder},
 };
 use reth_rpc_types::{
     state::StateOverride, BlockError, Bundle, CallRequest, EthCallResponse, StateContext,
@@ -108,7 +108,7 @@ where
         self.spawn_with_state_at_block(at.into(), move |state| {
             let mut results = Vec::with_capacity(transactions.len());
             //let mut db = SubState::new(State::new(state));
-            let mut db = RevmStateBuilder::default()
+            let mut db = StateBuilder::default()
                 .with_database(Box::new(RevmDatabase::new(state)))
                 .without_bundle_update()
                 .build();
@@ -200,7 +200,7 @@ where
 
         // Configure the evm env
         let mut env = build_call_evm_env(cfg, block, request)?;
-        let mut db = RevmStateBuilder::default()
+        let mut db = StateBuilder::default()
             .with_database(Box::new(RevmDatabase::new(state)))
             .without_bundle_update()
             .build();
@@ -363,7 +363,7 @@ where
         // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
         env.cfg.disable_base_fee = true;
 
-        let mut db = RevmStateBuilder::default()
+        let mut db = StateBuilder::default()
             .with_database(Box::new(RevmDatabase::new(state)))
             .without_bundle_update()
             .build();

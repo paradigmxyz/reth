@@ -28,7 +28,7 @@ use reth_rpc_types::{
     BlockError, BlockOverrides, CallRequest, Index, TransactionInfo,
 };
 use revm::{
-    db::{State as RevmState, StateBuilder as RevmStateBuilder},
+    db::{State as RevmState, StateBuilder},
     primitives::Env,
     DatabaseCommit,
 };
@@ -149,7 +149,7 @@ where
             .spawn_with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(calls.len());
                 let provider = Box::new(RevmDatabase::new(state));
-                let mut revm_state = RevmStateBuilder::default()
+                let mut revm_state = StateBuilder::default()
                     .with_database(provider)
                     .without_bundle_update()
                     .build();
@@ -325,7 +325,7 @@ where
             .eth_api
             .spawn_with_state_at_block(state_at.into(), move |state| {
                 let mut results = Vec::with_capacity(transactions.len());
-                let mut db = RevmStateBuilder::default()
+                let mut db = StateBuilder::default()
                     .with_database(Box::new(RevmDatabase::new(state)))
                     .without_bundle_update()
                     .build();

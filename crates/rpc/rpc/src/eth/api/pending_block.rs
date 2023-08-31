@@ -9,7 +9,7 @@ use reth_primitives::{
 use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::{
     database::RevmDatabase, env::tx_env_with_recovered, into_reth_log,
-    StateBuilder as RevmStateBuilder,
+    StateBuilder,
 };
 use reth_transaction_pool::TransactionPool;
 use revm::DatabaseCommit;
@@ -43,7 +43,7 @@ impl PendingBlockEnv {
         let parent_hash = origin.build_target_hash();
         let state_provider = client.history_by_block_hash(parent_hash)?;
         let state = RevmDatabase::new(&state_provider);
-        let mut db = RevmStateBuilder::default().with_database(Box::new(state)).build();
+        let mut db = StateBuilder::default().with_database(Box::new(state)).build();
 
         let mut cumulative_gas_used = 0;
         let block_gas_limit: u64 = block_env.gas_limit.try_into().unwrap_or(u64::MAX);

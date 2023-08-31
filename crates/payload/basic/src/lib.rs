@@ -37,7 +37,7 @@ use reth_revm::{
     database::RevmDatabase,
     env::tx_env_with_recovered,
     into_reth_log,
-    revm::{State as RevmState, StateBuilder as RevmStateBuilder},
+    revm::{State as RevmState, StateBuilder},
     state_change::post_block_withdrawals_balance_increments,
 };
 use reth_rlp::Encodable;
@@ -641,7 +641,7 @@ where
     let state_provider = client.state_by_block_hash(config.parent_block.hash)?;
     let state: RevmDatabase<&StateProviderBox<'_>> = RevmDatabase::new(&state_provider);
     let wrapped_state = WrapDatabaseRef(cached_reads.as_db(&state));
-    let mut db = RevmStateBuilder::default().with_database(Box::new(wrapped_state)).build();
+    let mut db = StateBuilder::default().with_database(Box::new(wrapped_state)).build();
     let PayloadConfig {
         initialized_block_env,
         initialized_cfg,
@@ -819,7 +819,7 @@ where
 
     let state = client.state_by_block_hash(parent_block.hash)?;
     let mut db: RevmState<'_, Error> =
-        RevmStateBuilder::default().with_database(Box::new(RevmDatabase::new(&state))).build();
+        StateBuilder::default().with_database(Box::new(RevmDatabase::new(&state))).build();
 
     let base_fee = initialized_block_env.basefee.to::<u64>();
     let block_number = initialized_block_env.number.to::<u64>();

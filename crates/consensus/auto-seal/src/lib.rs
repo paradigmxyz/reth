@@ -35,7 +35,7 @@ use reth_provider::{
     BlockExecutor, BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotificationSender,
     StateProviderFactory,
 };
-use reth_revm::{database::RevmDatabase, processor::EVMProcessor, StateBuilder as RevmStateBuilder};
+use reth_revm::{database::RevmDatabase, processor::EVMProcessor, StateBuilder};
 use reth_transaction_pool::TransactionPool;
 use std::{
     collections::HashMap,
@@ -366,7 +366,7 @@ impl StorageInner {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
         // now execute the block
-        let db = RevmStateBuilder::default()
+        let db = StateBuilder::default()
             .with_database(Box::new(RevmDatabase::new(client.latest().unwrap())))
             .without_bundle_update()
             .build();

@@ -575,7 +575,7 @@ mod tests {
     use reth_revm_primitives::{into_reth_acc, primitives::HashMap};
     use revm::{
         primitives::{Account, AccountInfo as RevmAccountInfo, AccountStatus, StorageSlot},
-        CacheState, DatabaseCommit, StateBuilder as RevmStateBuilder,
+        CacheState, DatabaseCommit, StateBuilder,
     };
     use std::sync::Arc;
 
@@ -596,7 +596,7 @@ mod tests {
         let mut cache_state = CacheState::new(true);
         cache_state.insert_not_existing(address_a);
         cache_state.insert_account(address_b, account_b.clone());
-        let mut state = RevmStateBuilder::default().with_cached_prestate(cache_state).build();
+        let mut state = StateBuilder::default().with_cached_prestate(cache_state).build();
 
         // 0x00.. is created
         state.commit(HashMap::from([(
@@ -669,7 +669,7 @@ mod tests {
 
         let mut cache_state = CacheState::new(true);
         cache_state.insert_account(address_b, account_b_changed.clone());
-        let mut state = RevmStateBuilder::default().with_cached_prestate(cache_state).build();
+        let mut state = StateBuilder::default().with_cached_prestate(cache_state).build();
 
         // 0xff.. is destroyed
         state.commit(HashMap::from([(
@@ -731,7 +731,7 @@ mod tests {
             account_b.clone(),
             HashMap::from([(U256::from(1), U256::from(1))]),
         );
-        let mut state = RevmStateBuilder::default().with_cached_prestate(cache_state).build();
+        let mut state = StateBuilder::default().with_cached_prestate(cache_state).build();
 
         state.commit(HashMap::from([
             (
@@ -859,7 +859,7 @@ mod tests {
         // Delete account A
         let mut cache_state = CacheState::new(true);
         cache_state.insert_account(address_a, RevmAccountInfo::default());
-        let mut state = RevmStateBuilder::default().with_cached_prestate(cache_state).build();
+        let mut state = StateBuilder::default().with_cached_prestate(cache_state).build();
 
         state.commit(HashMap::from([(
             address_a,
@@ -917,7 +917,7 @@ mod tests {
         // Block #0: initial state.
         let mut cache_state = CacheState::new(true);
         cache_state.insert_not_existing(address1);
-        let mut init_state = RevmStateBuilder::default().with_cached_prestate(cache_state).build();
+        let mut init_state = StateBuilder::default().with_cached_prestate(cache_state).build();
         init_state.commit(HashMap::from([(
             address1,
             Account {
@@ -948,7 +948,7 @@ mod tests {
             account_info.clone(),
             HashMap::from([(U256::ZERO, U256::from(1)), (U256::from(1), U256::from(2))]),
         );
-        let mut state = RevmStateBuilder::default().with_cached_prestate(cache_state).build();
+        let mut state = StateBuilder::default().with_cached_prestate(cache_state).build();
 
         // Block #1: change storage.
         state.commit(HashMap::from([(
@@ -1228,7 +1228,7 @@ mod tests {
         // Block #0: initial state.
         let mut cache_state = CacheState::new(true);
         cache_state.insert_not_existing(address1);
-        let mut init_state = RevmStateBuilder::default().with_cached_prestate(cache_state).build();
+        let mut init_state = StateBuilder::default().with_cached_prestate(cache_state).build();
         init_state.commit(HashMap::from([(
             address1,
             Account {
@@ -1259,7 +1259,7 @@ mod tests {
             account1.clone(),
             HashMap::from([(U256::ZERO, U256::from(1)), (U256::from(1), U256::from(2))]),
         );
-        let mut state = RevmStateBuilder::default().with_cached_prestate(cache_state).build();
+        let mut state = StateBuilder::default().with_cached_prestate(cache_state).build();
 
         // Block #1: Destroy, re-create, change storage.
         state.commit(HashMap::from([(
