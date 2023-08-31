@@ -66,7 +66,6 @@ mod tests {
     use std::sync::Arc;
 
     #[tokio::test]
-    #[ignore = "Until pruninig is integrated with new state"]
     async fn test_prune() {
         let test_tx = TestTransaction::default();
         let factory = Arc::new(ProviderFactory::new(test_tx.tx.as_ref(), MAINNET.clone()));

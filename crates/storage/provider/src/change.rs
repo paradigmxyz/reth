@@ -12,7 +12,7 @@ use reth_primitives::{
 };
 use reth_revm_primitives::{
     db::states::{
-        BundleState as RevmBundleState, RevertToSlot, StateChangeset as RevmChange,
+        BundleState, RevertToSlot, StateChangeset as RevmChange,
         StateReverts as RevmReverts,
     },
     into_reth_acc, into_revm_acc,
@@ -27,9 +27,9 @@ use std::collections::HashMap;
 
 /// Bundle state of post execution changes and reverts
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
-pub struct BundleState {
+pub struct BundleStateWithReceipts {
     /// Bundle state with reverts.
-    bundle: RevmBundleState,
+    bundle: BundleState,
     /// Receipts
     receipts: Vec<Vec<Receipt>>,
     /// First block o bundle state.
@@ -46,10 +46,10 @@ pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
 /// Type used to initialize revms reverts.
 pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>;
 
-impl BundleState {
+impl BundleStateWithReceipts {
     /// Create Bundle State.
     pub fn new(
-        bundle: RevmBundleState,
+        bundle: BundleState,
         receipts: Vec<Vec<Receipt>>,
         first_block: BlockNumber,
     ) -> Self {
@@ -69,7 +69,7 @@ impl BundleState {
         reverts.sort_unstable_by_key(|a| a.0);
 
         // initialize revm bundle
-        let bundle = RevmBundleState::new(
+        let bundle = BundleState::new(
             state_init.into_iter().map(|(address, (original, present, storage))| {
                 (
                     address,
@@ -95,7 +95,7 @@ impl BundleState {
     }
 
     /// Return revm bundle state.
-    pub fn state(&self) -> &RevmBundleState {
+    pub fn state(&self) -> &BundleState {
         &self.bundle
     }
 
@@ -176,7 +176,7 @@ impl BundleState {
     /// let db = create_test_rw_db();
     ///
     /// // Initialize the bundle state
-    /// let bundle = BundleState::new_init(
+    /// let bundle = BundleStateWithReceipts::new_init(
     ///     HashMap::from([(
     ///         [0x11;20].into(),
     ///         (
@@ -312,7 +312,7 @@ impl BundleState {
         // number of detached block shoud be 1.
         let num_of_detached_block = (block_number - first_block) + 1;
 
-        let mut detached_bundle_state: BundleState = self.clone();
+        let mut detached_bundle_state: BundleStateWithReceipts = self.clone();
         detached_bundle_state.revert_to(block_number);
 
         // split is done as [0, num) and [num, len]
@@ -562,7 +562,7 @@ impl StateChange {
 #[cfg(test)]
 mod tests {
     use super::{StateChange, StateReverts};
-    use crate::{AccountReader, BundleState, ProviderFactory};
+    use crate::{AccountReader, BundleStateWithReceipts, ProviderFactory};
     use reth_db::{
         cursor::{DbCursorRO, DbDupCursorRO},
         models::{AccountBeforeTx, BlockNumberAddress},
@@ -772,7 +772,7 @@ mod tests {
 
         state.merge_transitions(true);
 
-        BundleState::new(state.take_bundle(), Vec::new(), 1)
+        BundleStateWithReceipts::new(state.take_bundle(), Vec::new(), 1)
             .write_to_db(provider.tx_ref(), false)
             .expect("Could not write bundle state to DB");
 
@@ -871,7 +871,7 @@ mod tests {
         )]));
 
         state.merge_transitions(true);
-        BundleState::new(state.take_bundle(), Vec::new(), 2)
+        BundleStateWithReceipts::new(state.take_bundle(), Vec::new(), 2)
             .write_to_db(provider.tx_ref(), false)
             .expect("Could not write bundle state to DB");
 
@@ -938,7 +938,7 @@ mod tests {
             },
         )]));
         init_state.merge_transitions(true);
-        BundleState::new(init_state.take_bundle(), Vec::new(), 0)
+        BundleStateWithReceipts::new(init_state.take_bundle(), Vec::new(), 0)
             .write_to_db(provider.tx_ref(), false)
             .expect("Could not write init bundle state to DB");
 
@@ -1084,7 +1084,7 @@ mod tests {
 
         let bundle = state.take_bundle();
 
-        BundleState::new(bundle, Vec::new(), 1)
+        BundleStateWithReceipts::new(bundle, Vec::new(), 1)
             .write_to_db(provider.tx_ref(), false)
             .expect("Could not write bundle state to DB");
 
@@ -1249,7 +1249,7 @@ mod tests {
             },
         )]));
         init_state.merge_transitions(true);
-        BundleState::new(init_state.take_bundle(), Vec::new(), 0)
+        BundleStateWithReceipts::new(init_state.take_bundle(), Vec::new(), 0)
             .write_to_db(provider.tx_ref(), false)
             .expect("Could not write init bundle state to DB");
 
@@ -1295,7 +1295,7 @@ mod tests {
 
         // Commit block #1 changes to the database.
         state.merge_transitions(true);
-        BundleState::new(state.take_bundle(), Vec::new(), 1)
+        BundleStateWithReceipts::new(state.take_bundle(), Vec::new(), 1)
             .write_to_db(provider.tx_ref(), false)
             .expect("Could not write bundle state to DB");
 

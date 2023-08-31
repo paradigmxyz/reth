@@ -26,7 +26,7 @@ use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_revm::{
-    database::State,
+    database::RevmDatabase,
     env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     revm::{State as RevmState, StateBuilder as RevmStateBuilder},
     tracing::{TracingInspector, TracingInspectorConfig},
@@ -523,7 +523,7 @@ where
             .spawn(move || {
                 let state = this.state_at(at)?;
                 let mut db = RevmStateBuilder::default()
-                    .with_database(Box::new(State::new(state)))
+                    .with_database(Box::new(RevmDatabase::new(state)))
                     .without_bundle_update()
                     .build();
 
@@ -577,7 +577,7 @@ where
     {
         self.with_state_at_block(at, |state| {
             let mut db = RevmStateBuilder::default()
-                .with_database(Box::new(State::new(state)))
+                .with_database(Box::new(RevmDatabase::new(state)))
                 .without_bundle_update()
                 .build();
 
@@ -603,7 +603,7 @@ where
     {
         self.spawn_with_state_at_block(at, move |state| {
             let mut db = RevmStateBuilder::default()
-                .with_database(Box::new(State::new(state)))
+                .with_database(Box::new(RevmDatabase::new(state)))
                 .without_bundle_update()
                 .build();
             let mut inspector = TracingInspector::new(config);
@@ -664,7 +664,7 @@ where
 
         self.spawn_with_state_at_block(parent_block.into(), move |state| {
             let mut db = RevmStateBuilder::default()
-                .with_database(Box::new(State::new(state)))
+                .with_database(Box::new(RevmDatabase::new(state)))
                 .without_bundle_update()
                 .build();
 
@@ -731,7 +731,7 @@ where
                 return match signer.sign_transaction(request, from) {
                     Ok(tx) => Ok(tx),
                     Err(e) => Err(e.into()),
-                }
+                };
             }
         }
         Err(EthApiError::InvalidTransactionSignature)
@@ -759,7 +759,7 @@ where
                     block.header.number,
                     block.header.base_fee_per_gas,
                     index.into(),
-                )))
+                )));
             }
         }
 

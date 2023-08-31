@@ -1,5 +1,5 @@
 use crate::{
-    BlockIdReader, BlockNumReader, BundleState, Chain, HeaderProvider, ReceiptProvider,
+    BlockIdReader, BlockNumReader, BundleStateWithReceipts, Chain, HeaderProvider, ReceiptProvider,
     ReceiptProviderIdExt, TransactionsProvider, WithdrawalsProvider,
 };
 use auto_impl::auto_impl;
@@ -262,6 +262,6 @@ pub trait BlockWriter: Send + Sync {
     fn append_blocks_with_bundle_state(
         &self,
         blocks: Vec<SealedBlockWithSenders>,
-        state: BundleState,
+        state: BundleStateWithReceipts,
     ) -> Result<()>;
 }

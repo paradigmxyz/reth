@@ -1,5 +1,5 @@
 use crate::{
-    change::BundleState, AccountReader, BlockHashReader, PostStateDataProvider, StateProvider,
+    change::BundleStateWithReceipts, AccountReader, BlockHashReader, PostStateDataProvider, StateProvider,
     StateRootProvider,
 };
 use reth_interfaces::{provider::ProviderError, Result};
@@ -52,7 +52,7 @@ impl<SP: StateProvider, PSDP: PostStateDataProvider> AccountReader for PostState
 impl<SP: StateProvider, PSDP: PostStateDataProvider> StateRootProvider
     for PostStateProvider<SP, PSDP>
 {
-    fn state_root(&self, post_state: BundleState) -> Result<H256> {
+    fn state_root(&self, post_state: BundleStateWithReceipts) -> Result<H256> {
         let mut state = self.post_state_data_provider.state().clone();
         state.extend(post_state);
         self.state_provider.state_root(state)

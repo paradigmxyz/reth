@@ -31,10 +31,10 @@ use reth_primitives::{
     SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
 };
 use reth_provider::{
-    BlockReaderIdExt, BlockSource, BundleState, StateProviderBox, StateProviderFactory,
+    BlockReaderIdExt, BlockSource, BundleStateWithReceipts, StateProviderBox, StateProviderFactory,
 };
 use reth_revm::{
-    database::State,
+    database::RevmDatabase,
     env::tx_env_with_recovered,
     into_reth_log,
     revm::{State as RevmState, StateBuilder as RevmStateBuilder},
@@ -639,7 +639,7 @@ where
     let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
 
     let state_provider = client.state_by_block_hash(config.parent_block.hash)?;
-    let state: State<&StateProviderBox<'_>> = State::new(&state_provider);
+    let state: RevmDatabase<&StateProviderBox<'_>> = RevmDatabase::new(&state_provider);
     let wrapped_state = WrapDatabaseRef(cached_reads.as_db(&state));
     let mut db = RevmStateBuilder::default().with_database(Box::new(wrapped_state)).build();
     let PayloadConfig {
@@ -754,7 +754,7 @@ where
     // merge made transaction into bundle state.
     db.merge_transitions(false);
 
-    let bundle = BundleState::new(db.take_bundle(), vec![receipts], block_number);
+    let bundle = BundleStateWithReceipts::new(db.take_bundle(), vec![receipts], block_number);
     let receipts_root = bundle.receipts_root_slow(block_number).expect("Number is in range");
     let logs_bloom = bundle.block_logs_bloom(block_number).expect("Number is in range");
 
@@ -819,7 +819,7 @@ where
 
     let state = client.state_by_block_hash(parent_block.hash)?;
     let mut db: RevmState<'_, Error> =
-        RevmStateBuilder::default().with_database(Box::new(State::new(&state))).build();
+        RevmStateBuilder::default().with_database(Box::new(RevmDatabase::new(&state))).build();
 
     let base_fee = initialized_block_env.basefee.to::<u64>();
     let block_number = initialized_block_env.number.to::<u64>();
@@ -832,7 +832,7 @@ where
     db.merge_transitions(false);
 
     // calculate the state root
-    let bundle_state = BundleState::new(db.take_bundle(), vec![], block_number);
+    let bundle_state = BundleStateWithReceipts::new(db.take_bundle(), vec![], block_number);
     let state_root = state.state_root(bundle_state)?;
 
     let header = Header {

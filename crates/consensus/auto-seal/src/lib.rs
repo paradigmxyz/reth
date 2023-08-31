@@ -32,10 +32,10 @@ use reth_primitives::{
     U256,
 };
 use reth_provider::{
-    BlockExecutor, BlockReaderIdExt, BundleState, CanonStateNotificationSender,
+    BlockExecutor, BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotificationSender,
     StateProviderFactory,
 };
-use reth_revm::{database::State, processor::EVMProcessor, StateBuilder as RevmStateBuilder};
+use reth_revm::{database::RevmDatabase, processor::EVMProcessor, StateBuilder as RevmStateBuilder};
 use reth_transaction_pool::TransactionPool;
 use std::{
     collections::HashMap,
@@ -299,7 +299,7 @@ impl StorageInner {
         block: &Block,
         executor: &mut EVMProcessor<'_>,
         senders: Vec<Address>,
-    ) -> Result<(BundleState, u64), BlockExecutionError> {
+    ) -> Result<(BundleStateWithReceipts, u64), BlockExecutionError> {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
         let gas_used = executor.execute_transactions(block, U256::ZERO, Some(senders))?;
@@ -320,10 +320,10 @@ impl StorageInner {
     pub(crate) fn complete_header(
         &self,
         mut header: Header,
-        bundle_state: &BundleState,
+        bundle_state: &BundleStateWithReceipts,
         client: &impl StateProviderFactory,
         gas_used: u64,
-    ) -> Header {
+    ) -> Result<Header, BlockExecutionError> {
         let receipts = bundle_state.receipts_by_block(header.number);
         header.receipts_root = if receipts.is_empty() {
             EMPTY_RECEIPTS
@@ -338,9 +338,13 @@ impl StorageInner {
         header.gas_used = gas_used;
 
         // calculate the state root
-        let state_root = client.latest().unwrap().state_root(bundle_state.clone()).unwrap();
+        let state_root = client
+            .latest()
+            .map_err(|_| BlockExecutionError::ProviderError)?
+            .state_root(bundle_state.clone())
+            .unwrap();
         header.state_root = state_root;
-        header
+        Ok(header)
     }
 
     /// Builds and executes a new block with the given transactions, on the provided [Executor].
@@ -351,7 +355,7 @@ impl StorageInner {
         transactions: Vec<TransactionSigned>,
         client: &impl StateProviderFactory,
         chain_spec: Arc<ChainSpec>,
-    ) -> Result<(SealedHeader, BundleState), BlockExecutionError> {
+    ) -> Result<(SealedHeader, BundleStateWithReceipts), BlockExecutionError> {
         let header = self.build_header_template(&transactions, chain_spec.clone());
 
         let block = Block { header, body: transactions, ommers: vec![], withdrawals: None };
@@ -363,7 +367,7 @@ impl StorageInner {
 
         // now execute the block
         let db = RevmStateBuilder::default()
-            .with_database(Box::new(State::new(client.latest().unwrap())))
+            .with_database(Box::new(RevmDatabase::new(client.latest().unwrap())))
             .without_bundle_update()
             .build();
         let mut executor = EVMProcessor::new_with_state(chain_spec, db);
@@ -376,7 +380,7 @@ impl StorageInner {
         trace!(target: "consensus::auto", ?bundle_state, ?header, ?body, "executed block, calculating state root and completing header");
 
         // fill in the rest of the fields
-        let header = self.complete_header(header, &bundle_state, client, gas_used);
+        let header = self.complete_header(header, &bundle_state, client, gas_used)?;
 
         trace!(target: "consensus::auto", root=?header.state_root, ?body, "calculated root");
 

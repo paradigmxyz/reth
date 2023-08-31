@@ -15,7 +15,7 @@ use reth_interfaces::Error;
 use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, SealedHeader, H256, U256};
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::{
-    database::State,
+    database::RevmDatabase,
     env::tx_env_with_recovered,
     tracing::{
         parity::populate_account_balance_nonce_diffs, TracingInspector, TracingInspectorConfig,
@@ -148,7 +148,7 @@ where
             .eth_api
             .spawn_with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(calls.len());
-                let provider = Box::new(State::new(state));
+                let provider = Box::new(RevmDatabase::new(state));
                 let mut revm_state = RevmStateBuilder::default()
                     .with_database(provider)
                     .without_bundle_update()
@@ -326,7 +326,7 @@ where
             .spawn_with_state_at_block(state_at.into(), move |state| {
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = RevmStateBuilder::default()
-                    .with_database(Box::new(State::new(state)))
+                    .with_database(Box::new(RevmDatabase::new(state)))
                     .without_bundle_update()
                     .build();
 

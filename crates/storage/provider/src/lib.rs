@@ -50,4 +50,4 @@ pub mod chain;
 pub use chain::{Chain, DisplayBlocksChain};
 
 pub mod change;
-pub use change::{BundleState, StateChange, StateReverts};
+pub use change::{BundleStateWithReceipts, StateChange, StateReverts};

@@ -168,7 +168,7 @@ where
     /// given hash.
     pub(crate) fn download_full_block(&mut self, hash: H256) -> bool {
         if self.is_inflight_request(hash) {
-            return false
+            return false;
         }
         trace!(
             target: "consensus::engine::sync",
@@ -240,7 +240,7 @@ where
 
                 if target.is_none() && !self.run_pipeline_continuously {
                     // nothing to sync
-                    return None
+                    return None;
                 }
 
                 let (tx, rx) = oneshot::channel();
@@ -269,14 +269,14 @@ where
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<EngineSyncEvent> {
         // try to spawn a pipeline if a target is set
         if let Some(event) = self.try_spawn_pipeline() {
-            return Poll::Ready(event)
+            return Poll::Ready(event);
         }
 
         // make sure we poll the pipeline if it's active, and return any ready pipeline events
         if !self.is_pipeline_idle() {
             // advance the pipeline
             if let Poll::Ready(event) = self.poll_pipeline(cx) {
-                return Poll::Ready(event)
+                return Poll::Ready(event);
             }
         }
 
@@ -314,10 +314,10 @@ where
                 if peek.0 .0.hash() == block.0 .0.hash() {
                     PeekMut::pop(peek);
                 } else {
-                    break
+                    break;
                 }
             }
-            return Poll::Ready(EngineSyncEvent::FetchedFullBlock(block.0 .0))
+            return Poll::Ready(EngineSyncEvent::FetchedFullBlock(block.0 .0));
         }
 
         Poll::Pending
@@ -402,7 +402,7 @@ mod tests {
         constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpec,
         ChainSpecBuilder, Header, SealedHeader, MAINNET,
     };
-    use reth_provider::{test_utils::TestExecutorFactory, BundleState};
+    use reth_provider::{test_utils::TestExecutorFactory, BundleStateWithReceipts};
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
     use reth_tasks::TokioTaskExecutor;
     use std::{collections::VecDeque, future::poll_fn, sync::Arc};
@@ -410,7 +410,7 @@ mod tests {
 
     struct TestPipelineBuilder {
         pipeline_exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
-        executor_results: Vec<BundleState>,
+        executor_results: Vec<BundleStateWithReceipts>,
         max_block: Option<BlockNumber>,
     }
 
@@ -435,7 +435,7 @@ mod tests {
 
         /// Set the executor results to use for the test consensus engine.
         #[allow(dead_code)]
-        fn with_executor_results(mut self, executor_results: Vec<BundleState>) -> Self {
+        fn with_executor_results(mut self, executor_results: Vec<BundleStateWithReceipts>) -> Self {
             self.executor_results = executor_results;
             self
         }

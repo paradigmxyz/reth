@@ -1,5 +1,5 @@
 use crate::{
-    database::State,
+    database::RevmDatabase,
     env::{fill_cfg_and_block_env, fill_tx_env},
     eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     into_reth_log,
@@ -14,10 +14,10 @@ use reth_primitives::{
     Address, Block, BlockNumber, Bloom, ChainSpec, Hardfork, Header, PruneModes, Receipt,
     ReceiptWithBloom, TransactionSigned, H256, U256,
 };
-use reth_provider::{change::BundleState, BlockExecutor, BlockExecutorStats, StateProvider};
+use reth_provider::{change::BundleStateWithReceipts, BlockExecutor, BlockExecutorStats, StateProvider};
 use revm::{
-    primitives::ResultAndState, DatabaseCommit, State as RevmState,
-    StateBuilder as RevmStateBuilder, EVM,
+    primitives::ResultAndState, DatabaseCommit, db::State,
+    StateBuilder, EVM,
 };
 use std::{sync::Arc, time::Instant};
 use tracing::{debug, trace};
@@ -25,8 +25,8 @@ use tracing::{debug, trace};
 /// Main block executor
 pub struct EVMProcessor<'a> {
     /// The configured chain-spec
-    pub chain_spec: Arc<ChainSpec>,
-    evm: EVM<RevmState<'a, Error>>,
+    chain_spec: Arc<ChainSpec>,
+    evm: EVM<State<'a, Error>>,
     stack: InspectorStack,
     receipts: Vec<Vec<Receipt>>,
     /// First block will be initialized to ZERO
@@ -40,10 +40,14 @@ pub struct EVMProcessor<'a> {
     stats: BlockExecutorStats,
 }
 
-impl<'a> From<Arc<ChainSpec>> for EVMProcessor<'a> {
-    /// Instantiates a new executor from the chainspec. Must call
-    /// `with_db` to set the database before executing.
-    fn from(chain_spec: Arc<ChainSpec>) -> Self {
+impl<'a> EVMProcessor<'a> {
+    /// Return chain spec.
+    pub fn chain_spec(&self) -> &Arc<ChainSpec> {
+        &self.chain_spec
+    }
+
+    /// Create new Processor wit given chain spec.
+    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         let evm = EVM::new();
         EVMProcessor {
             chain_spec,
@@ -56,18 +60,16 @@ impl<'a> From<Arc<ChainSpec>> for EVMProcessor<'a> {
             stats: BlockExecutorStats::default(),
         }
     }
-}
 
-impl<'a> EVMProcessor<'a> {
     /// Creates a new executor from the given chain spec and database.
-    pub fn new<DB: StateProvider + 'a>(chain_spec: Arc<ChainSpec>, db: State<DB>) -> Self {
+    pub fn new_with_db<DB: StateProvider + 'a>(chain_spec: Arc<ChainSpec>, db: RevmDatabase<DB>) -> Self {
         let revm_state =
-            RevmStateBuilder::default().with_database(Box::new(db)).without_state_clear().build();
+            StateBuilder::default().with_database(Box::new(db)).without_state_clear().build();
         EVMProcessor::new_with_state(chain_spec, revm_state)
     }
 
     /// Create new EVM processor with a given revm state.
-    pub fn new_with_state(chain_spec: Arc<ChainSpec>, revm_state: RevmState<'a, Error>) -> Self {
+    pub fn new_with_state(chain_spec: Arc<ChainSpec>, revm_state: State<'a, Error>) -> Self {
         let mut evm = EVM::new();
         evm.database(revm_state);
         EVMProcessor {
@@ -88,7 +90,7 @@ impl<'a> EVMProcessor<'a> {
     }
 
     /// Gives a reference to the database
-    pub fn db(&mut self) -> &mut RevmState<'a, Error> {
+    pub fn db(&mut self) -> &mut State<'a, Error> {
         self.evm.db().expect("db to not be moved")
     }
 
@@ -215,7 +217,7 @@ impl<'a> EVMProcessor<'a> {
         // perf: do not execute empty blocks
         if block.body.is_empty() {
             self.receipts.push(Vec::new());
-            return Ok(0)
+            return Ok(0);
         }
         let senders = self.recover_senders(&block.body, senders)?;
 
@@ -233,7 +235,7 @@ impl<'a> EVMProcessor<'a> {
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into())
+                .into());
             }
             // Execute transaction.
             let ResultAndState { result, state } = self.transact(transaction, sender)?;
@@ -295,7 +297,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                     })
                     .unwrap_or_default(),
             }
-            .into())
+            .into());
         }
         let time = Instant::now();
         self.post_execution_state_change(block, total_difficulty)?;
@@ -303,8 +305,8 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
 
         let time = Instant::now();
         let with_reverts = self.tip.map_or(true, |tip| {
-            !self.prune_modes.should_prune_account_history(block.number, tip) &&
-                !self.prune_modes.should_prune_storage_history(block.number, tip)
+            !self.prune_modes.should_prune_account_history(block.number, tip)
+                && !self.prune_modes.should_prune_storage_history(block.number, tip)
         });
         self.db().merge_transitions(with_reverts);
         self.stats.merge_transitions_duration += time.elapsed();
@@ -341,7 +343,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                     e,
                     self.receipts.last().unwrap()
                 );
-                return Err(e)
+                return Err(e);
             };
             self.stats.receipt_root_duration += time.elapsed();
         }
@@ -357,9 +359,9 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         self.tip = Some(tip);
     }
 
-    fn take_output_state(&mut self) -> BundleState {
+    fn take_output_state(&mut self) -> BundleStateWithReceipts {
         let receipts = std::mem::take(&mut self.receipts);
-        BundleState::new(self.evm.db().unwrap().take_bundle(), receipts, self.first_block)
+        BundleStateWithReceipts::new(self.evm.db().unwrap().take_bundle(), receipts, self.first_block)
     }
 
     fn stats(&self) -> BlockExecutorStats {
@@ -381,7 +383,7 @@ pub fn verify_receipt<'a>(
             got: receipts_root,
             expected: expected_receipts_root,
         }
-        .into())
+        .into());
     }
 
     // Create header log bloom.
@@ -391,7 +393,7 @@ pub fn verify_receipt<'a>(
             expected: Box::new(expected_logs_bloom),
             got: Box::new(logs_bloom),
         }
-        .into())
+        .into());
     }
 
     Ok(())

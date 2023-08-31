@@ -14,7 +14,7 @@ use reth_primitives::{
     BlockHash, BlockNumber, ForkBlock, SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
-    change::BundleState, providers::PostStateProvider, Chain, ExecutorFactory,
+    change::BundleStateWithReceipts, providers::PostStateProvider, Chain, ExecutorFactory,
     PostStateDataProvider, StateRootProvider,
 };
 use std::{
@@ -72,7 +72,7 @@ impl AppendableChain {
         C: Consensus,
         EF: ExecutorFactory,
     {
-        let state = BundleState::default();
+        let state = BundleStateWithReceipts::default();
         let empty = BTreeMap::new();
 
         let state_provider = PostStateDataRef {
@@ -106,7 +106,7 @@ impl AppendableChain {
         C: Consensus,
         EF: ExecutorFactory,
     {
-        let state = BundleState::default();
+        let state = BundleStateWithReceipts::default();
         let empty = BTreeMap::new();
 
         let state_provider = PostStateDataRef {
@@ -183,7 +183,7 @@ impl AppendableChain {
         post_state_data_provider: PSDP,
         externals: &TreeExternals<DB, C, EF>,
         block_kind: BlockKind,
-    ) -> Result<BundleState, Error>
+    ) -> Result<BundleStateWithReceipts, Error>
     where
         PSDP: PostStateDataProvider,
         DB: Database,
@@ -216,7 +216,7 @@ impl AppendableChain {
                     got: state_root,
                     expected: block.state_root,
                 }
-                .into())
+                .into());
             }
         }
 
@@ -230,7 +230,7 @@ impl AppendableChain {
         parent_block: &SealedHeader,
         post_state_data_provider: PSDP,
         externals: &TreeExternals<DB, C, EF>,
-    ) -> Result<BundleState, Error>
+    ) -> Result<BundleStateWithReceipts, Error>
     where
         PSDP: PostStateDataProvider,
         DB: Database,
@@ -252,7 +252,7 @@ impl AppendableChain {
         parent_block: &SealedHeader,
         post_state_data_provider: PSDP,
         externals: &TreeExternals<DB, C, EF>,
-    ) -> Result<BundleState, Error>
+    ) -> Result<BundleStateWithReceipts, Error>
     where
         PSDP: PostStateDataProvider,
         DB: Database,
@@ -311,7 +311,7 @@ impl AppendableChain {
             block_kind,
         )
         .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
-        // bundle state was already extended.
+        // extend the state.
         self.state.extend(block_state);
         self.blocks.insert(block.number, block);
         Ok(())

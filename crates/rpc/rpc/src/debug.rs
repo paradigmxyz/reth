@@ -18,7 +18,7 @@ use reth_primitives::{
 };
 use reth_provider::{BlockReaderIdExt, HeaderProvider};
 use reth_revm::{
-    database::State,
+    database::RevmDatabase,
     env::tx_env_with_recovered,
     revm::{
         primitives::{db::DatabaseCommit, BlockEnv, CfgEnv, Env},
@@ -95,7 +95,7 @@ where
                 let mut results = Vec::with_capacity(transactions.len());
                 //let mut db = SubState::new(State::new(state));
                 let mut db = RevmStateBuilder::default()
-                    .with_database(Box::new(State::new(state)))
+                    .with_database(Box::new(RevmDatabase::new(state)))
                     .without_bundle_update()
                     .build();
 
@@ -191,7 +191,7 @@ where
                 // configure env for the target transaction
                 let tx = transaction.into_recovered();
 
-                let provider = Box::new(State::new(state));
+                let provider = Box::new(RevmDatabase::new(state));
                 let mut db = RevmStateBuilder::default()
                     .with_database(provider)
                     .without_bundle_update()
@@ -295,7 +295,7 @@ where
                     let (_, _, at) = self.inner.eth_api.evm_env_at(at).await?;
                     let state = self.inner.eth_api.state_at(at)?;
                     let db = RevmStateBuilder::default()
-                        .with_database(Box::new(State::new(state)))
+                        .with_database(Box::new(RevmDatabase::new(state)))
                         .without_bundle_update()
                         .build();
                     let has_state_overrides = overrides.has_state();
@@ -389,7 +389,7 @@ where
                 let mut results = Vec::with_capacity(bundles.len());
                 //let mut db = SubState::new(State::new(state));
                 let mut db = RevmStateBuilder::default()
-                    .with_database(Box::new(State::new(state)))
+                    .with_database(Box::new(RevmDatabase::new(state)))
                     .without_bundle_update()
                     .build();
 
@@ -595,7 +595,7 @@ where
             }
         };
 
-        let database = Box::new(State::new(state));
+        let database = Box::new(RevmDatabase::new(state));
 
         let mut db = if let Some(db) = db {
             let RevmState {

@@ -8,7 +8,7 @@ use reth_db::{
 use reth_primitives::{stage::StageId, Account, Bytecode, ChainSpec, StorageEntry, H256, U256};
 use reth_provider::{
     change::{BundleStateInit, RevertsInit},
-    BundleState, DatabaseProviderRW, HashingWriter, HistoryWriter, ProviderFactory,
+    BundleStateWithReceipts, DatabaseProviderRW, HashingWriter, HistoryWriter, ProviderFactory,
 };
 use std::{
     collections::{BTreeMap, HashMap},
@@ -52,13 +52,13 @@ pub fn init_genesis<DB: Database>(
     if let Some((_, db_hash)) = tx.cursor_read::<tables::CanonicalHeaders>()?.first()? {
         if db_hash == hash {
             debug!("Genesis already written, skipping.");
-            return Ok(hash)
+            return Ok(hash);
         }
 
         return Err(InitDatabaseError::GenesisHashMismatch {
             chainspec_hash: hash,
             database_hash: db_hash,
-        })
+        });
     }
 
     drop(tx);
@@ -140,7 +140,7 @@ pub fn insert_genesis_state<DB: Database>(
     let mut all_reverts_init: RevertsInit = HashMap::new();
     all_reverts_init.insert(0, reverts_init);
 
-    let bundle = BundleState::new_init(
+    let bundle = BundleStateWithReceipts::new_init(
         state_init,
         all_reverts_init,
         contracts.into_iter().collect(),

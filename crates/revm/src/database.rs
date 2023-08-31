@@ -9,9 +9,9 @@ use revm::{
 
 /// Wrapper around StateProvider that implements revm database trait
 #[derive(Debug, Clone)]
-pub struct State<DB: StateProvider>(pub DB);
+pub struct RevmDatabase<DB: StateProvider>(pub DB);
 
-impl<DB: StateProvider> State<DB> {
+impl<DB: StateProvider>  RevmDatabase<DB> {
     /// Create new State with generic StateProvider.
     pub fn new(db: DB) -> Self {
         Self(db)
@@ -33,7 +33,7 @@ impl<DB: StateProvider> State<DB> {
     }
 }
 
-impl<DB: StateProvider> Database for State<DB> {
+impl<DB: StateProvider> Database for RevmDatabase<DB> {
     type Error = Error;
 
     fn basic(&mut self, address: H160) -> Result<Option<AccountInfo>, Self::Error> {
@@ -67,7 +67,7 @@ impl<DB: StateProvider> Database for State<DB> {
     }
 }
 
-impl<DB: StateProvider> DatabaseRef for State<DB> {
+impl<DB: StateProvider> DatabaseRef for RevmDatabase<DB> {
     type Error = <Self as Database>::Error;
 
     fn basic(&self, address: H160) -> Result<Option<AccountInfo>, Self::Error> {

@@ -1,6 +1,6 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
-use crate::change::BundleState;
+use crate::change::BundleStateWithReceipts;
 use reth_interfaces::{executor::BlockExecutionError, Error};
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock, SealedBlockWithSenders,
@@ -20,7 +20,7 @@ pub struct Chain {
     /// [Chain::first] to [Chain::tip], inclusive.
     ///
     /// This state also contains the individual changes that lead to the current state.
-    pub state: BundleState,
+    pub state: BundleStateWithReceipts,
     /// All blocks in this chain.
     pub blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
 }
@@ -42,7 +42,7 @@ impl Chain {
     }
 
     /// Get post state of this chain
-    pub fn state(&self) -> &BundleState {
+    pub fn state(&self) -> &BundleStateWithReceipts {
         &self.state
     }
 
@@ -64,28 +64,28 @@ impl Chain {
     }
 
     /// Return post state of the block at the `block_number` or None if block is not known
-    pub fn state_at_block(&self, block_number: BlockNumber) -> Option<BundleState> {
+    pub fn state_at_block(&self, block_number: BlockNumber) -> Option<BundleStateWithReceipts> {
         if self.tip().number == block_number {
-            return Some(self.state.clone())
+            return Some(self.state.clone());
         }
 
         if self.blocks.get(&block_number).is_some() {
             let mut state = self.state.clone();
             state.revert_to(block_number);
-            return Some(state)
+            return Some(state);
         }
         None
     }
 
     /// Destructure the chain into its inner components, the blocks and the state at the tip of the
     /// chain.
-    pub fn into_inner(self) -> (ChainBlocks<'static>, BundleState) {
+    pub fn into_inner(self) -> (ChainBlocks<'static>, BundleStateWithReceipts) {
         (ChainBlocks { blocks: Cow::Owned(self.blocks) }, self.state)
     }
 
     /// Destructure the chain into its inner components, the blocks and the state at the tip of the
     /// chain.
-    pub fn inner(&self) -> (ChainBlocks<'_>, &BundleState) {
+    pub fn inner(&self) -> (ChainBlocks<'_>, &BundleStateWithReceipts) {
         (ChainBlocks { blocks: Cow::Borrowed(&self.blocks) }, &self.state)
     }
 
@@ -125,7 +125,7 @@ impl Chain {
     }
 
     /// Create new chain with given blocks and post state.
-    pub fn new(blocks: Vec<SealedBlockWithSenders>, state: BundleState) -> Self {
+    pub fn new(blocks: Vec<SealedBlockWithSenders>, state: BundleStateWithReceipts) -> Self {
         Self { state, blocks: blocks.into_iter().map(|b| (b.number, b)).collect() }
     }
 
@@ -170,7 +170,7 @@ impl Chain {
                 chain_tip: chain_tip.num_hash(),
                 other_chain_fork: chain.fork_block(),
             }
-            .into())
+            .into());
         }
 
         // Insert blocks from other chain
@@ -206,16 +206,16 @@ impl Chain {
                 };
                 // If block number is same as tip whole chain is becoming canonical.
                 if block_number == chain_tip {
-                    return ChainSplit::NoSplitCanonical(self)
+                    return ChainSplit::NoSplitCanonical(self);
                 }
                 block_number
             }
             SplitAt::Number(block_number) => {
                 if block_number >= chain_tip {
-                    return ChainSplit::NoSplitCanonical(self)
+                    return ChainSplit::NoSplitCanonical(self);
                 }
                 if block_number < *self.blocks.first_entry().expect("chain is never empty").key() {
-                    return ChainSplit::NoSplitPending(self)
+                    return ChainSplit::NoSplitPending(self);
                 }
                 block_number
             }
@@ -361,7 +361,7 @@ mod tests {
     use super::*;
     use reth_primitives::{H160, H256};
     use reth_revm_primitives::{
-        db::states::BundleState as RevmBundleState,
+        db::BundleState,
         primitives::{AccountInfo, HashMap},
     };
 
@@ -399,8 +399,8 @@ mod tests {
 
     #[test]
     fn test_number_split() {
-        let block_state1 = BundleState::new(
-            RevmBundleState::new(
+        let block_state1 = BundleStateWithReceipts::new(
+            BundleState::new(
                 vec![(H160([2; 20]), None, Some(AccountInfo::default()), HashMap::default())],
                 vec![vec![(H160([2; 20]), None, vec![])]],
                 vec![],
@@ -409,8 +409,8 @@ mod tests {
             1,
         );
 
-        let block_state2 = BundleState::new(
-            RevmBundleState::new(
+        let block_state2 = BundleStateWithReceipts::new(
+            BundleState::new(
                 vec![(H160([3; 20]), None, Some(AccountInfo::default()), HashMap::default())],
                 vec![vec![(H160([3; 20]), None, vec![])]],
                 vec![],

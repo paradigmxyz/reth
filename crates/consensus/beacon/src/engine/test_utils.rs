@@ -21,8 +21,8 @@ use reth_interfaces::{
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, ChainSpec, PruneBatchSizes, PruneModes, H256, U256};
 use reth_provider::{
-    providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockExecutor, BundleState,
-    ExecutorFactory, ProviderFactory,
+    providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockExecutor,
+    BundleStateWithReceipts, ExecutorFactory, ProviderFactory,
 };
 use reth_prune::Pruner;
 use reth_revm::Factory;
@@ -81,7 +81,7 @@ impl<DB> TestEnv<DB> {
         loop {
             let result = self.send_new_payload(payload.clone()).await?;
             if !result.is_syncing() {
-                return Ok(result)
+                return Ok(result);
             }
         }
     }
@@ -102,7 +102,7 @@ impl<DB> TestEnv<DB> {
         loop {
             let result = self.engine_handle.fork_choice_updated(state, None).await?;
             if !result.is_syncing() {
-                return Ok(result)
+                return Ok(result);
             }
         }
     }
@@ -137,7 +137,7 @@ impl Default for TestPipelineConfig {
 /// Represents either test executor results, or real executor configuration.
 enum TestExecutorConfig {
     /// Test executor results.
-    Test(Vec<BundleState>),
+    Test(Vec<BundleStateWithReceipts>),
     /// Real executor configuration.
     Real,
 }
@@ -199,7 +199,7 @@ where
         }
     }
 
-    fn take_output_state(&mut self) -> reth_provider::BundleState {
+    fn take_output_state(&mut self) -> BundleStateWithReceipts {
         match self {
             EitherBlockExecutor::Left(a) => a.take_output_state(),
             EitherBlockExecutor::Right(b) => b.take_output_state(),
@@ -285,7 +285,7 @@ impl TestConsensusEngineBuilder {
     }
 
     /// Set the executor results to use for the test consensus engine.
-    pub fn with_executor_results(mut self, executor_results: Vec<BundleState>) -> Self {
+    pub fn with_executor_results(mut self, executor_results: Vec<BundleStateWithReceipts>) -> Self {
         self.executor_config = TestExecutorConfig::Test(executor_results);
         self
     }
@@ -365,7 +365,7 @@ where
 
     /// Set the executor results to use for the test consensus engine.
     #[allow(dead_code)]
-    pub fn with_executor_results(mut self, executor_results: Vec<BundleState>) -> Self {
+    pub fn with_executor_results(mut self, executor_results: Vec<BundleStateWithReceipts>) -> Self {
         self.base_config.executor_config = TestExecutorConfig::Test(executor_results);
         self
     }

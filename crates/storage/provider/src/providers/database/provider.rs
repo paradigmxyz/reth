@@ -1,5 +1,5 @@
 use crate::{
-    change::{BundleState, BundleStateInit, RevertsInit},
+    change::{BundleStateWithReceipts, RevertsInit, BundleStateInit},
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
@@ -201,9 +201,9 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     pub fn unwind_or_peek_state<const UNWIND: bool>(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<BundleState> {
+    ) -> Result<BundleStateWithReceipts> {
         if range.is_empty() {
-            return Ok(BundleState::default())
+            return Ok(BundleStateWithReceipts::default())
         }
         let start_block_number = *range.start();
 
@@ -341,7 +341,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             receipts.push(block_receipt);
         }
 
-        Ok(BundleState::new_init(state, reverts, Vec::new(), receipts, start_block_number))
+        Ok(BundleStateWithReceipts::new_init(state, reverts, Vec::new(), receipts, start_block_number))
     }
 
     /// Return list of entries from table
@@ -1912,7 +1912,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
     fn append_blocks_with_bundle_state(
         &self,
         blocks: Vec<SealedBlockWithSenders>,
-        state: BundleState,
+        state: BundleStateWithReceipts,
     ) -> Result<()> {
         if blocks.is_empty() {
             return Ok(())

@@ -1,5 +1,5 @@
 use crate::{
-    change::BundleState,
+    change::BundleStateWithReceipts,
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     ChainSpecProvider, EvmEnvProvider, HeaderProvider, PostStateDataProvider, ReceiptProviderIdExt,
@@ -400,7 +400,7 @@ impl AccountReader for MockEthProvider {
 }
 
 impl StateRootProvider for MockEthProvider {
-    fn state_root(&self, _state: BundleState) -> Result<H256> {
+    fn state_root(&self, _state: BundleStateWithReceipts) -> Result<H256> {
         todo!()
     }
 }

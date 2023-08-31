@@ -6,9 +6,10 @@ use reth_primitives::{
     proofs, Block, Header, IntoRecoveredTransaction, Receipt, SealedBlock, SealedHeader,
     EMPTY_OMMER_ROOT, H256, U256,
 };
-use reth_provider::{BundleState, StateProviderFactory};
+use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::{
-    database::State, env::tx_env_with_recovered, into_reth_log, StateBuilder as RevmStateBuilder,
+    database::RevmDatabase, env::tx_env_with_recovered, into_reth_log,
+    StateBuilder as RevmStateBuilder,
 };
 use reth_transaction_pool::TransactionPool;
 use revm::DatabaseCommit;
@@ -41,7 +42,7 @@ impl PendingBlockEnv {
 
         let parent_hash = origin.build_target_hash();
         let state_provider = client.history_by_block_hash(parent_hash)?;
-        let state = State::new(&state_provider);
+        let state = RevmDatabase::new(&state_provider);
         let mut db = RevmStateBuilder::default().with_database(Box::new(state)).build();
 
         let mut cumulative_gas_used = 0;
@@ -61,7 +62,7 @@ impl PendingBlockEnv {
                 // which also removes all dependent transaction from the iterator before we can
                 // continue
                 best_txs.mark_invalid(&pool_tx);
-                continue
+                continue;
             }
 
             // convert tx to a signed transaction
@@ -86,11 +87,11 @@ impl PendingBlockEnv {
                                 // descendants
                                 best_txs.mark_invalid(&pool_tx);
                             }
-                            continue
+                            continue;
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
-                            return Err(err.into())
+                            return Err(err.into());
                         }
                     }
                 }
@@ -116,7 +117,7 @@ impl PendingBlockEnv {
         // merge made transitions into bundle state.
         db.merge_transitions(false);
 
-        let bundle = BundleState::new(db.take_bundle(), vec![receipts], block_number);
+        let bundle = BundleStateWithReceipts::new(db.take_bundle(), vec![receipts], block_number);
 
         let receipts_root = bundle.receipts_root_slow(block_number).expect("Block is present");
         let logs_bloom = bundle.block_logs_bloom(block_number).expect("Block is present");

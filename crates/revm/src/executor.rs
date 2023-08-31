@@ -32,7 +32,7 @@ where
     DB: StateProvider,
 {
     /// The configured chain-spec
-    pub chain_spec: Arc<ChainSpec>,
+    chain_spec: Arc<ChainSpec>,
     evm: EVM<SubState<DB>>,
     stack: InspectorStack,
 }

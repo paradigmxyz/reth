@@ -1,5 +1,5 @@
 use crate::{
-    change::BundleState,
+    change::BundleStateWithReceipts,
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider, PruneCheckpointReader,
@@ -243,7 +243,7 @@ impl ChangeSetReader for NoopProvider {
 }
 
 impl StateRootProvider for NoopProvider {
-    fn state_root(&self, _state: BundleState) -> Result<H256> {
+    fn state_root(&self, _state: BundleStateWithReceipts) -> Result<H256> {
         todo!()
     }
 }

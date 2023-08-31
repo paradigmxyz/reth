@@ -1,12 +1,12 @@
 use crate::{
-    change::BundleState, BlockExecutor, BlockExecutorStats, ExecutorFactory, StateProvider,
+    change::BundleStateWithReceipts, BlockExecutor, BlockExecutorStats, ExecutorFactory, StateProvider,
 };
 use parking_lot::Mutex;
 use reth_interfaces::executor::BlockExecutionError;
 use reth_primitives::{Address, Block, BlockNumber, ChainSpec, U256};
 use std::sync::Arc;
 /// Test executor with mocked result.
-pub struct TestExecutor(pub Option<BundleState>);
+pub struct TestExecutor(pub Option<BundleStateWithReceipts>);
 
 impl BlockExecutor for TestExecutor {
     fn execute(
@@ -37,7 +37,7 @@ impl BlockExecutor for TestExecutor {
 
     fn set_tip(&mut self, _tip: BlockNumber) {}
 
-    fn take_output_state(&mut self) -> BundleState {
+    fn take_output_state(&mut self) -> BundleStateWithReceipts {
         self.0.clone().unwrap_or_default()
     }
 
@@ -49,7 +49,7 @@ impl BlockExecutor for TestExecutor {
 /// Executor factory with pre-set execution results.
 #[derive(Clone, Debug)]
 pub struct TestExecutorFactory {
-    exec_results: Arc<Mutex<Vec<BundleState>>>,
+    exec_results: Arc<Mutex<Vec<BundleStateWithReceipts>>>,
     chain_spec: Arc<ChainSpec>,
 }
 
@@ -60,7 +60,7 @@ impl TestExecutorFactory {
     }
 
     /// Extend the mocked execution results
-    pub fn extend(&self, results: Vec<BundleState>) {
+    pub fn extend(&self, results: Vec<BundleStateWithReceipts>) {
         self.exec_results.lock().extend(results);
     }
 }
