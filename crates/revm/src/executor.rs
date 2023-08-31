@@ -752,7 +752,7 @@ mod tests {
         constants::{BEACON_ROOTS_ADDRESS, ETH_TO_WEI},
         hex_literal::hex,
         keccak256, Account, Address, BlockNumber, Bytecode, Bytes, ChainSpecBuilder, ForkCondition,
-        GenesisAccount, StorageKey, H160, H256, MAINNET, U256,
+        GenesisAccount, StorageKey, H256, MAINNET, U256,
     };
     use reth_provider::{
         post_state::{AccountChanges, Storage, StorageTransition, StorageWipe},
