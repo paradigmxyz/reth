@@ -135,7 +135,7 @@ mod tests {
                 Factory::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build())),
                 ExecutionStageThresholds { max_blocks: Some(100), max_changes: None },
                 MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
-                prune_modes,
+                prune_modes.clone(),
             );
 
             execution_stage.execute(&provider, input).await.unwrap();
@@ -155,19 +155,36 @@ mod tests {
             );
 
             // Check AccountHistory
-            let mut acc_indexing_stage = IndexAccountHistoryStage::default();
-            acc_indexing_stage.execute(&provider, input).await.unwrap();
-            let mut account_history: Cursor<'_, RW, AccountHistory> =
-                provider.tx_ref().cursor_read::<tables::AccountHistory>().unwrap();
-            assert_eq!(account_history.walk(None).unwrap().count(), expect_num_acc_changesets);
+            let mut acc_indexing_stage =
+                IndexAccountHistoryStage { prune_modes: prune_modes.clone(), ..Default::default() };
+
+            if let Some(PruneMode::Full) = prune_modes.account_history {
+                // Full is not supported
+                assert!(acc_indexing_stage.execute(&provider, input).await.is_err());
+            } else {
+                acc_indexing_stage.execute(&provider, input).await.unwrap();
+                let mut account_history: Cursor<'_, RW, AccountHistory> =
+                    provider.tx_ref().cursor_read::<tables::AccountHistory>().unwrap();
+                assert_eq!(account_history.walk(None).unwrap().count(), expect_num_acc_changesets);
+            }
 
             // Check StorageHistory
-            let mut storage_indexing_stage = IndexStorageHistoryStage::default();
-            storage_indexing_stage.execute(&provider, input).await.unwrap();
+            let mut storage_indexing_stage =
+                IndexStorageHistoryStage { prune_modes: prune_modes.clone(), ..Default::default() };
 
-            let mut storage_history =
-                provider.tx_ref().cursor_read::<tables::StorageHistory>().unwrap();
-            assert_eq!(storage_history.walk(None).unwrap().count(), expect_num_storage_changesets);
+            if let Some(PruneMode::Full) = prune_modes.storage_history {
+                // Full is not supported
+                assert!(acc_indexing_stage.execute(&provider, input).await.is_err());
+            } else {
+                storage_indexing_stage.execute(&provider, input).await.unwrap();
+
+                let mut storage_history =
+                    provider.tx_ref().cursor_read::<tables::StorageHistory>().unwrap();
+                assert_eq!(
+                    storage_history.walk(None).unwrap().count(),
+                    expect_num_storage_changesets
+                );
+            }
         };
 
         // In an unpruned configuration there is 1 receipt, 3 changed accounts and 1 changed

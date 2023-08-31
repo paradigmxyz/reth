@@ -1040,27 +1040,52 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
     /// Returns true if the replacement candidate is underpriced and can't replace the existing
     /// transaction.
+    #[inline]
     fn is_underpriced(
         existing_transaction: &ValidPoolTransaction<T>,
         maybe_replacement: &ValidPoolTransaction<T>,
         price_bumps: &PriceBumpConfig,
     ) -> bool {
         let price_bump = price_bumps.price_bump(existing_transaction.tx_type());
+        let price_bump_multiplier = (100 + price_bump) / 100;
+
+        if maybe_replacement.max_fee_per_gas() <=
+            existing_transaction.max_fee_per_gas() * price_bump_multiplier
+        {
+            return true
+        }
 
         let existing_max_priority_fee_per_gas =
-            maybe_replacement.transaction.max_priority_fee_per_gas().unwrap_or(0);
-        let replacement_max_priority_fee_per_gas =
             existing_transaction.transaction.max_priority_fee_per_gas().unwrap_or(0);
+        let replacement_max_priority_fee_per_gas =
+            maybe_replacement.transaction.max_priority_fee_per_gas().unwrap_or(0);
 
-        maybe_replacement.max_fee_per_gas() <=
-            existing_transaction.max_fee_per_gas() * (100 + price_bump) / 100 ||
-            (existing_max_priority_fee_per_gas <=
-                replacement_max_priority_fee_per_gas * (100 + price_bump) / 100 &&
-                existing_max_priority_fee_per_gas != 0 &&
-                replacement_max_priority_fee_per_gas != 0)
+        if replacement_max_priority_fee_per_gas <=
+            existing_max_priority_fee_per_gas * price_bump_multiplier &&
+            existing_max_priority_fee_per_gas != 0 &&
+            replacement_max_priority_fee_per_gas != 0
+        {
+            return true
+        }
+
+        // check max blob fee per gas
+        if let Some(existing_max_blob_fee_per_gas) =
+            existing_transaction.transaction.max_fee_per_blob_gas()
+        {
+            // this enforces that blob txs can only be replaced by blob txs
+            let replacement_max_blob_fee_per_gas =
+                maybe_replacement.transaction.max_fee_per_blob_gas().unwrap_or(0);
+            if replacement_max_blob_fee_per_gas <=
+                existing_max_blob_fee_per_gas * price_bump_multiplier
+            {
+                return true
+            }
+        }
+
+        false
     }
 
-    /// Inserts a new transaction into the pool.
+    /// Inserts a new _valid_ transaction into the pool.
     ///
     /// If the transaction already exists, it will be replaced if not underpriced.
     /// Returns info to which sub-pool the transaction should be moved.
@@ -1079,13 +1104,16 @@ impl<T: PoolTransaction> AllTransactions<T> {
         assert!(on_chain_nonce <= transaction.nonce(), "Invalid transaction");
 
         let transaction = Arc::new(self.ensure_valid(transaction)?);
-        let tx_id = *transaction.id();
+        let inserted_tx_id = *transaction.id();
         let mut state = TxState::default();
         let mut cumulative_cost = U256::ZERO;
         let mut updates = Vec::new();
 
-        let ancestor =
-            TransactionId::ancestor(transaction.transaction.nonce(), on_chain_nonce, tx_id.sender);
+        let ancestor = TransactionId::ancestor(
+            transaction.transaction.nonce(),
+            on_chain_nonce,
+            inserted_tx_id.sender,
+        );
 
         // If there's no ancestor tx then this is the next transaction.
         if ancestor.is_none() {
@@ -1108,6 +1136,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             state.insert(TxState::NOT_TOO_MUCH_GAS);
         }
 
+        // placeholder for the replaced transaction, if any
         let mut replaced_tx = None;
 
         let pool_tx = PoolInternalTransaction {
@@ -1150,6 +1179,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         // The next transaction of this sender
         let on_chain_id = TransactionId::new(transaction.sender_id(), on_chain_nonce);
         {
+            // get all transactions of the sender's account
             let mut descendants = self.descendant_txs_mut(&on_chain_id).peekable();
 
             // Tracks the next nonce we expect if the transactions are gapless
@@ -1164,7 +1194,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 // SAFETY: the transaction was added above so the _inclusive_ descendants iterator
                 // returns at least 1 tx.
                 let (id, tx) = descendants.peek().expect("Includes >= 1; qed.");
-                if id.nonce < tx_id.nonce {
+                if id.nonce < inserted_tx_id.nonce {
                     !tx.state.is_pending()
                 } else {
                     true
@@ -1207,7 +1237,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 // update the pool based on the state
                 tx.subpool = tx.state.into();
 
-                if tx_id.eq(id) {
+                if inserted_tx_id.eq(id) {
                     // if it is the new transaction, track the state
                     state = tx.state;
                 } else {
@@ -1229,7 +1259,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
         // If this wasn't a replacement transaction we need to update the counter.
         if replaced_tx.is_none() {
-            self.tx_inc(tx_id.sender);
+            self.tx_inc(inserted_tx_id.sender);
         }
 
         Ok(InsertOk { transaction, move_to: state.into(), state, replaced_tx, updates })
@@ -1455,7 +1485,7 @@ mod tests {
 
         // insert the same tx again
         let res = pool.insert_tx(valid_tx, on_chain_balance, on_chain_nonce);
-        assert!(res.is_err());
+        res.unwrap_err();
         assert_eq!(pool.len(), 1);
 
         let valid_tx = f.validated(tx.next());

@@ -144,6 +144,14 @@ pub enum InvalidPoolTransactionError {
     /// Thrown if validating the blob sidecar for the transaction failed.
     #[error(transparent)]
     InvalidEip4844Blob(BlobTransactionValidationError),
+    /// EIP-4844 transactions are only accepted if they're gapless, meaning the previous nonce of
+    /// the transaction (`tx.nonce -1`) must either be in the pool or match the on chain nonce of
+    /// the sender.
+    ///
+    /// This error is thrown on validation if a valid blob transaction arrives with a nonce that
+    /// would introduce gap in the nonce sequence.
+    #[error("Nonce too high.")]
+    Eip4844NonceGap,
     /// Any other error that occurred while inserting/validating that is transaction specific
     #[error("{0:?}")]
     Other(Box<dyn PoolTransactionError>),
@@ -209,6 +217,11 @@ impl InvalidPoolTransactionError {
             InvalidPoolTransactionError::InvalidEip4844Blob(_) => {
                 // This is only reachable when the blob is invalid
                 true
+            }
+            InvalidPoolTransactionError::Eip4844NonceGap => {
+                // it is possible that the pool sees `nonce n` before `nonce n-1` and this is only
+                // thrown for valid(good) blob transactions
+                false
             }
         }
     }

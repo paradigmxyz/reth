@@ -5,9 +5,9 @@ use crate::{
     BeaconForkChoiceUpdateError, BeaconOnNewPayloadError,
 };
 use futures::TryFutureExt;
-use reth_primitives::H256;
 use reth_rpc_types::engine::{
-    ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
+    CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes,
+    PayloadStatus,
 };
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -35,14 +35,10 @@ impl BeaconConsensusEngineHandle {
     pub async fn new_payload(
         &self,
         payload: ExecutionPayload,
-        parent_beacon_block_root: Option<H256>,
+        cancun_fields: Option<CancunPayloadFields>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload {
-            payload,
-            parent_beacon_block_root,
-            tx,
-        });
+        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, cancun_fields, tx });
         rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
     }
 

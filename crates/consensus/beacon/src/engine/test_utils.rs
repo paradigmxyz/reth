@@ -27,7 +27,9 @@ use reth_provider::{
 };
 use reth_prune::Pruner;
 use reth_revm::Factory;
-use reth_rpc_types::engine::{ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
+use reth_rpc_types::engine::{
+    CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
+};
 use reth_stages::{
     sets::DefaultStages, stages::HeaderSyncMode, test_utils::TestStages, ExecOutput, Pipeline,
     StageError,
@@ -69,9 +71,9 @@ impl<DB> TestEnv<DB> {
     pub async fn send_new_payload<T: Into<ExecutionPayload>>(
         &self,
         payload: T,
-        parent_beacon_block_root: Option<H256>,
+        cancun_fields: Option<CancunPayloadFields>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
-        self.engine_handle.new_payload(payload.into(), parent_beacon_block_root).await
+        self.engine_handle.new_payload(payload.into(), cancun_fields).await
     }
 
     /// Sends the `ExecutionPayload` message to the consensus engine and retries if the engine
@@ -79,11 +81,11 @@ impl<DB> TestEnv<DB> {
     pub async fn send_new_payload_retry_on_syncing<T: Into<ExecutionPayload>>(
         &self,
         payload: T,
-        parent_beacon_block_root: Option<H256>,
+        cancun_fields: Option<CancunPayloadFields>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let payload: ExecutionPayload = payload.into();
         loop {
-            let result = self.send_new_payload(payload.clone(), parent_beacon_block_root).await?;
+            let result = self.send_new_payload(payload.clone(), cancun_fields.clone()).await?;
             if !result.is_syncing() {
                 return Ok(result)
             }

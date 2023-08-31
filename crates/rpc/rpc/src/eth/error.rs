@@ -520,6 +520,9 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             InvalidPoolTransactionError::InvalidEip4844Blob(err) => {
                 RpcPoolError::InvalidEip4844Blob(err)
             }
+            InvalidPoolTransactionError::Eip4844NonceGap => {
+                RpcPoolError::Invalid(RpcInvalidTransactionError::NonceTooHigh)
+            }
         }
     }
 }
