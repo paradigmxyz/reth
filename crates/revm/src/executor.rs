@@ -324,7 +324,8 @@ where
 
     /// Applies the pre-block call to the EIP-4788 beacon block root contract.
     ///
-    /// If cancun is not activated or the block is the genesis block, then this is a no-op.
+    /// If cancun is not activated or the block is the genesis block, then this is a no-op, and the
+    /// returned [PostState] is unchanged.
     pub fn apply_pre_block_call(
         &mut self,
         block: &Block,
