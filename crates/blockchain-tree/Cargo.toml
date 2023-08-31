@@ -31,7 +31,7 @@ reth-metrics = { workspace = true, features = ["common"] }
 metrics.workspace = true
 
 # misc
-aquamarine = "0.3.0"
+aquamarine.workspace = true
 linked_hash_set = "0.1.4"
 
 [dev-dependencies]
