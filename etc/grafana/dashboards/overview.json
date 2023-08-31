@@ -96,6 +96,7 @@
   "liveNow": false,
   "panels": [
     {
+      "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -3633,12 +3634,162 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Tracks the entries, byte size, failed inserts and file deletes of the blob store",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 135
+      },
+      "id": 115,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_blobstore_entries{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Entries",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_blobstore_byte_size{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Bytesize",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_blobstore_failed_inserts{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Failed Inserts",
+          "range": true,
+          "refId": "C",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_blobstore_failed_deletes{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Failed Deletes",
+          "range": true,
+          "refId": "D",
+          "useBackend": false
+        }
+      ],
+      "title": "Blob store",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 135
+        "y": 143
       },
       "id": 79,
       "panels": [],
@@ -3710,7 +3861,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 136
+        "y": 144
       },
       "id": 74,
       "options": {
@@ -3805,7 +3956,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 136
+        "y": 144
       },
       "id": 80,
       "options": {
@@ -3900,7 +4051,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 144
+        "y": 152
       },
       "id": 81,
       "options": {
@@ -3995,7 +4146,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 144
+        "y": 152
       },
       "id": 114,
       "options": {
@@ -4033,7 +4184,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 152
+        "y": 160
       },
       "id": 87,
       "panels": [],
@@ -4105,7 +4256,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 153
+        "y": 161
       },
       "id": 83,
       "options": {
@@ -4199,7 +4350,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 153
+        "y": 161
       },
       "id": 84,
       "options": {
@@ -4305,7 +4456,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 161
+        "y": 169
       },
       "id": 85,
       "options": {
@@ -4342,7 +4493,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 169
+        "y": 177
       },
       "id": 68,
       "panels": [],
@@ -4414,7 +4565,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 170
+        "y": 178
       },
       "id": 60,
       "options": {
@@ -4508,7 +4659,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 170
+        "y": 178
       },
       "id": 62,
       "options": {
@@ -4602,7 +4753,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 178
+        "y": 186
       },
       "id": 64,
       "options": {
@@ -4639,7 +4790,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 186
+        "y": 194
       },
       "id": 97,
       "panels": [],
@@ -4709,7 +4860,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 187
+        "y": 195
       },
       "id": 98,
       "options": {
@@ -4870,7 +5021,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 187
+        "y": 195
       },
       "id": 101,
       "options": {
@@ -4966,7 +5117,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 195
+        "y": 203
       },
       "id": 99,
       "options": {
@@ -5062,7 +5213,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 195
+        "y": 203
       },
       "id": 100,
       "options": {
@@ -5100,7 +5251,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 203
+        "y": 211
       },
       "id": 105,
       "panels": [],
@@ -5171,7 +5322,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 204
+        "y": 212
       },
       "id": 106,
       "options": {
@@ -5267,7 +5418,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 204
+        "y": 212
       },
       "id": 107,
       "options": {
@@ -5305,7 +5456,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 212
+        "y": 220
       },
       "id": 108,
       "panels": [],
@@ -5328,7 +5479,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 213
+        "y": 221
       },
       "hiddenSeries": false,
       "id": 109,
@@ -5416,7 +5567,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 213
+        "y": 221
       },
       "hiddenSeries": false,
       "id": 110,
@@ -5513,7 +5664,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 221
+        "y": 229
       },
       "id": 111,
       "maxDataPoints": 25,
@@ -5602,7 +5753,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 221
+        "y": 229
       },
       "id": 112,
       "maxDataPoints": 25,
@@ -5706,6 +5857,6 @@
   "timezone": "",
   "title": "reth",
   "uid": "2k8BXz24x",
-  "version": 8,
+  "version": 9,
   "weekStart": ""
 }
