@@ -72,6 +72,14 @@ impl PeersHandle {
 
         rx.await.unwrap_or_default()
     }
+
+    /// Returns all connected peers.
+    pub async fn all_connected_peers(&self) -> Vec<NodeRecord> {
+        let (tx, rx) = oneshot::channel();
+        self.send(PeerCommand::GetConnectedPeers(tx));
+
+        rx.await.unwrap_or_default()
+    }
 }
 
 /// Maintains the state of _all_ the peers known to the network.
@@ -181,6 +189,14 @@ impl PeersManager {
     /// Returns an iterator over all peers
     pub(crate) fn iter_peers(&self) -> impl Iterator<Item = NodeRecord> + '_ {
         self.peers.iter().map(|(peer_id, v)| NodeRecord::new(v.addr, *peer_id))
+    }
+
+    /// Returns an iterator over all connected peers
+    pub(crate) fn iter_connected_peers(&self) -> impl Iterator<Item = NodeRecord> + '_ {
+        self.peers
+            .iter()
+            .filter(|(_, p)| p.state.is_connected())
+            .map(|(peer_id, v)| NodeRecord::new(v.addr, *peer_id))
     }
 
     /// Returns the number of currently active inbound connections.
@@ -730,6 +746,9 @@ impl PeersManager {
                     PeerCommand::GetPeers(tx) => {
                         let _ = tx.send(self.iter_peers().collect());
                     }
+                    PeerCommand::GetConnectedPeers(tx) => {
+                        let _ = tx.send(self.iter_connected_peers().collect());
+                    }
                 }
             }
 
@@ -1022,6 +1041,8 @@ pub(crate) enum PeerCommand {
     GetPeer(PeerId, oneshot::Sender<Option<Peer>>),
     /// Get node information on all peers
     GetPeers(oneshot::Sender<Vec<NodeRecord>>),
+    /// Get node information on all connected peers
+    GetConnectedPeers(oneshot::Sender<Vec<NodeRecord>>),
 }
 
 /// Actions the peer manager can trigger.

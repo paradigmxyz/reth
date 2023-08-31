@@ -201,7 +201,7 @@ impl PeersInfo for NetworkHandle {
     }
 
     async fn all_peers(&self) -> Vec<NodeRecord> {
-        self.inner.peers.all_peers().await
+        self.inner.peers.all_connected_peers().await
     }
 }
 

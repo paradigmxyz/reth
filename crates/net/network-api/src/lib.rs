@@ -65,7 +65,7 @@ pub trait PeersInfo: Send + Sync {
     /// Returns the Ethereum Node Record of the node.
     fn local_node_record(&self) -> NodeRecord;
 
-    /// Returns all peers node isi connected to.
+    /// Returns all peers node is connected to.
     async fn all_peers(&self) -> Vec<NodeRecord>;
 }
 
