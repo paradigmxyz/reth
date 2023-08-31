@@ -19,6 +19,7 @@ use reth_provider::{
     BlockExecutor, BlockExecutorStats, BundleStateWithReceipts, PrunableBlockExecutor,
     StateProvider,
 };
+use reth_revm_primitives::env::fill_tx_env_with_beacon_root_contract_call;
 use revm::{
     db::{states::bundle_state::BundleRetention, StateDBBox},
     primitives::ResultAndState,
@@ -53,7 +54,7 @@ pub struct EVMProcessor<'a> {
     /// Outer vector stores receipts for each block sequentially.
     /// The inner vector stores receipts ordered by transaction number.
     ///
-    /// If receipt is None it means it is pruned.   
+    /// If receipt is None it means it is pruned.
     receipts: Vec<Vec<Option<Receipt>>>,
     /// First block will be initialized to `None`
     /// and be set to the block number of first block executed.
@@ -172,6 +173,45 @@ impl<'a> EVMProcessor<'a> {
         );
     }
 
+    /// Applies the pre-block call to the EIP-4788 beacon block root contract.
+    ///
+    /// If cancun is not activated or the block is the genesis block, then this is a no-op, and no
+    /// state changes are made.
+    pub fn apply_pre_block_call(
+        &mut self,
+        block: &Block,
+    ) -> Result<(), BlockExecutionError> {
+        if self.chain_spec.fork(Hardfork::Cancun).active_at_timestamp(block.timestamp) {
+            // if the block number is zero (genesis block) then the parent beacon block root must
+            // be 0x0 and no system transaction may occur as per EIP-4788
+            if block.number == 0 {
+                if block.parent_beacon_block_root != Some(H256::zero()) {
+                    return Err(
+                        BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero.into()
+                    )
+                }
+            } else {
+                let parent_beacon_block_root = block.parent_beacon_block_root.ok_or(
+                    BlockExecutionError::from(BlockValidationError::MissingParentBeaconBlockRoot),
+                )?;
+                fill_tx_env_with_beacon_root_contract_call(
+                    &mut self.evm.env.tx,
+                    parent_beacon_block_root,
+                );
+
+                let ResultAndState { state, .. } = self.evm.transact().map_err(|e| {
+                    BlockExecutionError::from(BlockValidationError::EVM {
+                        hash: Default::default(),
+                        message: format!("{e:?}"),
+                    })
+                })?;
+
+                self.db().commit(state);
+            }
+        }
+        Ok(())
+    }
+
     /// Apply post execution state changes, including block rewards, withdrawals, and irregular DAO
     /// hardfork state change.
     pub fn apply_post_execution_state_change(
@@ -256,14 +296,15 @@ impl<'a> EVMProcessor<'a> {
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
+        self.init_env(&block.header, total_difficulty);
+        self.apply_pre_block_call(block)?;
+
         // perf: do not execute empty blocks
         if block.body.is_empty() {
             return Ok((Vec::new(), 0))
         }
 
         let senders = self.recover_senders(&block.body, senders)?;
-
-        self.init_env(&block.header, total_difficulty);
 
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.len());
@@ -528,4 +569,318 @@ pub fn verify_receipt<'a>(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use reth_interfaces::test_utils::generators::sign_tx_with_key_pair;
+    use reth_primitives::{constants::BEACON_ROOTS_ADDRESS, keccak256, Bytecode, Bytes, public_key_to_address, ChainSpecBuilder, ForkCondition, MAINNET, StorageKey, Account, Transaction, TxLegacy, TransactionKind};
+    use reth_provider::{AccountReader, BlockHashReader, StateRootProvider};
+    use reth_revm_primitives::TransitionState;
+    use secp256k1::{KeyPair, Secp256k1, rand};
+    use std::{str::FromStr, collections::HashMap};
+
+    use super::*;
+
+    #[derive(Debug, Default, Clone, Eq, PartialEq)]
+    struct StateProviderTest {
+        accounts: HashMap<Address, (HashMap<StorageKey, U256>, Account)>,
+        contracts: HashMap<H256, Bytecode>,
+        block_hash: HashMap<u64, H256>,
+    }
+
+    impl StateProviderTest {
+        /// Insert account.
+        fn insert_account(
+            &mut self,
+            address: Address,
+            mut account: Account,
+            bytecode: Option<Bytes>,
+            storage: HashMap<StorageKey, U256>,
+        ) {
+            if let Some(bytecode) = bytecode {
+                let hash = keccak256(&bytecode);
+                account.bytecode_hash = Some(hash);
+                self.contracts.insert(hash, Bytecode::new_raw(bytecode.into()));
+            }
+            self.accounts.insert(address, (storage, account));
+        }
+    }
+
+    impl AccountReader for StateProviderTest {
+        fn basic_account(&self, address: Address) -> reth_interfaces::Result<Option<Account>> {
+            let ret = Ok(self.accounts.get(&address).map(|(_, acc)| *acc));
+            ret
+        }
+    }
+
+    impl BlockHashReader for StateProviderTest {
+        fn block_hash(&self, number: u64) -> reth_interfaces::Result<Option<H256>> {
+            Ok(self.block_hash.get(&number).cloned())
+        }
+
+        fn canonical_hashes_range(
+            &self,
+            start: BlockNumber,
+            end: BlockNumber,
+        ) -> reth_interfaces::Result<Vec<H256>> {
+            let range = start..end;
+            Ok(self
+                .block_hash
+                .iter()
+                .filter_map(|(block, hash)| range.contains(block).then_some(*hash))
+                .collect())
+        }
+    }
+
+    impl StateRootProvider for StateProviderTest {
+        fn state_root(&self, _bundle_state: BundleStateWithReceipts) -> reth_interfaces::Result<H256> {
+            todo!()
+        }
+    }
+
+    impl StateProvider for StateProviderTest {
+        fn storage(
+            &self,
+            account: Address,
+            storage_key: reth_primitives::StorageKey,
+        ) -> reth_interfaces::Result<Option<reth_primitives::StorageValue>> {
+            Ok(self
+                .accounts
+                .get(&account)
+                .and_then(|(storage, _)| storage.get(&storage_key).cloned()))
+        }
+
+        fn bytecode_by_hash(&self, code_hash: H256) -> reth_interfaces::Result<Option<Bytecode>> {
+            Ok(self.contracts.get(&code_hash).cloned())
+        }
+
+        fn proof(
+            &self,
+            _address: Address,
+            _keys: &[H256],
+        ) -> reth_interfaces::Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
+            todo!()
+        }
+    }
+
+    #[test]
+    fn eip_4788_non_genesis_call() {
+        let mut header = Header { timestamp: 1, number: 1, ..Header::default() };
+
+        let mut db = StateProviderTest::default();
+
+        // set up key that we can use to construct a tx, which actually calls the beacon root
+        // contract
+        let secp = Secp256k1::new();
+        let key_pair = KeyPair::new(&secp, &mut rand::thread_rng());
+        let caller_address = public_key_to_address(key_pair.public_key());
+
+        let caller_genesis = Account { balance: U256::MAX, ..Default::default() };
+        db.insert_account(caller_address, caller_genesis, None, HashMap::new());
+
+        let beacon_root_contract_code = Bytes::from_str("0x3373fffffffffffffffffffffffffffffffffffffffe14604457602036146024575f5ffd5b620180005f350680545f35146037575f5ffd5b6201800001545f5260205ff35b42620180004206555f3562018000420662018000015500").unwrap();
+
+        let beacon_root_contract_account = Account {
+            balance: U256::ZERO,
+            bytecode_hash: Some(keccak256(beacon_root_contract_code.clone())),
+            nonce: 1,
+        };
+
+        db.insert_account(
+            BEACON_ROOTS_ADDRESS,
+            beacon_root_contract_account,
+            Some(beacon_root_contract_code),
+            HashMap::new(),
+        );
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+                .build(),
+        );
+
+        // TODO: seems like this is not possible because the type built from this is not State<'a,
+        // reth_interfaces::Error>, it is State<'a, Infallible>, which is incompatible with the
+        // EVMProcessor.
+        // let mut state = StateBuilder::default().with_cached_prestate(cache_state).build();
+
+        // execute chain and verify receipts
+        // let mut executor = EVMProcessor::new_with_state(chain_spec, state);
+        let mut executor = EVMProcessor::new_with_db(chain_spec, RevmDatabase::new(db));
+
+        // attempt to execute a block without parent beacon block root, expect err
+        let _err = executor
+            .execute_and_verify_receipt(
+                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                U256::ZERO,
+                None,
+            )
+            .expect_err(
+                "Executing cancun block without parent beacon block root field should fail",
+            );
+
+        // fix header, set a gas limit
+        header.parent_beacon_block_root = Some(H256::from_low_u64_be(0x1337));
+        header.gas_limit = u64::MAX;
+        header.gas_used = 25440;
+
+        // build and sign transaction that calls the beacon root contract
+        let transaction = Transaction::Legacy(TxLegacy {
+            chain_id: Some(1),
+            nonce: 0,
+            gas_price: 1,
+            gas_limit: u64::MAX,
+            to: TransactionKind::Call(BEACON_ROOTS_ADDRESS),
+            value: 0,
+            // caller must specify timestamp in calldata, it must be 32 bytes
+            input: Bytes::from(H256::from_low_u64_be(header.timestamp).to_fixed_bytes()),
+        });
+
+        let signed_tx = sign_tx_with_key_pair(key_pair, transaction);
+
+        // Now execute a block with a tx that calls the beacon root contract, ensure that it does
+        // not fail
+        executor
+            .execute(
+                &Block {
+                    header: header.clone(),
+                    body: vec![signed_tx],
+                    ommers: vec![],
+                    withdrawals: None,
+                },
+                U256::ZERO,
+                Some(vec![caller_address]),
+            )
+            .unwrap();
+
+        // check the receipts to ensure that the transaction didn't fail
+        let receipts = executor.receipts.last().expect("there should be receipts for the block we just executed");
+        assert_eq!(receipts.len(), 1);
+        let receipt = receipts.first().expect("there is one receipt");
+        assert!(receipt.success);
+
+        // check the actual storage of the contract - it should be:
+        // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH should be
+        // header.timestamp
+        // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH + HISTORY_BUFFER_LENGTH
+        // should be parent_beacon_block_root
+        let history_buffer_length = 98304u64;
+        let timestamp_index = header.timestamp % history_buffer_length;
+        let parent_beacon_block_root_index =
+            timestamp_index % history_buffer_length + history_buffer_length;
+
+        // get timestamp storage and compare
+        let timestamp_storage =
+            executor.db().database.storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index)).unwrap();
+        assert_eq!(timestamp_storage, U256::from(header.timestamp));
+
+        // get parent beacon block root storage and compare
+        let parent_beacon_block_root_storage = executor
+            .db()
+            .database
+            .storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index))
+            .unwrap();
+        assert_eq!(parent_beacon_block_root_storage, U256::from(0x1337));
+    }
+
+    #[test]
+    fn eip_4788_no_code_cancun() {
+        // This test ensures that we "silently fail" when cancun is active and there is no code at
+        // BEACON_ROOTS_ADDRESS
+        let header = Header {
+            timestamp: 1,
+            number: 1,
+            parent_beacon_block_root: Some(H256::from_low_u64_be(0x1337)),
+            ..Header::default()
+        };
+
+        let db = StateProviderTest::default();
+
+        // DON'T deploy the contract at genesis
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+                .build(),
+        );
+
+        let mut executor = EVMProcessor::new_with_db(chain_spec, RevmDatabase::new(db));
+
+        // attempt to execute a block without parent beacon block root, expect err
+        let _out = executor
+            .execute_and_verify_receipt(
+                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                U256::ZERO,
+                None,
+            )
+            .expect(
+                "Executing a block with no transactions while cancun is active should not fail",
+            );
+    }
+
+    #[test]
+    fn eip_4788_genesis_call() {
+        let mut db = StateProviderTest::default();
+
+        let beacon_root_contract_code = Bytes::from_str("0x3373fffffffffffffffffffffffffffffffffffffffe14604457602036146024575f5ffd5b620180005f350680545f35146037575f5ffd5b6201800001545f5260205ff35b42620180004206555f3562018000420662018000015500").unwrap();
+
+        let beacon_root_contract_account = Account {
+            balance: U256::ZERO,
+            bytecode_hash: Some(keccak256(beacon_root_contract_code.clone())),
+            nonce: 1,
+        };
+        db.insert_account(
+            BEACON_ROOTS_ADDRESS,
+            beacon_root_contract_account,
+            Some(beacon_root_contract_code),
+            HashMap::new(),
+        );
+
+        // activate cancun at genesis
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(0))
+                .build(),
+        );
+
+        let mut header = chain_spec.genesis_header();
+
+        let mut executor = EVMProcessor::new_with_db(chain_spec, RevmDatabase::new(db));
+
+        // attempt to execute the genesis block with non-zero parent beacon block root, expect err
+        header.parent_beacon_block_root = Some(H256::from_low_u64_be(0x1337));
+        let _err = executor
+            .execute_and_verify_receipt(
+                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                U256::ZERO,
+                None,
+            )
+            .expect_err(
+                "Executing genesis cancun block with non-zero parent beacon block root field should fail",
+            );
+
+        // fix header
+        header.parent_beacon_block_root = Some(H256::zero());
+
+        // now try to process the genesis block again, this time ensuring that a system contract
+        // call does not occur
+        let out = executor
+            .execute(
+                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                U256::ZERO,
+                None,
+            )
+            .unwrap();
+
+        // there is no system contract call so there should be NO STORAGE CHANGES
+        // this means we'll check the transition state
+        let state = executor.evm.db().unwrap();
+        let transition_state = state.transition_state.expect("the evm should be initialized with bundle updates");
+
+        // assert that it is the default (empty) transition state
+        assert_eq!(transition_state, TransitionState::default());
+    }
 }
