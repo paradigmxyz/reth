@@ -752,7 +752,7 @@ mod tests {
         constants::{BEACON_ROOTS_ADDRESS, ETH_TO_WEI},
         hex_literal::hex,
         keccak256, Account, Address, BlockNumber, Bytecode, Bytes, ChainSpecBuilder, ForkCondition,
-        GenesisAccount, StorageKey, H256, MAINNET, U256,
+        GenesisAccount, StorageKey, H160, H256, MAINNET, U256,
     };
     use reth_provider::{
         post_state::{AccountChanges, Storage, StorageTransition, StorageWipe},
@@ -1032,7 +1032,7 @@ mod tests {
 
     #[test]
     fn eip_4788_non_genesis_call() {
-        let header = Header { timestamp: 1, ..Header::default() };
+        let mut header = Header { timestamp: 1, ..Header::default() };
 
         let db = StateProviderTest::default();
 
@@ -1058,6 +1058,23 @@ mod tests {
 
         // execute chain and verify receipts
         let mut executor = Executor::new(chain_spec, db);
+
+        // attempt to execute a block without parent beacon block root, expect err
+        let _err = executor
+            .execute_and_verify_receipt(
+                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                U256::ZERO,
+                None,
+            )
+            .expect_err(
+                "Executing cancun block without parent beacon block root field should fail",
+            );
+
+        // fix header
+        header.parent_beacon_block_root = Some(H256::from_low_u64_be(0x1337));
+
+        // TODO: implement this
+        // Now execute a block with a tx that calls the beacon root contract
         let _out = executor
             .execute_and_verify_receipt(
                 &Block { header, body: vec![], ommers: vec![], withdrawals: None },
@@ -1066,8 +1083,6 @@ mod tests {
             )
             .unwrap();
 
-        // Check if cache is set
-        // beneficiary
         let _db = executor.db();
     }
 
