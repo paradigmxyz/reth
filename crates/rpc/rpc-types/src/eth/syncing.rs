@@ -72,6 +72,7 @@ pub struct PeerProtocolsInfo {
     /// Ethereum protocol information
     pub eth: Option<PeerEthProtocolInfo>,
     /// PIP protocol information.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pip: Option<PipProtocolInfo>,
 }
 
