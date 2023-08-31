@@ -10,7 +10,7 @@ use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     Account, Address, Block, BlockNumber, Bloom, Bytecode, ChainSpec, Hardfork, Header, Receipt,
-    ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
+    ReceiptWithBloom, Transaction, TransactionSigned, TxLegacy, Withdrawal, H256, U256,
 };
 use reth_provider::{BlockExecutor, PostState, StateProvider};
 use revm::{
@@ -294,6 +294,33 @@ where
         if self.chain_spec.fork(Hardfork::Dao).transitions_at_block(block.number) {
             self.apply_dao_fork_changes(block.number, &mut post_state)?;
         }
+        Ok(post_state)
+    }
+
+    /// Applies the pre-block call to the EIP-4788 beacon block root contract.
+    pub fn apply_pre_block_call(
+        &mut self,
+        block: &Block,
+        mut post_state: PostState,
+    ) -> Result<PostState, BlockExecutionError> {
+        if self.chain_spec.fork(Hardfork::Cancun).active_at_timestamp(block.timestamp) {
+            // requirements:
+            // the call must execute to completion
+            // the call does not count against the block’s gas limit
+            // the call does not follow the EIP-1559 burn semantics - no value should be transferred
+            // as part of the call if no code exists at BEACON_ROOTS_ADDRESS, the call
+            // must fail silently
+            //
+            // solution:
+            // configure tx env manually
+            // with helper fn
+            // set nonce to None (no nonce checks happen then)
+            // set gas price to 0 (then there's no value transfer)
+            // still not sure about "if no code exists then the call must fail silently"
+            //
+            // let result_and_state = self.evm.transact()?;
+        }
+
         Ok(post_state)
     }
 }
