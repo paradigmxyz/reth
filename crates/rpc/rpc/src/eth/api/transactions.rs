@@ -48,6 +48,8 @@ use http::{header::CONTENT_TYPE, HeaderValue};
 #[cfg(feature = "optimism")]
 use hyper::{Body, Client, Method, Request};
 #[cfg(feature = "optimism")]
+use hyper_tls::HttpsConnector;
+#[cfg(feature = "optimism")]
 use reth_revm::{executor, optimism::L1BlockInfo};
 #[cfg(feature = "optimism")]
 use std::ops::Div;
@@ -428,9 +430,12 @@ where
     }
 
     async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256> {
+        let recovered = recover_raw_transaction(tx.clone())?;
+
         #[cfg(feature = "optimism")]
         if let Some(endpoint) = self.network().sequencer_endpoint() {
-            let client = Client::new();
+            let https = HttpsConnector::new();
+            let client = Client::builder().build(https);
 
             let body = serde_json::json!({
                 "jsonrpc": "2.0",
@@ -447,8 +452,6 @@ where
 
             client.request(req).await?;
         }
-
-        let recovered = recover_raw_transaction(tx)?;
 
         let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered);
 
