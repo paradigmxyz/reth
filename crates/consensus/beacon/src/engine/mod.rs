@@ -31,8 +31,8 @@ use reth_provider::{
 };
 use reth_prune::Pruner;
 use reth_rpc_types::engine::{
-    CancunPayloadFields, ExecutionPayload, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
-    PayloadValidationError,
+    CancunPayloadFields, ExecutionPayload, PayloadAttributes, PayloadError, PayloadStatus,
+    PayloadStatusEnum, PayloadValidationError,
 };
 use reth_stages::{ControlFlow, Pipeline, PipelineError};
 use reth_tasks::TaskSpawner;
@@ -1056,10 +1056,7 @@ where
         payload: ExecutionPayload,
         cancun_fields: Option<CancunPayloadFields>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
-        let block = match self.ensure_well_formed_payload(
-            payload,
-            cancun_fields.map(|fields| fields.parent_beacon_block_root),
-        ) {
+        let block = match self.ensure_well_formed_payload(payload, cancun_fields) {
             Ok(block) => block,
             Err(status) => return Ok(status),
         };
@@ -1120,13 +1117,18 @@ where
     ///    - missing or invalid base fee
     ///    - invalid extra data
     ///    - invalid transactions
+    ///    - incorrect hash
+    ///    - the versioned hashes passed with the payload do not exactly match transaction
+    ///    versioned hashes
     fn ensure_well_formed_payload(
         &self,
         payload: ExecutionPayload,
-        parent_beacon_block_root: Option<H256>,
+        cancun_fields: Option<CancunPayloadFields>,
     ) -> Result<SealedBlock, PayloadStatus> {
         let parent_hash = payload.parent_hash();
-        let block = match payload.try_into_sealed_block(parent_beacon_block_root) {
+        let block = match payload.try_into_sealed_block(
+            cancun_fields.as_ref().map(|fields| fields.parent_beacon_block_root),
+        ) {
             Ok(block) => block,
             Err(error) => {
                 error!(target: "consensus::engine", ?error, "Invalid payload");
@@ -1144,7 +1146,76 @@ where
             }
         };
 
+        let block_versioned_hashes = block
+            .blob_transactions()
+            .iter()
+            .filter_map(|tx| tx.as_eip4844().map(|blob_tx| &blob_tx.blob_versioned_hashes))
+            .flatten()
+            .collect::<Vec<_>>();
+
+        self.validate_versioned_hashes(parent_hash, block_versioned_hashes, cancun_fields)?;
+
         Ok(block)
+    }
+
+    /// Validates that the versioned hashes in the block match the versioned hashes passed in the
+    /// [CancunPayloadFields], if the cancun payload fields are provided. If the payload fields are
+    /// not provided, but versioned hashes exist in the block, this returns a [PayloadStatus] with
+    /// the [PayloadError::InvalidVersionedHashes] error.
+    ///
+    /// This validates versioned hashes according to the Engine API Cancun spec:
+    /// <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification>
+    fn validate_versioned_hashes(
+        &self,
+        parent_hash: H256,
+        block_versioned_hashes: Vec<&H256>,
+        cancun_fields: Option<CancunPayloadFields>,
+    ) -> Result<(), PayloadStatus> {
+        // This validates the following engine API rule:
+        //
+        // 3. Given the expected array of blob versioned hashes client software **MUST** run its
+        //    validation by taking the following steps:
+        //
+        //   1. Obtain the actual array by concatenating blob versioned hashes lists
+        //      (`tx.blob_versioned_hashes`) of each [blob
+        //      transaction](https://eips.ethereum.org/EIPS/eip-4844#new-transaction-type) included
+        //      in the payload, respecting the order of inclusion. If the payload has no blob
+        //      transactions the expected array **MUST** be `[]`.
+        //
+        //   2. Return `{status: INVALID, latestValidHash: null, validationError: errorMessage |
+        //      null}` if the expected and the actual arrays don't match.
+        //
+        // This validation **MUST** be instantly run in all cases even during active sync process.
+        if let Some(fields) = cancun_fields {
+            if block_versioned_hashes.len() != fields.versioned_hashes.len() {
+                // if the lengths don't match then we know that the payload is invalid
+                let latest_valid_hash =
+                    self.latest_valid_hash_for_invalid_payload(parent_hash, None);
+                let status = PayloadStatusEnum::from(PayloadError::InvalidVersionedHashes);
+                return Err(PayloadStatus::new(status, latest_valid_hash))
+            }
+
+            // we can use `zip` safely here because we already compared their length
+            let zipped_versioned_hashes =
+                fields.versioned_hashes.iter().zip(block_versioned_hashes);
+            for (payload_versioned_hash, block_versioned_hash) in zipped_versioned_hashes {
+                if payload_versioned_hash != block_versioned_hash {
+                    // One of the hashes does not match - return invalid
+                    let latest_valid_hash =
+                        self.latest_valid_hash_for_invalid_payload(parent_hash, None);
+                    let status = PayloadStatusEnum::from(PayloadError::InvalidVersionedHashes);
+                    return Err(PayloadStatus::new(status, latest_valid_hash))
+                }
+            }
+        } else if !block_versioned_hashes.is_empty() {
+            // there are versioned hashes in the block but no expected versioned hashes were
+            // provided in the new payload call, so the payload is invalid
+            let latest_valid_hash = self.latest_valid_hash_for_invalid_payload(parent_hash, None);
+            let status = PayloadStatusEnum::from(PayloadError::InvalidVersionedHashes);
+            return Err(PayloadStatus::new(status, latest_valid_hash))
+        }
+
+        Ok(())
     }
 
     /// When the pipeline or the pruner is active, the tree is unable to commit any additional
