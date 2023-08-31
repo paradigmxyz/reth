@@ -10,7 +10,7 @@ use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     Account, Address, Block, BlockNumber, Bloom, Bytecode, ChainSpec, Hardfork, Header, Receipt,
-    ReceiptWithBloom, Transaction, TransactionSigned, TxLegacy, Withdrawal, H256, U256,
+    ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
 };
 use reth_provider::{BlockExecutor, PostState, StateProvider};
 use revm::{
