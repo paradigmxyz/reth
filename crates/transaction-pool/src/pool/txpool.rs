@@ -18,7 +18,9 @@ use crate::{
 };
 use fnv::FnvHashMap;
 use reth_primitives::{
-    constants::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE},
+    constants::{
+        eip4844::BLOB_TX_MIN_BLOB_GASPRICE, ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE,
+    },
     Address, TxHash, H256,
 };
 use std::{
@@ -135,7 +137,13 @@ impl<T: TransactionOrdering> TxPool<T> {
             last_seen_block_hash: self.all_transactions.last_seen_block_hash,
             last_seen_block_number: self.all_transactions.last_seen_block_number,
             pending_basefee: self.all_transactions.pending_basefee,
+            pending_blob_fee: Some(self.all_transactions.pending_blob_fee),
         }
+    }
+
+    /// Updates the tracked blob fee
+    fn update_blob_fee(&mut self, _pending_blob_fee: u64) {
+        // TODO(mattsse): update blob txs
     }
 
     /// Updates the tracked basefee
@@ -182,11 +190,21 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///
     /// This will also apply updates to the pool based on the new base fee
     pub(crate) fn set_block_info(&mut self, info: BlockInfo) {
-        let BlockInfo { last_seen_block_hash, last_seen_block_number, pending_basefee } = info;
+        let BlockInfo {
+            last_seen_block_hash,
+            last_seen_block_number,
+            pending_basefee,
+            pending_blob_fee,
+        } = info;
         self.all_transactions.last_seen_block_hash = last_seen_block_hash;
         self.all_transactions.last_seen_block_number = last_seen_block_number;
         self.all_transactions.pending_basefee = pending_basefee;
-        self.update_basefee(pending_basefee)
+        self.update_basefee(pending_basefee);
+
+        if let Some(blob_fee) = pending_blob_fee {
+            self.all_transactions.pending_blob_fee = blob_fee;
+            self.update_blob_fee(pending_basefee)
+        }
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block.
@@ -683,6 +701,8 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     last_seen_block_hash: H256,
     /// Expected base fee for the pending block.
     pending_basefee: u64,
+    /// Expected blob fee for the pending block.
+    pending_blob_fee: u64,
     /// Configured price bump settings for replacements
     price_bumps: PriceBumpConfig,
 }
@@ -741,11 +761,18 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
     /// Updates the block specific info
     fn set_block_info(&mut self, block_info: BlockInfo) {
-        let BlockInfo { last_seen_block_hash, last_seen_block_number, pending_basefee } =
-            block_info;
+        let BlockInfo {
+            last_seen_block_hash,
+            last_seen_block_number,
+            pending_basefee,
+            pending_blob_fee,
+        } = block_info;
         self.last_seen_block_number = last_seen_block_number;
         self.last_seen_block_hash = last_seen_block_hash;
         self.pending_basefee = pending_basefee;
+        if let Some(pending_blob_fee) = pending_blob_fee {
+            self.pending_blob_fee = pending_blob_fee;
+        }
     }
 
     /// Rechecks all transactions in the pool against the changes.
@@ -1296,6 +1323,7 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
             last_seen_block_number: 0,
             last_seen_block_hash: Default::default(),
             pending_basefee: Default::default(),
+            pending_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
             price_bumps: Default::default(),
         }
     }
