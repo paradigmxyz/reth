@@ -31,10 +31,10 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainInfo, ChainSpec, Hardfork, Head, Header, PruneCheckpoint, PrunePart, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta, TransactionSigned,
-    TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256,
-    U256,
+    ChainInfo, ChainSpec, Hardfork, Head, Header, PruneCheckpoint, PruneModes, PrunePart, Receipt,
+    SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
+    TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber,
+    Withdrawal, H256, U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
@@ -1871,6 +1871,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
         &self,
         block: SealedBlock,
         senders: Option<Vec<Address>>,
+        prune_modes: Option<&PruneModes>,
     ) -> Result<StoredBlockBodyIndices> {
         let block_number = block.number;
         self.tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
@@ -1922,7 +1923,14 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
             let hash = transaction.hash();
             self.tx.put::<tables::TxSenders>(next_tx_num, sender)?;
             self.tx.put::<tables::Transactions>(next_tx_num, transaction.into())?;
-            self.tx.put::<tables::TxHashNumber>(hash, next_tx_num)?;
+
+            if prune_modes
+                .and_then(|modes| modes.transaction_lookup)
+                .filter(|prune_mode| prune_mode.is_full())
+                .is_none()
+            {
+                self.tx.put::<tables::TxHashNumber>(hash, next_tx_num)?;
+            }
             next_tx_num += 1;
         }
 
@@ -1949,6 +1957,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
         &self,
         blocks: Vec<SealedBlockWithSenders>,
         state: PostState,
+        prune_modes: Option<&PruneModes>,
     ) -> Result<()> {
         if blocks.is_empty() {
             return Ok(())
@@ -1966,7 +1975,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
         // Insert the blocks
         for block in blocks {
             let (block, senders) = block.into_components();
-            self.insert_block(block, Some(senders))?;
+            self.insert_block(block, Some(senders), prune_modes)?;
         }
 
         // Write state and changesets to the database.
