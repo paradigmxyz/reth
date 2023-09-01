@@ -96,6 +96,7 @@ pub trait RethNodeCommandConfig: fmt::Debug {
 
         // The default payload builder is implemented on the unit type.
         #[cfg(not(feature = "optimism"))]
+        #[allow(clippy::let_unit_value)]
         let payload_builder = ();
 
         // Optimism's payload builder is impelmented on the OptimismPayloadBuilder type.
