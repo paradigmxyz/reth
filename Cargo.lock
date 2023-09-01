@@ -5172,6 +5172,7 @@ dependencies = [
 name = "reth"
 version = "0.1.0-alpha.8"
 dependencies = [
+ "aquamarine",
  "backon",
  "boyer-moore-magiclen",
  "clap",

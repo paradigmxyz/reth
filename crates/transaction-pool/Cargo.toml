@@ -36,7 +36,7 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
-aquamarine = "0.3.0"
+aquamarine.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 serde = { workspace = true, features = ["derive", "rc"], optional = true }
