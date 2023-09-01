@@ -351,13 +351,12 @@ where
                     parent_beacon_block_root,
                 );
 
-                let ResultAndState { state, .. } =
-                    self.evm.transact().map_err(|e| {
-                        BlockExecutionError::from(BlockValidationError::EVM {
-                            hash: Default::default(),
-                            message: format!("{e:?}"),
-                        })
-                    })?;
+                let ResultAndState { state, .. } = self.evm.transact().map_err(|e| {
+                    BlockExecutionError::from(BlockValidationError::EVM {
+                        hash: Default::default(),
+                        message: format!("{e:?}"),
+                    })
+                })?;
 
                 // commit changes
                 self.commit_changes(
