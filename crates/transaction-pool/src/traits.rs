@@ -666,6 +666,11 @@ pub trait EthPoolTransaction: PoolTransaction {
     /// Extracts the blob sidecar from the transaction.
     fn take_blob(&mut self) -> EthBlobTransactionSidecar;
 
+    /// Returns the number of blobs this transaction has.
+    fn blob_count(&self) -> usize {
+        self.as_eip4844().map(|tx| tx.blob_versioned_hashes.len()).unwrap_or_default()
+    }
+
     /// Returns the transaction as EIP-4844 transaction if it is one.
     fn as_eip4844(&self) -> Option<&TxEip4844>;
 
