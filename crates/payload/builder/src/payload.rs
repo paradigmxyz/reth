@@ -130,7 +130,7 @@ pub struct PayloadBuilderAttributes {
     /// Withdrawals for the generated payload
     pub withdrawals: Vec<Withdrawal>,
     /// Root of the parent beacon block
-    pub parent_beacon_block_root: H256,
+    pub parent_beacon_block_root: Option<H256>,
 }
 
 // === impl PayloadBuilderAttributes ===
@@ -148,7 +148,7 @@ impl PayloadBuilderAttributes {
             suggested_fee_recipient: attributes.suggested_fee_recipient,
             prev_randao: attributes.prev_randao,
             withdrawals: attributes.withdrawals.unwrap_or_default(),
-            parent_beacon_block_root: attributes.parent_beacon_block_root.unwrap_or_default(),
+            parent_beacon_block_root: attributes.parent_beacon_block_root,
         }
     }
 
