@@ -473,8 +473,19 @@ pub enum RpcPoolError {
     #[error("{0:?}")]
     PoolTransactionError(Box<dyn PoolTransactionError>),
     /// Unable to find the blob for an EIP4844 transaction
-    #[error("blob not found for EIP4844 transaction")]
+    #[error("blob sidecar not found for EIP4844 transaction")]
     MissingEip4844Blob,
+    /// Thrown if an EIP-4844 without any blobs arrives
+    #[error("blobless blob transaction")]
+    NoEip4844Blobs,
+    /// Thrown if an EIP-4844 without any blobs arrives
+    #[error("too many blobs in transaction: have {have}, permitted {permitted}")]
+    TooManyEip4844Blobs {
+        /// Number of blobs the transaction has
+        have: usize,
+        /// Number of maximum blobs the transaction can have
+        permitted: usize,
+    },
     /// Thrown if validating the blob sidecar for the transaction failed.
     #[error(transparent)]
     InvalidEip4844Blob(BlobTransactionValidationError),
@@ -516,7 +527,13 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             InvalidPoolTransactionError::OversizedData(_, _) => RpcPoolError::OversizedData,
             InvalidPoolTransactionError::Underpriced => RpcPoolError::Underpriced,
             InvalidPoolTransactionError::Other(err) => RpcPoolError::PoolTransactionError(err),
-            InvalidPoolTransactionError::MissingEip4844Blob => RpcPoolError::MissingEip4844Blob,
+            InvalidPoolTransactionError::MissingEip4844BlobSidecar => {
+                RpcPoolError::MissingEip4844Blob
+            }
+            InvalidPoolTransactionError::NoEip4844Blobs => RpcPoolError::NoEip4844Blobs,
+            InvalidPoolTransactionError::TooManyEip4844Blobs { have, permitted } => {
+                RpcPoolError::TooManyEip4844Blobs { have, permitted }
+            }
             InvalidPoolTransactionError::InvalidEip4844Blob(err) => {
                 RpcPoolError::InvalidEip4844Blob(err)
             }

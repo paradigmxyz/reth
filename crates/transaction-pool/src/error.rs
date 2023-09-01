@@ -139,8 +139,19 @@ pub enum InvalidPoolTransactionError {
     #[error("transaction underpriced")]
     Underpriced,
     /// Thrown if we're unable to find the blob for a transaction that was previously extracted
-    #[error("blob not found for EIP4844 transaction")]
-    MissingEip4844Blob,
+    #[error("blob sidecar not found for EIP4844 transaction")]
+    MissingEip4844BlobSidecar,
+    /// Thrown if an EIP-4844 without any blobs arrives
+    #[error("blobless blob transaction")]
+    NoEip4844Blobs,
+    /// Thrown if an EIP-4844 without any blobs arrives
+    #[error("too many blobs in transaction: have {have}, permitted {permitted}")]
+    TooManyEip4844Blobs {
+        /// Number of blobs the transaction has
+        have: usize,
+        /// Number of maximum blobs the transaction can have
+        permitted: usize,
+    },
     /// Thrown if validating the blob sidecar for the transaction failed.
     #[error(transparent)]
     InvalidEip4844Blob(BlobTransactionValidationError),
@@ -209,7 +220,7 @@ impl InvalidPoolTransactionError {
                 false
             }
             InvalidPoolTransactionError::Other(err) => err.is_bad_transaction(),
-            InvalidPoolTransactionError::MissingEip4844Blob => {
+            InvalidPoolTransactionError::MissingEip4844BlobSidecar => {
                 // this is only reachable when blob transactions are reinjected and we're unable to
                 // find the previously extracted blob
                 false
@@ -222,6 +233,14 @@ impl InvalidPoolTransactionError {
                 // it is possible that the pool sees `nonce n` before `nonce n-1` and this is only
                 // thrown for valid(good) blob transactions
                 false
+            }
+            InvalidPoolTransactionError::NoEip4844Blobs => {
+                // this is a malformed transaction and should not be sent over the network
+                true
+            }
+            InvalidPoolTransactionError::TooManyEip4844Blobs { .. } => {
+                // this is a malformed transaction and should not be sent over the network
+                true
             }
         }
     }
