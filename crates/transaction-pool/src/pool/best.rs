@@ -29,6 +29,10 @@ impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransaction
     fn no_updates(&mut self) {
         self.best.no_updates()
     }
+
+    fn skip_blob_transactions(&mut self) {
+        self.best.skip_blob_transactions()
+    }
 }
 
 impl<T: TransactionOrdering> Iterator for BestTransactionsWithBasefee<T> {
@@ -133,6 +137,21 @@ impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransaction
 
     fn no_updates(&mut self) {
         self.new_transaction_receiver.take();
+    }
+
+    fn skip_blob_transactions(&mut self) {
+        while let Some(pending_tx) = self.try_recv() {
+            let tx = pending_tx.transaction.clone();
+            if tx.transaction.is_eip4844() {
+                self.mark_invalid(&tx)
+            } else {
+                let tx_id = *tx.id();
+                if self.ancestor(&tx_id).is_none() {
+                    self.independent.insert(pending_tx.clone());
+                }
+                self.all.insert(tx_id, pending_tx);
+            }
+        }
     }
 }
 
