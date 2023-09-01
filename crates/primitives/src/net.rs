@@ -150,6 +150,12 @@ pub static GOERLI_BOOTNODES : [&str; 7] = [
     "enode://d2b720352e8216c9efc470091aa91ddafc53e222b32780f505c817ceef69e01d5b0b0797b69db254c586f493872352f5a022b4d8479a00fc92ec55f9ad46a27e@88.99.70.182:30303",
 ];
 
+/// Ethereum Foundation Holesky BOOTNODES
+pub static HOLESKY_BOOTNODES : [&str; 2] = [
+    "enode://ac906289e4b7f12df423d654c5a962b6ebe5b3a74cc9e06292a85221f9a64a6f1cfdd6b714ed6dacef51578f92b34c60ee91e9ede9c7f8fadc4d347326d95e2b@146.190.13.128:30303",
+    "enode://a3435a0155a3e837c02f5e7f5662a2f1fbc25b48e4dc232016e1c51b544cb5b4510ef633ea3278c0e970fa8ad8141e2d4d0f9f95456c537ff05fdf9b31c15072@178.128.136.233:30303",
+];
+
 /// Returns parsed mainnet nodes
 pub fn mainnet_nodes() -> Vec<NodeRecord> {
     parse_nodes(&MAINNET_BOOTNODES[..])
@@ -163,6 +169,11 @@ pub fn goerli_nodes() -> Vec<NodeRecord> {
 /// Returns parsed sepolia nodes
 pub fn sepolia_nodes() -> Vec<NodeRecord> {
     parse_nodes(&SEPOLIA_BOOTNODES[..])
+}
+
+/// Returns parsed holesky nodes
+pub fn holesky_nodes() -> Vec<NodeRecord> {
+    parse_nodes(&HOLESKY_BOOTNODES[..])
 }
 
 /// Parses all the nodes

@@ -9,8 +9,8 @@ use reth_primitives::{
     Address, BlobTransactionSidecar, BlobTransactionValidationError,
     FromRecoveredPooledTransaction, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId,
     PooledTransactionsElement, PooledTransactionsElementEcRecovered, SealedBlock, Transaction,
-    TransactionKind, TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
-    H256, U256,
+    TransactionKind, TransactionSignedEcRecovered, TxEip4844, TxHash, EIP1559_TX_TYPE_ID,
+    EIP4844_TX_TYPE_ID, H256, U256,
 };
 use reth_rlp::Encodable;
 use std::{
@@ -484,6 +484,10 @@ pub struct CanonicalStateUpdate<'a> {
     ///
     /// The base fee of a block depends on the utilization of the last block and its base fee.
     pub pending_block_base_fee: u64,
+    /// EIP-4844 blob fee of the _next_ (pending) block
+    ///
+    /// Only after Cancun
+    pub pending_block_blob_fee: Option<u64>,
     /// A set of changed accounts across a range of blocks.
     pub changed_accounts: Vec<ChangedAccount>,
     /// All mined transactions in the block range.
@@ -512,14 +516,15 @@ impl<'a> CanonicalStateUpdate<'a> {
             last_seen_block_hash: self.hash(),
             last_seen_block_number: self.number(),
             pending_basefee: self.pending_block_base_fee,
+            pending_blob_fee: self.pending_block_blob_fee,
         }
     }
 }
 
 impl<'a> fmt::Display for CanonicalStateUpdate<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{{ hash: {}, number: {}, pending_block_base_fee: {}, changed_accounts: {}, mined_transactions: {} }}",
-            self.hash(), self.number(), self.pending_block_base_fee, self.changed_accounts.len(), self.mined_transactions.len())
+        write!(f, "{{ hash: {}, number: {}, pending_block_base_fee: {}, pending_block_blob_fee: {:?}, changed_accounts: {}, mined_transactions: {} }}",
+            self.hash(), self.number(), self.pending_block_base_fee, self.pending_block_blob_fee,  self.changed_accounts.len(), self.mined_transactions.len())
     }
 }
 
@@ -613,6 +618,11 @@ pub trait PoolTransaction:
     /// This will return `None` for non-EIP1559 transactions
     fn max_priority_fee_per_gas(&self) -> Option<u128>;
 
+    /// Returns the EIP-4844 max fee per data gas
+    ///
+    /// This will return `None` for non-EIP4844 transactions
+    fn max_fee_per_blob_gas(&self) -> Option<u128>;
+
     /// Returns the effective tip for this transaction.
     ///
     /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
@@ -655,6 +665,14 @@ pub trait PoolTransaction:
 pub trait EthPoolTransaction: PoolTransaction {
     /// Extracts the blob sidecar from the transaction.
     fn take_blob(&mut self) -> EthBlobTransactionSidecar;
+
+    /// Returns the number of blobs this transaction has.
+    fn blob_count(&self) -> usize {
+        self.as_eip4844().map(|tx| tx.blob_versioned_hashes.len()).unwrap_or_default()
+    }
+
+    /// Returns the transaction as EIP-4844 transaction if it is one.
+    fn as_eip4844(&self) -> Option<&TxEip4844>;
 
     /// Validates the blob sidecar of the transaction with the given settings.
     fn validate_blob(
@@ -795,6 +813,10 @@ impl PoolTransaction for EthPooledTransaction {
         }
     }
 
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        self.transaction.max_fee_per_blob_gas()
+    }
+
     /// Returns the effective tip for this transaction.
     ///
     /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
@@ -843,6 +865,10 @@ impl EthPoolTransaction for EthPooledTransaction {
         } else {
             EthBlobTransactionSidecar::None
         }
+    }
+
+    fn as_eip4844(&self) -> Option<&TxEip4844> {
+        self.transaction.as_eip4844()
     }
 
     fn validate_blob(
@@ -905,9 +931,14 @@ pub struct BlockInfo {
     pub last_seen_block_number: u64,
     /// Currently enforced base fee: the threshold for the basefee sub-pool.
     ///
-    /// Note: this is the derived base fee of the _next_ block that builds on the clock the pool is
+    /// Note: this is the derived base fee of the _next_ block that builds on the block the pool is
     /// currently tracking.
     pub pending_basefee: u64,
+    /// Currently enforced blob fee: the threshold for eip-4844 blob transactions.
+    ///
+    /// Note: this is the derived blob fee of the _next_ block that builds on the block the pool is
+    /// currently tracking
+    pub pending_blob_fee: Option<u64>,
 }
 
 /// The limit to enforce for [TransactionPool::get_pooled_transaction_elements].

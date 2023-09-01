@@ -43,6 +43,9 @@ pub struct Transaction {
     /// The miner's tip.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_priority_fee_per_gas: Option<U128>,
+    /// Configured max fee per blob gas for eip-4844 transactions
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_fee_per_blob_gas: Option<U128>,
     /// Data
     pub input: Bytes,
     /// All _flattened_ fields of the transaction signature.
@@ -52,6 +55,9 @@ pub struct Transaction {
     pub signature: Option<Signature>,
     /// The chain id of the transaction, if any.
     pub chain_id: Option<U64>,
+    /// Contains the blob hashes for eip-4844 transactions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blob_versioned_hashes: Vec<H256>,
     /// EIP2930
     ///
     /// Pre-pay to warm storage access.
@@ -91,10 +97,12 @@ mod tests {
                 y_parity: None,
             }),
             chain_id: Some(U64::from(17)),
+            blob_versioned_hashes: vec![],
             access_list: None,
             transaction_type: Some(U64::from(20)),
             max_fee_per_gas: Some(U128::from(21)),
             max_priority_fee_per_gas: Some(U128::from(22)),
+            max_fee_per_blob_gas: None,
         };
         let serialized = serde_json::to_string(&transaction).unwrap();
         assert_eq!(
@@ -126,10 +134,12 @@ mod tests {
                 y_parity: Some(Parity(true)),
             }),
             chain_id: Some(U64::from(17)),
+            blob_versioned_hashes: vec![],
             access_list: None,
             transaction_type: Some(U64::from(20)),
             max_fee_per_gas: Some(U128::from(21)),
             max_priority_fee_per_gas: Some(U128::from(22)),
+            max_fee_per_blob_gas: None,
         };
         let serialized = serde_json::to_string(&transaction).unwrap();
         assert_eq!(

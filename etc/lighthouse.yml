@@ -2,7 +2,6 @@ version: '3.9'
 name: reth
 
 services:
-
   lighthouse:
     restart: unless-stopped
     image: sigp/lighthouse
@@ -17,8 +16,12 @@ services:
     volumes:
       - lighthousedata:/root/.lighthouse
       - ./jwttoken:/root/jwt:ro
+    # For Sepolia:
+    # - Replace `--network mainnet` with `--network sepolia`
+    # - Use different checkpoint sync URL: `--checkpoint-sync-url https://sepolia.checkpoint-sync.ethpandaops.io`
     command: >
       lighthouse bn
+      --network mainnet
       --http --http-address 0.0.0.0
       --execution-endpoint http://reth:8551
       --metrics --metrics-address 0.0.0.0

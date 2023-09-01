@@ -82,6 +82,8 @@ pub struct Header {
     pub blob_gas_used: Option<JsonU256>,
     /// Excess blob gas.
     pub excess_blob_gas: Option<JsonU256>,
+    /// Parent beacon block root.
+    pub parent_beacon_block_root: Option<H256>,
 }
 
 impl From<Header> for SealedHeader {
@@ -106,6 +108,7 @@ impl From<Header> for SealedHeader {
             withdrawals_root: value.withdrawals_root,
             blob_gas_used: value.blob_gas_used.map(|v| v.0.to::<u64>()),
             excess_blob_gas: value.excess_blob_gas.map(|v| v.0.to::<u64>()),
+            parent_beacon_block_root: value.parent_beacon_block_root,
         };
         header.seal(value.hash)
     }

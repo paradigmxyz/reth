@@ -277,6 +277,7 @@ impl StorageInner {
             blob_gas_used: None,
             excess_blob_gas: None,
             extra_data: Default::default(),
+            parent_beacon_block_root: None,
         };
 
         header.transactions_root = if transactions.is_empty() {

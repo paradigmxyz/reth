@@ -19,13 +19,14 @@
 //!
 //! - `serde` (default): Enable serde support
 use async_trait::async_trait;
-use reth_eth_wire::DisconnectReason;
+use reth_eth_wire::{DisconnectReason, EthVersion, Status};
 use reth_primitives::{NodeRecord, PeerId};
 use reth_rpc_types::NetworkStatus;
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 
 pub use error::NetworkError;
 pub use reputation::{Reputation, ReputationChangeKind};
+use reth_eth_wire::capability::Capabilities;
 
 /// Network Error
 pub mod error;
@@ -81,6 +82,9 @@ pub trait Peers: PeersInfo {
     /// Adds a peer to the known peer set, with the given kind.
     fn add_peer_kind(&self, peer: PeerId, kind: PeerKind, addr: SocketAddr);
 
+    /// Returns the rpc [PeerInfo] for all connected peers.
+    async fn get_peers(&self) -> Result<Vec<PeerInfo>, NetworkError>;
+
     /// Removes a peer from the peer set that corresponds to given kind.
     fn remove_peer(&self, peer: PeerId, kind: PeerKind);
 
@@ -105,4 +109,55 @@ pub enum PeerKind {
     Basic,
     /// Trusted peer.
     Trusted,
+}
+
+/// Info about an active peer session.
+#[derive(Debug, Clone)]
+pub struct PeerInfo {
+    /// Announced capabilities of the peer
+    pub capabilities: Arc<Capabilities>,
+    /// The identifier of the remote peer
+    pub remote_id: PeerId,
+    /// The client's name and version
+    pub client_version: Arc<String>,
+    /// The peer's address we're connected to
+    pub remote_addr: SocketAddr,
+    /// The local address of the connection
+    pub local_addr: Option<SocketAddr>,
+    /// The direction of the session
+    pub direction: Direction,
+    /// The negotiated eth version.
+    pub eth_version: EthVersion,
+    /// The Status message the peer sent for the `eth` handshake
+    pub status: Status,
+}
+
+/// The direction of the connection.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum Direction {
+    /// Incoming connection.
+    Incoming,
+    /// Outgoing connection to a specific node.
+    Outgoing(PeerId),
+}
+
+impl Direction {
+    /// Returns `true` if this an incoming connection.
+    pub fn is_incoming(&self) -> bool {
+        matches!(self, Direction::Incoming)
+    }
+
+    /// Returns `true` if this an outgoing connection.
+    pub fn is_outgoing(&self) -> bool {
+        matches!(self, Direction::Outgoing(_))
+    }
+}
+
+impl std::fmt::Display for Direction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Direction::Incoming => write!(f, "incoming"),
+            Direction::Outgoing(_) => write!(f, "outgoing"),
+        }
+    }
 }
