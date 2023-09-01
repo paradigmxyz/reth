@@ -267,6 +267,9 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let metrics_listener = MetricsListener::new(metrics_rx);
         ctx.task_executor.spawn_critical("metrics listener task", metrics_listener);
 
+        let prune_config =
+            self.pruning.prune_config(Arc::clone(&self.chain))?.or(config.prune.clone());
+
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
             db.clone(),
@@ -284,6 +287,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 tree_externals,
                 canon_state_notification_sender.clone(),
                 tree_config,
+                prune_config.clone().map(|config| config.parts),
             )?
             .with_sync_metrics_tx(metrics_tx.clone()),
         );
@@ -364,9 +368,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         } else {
             None
         };
-
-        let prune_config =
-            self.pruning.prune_config(Arc::clone(&self.chain))?.or(config.prune.clone());
 
         // Configure the pipeline
         let (mut pipeline, client) = if self.dev.dev {
