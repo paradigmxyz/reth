@@ -144,10 +144,7 @@ impl<'a> EVMProcessor<'a> {
     ///
     /// If cancun is not activated or the block is the genesis block, then this is a no-op, and no
     /// state changes are made.
-    pub fn apply_pre_block_call(
-        &mut self,
-        block: &Block,
-    ) -> Result<(), BlockExecutionError> {
+    pub fn apply_pre_block_call(&mut self, block: &Block) -> Result<(), BlockExecutionError> {
         if self.chain_spec.fork(Hardfork::Cancun).active_at_timestamp(block.timestamp) {
             // if the block number is zero (genesis block) then the parent beacon block root must
             // be 0x0 and no system transaction may occur as per EIP-4788
@@ -460,11 +457,15 @@ pub fn verify_receipt<'a>(
 #[cfg(test)]
 mod tests {
     use reth_interfaces::test_utils::generators::sign_tx_with_key_pair;
-    use reth_primitives::{constants::BEACON_ROOTS_ADDRESS, keccak256, Bytecode, Bytes, public_key_to_address, ChainSpecBuilder, ForkCondition, MAINNET, StorageKey, Account, Transaction, TxLegacy, TransactionKind};
+    use reth_primitives::{
+        constants::BEACON_ROOTS_ADDRESS, keccak256, public_key_to_address, Account, Bytecode,
+        Bytes, ChainSpecBuilder, ForkCondition, StorageKey, Transaction, TransactionKind, TxLegacy,
+        MAINNET,
+    };
     use reth_provider::{AccountReader, BlockHashReader, StateRootProvider};
     use reth_revm_primitives::TransitionState;
-    use secp256k1::{KeyPair, Secp256k1, rand};
-    use std::{str::FromStr, collections::HashMap};
+    use secp256k1::{rand, KeyPair, Secp256k1};
+    use std::{collections::HashMap, str::FromStr};
 
     use super::*;
 
@@ -520,7 +521,10 @@ mod tests {
     }
 
     impl StateRootProvider for StateProviderTest {
-        fn state_root(&self, _bundle_state: BundleStateWithReceipts) -> reth_interfaces::Result<H256> {
+        fn state_root(
+            &self,
+            _bundle_state: BundleStateWithReceipts,
+        ) -> reth_interfaces::Result<H256> {
             todo!()
         }
     }
@@ -642,7 +646,10 @@ mod tests {
             .unwrap();
 
         // check the receipts to ensure that the transaction didn't fail
-        let receipts = executor.receipts.last().expect("there should be receipts for the block we just executed");
+        let receipts = executor
+            .receipts
+            .last()
+            .expect("there should be receipts for the block we just executed");
         assert_eq!(receipts.len(), 1);
         let receipt = receipts.first().expect("there is one receipt");
         assert!(receipt.success);
@@ -658,8 +665,11 @@ mod tests {
             timestamp_index % history_buffer_length + history_buffer_length;
 
         // get timestamp storage and compare
-        let timestamp_storage =
-            executor.db().database.storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index)).unwrap();
+        let timestamp_storage = executor
+            .db()
+            .database
+            .storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index))
+            .unwrap();
         assert_eq!(timestamp_storage, U256::from(header.timestamp));
 
         // get parent beacon block root storage and compare
@@ -764,7 +774,8 @@ mod tests {
         // there is no system contract call so there should be NO STORAGE CHANGES
         // this means we'll check the transition state
         let state = executor.evm.db().unwrap();
-        let transition_state = state.transition_state.expect("the evm should be initialized with bundle updates");
+        let transition_state =
+            state.transition_state.expect("the evm should be initialized with bundle updates");
 
         // assert that it is the default (empty) transition state
         assert_eq!(transition_state, TransitionState::default());
