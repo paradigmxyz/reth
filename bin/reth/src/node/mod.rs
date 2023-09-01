@@ -867,7 +867,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
                 .set(TransactionLookupStage::new(
                     stage_config.transaction_lookup.commit_threshold,
-                    prune_modes,
+                    prune_modes.clone(),
                 ))
                 .set(IndexAccountHistoryStage::new(
                     stage_config.index_account_history.commit_threshold,
