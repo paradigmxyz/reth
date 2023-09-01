@@ -6,6 +6,15 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
+description = """
+Reth node implementation
+"""
+
+[package.metadata.cargo-udeps.ignore]
+normal = [
+    # Used for diagrams in docs
+    "aquamarine",
+]
 
 [dependencies]
 # reth
@@ -81,6 +90,7 @@ pin-project.workspace = true
 hyper = "0.14.25"
 
 # misc
+aquamarine.workspace = true
 eyre = "0.6.8"
 clap = { version = "4", features = ["derive"] }
 tempfile = { version = "3.3.0" }

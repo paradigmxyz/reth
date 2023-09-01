@@ -25,17 +25,17 @@ impl<'a> PayloadOrAttributes<'a> {
     }
 
     /// Return the withdrawals for the payload or attributes.
-    pub(crate) fn withdrawals(&self) -> &Option<Vec<Withdrawal>> {
+    pub(crate) fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
         match self {
-            Self::ExecutionPayload { payload, .. } => &payload.withdrawals,
-            Self::PayloadAttributes(attributes) => &attributes.withdrawals,
+            Self::ExecutionPayload { payload, .. } => payload.withdrawals(),
+            Self::PayloadAttributes(attributes) => attributes.withdrawals.as_ref(),
         }
     }
 
     /// Return the timestamp for the payload or attributes.
     pub(crate) fn timestamp(&self) -> u64 {
         match self {
-            Self::ExecutionPayload { payload, .. } => payload.timestamp.as_u64(),
+            Self::ExecutionPayload { payload, .. } => payload.timestamp(),
             Self::PayloadAttributes(attributes) => attributes.timestamp.as_u64(),
         }
     }

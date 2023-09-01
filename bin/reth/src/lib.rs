@@ -87,3 +87,6 @@ pub mod rpc {
 
 #[cfg(all(feature = "jemalloc", unix))]
 use jemallocator as _;
+
+// for rendering diagrams
+use aquamarine as _;

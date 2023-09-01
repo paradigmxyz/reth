@@ -5259,6 +5259,7 @@ dependencies = [
 name = "reth"
 version = "0.1.0-alpha.8"
 dependencies = [
+ "aquamarine",
  "backon",
  "boyer-moore-magiclen",
  "clap",
@@ -5838,6 +5839,7 @@ dependencies = [
  "reth-revm-primitives",
  "reth-rlp",
  "reth-rpc-types",
+ "reth-transaction-pool",
  "revm-primitives",
  "sha2",
  "thiserror",

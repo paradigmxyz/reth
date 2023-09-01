@@ -1,3 +1,5 @@
+use reth_primitives::EIP4844_TX_TYPE_ID;
+
 /// Guarantees max transactions for one sender, compatible with geth/erigon
 pub const TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER: usize = 16;
 
@@ -11,6 +13,8 @@ pub const TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT: usize = 20;
 pub const DEFAULT_PRICE_BUMP: u128 = 10;
 
 /// Replace blob price bump (in %) for the transaction pool underpriced check.
+///
+/// This enforces that a blob transaction requires a 100% price bump to be replaced
 pub const REPLACE_BLOB_PRICE_BUMP: u128 = 100;
 
 /// Configuration options for the Transaction pool.
@@ -25,7 +29,7 @@ pub struct PoolConfig {
     /// Max number of executable transaction slots guaranteed per account
     pub max_account_slots: usize,
     /// Price bump (in %) for the transaction pool underpriced check.
-    pub price_bump: u128,
+    pub price_bumps: PriceBumpConfig,
 }
 
 impl Default for PoolConfig {
@@ -35,7 +39,7 @@ impl Default for PoolConfig {
             basefee_limit: Default::default(),
             queued_limit: Default::default(),
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
-            price_bump: PriceBumpConfig::default().default_price_bump,
+            price_bumps: Default::default(),
         }
     }
 }
@@ -68,12 +72,23 @@ impl Default for SubPoolLimit {
 }
 
 /// Price bump config (in %) for the transaction pool underpriced check.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct PriceBumpConfig {
     /// Default price bump (in %) for the transaction pool underpriced check.
     pub default_price_bump: u128,
     /// Replace blob price bump (in %) for the transaction pool underpriced check.
     pub replace_blob_tx_price_bump: u128,
+}
+
+impl PriceBumpConfig {
+    /// Returns the price bump required to replace the given transaction type.
+    #[inline]
+    pub(crate) fn price_bump(&self, tx_type: u8) -> u128 {
+        if tx_type == EIP4844_TX_TYPE_ID {
+            return self.replace_blob_tx_price_bump
+        }
+        self.default_price_bump
+    }
 }
 
 impl Default for PriceBumpConfig {

@@ -1,13 +1,21 @@
 use crate::{
     compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR},
+    constants::eip4844::DATA_GAS_PER_BLOB,
     keccak256, Address, Bytes, TxHash, H256,
 };
 pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
+pub use eip1559::TxEip1559;
+pub use eip2930::TxEip2930;
+pub use eip4844::{
+    BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError, TxEip4844,
+};
 pub use error::InvalidTransactionError;
+pub use legacy::TxLegacy;
 pub use meta::TransactionMeta;
 use once_cell::sync::Lazy;
+pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
 use reth_rlp::{Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
@@ -17,14 +25,6 @@ use std::mem;
 pub use tx_type::{
     TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
-
-pub use eip1559::TxEip1559;
-pub use eip2930::TxEip2930;
-pub use eip4844::{
-    BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError, TxEip4844,
-};
-pub use legacy::TxLegacy;
-pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 
 mod access_list;
 mod eip1559;
@@ -268,6 +268,15 @@ impl Transaction {
             }
             _ => None,
         }
+    }
+
+    /// Returns the blob gas used for all blobs of the EIP-4844 transaction if it is an EIP-4844
+    /// transaction.
+    ///
+    /// This is the number of blobs times the [DATA_GAS_PER_BLOB] a single blob consumes.
+    pub fn blob_gas_used(&self) -> Option<u128> {
+        let tx = self.as_eip4844()?;
+        Some(tx.blob_versioned_hashes.len() as u128 * DATA_GAS_PER_BLOB as u128)
     }
 
     /// Return the max priority fee per gas if the transaction is an EIP-1559 transaction, and

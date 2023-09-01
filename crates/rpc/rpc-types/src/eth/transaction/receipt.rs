@@ -22,6 +22,14 @@ pub struct TransactionReceipt {
     /// fields in 1559-style transactions are maximums (max fee + max priority fee), the amount
     /// that's actually paid by users can only be determined post-execution
     pub effective_gas_price: U128,
+    /// Blob gas used by the eip-4844 transaction
+    ///
+    /// This is None for non eip-4844 transactions
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blob_gas_used: Option<U128>,
+    /// The price paid by the eip-4844 transaction per blob gas.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blob_gas_price: Option<U128>,
     /// Address of the sender
     pub from: Address,
     /// Address of the receiver. null when its a contract creation transaction.

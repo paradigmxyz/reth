@@ -937,6 +937,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
             .unwrap_or_default()
     };
 
+    #[allow(clippy::needless_update)]
     let mut res_receipt = TransactionReceipt {
         transaction_hash: Some(meta.tx_hash),
         transaction_index: meta.index.into(),
@@ -954,6 +955,10 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         state_root: None,
         logs_bloom: receipt.bloom_slow(),
         status_code: if receipt.success { Some(U64::from(1)) } else { Some(U64::from(0)) },
+        // EIP-4844 fields
+        blob_gas_price: transaction.transaction.max_fee_per_blob_gas().map(U128::from),
+        blob_gas_used: transaction.transaction.blob_gas_used().map(U128::from),
+        // Optimism fields
         #[cfg(feature = "optimism")]
         deposit_nonce: receipt.deposit_nonce.map(U64::from),
         ..Default::default()
