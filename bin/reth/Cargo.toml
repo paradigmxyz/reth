@@ -97,7 +97,7 @@ jemallocator = { version = "0.5.0", optional = true }
 jemalloc-ctl = { version = "0.5.0", optional = true }
 
 [features]
-default = ["jemalloc", "ethereum"]
+default = ["jemalloc"]
 jemalloc = ["dep:jemallocator", "dep:jemalloc-ctl"]
 jemalloc-prof = ["jemalloc", "jemallocator?/profiling"]
 min-error-logs = ["tracing/release_max_level_error"]

@@ -22,6 +22,7 @@ jobs:
     strategy:
       matrix:
         partition: [1, 2]
+        network: ["ethereum", "optimism"]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -52,7 +53,8 @@ jobs:
       - name: Run tests
         run: |
           cargo llvm-cov nextest --lcov --output-path lcov.info \
-            --locked --all-features --workspace --exclude examples --exclude ef-tests \
+            --locked --features "jemalloc-prof,${{ matrix.network }},min-error-logs,min-warn-logs,min-info-logs,min-debug-logs,min-trace-logs" \
+            --workspace --exclude examples --exclude ef-tests \
             --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
             -E 'kind(test)'
 
