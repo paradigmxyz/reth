@@ -40,7 +40,7 @@ reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true , features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 parking_lot.workspace = true
-assert_matches = "1.5"
+assert_matches.workspace = true
 tokio = { workspace = true, features = ["macros", "sync"] }
 
 [features]

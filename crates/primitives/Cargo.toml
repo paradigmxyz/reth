@@ -85,7 +85,7 @@ revm-primitives = { workspace = true, features = ["arbitrary"] }
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-derive = "0.3"
-assert_matches = "1.5.0"
+assert_matches.workspace = true
 toml = "0.7.4"
 
 # necessary so we don't hit a "undeclared 'std'": 

@@ -40,6 +40,7 @@ reth-rlp.workspace = true
 reth-trie = { path = "../../trie", features = ["test-utils"] }
 parking_lot.workspace = true
 tempfile = "3.3"
+assert_matches.workspace = true
 
 [features]
 test-utils = ["reth-rlp"]

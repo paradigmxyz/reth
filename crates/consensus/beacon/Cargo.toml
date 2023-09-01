@@ -46,7 +46,7 @@ reth-tracing = { path = "../../tracing" }
 reth-revm = { path = "../../revm" }
 reth-downloaders = { path = "../../net/downloaders" }
 
-assert_matches = "1.5"
+assert_matches.workspace = true
 
 [features]
 optimism = [

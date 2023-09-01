@@ -48,6 +48,7 @@ async fn main() -> eyre::Result<()> {
             externals,
             canon_state_notification_sender,
             tree_config,
+            None,
         )?);
 
         BlockchainProvider::new(factory, tree)?
