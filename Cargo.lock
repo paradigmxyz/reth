@@ -5901,7 +5901,6 @@ dependencies = [
 name = "reth-revm"
 version = "0.1.0-alpha.8"
 dependencies = [
- "once_cell",
  "reth-consensus-common",
  "reth-interfaces",
  "reth-primitives",
