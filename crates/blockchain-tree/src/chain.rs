@@ -204,7 +204,21 @@ impl AppendableChain {
         let provider = PostStateProvider::new(state_provider, post_state_data_provider);
 
         let mut executor = externals.executor_factory.with_sp(&provider);
-        let post_state = executor.execute_and_verify_receipt(&block, U256::MAX, Some(senders))?;
+        let mut post_state = executor.execute_and_verify_receipt(&block, U256::MAX, Some(senders))?;
+
+        // Additional stages could have their own executor factory.
+        let mut noncore_executor = externals.noncore_stage_factory.with_sp(&provider);
+        // Pass custom stages to the executor
+        let post_stage = noncore_executor.run_noncore_stages(block, noncore_stages);
+        // Push the changes alongside core post_state
+        post_state.non_core_changes = Some(non_core_post_state);
+        /*
+        Explanation:
+        // - in crates/storage/provider/src/post_state/mod.rs
+        // - member has type: `non_core_changes: Option<NonCorePostWriter>`
+        // - `NonCorePostWriter` provides method `write_noncore_stage_data(tx)`
+        // - which is called by self.write_to_db(...)
+        */
 
         // check state root if the block extends the canonical chain.
         if block_kind.extends_canonical_head() {

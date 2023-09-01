@@ -24,6 +24,8 @@ pub struct TreeExternals<DB, C, EF> {
     pub(crate) executor_factory: EF,
     /// The chain spec.
     pub(crate) chain_spec: Arc<ChainSpec>,
+    /// The factory to run non-core stages on blocks with.
+    pub(crate) noncore_stage_factory: EF,
 }
 
 impl<DB, C, EF> TreeExternals<DB, C, EF> {

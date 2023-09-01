@@ -69,6 +69,20 @@ impl RethCliExt for MyRethCliExt {
     type Node = RethCliNamespaceExt;
     /// This tells the reth CLI to use additional non-core tables.
     type TableExt = NonCoreTable;
+    /// Data obtained after executing custom stages.
+    type CustomStagePostData = MyPostData;
+}
+
+/// Holds data obtained from extra stages, ready to be put in DB.
+struct MyPostData {
+    // e.g., store block -> miner address mappings
+}
+
+impl NonCorePostWriter for MyPostData {
+    fn write_noncore_stage_data(self, tx: &TX) {
+        // tx::cursor_write::<MyTable>()
+        // Store data.miner_addresses in MyTable
+    }
 }
 
 /// Our custom cli args extension that adds one flag to reth default CLI.

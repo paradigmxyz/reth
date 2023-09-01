@@ -56,7 +56,7 @@ pub use storage::{Storage, StorageChanges, StorageChangeset, StorageTransition, 
 /// for receipts and changes, which [PostState::new] does, and thus it (or
 /// [PostState::with_tx_capacity]) should be preferred to using the [Default] implementation.
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
-pub struct PostState {
+pub struct PostState<NS: NonCorePostWriter> {
     /// The state of all modified accounts after execution.
     ///
     /// If the value contained is `None`, then the account should be deleted.
@@ -80,6 +80,10 @@ pub struct PostState {
     receipts: BTreeMap<BlockNumber, Vec<Receipt>>,
     /// Pruning configuration.
     prune_modes: PruneModes,
+    /// Data produced from executing a non-core stages.
+    ///
+    /// The trait allows the data to be written to the DB in a custom function.
+    non_core_changes: Option<NonCorePostWriter>,
 }
 
 impl PostState {
@@ -672,8 +676,30 @@ impl PostState {
             }
         }
 
+        // Write the custom data for non-core stages to the DB.
+        /*
+        - `self.non_core_changes` is a type provided by the user.
+        - It implements a trait that provides this method.
+        - The method accepts &tx and then the user will impl the desired db write
+        via: `tx::cursor_write::<MyTable>()` similar to above.
+        - Thus they can keep any data and write to any table they create.
+        - `self.non_core_changes` is populated in `crates/blockchain-tree/src/chain.rs`
+        validate_and_execute() after `post_state` has been obtained.
+        */
+        self.non_core_changes.write_noncore_stage_data(tx)?;
         Ok(())
     }
+}
+
+
+/// Trait that allows data obtained from custom stages to be written
+/// to the database.
+///
+/// Defined and implemented on an associated type in CLI namespace/stage/table extension group.
+pub trait NonCorePostWriter<'a, TX: DbTxMut<'a> + DbTx<'a>> {
+    /// Method that allows
+    /// Called alongside core
+    fn write_noncore_stage_data(self, tx: &TX,);
 }
 
 #[cfg(test)]
