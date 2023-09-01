@@ -15,7 +15,7 @@ concurrency:
 name: unit
 jobs:
   test:
-    name: test (partition ${{ matrix.partition }}/${{ strategy.job-total }})
+    name: test (${{ matrix.network }} | partition ${{ matrix.partition }}/${{ strategy.job-total }})
     runs-on:
       group: Reth
     strategy:
