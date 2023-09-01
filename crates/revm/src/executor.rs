@@ -334,7 +334,7 @@ where
         if self.chain_spec.fork(Hardfork::Cancun).active_at_timestamp(block.timestamp) {
             // if the block number is zero (genesis block) then the parent beacon block root must
             // be 0x0 and no system transaction may occur as per EIP-4788
-            if block.number == 0 && block.parent_beacon_block_root != Some(H256::zero()) {
+            if block.number == 0 {
                 if block.parent_beacon_block_root != Some(H256::zero()) {
                     return Err(
                         BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero.into()
@@ -1072,6 +1072,68 @@ mod tests {
     }
 
     #[test]
+    fn eip_4788_genesis_call() {
+        let mut db = StateProviderTest::default();
+
+        let beacon_root_contract_code = Bytes::from_str("0x3373fffffffffffffffffffffffffffffffffffffffe14604457602036146024575f5ffd5b620180005f350680545f35146037575f5ffd5b6201800001545f5260205ff35b42620180004206555f3562018000420662018000015500").unwrap();
+
+        let beacon_root_contract_account = Account {
+            balance: U256::ZERO,
+            bytecode_hash: Some(keccak256(beacon_root_contract_code.clone())),
+            nonce: 1,
+        };
+        db.insert_account(
+            BEACON_ROOTS_ADDRESS,
+            beacon_root_contract_account,
+            Some(beacon_root_contract_code),
+            HashMap::new(),
+        );
+
+        // activate cancun at genesis
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(0))
+                .build(),
+        );
+
+        let mut header = chain_spec.genesis_header();
+
+        let db = SubState::new(State::new(db));
+
+        // execute chain and verify receipts
+        let mut executor = Executor::new(chain_spec, db);
+
+        // attempt to execute the genesis block with non-zero parent beacon block root, expect err
+        header.parent_beacon_block_root = Some(H256::from_low_u64_be(0x1337));
+        let _err = executor
+            .execute_and_verify_receipt(
+                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                U256::ZERO,
+                None,
+            )
+            .expect_err(
+                "Executing genesis cancun block with non-zero parent beacon block root field should fail",
+            );
+
+        // fix header
+        header.parent_beacon_block_root = Some(H256::zero());
+
+        // now try to process the genesis block again, this time ensuring that a system contract
+        // call does not occur
+        let out = executor
+            .execute(
+                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                U256::ZERO,
+                None,
+            )
+            .unwrap();
+
+        // there is no system contract call so there should be NO STORAGE CHANGES
+        assert_eq!(out.storage_changes().len(), 0);
+    }
+
+    #[test]
     fn eip_4788_non_genesis_call() {
         let mut header = Header { timestamp: 1, number: 1, ..Header::default() };
 
@@ -1100,7 +1162,6 @@ mod tests {
             HashMap::new(),
         );
 
-        // deploy the contract at genesis
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
