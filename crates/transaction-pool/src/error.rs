@@ -235,7 +235,7 @@ impl InvalidPoolTransactionError {
                 false
             }
             InvalidPoolTransactionError::NoEip4844Blobs => {
-                // this is a malformed transaction and should be sent over the network
+                // this is a malformed transaction and should not be sent over the network
                 true
             }
             InvalidPoolTransactionError::TooManyEip4844Blobs { .. } => {
