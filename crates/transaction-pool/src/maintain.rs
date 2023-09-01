@@ -1,6 +1,7 @@
 //! Support for maintaining the state of the transaction pool
 
 use crate::{
+    blobstore::{BlobStoreCanonTracker, BlobStoreUpdates},
     metrics::MaintainPoolMetrics,
     traits::{CanonicalStateUpdate, ChangedAccount, TransactionPoolExt},
     BlockInfo, TransactionPool,
@@ -9,7 +10,9 @@ use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
 };
-use reth_primitives::{Address, BlockHash, BlockNumberOrTag, FromRecoveredTransaction};
+use reth_primitives::{
+    Address, BlockHash, BlockNumber, BlockNumberOrTag, FromRecoveredTransaction,
+};
 use reth_provider::{
     BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, PostState, StateProviderFactory,
 };
@@ -89,9 +92,17 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
             pending_basefee: latest
                 .next_block_base_fee(chain_spec.base_fee_params)
                 .unwrap_or_default(),
+            pending_blob_fee: latest.next_block_blob_fee().map(|fee| fee.saturating_to()),
         };
         pool.set_block_info(info);
     }
+
+    // keeps track of mined blob transaction so we can clean finalized transactions
+    let mut blob_store_tracker = BlobStoreCanonTracker::default();
+
+    // keeps track of the latest finalized block
+    let mut last_finalized_block =
+        FinalizedBlockTracker::new(client.finalized_block_number().ok().flatten());
 
     // keeps track of any dirty accounts that we know of are out of sync with the pool
     let mut dirty_addresses = HashSet::new();
@@ -148,6 +159,19 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
             };
             reload_accounts_fut = rx.fuse();
             task_spawner.spawn_blocking(fut);
+        }
+
+        // check if we have a new finalized block
+        if let Some(finalized) =
+            last_finalized_block.update(client.finalized_block_number().ok().flatten())
+        {
+            match blob_store_tracker.on_finalized_block(finalized) {
+                BlobStoreUpdates::None => {}
+                BlobStoreUpdates::Finalized(blobs) => {
+                    // remove all finalized blobs from the blob store
+                    pool.delete_blobs(blobs);
+                }
+            }
         }
 
         // outcomes of the futures we are waiting on
@@ -211,9 +235,11 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
 
                 let chain_spec = client.chain_spec();
 
-                // base fee for the next block: `new_tip+1`
+                // fees for the next block: `new_tip+1`
                 let pending_block_base_fee =
                     new_tip.next_block_base_fee(chain_spec.base_fee_params).unwrap_or_default();
+                let pending_block_blob_fee =
+                    new_tip.next_block_blob_fee().map(|fee| fee.saturating_to());
 
                 // we know all changed account in the new chain
                 let new_changed_accounts: HashSet<_> =
@@ -267,13 +293,12 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
 
                 // update the pool first
                 let update = CanonicalStateUpdate {
-                    hash: new_tip.hash,
-                    number: new_tip.number,
+                    new_tip: &new_tip.block,
                     pending_block_base_fee,
+                    pending_block_blob_fee,
                     changed_accounts,
                     // all transactions mined in the new chain need to be removed from the pool
                     mined_transactions: new_mined_transactions.into_iter().collect(),
-                    timestamp: new_tip.timestamp,
                 };
                 pool.on_canonical_state_change(update);
 
@@ -283,15 +308,21 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 // Note: we no longer know if the tx was local or external
                 metrics.inc_reinserted_transactions(pruned_old_transactions.len());
                 let _ = pool.add_external_transactions(pruned_old_transactions).await;
+
+                // keep track of mined blob transactions
+                // TODO(mattsse): handle reorged transactions
+                blob_store_tracker.add_new_chain_blocks(&new_blocks);
             }
             CanonStateNotification::Commit { new } => {
                 let (blocks, state) = new.inner();
                 let tip = blocks.tip();
                 let chain_spec = client.chain_spec();
 
-                // base fee for the next block: `tip+1`
+                // fees for the next block: `tip+1`
                 let pending_block_base_fee =
                     tip.next_block_base_fee(chain_spec.base_fee_params).unwrap_or_default();
+                let pending_block_blob_fee =
+                    tip.next_block_blob_fee().map(|fee| fee.saturating_to());
 
                 let first_block = blocks.first();
                 trace!(
@@ -312,8 +343,13 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                         last_seen_block_hash: tip.hash,
                         last_seen_block_number: tip.number,
                         pending_basefee: pending_block_base_fee,
+                        pending_blob_fee: pending_block_blob_fee,
                     };
                     pool.set_block_info(info);
+
+                    // keep track of mined blob transactions
+                    blob_store_tracker.add_new_chain_blocks(&blocks);
+
                     continue
                 }
 
@@ -336,15 +372,46 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
 
                 // Canonical update
                 let update = CanonicalStateUpdate {
-                    hash: tip.hash,
-                    number: tip.number,
+                    new_tip: &tip.block,
                     pending_block_base_fee,
+                    pending_block_blob_fee,
                     changed_accounts,
                     mined_transactions,
-                    timestamp: tip.timestamp,
                 };
                 pool.on_canonical_state_change(update);
+
+                // keep track of mined blob transactions
+                blob_store_tracker.add_new_chain_blocks(&blocks);
             }
+        }
+    }
+}
+
+struct FinalizedBlockTracker {
+    last_finalized_block: Option<BlockNumber>,
+}
+
+impl FinalizedBlockTracker {
+    fn new(last_finalized_block: Option<BlockNumber>) -> Self {
+        Self { last_finalized_block }
+    }
+
+    /// Updates the tracked finalized block and returns the new finalized block if it changed
+    fn update(&mut self, finalized_block: Option<BlockNumber>) -> Option<BlockNumber> {
+        match (self.last_finalized_block, finalized_block) {
+            (Some(last), Some(finalized)) => {
+                self.last_finalized_block = Some(finalized);
+                if last < finalized {
+                    Some(finalized)
+                } else {
+                    None
+                }
+            }
+            (None, Some(finalized)) => {
+                self.last_finalized_block = Some(finalized);
+                Some(finalized)
+            }
+            _ => None,
         }
     }
 }

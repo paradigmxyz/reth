@@ -7,7 +7,8 @@ use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::Result;
 use reth_primitives::{
     Address, Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders,
-    ChainSpec, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, H256,
+    ChainSpec, Header, PruneModes, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    H256,
 };
 use std::ops::RangeInclusive;
 
@@ -242,6 +243,7 @@ pub trait BlockWriter: Send + Sync {
         &self,
         block: SealedBlock,
         senders: Option<Vec<Address>>,
+        prune_modes: Option<&PruneModes>,
     ) -> Result<StoredBlockBodyIndices>;
 
     /// Appends a batch of sealed blocks to the blockchain, including sender information, and
@@ -254,6 +256,7 @@ pub trait BlockWriter: Send + Sync {
     ///
     /// - `blocks`: Vector of `SealedBlockWithSenders` instances to append.
     /// - `state`: Post-state information to update after appending.
+    /// - `prune_modes`: Optional pruning configuration.
     ///
     /// # Returns
     ///
@@ -263,5 +266,6 @@ pub trait BlockWriter: Send + Sync {
         &self,
         blocks: Vec<SealedBlockWithSenders>,
         state: PostState,
+        prune_modes: Option<&PruneModes>,
     ) -> Result<()>;
 }

@@ -132,7 +132,11 @@ where
         })
     }
 
-    // todo: docs
+    /// Calculates reward percentiles for transactions in a block header.
+    /// Given a list of percentiles and a sealed block header, this function computes
+    /// the corresponding rewards for the transactions at each percentile.
+    ///
+    /// The results are returned as a vector of U256 values.
     async fn calculate_reward_percentiles(
         &self,
         percentiles: &[f64],

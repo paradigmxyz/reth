@@ -50,6 +50,8 @@ pub fn validate_header_standalone(
         return Err(ConsensusError::BlobGasUsedUnexpected)
     } else if header.excess_blob_gas.is_some() {
         return Err(ConsensusError::ExcessBlobGasUnexpected)
+    } else if header.parent_beacon_block_root.is_some() {
+        return Err(ConsensusError::ParentBeaconBlockRootUnexpected)
     }
 
     Ok(())
@@ -451,6 +453,7 @@ pub fn validate_4844_header_with_parent(
 ///
 ///  * `blob_gas_used` exists as a header field
 ///  * `excess_blob_gas` exists as a header field
+///  * `parent_beacon_block_root` exists as a header field
 ///  * `blob_gas_used` is less than or equal to `MAX_DATA_GAS_PER_BLOCK`
 ///  * `blob_gas_used` is a multiple of `DATA_GAS_PER_BLOB`
 pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), ConsensusError> {
@@ -458,6 +461,10 @@ pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), Cons
 
     if header.excess_blob_gas.is_none() {
         return Err(ConsensusError::ExcessBlobGasMissing)
+    }
+
+    if header.parent_beacon_block_root.is_none() {
+        return Err(ConsensusError::ParentBeaconBlockRootMissing)
     }
 
     if blob_gas_used > MAX_DATA_GAS_PER_BLOCK {
@@ -633,6 +640,7 @@ mod tests {
             withdrawals_root: None,
             blob_gas_used: None,
             excess_blob_gas: None,
+            parent_beacon_block_root: None,
         };
         // size: 0x9b5
 

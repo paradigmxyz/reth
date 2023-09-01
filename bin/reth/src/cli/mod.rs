@@ -10,7 +10,7 @@ use crate::{
     stage, test_vectors,
     version::{LONG_VERSION, SHORT_VERSION},
 };
-use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
+use clap::{value_parser, ArgAction, Args, Parser, Subcommand, ValueEnum};
 use reth_primitives::ChainSpec;
 use reth_tracing::{
     tracing::{metadata::LevelFilter, Level, Subscriber},
@@ -43,13 +43,28 @@ pub struct Cli<Ext: RethCliExt = ()> {
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        global = true,
         verbatim_doc_comment,
         default_value = "mainnet",
         value_parser = genesis_value_parser,
         global = true,
     )]
     chain: Arc<ChainSpec>,
+
+    /// Add a new instance of a node.
+    ///
+    /// Configures the ports of the node to avoid conflicts with the defaults.
+    /// This is useful for running multiple nodes on the same machine.
+    ///
+    /// Max number of instances is 200. It is chosen in a way so that it's not possible to have
+    /// port numbers that conflict with each other.
+    ///
+    /// Changes to the following port numbers:
+    /// - DISCOVERY_PORT: default + `instance` - 1
+    /// - AUTH_PORT: default + `instance` * 100 - 100
+    /// - HTTP_RPC_PORT: default - `instance` + 1
+    /// - WS_RPC_PORT: default + `instance` * 2 - 2
+    #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
+    instance: u16,
 
     #[clap(flatten)]
     logs: Logs,
@@ -301,5 +316,14 @@ mod tests {
         reth.logs.log_directory = reth.logs.log_directory.join(reth.chain.chain.to_string());
         let log_dir = reth.logs.log_directory;
         assert!(log_dir.as_ref().ends_with("reth/logs/sepolia"), "{:?}", log_dir);
+    }
+
+    #[test]
+    fn override_trusted_setup_file() {
+        // We already have a test that asserts that this has been initialized,
+        // so we cheat a little bit and check that loading a random file errors.
+        let reth = Cli::<()>::try_parse_from(["reth", "node", "--trusted-setup-file", "README.md"])
+            .unwrap();
+        assert!(reth.run().is_err());
     }
 }

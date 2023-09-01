@@ -156,7 +156,7 @@
 //! - `test-utils`: Export utilities for testing
 use crate::pool::PoolInner;
 use aquamarine as _;
-use reth_primitives::{Address, BlobTransactionSidecar, TxHash, U256};
+use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
 use reth_provider::StateProviderFactory;
 use std::{
     collections::{HashMap, HashSet},
@@ -165,8 +165,8 @@ use std::{
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
 
-use crate::blobstore::{BlobStore, BlobStoreError};
 pub use crate::{
+    blobstore::{BlobStore, BlobStoreError},
     config::{
         PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP, REPLACE_BLOB_PRICE_BUMP,
         TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER, TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
@@ -180,8 +180,9 @@ pub use crate::{
     },
     traits::{
         AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
-        EthPooledTransaction, NewTransactionEvent, PendingTransactionListenerKind, PoolSize,
-        PoolTransaction, PropagateKind, PropagatedTransactions, TransactionOrigin, TransactionPool,
+        EthBlobTransactionSidecar, EthPoolTransaction, EthPooledTransaction,
+        GetPooledTransactionLimit, NewTransactionEvent, PoolSize, PoolTransaction, PropagateKind,
+        PropagatedTransactions, TransactionListenerKind, TransactionOrigin, TransactionPool,
         TransactionPoolExt,
     },
     validate::{
@@ -373,15 +374,15 @@ where
         self.pool.add_all_transactions_event_listener()
     }
 
-    fn pending_transactions_listener_for(
-        &self,
-        kind: PendingTransactionListenerKind,
-    ) -> Receiver<TxHash> {
+    fn pending_transactions_listener_for(&self, kind: TransactionListenerKind) -> Receiver<TxHash> {
         self.pool.add_pending_listener(kind)
     }
 
-    fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
-        self.pool.add_new_transaction_listener()
+    fn new_transactions_listener_for(
+        &self,
+        kind: TransactionListenerKind,
+    ) -> Receiver<NewTransactionEvent<Self::Transaction>> {
+        self.pool.add_new_transaction_listener(kind)
     }
 
     fn pooled_transaction_hashes(&self) -> Vec<TxHash> {
@@ -401,6 +402,14 @@ where
         max: usize,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pooled_transactions().into_iter().take(max).collect()
+    }
+
+    fn get_pooled_transaction_elements(
+        &self,
+        tx_hashes: Vec<TxHash>,
+        limit: GetPooledTransactionLimit,
+    ) -> Vec<PooledTransactionsElement> {
+        self.pool.get_pooled_transaction_elements(tx_hashes, limit)
     }
 
     fn best_transactions(
@@ -486,12 +495,20 @@ where
         self.pool.set_block_info(info)
     }
 
-    fn on_canonical_state_change(&self, update: CanonicalStateUpdate) {
+    fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_>) {
         self.pool.on_canonical_state_change(update);
     }
 
     fn update_accounts(&self, accounts: Vec<ChangedAccount>) {
         self.pool.update_accounts(accounts);
+    }
+
+    fn delete_blob(&self, tx: TxHash) {
+        self.pool.delete_blob(tx)
+    }
+
+    fn delete_blobs(&self, txs: Vec<TxHash>) {
+        self.pool.delete_blobs(txs)
     }
 }
 

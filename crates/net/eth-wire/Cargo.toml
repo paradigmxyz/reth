@@ -24,10 +24,11 @@ reth-rlp = { workspace = true, features = [
     "ethereum-types",
     "smol_str",
 ] }
+reth-discv4 = {path = "../discv4" }
 
 # metrics
 reth-metrics.workspace = true
-metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
+metrics.workspace = true
 
 # used for Chain and builders
 ethers-core = { workspace = true, default-features = false }

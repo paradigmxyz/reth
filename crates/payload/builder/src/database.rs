@@ -10,7 +10,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
 };
 
-/// A container type that caches all [DatabaseRef] reads from an underlying [DatabaseRef].
+/// A container type that caches reads from an underlying [DatabaseRef].
 ///
 /// This is intended to be used in conjunction with [CacheDB](reth_revm_primitives::db::CacheDB)
 /// during payload building which repeatedly accesses the same data.

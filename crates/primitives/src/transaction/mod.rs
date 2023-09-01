@@ -1,13 +1,21 @@
 use crate::{
     compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR},
+    constants::eip4844::DATA_GAS_PER_BLOB,
     keccak256, Address, Bytes, TxHash, H256,
 };
 pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
+pub use eip1559::TxEip1559;
+pub use eip2930::TxEip2930;
+pub use eip4844::{
+    BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError, TxEip4844,
+};
 pub use error::InvalidTransactionError;
+pub use legacy::TxLegacy;
 pub use meta::TransactionMeta;
 use once_cell::sync::Lazy;
+pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
 use reth_rlp::{Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
@@ -17,12 +25,6 @@ use std::mem;
 pub use tx_type::{
     TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
-
-pub use eip1559::TxEip1559;
-pub use eip2930::TxEip2930;
-pub use eip4844::{BlobTransaction, BlobTransactionSidecar, TxEip4844};
-pub use legacy::TxLegacy;
-pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 
 mod access_list;
 mod eip1559;
@@ -231,6 +233,15 @@ impl Transaction {
         }
     }
 
+    /// Returns the blob gas used for all blobs of the EIP-4844 transaction if it is an EIP-4844
+    /// transaction.
+    ///
+    /// This is the number of blobs times the [DATA_GAS_PER_BLOB] a single blob consumes.
+    pub fn blob_gas_used(&self) -> Option<u128> {
+        let tx = self.as_eip4844()?;
+        Some(tx.blob_versioned_hashes.len() as u128 * DATA_GAS_PER_BLOB as u128)
+    }
+
     /// Return the max priority fee per gas if the transaction is an EIP-1559 transaction, and
     /// otherwise return the gas price.
     ///
@@ -386,6 +397,62 @@ impl Transaction {
             Transaction::Eip2930(tx) => tx.size(),
             Transaction::Eip1559(tx) => tx.size(),
             Transaction::Eip4844(tx) => tx.size(),
+        }
+    }
+
+    /// Returns true if the transaction is a legacy transaction.
+    #[inline]
+    pub fn is_legacy(&self) -> bool {
+        matches!(self, Transaction::Legacy(_))
+    }
+
+    /// Returns true if the transaction is an EIP-2930 transaction.
+    #[inline]
+    pub fn is_eip2930(&self) -> bool {
+        matches!(self, Transaction::Eip2930(_))
+    }
+
+    /// Returns true if the transaction is an EIP-1559 transaction.
+    #[inline]
+    pub fn is_eip1559(&self) -> bool {
+        matches!(self, Transaction::Eip1559(_))
+    }
+
+    /// Returns true if the transaction is an EIP-4844 transaction.
+    #[inline]
+    pub fn is_eip4844(&self) -> bool {
+        matches!(self, Transaction::Eip4844(_))
+    }
+
+    /// Returns the [TxLegacy] variant if the transaction is a legacy transaction.
+    pub fn as_legacy(&self) -> Option<&TxLegacy> {
+        match self {
+            Transaction::Legacy(tx) => Some(tx),
+            _ => None,
+        }
+    }
+
+    /// Returns the [TxEip2930] variant if the transaction is an EIP-2930 transaction.
+    pub fn as_eip2830(&self) -> Option<&TxEip2930> {
+        match self {
+            Transaction::Eip2930(tx) => Some(tx),
+            _ => None,
+        }
+    }
+
+    /// Returns the [TxEip1559] variant if the transaction is an EIP-1559 transaction.
+    pub fn as_eip1559(&self) -> Option<&TxEip1559> {
+        match self {
+            Transaction::Eip1559(tx) => Some(tx),
+            _ => None,
+        }
+    }
+
+    /// Returns the [TxEip4844] variant if the transaction is an EIP-4844 transaction.
+    pub fn as_eip4844(&self) -> Option<&TxEip4844> {
+        match self {
+            Transaction::Eip4844(tx) => Some(tx),
+            _ => None,
         }
     }
 }
@@ -1087,6 +1154,16 @@ impl FromRecoveredTransaction for TransactionSignedEcRecovered {
     fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
         tx
     }
+}
+
+/// A transaction type that can be created from a [`PooledTransactionsElementEcRecovered`]
+/// transaction.
+///
+/// This is a conversion trait that'll ensure transactions received via P2P can be converted to the
+/// transaction type that the transaction pool uses.
+pub trait FromRecoveredPooledTransaction {
+    /// Converts to this type from the given [`PooledTransactionsElementEcRecovered`].
+    fn from_recovered_transaction(tx: PooledTransactionsElementEcRecovered) -> Self;
 }
 
 /// The inverse of [`FromRecoveredTransaction`] that ensure the transaction can be sent over the
