@@ -114,30 +114,10 @@ impl PoolError {
     }
 }
 
-/// Represents errors that can happen when validating transactions for the pool
-///
-/// See [TransactionValidator](crate::TransactionValidator).
+/// Represents all errors that can happen when validating transactions for the pool for EIP-4844
+/// transactions
 #[derive(Debug, thiserror::Error)]
-pub enum InvalidPoolTransactionError {
-    /// Hard consensus errors
-    #[error(transparent)]
-    Consensus(#[from] InvalidTransactionError),
-    /// Thrown when a new transaction is added to the pool, but then immediately discarded to
-    /// respect the size limits of the pool.
-    #[error("Transaction's gas limit {0} exceeds block's gas limit {1}.")]
-    ExceedsGasLimit(u64, u64),
-    /// Thrown when a new transaction is added to the pool, but then immediately discarded to
-    /// respect the max_init_code_size.
-    #[error("Transaction's size {0} exceeds max_init_code_size {1}.")]
-    ExceedsMaxInitCodeSize(usize, usize),
-    /// Thrown if the input data of a transaction is greater
-    /// than some meaningful limit a user might use. This is not a consensus error
-    /// making the transaction invalid, rather a DOS protection.
-    #[error("Input data too large")]
-    OversizedData(usize, usize),
-    /// Thrown if the transaction's fee is below the minimum fee
-    #[error("transaction underpriced")]
-    Underpriced,
+pub enum Eip4844PoolTransactionError {
     /// Thrown if we're unable to find the blob for a transaction that was previously extracted
     #[error("blob sidecar not found for EIP4844 transaction")]
     MissingEip4844BlobSidecar,
@@ -163,6 +143,35 @@ pub enum InvalidPoolTransactionError {
     /// would introduce gap in the nonce sequence.
     #[error("Nonce too high.")]
     Eip4844NonceGap,
+}
+
+/// Represents errors that can happen when validating transactions for the pool
+///
+/// See [TransactionValidator](crate::TransactionValidator).
+#[derive(Debug, thiserror::Error)]
+pub enum InvalidPoolTransactionError {
+    /// Hard consensus errors
+    #[error(transparent)]
+    Consensus(#[from] InvalidTransactionError),
+    /// Thrown when a new transaction is added to the pool, but then immediately discarded to
+    /// respect the size limits of the pool.
+    #[error("Transaction's gas limit {0} exceeds block's gas limit {1}.")]
+    ExceedsGasLimit(u64, u64),
+    /// Thrown when a new transaction is added to the pool, but then immediately discarded to
+    /// respect the max_init_code_size.
+    #[error("Transaction's size {0} exceeds max_init_code_size {1}.")]
+    ExceedsMaxInitCodeSize(usize, usize),
+    /// Thrown if the input data of a transaction is greater
+    /// than some meaningful limit a user might use. This is not a consensus error
+    /// making the transaction invalid, rather a DOS protection.
+    #[error("Input data too large")]
+    OversizedData(usize, usize),
+    /// Thrown if the transaction's fee is below the minimum fee
+    #[error("transaction underpriced")]
+    Underpriced,
+    /// Eip-4844 related errors
+    #[error(transparent)]
+    Eip4844(#[from] Eip4844PoolTransactionError),
     /// Any other error that occurred while inserting/validating that is transaction specific
     #[error("{0:?}")]
     Other(Box<dyn PoolTransactionError>),
@@ -220,27 +229,31 @@ impl InvalidPoolTransactionError {
                 false
             }
             InvalidPoolTransactionError::Other(err) => err.is_bad_transaction(),
-            InvalidPoolTransactionError::MissingEip4844BlobSidecar => {
-                // this is only reachable when blob transactions are reinjected and we're unable to
-                // find the previously extracted blob
-                false
-            }
-            InvalidPoolTransactionError::InvalidEip4844Blob(_) => {
-                // This is only reachable when the blob is invalid
-                true
-            }
-            InvalidPoolTransactionError::Eip4844NonceGap => {
-                // it is possible that the pool sees `nonce n` before `nonce n-1` and this is only
-                // thrown for valid(good) blob transactions
-                false
-            }
-            InvalidPoolTransactionError::NoEip4844Blobs => {
-                // this is a malformed transaction and should not be sent over the network
-                true
-            }
-            InvalidPoolTransactionError::TooManyEip4844Blobs { .. } => {
-                // this is a malformed transaction and should not be sent over the network
-                true
+            InvalidPoolTransactionError::Eip4844(eip4844_err) => {
+                match eip4844_err {
+                    Eip4844PoolTransactionError::MissingEip4844BlobSidecar => {
+                        // this is only reachable when blob transactions are reinjected and we're
+                        // unable to find the previously extracted blob
+                        false
+                    }
+                    Eip4844PoolTransactionError::InvalidEip4844Blob(_) => {
+                        // This is only reachable when the blob is invalid
+                        true
+                    }
+                    Eip4844PoolTransactionError::Eip4844NonceGap => {
+                        // it is possible that the pool sees `nonce n` before `nonce n-1` and this
+                        // is only thrown for valid(good) blob transactions
+                        false
+                    }
+                    Eip4844PoolTransactionError::NoEip4844Blobs => {
+                        // this is a malformed transaction and should not be sent over the network
+                        true
+                    }
+                    Eip4844PoolTransactionError::TooManyEip4844Blobs { .. } => {
+                        // this is a malformed transaction and should not be sent over the network
+                        true
+                    }
+                }
             }
         }
     }
