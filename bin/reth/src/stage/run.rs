@@ -12,7 +12,7 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_db::init_db;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
-use reth_primitives::ChainSpec;
+use reth_primitives::{ChainSpec, PruneModes};
 use reth_provider::{ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     stages::{
@@ -208,7 +208,9 @@ impl Command {
                         None,
                     )
                 }
-                StageEnum::TxLookup => (Box::new(TransactionLookupStage::new(batch_size)), None),
+                StageEnum::TxLookup => {
+                    (Box::new(TransactionLookupStage::new(batch_size, PruneModes::none())), None)
+                }
                 StageEnum::AccountHashing => {
                     (Box::new(AccountHashingStage::new(1, batch_size)), None)
                 }
