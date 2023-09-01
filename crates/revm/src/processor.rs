@@ -17,7 +17,11 @@ use reth_primitives::{
 use reth_provider::{
     change::BundleStateWithReceipts, BlockExecutor, BlockExecutorStats, StateProvider,
 };
-use revm::{db::State, primitives::ResultAndState, DatabaseCommit, StateBuilder, EVM};
+use revm::{
+    db::{states::bundle_state::BundleRetention, State},
+    primitives::ResultAndState,
+    DatabaseCommit, StateBuilder, EVM,
+};
 use std::{sync::Arc, time::Instant};
 use tracing::{debug, trace};
 
@@ -306,11 +310,15 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         self.stats.apply_post_execution_changes_duration += time.elapsed();
 
         let time = Instant::now();
-        let with_reverts = self.tip.map_or(true, |tip| {
+        let retention = if self.tip.map_or(true, |tip| {
             !self.prune_modes.should_prune_account_history(block.number, tip) &&
                 !self.prune_modes.should_prune_storage_history(block.number, tip)
-        });
-        self.db().merge_transitions(with_reverts);
+        }) {
+            BundleRetention::Reverts
+        } else {
+            BundleRetention::PlainState
+        };
+        self.db().merge_transitions(retention);
         self.stats.merge_transitions_duration += time.elapsed();
 
         if self.first_block == 0 {

@@ -9,7 +9,7 @@ use reth_primitives::{
 use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::{database::RevmDatabase, env::tx_env_with_recovered, into_reth_log, StateBuilder};
 use reth_transaction_pool::TransactionPool;
-use revm::DatabaseCommit;
+use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit};
 use revm_primitives::{BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState};
 use std::time::Instant;
 
@@ -112,7 +112,7 @@ impl PendingBlockEnv {
             executed_txs.push(tx.into_signed());
         }
         // merge made transitions into bundle state.
-        db.merge_transitions(false);
+        db.merge_transitions(BundleRetention::PlainState);
 
         let bundle = BundleStateWithReceipts::new(db.take_bundle(), vec![receipts], block_number);
 

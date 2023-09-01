@@ -44,7 +44,7 @@ use reth_rlp::Encodable;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::{
-    db::WrapDatabaseRef,
+    db::{states::bundle_state::BundleRetention, WrapDatabaseRef},
     primitives::{BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState},
     DatabaseCommit,
 };
@@ -752,7 +752,7 @@ where
         commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
 
     // merge made transaction into bundle state.
-    db.merge_transitions(false);
+    db.merge_transitions(BundleRetention::PlainState);
 
     let bundle = BundleStateWithReceipts::new(db.take_bundle(), vec![receipts], block_number);
     let receipts_root = bundle.receipts_root_slow(block_number).expect("Number is in range");
@@ -829,7 +829,7 @@ where
         commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
 
     // merge transition, this would apply the withdrawal balance changes.
-    db.merge_transitions(false);
+    db.merge_transitions(BundleRetention::PlainState);
 
     // calculate the state root
     let bundle_state = BundleStateWithReceipts::new(db.take_bundle(), vec![], block_number);

@@ -35,7 +35,10 @@ use reth_provider::{
     BlockExecutor, BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotificationSender,
     StateProviderFactory,
 };
-use reth_revm::{database::RevmDatabase, processor::EVMProcessor, StateBuilder};
+use reth_revm::{
+    database::RevmDatabase, db::states::bundle_state::BundleRetention, processor::EVMProcessor,
+    StateBuilder,
+};
 use reth_transaction_pool::TransactionPool;
 use std::{
     collections::HashMap,
@@ -309,7 +312,7 @@ impl StorageInner {
         executor.post_execution_state_change(block, U256::ZERO)?;
 
         // merge transitions
-        executor.db().merge_transitions(true);
+        executor.db().merge_transitions(BundleRetention::Reverts);
 
         // apply post block changes
         Ok((executor.take_output_state(), gas_used))
