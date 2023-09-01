@@ -26,3 +26,8 @@ tracing.workspace = true
 [dev-dependencies]
 reth-rlp.workspace = true
 once_cell = "1.17.0"
+
+# for creating keys, signing, mostly for eip4788 contract deployment / usage
+# tests
+reth-interfaces = { workspace = true, features = ["test-utils"] }
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
