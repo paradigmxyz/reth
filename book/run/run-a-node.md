@@ -7,7 +7,7 @@ In this chapter we'll go through a few different topics you'll encounter when ru
 1. [Logs and Observability](./observability.md)
 1. [Configuring reth.toml](./config.md)
 1. [Transaction types](./transactions.md)
-1. [Pruning](./pruning.md)
+1. [Pruning & Full Node](./pruning.md)
 1. [Ports](./ports.md)
 1. [Troubleshooting](./troubleshooting.md)
 

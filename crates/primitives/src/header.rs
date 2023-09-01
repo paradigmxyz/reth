@@ -8,6 +8,7 @@ use crate::{
 };
 use bytes::{Buf, BufMut, BytesMut};
 
+use crate::constants::eip4844::blob_fee;
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, Encodable, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
 use serde::{Deserialize, Serialize};
@@ -100,8 +101,13 @@ pub struct Header {
     /// with above-target blob gas consumption increase this value, blocks with below-target blob
     /// gas consumption decrease it (bounded at 0). This was added in EIP-4844.
     pub excess_blob_gas: Option<u64>,
-    /// TODO: Docs
-    /// This was added in EIP-4788.
+    /// The hash of the parent beacon block's root is included in execution blocks, as proposed by
+    /// EIP-4788.
+    ///
+    /// This enables trust-minimized access to consensus state, supporting staking pools, bridges,
+    /// and more.
+    ///
+    /// The beacon roots contract handles root storage, enhancing Ethereum's functionalities.
     pub parent_beacon_block_root: Option<H256>,
     /// An arbitrary byte array containing data relevant to this block. This must be 32 bytes or
     /// fewer; formally Hx.
@@ -176,6 +182,22 @@ impl Header {
             ommers_hash: self.ommers_hash,
             withdrawals_root: self.withdrawals_root,
         }
+    }
+
+    /// Returns the blob fee for _this_ block according to the EIP-4844 spec.
+    ///
+    /// Returns `None` if `excess_blob_gas` is None
+    pub fn blob_fee(&self) -> Option<U256> {
+        self.excess_blob_gas.map(blob_fee)
+    }
+
+    /// Returns the blob fee for the next block according to the EIP-4844 spec.
+    ///
+    /// Returns `None` if `excess_blob_gas` is None.
+    ///
+    /// See also [Self::next_block_excess_blob_gas]
+    pub fn next_block_blob_fee(&self) -> Option<U256> {
+        self.next_block_excess_blob_gas().map(blob_fee)
     }
 
     /// Calculate base fee for next block according to the EIP-1559 spec.

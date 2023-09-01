@@ -9,7 +9,10 @@ use crate::{
     TransactionValidationTaskExecutor, TransactionValidator,
 };
 use reth_primitives::{
-    constants::{eip4844::KZG_TRUSTED_SETUP, ETHEREUM_BLOCK_GAS_LIMIT},
+    constants::{
+        eip4844::{MAINNET_KZG_TRUSTED_SETUP, MAX_BLOBS_PER_BLOCK},
+        ETHEREUM_BLOCK_GAS_LIMIT,
+    },
     kzg::KzgSettings,
     ChainSpec, InvalidTransactionError, SealedBlock, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
     EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
@@ -233,6 +236,26 @@ where
                 )
             }
 
+            let blob_count = transaction.blob_count();
+            if blob_count == 0 {
+                // no blobs
+                return TransactionValidationOutcome::Invalid(
+                    transaction,
+                    InvalidPoolTransactionError::NoEip4844Blobs,
+                )
+            }
+
+            if blob_count > MAX_BLOBS_PER_BLOCK {
+                // too many blobs
+                return TransactionValidationOutcome::Invalid(
+                    transaction,
+                    InvalidPoolTransactionError::TooManyEip4844Blobs {
+                        have: blob_count,
+                        permitted: MAX_BLOBS_PER_BLOCK,
+                    },
+                )
+            }
+
             // extract the blob from the transaction
             match transaction.take_blob() {
                 EthBlobTransactionSidecar::None => {
@@ -248,7 +271,7 @@ where
                     } else {
                         return TransactionValidationOutcome::Invalid(
                             transaction,
-                            InvalidPoolTransactionError::MissingEip4844Blob,
+                            InvalidPoolTransactionError::MissingEip4844BlobSidecar,
                         )
                     }
                 }
@@ -414,7 +437,7 @@ impl EthTransactionValidatorBuilder {
             additional_tasks: 1,
             // default to true, can potentially take this as a param in the future
             propagate_local_transactions: true,
-            kzg_settings: Arc::clone(&KZG_TRUSTED_SETUP),
+            kzg_settings: Arc::clone(&MAINNET_KZG_TRUSTED_SETUP),
 
             // by default all transaction types are allowed
             eip2718: true,

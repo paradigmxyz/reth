@@ -92,6 +92,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
             pending_basefee: latest
                 .next_block_base_fee(chain_spec.base_fee_params)
                 .unwrap_or_default(),
+            pending_blob_fee: latest.next_block_blob_fee().map(|fee| fee.saturating_to()),
         };
         pool.set_block_info(info);
     }
@@ -234,9 +235,11 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
 
                 let chain_spec = client.chain_spec();
 
-                // base fee for the next block: `new_tip+1`
+                // fees for the next block: `new_tip+1`
                 let pending_block_base_fee =
                     new_tip.next_block_base_fee(chain_spec.base_fee_params).unwrap_or_default();
+                let pending_block_blob_fee =
+                    new_tip.next_block_blob_fee().map(|fee| fee.saturating_to());
 
                 // we know all changed account in the new chain
                 let new_changed_accounts: HashSet<_> =
@@ -292,6 +295,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 let update = CanonicalStateUpdate {
                     new_tip: &new_tip.block,
                     pending_block_base_fee,
+                    pending_block_blob_fee,
                     changed_accounts,
                     // all transactions mined in the new chain need to be removed from the pool
                     mined_transactions: new_mined_transactions.into_iter().collect(),
@@ -314,9 +318,11 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 let tip = blocks.tip();
                 let chain_spec = client.chain_spec();
 
-                // base fee for the next block: `tip+1`
+                // fees for the next block: `tip+1`
                 let pending_block_base_fee =
                     tip.next_block_base_fee(chain_spec.base_fee_params).unwrap_or_default();
+                let pending_block_blob_fee =
+                    tip.next_block_blob_fee().map(|fee| fee.saturating_to());
 
                 let first_block = blocks.first();
                 trace!(
@@ -337,6 +343,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                         last_seen_block_hash: tip.hash,
                         last_seen_block_number: tip.number,
                         pending_basefee: pending_block_base_fee,
+                        pending_blob_fee: pending_block_blob_fee,
                     };
                     pool.set_block_info(info);
 
@@ -367,6 +374,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 let update = CanonicalStateUpdate {
                     new_tip: &tip.block,
                     pending_block_base_fee,
+                    pending_block_blob_fee,
                     changed_accounts,
                     mined_transactions,
                 };

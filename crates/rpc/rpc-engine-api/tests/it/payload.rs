@@ -10,7 +10,9 @@ use reth_primitives::{
     Block, SealedBlock, TransactionSigned, H256, U256,
 };
 use reth_rlp::{Decodable, DecodeError};
-use reth_rpc_types::engine::{ExecutionPayload, ExecutionPayloadBodyV1, PayloadError};
+use reth_rpc_types::engine::{
+    ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadV1, PayloadError,
+};
 
 fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> ExecutionPayload {
     let unsealed = src.unseal();
@@ -81,12 +83,13 @@ fn payload_validation() {
     );
 
     // Invalid encoded transactions
-    let mut payload_with_invalid_txs: ExecutionPayload = block.clone().into();
+    let mut payload_with_invalid_txs: ExecutionPayloadV1 = block.clone().into();
     payload_with_invalid_txs.transactions.iter_mut().for_each(|tx| {
         *tx = Bytes::new().into();
     });
+    let payload_with_invalid_txs = Block::try_from(payload_with_invalid_txs);
     assert_matches!(
-        payload_with_invalid_txs.try_into_sealed_block(None),
+        payload_with_invalid_txs,
         Err(PayloadError::Decode(DecodeError::InputTooShort))
     );
 
@@ -98,7 +101,7 @@ fn payload_validation() {
     assert_matches!(
         block_with_ommers.clone().try_into_sealed_block(None),
         Err(PayloadError::BlockHash { consensus, .. })
-            if consensus == block_with_ommers.block_hash
+            if consensus == block_with_ommers.block_hash()
     );
 
     // None zero difficulty
@@ -108,7 +111,7 @@ fn payload_validation() {
     });
     assert_matches!(
         block_with_difficulty.clone().try_into_sealed_block(None),
-        Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_difficulty.block_hash
+        Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_difficulty.block_hash()
     );
 
     // None zero nonce
@@ -118,7 +121,7 @@ fn payload_validation() {
     });
     assert_matches!(
         block_with_nonce.clone().try_into_sealed_block(None),
-        Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_nonce.block_hash
+        Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_nonce.block_hash()
     );
 
     // Valid block
