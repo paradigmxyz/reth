@@ -42,6 +42,7 @@ jsonrpsee.workspace = true
 http = "0.2.8"
 http-body = "0.4.5"
 hyper = "0.14.24"
+reqwest = "0.11.20"
 jsonwebtoken = "8"
 
 # async
