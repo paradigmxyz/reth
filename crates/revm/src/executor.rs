@@ -351,9 +351,7 @@ where
                     parent_beacon_block_root,
                 );
 
-                // TODO: "if no code exists then the call must fail silently"
-                // TODO: determine if error is appropriate here
-                let ResultAndState { result: _result, state } =
+                let ResultAndState { state, .. } =
                     self.evm.transact().map_err(|e| {
                         BlockExecutionError::from(BlockValidationError::EVM {
                             hash: Default::default(),
