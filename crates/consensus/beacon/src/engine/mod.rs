@@ -914,11 +914,11 @@ where
         error: Error,
     ) -> PayloadStatus {
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
-        warn!(target: "consensus::engine", ?error, ?state, "Failed to canonicalize the head hash");
 
         // check if the new head was previously invalidated, if so then we deem this FCU
         // as invalid
         if let Some(invalid_ancestor) = self.check_invalid_ancestor(state.head_block_hash) {
+            warn!(target: "consensus::engine", ?error, ?state, ?invalid_ancestor, head=?state.head_block_hash, "Failed to canonicalize the head hash, head is also considered invalid");
             debug!(target: "consensus::engine", head=?state.head_block_hash, current_error=?error, "Head was previously marked as invalid");
             return invalid_ancestor
         }
@@ -930,12 +930,19 @@ where
                     ..
                 }),
             ) => {
+                warn!(target: "consensus::engine", ?error, ?state, "Failed to canonicalize the head hash");
                 return PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                     validation_error: error.to_string(),
                 })
                 .with_latest_valid_hash(H256::zero())
             }
+            Error::Execution(BlockExecutionError::BlockHashNotFoundInChain { .. }) => {
+                // This just means we couldn't find the block when attempting to make it canonical,
+                // so we should not warn the user, since this will result in us attempting to sync
+                // to a new target and is considered normal operation during sync
+            }
             _ => {
+                warn!(target: "consensus::engine", ?error, ?state, "Failed to canonicalize the head hash");
                 // TODO(mattsse) better error handling before attempting to sync (FCU could be
                 // invalid): only trigger sync if we can't determine whether the FCU is invalid
             }
@@ -976,6 +983,7 @@ where
             self.sync.download_full_block(target);
         }
 
+        debug!(target: "consensus::engine", ?target, "Syncing to new target");
         PayloadStatus::from_status(PayloadStatusEnum::Syncing)
     }
 
