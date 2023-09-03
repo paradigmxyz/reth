@@ -571,11 +571,10 @@ pub trait BestTransactions: Iterator + Send {
     /// listen to pool updates.
     fn no_updates(&mut self);
 
-    /// Skip all blob transactions (is_eip4844).
+    /// Set the skip_blobs flag to control whether to skip blob transactions (is_eip4844).
     ///
-    /// This function will skip all blob transactions in the iterator and mark them as invalid
-    /// internally so that dependent transactions are not yielded.
-    fn skip_blob_transactions(&mut self);
+    /// This flag will control whether the iterator skips blob transactions or not.
+    fn set_skip_blobs(&mut self, skip_blobs: bool);
 }
 
 /// A no-op implementation that yields no transactions.
@@ -584,7 +583,7 @@ impl<T> BestTransactions for std::iter::Empty<T> {
 
     fn no_updates(&mut self) {}
 
-    fn skip_blob_transactions(&mut self) {}
+    fn set_skip_blobs(&mut self, _skip_blobs: bool) {}
 }
 
 /// Trait for transaction types used inside the pool

@@ -30,8 +30,8 @@ impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransaction
         self.best.no_updates()
     }
 
-    fn skip_blob_transactions(&mut self) {
-        self.best.skip_blob_transactions()
+    fn set_skip_blobs(&mut self, skip_blobs: bool) {
+        self.best.set_skip_blobs(skip_blobs)
     }
 }
 
@@ -76,6 +76,8 @@ pub(crate) struct BestTransactions<T: TransactionOrdering> {
     /// These new pending transactions are inserted into this iterator's pool before yielding the
     /// next value
     pub(crate) new_transaction_receiver: Option<Receiver<PendingTransaction<T>>>,
+    /// Flag to control whether to skip blob transactions (EIP4844).
+    pub(crate) skip_blobs: bool,
 }
 
 impl<T: TransactionOrdering> BestTransactions<T> {
@@ -139,19 +141,8 @@ impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransaction
         self.new_transaction_receiver.take();
     }
 
-    fn skip_blob_transactions(&mut self) {
-        while let Some(pending_tx) = self.try_recv() {
-            let tx = pending_tx.transaction.clone();
-            if tx.transaction.is_eip4844() {
-                self.mark_invalid(&tx)
-            } else {
-                let tx_id = *tx.id();
-                if self.ancestor(&tx_id).is_none() {
-                    self.independent.insert(pending_tx.clone());
-                }
-                self.all.insert(tx_id, pending_tx);
-            }
-        }
+    fn set_skip_blobs(&mut self, skip_blobs: bool) {
+        self.skip_blobs = skip_blobs;
     }
 }
 
@@ -180,7 +171,11 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
                 self.independent.insert(unlocked.clone());
             }
 
-            return Some(best.transaction)
+            if self.skip_blobs && best.transaction.transaction.is_eip4844() {
+                self.mark_invalid(&best.transaction)
+            } else {
+                return Some(best.transaction)
+            }
         }
     }
 }
