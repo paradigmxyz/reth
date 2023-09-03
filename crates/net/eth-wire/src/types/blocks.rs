@@ -351,7 +351,7 @@ mod test {
                             gas_limit: 0x2e248u64,
                             to:
     TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
-                            value: U256::from(0x200u64),
+                            value: 0x200u64.into(),
                             input: Default::default(),
                         }),
                         Signature {
@@ -369,7 +369,7 @@ mod test {
                             gas_limit: 0x33450u64,
                             to:
     TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
-                            value: U256::from(0x2d9u64),
+                            value: 0x2d9u64.into(),
                             input: Default::default(),
                         }), Signature {
                                 odd_y_parity: false,
@@ -437,7 +437,7 @@ mod test {
                             gas_limit: 0x2e248u64,
                             to:
     TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
-                            value: U256::from(0x200u64),
+                            value: 0x200u64.into(),
                             input: Default::default(),
                         }),
                         Signature {
@@ -455,7 +455,7 @@ mod test {
                             gas_limit: 0x33450u64,
                             to:
     TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
-                            value: U256::from(0x2d9u64),
+                            value: 0x2d9u64.into(),
                             input: Default::default(),
                         }),
                         Signature {

@@ -186,7 +186,7 @@ where
                 TransactionKind::Call(to) => TransactTo::Call(*to),
                 TransactionKind::Create => TransactTo::create(),
             };
-            tx_env.value = U256::from(*value);
+            tx_env.value = (*value).into();
             tx_env.data = input.clone();
             tx_env.chain_id = *chain_id;
             tx_env.nonce = Some(*nonce);
@@ -209,7 +209,7 @@ where
                 TransactionKind::Call(to) => TransactTo::Call(*to),
                 TransactionKind::Create => TransactTo::create(),
             };
-            tx_env.value = U256::from(*value);
+            tx_env.value = (*value).into();
             tx_env.data = input.clone();
             tx_env.chain_id = Some(*chain_id);
             tx_env.nonce = Some(*nonce);
@@ -239,7 +239,7 @@ where
                 TransactionKind::Call(to) => TransactTo::Call(*to),
                 TransactionKind::Create => TransactTo::create(),
             };
-            tx_env.value = U256::from(*value);
+            tx_env.value = (*value).into();
             tx_env.data = input.clone();
             tx_env.chain_id = Some(*chain_id);
             tx_env.nonce = Some(*nonce);
@@ -271,7 +271,7 @@ where
                 TransactionKind::Call(to) => TransactTo::Call(*to),
                 TransactionKind::Create => TransactTo::create(),
             };
-            tx_env.value = U256::from(*value);
+            tx_env.value = (*value).into();
             tx_env.data = input.clone();
             tx_env.chain_id = Some(*chain_id);
             tx_env.nonce = Some(*nonce);
