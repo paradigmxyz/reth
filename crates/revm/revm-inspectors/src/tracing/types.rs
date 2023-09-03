@@ -1,6 +1,12 @@
 //! Types for representing call trace items.
 
-use crate::tracing::{config::TraceStyle, utils::convert_memory};
+use std::collections::{btree_map::Entry, BTreeMap, VecDeque};
+
+use revm::interpreter::{
+    opcode, CallContext, CallScheme, CreateScheme, InstructionResult, Memory, OpCode, Stack,
+};
+use serde::{Deserialize, Serialize};
+
 use reth_primitives::{abi::decode_revert_reason, bytes::Bytes, Address, H256, U256};
 use reth_rpc_types::trace::{
     geth::{AccountState, CallFrame, CallLogFrame, GethDefaultTracingOptions, StructLog},
@@ -9,11 +15,8 @@ use reth_rpc_types::trace::{
         CreateOutput, Delta, SelfdestructAction, StateDiff, TraceOutput, TransactionTrace,
     },
 };
-use revm::interpreter::{
-    opcode, CallContext, CallScheme, CreateScheme, InstructionResult, Memory, OpCode, Stack,
-};
-use serde::{Deserialize, Serialize};
-use std::collections::{btree_map::Entry, BTreeMap, VecDeque};
+
+use crate::tracing::{config::TraceStyle, utils::convert_memory};
 
 /// A unified representation of a call
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -309,7 +312,7 @@ impl CallTraceNode {
 
         // iterate over all storage diffs
         for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
-            let StorageChange { key, value, had_value } = change;
+            let StorageChange { key, value, had_value, reason: _ } = change;
             let h256_value = H256::from(value);
             match acc.storage.entry(key.into()) {
                 Entry::Vacant(entry) => {
@@ -516,7 +519,7 @@ impl CallTraceNode {
         let addr = self.trace.address;
         let acc_state = account_states.entry(addr).or_default();
         for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
-            let StorageChange { key, value, had_value } = change;
+            let StorageChange { key, value, had_value, reason: _ } = change;
             let storage_map = acc_state.storage.get_or_insert_with(BTreeMap::new);
             let value_to_insert = if post_value {
                 H256::from(value)
@@ -527,6 +530,69 @@ impl CallTraceNode {
                 }
             };
             storage_map.insert(key.into(), value_to_insert);
+        }
+    }
+
+    pub(crate) fn geth_update_account_storage_diff_mode(
+        &self,
+        account_states: &mut BTreeMap<Address, AccountState>,
+        post_value: bool,
+    ) {
+        let changes = self.trace.steps.iter().filter_map(|s| s.storage_change);
+
+        let mut changed_slots: BTreeMap<U256, Vec<StorageChange>> = BTreeMap::new();
+        for change in changes {
+            changed_slots.entry(change.key).or_default().push(change);
+        }
+
+        let addr = self.execution_address();
+        for (slot, changes) in changed_slots {
+            let mut initial_value: Option<U256> = account_states
+                .entry(addr)
+                .or_default()
+                .storage
+                .clone()
+                .unwrap_or_else(BTreeMap::new)
+                .get(&H256::from(slot))
+                .map(|v| {
+                    let conv: U256 = v.clone().into();
+                    conv
+                });
+            let mut final_value: Option<U256> = None;
+
+            for change in changes {
+                if initial_value.is_none() {
+                    initial_value = match change.reason {
+                        StorageChangeReason::SSTORE => match change.had_value {
+                            Some(had_value) => Some(had_value),
+                            None => Some(U256::default()),
+                        },
+                        StorageChangeReason::SLOAD => Some(change.value),
+                    };
+                }
+
+                if change.reason == StorageChangeReason::SSTORE {
+                    final_value = Some(change.value);
+                }
+            }
+
+            if final_value.is_none() || initial_value.is_none() {
+                continue
+            }
+
+            if initial_value == final_value {
+                continue
+            }
+
+            let value_to_write =
+                if post_value { final_value.unwrap() } else { initial_value.unwrap() };
+
+            account_states
+                .entry(addr)
+                .or_default()
+                .storage
+                .get_or_insert_with(BTreeMap::new)
+                .insert(H256::from(slot), H256::from(value_to_write));
         }
     }
 }
@@ -666,10 +732,19 @@ impl CallTraceStep {
     }
 }
 
+/// Represents the source of a storage change - e.g., whether it came
+/// from an SSTORE or SLOAD instruction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StorageChangeReason {
+    SLOAD,
+    SSTORE,
+}
+
 /// Represents a storage change during execution
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct StorageChange {
     pub(crate) key: U256,
     pub(crate) value: U256,
     pub(crate) had_value: Option<U256>,
+    pub(crate) reason: StorageChangeReason,
 }

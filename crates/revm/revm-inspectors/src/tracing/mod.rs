@@ -24,7 +24,7 @@ mod types;
 mod utils;
 use crate::tracing::{
     arena::PushTraceKind,
-    types::{CallTraceNode, StorageChange},
+    types::{CallTraceNode, StorageChange, StorageChangeReason},
     utils::gas_used,
 };
 pub use builder::{
@@ -315,38 +315,42 @@ impl TracingInspector {
             }
         }
 
-        if let Some(pc) = interp.program_counter().checked_sub(1) {
-            if self.config.record_state_diff {
-                let op = interp.contract.bytecode.bytecode()[pc];
+        let pc = step.pc;
 
-                let journal_entry = data
-                    .journaled_state
-                    .journal
-                    .last()
-                    // This should always work because revm initializes it as `vec![vec![]]`
-                    // See [JournaledState::new](revm::JournaledState)
-                    .expect("exists; initialized with vec")
-                    .last();
+        if self.config.record_state_diff {
+            let op = interp.contract.bytecode.bytecode()[pc];
 
-                step.storage_change = match (op, journal_entry) {
-                    (
-                        opcode::SLOAD | opcode::SSTORE,
-                        Some(JournalEntry::StorageChange { address, key, had_value }),
-                    ) => {
-                        // SAFETY: (Address,key) exists if part if StorageChange
-                        let value =
-                            data.journaled_state.state[address].storage[key].present_value();
-                        let change = StorageChange { key: *key, value, had_value: *had_value };
-                        Some(change)
-                    }
-                    _ => None,
-                };
-            }
+            let journal_entry = data
+                .journaled_state
+                .journal
+                .last()
+                // This should always work because revm initializes it as `vec![vec![]]`
+                // See [JournaledState::new](revm::JournaledState)
+                .expect("exists; initialized with vec")
+                .last();
 
-            // The gas cost is the difference between the recorded gas remaining at the start of the
-            // step the remaining gas here, at the end of the step.
-            step.gas_cost = step.gas_remaining - self.gas_inspector.gas_remaining();
+            step.storage_change = match (op, journal_entry) {
+                (
+                    opcode::SLOAD | opcode::SSTORE,
+                    Some(JournalEntry::StorageChange { address, key, had_value }),
+                ) => {
+                    // SAFETY: (Address,key) exists if part if StorageChange
+                    let value = data.journaled_state.state[address].storage[key].present_value();
+                    let reason = match op {
+                        opcode::SLOAD => StorageChangeReason::SLOAD,
+                        opcode::SSTORE => StorageChangeReason::SSTORE,
+                        _ => unreachable!(),
+                    };
+                    let change = StorageChange { key: *key, value, had_value: *had_value, reason };
+                    Some(change)
+                }
+                _ => None,
+            };
         }
+
+        // The gas cost is the difference between the recorded gas remaining at the start of the
+        // step the remaining gas here, at the end of the step.
+        step.gas_cost = step.gas_remaining - self.gas_inspector.gas_remaining();
 
         // set the status
         step.status = status;

@@ -21,6 +21,14 @@ pub struct DiffMode {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ChangeType {
+    Create,
+    Destroy,
+    #[default]
+    Modify,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountState {
     #[serde(
         default,
@@ -30,14 +38,13 @@ pub struct AccountState {
     pub balance: Option<U256>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<Bytes>,
-    #[serde(
-        default,
-        deserialize_with = "from_int_or_hex_opt",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub nonce: Option<U256>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nonce: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub storage: Option<BTreeMap<H256, H256>>,
+
+    #[serde(skip_serializing)]
+    pub change_type: ChangeType,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
