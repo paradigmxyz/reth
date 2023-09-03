@@ -272,10 +272,12 @@ where
         block_number: Option<BlockId>,
     ) -> Result<U256> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_estimateGas");
-        Ok(self.estimate_gas_at(
-            request,
-            block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
-        ).await?)
+        Ok(self
+            .estimate_gas_at(
+                request,
+                block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
+            )
+            .await?)
     }
 
     /// Handler for: `eth_gasPrice`

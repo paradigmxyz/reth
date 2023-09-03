@@ -400,20 +400,21 @@ where
     }
 
     async fn transaction_receipt(&self, hash: H256) -> EthResult<Option<TransactionReceipt>> {
-        let result = self.on_blocking_task(|this| async move {
-            let (tx, meta) = match this.provider().transaction_by_hash_with_meta(hash)? {
-                Some((tx, meta)) => (tx, meta),
-                None => return Ok(None),
-            };
+        let result = self
+            .on_blocking_task(|this| async move {
+                let (tx, meta) = match this.provider().transaction_by_hash_with_meta(hash)? {
+                    Some((tx, meta)) => (tx, meta),
+                    None => return Ok(None),
+                };
 
-            let receipt = match this.provider().receipt_by_hash(hash)? {
-                Some(recpt) => recpt,
-                None => return Ok(None),
-            };
+                let receipt = match this.provider().receipt_by_hash(hash)? {
+                    Some(recpt) => recpt,
+                    None => return Ok(None),
+                };
 
-            Ok(Some((tx, meta, receipt)))
-        })
-        .await?;
+                Ok(Some((tx, meta, receipt)))
+            })
+            .await?;
 
         let (tx, meta, receipt) = match result {
             Some((tx, meta, receipt)) => (tx, meta, receipt),
