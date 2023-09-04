@@ -88,6 +88,9 @@ jobs:
           - sim: ethereum/engine
             limit: engine-api
             experimental: true
+          - sim: ethereum/engine
+            limit: cancun
+            experimental: true
             # eth_ rpc methods
           - sim: ethereum/rpc-compat
             include: [eth_blockNumber, eth_call, eth_chainId, eth_createAccessList, eth_estimateGas, eth_feeHistory, eth_getBalance, eth_getBlockBy, eth_getBlockTransactionCountBy, eth_getCode, eth_getStorage, eth_getTransactionBy, eth_getTransactionCount, eth_getTransactionReceipt, eth_sendRawTransaction, eth_syncing]
