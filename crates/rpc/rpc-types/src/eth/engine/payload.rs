@@ -557,6 +557,9 @@ pub enum PayloadError {
         /// The block hash provided with the payload.
         consensus: H256,
     },
+    /// Expected blob versioned hashes do not match the given transactions.
+    #[error("Expected blob versioned hashes do not match the given transactions")]
+    InvalidVersionedHashes,
     /// Encountered decoding error.
     #[error(transparent)]
     Decode(#[from] reth_rlp::DecodeError),
@@ -601,8 +604,11 @@ impl From<Block> for ExecutionPayloadBodyV1 {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PayloadAttributes {
+    /// Value for the `timestamp` field of the new payload
     pub timestamp: U64,
+    /// Value for the `prevRandao` field of the new payload
     pub prev_randao: H256,
+    /// Suggested value for the `feeRecipient` field of the new payload
     pub suggested_fee_recipient: Address,
     /// Array of [`Withdrawal`] enabled with V2
     /// See <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#payloadattributesv2>

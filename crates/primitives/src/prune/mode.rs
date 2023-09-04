@@ -49,6 +49,11 @@ impl PruneMode {
             PruneMode::Before(n) => *n > block,
         }
     }
+
+    /// Returns true if the prune mode is [`PruneMode::Full`].
+    pub fn is_full(&self) -> bool {
+        matches!(self, Self::Full)
+    }
 }
 
 #[cfg(test)]

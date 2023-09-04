@@ -16,7 +16,7 @@ use reth_interfaces::{
     Error,
 };
 use reth_primitives::{
-    BlockHash, BlockNumHash, BlockNumber, ForkBlock, Hardfork, Receipt, SealedBlock,
+    BlockHash, BlockNumHash, BlockNumber, ForkBlock, Hardfork, PruneModes, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
@@ -93,6 +93,7 @@ pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
     metrics: TreeMetrics,
     /// Metrics for sync stages.
     sync_metrics_tx: Option<MetricEventsSender>,
+    prune_modes: Option<PruneModes>,
 }
 
 /// A container that wraps chains and block indices to allow searching for block hashes across all
@@ -110,6 +111,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         externals: TreeExternals<DB, C, EF>,
         canon_state_notification_sender: CanonStateNotificationSender,
         config: BlockchainTreeConfig,
+        prune_modes: Option<PruneModes>,
     ) -> Result<Self, Error> {
         let max_reorg_depth = config.max_reorg_depth();
 
@@ -145,6 +147,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             canon_state_notification_sender,
             metrics: Default::default(),
             sync_metrics_tx: None,
+            prune_modes,
         })
     }
 
@@ -1048,7 +1051,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let (blocks, state) = chain.into_inner();
 
         provider
-            .append_blocks_with_post_state(blocks.into_blocks().collect(), state)
+            .append_blocks_with_post_state(
+                blocks.into_blocks().collect(),
+                state,
+                self.prune_modes.as_ref(),
+            )
             .map_err(|e| BlockExecutionError::CanonicalCommit { inner: e.to_string() })?;
 
         provider.commit()?;
@@ -1173,7 +1180,7 @@ mod tests {
         let factory = ProviderFactory::new(&db, MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
-        provider.insert_block(genesis, None).unwrap();
+        provider.insert_block(genesis, None, None).unwrap();
 
         // insert first 10 blocks
         for i in 0..10 {
@@ -1279,7 +1286,7 @@ mod tests {
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
         let (sender, mut canon_notif) = tokio::sync::broadcast::channel(10);
         let mut tree =
-            BlockchainTree::new(externals, sender, config).expect("failed to create tree");
+            BlockchainTree::new(externals, sender, config, None).expect("failed to create tree");
 
         // genesis block 10 is already canonical
         assert!(tree.make_canonical(&H256::zero()).is_ok());

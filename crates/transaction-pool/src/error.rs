@@ -114,6 +114,37 @@ impl PoolError {
     }
 }
 
+/// Represents all errors that can happen when validating transactions for the pool for EIP-4844
+/// transactions
+#[derive(Debug, thiserror::Error)]
+pub enum Eip4844PoolTransactionError {
+    /// Thrown if we're unable to find the blob for a transaction that was previously extracted
+    #[error("blob sidecar not found for EIP4844 transaction")]
+    MissingEip4844BlobSidecar,
+    /// Thrown if an EIP-4844 without any blobs arrives
+    #[error("blobless blob transaction")]
+    NoEip4844Blobs,
+    /// Thrown if an EIP-4844 without any blobs arrives
+    #[error("too many blobs in transaction: have {have}, permitted {permitted}")]
+    TooManyEip4844Blobs {
+        /// Number of blobs the transaction has
+        have: usize,
+        /// Number of maximum blobs the transaction can have
+        permitted: usize,
+    },
+    /// Thrown if validating the blob sidecar for the transaction failed.
+    #[error(transparent)]
+    InvalidEip4844Blob(BlobTransactionValidationError),
+    /// EIP-4844 transactions are only accepted if they're gapless, meaning the previous nonce of
+    /// the transaction (`tx.nonce -1`) must either be in the pool or match the on chain nonce of
+    /// the sender.
+    ///
+    /// This error is thrown on validation if a valid blob transaction arrives with a nonce that
+    /// would introduce gap in the nonce sequence.
+    #[error("Nonce too high.")]
+    Eip4844NonceGap,
+}
+
 /// Represents errors that can happen when validating transactions for the pool
 ///
 /// See [TransactionValidator](crate::TransactionValidator).
@@ -138,12 +169,9 @@ pub enum InvalidPoolTransactionError {
     /// Thrown if the transaction's fee is below the minimum fee
     #[error("transaction underpriced")]
     Underpriced,
-    /// Thrown if we're unable to find the blob for a transaction that was previously extracted
-    #[error("blob not found for EIP4844 transaction")]
-    MissingEip4844Blob,
-    /// Thrown if validating the blob sidecar for the transaction failed.
+    /// Eip-4844 related errors
     #[error(transparent)]
-    InvalidEip4844Blob(BlobTransactionValidationError),
+    Eip4844(#[from] Eip4844PoolTransactionError),
     /// Any other error that occurred while inserting/validating that is transaction specific
     #[error("{0:?}")]
     Other(Box<dyn PoolTransactionError>),
@@ -201,14 +229,31 @@ impl InvalidPoolTransactionError {
                 false
             }
             InvalidPoolTransactionError::Other(err) => err.is_bad_transaction(),
-            InvalidPoolTransactionError::MissingEip4844Blob => {
-                // this is only reachable when blob transactions are reinjected and we're unable to
-                // find the previously extracted blob
-                false
-            }
-            InvalidPoolTransactionError::InvalidEip4844Blob(_) => {
-                // This is only reachable when the blob is invalid
-                true
+            InvalidPoolTransactionError::Eip4844(eip4844_err) => {
+                match eip4844_err {
+                    Eip4844PoolTransactionError::MissingEip4844BlobSidecar => {
+                        // this is only reachable when blob transactions are reinjected and we're
+                        // unable to find the previously extracted blob
+                        false
+                    }
+                    Eip4844PoolTransactionError::InvalidEip4844Blob(_) => {
+                        // This is only reachable when the blob is invalid
+                        true
+                    }
+                    Eip4844PoolTransactionError::Eip4844NonceGap => {
+                        // it is possible that the pool sees `nonce n` before `nonce n-1` and this
+                        // is only thrown for valid(good) blob transactions
+                        false
+                    }
+                    Eip4844PoolTransactionError::NoEip4844Blobs => {
+                        // this is a malformed transaction and should not be sent over the network
+                        true
+                    }
+                    Eip4844PoolTransactionError::TooManyEip4844Blobs { .. } => {
+                        // this is a malformed transaction and should not be sent over the network
+                        true
+                    }
+                }
             }
         }
     }
