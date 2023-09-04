@@ -30,6 +30,10 @@ impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransaction
         self.best.no_updates()
     }
 
+    fn skip_blobs(&mut self) {
+        self.set_skip_blobs(true)
+    }
+
     fn set_skip_blobs(&mut self, skip_blobs: bool) {
         self.best.set_skip_blobs(skip_blobs)
     }
@@ -139,6 +143,10 @@ impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransaction
 
     fn no_updates(&mut self) {
         self.new_transaction_receiver.take();
+    }
+
+    fn skip_blobs(&mut self) {
+        self.set_skip_blobs(true);
     }
 
     fn set_skip_blobs(&mut self, skip_blobs: bool) {

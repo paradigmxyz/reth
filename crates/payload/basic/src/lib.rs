@@ -24,9 +24,8 @@ use reth_primitives::{
     bytes::{Bytes, BytesMut},
     calculate_excess_blob_gas,
     constants::{
-        eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
-        BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
-        ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
+        eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
+        EMPTY_WITHDRAWALS, ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
     },
     proofs, Block, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
     SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
@@ -682,8 +681,10 @@ where
         // convert tx to a signed transaction
         let tx = pool_tx.to_recovered_transaction();
 
+        // There's only limited amount of blob space available per block, so we need to check if the
+        // EIP-4844 can still fit in the block
         if let Some(blob_tx) = tx.transaction.as_eip4844() {
-            let tx_blob_gas = blob_tx.blob_versioned_hashes.len() as u64 * DATA_GAS_PER_BLOB;
+            let tx_blob_gas = blob_tx.blob_gas();
             if sum_blob_gas_used + tx_blob_gas > MAX_DATA_GAS_PER_BLOCK {
                 // we can't fit this _blob_ transaction into the block, so we mark it as invalid,
                 // which removes its dependent transactions from the iterator. This is similar to
@@ -693,6 +694,11 @@ where
             } else {
                 // add to the data gas if we're going to execute the transaction
                 sum_blob_gas_used += tx_blob_gas;
+
+                // if we've reached the max data gas per block, we can skip blob txs entirely
+                if sum_blob_gas_used == MAX_DATA_GAS_PER_BLOCK {
+                    best_txs.skip_blobs();
+                }
             }
         }
 
