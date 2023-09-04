@@ -338,11 +338,7 @@ where
 
         let discarded = &outcome.discarded;
         // For each discarded EIP-4844 transaction, delete the blob txs from the blob store
-        let blob_hashes = discarded
-            .iter()
-            .filter(|tx| tx.transaction.is_eip4844())
-            .map(|tx| *tx.hash())
-            .collect::<Vec<_>>();
+        let blob_hashes = self.filter_eip4844_blobs(discarded);
         self.delete_blobs(blob_hashes);
 
         // notify listeners about updates
@@ -362,11 +358,8 @@ where
         discarded.iter().for_each(|tx| listener.discarded(tx.hash()));
 
         // For each discarded EIP-4844 transaction, delete the blob txs from the blob store
-        let blob_hashes = discarded
-            .iter()
-            .filter(|tx| tx.transaction.is_eip4844())
-            .map(|tx| *tx.hash())
-            .collect::<Vec<_>>();
+        let blob_hashes = self.filter_eip4844_blobs(&discarded);
+
         self.delete_blobs(blob_hashes);
     }
 
@@ -594,11 +587,8 @@ where
         discarded.iter().for_each(|tx| listener.discarded(tx.hash()));
 
         // For each discarded EIP-4844 transaction, delete the blob txs from the blob store
-        let blob_hashes = discarded
-            .iter()
-            .filter(|tx| tx.transaction.is_eip4844())
-            .map(|tx| *tx.hash())
-            .collect::<Vec<_>>();
+        let blob_hashes = self.filter_eip4844_blobs(&discarded);
+
         self.delete_blobs(blob_hashes);
     }
 
@@ -615,11 +605,8 @@ where
                 discarded.iter().for_each(|tx| listener.discarded(tx.hash()));
 
                 // For each discarded EIP-4844 transaction, delete the blob txs from the blob store
-                let blob_hashes = discarded
-                    .iter()
-                    .filter(|tx| tx.transaction.is_eip4844())
-                    .map(|tx| *tx.hash())
-                    .collect::<Vec<_>>();
+                let blob_hashes = self.filter_eip4844_blobs(discarded);
+
                 self.delete_blobs(blob_hashes);
             }
             AddedTransaction::Parked { transaction, replaced, .. } => {
@@ -767,6 +754,18 @@ where
             self.blob_store_metrics.blobstore_byte_size.set(data_size as f64);
         }
         self.blob_store_metrics.blobstore_entries.set(self.blob_store.blobs_len() as f64);
+    }
+
+    /// Returns the hashes of all EIP-4844 transactions in the given iterator
+    fn filter_eip4844_blobs<'a>(
+        &'a self,
+        transactions: impl IntoIterator<Item = &'a Arc<ValidPoolTransaction<T::Transaction>>>,
+    ) -> Vec<TxHash> {
+        transactions
+            .into_iter()
+            .filter(|tx| tx.transaction.is_eip4844())
+            .map(|tx| *tx.hash())
+            .collect::<Vec<_>>()
     }
 }
 
