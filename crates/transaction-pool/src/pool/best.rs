@@ -172,6 +172,8 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
             }
 
             if self.skip_blobs && best.transaction.transaction.is_eip4844() {
+                // blobs should be skipped, marking the as invalid will ensure that no dependent
+                // transactions are returned
                 self.mark_invalid(&best.transaction)
             } else {
                 return Some(best.transaction)
