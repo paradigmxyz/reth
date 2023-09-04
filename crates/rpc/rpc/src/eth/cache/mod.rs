@@ -12,11 +12,12 @@ use schnellru::{ByLength, Limiter};
 use std::{
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{ready, Context, Poll},
 };
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
-    oneshot,
+    oneshot, Semaphore,
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -51,6 +52,9 @@ type ReceiptsLruCache<L> = MultiConsumerLruCache<H256, Vec<Receipt>, L, Receipts
 
 type EnvLruCache<L> = MultiConsumerLruCache<H256, (CfgEnv, BlockEnv), L, EnvResponseSender>;
 
+/// The max concurrent database operations for `EthStateCacheService`.
+pub const MAX_CONCURRENT_DB_OPS: usize = 512;
+
 /// Provides async access to cached eth data
 ///
 /// This is the frontend for the async caching service which manages cached data on a different
@@ -78,6 +82,7 @@ impl EthStateCache {
             action_tx: to_service.clone(),
             action_rx: UnboundedReceiverStream::new(rx),
             action_task_spawner,
+            rate_limiter: Arc::new(Semaphore::new(MAX_CONCURRENT_DB_OPS)),
         };
         let cache = EthStateCache { to_service };
         (cache, service)
@@ -229,6 +234,8 @@ pub(crate) struct EthStateCacheService<
     action_rx: UnboundedReceiverStream<CacheAction>,
     /// The type that's used to spawn tasks that do the actual work
     action_task_spawner: Tasks,
+    /// Rate limiter
+    rate_limiter: Arc<Semaphore>,
 }
 
 impl<Provider, Tasks> EthStateCacheService<Provider, Tasks>
@@ -308,7 +315,10 @@ where
                             if this.full_block_cache.queue(block_hash, Either::Left(response_tx)) {
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
+                                let rate_limiter = this.rate_limiter.clone();
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
+                                    // Acquire permit
+                                    let _permit = rate_limiter.acquire().await;
                                     // Only look in the database to prevent situations where we
                                     // looking up the tree is blocking
                                     let res = provider
@@ -329,7 +339,10 @@ where
                             if this.full_block_cache.queue(block_hash, Either::Right(response_tx)) {
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
+                                let rate_limiter = this.rate_limiter.clone();
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
+                                    // Acquire permit
+                                    let _permit = rate_limiter.acquire().await;
                                     // Only look in the database to prevent situations where we
                                     // looking up the tree is blocking
                                     let res = provider
@@ -350,7 +363,10 @@ where
                             if this.receipts_cache.queue(block_hash, response_tx) {
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
+                                let rate_limiter = this.rate_limiter.clone();
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
+                                    // Acquire permit
+                                    let _permit = rate_limiter.acquire().await;
                                     let res = provider.receipts_by_block(block_hash.into());
                                     let _ = action_tx
                                         .send(CacheAction::ReceiptsResult { block_hash, res });
@@ -369,7 +385,10 @@ where
                             if this.evm_env_cache.queue(block_hash, response_tx) {
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
+                                let rate_limiter = this.rate_limiter.clone();
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
+                                    // Acquire permit
+                                    let _permit = rate_limiter.acquire().await;
                                     let mut cfg = CfgEnv::default();
                                     let mut block_env = BlockEnv::default();
                                     let res = provider
