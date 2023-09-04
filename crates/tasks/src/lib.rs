@@ -404,12 +404,24 @@ impl TaskExecutor {
 impl TaskSpawner for TaskExecutor {
     fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
         self.metrics.inc_regular_task();
-        self.spawn(fut)
+        // Wrap the original future to increment the finished tasks counter upon completion
+        let metrics = self.metrics.clone();
+        let wrapped_fut = async move {
+            let _ = fut.await;
+            metrics.inc_finisehd_regular_task(); // Increment the number of finished tasks
+        };
+        self.spawn(wrapped_fut)
     }
 
     fn spawn_critical(&self, name: &'static str, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
         self.metrics.inc_critical_tasks();
-        TaskExecutor::spawn_critical(self, name, fut)
+        // Wrap the original future to increment the finished tasks counter upon completion
+        let metrics = self.metrics.clone();
+        let wrapped_fut = async move {
+            let _ = fut.await;
+            metrics.inc_finished_critical_tasks(); // Increment the number of finished tasks
+        };
+        TaskExecutor::spawn_critical(self, name, wrapped_fut)
     }
 
     fn spawn_blocking(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
