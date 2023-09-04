@@ -396,9 +396,11 @@ mod tests {
     use crate::{BlockHashReader, BlockNumReader, BlockWriter, TransactionsProvider};
     use assert_matches::assert_matches;
     use reth_db::{
+        tables,
         test_utils::{create_test_rw_db, ERROR_TEMPDIR},
         DatabaseEnv,
     };
+    use reth_interfaces::test_utils::{generators, generators::random_block};
     use reth_primitives::{
         hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, H256,
     };
@@ -483,6 +485,35 @@ mod tests {
                 Ok(_)
             );
             assert_matches!(provider.transaction_id(block.body[0].hash), Ok(None));
+        }
+    }
+
+    #[test]
+    fn get_take_block_transaction_range_recover_senders() {
+        let chain_spec = ChainSpecBuilder::mainnet().build();
+        let db = create_test_rw_db();
+        let factory = ProviderFactory::new(db, Arc::new(chain_spec));
+
+        let mut rng = generators::rng();
+        let block = random_block(&mut rng, 0, None, Some(3), None);
+
+        {
+            let provider = factory.provider_rw().unwrap();
+
+            assert_matches!(provider.insert_block(block.clone(), None, None), Ok(_));
+
+            let senders = provider.get_or_take::<tables::TxSenders, true>(0..=0);
+            assert_eq!(senders, Ok(vec![(0, block.body[0].recover_signer().unwrap())]));
+            assert_eq!(provider.transaction_sender(0), Ok(None));
+
+            let result = provider.get_take_block_transaction_range::<true>(0..=0);
+            assert_eq!(
+                result,
+                Ok(vec![(
+                    0,
+                    block.body.iter().cloned().map(|tx| tx.into_ecrecovered().unwrap()).collect()
+                )])
+            )
         }
     }
 }
