@@ -828,7 +828,7 @@ where
         difficulty: U256::ZERO,
         gas_used: cumulative_gas_used,
         extra_data: extra_data.into(),
-        parent_beacon_block_root: None,
+        parent_beacon_block_root: attributes.parent_beacon_block_root,
         blob_gas_used,
         excess_blob_gas,
     };
@@ -906,7 +906,7 @@ where
         blob_gas_used: None,
         excess_blob_gas: None,
         extra_data: extra_data.into(),
-        parent_beacon_block_root: None,
+        parent_beacon_block_root: attributes.parent_beacon_block_root,
     };
 
     let block = Block { header, body: vec![], ommers: vec![], withdrawals };
