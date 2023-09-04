@@ -129,6 +129,8 @@ pub struct PayloadBuilderAttributes {
     pub prev_randao: H256,
     /// Withdrawals for the generated payload
     pub withdrawals: Vec<Withdrawal>,
+    /// Root of the parent beacon block
+    pub parent_beacon_block_root: Option<H256>,
 }
 
 // === impl PayloadBuilderAttributes ===
@@ -146,6 +148,7 @@ impl PayloadBuilderAttributes {
             suggested_fee_recipient: attributes.suggested_fee_recipient,
             prev_randao: attributes.prev_randao,
             withdrawals: attributes.withdrawals.unwrap_or_default(),
+            parent_beacon_block_root: attributes.parent_beacon_block_root,
         }
     }
 
@@ -203,6 +206,9 @@ pub(crate) fn payload_id(parent: &H256, attributes: &PayloadAttributes) -> Paylo
         let mut buf = Vec::new();
         withdrawals.encode(&mut buf);
         hasher.update(buf);
+    }
+    if let Some(parent_beacon_block) = attributes.parent_beacon_block_root {
+        hasher.update(parent_beacon_block);
     }
     let out = hasher.finalize();
     PayloadId::new(out.as_slice()[..8].try_into().expect("sufficient length"))
