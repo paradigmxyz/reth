@@ -52,9 +52,6 @@ type ReceiptsLruCache<L> = MultiConsumerLruCache<H256, Vec<Receipt>, L, Receipts
 
 type EnvLruCache<L> = MultiConsumerLruCache<H256, (CfgEnv, BlockEnv), L, EnvResponseSender>;
 
-/// The max concurrent database operations for `EthStateCacheService`.
-pub const MAX_CONCURRENT_DB_OPS: usize = 512;
-
 /// Provides async access to cached eth data
 ///
 /// This is the frontend for the async caching service which manages cached data on a different
@@ -72,6 +69,7 @@ impl EthStateCache {
         max_blocks: u32,
         max_receipts: u32,
         max_envs: u32,
+        max_concurrent_db_operations: usize,
     ) -> (Self, EthStateCacheService<Provider, Tasks>) {
         let (to_service, rx) = unbounded_channel();
         let service = EthStateCacheService {
@@ -82,7 +80,7 @@ impl EthStateCache {
             action_tx: to_service.clone(),
             action_rx: UnboundedReceiverStream::new(rx),
             action_task_spawner,
-            rate_limiter: Arc::new(Semaphore::new(MAX_CONCURRENT_DB_OPS)),
+            rate_limiter: Arc::new(Semaphore::new(max_concurrent_db_operations)),
         };
         let cache = EthStateCache { to_service };
         (cache, service)
@@ -112,9 +110,20 @@ impl EthStateCache {
         Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
         Tasks: TaskSpawner + Clone + 'static,
     {
-        let EthStateCacheConfig { max_blocks, max_receipts, max_envs } = config;
-        let (this, service) =
-            Self::create(provider, executor.clone(), max_blocks, max_receipts, max_envs);
+        let EthStateCacheConfig {
+            max_blocks,
+            max_receipts,
+            max_envs,
+            max_concurrent_db_operations,
+        } = config;
+        let (this, service) = Self::create(
+            provider,
+            executor.clone(),
+            max_blocks,
+            max_receipts,
+            max_envs,
+            max_concurrent_db_operations,
+        );
         executor.spawn_critical("eth state cache", Box::pin(service));
         this
     }
