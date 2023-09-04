@@ -34,7 +34,7 @@ pub struct EVMProcessor<'a> {
     receipts: Vec<Vec<Receipt>>,
     /// First block will be initialized to ZERO
     /// and be set to the block number of first block executed.
-    first_block: BlockNumber,
+    first_block: Option<BlockNumber>,
     /// The maximum known block .
     tip: Option<BlockNumber>,
     /// Pruning configuration.
@@ -57,7 +57,7 @@ impl<'a> EVMProcessor<'a> {
             evm,
             stack: InspectorStack::new(InspectorStackConfig::default()),
             receipts: Vec::new(),
-            first_block: 0,
+            first_block: None,
             tip: None,
             prune_modes: PruneModes::none(),
             stats: BlockExecutorStats::default(),
@@ -83,9 +83,9 @@ impl<'a> EVMProcessor<'a> {
             evm,
             stack: InspectorStack::new(InspectorStackConfig::default()),
             receipts: Vec::new(),
-            first_block: 0,
+            first_block: None,
             tip: None,
-            prune_modes: PruneModes::default(),
+            prune_modes: PruneModes::none(),
             stats: BlockExecutorStats::default(),
         }
     }
@@ -321,8 +321,8 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         self.db().merge_transitions(retention);
         self.stats.merge_transitions_duration += time.elapsed();
 
-        if self.first_block == 0 {
-            self.first_block = block.number;
+        if self.first_block.is_none() {
+            self.first_block = Some(block.number);
         }
         Ok(())
     }
@@ -374,7 +374,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         BundleStateWithReceipts::new(
             self.evm.db().unwrap().take_bundle(),
             receipts,
-            self.first_block,
+            self.first_block.unwrap_or_default(),
         )
     }
 

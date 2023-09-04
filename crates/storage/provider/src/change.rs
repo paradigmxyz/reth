@@ -30,9 +30,9 @@ use std::collections::HashMap;
 pub struct BundleStateWithReceipts {
     /// Bundle state with reverts.
     bundle: BundleState,
-    /// Receipts
+    /// Receipts.
     receipts: Vec<Vec<Receipt>>,
-    /// First block o bundle state.
+    /// First block of bundle state.
     first_block: BlockNumber,
 }
 
@@ -338,7 +338,7 @@ impl BundleStateWithReceipts {
     /// `omit_changed_check` should be set to true of bundle has some of it data
     /// detached, This would make some original values not known.
     pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
-        mut self,
+        self,
         tx: &TX,
         omit_changed_check: bool,
     ) -> Result<(), DatabaseError> {
@@ -351,10 +351,12 @@ impl BundleStateWithReceipts {
                 next_number += 1;
             }
         }
-        let reverts = self.bundle.take_all_reverts().into_plain_state_reverts();
-        StateReverts(reverts).write_to_db(tx, self.first_block)?;
 
-        StateChange(self.bundle.into_plain_state_sorted(omit_changed_check)).write_to_db(tx)?;
+        let (plain_state, reverts) =
+            self.bundle.into_sorted_plain_state_and_reverts(omit_changed_check);
+
+        StateReverts(reverts).write_to_db(tx, self.first_block)?;
+        StateChange(plain_state).write_to_db(tx)?;
 
         Ok(())
     }
