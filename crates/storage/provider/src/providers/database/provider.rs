@@ -8,7 +8,7 @@ use crate::{
     PruneCheckpointReader, PruneCheckpointWriter, StageCheckpointReader, StorageReader,
     TransactionsProvider, WithdrawalsProvider,
 };
-use itertools::{izip, Itertools, PeekingNext};
+use itertools::{izip, Itertools};
 use reth_db::{
     common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -442,8 +442,26 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             {
                 let mut senders = senders.iter().peekable();
 
+                // `transactions` contain all entries. `senders` contain _some_ of the senders for
+                // these transactions. Both are sorted and indexed by `TxNumber`.
+                //
+                // The general idea is to iterate on both `transactions` and `senders`, and advance
+                // the `senders` iteration only if it matches the current `transactions` entry's
+                // `TxNumber`. Otherwise, add the transaction to the list of missing senders.
                 for (i, (tx_number, transaction)) in transactions.iter().enumerate() {
-                    if senders.peeking_next(|(key, _)| key == tx_number).is_none() {
+                    if let Some((sender_tx_number, _)) = senders.peek() {
+                        if sender_tx_number == tx_number {
+                            // If current sender's `TxNumber` matches current transaction's
+                            // `TxNumber`, advance the senders iterator.
+                            senders.next();
+                        } else {
+                            // If current sender's `TxNumber` doesn't match current transaction's
+                            // `TxNumber`, add it to missing senders.
+                            missing_senders.push((i, tx_number, transaction));
+                        }
+                    } else {
+                        // If there's no more senders left, but we're still iterating over
+                        // transactions, add them to missing senders
                         missing_senders.push((i, tx_number, transaction));
                     }
                 }
