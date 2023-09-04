@@ -34,7 +34,7 @@ use reth_primitives::{
     ChainInfo, ChainSpec, Hardfork, Head, Header, PruneCheckpoint, PruneModes, PrunePart, Receipt,
     SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber,
-    Withdrawal, H160, H256, U256,
+    Withdrawal, H256, U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
