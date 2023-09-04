@@ -116,15 +116,15 @@ impl Default for Discv4Config {
     fn default() -> Self {
         Self {
             enable_packet_filter: false,
-            /// This should be high enough to cover an entire recursive FindNode lookup which is
-            /// includes sending FindNode to nodes it discovered in the rounds using the
-            /// concurrency factor ALPHA
+            // This should be high enough to cover an entire recursive FindNode lookup which is
+            // includes sending FindNode to nodes it discovered in the rounds using the concurrency
+            // factor ALPHA
             udp_egress_message_buffer: 1024,
-            /// Every outgoing request will eventually lead to an incoming response
+            // Every outgoing request will eventually lead to an incoming response
             udp_ingress_message_buffer: 1024,
             max_find_node_failures: 5,
             ping_interval: Duration::from_secs(60 * 10),
-            /// unified expiration and timeout durations, mirrors geth's `expiration` duration
+            // Unified expiration and timeout durations, mirrors geth's `expiration` duration
             ping_expiration: Duration::from_secs(20),
             bond_expiration: Duration::from_secs(60 * 60),
             enr_expiration: Duration::from_secs(20),
@@ -141,7 +141,7 @@ impl Default for Discv4Config {
             enforce_expiration_timestamps: true,
             additional_eip868_rlp_pairs: Default::default(),
             external_ip_resolver: Some(Default::default()),
-            /// By default retry public IP using a 5min interval
+            // By default retry public IP using a 5min interval
             resolve_external_ip_interval: Some(Duration::from_secs(60 * 5)),
         }
     }
