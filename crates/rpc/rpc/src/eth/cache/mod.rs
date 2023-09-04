@@ -110,19 +110,15 @@ impl EthStateCache {
         Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
         Tasks: TaskSpawner + Clone + 'static,
     {
-        let EthStateCacheConfig {
-            max_blocks,
-            max_receipts,
-            max_envs,
-            max_concurrent_db_operations,
-        } = config;
+        let EthStateCacheConfig { max_blocks, max_receipts, max_envs, max_concurrent_db_requests } =
+            config;
         let (this, service) = Self::create(
             provider,
             executor.clone(),
             max_blocks,
             max_receipts,
             max_envs,
-            max_concurrent_db_operations,
+            max_concurrent_db_requests,
         );
         executor.spawn_critical("eth state cache", Box::pin(service));
         this
