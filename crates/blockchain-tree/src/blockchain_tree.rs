@@ -841,12 +841,16 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let chain = chain.into_inner();
         match chain.split(split_at) {
             ChainSplit::Split { canonical, pending } => {
+                trace!(target: "blockchain_tree", ?canonical, ?pending, "Split chain");
                 // rest of split chain is inserted back with same chain_id.
                 self.block_indices.insert_chain(chain_id, &pending);
                 self.chains.insert(chain_id, AppendableChain::new(pending));
                 canonical
             }
-            ChainSplit::NoSplitCanonical(canonical) => canonical,
+            ChainSplit::NoSplitCanonical(canonical) => {
+                trace!(target: "blockchain_tree", "No split on canonical chain");
+                canonical
+            }
             ChainSplit::NoSplitPending(_) => {
                 unreachable!("Should not happen as block indices guarantee structure of blocks")
             }
@@ -928,6 +932,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         };
         let chain = self.chains.remove(&chain_id).expect("To be present");
 
+        trace!(target: "blockchain_tree", ?chain, "Found chain to make canonical");
+
         // we are splitting chain at the block hash that we want to make canonical
         let canonical = self.split_chain(chain_id, chain, SplitAt::Hash(*block_hash));
 
@@ -939,6 +945,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         while let Some(chain_id) = self.block_indices.get_blocks_chain_id(&block_fork.hash) {
             let chain = self.chains.remove(&chain_id).expect("To fork to be present");
             block_fork = chain.fork_block();
+            // canonical chain is lower part of the chain.
             let canonical = self.split_chain(chain_id, chain, SplitAt::Number(block_fork_number));
             block_fork_number = canonical.fork_block_number();
             chains_to_promote.push(canonical);
@@ -947,11 +954,17 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let old_tip = self.block_indices.canonical_tip();
         // Merge all chain into one chain.
         let mut new_canon_chain = chains_to_promote.pop().expect("There is at least one block");
-
+        trace!(target: "blockchain_tree", ?new_canon_chain, "Merging chains");
+        let mut have_append = false;
         for chain in chains_to_promote.into_iter().rev() {
+            have_append = true;
+            trace!(target: "blockchain_tree", ?chain, "Appending chain");
             new_canon_chain.append_chain(chain).expect("We have just build the chain.");
         }
 
+        if have_append {
+            trace!(target: "blockchain_tree", ?new_canon_chain, "Canonical appended chain");
+        }
         // update canonical index
         self.block_indices.canonicalize_blocks(new_canon_chain.blocks());
 

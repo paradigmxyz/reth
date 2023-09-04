@@ -58,13 +58,11 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0-alpha.8"
 edition = "2021"
-rust-version = "1.70" # Remember to update .clippy.toml and README.md
+rust-version = "1.70"                              # Remember to update .clippy.toml and README.md
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
-exclude = [
-    ".github/",
-]
+exclude = [".github/"]
 
 # Like release, but with full debug symbols. Useful for e.g. `perf`.
 [profile.debug-fast]
@@ -97,8 +95,7 @@ reth-transaction-pool = { path = "./crates/transaction-pool" }
 reth-tasks = { path = "./crates/tasks" }
 reth-network = { path = "./crates/net/network" }
 reth-network-api = { path = "./crates/net/network-api" }
-reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat"}
-
+reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat" }
 
 
 ## eth
@@ -120,7 +117,7 @@ strum = "0.25"
 rayon = "1.7"
 itertools = "0.11"
 parking_lot = "0.12"
-metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
+metrics = "0.21.1"                                    # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
 
 ### proc-macros
 proc-macro2 = "1.0"
@@ -143,7 +140,11 @@ jsonrpsee-core = { version = "0.20" }
 jsonrpsee-types = { version = "0.20" }
 
 ## crypto
-secp256k1 = { version = "0.27.0", default-features = false, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { version = "0.27.0", default-features = false, features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
 enr = { version = "0.9", default-features = false, features = ["k256"] }
 # for eip-4844
 c-kzg = { git = "https://github.com/ethereum/c-kzg-4844" }
@@ -151,3 +152,7 @@ c-kzg = { git = "https://github.com/ethereum/c-kzg-4844" }
 ### misc-testing
 proptest = "1.0"
 arbitrary = "1.1"
+
+# [patch."https://github.com/bluealloy/revm.git"]
+# revm = { path = "../revm/crates/revm" }
+# revm-primitives = { path = "../revm/crates/primitives" }

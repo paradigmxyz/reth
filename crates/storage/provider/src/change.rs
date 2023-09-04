@@ -12,7 +12,8 @@ use reth_primitives::{
 };
 use reth_revm_primitives::{
     db::states::{
-        BundleState, RevertToSlot, StateChangeset as RevmChange, StateReverts as RevmReverts,
+        BundleState, PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, RevertToSlot,
+        StateChangeset,
     },
     into_reth_acc, into_revm_acc,
     primitives::AccountInfo,
@@ -289,10 +290,11 @@ impl BundleStateWithReceipts {
     /// This will detach lower part of the chain and return it back.
     /// Specified block number will be included in detachment
     ///
-    /// This plain state will contains some additional informations.
+    /// This plain state will contains some additional information that
+    /// are is a artifacts of the lower part state.
     ///
     /// If block number is in future, return None.
-    pub fn detach_lower_part_at(&mut self, block_number: BlockNumber) -> Option<Self> {
+    pub fn split_at(&mut self, block_number: BlockNumber) -> Option<Self> {
         let last_block = self.last_block();
         let first_block = self.first_block;
         if block_number >= last_block {
@@ -314,9 +316,7 @@ impl BundleStateWithReceipts {
         let (_, this) = self.receipts.split_at(num_of_detached_block as usize);
 
         self.receipts = this.to_vec().clone();
-        self.bundle
-            .detach_lower_part_reverts(num_of_detached_block as usize)
-            .expect("there should be detachments");
+        self.bundle.take_n_reverts(num_of_detached_block as usize);
 
         self.first_block = block_number + 1;
 
@@ -351,7 +351,7 @@ impl BundleStateWithReceipts {
                 next_number += 1;
             }
         }
-        let reverts = self.bundle.take_reverts();
+        let reverts = self.bundle.take_all_reverts().into_plain_state_reverts();
         StateReverts(reverts).write_to_db(tx, self.first_block)?;
 
         StateChange(self.bundle.into_plain_state_sorted(omit_changed_check)).write_to_db(tx)?;
@@ -362,10 +362,10 @@ impl BundleStateWithReceipts {
 
 /// Revert of the state.
 #[derive(Default)]
-pub struct StateReverts(pub RevmReverts);
+pub struct StateReverts(pub PlainStateReverts);
 
-impl From<RevmReverts> for StateReverts {
-    fn from(revm: RevmReverts) -> Self {
+impl From<PlainStateReverts> for StateReverts {
+    fn from(revm: PlainStateReverts) -> Self {
         Self(revm)
     }
 }
@@ -387,14 +387,16 @@ impl StateReverts {
             let block_number = first_block + block_number as BlockNumber;
 
             tracing::trace!(target: "provider::reverts", block_number=block_number,"Writing block change");
-            for (address, wipe_storage, storage) in storage_changes.into_iter() {
+            for PlainStorageRevert { address, wiped, storage_revert } in storage_changes.into_iter()
+            {
+                let storage = storage_revert;
                 let storage_id = BlockNumberAddress((block_number, address));
                 tracing::trace!(target: "provider::reverts","Writting revert for {:?}", address);
                 // If we are writing the primary storage wipe transition, the pre-existing plain
                 // storage state has to be taken from the database and written to storage history.
                 // See [StorageWipe::Primary] for more details.
                 let mut wiped_storage: Vec<(U256, U256)> = Vec::new();
-                if wipe_storage {
+                if wiped {
                     tracing::trace!(target: "provider::reverts", "wipe storage storage changes");
                     if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
                         wiped_storage.push((entry.key.into(), entry.value));
@@ -499,10 +501,10 @@ impl StateReverts {
 
 /// A change to the state of the world.
 #[derive(Default)]
-pub struct StateChange(pub RevmChange);
+pub struct StateChange(pub StateChangeset);
 
-impl From<RevmChange> for StateChange {
-    fn from(revm: RevmChange) -> Self {
+impl From<StateChangeset> for StateChange {
+    fn from(revm: StateChangeset) -> Self {
         Self(revm)
     }
 }
@@ -513,7 +515,7 @@ impl StateChange {
         // Write new storage state
         tracing::trace!(target: "provider::post_state", len = self.0.storage.len(), "Writing new storage state");
         let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
-        for (address, (_wipped, storage)) in self.0.storage.into_iter() {
+        for PlainStorageChangeset { address, storage } in self.0.storage.into_iter() {
             // Wipping of storage is done when appling the reverts.
 
             for (key, value) in storage.into_iter() {
@@ -569,7 +571,7 @@ mod tests {
     use reth_primitives::{Address, StorageEntry, H256, MAINNET, U256};
     use reth_revm_primitives::{into_reth_acc, primitives::HashMap};
     use revm::{
-        db::states::bundle_state::BundleRetention,
+        db::states::{bundle_state::BundleRetention, changes::PlainStorageRevert},
         primitives::{Account, AccountInfo as RevmAccountInfo, AccountStatus, StorageSlot},
         CacheState, DatabaseCommit, StateBuilder,
     };
@@ -618,7 +620,7 @@ mod tests {
         let mut revm_bundle_state = state.take_bundle();
 
         // Write plain state and reverts separately.
-        let reverts = revm_bundle_state.take_reverts();
+        let reverts = revm_bundle_state.take_all_reverts().into_plain_state_reverts();
         let plain_state = revm_bundle_state.into_plain_state_sorted(false);
         assert!(plain_state.storage.is_empty());
         assert!(plain_state.contracts.is_empty());
@@ -681,7 +683,7 @@ mod tests {
         let mut revm_bundle_state = state.take_bundle();
 
         // Write plain state and reverts separately.
-        let reverts = revm_bundle_state.take_reverts();
+        let reverts = revm_bundle_state.take_all_reverts().into_plain_state_reverts();
         let plain_state = revm_bundle_state.into_plain_state_sorted(false);
         assert!(plain_state.storage.is_empty());
         assert!(plain_state.contracts.is_empty());
@@ -689,7 +691,10 @@ mod tests {
             .write_to_db(provider.tx_ref())
             .expect("Could not write plain state to DB");
 
-        assert_eq!(reverts.storage, [[(address_b, true, vec![])]]);
+        assert_eq!(
+            reverts.storage,
+            [[PlainStorageRevert { address: address_b, wiped: true, storage_revert: vec![] }]]
+        );
         StateReverts(reverts)
             .write_to_db(provider.tx_ref(), 2)
             .expect("Could not write reverts to DB");

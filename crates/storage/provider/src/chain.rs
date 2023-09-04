@@ -225,7 +225,7 @@ impl Chain {
 
         let mut state = std::mem::take(&mut self.state);
         let canonical_state =
-            state.detach_lower_part_at(block_number).expect("Detach block number to be in range");
+            state.split_at(block_number).expect("Detach block number to be in range");
 
         ChainSplit::Split {
             canonical: Chain { state: canonical_state, blocks: self.blocks },
@@ -437,7 +437,7 @@ mod tests {
         let chain = Chain::new(vec![block1.clone(), block2.clone()], block_state_extended);
 
         let mut split2_state = chain.state.clone();
-        let split1_state = split2_state.detach_lower_part_at(1).unwrap();
+        let split1_state = split2_state.split_at(1).unwrap();
 
         let chain_split1 =
             Chain { state: split1_state, blocks: BTreeMap::from([(1, block1.clone())]) };

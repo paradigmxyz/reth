@@ -61,12 +61,6 @@ impl Bytecode {
     pub fn new_raw(bytes: Bytes) -> Self {
         Self(RevmBytecode::new_raw(bytes))
     }
-
-    /// Create new bytecode from raw bytes and its hash.
-    pub fn new_raw_with_hash(bytes: Bytes) -> Self {
-        let revm_bytecode = unsafe { RevmBytecode::new_raw_with_hash(bytes) };
-        Self(revm_bytecode)
-    }
 }
 
 impl Deref for Bytecode {
