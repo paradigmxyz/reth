@@ -436,6 +436,8 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
         // Recover senders manually if not found in db
         if senders.len() != transactions.len() {
+            // Find all missing senders, their corresponding tx numbers and indexes to the original
+            // `senders` vector at which the recovered senders will be inserted
             let mut missing_senders = Vec::with_capacity(transactions.len() - senders.len());
             {
                 let mut senders = senders.iter().peekable();
@@ -447,21 +449,26 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
                 }
             }
 
+            // Recover senders
             let recovered_senders = TransactionSigned::recover_signers(
                 missing_senders.iter().map(|(_, _, tx)| *tx).collect::<Vec<_>>(),
                 missing_senders.len(),
             )
             .ok_or(BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError))?;
 
+            // Insert recovered senders along with tx numbers at the corresponding indexes to the
+            // original `senders` vector
             for ((i, tx_number, _), sender) in missing_senders.into_iter().zip(recovered_senders) {
                 senders.insert(i, (*tx_number, sender));
             }
 
+            // Debug assertions which are triggered during the test to ensure that all senders are
+            // present and sorted
+            debug_assert_eq!(senders.len(), transactions.len(), "missing one or more senders");
             debug_assert!(
                 senders.iter().tuple_windows().all(|(a, b)| a.0 < b.0),
                 "senders not sorted"
             );
-            debug_assert_eq!(senders.len(), transactions.len(), "missing one or more senders");
         }
 
         if TAKE {
