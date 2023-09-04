@@ -2,7 +2,7 @@
 
 use crate::{
     blobstore::BlobStore,
-    error::InvalidPoolTransactionError,
+    error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
     traits::TransactionOrigin,
     validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_SIZE, TX_MAX_SIZE},
     EthBlobTransactionSidecar, EthPoolTransaction, TransactionValidationOutcome,
@@ -217,7 +217,9 @@ where
                 // no blobs
                 return TransactionValidationOutcome::Invalid(
                     transaction,
-                    InvalidPoolTransactionError::NoEip4844Blobs,
+                    InvalidPoolTransactionError::Eip4844(
+                        Eip4844PoolTransactionError::NoEip4844Blobs,
+                    ),
                 )
             }
 
@@ -225,10 +227,12 @@ where
                 // too many blobs
                 return TransactionValidationOutcome::Invalid(
                     transaction,
-                    InvalidPoolTransactionError::TooManyEip4844Blobs {
-                        have: blob_count,
-                        permitted: MAX_BLOBS_PER_BLOCK,
-                    },
+                    InvalidPoolTransactionError::Eip4844(
+                        Eip4844PoolTransactionError::TooManyEip4844Blobs {
+                            have: blob_count,
+                            permitted: MAX_BLOBS_PER_BLOCK,
+                        },
+                    ),
                 )
             }
 
@@ -247,7 +251,9 @@ where
                     } else {
                         return TransactionValidationOutcome::Invalid(
                             transaction,
-                            InvalidPoolTransactionError::MissingEip4844BlobSidecar,
+                            InvalidPoolTransactionError::Eip4844(
+                                Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
+                            ),
                         )
                     }
                 }
@@ -257,7 +263,9 @@ where
                         if let Err(err) = eip4844.validate_blob(&blob, &self.kzg_settings) {
                             return TransactionValidationOutcome::Invalid(
                                 transaction,
-                                InvalidPoolTransactionError::InvalidEip4844Blob(err),
+                                InvalidPoolTransactionError::Eip4844(
+                                    Eip4844PoolTransactionError::InvalidEip4844Blob(err),
+                                ),
                             )
                         }
                         // store the extracted blob
