@@ -425,35 +425,43 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         }
 
         // Get transactions and senders
+        let tx_range = first_transaction..=last_transaction;
         let transactions = self
-            .get_or_take::<tables::Transactions, TAKE>(first_transaction..=last_transaction)?
+            .get_or_take::<tables::Transactions, TAKE>(tx_range.clone())?
             .into_iter()
             .map(|(id, tx)| (id, tx.into()))
             .collect::<Vec<(u64, TransactionSigned)>>();
 
-        let mut senders =
-            self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)?;
+        // Retrieve senders from the database. Partially recover if unable to retrieve all of the
+        // requested senders.
+        // NOTE: It is only possible to have missing senders at the beginning of the range (e.g. in
+        // case of pruning).
+        let db_senders = self.get_or_take::<tables::TxSenders, TAKE>(tx_range)?;
 
-        // Recover senders manually if not found in db
-        let senders_len = senders.len();
+        let db_senders_len = db_senders.len();
         let transactions_len = transactions.len();
-        let missing_senders = transactions_len - senders_len;
-        let mut senders_recovered: Vec<(u64, H160)> = (first_transaction..
-            first_transaction + missing_senders as u64)
-            .zip(
-                TransactionSigned::recover_signers(
-                    transactions.iter().take(missing_senders).map(|(_, tx)| tx).collect::<Vec<_>>(),
-                    missing_senders,
-                )
-                .ok_or(BlockExecutionError::Validation(
-                    BlockValidationError::SenderRecoveryError,
-                ))?,
-            )
-            .collect();
-        // It's only possible to have missing senders at the beginning of the range, and not in the
-        // middle or in the end, so it's safe to do `senders_recovered.extend(senders.iter())`
-        senders_recovered.extend(senders.iter());
-        senders = senders_recovered;
+        let senders = if transactions_len == db_senders_len {
+            db_senders
+        } else {
+            // Calculate the number of missing senders.
+            // SAFETY: `transactions_len` is always gte than `db_senders_len` since the same range
+            // is used to retrieve both collections and transactions are never pruned.
+            let missing_senders = transactions_len - db_senders_len;
+            let txs_to_recover =
+                transactions.iter().take(missing_senders).map(|(_, tx)| tx).collect::<Vec<_>>();
+            let recovered_senders =
+                TransactionSigned::recover_signers(txs_to_recover, missing_senders).ok_or(
+                    BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError),
+                )?;
+
+            // Create index range for transactions with recovered senders
+            (first_transaction..first_transaction + missing_senders as u64)
+                // Zip index range with recovered senders
+                .zip(recovered_senders)
+                // Append senders retrieved from the database
+                .chain(db_senders.into_iter())
+                .collect()
+        };
         debug_assert_eq!(senders.len(), transactions_len, "missing one or more senders");
 
         if TAKE {

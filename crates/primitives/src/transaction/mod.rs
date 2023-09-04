@@ -803,9 +803,9 @@ impl TransactionSigned {
         T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
     {
         if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
-            txes.into_iter().map(|tx| tx.recover_signer()).collect()
+            txes.into_iter().map(Self::recover_signer).collect()
         } else {
-            txes.into_par_iter().map(|tx| tx.recover_signer()).collect()
+            txes.into_par_iter().map(Self::recover_signer).collect()
         }
     }
 
