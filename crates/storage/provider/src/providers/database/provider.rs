@@ -404,7 +404,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     }
 
     /// Get requested blocks transaction with signer
-    fn get_take_block_transaction_range<const TAKE: bool>(
+    pub(crate) fn get_take_block_transaction_range<const TAKE: bool>(
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> Result<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>> {
