@@ -21,6 +21,9 @@ pub const DEFAULT_RECEIPT_CACHE_MAX_LEN: u32 = 2000;
 /// Default cache size for the env cache: 1000 envs.
 pub const DEFAULT_ENV_CACHE_MAX_LEN: u32 = 1000;
 
+/// Default number of concurrent database requests.
+pub const DEFAULT_CONCURRENT_DB_REQUESTS: usize = 512;
+
 /// Settings for the [EthStateCache](crate::eth::cache::EthStateCache).
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +40,10 @@ pub struct EthStateCacheConfig {
     ///
     /// Default is 1000.
     pub max_envs: u32,
+    /// Max number of concurrent database requests.
+    ///
+    /// Default is 512.
+    pub max_concurrent_db_requests: usize,
 }
 
 impl Default for EthStateCacheConfig {
@@ -45,6 +52,7 @@ impl Default for EthStateCacheConfig {
             max_blocks: DEFAULT_BLOCK_CACHE_MAX_LEN,
             max_receipts: DEFAULT_RECEIPT_CACHE_MAX_LEN,
             max_envs: DEFAULT_ENV_CACHE_MAX_LEN,
+            max_concurrent_db_requests: DEFAULT_CONCURRENT_DB_REQUESTS,
         }
     }
 }
