@@ -34,7 +34,7 @@ use reth_primitives::{
     ChainInfo, ChainSpec, Hardfork, Head, Header, PruneCheckpoint, PruneModes, PrunePart, Receipt,
     SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber,
-    Withdrawal, H256, U256,
+    Withdrawal, H160, H256, U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
@@ -431,8 +431,30 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             .map(|(id, tx)| (id, tx.into()))
             .collect::<Vec<(u64, TransactionSigned)>>();
 
-        let senders =
+        let mut senders =
             self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)?;
+
+        // Recover senders manually if not found in db
+        let senders_len = senders.len();
+        let transactions_len = transactions.len();
+        let missing_senders = transactions_len - senders_len;
+        let mut senders_recovered: Vec<(u64, H160)> = (first_transaction..
+            first_transaction + missing_senders as u64)
+            .zip(
+                TransactionSigned::recover_signers(
+                    transactions.iter().take(missing_senders).map(|(_, tx)| tx).collect::<Vec<_>>(),
+                    missing_senders,
+                )
+                .ok_or(BlockExecutionError::Validation(
+                    BlockValidationError::SenderRecoveryError,
+                ))?,
+            )
+            .collect();
+        // It's only possible to have missing senders at the beginning of the range, and not in the
+        // middle or in the end, so it's safe to do `senders_recovered.extend(senders.iter())`
+        senders_recovered.extend(senders.iter());
+        senders = senders_recovered;
+        debug_assert_eq!(senders.len(), transactions_len, "missing one or more senders");
 
         if TAKE {
             // Remove TxHashNumber
