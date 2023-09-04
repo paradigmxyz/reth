@@ -8,7 +8,7 @@ use crate::{
     PruneCheckpointReader, PruneCheckpointWriter, StageCheckpointReader, StorageReader,
     TransactionsProvider, WithdrawalsProvider,
 };
-use itertools::{izip, Itertools};
+use itertools::{izip, Itertools, PeekingNext};
 use reth_db::{
     common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -34,7 +34,7 @@ use reth_primitives::{
     ChainInfo, ChainSpec, Hardfork, Head, Header, PruneCheckpoint, PruneModes, PrunePart, Receipt,
     SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber,
-    Withdrawal, H160, H256, U256,
+    Withdrawal, H256, U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
@@ -435,26 +435,34 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)?;
 
         // Recover senders manually if not found in db
-        let senders_len = senders.len();
-        let transactions_len = transactions.len();
-        let missing_senders = transactions_len - senders_len;
-        let mut senders_recovered: Vec<(u64, H160)> = (first_transaction..
-            first_transaction + missing_senders as u64)
-            .zip(
-                TransactionSigned::recover_signers(
-                    transactions.iter().take(missing_senders).map(|(_, tx)| tx).collect::<Vec<_>>(),
-                    missing_senders,
-                )
-                .ok_or(BlockExecutionError::Validation(
-                    BlockValidationError::SenderRecoveryError,
-                ))?,
+        if senders.len() != transactions.len() {
+            let mut missing_senders = Vec::with_capacity(transactions.len() - senders.len());
+            {
+                let mut senders = senders.iter().peekable();
+
+                for (i, (tx_number, transaction)) in transactions.iter().enumerate() {
+                    if senders.peeking_next(|(key, _)| key == tx_number).is_none() {
+                        missing_senders.push((i, tx_number, transaction));
+                    }
+                }
+            }
+
+            let recovered_senders = TransactionSigned::recover_signers(
+                missing_senders.iter().map(|(_, _, tx)| *tx).collect::<Vec<_>>(),
+                missing_senders.len(),
             )
-            .collect();
-        // It's only possible to have missing senders at the beginning of the range, and not in the
-        // middle or in the end, so it's safe to do `senders_recovered.extend(senders.iter())`
-        senders_recovered.extend(senders.iter());
-        senders = senders_recovered;
-        debug_assert_eq!(senders.len(), transactions_len, "missing one or more senders");
+            .ok_or(BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError))?;
+
+            for ((i, tx_number, _), sender) in missing_senders.into_iter().zip(recovered_senders) {
+                senders.insert(i, (*tx_number, sender));
+            }
+
+            debug_assert!(
+                senders.iter().tuple_windows().all(|(a, b)| a.0 < b.0),
+                "senders not sorted"
+            );
+            debug_assert_eq!(senders.len(), transactions.len(), "missing one or more senders");
+        }
 
         if TAKE {
             // Remove TxHashNumber
