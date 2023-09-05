@@ -5878,9 +5878,7 @@ dependencies = [
  "reth-provider",
  "reth-revm-inspectors",
  "reth-revm-primitives",
- "reth-rlp",
  "revm",
- "secp256k1",
  "tracing",
 ]
 

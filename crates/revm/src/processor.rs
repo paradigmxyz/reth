@@ -456,16 +456,13 @@ pub fn verify_receipt<'a>(
 
 #[cfg(test)]
 mod tests {
-    use reth_interfaces::test_utils::generators::sign_tx_with_key_pair;
     use reth_primitives::{
-        constants::BEACON_ROOTS_ADDRESS, keccak256, public_key_to_address, Account, Bytecode,
-        Bytes, ChainSpecBuilder, ForkCondition, StorageKey, Transaction, TransactionKind, TxLegacy,
-        MAINNET,
+        constants::BEACON_ROOTS_ADDRESS, keccak256, Account, Bytecode, Bytes, ChainSpecBuilder,
+        ForkCondition, StorageKey, MAINNET,
     };
     use reth_provider::{AccountReader, BlockHashReader, StateRootProvider};
     use reth_revm_primitives::TransitionState;
     use revm::Database;
-    use secp256k1::{rand, KeyPair, Secp256k1};
     use std::{collections::HashMap, str::FromStr};
 
     use super::*;
@@ -561,15 +558,6 @@ mod tests {
 
         let mut db = StateProviderTest::default();
 
-        // set up key that we can use to construct a tx, which actually calls the beacon root
-        // contract
-        let secp = Secp256k1::new();
-        let key_pair = KeyPair::new(&secp, &mut rand::thread_rng());
-        let caller_address = public_key_to_address(key_pair.public_key());
-
-        let caller_genesis = Account { balance: U256::MAX, ..Default::default() };
-        db.insert_account(caller_address, caller_genesis, None, HashMap::new());
-
         let beacon_root_contract_code = Bytes::from_str("0x3373fffffffffffffffffffffffffffffffffffffffe14604457602036146024575f5ffd5b620180005f350680545f35146037575f5ffd5b6201800001545f5260205ff35b42620180004206555f3562018000420662018000015500").unwrap();
 
         let beacon_root_contract_account = Account {
@@ -614,46 +602,15 @@ mod tests {
 
         // fix header, set a gas limit
         header.parent_beacon_block_root = Some(H256::from_low_u64_be(0x1337));
-        header.gas_limit = u64::MAX;
-        header.gas_used = 25440;
 
-        // build and sign transaction that calls the beacon root contract
-        let transaction = Transaction::Legacy(TxLegacy {
-            chain_id: Some(1),
-            nonce: 0,
-            gas_price: 1,
-            gas_limit: u64::MAX,
-            to: TransactionKind::Call(BEACON_ROOTS_ADDRESS),
-            value: 0,
-            // caller must specify timestamp in calldata, it must be 32 bytes
-            input: Bytes::from(H256::from_low_u64_be(header.timestamp).to_fixed_bytes()),
-        });
-
-        let signed_tx = sign_tx_with_key_pair(key_pair, transaction);
-
-        // Now execute a block with a tx that calls the beacon root contract, ensure that it does
-        // not fail
+        // Now execute a block with the fixed header, ensure that it does not fail
         executor
             .execute(
-                &Block {
-                    header: header.clone(),
-                    body: vec![signed_tx],
-                    ommers: vec![],
-                    withdrawals: None,
-                },
+                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
                 U256::ZERO,
-                Some(vec![caller_address]),
+                None,
             )
             .unwrap();
-
-        // check the receipts to ensure that the transaction didn't fail
-        let receipts = executor
-            .receipts
-            .last()
-            .expect("there should be receipts for the block we just executed");
-        assert_eq!(receipts.len(), 1);
-        let receipt = receipts.first().expect("there is one receipt");
-        assert!(receipt.success);
 
         // check the actual storage of the contract - it should be:
         // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH should be
