@@ -24,7 +24,7 @@ impl PruningArgs {
             Some(PruneConfig {
                 block_interval: 5,
                 parts: PruneModes {
-                    sender_recovery: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
+                    sender_recovery: Some(PruneMode::Full),
                     transaction_lookup: None,
                     receipts: chain_spec
                         .deposit_contract
