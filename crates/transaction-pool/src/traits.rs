@@ -310,6 +310,15 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
         tx_hashes: Vec<TxHash>,
     ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError>;
+
+    /// Returns the exact [BlobTransactionSidecar] for the given transaction hashes in the order
+    /// they were requested.
+    ///
+    /// Returns an error if any of the blobs are not found in the blob store.
+    fn get_all_blobs_exact(
+        &self,
+        tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError>;
 }
 
 /// Extension for [TransactionPool] trait that allows to set the current block info.
@@ -570,6 +579,21 @@ pub trait BestTransactions: Iterator + Send {
     /// This ensures that iterator will return the best transaction that it currently knows and not
     /// listen to pool updates.
     fn no_updates(&mut self);
+
+    /// Skip all blob transactions.
+    ///
+    /// There's only limited blob space available in a block, once exhausted, EIP-4844 transactions
+    /// can no longer be included.
+    ///
+    /// If called then the iterator will no longer yield blob transactions.
+    ///
+    /// Note: this will also exclude any transactions that depend on blob transactions.
+    fn skip_blobs(&mut self);
+
+    /// Controls whether the iterator skips blob transactions or not.
+    ///
+    /// If set to true, no blob transactions will be returned.
+    fn set_skip_blobs(&mut self, skip_blobs: bool);
 }
 
 /// A no-op implementation that yields no transactions.
@@ -577,6 +601,10 @@ impl<T> BestTransactions for std::iter::Empty<T> {
     fn mark_invalid(&mut self, _tx: &T) {}
 
     fn no_updates(&mut self) {}
+
+    fn skip_blobs(&mut self) {}
+
+    fn set_skip_blobs(&mut self, _skip_blobs: bool) {}
 }
 
 /// Trait for transaction types used inside the pool
@@ -604,6 +632,8 @@ pub trait PoolTransaction:
     ///
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
+    /// For EIP-4844 blob transactions: `max_fee_per_gas * gas_limit + tx_value +
+    /// max_blob_fee_per_gas * blob_gas_used`.
     fn cost(&self) -> U256;
 
     /// Amount of gas that should be used in executing this transaction. This is paid up-front.
@@ -700,6 +730,8 @@ pub struct EthPooledTransaction {
 
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
+    /// For EIP-4844 blob transactions: `max_fee_per_gas * gas_limit + tx_value +
+    /// max_blob_fee_per_gas * blob_gas_used`.
     pub(crate) cost: U256,
 
     /// The blob side car this transaction
@@ -735,7 +767,12 @@ impl EthPooledTransaction {
             #[cfg(feature = "optimism")]
             Transaction::Deposit(_) => U256::ZERO,
         };
-        let cost = gas_cost + U256::from(transaction.value());
+        let mut cost = gas_cost + U256::from(transaction.value());
+
+        if let Some(blob_tx) = transaction.as_eip4844() {
+            // add max blob cost
+            cost += U256::from(blob_tx.max_fee_per_gas * blob_tx.blob_gas() as u128);
+        }
 
         Self { transaction, cost, blob_sidecar }
     }
@@ -792,6 +829,8 @@ impl PoolTransaction for EthPooledTransaction {
     ///
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
+    /// For EIP-4844 blob transactions: `max_fee_per_gas * gas_limit + tx_value +
+    /// max_blob_fee_per_gas * blob_gas_used`.
     fn cost(&self) -> U256 {
         self.cost
     }
