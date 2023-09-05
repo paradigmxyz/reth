@@ -580,17 +580,11 @@ mod tests {
                 .build(),
         );
 
-        // TODO: seems like this is not possible because the type built from this is not State<'a,
-        // reth_interfaces::Error>, it is State<'a, Infallible>, which is incompatible with the
-        // EVMProcessor.
-        // let mut state = StateBuilder::default().with_cached_prestate(cache_state).build();
-
-        // execute chain and verify receipts
-        // let mut executor = EVMProcessor::new_with_state(chain_spec, state);
+        // execute invalid header (no parent beacon block root)
         let mut executor = EVMProcessor::new_with_db(chain_spec, RevmDatabase::new(db));
 
         // attempt to execute a block without parent beacon block root, expect err
-        let _err = executor
+        let err = executor
             .execute_and_verify_receipt(
                 &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
                 U256::ZERO,
@@ -599,6 +593,10 @@ mod tests {
             .expect_err(
                 "Executing cancun block without parent beacon block root field should fail",
             );
+        assert_eq!(
+            err,
+            BlockExecutionError::Validation(BlockValidationError::MissingParentBeaconBlockRoot)
+        );
 
         // fix header, set a gas limit
         header.parent_beacon_block_root = Some(H256::from_low_u64_be(0x1337));
