@@ -31,11 +31,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # TODO: replace when we are not using a fork
       - name: Checkout hive tests
         uses: actions/checkout@v3
         with:
-          repository: paradigmxyz/hive
+          repository: ethereum/hive
           ref: master
           path: hivetests
 
@@ -88,6 +87,9 @@ jobs:
           - sim: ethereum/engine
             limit: engine-api
             experimental: true
+          - sim: ethereum/engine
+            limit: cancun
+            experimental: true
             # eth_ rpc methods
           - sim: ethereum/rpc-compat
             include: [eth_blockNumber, eth_call, eth_chainId, eth_createAccessList, eth_estimateGas, eth_feeHistory, eth_getBalance, eth_getBlockBy, eth_getBlockTransactionCountBy, eth_getCode, eth_getStorage, eth_getTransactionBy, eth_getTransactionCount, eth_getTransactionReceipt, eth_sendRawTransaction, eth_syncing]
@@ -123,11 +125,10 @@ jobs:
           mv /tmp/hive /usr/local/bin
           chmod +x /usr/local/bin/hive
 
-      # TODO: replace when we are not using a fork
       - name: Checkout hive tests
         uses: actions/checkout@v3
         with:
-          repository: paradigmxyz/hive
+          repository: ethereum/hive
           ref: master
           path: hivetests
 

@@ -922,7 +922,7 @@ mod tests {
     fn is_pruning_needed() {
         let db = create_test_rw_db();
         let pruner =
-            Pruner::new(db, MAINNET.clone(), 5, PruneModes::default(), PruneBatchSizes::default());
+            Pruner::new(db, MAINNET.clone(), 5, PruneModes::none(), PruneBatchSizes::default());
 
         // No last pruned block number was set before
         let first_block_number = 1;

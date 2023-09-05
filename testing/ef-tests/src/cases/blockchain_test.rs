@@ -81,6 +81,7 @@ impl Case for BlockchainTestCase {
             provider.insert_block(
                 SealedBlock::new(case.genesis_block_header.clone().into(), BlockBody::default()),
                 None,
+                None,
             )?;
             case.pre.write_to_db(provider.tx_ref())?;
 
@@ -88,7 +89,7 @@ impl Case for BlockchainTestCase {
             for block in case.blocks.iter() {
                 let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
                 last_block = Some(decoded.number);
-                provider.insert_block(decoded, None)?;
+                provider.insert_block(decoded, None, None)?;
             }
 
             // Call execution stage

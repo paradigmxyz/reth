@@ -47,8 +47,12 @@ where
     /// Estimate gas needed for execution of the `request` at the [BlockId].
     pub async fn estimate_gas_at(&self, request: CallRequest, at: BlockId) -> EthResult<U256> {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
-        let state = self.state_at(at)?;
-        self.estimate_gas_with(cfg, block_env, request, state)
+
+        self.on_blocking_task(|this| async move {
+            let state = this.state_at(at)?;
+            this.estimate_gas_with(cfg, block_env, request, state)
+        })
+        .await
     }
 
     /// Executes the call request (`eth_call`) and returns the output

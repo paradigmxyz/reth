@@ -38,8 +38,10 @@ reth-db = { path = "../db", features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
 reth-rlp.workspace = true
 reth-trie = { path = "../../trie", features = ["test-utils"] }
+reth-interfaces = { workspace = true, features = ["test-utils"] }
 parking_lot.workspace = true
 tempfile = "3.3"
+assert_matches.workspace = true
 
 [features]
 test-utils = ["reth-rlp"]
