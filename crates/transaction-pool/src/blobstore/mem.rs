@@ -83,7 +83,7 @@ impl BlobStore for InMemoryBlobStore {
 
     // Retrieves the decoded blob data for the given transaction hash.
     fn get(&self, tx: H256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
-        let store = self.inner.store.write();
+        let store = self.inner.store.read();
         Ok(store.get(&tx).cloned())
     }
 
@@ -92,10 +92,24 @@ impl BlobStore for InMemoryBlobStore {
         txs: Vec<H256>,
     ) -> Result<Vec<(H256, BlobTransactionSidecar)>, BlobStoreError> {
         let mut items = Vec::with_capacity(txs.len());
-        let store = self.inner.store.write();
+        let store = self.inner.store.read();
         for tx in txs {
             if let Some(item) = store.get(&tx) {
                 items.push((tx, item.clone()));
+            }
+        }
+
+        Ok(items)
+    }
+
+    fn get_exact(&self, txs: Vec<H256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
+        let mut items = Vec::with_capacity(txs.len());
+        let store = self.inner.store.read();
+        for tx in txs {
+            if let Some(item) = store.get(&tx) {
+                items.push(item.clone());
+            } else {
+                return Err(BlobStoreError::MissingSidecar(tx))
             }
         }
 
