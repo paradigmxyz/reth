@@ -4,7 +4,7 @@ use crate::{
     eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     into_reth_log,
     stack::{InspectorStack, InspectorStackConfig},
-    state_change::post_block_balance_increments,
+    state_change::{apply_pre_block_call, post_block_balance_increments},
 };
 use reth_interfaces::{
     executor::{BlockExecutionError, BlockValidationError},
@@ -17,7 +17,6 @@ use reth_primitives::{
 use reth_provider::{
     change::BundleStateWithReceipts, BlockExecutor, BlockExecutorStats, StateProvider,
 };
-use reth_revm_primitives::env::fill_tx_env_with_beacon_root_contract_call;
 use revm::{
     db::{states::bundle_state::BundleRetention, StateDBBox},
     primitives::ResultAndState,
@@ -145,34 +144,13 @@ impl<'a> EVMProcessor<'a> {
     /// If cancun is not activated or the block is the genesis block, then this is a no-op, and no
     /// state changes are made.
     pub fn apply_pre_block_call(&mut self, block: &Block) -> Result<(), BlockExecutionError> {
-        if self.chain_spec.fork(Hardfork::Cancun).active_at_timestamp(block.timestamp) {
-            // if the block number is zero (genesis block) then the parent beacon block root must
-            // be 0x0 and no system transaction may occur as per EIP-4788
-            if block.number == 0 {
-                if block.parent_beacon_block_root != Some(H256::zero()) {
-                    return Err(
-                        BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero.into()
-                    )
-                }
-            } else {
-                let parent_beacon_block_root = block.parent_beacon_block_root.ok_or(
-                    BlockExecutionError::from(BlockValidationError::MissingParentBeaconBlockRoot),
-                )?;
-                fill_tx_env_with_beacon_root_contract_call(
-                    &mut self.evm.env.tx,
-                    parent_beacon_block_root,
-                );
-
-                let ResultAndState { state, .. } = self.evm.transact().map_err(|e| {
-                    BlockExecutionError::from(BlockValidationError::EVM {
-                        hash: Default::default(),
-                        message: format!("{e:?}"),
-                    })
-                })?;
-
-                self.db().commit(state);
-            }
-        }
+        apply_pre_block_call(
+            &self.chain_spec,
+            block.timestamp,
+            block.number,
+            block.parent_beacon_block_root,
+            &mut self.evm,
+        )?;
         Ok(())
     }
 
