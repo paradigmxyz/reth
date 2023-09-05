@@ -44,7 +44,6 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
         _ => {
             let raw = fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
             let genesis: AllGenesisFormats = serde_json::from_str(&raw)?;
-            println!("genesis: {:?}", genesis);
             Arc::new(genesis.into())
         }
     })

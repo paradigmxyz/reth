@@ -462,7 +462,7 @@ impl ChainSpec {
 impl From<Genesis> for ChainSpec {
     fn from(genesis: Genesis) -> Self {
         // Block-based hardforks
-        let hardfork_opts = vec![
+        let hardfork_opts = [
             (Hardfork::Homestead, genesis.config.homestead_block),
             (Hardfork::Dao, genesis.config.dao_fork_block),
             (Hardfork::Tangerine, genesis.config.eip150_block),
@@ -494,7 +494,7 @@ impl From<Genesis> for ChainSpec {
         }
 
         // Time-based hardforks
-        let time_hardfork_opts = vec![
+        let time_hardfork_opts = [
             (Hardfork::Shanghai, genesis.config.shanghai_time),
             (Hardfork::Cancun, genesis.config.cancun_time),
         ];
