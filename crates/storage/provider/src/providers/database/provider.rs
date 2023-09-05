@@ -1980,7 +1980,15 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
 
         for (transaction, sender) in tx_iter {
             let hash = transaction.hash();
-            self.tx.put::<tables::TxSenders>(next_tx_num, sender)?;
+
+            if prune_modes
+                .and_then(|modes| modes.sender_recovery)
+                .filter(|prune_mode| prune_mode.is_full())
+                .is_none()
+            {
+                self.tx.put::<tables::TxSenders>(next_tx_num, sender)?;
+            }
+
             self.tx.put::<tables::Transactions>(next_tx_num, transaction.into())?;
 
             if prune_modes
