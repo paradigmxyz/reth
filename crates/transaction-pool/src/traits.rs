@@ -629,6 +629,8 @@ pub trait PoolTransaction:
     ///
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
+    /// For EIP-4844 blob transactions: `max_fee_per_gas * gas_limit + tx_value +
+    /// max_blob_fee_per_gas * blob_gas_used`.
     fn cost(&self) -> U256;
 
     /// Amount of gas that should be used in executing this transaction. This is paid up-front.
@@ -721,6 +723,8 @@ pub struct EthPooledTransaction {
 
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
+    /// For EIP-4844 blob transactions: `max_fee_per_gas * gas_limit + tx_value +
+    /// max_blob_fee_per_gas * blob_gas_used`.
     pub(crate) cost: U256,
 
     /// The blob side car this transaction
@@ -754,7 +758,12 @@ impl EthPooledTransaction {
                 U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit)
             }
         };
-        let cost = gas_cost + U256::from(transaction.value());
+        let mut cost = gas_cost + U256::from(transaction.value());
+
+        if let Some(blob_tx) = transaction.as_eip4844() {
+            // add max blob cost
+            cost += U256::from(blob_tx.max_fee_per_gas * blob_tx.blob_gas() as u128);
+        }
 
         Self { transaction, cost, blob_sidecar }
     }
@@ -806,6 +815,8 @@ impl PoolTransaction for EthPooledTransaction {
     ///
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
+    /// For EIP-4844 blob transactions: `max_fee_per_gas * gas_limit + tx_value +
+    /// max_blob_fee_per_gas * blob_gas_used`.
     fn cost(&self) -> U256 {
         self.cost
     }
