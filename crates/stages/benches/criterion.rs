@@ -5,7 +5,7 @@ use criterion::{
 use pprof::criterion::{Output, PProfProfiler};
 use reth_db::DatabaseEnv;
 use reth_interfaces::test_utils::TestConsensus;
-use reth_primitives::{stage::StageCheckpoint, MAINNET};
+use reth_primitives::{stage::StageCheckpoint, PruneModes, MAINNET};
 use reth_provider::ProviderFactory;
 use reth_stages::{
     stages::{MerkleStage, SenderRecoveryStage, TotalDifficultyStage, TransactionLookupStage},
@@ -62,7 +62,7 @@ fn transaction_lookup(c: &mut Criterion) {
     let mut group = c.benchmark_group("Stages");
     // don't need to run each stage for that many times
     group.sample_size(10);
-    let stage = TransactionLookupStage::new(DEFAULT_NUM_BLOCKS);
+    let stage = TransactionLookupStage::new(DEFAULT_NUM_BLOCKS, PruneModes::none());
 
     measure_stage(
         &mut group,

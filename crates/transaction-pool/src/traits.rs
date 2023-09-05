@@ -310,6 +310,15 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
         tx_hashes: Vec<TxHash>,
     ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError>;
+
+    /// Returns the exact [BlobTransactionSidecar] for the given transaction hashes in the order
+    /// they were requested.
+    ///
+    /// Returns an error if any of the blobs are not found in the blob store.
+    fn get_all_blobs_exact(
+        &self,
+        tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError>;
 }
 
 /// Extension for [TransactionPool] trait that allows to set the current block info.
@@ -570,6 +579,21 @@ pub trait BestTransactions: Iterator + Send {
     /// This ensures that iterator will return the best transaction that it currently knows and not
     /// listen to pool updates.
     fn no_updates(&mut self);
+
+    /// Skip all blob transactions.
+    ///
+    /// There's only limited blob space available in a block, once exhausted, EIP-4844 transactions
+    /// can no longer be included.
+    ///
+    /// If called then the iterator will no longer yield blob transactions.
+    ///
+    /// Note: this will also exclude any transactions that depend on blob transactions.
+    fn skip_blobs(&mut self);
+
+    /// Controls whether the iterator skips blob transactions or not.
+    ///
+    /// If set to true, no blob transactions will be returned.
+    fn set_skip_blobs(&mut self, skip_blobs: bool);
 }
 
 /// A no-op implementation that yields no transactions.
@@ -577,6 +601,10 @@ impl<T> BestTransactions for std::iter::Empty<T> {
     fn mark_invalid(&mut self, _tx: &T) {}
 
     fn no_updates(&mut self) {}
+
+    fn skip_blobs(&mut self) {}
+
+    fn set_skip_blobs(&mut self, _skip_blobs: bool) {}
 }
 
 /// Trait for transaction types used inside the pool

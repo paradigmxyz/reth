@@ -290,7 +290,7 @@ pub struct PruneConfig {
 
 impl Default for PruneConfig {
     fn default() -> Self {
-        Self { block_interval: 5, parts: PruneModes::default() }
+        Self { block_interval: 5, parts: PruneModes::none() }
     }
 }
 

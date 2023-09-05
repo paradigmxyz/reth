@@ -192,6 +192,16 @@ impl TransactionPool for NoopTransactionPool {
     ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError> {
         Ok(vec![])
     }
+
+    fn get_all_blobs_exact(
+        &self,
+        tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
+        if tx_hashes.is_empty() {
+            return Ok(vec![])
+        }
+        Err(BlobStoreError::MissingSidecar(tx_hashes[0]))
+    }
 }
 
 /// A [`TransactionValidator`] that does nothing.

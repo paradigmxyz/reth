@@ -5,12 +5,12 @@ use jsonrpsee::{
     core::Error as RpcError,
     types::{error::CALL_EXECUTION_FAILED_CODE, ErrorObject},
 };
-use reth_primitives::{
-    abi::decode_revert_reason, Address, BlobTransactionValidationError, Bytes, U256,
-};
+use reth_primitives::{abi::decode_revert_reason, Address, Bytes, U256};
 use reth_revm::tracing::js::JsInspectorError;
 use reth_rpc_types::{error::EthRpcErrorCode, BlockError, CallInputError};
-use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolError, PoolTransactionError};
+use reth_transaction_pool::error::{
+    Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolTransactionError,
+};
 use revm::primitives::{EVMError, ExecutionResult, Halt, OutOfGasError};
 use std::time::Duration;
 
@@ -472,23 +472,9 @@ pub enum RpcPoolError {
     /// Custom pool error
     #[error("{0:?}")]
     PoolTransactionError(Box<dyn PoolTransactionError>),
-    /// Unable to find the blob for an EIP4844 transaction
-    #[error("blob sidecar not found for EIP4844 transaction")]
-    MissingEip4844Blob,
-    /// Thrown if an EIP-4844 without any blobs arrives
-    #[error("blobless blob transaction")]
-    NoEip4844Blobs,
-    /// Thrown if an EIP-4844 without any blobs arrives
-    #[error("too many blobs in transaction: have {have}, permitted {permitted}")]
-    TooManyEip4844Blobs {
-        /// Number of blobs the transaction has
-        have: usize,
-        /// Number of maximum blobs the transaction can have
-        permitted: usize,
-    },
-    /// Thrown if validating the blob sidecar for the transaction failed.
+    /// Eip-4844 related error
     #[error(transparent)]
-    InvalidEip4844Blob(BlobTransactionValidationError),
+    Eip4844(#[from] Eip4844PoolTransactionError),
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
@@ -527,19 +513,7 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             InvalidPoolTransactionError::OversizedData(_, _) => RpcPoolError::OversizedData,
             InvalidPoolTransactionError::Underpriced => RpcPoolError::Underpriced,
             InvalidPoolTransactionError::Other(err) => RpcPoolError::PoolTransactionError(err),
-            InvalidPoolTransactionError::MissingEip4844BlobSidecar => {
-                RpcPoolError::MissingEip4844Blob
-            }
-            InvalidPoolTransactionError::NoEip4844Blobs => RpcPoolError::NoEip4844Blobs,
-            InvalidPoolTransactionError::TooManyEip4844Blobs { have, permitted } => {
-                RpcPoolError::TooManyEip4844Blobs { have, permitted }
-            }
-            InvalidPoolTransactionError::InvalidEip4844Blob(err) => {
-                RpcPoolError::InvalidEip4844Blob(err)
-            }
-            InvalidPoolTransactionError::Eip4844NonceGap => {
-                RpcPoolError::Invalid(RpcInvalidTransactionError::NonceTooHigh)
-            }
+            InvalidPoolTransactionError::Eip4844(err) => RpcPoolError::Eip4844(err),
         }
     }
 }
