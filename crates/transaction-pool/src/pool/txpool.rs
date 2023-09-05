@@ -1,7 +1,7 @@
 //! The internal transaction pool implementation.
 use crate::{
     config::TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
-    error::{InvalidPoolTransactionError, PoolError},
+    error::{Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError},
     identifier::{SenderId, TransactionId},
     metrics::TxPoolMetrics,
     pool::{
@@ -396,10 +396,10 @@ impl<T: TransactionOrdering> TxPool<T> {
 
                 Ok(res)
             }
-            Err(e) => {
+            Err(err) => {
                 // Update invalid transactions metric
                 self.metrics.invalid_transactions.increment(1);
-                match e {
+                match err {
                     InsertErr::Underpriced { existing, transaction: _ } => {
                         Err(PoolError::ReplacementUnderpriced(existing))
                     }
@@ -419,6 +419,16 @@ impl<T: TransactionOrdering> TxPool<T> {
                     } => Err(PoolError::InvalidTransaction(
                         *transaction.hash(),
                         InvalidPoolTransactionError::ExceedsGasLimit(block_gas_limit, tx_gas_limit),
+                    )),
+                    InsertErr::BlobTxHasNonceGap { transaction } => {
+                        Err(PoolError::InvalidTransaction(
+                            *transaction.hash(),
+                            Eip4844PoolTransactionError::Eip4844NonceGap.into(),
+                        ))
+                    }
+                    InsertErr::Overdraft { transaction } => Err(PoolError::InvalidTransaction(
+                        *transaction.hash(),
+                        InvalidPoolTransactionError::Overdraft,
                     )),
                 }
             }
@@ -1065,6 +1075,39 @@ impl<T: PoolTransaction> AllTransactions<T> {
         Ok(transaction)
     }
 
+    /// Enforces additional constraints for blob transactions before attempting to insert:
+    ///    - new blob transactions must not have any nonce gaps
+    ///    - blob transactions cannot go into overdraft
+    fn ensure_valid_blob_transaction(
+        &self,
+        transaction: ValidPoolTransaction<T>,
+        on_chain_balance: U256,
+        ancestor: Option<TransactionId>,
+    ) -> Result<ValidPoolTransaction<T>, InsertErr<T>> {
+        if let Some(ancestor) = ancestor {
+            let Some(tx) = self.txs.get(&ancestor) else {
+                // ancestor tx is missing, so we can't insert the new blob
+                return Err(InsertErr::BlobTxHasNonceGap { transaction: Arc::new(transaction) })
+            };
+            if tx.state.has_nonce_gap() {
+                // the ancestor transaction already has a nonce gap, so we can't insert the new
+                // blob
+                return Err(InsertErr::BlobTxHasNonceGap { transaction: Arc::new(transaction) })
+            }
+
+            // check if the new blob would go into overdraft
+            if tx.next_cumulative_cost() + transaction.cost() > on_chain_balance {
+                // the transaction would go into overdraft
+                return Err(InsertErr::Overdraft { transaction: Arc::new(transaction) })
+            }
+        } else if transaction.cost() > on_chain_balance {
+            // the transaction would go into overdraft
+            return Err(InsertErr::Overdraft { transaction: Arc::new(transaction) })
+        }
+
+        Ok(transaction)
+    }
+
     /// Returns true if the replacement candidate is underpriced and can't replace the existing
     /// transaction.
     #[inline]
@@ -1122,6 +1165,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// These can include:
     ///      - closing nonce gaps of descendant transactions
     ///      - enough balance updates
+    ///
+    /// Note: For EIP-4844 blob transactions additional constraints are enforced:
+    ///      - new blob transactions must not have any nonce gaps
+    ///      - blob transactions cannot go into overdraft
     pub(crate) fn insert_tx(
         &mut self,
         transaction: ValidPoolTransaction<T>,
@@ -1130,17 +1177,28 @@ impl<T: PoolTransaction> AllTransactions<T> {
     ) -> InsertResult<T> {
         assert!(on_chain_nonce <= transaction.nonce(), "Invalid transaction");
 
-        let transaction = Arc::new(self.ensure_valid(transaction)?);
+        let mut transaction = self.ensure_valid(transaction)?;
+
         let inserted_tx_id = *transaction.id();
         let mut state = TxState::default();
         let mut cumulative_cost = U256::ZERO;
         let mut updates = Vec::new();
 
+        // identifier of the ancestor transaction, will be None if the transaction is the next tx of
+        // the sender
         let ancestor = TransactionId::ancestor(
             transaction.transaction.nonce(),
             on_chain_nonce,
             inserted_tx_id.sender,
         );
+
+        // before attempting to insert a blob transaction, we need to ensure that additional
+        // constraints are met
+        if transaction.is_eip4844() {
+            transaction =
+                self.ensure_valid_blob_transaction(transaction, on_chain_balance, ancestor)?;
+        }
+        let transaction = Arc::new(transaction);
 
         // If there's no ancestor tx then this is the next transaction.
         if ancestor.is_none() {
@@ -1341,6 +1399,11 @@ pub(crate) enum InsertErr<T: PoolTransaction> {
         transaction: Arc<ValidPoolTransaction<T>>,
         existing: TxHash,
     },
+    /// Attempted to insert a blob transaction with a nonce gap
+    BlobTxHasNonceGap { transaction: Arc<ValidPoolTransaction<T>> },
+    /// Attempted to insert a transaction that would overdraft the sender's balance at the time of
+    /// insertion.
+    Overdraft { transaction: Arc<ValidPoolTransaction<T>> },
     /// The transactions feeCap is lower than the chain's minimum fee requirement.
     ///
     /// See also [`MIN_PROTOCOL_BASE_FEE`]
