@@ -20,15 +20,23 @@ impl TaskExecutorMetrics {
         self.critical_tasks.increment(1);
     }
 
-    pub(crate) fn inc_regular_task(&self) {
+    pub(crate) fn inc_regular_tasks(&self) {
         self.regular_tasks.increment(1);
     }
+}
 
-    pub(crate) fn inc_finished_critical_tasks(&self) {
-        self.finished_critical_tasks.increment(1);
+/// Helper type for increasing counters even if a task fails.
+pub struct IncCounterOnDrop(Counter);
+
+impl IncCounterOnDrop {
+    /// Create a new `IncCounterOnDrop`.
+    pub fn new(counter: Counter) -> Self {
+        IncCounterOnDrop(counter)
     }
+}
 
-    pub(crate) fn inc_finisehd_regular_task(&self) {
-        self.finished_regular_tasks.increment(1);
+impl Drop for IncCounterOnDrop {
+    fn drop(&mut self) {
+        self.0.increment(1);
     }
 }

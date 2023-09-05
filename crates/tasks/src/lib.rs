@@ -22,6 +22,7 @@ use futures_util::{
     future::{select, BoxFuture},
     pin_mut, Future, FutureExt, TryFutureExt,
 };
+use metrics::IncCounterOnDrop;
 use std::{
     any::Any,
     fmt::{Display, Formatter},
@@ -271,7 +272,11 @@ impl TaskExecutor {
     {
         let on_shutdown = self.on_shutdown.clone();
 
+        // Wrap the original future to increment the finished tasks counter upon completion
+        let metrics = self.metrics.clone();
         let task = async move {
+            // Create an instance of IncCounterOnDrop with the counter to increment
+            let _inc_counter_on_drop = IncCounterOnDrop::new(metrics.finished_regular_tasks);
             pin_mut!(fut);
             let _ = select(on_shutdown, fut).await;
         }
@@ -341,7 +346,11 @@ impl TaskExecutor {
             })
             .in_current_span();
 
+        // Wrap the original future to increment the finished tasks counter upon completion
+        let metrics = self.metrics.clone();
         let task = async move {
+            // Create an instance of IncCounterOnDrop with the counter to increment
+            let _inc_counter_on_drop = IncCounterOnDrop::new(metrics.finished_critical_tasks);
             pin_mut!(task);
             let _ = select(on_shutdown, task).await;
         };
@@ -403,25 +412,13 @@ impl TaskExecutor {
 
 impl TaskSpawner for TaskExecutor {
     fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
-        self.metrics.inc_regular_task();
-        // Wrap the original future to increment the finished tasks counter upon completion
-        let metrics = self.metrics.clone();
-        let wrapped_fut = async move {
-            let _ = fut.await;
-            metrics.inc_finisehd_regular_task(); // Increment the number of finished tasks
-        };
-        self.spawn(wrapped_fut)
+        self.metrics.inc_regular_tasks();
+        self.spawn(fut)
     }
 
     fn spawn_critical(&self, name: &'static str, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
         self.metrics.inc_critical_tasks();
-        // Wrap the original future to increment the finished tasks counter upon completion
-        let metrics = self.metrics.clone();
-        let wrapped_fut = async move {
-            let _ = fut.await;
-            metrics.inc_finished_critical_tasks(); // Increment the number of finished tasks
-        };
-        TaskExecutor::spawn_critical(self, name, wrapped_fut)
+        TaskExecutor::spawn_critical(self, name, fut)
     }
 
     fn spawn_blocking(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
