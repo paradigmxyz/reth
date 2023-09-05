@@ -70,7 +70,7 @@ pub(crate) struct BestTransactions<T: TransactionOrdering> {
     pub(crate) independent: BTreeSet<PendingTransaction<T>>,
     /// There might be the case where a yielded transactions is invalid, this will track it.
     pub(crate) invalid: HashSet<TxHash>,
-    /// Used to recieve any new pending transactions that have been added to the pool after this
+    /// Used to receive any new pending transactions that have been added to the pool after this
     /// iterator was snapshotted
     ///
     /// These new pending transactions are inserted into this iterator's pool before yielding the
