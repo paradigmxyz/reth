@@ -440,6 +440,8 @@ impl<'a> PrunableBlockExecutor for EVMProcessor<'a> {
             true
         });
 
+        block_receipts.shrink_to_fit();
+
         Ok(())
     }
 }
