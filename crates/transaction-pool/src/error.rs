@@ -169,6 +169,9 @@ pub enum InvalidPoolTransactionError {
     /// Thrown if the transaction's fee is below the minimum fee
     #[error("transaction underpriced")]
     Underpriced,
+    /// Thrown if the transaction's would require an account to be overdrawn
+    #[error("transaction overdraws from account")]
+    Overdraft,
     /// Eip-4844 related errors
     #[error(transparent)]
     Eip4844(#[from] Eip4844PoolTransactionError),
@@ -228,6 +231,7 @@ impl InvalidPoolTransactionError {
                 // local setting
                 false
             }
+            InvalidPoolTransactionError::Overdraft => false,
             InvalidPoolTransactionError::Other(err) => err.is_bad_transaction(),
             InvalidPoolTransactionError::Eip4844(eip4844_err) => {
                 match eip4844_err {

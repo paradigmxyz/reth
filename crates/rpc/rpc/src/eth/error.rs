@@ -514,6 +514,9 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             InvalidPoolTransactionError::Underpriced => RpcPoolError::Underpriced,
             InvalidPoolTransactionError::Other(err) => RpcPoolError::PoolTransactionError(err),
             InvalidPoolTransactionError::Eip4844(err) => RpcPoolError::Eip4844(err),
+            InvalidPoolTransactionError::Overdraft => {
+                RpcPoolError::Invalid(RpcInvalidTransactionError::InsufficientFunds)
+            }
         }
     }
 }
