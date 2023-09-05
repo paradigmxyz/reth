@@ -261,7 +261,6 @@ impl<'a> EVMProcessor<'a> {
         senders: Option<Vec<Address>>,
     ) -> Result<u64, BlockExecutionError> {
         self.init_env(&block.header, total_difficulty);
-        self.apply_pre_block_call(block)?;
 
         // perf: do not execute empty blocks
         if block.body.is_empty() {
@@ -325,6 +324,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<(), BlockExecutionError> {
+        self.apply_pre_block_call(block)?;
         let cumulative_gas_used = self.execute_transactions(block, total_difficulty, senders)?;
 
         // Check if gas used matches the value set in header.
