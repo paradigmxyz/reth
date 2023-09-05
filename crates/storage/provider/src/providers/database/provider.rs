@@ -435,9 +435,11 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)?;
 
         // Recover senders manually if not found in db
+        // SAFETY: Transactions are always guaranteed to be in the database whereas
+        // senders might be pruned.
         if senders.len() != transactions.len() {
             // Find all missing senders, their corresponding tx numbers and indexes to the original
-            // `senders` vector at which the recovered senders will be inserted
+            // `senders` vector at which the recovered senders will be inserted.
             let mut missing_senders = Vec::with_capacity(transactions.len() - senders.len());
             {
                 let mut senders = senders.iter().peekable();
@@ -477,6 +479,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             // Insert recovered senders along with tx numbers at the corresponding indexes to the
             // original `senders` vector
             for ((i, tx_number, _), sender) in missing_senders.into_iter().zip(recovered_senders) {
+                // Insert will put recovered senders at necessary positions and shift the rest
                 senders.insert(i, (*tx_number, sender));
             }
 
