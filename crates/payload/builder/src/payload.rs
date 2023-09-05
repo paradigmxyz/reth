@@ -98,7 +98,7 @@ impl From<BuiltPayload> for ExecutionPayloadEnvelopeV3 {
         let BuiltPayload { block, fees, sidecars, .. } = value;
 
         ExecutionPayloadEnvelopeV3 {
-            payload_inner: block.into(),
+            execution_payload: block.into(),
             block_value: fees,
             // From the engine API spec:
             //
