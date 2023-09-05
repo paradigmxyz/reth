@@ -135,7 +135,7 @@ impl Chain {
     }
 
     /// Get all receipts for the given block.
-    pub fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<&[Receipt]> {
+    pub fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<&Receipt>> {
         let num = self.block_number(block_hash)?;
         Some(self.state.receipts_by_block(num))
     }
@@ -150,7 +150,7 @@ impl Chain {
             let mut receipts = receipts.iter();
             let mut tx_receipts = Vec::new();
             for tx in block.body.iter() {
-                if let Some(receipt) = receipts.next() {
+                if let Some((_, receipt)) = receipts.next() {
                     tx_receipts.push((tx.hash(), receipt.clone()));
                 }
             }
@@ -405,7 +405,7 @@ mod tests {
                 vec![vec![(H160([2; 20]), None, vec![])]],
                 vec![],
             ),
-            vec![vec![]],
+            vec![std::collections::HashMap::default()],
             1,
         );
 
@@ -415,7 +415,7 @@ mod tests {
                 vec![vec![(H160([3; 20]), None, vec![])]],
                 vec![],
             ),
-            vec![vec![]],
+            vec![std::collections::HashMap::default()],
             2,
         );
 

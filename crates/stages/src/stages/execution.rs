@@ -161,6 +161,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             executor.execute_and_verify_receipt(&block, td, Some(senders)).map_err(|error| {
                 StageError::ExecutionError { block: block.header.clone().seal_slow(), error }
             })?;
+            executor.prune_receipts(block.number)?;
 
             execution_duration += time.elapsed();
 

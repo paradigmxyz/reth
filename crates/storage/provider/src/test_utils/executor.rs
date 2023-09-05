@@ -1,10 +1,10 @@
 use crate::{
     change::BundleStateWithReceipts, BlockExecutor, BlockExecutorStats, ExecutorFactory,
-    StateProvider,
+    PrunableBlockExecutor, StateProvider,
 };
 use parking_lot::Mutex;
 use reth_interfaces::executor::BlockExecutionError;
-use reth_primitives::{Address, Block, BlockNumber, ChainSpec, U256};
+use reth_primitives::{Address, Block, BlockNumber, ChainSpec, PruneModes, PrunePartError, U256};
 use std::sync::Arc;
 /// Test executor with mocked result.
 pub struct TestExecutor(pub Option<BundleStateWithReceipts>);
@@ -34,16 +34,22 @@ impl BlockExecutor for TestExecutor {
         Ok(())
     }
 
-    fn set_prune_modes(&mut self, _prune_modes: reth_primitives::PruneModes) {}
-
-    fn set_tip(&mut self, _tip: BlockNumber) {}
-
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
         self.0.clone().unwrap_or_default()
     }
 
     fn stats(&self) -> BlockExecutorStats {
         BlockExecutorStats::default()
+    }
+}
+
+impl PrunableBlockExecutor for TestExecutor {
+    fn set_tip(&mut self, _tip: BlockNumber) {}
+
+    fn set_prune_modes(&mut self, _prune_modes: PruneModes) {}
+
+    fn prune_receipts(&mut self, _block: BlockNumber) -> Result<(), PrunePartError> {
+        Ok(())
     }
 }
 
@@ -67,7 +73,10 @@ impl TestExecutorFactory {
 }
 
 impl ExecutorFactory for TestExecutorFactory {
-    fn with_sp<'a, SP: StateProvider + 'a>(&'a self, _sp: SP) -> Box<dyn BlockExecutor + 'a> {
+    fn with_sp<'a, SP: StateProvider + 'a>(
+        &'a self,
+        _sp: SP,
+    ) -> Box<dyn PrunableBlockExecutor + 'a> {
         let exec_res = self.exec_results.lock().pop();
         Box::new(TestExecutor(exec_res))
     }

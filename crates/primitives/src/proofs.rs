@@ -99,7 +99,7 @@ pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> H256 {
 /// Calculates the receipt root for a header for the reference type of [ReceiptWithBloom].
 ///
 /// NOTE: Prefer [calculate_receipt_root] if you have log blooms memoized.
-pub fn calculate_receipt_root_ref<T>(receipts: &[T]) -> H256
+pub fn calculate_receipt_root_ref<T>(receipts: &[&T]) -> H256
 where
     for<'a> ReceiptWithBloomRef<'a>: From<&'a T>,
 {

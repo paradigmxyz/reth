@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crate::{change::BundleStateWithReceipts, StateProvider};
 use reth_interfaces::executor::BlockExecutionError;
-use reth_primitives::{Address, Block, BlockNumber, ChainSpec, PruneModes, U256};
+use reth_primitives::{Address, Block, BlockNumber, ChainSpec, PruneModes, PrunePartError, U256};
 use tracing::info;
 
 /// Executor factory that would create the EVM with particular state provider.
@@ -12,7 +12,10 @@ use tracing::info;
 /// It can be used to mock executor.
 pub trait ExecutorFactory: Send + Sync + 'static {
     /// Executor with [`StateProvider`]
-    fn with_sp<'a, SP: StateProvider + 'a>(&'a self, _sp: SP) -> Box<dyn BlockExecutor + 'a>;
+    fn with_sp<'a, SP: StateProvider + 'a>(
+        &'a self,
+        _sp: SP,
+    ) -> Box<dyn PrunableBlockExecutor + 'a>;
 
     /// Return internal chainspec
     fn chain_spec(&self) -> &ChainSpec;
@@ -77,15 +80,21 @@ pub trait BlockExecutor {
         senders: Option<Vec<Address>>,
     ) -> Result<(), BlockExecutionError>;
 
-    /// Set prune modes.
-    fn set_prune_modes(&mut self, prune_modes: PruneModes);
-
-    /// Set tip - highest known block number.
-    fn set_tip(&mut self, tip: BlockNumber);
-
     /// Return bundle state. This is output of the execution.
     fn take_output_state(&mut self) -> BundleStateWithReceipts;
 
     /// Internal statistics of execution.
     fn stats(&self) -> BlockExecutorStats;
+}
+
+/// A [BlockExecutor] capable of in-memory pruning of the data that will be written to the database.
+pub trait PrunableBlockExecutor: BlockExecutor {
+    /// Set tip - highest known block number.
+    fn set_tip(&mut self, tip: BlockNumber);
+
+    /// Set prune modes.
+    fn set_prune_modes(&mut self, prune_modes: PruneModes);
+
+    /// Prune in-memory receipts.
+    fn prune_receipts(&mut self, block: BlockNumber) -> Result<(), PrunePartError>;
 }
