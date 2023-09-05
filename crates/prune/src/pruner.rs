@@ -591,7 +591,7 @@ impl<DB: Database> Pruner<DB> {
             .collect::<Vec<_>>();
 
         // Number of transactions retrieved from the database should match the tx range count
-        let tx_count = tx_range.clone().count();
+        let tx_count = tx_range.count();
         if hashes.len() != tx_count {
             return Err(PrunerError::InconsistentData(
                 "Unexpected number of transaction hashes retrieved by transaction number range",
