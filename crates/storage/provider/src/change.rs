@@ -273,18 +273,22 @@ impl BundleStateWithReceipts {
 
     /// Revert to given block number.
     ///
+    /// If number is in future, or in the past return false
+    ///
     /// Note: Given Block number will stay inside the bundle state.
-    pub fn revert_to(&mut self, block_number: BlockNumber) {
-        let Some(index) = self.block_number_to_index(block_number) else { return };
+    pub fn revert_to(&mut self, block_number: BlockNumber) -> bool {
+        let Some(index) = self.block_number_to_index(block_number) else { return false };
 
         // +1 is for number of blocks that we have as index is included.
-        let new_len = self.len() - (index + 1);
+        let new_len = index + 1;
         let rm_trx: usize = self.len() - new_len;
 
         // remove receipts
         self.receipts.truncate(new_len);
         // Revert last n reverts.
         self.bundle.revert(rm_trx);
+
+        true
     }
 
     /// This will detach lower part of the chain and return it back.
@@ -570,10 +574,13 @@ mod tests {
         transaction::DbTx,
         DatabaseEnv,
     };
-    use reth_primitives::{Address, StorageEntry, H256, MAINNET, U256};
+    use reth_primitives::{Address, Receipt, StorageEntry, H256, MAINNET, U256};
     use reth_revm_primitives::{into_reth_acc, primitives::HashMap};
     use revm::{
-        db::states::{bundle_state::BundleRetention, changes::PlainStorageRevert},
+        db::{
+            states::{bundle_state::BundleRetention, changes::PlainStorageRevert},
+            BundleState,
+        },
         primitives::{Account, AccountInfo as RevmAccountInfo, AccountStatus, StorageSlot},
         CacheState, DatabaseCommit, StateBuilder,
     };
@@ -1324,5 +1331,34 @@ mod tests {
             )))
         );
         assert_eq!(storage_changes.next(), None);
+    }
+
+    #[test]
+    fn revert_to_indices() {
+        let base = BundleStateWithReceipts {
+            bundle: BundleState::default(),
+            receipts: vec![vec![Receipt::default(); 2]; 7],
+            first_block: 10,
+        };
+
+        let mut this = base.clone();
+        assert!(this.revert_to(10));
+        assert_eq!(this.receipts.len(), 1);
+
+        let mut this = base.clone();
+        assert!(!this.revert_to(9));
+        assert_eq!(this.receipts.len(), 7);
+
+        let mut this = base.clone();
+        assert!(this.revert_to(15));
+        assert_eq!(this.receipts.len(), 6);
+
+        let mut this = base.clone();
+        assert!(this.revert_to(16));
+        assert_eq!(this.receipts.len(), 7);
+
+        let mut this = base.clone();
+        assert!(!this.revert_to(17));
+        assert_eq!(this.receipts.len(), 7);
     }
 }
