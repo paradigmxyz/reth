@@ -705,7 +705,7 @@ mod tests {
         let mut executor = EVMProcessor::new_with_db(chain_spec, RevmDatabase::new(db));
 
         // attempt to execute a block without parent beacon block root, expect err
-        let _out = executor
+        executor
             .execute_and_verify_receipt(
                 &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
                 U256::ZERO,
@@ -763,7 +763,7 @@ mod tests {
 
         // now try to process the genesis block again, this time ensuring that a system contract
         // call does not occur
-        let out = executor
+        executor
             .execute(
                 &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
                 U256::ZERO,
@@ -774,8 +774,10 @@ mod tests {
         // there is no system contract call so there should be NO STORAGE CHANGES
         // this means we'll check the transition state
         let state = executor.evm.db().unwrap();
-        let transition_state =
-            state.transition_state.expect("the evm should be initialized with bundle updates");
+        let transition_state = state
+            .transition_state
+            .clone()
+            .expect("the evm should be initialized with bundle updates");
 
         // assert that it is the default (empty) transition state
         assert_eq!(transition_state, TransitionState::default());
