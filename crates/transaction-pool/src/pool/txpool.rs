@@ -1184,7 +1184,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let mut cumulative_cost = U256::ZERO;
         let mut updates = Vec::new();
 
-        // identifier of the ancestor transaction, will be None of the transaction is the next tx of
+        // identifier of the ancestor transaction, will be None if the transaction is the next tx of
         // the sender
         let ancestor = TransactionId::ancestor(
             transaction.transaction.nonce(),
