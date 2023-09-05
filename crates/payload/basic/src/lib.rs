@@ -11,7 +11,7 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! reth basic payload job generator
+//! A basic payload generator for reth.
 
 use crate::metrics::PayloadBuilderMetrics;
 use futures_core::ready;
@@ -23,9 +23,10 @@ use reth_payload_builder::{
 };
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
+    calculate_excess_blob_gas,
     constants::{
-        BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
-        ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
+        eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
+        EMPTY_WITHDRAWALS, ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
     },
     proofs, Block, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
     SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
@@ -63,7 +64,7 @@ use tracing::{debug, trace};
 
 mod metrics;
 
-/// The [PayloadJobGenerator] that creates [BasicPayloadJob]s.
+/// The [`PayloadJobGenerator`] that creates [`BasicPayloadJob`]s.
 pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder = ()> {
     /// The client that can interact with the chain.
     client: Client,
@@ -653,6 +654,7 @@ where
 
     debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number, "building new payload");
     let mut cumulative_gas_used = 0;
+    let mut sum_blob_gas_used = 0;
     let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
     let base_fee = initialized_block_env.basefee.to::<u64>();
 
@@ -681,6 +683,27 @@ where
 
         // convert tx to a signed transaction
         let tx = pool_tx.to_recovered_transaction();
+
+        // There's only limited amount of blob space available per block, so we need to check if the
+        // EIP-4844 can still fit in the block
+        if let Some(blob_tx) = tx.transaction.as_eip4844() {
+            let tx_blob_gas = blob_tx.blob_gas();
+            if sum_blob_gas_used + tx_blob_gas > MAX_DATA_GAS_PER_BLOCK {
+                // we can't fit this _blob_ transaction into the block, so we mark it as invalid,
+                // which removes its dependent transactions from the iterator. This is similar to
+                // the gas limit condition for regular transactions above.
+                best_txs.mark_invalid(&pool_tx);
+                continue
+            } else {
+                // add to the data gas if we're going to execute the transaction
+                sum_blob_gas_used += tx_blob_gas;
+
+                // if we've reached the max data gas per block, we can skip blob txs entirely
+                if sum_blob_gas_used == MAX_DATA_GAS_PER_BLOCK {
+                    best_txs.skip_blobs();
+                }
+            }
+        }
 
         // Configure the environment for the block.
         let env = Env {
@@ -764,6 +787,31 @@ where
     // create the block header
     let transactions_root = proofs::calculate_transaction_root(&executed_txs);
 
+    // initialize empty blob sidecars at first. If cancun is active then this will
+    let mut blob_sidecars = Vec::new();
+    let mut excess_blob_gas = None;
+    let mut blob_gas_used = None;
+
+    // only determine cancun fields when active
+    if chain_spec.is_cancun_activated_at_timestamp(attributes.timestamp) {
+        // grab the blob sidecars from the executed txs
+        blob_sidecars = pool.get_all_blobs_exact(
+            executed_txs.iter().filter(|tx| tx.is_eip4844()).map(|tx| tx.hash).collect(),
+        )?;
+
+        excess_blob_gas = if chain_spec.is_cancun_activated_at_timestamp(parent_block.timestamp) {
+            let parent_excess_blob_gas = parent_block.excess_blob_gas.unwrap_or_default();
+            let parent_blob_gas_used = parent_block.blob_gas_used.unwrap_or_default();
+            Some(calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
+        } else {
+            // for the first post-fork block, both parent.blob_gas_used and parent.excess_blob_gas
+            // are evaluated as 0
+            Some(calculate_excess_blob_gas(0, 0))
+        };
+
+        blob_gas_used = Some(sum_blob_gas_used);
+    }
+
     let header = Header {
         parent_hash: parent_block.hash,
         ommers_hash: EMPTY_OMMER_ROOT,
@@ -782,20 +830,25 @@ where
         difficulty: U256::ZERO,
         gas_used: cumulative_gas_used,
         extra_data: extra_data.into(),
-        blob_gas_used: None,
-        excess_blob_gas: None,
+        parent_beacon_block_root: attributes.parent_beacon_block_root,
+        blob_gas_used,
+        excess_blob_gas,
     };
 
     // seal the block
     let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
 
     let sealed_block = block.seal_slow();
-    // to release cache_reads
+
     drop(db);
-    Ok(BuildOutcome::Better {
-        payload: BuiltPayload::new(attributes.id, sealed_block, total_fees),
-        cached_reads,
-    })
+    let mut payload = BuiltPayload::new(attributes.id, sealed_block, total_fees);
+
+    if !blob_sidecars.is_empty() {
+        // extend the payload with the blob sidecars from the executed txs
+        payload.extend_sidecars(blob_sidecars);
+    }
+
+    Ok(BuildOutcome::Better { payload, cached_reads })
 }
 
 /// Builds an empty payload without any transactions.
@@ -855,6 +908,7 @@ where
         blob_gas_used: None,
         excess_blob_gas: None,
         extra_data: extra_data.into(),
+        parent_beacon_block_root: attributes.parent_beacon_block_root,
     };
 
     let block = Block { header, body: vec![], ommers: vec![], withdrawals };

@@ -113,6 +113,11 @@ impl<S> MeteredStream<S> {
     pub fn get_bandwidth_meter(&self) -> &BandwidthMeter {
         &self.meter
     }
+
+    /// Returns the wrapped stream
+    pub fn inner(&self) -> &S {
+        &self.inner
+    }
 }
 
 impl<Stream: AsyncRead> AsyncRead for MeteredStream<Stream> {

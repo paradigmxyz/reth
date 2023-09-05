@@ -81,8 +81,8 @@ mod tests {
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        provider.insert_block(genesis, None).unwrap();
-        provider.insert_block(block.clone(), None).unwrap();
+        provider.insert_block(genesis, None, None).unwrap();
+        provider.insert_block(block.clone(), None, None).unwrap();
 
         // Fill with bogus blocks to respect PruneMode distance.
         let mut head = block.hash;
@@ -90,7 +90,7 @@ mod tests {
         for block_number in 2..=tip {
             let nblock = random_block(&mut rng, block_number, Some(head), Some(0), Some(0));
             head = nblock.hash;
-            provider.insert_block(nblock, None).unwrap();
+            provider.insert_block(nblock, None, None).unwrap();
         }
         provider.commit().unwrap();
 
@@ -139,7 +139,7 @@ mod tests {
                     max_cumulative_gas: None,
                 },
                 MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
-                prune_modes,
+                prune_modes.clone(),
             );
 
             execution_stage.execute(&provider, input).await.unwrap();
@@ -159,19 +159,36 @@ mod tests {
             );
 
             // Check AccountHistory
-            let mut acc_indexing_stage = IndexAccountHistoryStage::default();
-            acc_indexing_stage.execute(&provider, input).await.unwrap();
-            let mut account_history: Cursor<'_, RW, AccountHistory> =
-                provider.tx_ref().cursor_read::<tables::AccountHistory>().unwrap();
-            assert_eq!(account_history.walk(None).unwrap().count(), expect_num_acc_changesets);
+            let mut acc_indexing_stage =
+                IndexAccountHistoryStage { prune_modes: prune_modes.clone(), ..Default::default() };
+
+            if let Some(PruneMode::Full) = prune_modes.account_history {
+                // Full is not supported
+                assert!(acc_indexing_stage.execute(&provider, input).await.is_err());
+            } else {
+                acc_indexing_stage.execute(&provider, input).await.unwrap();
+                let mut account_history: Cursor<'_, RW, AccountHistory> =
+                    provider.tx_ref().cursor_read::<tables::AccountHistory>().unwrap();
+                assert_eq!(account_history.walk(None).unwrap().count(), expect_num_acc_changesets);
+            }
 
             // Check StorageHistory
-            let mut storage_indexing_stage = IndexStorageHistoryStage::default();
-            storage_indexing_stage.execute(&provider, input).await.unwrap();
+            let mut storage_indexing_stage =
+                IndexStorageHistoryStage { prune_modes: prune_modes.clone(), ..Default::default() };
 
-            let mut storage_history =
-                provider.tx_ref().cursor_read::<tables::StorageHistory>().unwrap();
-            assert_eq!(storage_history.walk(None).unwrap().count(), expect_num_storage_changesets);
+            if let Some(PruneMode::Full) = prune_modes.storage_history {
+                // Full is not supported
+                assert!(acc_indexing_stage.execute(&provider, input).await.is_err());
+            } else {
+                storage_indexing_stage.execute(&provider, input).await.unwrap();
+
+                let mut storage_history =
+                    provider.tx_ref().cursor_read::<tables::StorageHistory>().unwrap();
+                assert_eq!(
+                    storage_history.walk(None).unwrap().count(),
+                    expect_num_storage_changesets
+                );
+            }
         };
 
         // In an unpruned configuration there is 1 receipt, 3 changed accounts and 1 changed

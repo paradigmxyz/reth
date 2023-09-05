@@ -185,7 +185,7 @@ impl Command {
                     continue
                 }
             };
-            provider_rw.insert_block(sealed_block.block, Some(sealed_block.senders))?;
+            provider_rw.insert_block(sealed_block.block, Some(sealed_block.senders), None)?;
         }
 
         // Check if any of hashing or merkle stages aren't on the same block number as

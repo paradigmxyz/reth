@@ -105,6 +105,7 @@ ethers-signers = { version = "2.0", default-features = false }
 ethers-middleware = { version = "2.0", default-features = false }
 
 ## misc
+aquamarine = "0.3"
 bytes = "1.4"
 bitflags = "2.3"
 tracing = "0.1.0"
@@ -152,7 +153,9 @@ c-kzg = { git = "https://github.com/ethereum/c-kzg-4844" }
 ### misc-testing
 proptest = "1.0"
 arbitrary = "1.1"
+assert_matches = "1.5.0"
 
 # [patch."https://github.com/bluealloy/revm.git"]
 # revm = { path = "../revm/crates/revm" }
 # revm-primitives = { path = "../revm/crates/primitives" }
+

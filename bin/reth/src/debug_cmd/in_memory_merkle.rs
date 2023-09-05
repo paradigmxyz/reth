@@ -194,7 +194,7 @@ impl Command {
         let provider_rw = factory.provider_rw()?;
 
         // Insert block, state and hashes
-        provider_rw.insert_block(block.clone(), None)?;
+        provider_rw.insert_block(block.clone(), None, None)?;
         block_state.write_to_db(provider_rw.tx_ref(), false)?;
         let storage_lists = provider_rw.changed_storages_with_range(block.number..=block.number)?;
         let storages = provider_rw.plainstate_storages(storage_lists)?;

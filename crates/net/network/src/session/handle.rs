@@ -10,6 +10,7 @@ use reth_eth_wire::{
     DisconnectReason, EthStream, EthVersion, P2PStream, Status,
 };
 use reth_net_common::bandwidth_meter::MeteredStream;
+use reth_network_api::PeerInfo;
 use reth_primitives::PeerId;
 use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::{
@@ -53,7 +54,6 @@ impl PendingSessionHandle {
 /// Within an active session that supports the `Ethereum Wire Protocol `, three high-level tasks can
 /// be performed: chain synchronization, block propagation and transaction exchange.
 #[derive(Debug)]
-#[allow(unused)]
 pub struct ActiveSessionHandle {
     /// The direction of the session
     pub(crate) direction: Direction,
@@ -73,6 +73,10 @@ pub struct ActiveSessionHandle {
     pub(crate) client_version: Arc<String>,
     /// The address we're connected to
     pub(crate) remote_addr: SocketAddr,
+    /// The local address of the connection.
+    pub(crate) local_addr: Option<SocketAddr>,
+    /// The Status message the peer sent for the `eth` handshake
+    pub(crate) status: Status,
 }
 
 // === impl ActiveSessionHandle ===
@@ -132,21 +136,20 @@ impl ActiveSessionHandle {
     pub fn remote_addr(&self) -> SocketAddr {
         self.remote_addr
     }
-}
 
-/// Info about an active peer session.
-#[derive(Debug, Clone)]
-pub struct PeerInfo {
-    /// Announced capabilities of the peer
-    pub capabilities: Arc<Capabilities>,
-    /// The identifier of the remote peer
-    pub remote_id: PeerId,
-    /// The client's name and version
-    pub client_version: Arc<String>,
-    /// The address we're connected to
-    pub remote_addr: SocketAddr,
-    /// The direction of the session
-    pub direction: Direction,
+    /// Extracts the [PeerInfo] from the session handle.
+    pub(crate) fn peer_info(&self) -> PeerInfo {
+        PeerInfo {
+            remote_id: self.remote_id,
+            direction: self.direction,
+            remote_addr: self.remote_addr,
+            local_addr: self.local_addr,
+            capabilities: self.capabilities.clone(),
+            client_version: self.client_version.clone(),
+            eth_version: self.version,
+            status: self.status,
+        }
+    }
 }
 
 /// Events a pending session can produce.
@@ -162,6 +165,8 @@ pub enum PendingSessionEvent {
         session_id: SessionId,
         /// The remote node's socket address
         remote_addr: SocketAddr,
+        /// The local address of the connection
+        local_addr: Option<SocketAddr>,
         /// The remote node's public key
         peer_id: PeerId,
         /// All capabilities the peer announced

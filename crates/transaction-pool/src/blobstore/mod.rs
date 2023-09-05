@@ -41,6 +41,12 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
         txs: Vec<H256>,
     ) -> Result<Vec<(H256, BlobTransactionSidecar)>, BlobStoreError>;
 
+    /// Returns the exact [BlobTransactionSidecar] for the given transaction hashes in the order
+    /// they were requested.
+    ///
+    /// Returns an error if any of the blobs are not found in the blob store.
+    fn get_exact(&self, txs: Vec<H256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError>;
+
     /// Data size of all transactions in the blob store.
     fn data_size_hint(&self) -> Option<usize>;
 
@@ -51,6 +57,9 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
 /// Error variants that can occur when interacting with a blob store.
 #[derive(Debug, thiserror::Error)]
 pub enum BlobStoreError {
+    /// Thrown if the blob sidecar is not found for a given transaction hash but was required.
+    #[error("blob sidecar not found for transaction {0:?}")]
+    MissingSidecar(H256),
     /// Failed to decode the stored blob data.
     #[error("failed to decode blob data: {0}")]
     DecodeError(#[from] reth_rlp::DecodeError),

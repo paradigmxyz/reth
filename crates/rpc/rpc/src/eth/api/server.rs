@@ -236,14 +236,7 @@ where
     ) -> Result<Bytes> {
         trace!(target: "rpc::eth", ?request, ?block_number, ?state_overrides, ?block_overrides, "Serving eth_call");
         Ok(self
-            .on_blocking_task(|this| async move {
-                this.call(
-                    request,
-                    block_number,
-                    EvmOverrides::new(state_overrides, block_overrides),
-                )
-                .await
-            })
+            .call(request, block_number, EvmOverrides::new(state_overrides, block_overrides))
             .await?)
     }
 
@@ -265,15 +258,11 @@ where
         block_number: Option<BlockId>,
     ) -> Result<AccessListWithGasUsed> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_createAccessList");
-        Ok(self
-            .on_blocking_task(|this| async move {
-                let block_id = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
-                let access_list = this.create_access_list_at(request.clone(), block_number).await?;
-                request.access_list = Some(access_list.clone());
-                let gas_used = this.estimate_gas_at(request, block_id).await?;
-                Ok(AccessListWithGasUsed { access_list, gas_used })
-            })
-            .await?)
+        let block_id = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let access_list = self.create_access_list_at(request.clone(), block_number).await?;
+        request.access_list = Some(access_list.clone());
+        let gas_used = self.estimate_gas_at(request, block_id).await?;
+        Ok(AccessListWithGasUsed { access_list, gas_used })
     }
 
     /// Handler for: `eth_estimateGas`
@@ -284,13 +273,10 @@ where
     ) -> Result<U256> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_estimateGas");
         Ok(self
-            .on_blocking_task(|this| async move {
-                this.estimate_gas_at(
-                    request,
-                    block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
-                )
-                .await
-            })
+            .estimate_gas_at(
+                request,
+                block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
+            )
             .await?)
     }
 

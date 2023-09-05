@@ -401,20 +401,28 @@ where
     }
 
     async fn transaction_receipt(&self, hash: H256) -> EthResult<Option<TransactionReceipt>> {
-        self.on_blocking_task(|this| async move {
-            let (tx, meta) = match this.provider().transaction_by_hash_with_meta(hash)? {
-                Some((tx, meta)) => (tx, meta),
-                None => return Ok(None),
-            };
+        let result = self
+            .on_blocking_task(|this| async move {
+                let (tx, meta) = match this.provider().transaction_by_hash_with_meta(hash)? {
+                    Some((tx, meta)) => (tx, meta),
+                    None => return Ok(None),
+                };
 
-            let receipt = match this.provider().receipt_by_hash(hash)? {
-                Some(recpt) => recpt,
-                None => return Ok(None),
-            };
+                let receipt = match this.provider().receipt_by_hash(hash)? {
+                    Some(recpt) => recpt,
+                    None => return Ok(None),
+                };
 
-            this.build_transaction_receipt(tx, meta, receipt).await.map(Some)
-        })
-        .await
+                Ok(Some((tx, meta, receipt)))
+            })
+            .await?;
+
+        let (tx, meta, receipt) = match result {
+            Some((tx, meta, receipt)) => (tx, meta, receipt),
+            None => return Ok(None),
+        };
+
+        self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
     }
 
     async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256> {
@@ -893,6 +901,10 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         state_root: None,
         logs_bloom: receipt.bloom_slow(),
         status_code: if receipt.success { Some(U64::from(1)) } else { Some(U64::from(0)) },
+
+        // EIP-4844 fields
+        blob_gas_price: transaction.transaction.max_fee_per_blob_gas().map(U128::from),
+        blob_gas_used: transaction.transaction.blob_gas_used().map(U128::from),
     };
 
     match tx.transaction.kind() {
