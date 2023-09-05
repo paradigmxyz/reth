@@ -790,12 +790,9 @@ where
     // only determine cancun fields when active
     if chain_spec.is_cancun_activated_at_timestamp(attributes.timestamp) {
         // grab the blob sidecars from the executed txs
-        let blobs = pool.get_all_blobs(
+        blob_sidecars = pool.get_all_blobs_exact(
             executed_txs.iter().filter(|tx| tx.is_eip4844()).map(|tx| tx.hash).collect(),
         )?;
-
-        // map to just the sidecars
-        blob_sidecars = blobs.into_iter().map(|(_, sidecars)| sidecars).collect();
 
         excess_blob_gas = if chain_spec.is_cancun_activated_at_timestamp(parent_block.timestamp) {
             let parent_excess_blob_gas = parent_block.excess_blob_gas.unwrap_or_default();

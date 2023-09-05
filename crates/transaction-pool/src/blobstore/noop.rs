@@ -34,6 +34,13 @@ impl BlobStore for NoopBlobStore {
         Ok(vec![])
     }
 
+    fn get_exact(&self, txs: Vec<H256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
+        if txs.is_empty() {
+            return Ok(vec![])
+        }
+        Err(BlobStoreError::MissingSidecar(txs[0]))
+    }
+
     fn data_size_hint(&self) -> Option<usize> {
         Some(0)
     }

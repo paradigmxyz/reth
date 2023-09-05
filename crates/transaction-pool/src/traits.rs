@@ -310,6 +310,15 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
         tx_hashes: Vec<TxHash>,
     ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError>;
+
+    /// Returns the exact [BlobTransactionSidecar] for the given transaction hashes in the order
+    /// they were requested.
+    ///
+    /// Returns an error if any of the blobs are not found in the blob store.
+    fn get_all_blobs_exact(
+        &self,
+        tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError>;
 }
 
 /// Extension for [TransactionPool] trait that allows to set the current block info.
