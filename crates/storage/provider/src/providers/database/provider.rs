@@ -438,6 +438,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         // SAFETY: Transactions are always guaranteed to be in the database whereas
         // senders might be pruned.
         if senders.len() != transactions.len() {
+            senders.reserve(transactions.len() - senders.len());
             // Find all missing senders, their corresponding tx numbers and indexes to the original
             // `senders` vector at which the recovered senders will be inserted.
             let mut missing_senders = Vec::with_capacity(transactions.len() - senders.len());
