@@ -34,7 +34,7 @@ use reth_primitives::{
 use reth_provider::{BlockReaderIdExt, BlockSource, BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase, env::tx_env_with_recovered, into_reth_log,
-    state_change::post_block_withdrawals_balance_increments,
+    state_change::{apply_pre_block_call, post_block_withdrawals_balance_increments},
 };
 use reth_rlp::Encodable;
 use reth_tasks::TaskSpawner;
@@ -664,6 +664,16 @@ where
 
     let block_number = initialized_block_env.number.to::<u64>();
 
+    // apply eip-4788 pre block contract call
+    let mut db = pre_block_contract_call(
+        db,
+        &chain_spec,
+        block_number,
+        &initialized_cfg,
+        &initialized_block_env,
+        &attributes,
+    )?;
+
     let mut receipts = Vec::new();
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
@@ -861,7 +871,7 @@ where
         extra_data,
         attributes,
         chain_spec,
-        ..
+        initialized_cfg,
     } = config;
 
     debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number,  "building empty payload");
@@ -875,6 +885,16 @@ where
     let base_fee = initialized_block_env.basefee.to::<u64>();
     let block_number = initialized_block_env.number.to::<u64>();
     let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
+
+    // apply eip-4788 pre block contract call
+    let mut db = pre_block_contract_call(
+        db,
+        &chain_spec,
+        block_number,
+        &initialized_cfg,
+        &initialized_block_env,
+        &attributes,
+    )?;
 
     let WithdrawalsOutcome { withdrawals_root, withdrawals } =
         commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
@@ -965,6 +985,49 @@ fn commit_withdrawals<DB: Database<Error = Error>>(
         withdrawals: Some(withdrawals),
         withdrawals_root: Some(withdrawals_root),
     })
+}
+
+/// TODO: docs
+fn pre_block_contract_call<'a>(
+    db: State<'a, Error>,
+    chain_spec: &ChainSpec,
+    block_number: u64,
+    initialized_cfg: &CfgEnv,
+    initialized_block_env: &BlockEnv,
+    attributes: &PayloadBuilderAttributes,
+) -> Result<State<'a, Error>, PayloadBuilderError> {
+    // Configure the environment for the block.
+    let env = Env {
+        cfg: initialized_cfg.clone(),
+        block: initialized_block_env.clone(),
+        ..Default::default()
+    };
+
+    // apply pre-block EIP-4788 contract call
+    let mut evm_pre_block = revm::EVM::with_env(env);
+    evm_pre_block.database(db);
+
+    // TODO: figure out what this should actually be
+    let parent_beacon_block_root =
+        chain_spec.is_cancun_activated_at_timestamp(attributes.timestamp).then_some(H256::zero());
+
+    // initialize a block from the env, because the pre block call needs the block itself
+    match apply_pre_block_call(
+        chain_spec,
+        attributes.timestamp,
+        block_number,
+        parent_beacon_block_root,
+        &mut evm_pre_block,
+    ) {
+        Ok(()) => {}
+        Err(err) => return Err(PayloadBuilderError::Internal(err.into())),
+    }
+
+    // give the state back
+    let db = evm_pre_block.take_db();
+    drop(evm_pre_block);
+
+    Ok(db)
 }
 
 /// Checks if the new payload is better than the current best.
