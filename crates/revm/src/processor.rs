@@ -464,6 +464,7 @@ mod tests {
     };
     use reth_provider::{AccountReader, BlockHashReader, StateRootProvider};
     use reth_revm_primitives::TransitionState;
+    use revm::Database;
     use secp256k1::{rand, KeyPair, Secp256k1};
     use std::{collections::HashMap, str::FromStr};
 
@@ -665,17 +666,13 @@ mod tests {
             timestamp_index % history_buffer_length + history_buffer_length;
 
         // get timestamp storage and compare
-        let timestamp_storage = executor
-            .db()
-            .database
-            .storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index))
-            .unwrap();
+        let timestamp_storage =
+            executor.db().storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index)).unwrap();
         assert_eq!(timestamp_storage, U256::from(header.timestamp));
 
         // get parent beacon block root storage and compare
         let parent_beacon_block_root_storage = executor
             .db()
-            .database
             .storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index))
             .unwrap();
         assert_eq!(parent_beacon_block_root_storage, U256::from(0x1337));
