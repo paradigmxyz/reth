@@ -564,7 +564,7 @@ where
                         // FCU resulted in a fatal error from which we can't recover
                         let err = err.clone();
                         let _ = tx.send(Err(error));
-                        return OnForkchoiceUpdateOutcome::Fatal(err.clone())
+                        return OnForkchoiceUpdateOutcome::Fatal(err)
                     }
                 }
                 let _ = tx.send(Err(error));
