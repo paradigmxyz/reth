@@ -336,10 +336,8 @@ where
             changed_senders,
         );
 
-        let discarded = &outcome.discarded;
-        // For each discarded EIP-4844 transaction, delete the blob txs from the blob store
-        let blob_hashes = self.filter_eip4844_blobs(discarded);
-        self.delete_blobs(blob_hashes);
+        // This will discard outdated transactions based on the account's nonce
+        self.delete_discarded_blobs(outcome.discarded.iter());
 
         // notify listeners about updates
         self.notify_on_new_state(outcome);
@@ -357,10 +355,9 @@ where
         promoted.iter().for_each(|tx| listener.pending(tx.hash(), None));
         discarded.iter().for_each(|tx| listener.discarded(tx.hash()));
 
-        // For each discarded EIP-4844 transaction, delete the blob txs from the blob store
-        let blob_hashes = self.filter_eip4844_blobs(&discarded);
-
-        self.delete_blobs(blob_hashes);
+        // This deletes outdated blob txs from the blob store, based on the account's nonce. This is
+        // called during txpool maintenance when the pool drifted.
+        self.delete_discarded_blobs(discarded.iter());
     }
 
     /// Add a single validated transaction into the pool.
@@ -412,6 +409,7 @@ where
                     // store the sidecar in the blob store
                     self.insert_blob(hash, sidecar);
                 }
+
                 if let Some(replaced) = added.replaced_blob_transaction() {
                     // delete the replaced transaction from the blob store
                     self.delete_blob(replaced);
@@ -424,6 +422,10 @@ where
 
                 // Notify tx event listeners
                 self.notify_event_listeners(&added);
+
+                if let Some(discarded) = added.discarded_transactions() {
+                    self.delete_discarded_blobs(discarded.iter());
+                }
 
                 // Notify listeners for _all_ transactions
                 self.on_new_transaction(added.into_new_transaction_event());
@@ -585,11 +587,6 @@ where
         mined.iter().for_each(|tx| listener.mined(tx, block_hash));
         promoted.iter().for_each(|tx| listener.pending(tx.hash(), None));
         discarded.iter().for_each(|tx| listener.discarded(tx.hash()));
-
-        // For each discarded EIP-4844 transaction, delete the blob txs from the blob store
-        let blob_hashes = self.filter_eip4844_blobs(&discarded);
-
-        self.delete_blobs(blob_hashes);
     }
 
     /// Fire events for the newly added transaction if there are any.
@@ -603,11 +600,6 @@ where
                 listener.pending(transaction.hash(), replaced.clone());
                 promoted.iter().for_each(|tx| listener.pending(tx.hash(), None));
                 discarded.iter().for_each(|tx| listener.discarded(tx.hash()));
-
-                // For each discarded EIP-4844 transaction, delete the blob txs from the blob store
-                let blob_hashes = self.filter_eip4844_blobs(discarded);
-
-                self.delete_blobs(blob_hashes);
             }
             AddedTransaction::Parked { transaction, replaced, .. } => {
                 listener.queued(transaction.hash());
@@ -756,16 +748,17 @@ where
         self.blob_store_metrics.blobstore_entries.set(self.blob_store.blobs_len() as f64);
     }
 
-    /// Returns the hashes of all EIP-4844 transactions in the given iterator
-    fn filter_eip4844_blobs<'a>(
+    /// Deletes all blob transactions that were discarded.
+    fn delete_discarded_blobs<'a>(
         &'a self,
         transactions: impl IntoIterator<Item = &'a Arc<ValidPoolTransaction<T::Transaction>>>,
-    ) -> Vec<TxHash> {
-        transactions
+    ) {
+        let blob_txs = transactions
             .into_iter()
             .filter(|tx| tx.transaction.is_eip4844())
             .map(|tx| *tx.hash())
-            .collect::<Vec<_>>()
+            .collect();
+        self.delete_blobs(blob_txs);
     }
 }
 
@@ -878,6 +871,14 @@ impl<T: PoolTransaction> AddedTransaction<T> {
         match self {
             AddedTransaction::Pending(tx) => tx.replaced.as_ref(),
             AddedTransaction::Parked { replaced, .. } => replaced.as_ref(),
+        }
+    }
+
+    /// Returns the discarded transactions if there were any
+    pub(crate) fn discarded_transactions(&self) -> Option<&[Arc<ValidPoolTransaction<T>>]> {
+        match self {
+            AddedTransaction::Pending(tx) => Some(&tx.discarded),
+            AddedTransaction::Parked { .. } => None,
         }
     }
 
