@@ -339,6 +339,11 @@ impl ChainSpec {
         }
     }
 
+    /// Get the timestamp of the genesis block.
+    pub fn genesis_timestamp(&self) -> u64 {
+        self.genesis.timestamp
+    }
+
     /// Returns the final total difficulty if the given block number is after the Paris hardfork.
     ///
     /// Note: technically this would also be valid for the block before the paris upgrade, but this
@@ -405,7 +410,7 @@ impl ChainSpec {
             })
         });
 
-        ForkFilter::new(head, self.genesis_hash(), forks)
+        ForkFilter::new(head, self.genesis_hash(), self.genesis_timestamp(), forks)
     }
 
     /// Compute the [`ForkId`] for the given [`Head`] folowing eip-6122 spec
