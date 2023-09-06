@@ -748,6 +748,10 @@ mod tests {
 
         let mut executor = EVMProcessor::new_with_db(chain_spec, RevmDatabase::new(db));
 
+        // get the env
+        // TODO: wait for https://github.com/bluealloy/revm/pull/689 to be merged
+        // let previous_env = executor.evm.env.clone();
+
         // attempt to execute a block without parent beacon block root, expect err
         executor
             .execute_and_verify_receipt(
@@ -758,6 +762,9 @@ mod tests {
             .expect(
                 "Executing a block with no transactions while cancun is active should not fail",
             );
+
+        // ensure that the env has not changed
+        // assert_eq!(executor.evm.env, previous_env);
     }
 
     #[test]
@@ -825,5 +832,80 @@ mod tests {
 
         // assert that it is the default (empty) transition state
         assert_eq!(transition_state, TransitionState::default());
+    }
+
+    #[test]
+    fn eip_4788_high_base_fee() {
+        // This test ensures that if we have a base fee, then we don't return an error when the
+        // system contract is called, due to the gas price being less than the base fee.
+        let header = Header {
+            timestamp: 1,
+            number: 1,
+            parent_beacon_block_root: Some(H256::from_low_u64_be(0x1337)),
+            base_fee_per_gas: Some(u64::MAX),
+            ..Header::default()
+        };
+
+        let mut db = StateProviderTest::default();
+
+        let beacon_root_contract_code = Bytes::from_str("0x3373fffffffffffffffffffffffffffffffffffffffe14604457602036146024575f5ffd5b620180005f350680545f35146037575f5ffd5b6201800001545f5260205ff35b42620180004206555f3562018000420662018000015500").unwrap();
+
+        let beacon_root_contract_account = Account {
+            balance: U256::ZERO,
+            bytecode_hash: Some(keccak256(beacon_root_contract_code.clone())),
+            nonce: 1,
+        };
+
+        db.insert_account(
+            BEACON_ROOTS_ADDRESS,
+            beacon_root_contract_account,
+            Some(beacon_root_contract_code),
+            HashMap::new(),
+        );
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+                .build(),
+        );
+
+        // execute header
+        let mut executor = EVMProcessor::new_with_db(chain_spec, RevmDatabase::new(db));
+        executor.init_env(&header, U256::ZERO);
+
+        // ensure that the env is configured with a base fee
+        assert_eq!(executor.evm.env.block.basefee, U256::from(u64::MAX));
+
+        // Now execute a block with the fixed header, ensure that it does not fail
+        executor
+            .execute(
+                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                U256::ZERO,
+                None,
+            )
+            .unwrap();
+
+        // check the actual storage of the contract - it should be:
+        // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH should be
+        // header.timestamp
+        // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH + HISTORY_BUFFER_LENGTH
+        // should be parent_beacon_block_root
+        let history_buffer_length = 98304u64;
+        let timestamp_index = header.timestamp % history_buffer_length;
+        let parent_beacon_block_root_index =
+            timestamp_index % history_buffer_length + history_buffer_length;
+
+        // get timestamp storage and compare
+        let timestamp_storage =
+            executor.db().storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index)).unwrap();
+        assert_eq!(timestamp_storage, U256::from(header.timestamp));
+
+        // get parent beacon block root storage and compare
+        let parent_beacon_block_root_storage = executor
+            .db()
+            .storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index))
+            .unwrap();
+        assert_eq!(parent_beacon_block_root_storage, U256::from(0x1337));
     }
 }

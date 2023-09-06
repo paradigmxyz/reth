@@ -76,17 +76,29 @@ pub fn apply_pre_block_call(
             let parent_beacon_block_root = block_parent_beacon_block_root.ok_or(
                 BlockExecutionError::from(BlockValidationError::MissingParentBeaconBlockRoot),
             )?;
-            fill_tx_env_with_beacon_root_contract_call(&mut evm.env.tx, parent_beacon_block_root);
 
-            let ResultAndState { state, .. } = evm.transact().map_err(|e| {
-                BlockExecutionError::from(BlockValidationError::EVM {
-                    hash: Default::default(),
-                    message: format!("{e:?}"),
-                })
-            })?;
+            // get previous env
+            let previous_env = evm.env.clone();
+
+            // modify env for pre block call
+            fill_tx_env_with_beacon_root_contract_call(&mut evm.env, parent_beacon_block_root);
+
+            let ResultAndState { state, .. } = match evm.transact() {
+                Ok(res) => res,
+                Err(e) => {
+                    evm.env = previous_env;
+                    return Err(BlockExecutionError::from(BlockValidationError::EVM {
+                        hash: Default::default(),
+                        message: format!("{e:?}"),
+                    }))
+                }
+            };
 
             let db = evm.db().expect("db to not be moved");
             db.commit(state);
+
+            // re-set the previous env
+            evm.env = previous_env;
         }
     }
     Ok(())
