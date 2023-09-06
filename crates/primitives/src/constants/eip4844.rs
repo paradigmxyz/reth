@@ -51,7 +51,7 @@ pub static MAINNET_KZG_TRUSTED_SETUP: Lazy<Arc<KzgSettings>> = Lazy::new(|| {
 pub fn load_trusted_setup_from_bytes(bytes: &[u8]) -> Result<KzgSettings, LoadKzgSettingsError> {
     let mut file = tempfile::NamedTempFile::new().map_err(LoadKzgSettingsError::TempFileErr)?;
     file.write_all(bytes).map_err(LoadKzgSettingsError::TempFileErr)?;
-    KzgSettings::load_trusted_setup_file(file.path().into()).map_err(LoadKzgSettingsError::KzgError)
+    KzgSettings::load_trusted_setup_file(file.path()).map_err(LoadKzgSettingsError::KzgError)
 }
 
 /// Error type for loading the trusted setup.
