@@ -132,6 +132,8 @@ pub struct PayloadBuilderAttributes {
     pub prev_randao: H256,
     /// Withdrawals for the generated payload
     pub withdrawals: Vec<Withdrawal>,
+    /// Root of the parent beacon block
+    pub parent_beacon_block_root: Option<H256>,
     /// NoTxPool option for the generated payload
     #[cfg(feature = "optimism")]
     pub no_tx_pool: bool,
@@ -172,6 +174,7 @@ impl PayloadBuilderAttributes {
             suggested_fee_recipient: attributes.suggested_fee_recipient,
             prev_randao: attributes.prev_randao,
             withdrawals: attributes.withdrawals.unwrap_or_default(),
+            parent_beacon_block_root: attributes.parent_beacon_block_root,
             #[cfg(feature = "optimism")]
             no_tx_pool: attributes.no_tx_pool.unwrap_or_default(),
             #[cfg(feature = "optimism")]
@@ -238,6 +241,10 @@ pub(crate) fn payload_id(
         let mut buf = Vec::new();
         withdrawals.encode(&mut buf);
         hasher.update(buf);
+    }
+
+    if let Some(parent_beacon_block) = attributes.parent_beacon_block_root {
+        hasher.update(parent_beacon_block);
     }
 
     #[cfg(feature = "optimism")]

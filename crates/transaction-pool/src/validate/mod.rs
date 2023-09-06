@@ -285,6 +285,12 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.origin.is_local()
     }
 
+    /// Whether the transaction is an EIP-4844 blob transaction.
+    #[inline]
+    pub fn is_eip4844(&self) -> bool {
+        self.transaction.is_eip4844()
+    }
+
     /// The heap allocated size of this transaction.
     pub(crate) fn size(&self) -> usize {
         self.transaction.size()
