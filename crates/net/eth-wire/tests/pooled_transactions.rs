@@ -1,6 +1,6 @@
 //! Decoding tests for [`PooledTransactions`]
 use reth_eth_wire::PooledTransactions;
-use reth_primitives::{hex, PooledTransactionsElement, Bytes};
+use reth_primitives::{hex, Bytes, PooledTransactionsElement};
 use reth_rlp::Decodable;
 use std::{fs, path::PathBuf};
 
