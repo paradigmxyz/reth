@@ -110,7 +110,7 @@ where
             .eth_api
             .evm_env_at(block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)))
             .await?;
-        let tx = tx_env_with_recovered(&tx);
+        let tx = tx_env_with_recovered(&tx.into_ecrecovered_transaction());
         let env = Env { cfg, block, tx };
 
         let config = tracing_config(&trace_types);
