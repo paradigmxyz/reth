@@ -137,8 +137,8 @@ pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_b
     // ensure the block gas limit is >= the tx
     env.block.gas_limit = U256::from(env.tx.gas_limit);
 
-    // disable the base fee check for this call
-    env.cfg.disable_base_fee = true;
+    // disable the base fee check for this call by setting the base fee to zero
+    env.block.basefee = U256::ZERO;
 }
 
 /// Fill transaction environment from [TransactionSignedEcRecovered].
