@@ -165,6 +165,7 @@ pub struct ForkFilter {
     /// [eip-6122]: https://eips.ethereum.org/EIPS/eip-6122
     forks: BTreeMap<ForkFilterKey, ForkHash>,
 
+    /// The current head, used to select forks that are active locally.
     head: Head,
 
     cache: Cache,
