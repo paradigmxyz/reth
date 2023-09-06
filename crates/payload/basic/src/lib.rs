@@ -31,20 +31,18 @@ use reth_primitives::{
     proofs, Block, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
     SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
 };
-use reth_provider::{
-    BlockReaderIdExt, BlockSource, BundleStateWithReceipts, StateProviderBox, StateProviderFactory,
-};
+use reth_provider::{BlockReaderIdExt, BlockSource, BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::{
-    database::RevmDatabase, env::tx_env_with_recovered, into_reth_log, revm::db::StateDBBox,
+    database::RevmDatabase, env::tx_env_with_recovered, into_reth_log,
     state_change::post_block_withdrawals_balance_increments,
 };
 use reth_rlp::Encodable;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::{
-    db::{states::bundle_state::BundleRetention, WrapDatabaseRef},
+    db::states::bundle_state::BundleRetention,
     primitives::{BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState},
-    DatabaseCommit, State,
+    Database, DatabaseCommit, State,
 };
 use std::{
     future::Future,
@@ -637,10 +635,9 @@ where
     let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
 
     let state_provider = client.state_by_block_hash(config.parent_block.hash)?;
-    let state: RevmDatabase<&StateProviderBox<'_>> = RevmDatabase::new(&state_provider);
-    let wrapped_state = WrapDatabaseRef(cached_reads.as_db(&state));
+    let state = RevmDatabase::new(&state_provider);
     let mut db =
-        State::builder().with_database_boxed(Box::new(wrapped_state)).with_bundle_update().build();
+        State::builder().with_database_ref(cached_reads.as_db(&state)).with_bundle_update().build();
     let PayloadConfig {
         initialized_block_env,
         initialized_cfg,
@@ -938,8 +935,8 @@ impl WithdrawalsOutcome {
 /// Returns the withdrawals root.
 ///
 /// Returns `None` values pre shanghai
-fn commit_withdrawals(
-    db: &mut StateDBBox<'_, Error>,
+fn commit_withdrawals<DB: Database<Error = Error>>(
+    db: &mut State<DB>,
     chain_spec: &ChainSpec,
     timestamp: u64,
     withdrawals: Vec<Withdrawal>,
