@@ -1794,7 +1794,7 @@ Post-merge hard forks (timestamp based):
 
     #[test]
     fn test_default_cancun_header_forkhash() {
-        // the chainid is not important for this test
+        // set the gas limit from the hive test genesis according to the hash
         let genesis = Genesis { gas_limit: 0x2fefd8u64, ..Default::default() };
         let default_chainspec = ChainSpecBuilder::default()
             .chain(Chain::Id(1337))
