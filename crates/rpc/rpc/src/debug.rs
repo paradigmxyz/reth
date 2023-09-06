@@ -22,7 +22,7 @@ use reth_revm::{
     env::tx_env_with_recovered,
     revm::{
         primitives::{db::DatabaseCommit, BlockEnv, CfgEnv, Env},
-        State, StateBuilder,
+        State,
     },
     tracing::{
         js::{JsDbRequest, JsInspector},
@@ -39,6 +39,7 @@ use reth_rpc_types::{
     BlockError, Bundle, CallRequest, RichBlock, StateContext,
 };
 use reth_tasks::TaskSpawner;
+use revm::{Database, StateDBBox};
 use std::sync::Arc;
 use tokio::sync::{mpsc, AcquireError, OwnedSemaphorePermit};
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
@@ -93,10 +94,9 @@ where
             .eth_api
             .spawn_with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(transactions.len());
-                //let mut db = SubState::new(State::new(state));
-                let mut db = StateBuilder::default()
-                    .with_database(Box::new(RevmDatabase::new(state)))
-                    .without_bundle_update()
+
+                let mut db = State::builder()
+                    .with_database_boxed(Box::new(RevmDatabase::new(state)))
                     .build();
 
                 let mut transactions = transactions.into_iter().peekable();
@@ -192,10 +192,9 @@ where
                 let tx = transaction.into_recovered();
 
                 let provider = Box::new(RevmDatabase::new(state));
-                let mut db =
-                    StateBuilder::default().with_database(provider).without_bundle_update().build();
+                let mut db = State::builder().with_database_boxed(provider).build();
                 // replay all transactions prior to the targeted transaction
-                replay_transactions_until::<State<'_, Error>, _, _>(
+                replay_transactions_until(
                     &mut db,
                     cfg.clone(),
                     block_env.clone(),
@@ -292,9 +291,8 @@ where
                     // because JSTracer and all JS types are not Send
                     let (_, _, at) = self.inner.eth_api.evm_env_at(at).await?;
                     let state = self.inner.eth_api.state_at(at)?;
-                    let db = StateBuilder::default()
-                        .with_database(Box::new(RevmDatabase::new(state)))
-                        .without_bundle_update()
+                    let db = State::builder()
+                        .with_database_boxed(Box::new(RevmDatabase::new(state)))
                         .build();
                     let has_state_overrides = overrides.has_state();
 
@@ -386,9 +384,8 @@ where
             .spawn_with_state_at_block(at.into(), move |state| {
                 let mut results = Vec::with_capacity(bundles.len());
                 //let mut db = SubState::new(State::new(state));
-                let mut db = StateBuilder::default()
-                    .with_database(Box::new(RevmDatabase::new(state)))
-                    .without_bundle_update()
+                let mut db = State::builder()
+                    .with_database_boxed(Box::new(RevmDatabase::new(state)))
                     .build();
 
                 if replay_block_txs {
@@ -461,7 +458,7 @@ where
         opts: GethDebugTracingOptions,
         env: Env,
         at: BlockId,
-        mut db: &mut State<'_, Error>,
+        mut db: &mut StateDBBox<'_, Error>,
     ) -> EthResult<(GethTrace, revm_primitives::State)> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
@@ -553,7 +550,7 @@ where
     fn spawn_js_trace_service(
         &self,
         at: BlockId,
-        db: Option<State<'static, Error>>,
+        db: Option<StateDBBox<'static, Error>>,
     ) -> EthResult<mpsc::Sender<JsDbRequest>> {
         let (to_db_service, rx) = mpsc::channel(1);
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
@@ -580,7 +577,7 @@ where
         at: BlockId,
         rx: mpsc::Receiver<JsDbRequest>,
         on_ready: std::sync::mpsc::Sender<EthResult<()>>,
-        db: Option<State<'_, Error>>,
+        db: Option<StateDBBox<'_, Error>>,
     ) {
         let state = match self.inner.eth_api.state_at(at) {
             Ok(state) => {
@@ -613,7 +610,7 @@ where
                 block_hashes,
             }
         } else {
-            StateBuilder::default().with_database(database).build()
+            State::builder().with_database(database).build()
         };
 
         let mut stream = ReceiverStream::new(rx);

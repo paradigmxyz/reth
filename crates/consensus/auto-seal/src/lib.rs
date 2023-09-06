@@ -37,7 +37,7 @@ use reth_provider::{
 };
 use reth_revm::{
     database::RevmDatabase, db::states::bundle_state::BundleRetention, processor::EVMProcessor,
-    StateBuilder,
+    State,
 };
 use reth_transaction_pool::TransactionPool;
 use std::{
@@ -370,9 +370,9 @@ impl StorageInner {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
         // now execute the block
-        let db = StateBuilder::default()
-            .with_database(Box::new(RevmDatabase::new(client.latest().unwrap())))
-            .without_bundle_update()
+        let db = State::builder()
+            .with_database_boxed(Box::new(RevmDatabase::new(client.latest().unwrap())))
+            .with_bundle_update()
             .build();
         let mut executor = EVMProcessor::new_with_state(chain_spec, db);
 

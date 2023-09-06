@@ -1,9 +1,9 @@
 //! Executor Factory
 
-use std::time::Duration;
 use crate::{change::BundleStateWithReceipts, StateProvider};
 use reth_interfaces::executor::BlockExecutionError;
 use reth_primitives::{Address, Block, BlockNumber, ChainSpec, PruneModes, U256};
+use std::time::Duration;
 use tracing::info;
 
 /// Executor factory that would create the EVM with particular state provider.

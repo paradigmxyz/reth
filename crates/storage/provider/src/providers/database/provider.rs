@@ -198,10 +198,10 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     // TODO(joshie) TEMPORARY should be moved to trait providers
 
     /// Unwind or peek at last N blocks of state
-    /// 
+    ///
     /// If UNWIND it set to true tip and latest state will be unwind
     /// and returned back with all the blocks
-    /// 
+    ///
     /// If UNWIND is false we will just read the state/blocks and return them.
     fn unwind_or_peek_state<const UNWIND: bool>(
         &self,

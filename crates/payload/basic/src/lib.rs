@@ -35,10 +35,7 @@ use reth_provider::{
     BlockReaderIdExt, BlockSource, BundleStateWithReceipts, StateProviderBox, StateProviderFactory,
 };
 use reth_revm::{
-    database::RevmDatabase,
-    env::tx_env_with_recovered,
-    into_reth_log,
-    revm::{State, StateBuilder},
+    database::RevmDatabase, env::tx_env_with_recovered, into_reth_log, revm::db::StateDBBox,
     state_change::post_block_withdrawals_balance_increments,
 };
 use reth_rlp::Encodable;
@@ -47,7 +44,7 @@ use reth_transaction_pool::TransactionPool;
 use revm::{
     db::{states::bundle_state::BundleRetention, WrapDatabaseRef},
     primitives::{BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState},
-    DatabaseCommit,
+    DatabaseCommit, State,
 };
 use std::{
     future::Future,
@@ -642,7 +639,8 @@ where
     let state_provider = client.state_by_block_hash(config.parent_block.hash)?;
     let state: RevmDatabase<&StateProviderBox<'_>> = RevmDatabase::new(&state_provider);
     let wrapped_state = WrapDatabaseRef(cached_reads.as_db(&state));
-    let mut db = StateBuilder::default().with_database(Box::new(wrapped_state)).build();
+    let mut db =
+        State::builder().with_database_boxed(Box::new(wrapped_state)).with_bundle_update().build();
     let PayloadConfig {
         initialized_block_env,
         initialized_cfg,
@@ -871,8 +869,7 @@ where
     debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number,  "building empty payload");
 
     let state = client.state_by_block_hash(parent_block.hash)?;
-    let mut db: State<'_, Error> =
-        StateBuilder::default().with_database(Box::new(RevmDatabase::new(&state))).build();
+    let mut db = State::builder().with_database_boxed(Box::new(RevmDatabase::new(&state))).build();
 
     let base_fee = initialized_block_env.basefee.to::<u64>();
     let block_number = initialized_block_env.number.to::<u64>();
@@ -942,7 +939,7 @@ impl WithdrawalsOutcome {
 ///
 /// Returns `None` values pre shanghai
 fn commit_withdrawals(
-    db: &mut State<'_, Error>,
+    db: &mut StateDBBox<'_, Error>,
     chain_spec: &ChainSpec,
     timestamp: u64,
     withdrawals: Vec<Withdrawal>,

@@ -11,11 +11,10 @@ use crate::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_consensus_common::calc::{base_block_reward, block_reward};
-use reth_interfaces::Error;
 use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, SealedHeader, H256, U256};
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::{
-    database::RevmDatabase,
+    database::{RethStateDBBox, RevmDatabase},
     env::tx_env_with_recovered,
     tracing::{
         parity::populate_account_balance_nonce_diffs, TracingInspector, TracingInspectorConfig,
@@ -27,11 +26,7 @@ use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*},
     BlockError, BlockOverrides, CallRequest, Index, TransactionInfo,
 };
-use revm::{
-    db::{State, StateBuilder},
-    primitives::Env,
-    DatabaseCommit,
-};
+use revm::{primitives::Env, DatabaseCommit, State};
 use revm_primitives::{ExecutionResult, ResultAndState};
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
@@ -149,8 +144,7 @@ where
             .spawn_with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(calls.len());
                 let provider = Box::new(RevmDatabase::new(state));
-                let mut revm_state =
-                    StateBuilder::default().with_database(provider).without_bundle_update().build();
+                let mut revm_state = State::builder().with_database_boxed(provider).build();
 
                 let mut calls = calls.into_iter().peekable();
 
@@ -295,7 +289,7 @@ where
                 TracingInspector,
                 ExecutionResult,
                 &'a revm_primitives::State,
-                &'a mut State<'_, Error>,
+                &'a mut RethStateDBBox<'_>,
             ) -> EthResult<R>
             + Send
             + 'static,
@@ -323,9 +317,8 @@ where
             .eth_api
             .spawn_with_state_at_block(state_at.into(), move |state| {
                 let mut results = Vec::with_capacity(transactions.len());
-                let mut db = StateBuilder::default()
-                    .with_database(Box::new(RevmDatabase::new(state)))
-                    .without_bundle_update()
+                let mut db = State::builder()
+                    .with_database_boxed(Box::new(RevmDatabase::new(state)))
                     .build();
 
                 let mut transactions = transactions.into_iter().enumerate().peekable();
