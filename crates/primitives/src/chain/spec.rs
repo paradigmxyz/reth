@@ -416,9 +416,6 @@ impl ChainSpec {
     /// Compute the [`ForkId`] for the given [`Head`] folowing eip-6122 spec
     pub fn fork_id(&self, head: &Head) -> ForkId {
         let mut forkhash = ForkHash::from(self.genesis_hash());
-        println!("genesis: {:?}", self);
-        println!("genesis hash: {:?}", self.genesis_hash());
-        println!("initial forkhash: {forkhash:?}");
         let mut current_applied = 0;
 
         // handle all block forks before handling timestamp based forks. see: https://eips.ethereum.org/EIPS/eip-6122
@@ -430,7 +427,6 @@ impl ChainSpec {
             {
                 if cond.active_at_head(head) {
                     if block != current_applied {
-                        println!("applying condition {cond:?} with head {head:?}");
                         forkhash += block;
                         current_applied = block;
                     }
@@ -451,7 +447,6 @@ impl ChainSpec {
             let cond = ForkCondition::Timestamp(timestamp);
             if cond.active_at_head(head) {
                 if timestamp != current_applied {
-                    println!("applying condition {cond:?} with head {head:?}");
                     forkhash += timestamp;
                     current_applied = timestamp;
                 }
