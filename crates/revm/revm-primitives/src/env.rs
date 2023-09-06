@@ -4,7 +4,7 @@ use reth_primitives::{
     recover_signer, Address, Bytes, Chain, ChainSpec, Head, Header, Transaction, TransactionKind,
     TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxLegacy, H256, U256,
 };
-use revm::primitives::{AnalysisKind, BlockEnv, CfgEnv, SpecId, TransactTo, TxEnv};
+use revm::primitives::{AnalysisKind, BlockEnv, CfgEnv, Env, SpecId, TransactTo, TxEnv};
 
 /// Convenience function to call both [fill_cfg_env] and [fill_block_env]
 pub fn fill_cfg_and_block_env(
@@ -122,20 +122,23 @@ pub fn tx_env_with_recovered(transaction: &TransactionSignedEcRecovered) -> TxEn
 ///  * the call does not follow the EIP-1559 burn semantics - no value should be transferred as
 ///  part of the call
 ///  * if no code exists at `BEACON_ROOTS_ADDRESS`, the call must fail silently
-pub fn fill_tx_env_with_beacon_root_contract_call(
-    tx_env: &mut TxEnv,
-    parent_beacon_block_root: H256,
-) {
-    tx_env.caller = SYSTEM_ADDRESS;
-    tx_env.transact_to = TransactTo::Call(BEACON_ROOTS_ADDRESS);
+pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_block_root: H256) {
+    env.tx.caller = SYSTEM_ADDRESS;
+    env.tx.transact_to = TransactTo::Call(BEACON_ROOTS_ADDRESS);
     // Explicitly set nonce to None so revm does not do any nonce checks
-    tx_env.nonce = None;
-    tx_env.gas_limit = 30_000_000;
-    tx_env.value = U256::ZERO;
-    tx_env.data = parent_beacon_block_root.to_fixed_bytes().to_vec().into();
+    env.tx.nonce = None;
+    env.tx.gas_limit = 30_000_000;
+    env.tx.value = U256::ZERO;
+    env.tx.data = parent_beacon_block_root.to_fixed_bytes().to_vec().into();
     // Setting the gas price to zero enforces that no value is transferred as part of the call, and
     // that the call will not count against the block's gas limit
-    tx_env.gas_price = U256::ZERO;
+    env.tx.gas_price = U256::ZERO;
+
+    // ensure the block gas limit is >= the tx
+    env.block.gas_limit = U256::from(env.tx.gas_limit);
+
+    // disable the base fee check for this call
+    env.cfg.disable_base_fee = true;
 }
 
 /// Fill transaction environment from [TransactionSignedEcRecovered].
