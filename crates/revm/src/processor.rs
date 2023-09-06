@@ -333,6 +333,7 @@ impl<'a> EVMProcessor<'a> {
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<Vec<Receipt>, BlockExecutionError> {
+        self.init_env(&block.header, total_difficulty);
         self.apply_pre_block_call(block)?;
         let (receipts, cumulative_gas_used) =
             self.execute_transactions(block, total_difficulty, senders)?;
