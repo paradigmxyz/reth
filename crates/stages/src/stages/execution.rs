@@ -123,7 +123,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // Build executor
         let mut executor =
-            self.executor_factory.with_sp(LatestStateProviderRef::new(provider.tx_ref()));
+            self.executor_factory.with_state(LatestStateProviderRef::new(provider.tx_ref()));
         executor.set_prune_modes(prune_modes);
         executor.set_tip(max_block);
 

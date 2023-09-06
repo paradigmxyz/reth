@@ -1,7 +1,6 @@
 //! Executor Factory
 
 use std::time::Duration;
-
 use crate::{change::BundleStateWithReceipts, StateProvider};
 use reth_interfaces::executor::BlockExecutionError;
 use reth_primitives::{Address, Block, BlockNumber, ChainSpec, PruneModes, U256};
@@ -12,7 +11,7 @@ use tracing::info;
 /// It can be used to mock executor.
 pub trait ExecutorFactory: Send + Sync + 'static {
     /// Executor with [`StateProvider`]
-    fn with_sp<'a, SP: StateProvider + 'a>(&'a self, _sp: SP) -> Box<dyn BlockExecutor + 'a>;
+    fn with_state<'a, SP: StateProvider + 'a>(&'a self, _sp: SP) -> Box<dyn BlockExecutor + 'a>;
 
     /// Return internal chainspec
     fn chain_spec(&self) -> &ChainSpec;

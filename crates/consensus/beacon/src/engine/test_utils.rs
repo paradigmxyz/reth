@@ -245,13 +245,13 @@ where
         }
     }
 
-    fn with_sp<'a, SP: reth_provider::StateProvider + 'a>(
+    fn with_state<'a, SP: reth_provider::StateProvider + 'a>(
         &'a self,
         sp: SP,
     ) -> Box<dyn BlockExecutor + 'a> {
         match self {
-            EitherExecutorFactory::Left(a) => a.with_sp::<'a, SP>(sp),
-            EitherExecutorFactory::Right(b) => b.with_sp::<'a, SP>(sp),
+            EitherExecutorFactory::Left(a) => a.with_state::<'a, SP>(sp),
+            EitherExecutorFactory::Right(b) => b.with_state::<'a, SP>(sp),
         }
     }
 }

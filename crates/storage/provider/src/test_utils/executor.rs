@@ -67,7 +67,7 @@ impl TestExecutorFactory {
 }
 
 impl ExecutorFactory for TestExecutorFactory {
-    fn with_sp<'a, SP: StateProvider + 'a>(&'a self, _sp: SP) -> Box<dyn BlockExecutor + 'a> {
+    fn with_state<'a, SP: StateProvider + 'a>(&'a self, _sp: SP) -> Box<dyn BlockExecutor + 'a> {
         let exec_res = self.exec_results.lock().pop();
         Box::new(TestExecutor(exec_res))
     }

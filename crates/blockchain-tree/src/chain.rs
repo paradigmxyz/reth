@@ -203,7 +203,7 @@ impl AppendableChain {
 
         let provider = BundleStateProvider::new(state_provider, post_state_data_provider);
 
-        let mut executor = externals.executor_factory.with_sp(&provider);
+        let mut executor = externals.executor_factory.with_state(&provider);
         executor.execute_and_verify_receipt(&block, U256::MAX, Some(senders))?;
         let bundle_state = executor.take_output_state();
 
