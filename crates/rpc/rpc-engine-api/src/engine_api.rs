@@ -104,7 +104,6 @@ where
 
         let cancun_fields = CancunPayloadFields { versioned_hashes, parent_beacon_block_root };
 
-        // TODO: validate versioned hashes and figure out what to do with parent_beacon_block_root
         Ok(self.inner.beacon_consensus.new_payload(payload, Some(cancun_fields)).await?)
     }
 
