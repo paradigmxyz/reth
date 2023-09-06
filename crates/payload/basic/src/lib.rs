@@ -781,7 +781,7 @@ where
     let WithdrawalsOutcome { withdrawals_root, withdrawals } =
         commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
 
-    // merge made transaction into bundle state.
+    // merge transition, this would apply the withdrawal balance changes and 4788 contract call
     db.merge_transitions(BundleRetention::PlainState);
 
     let bundle = BundleStateWithReceipts::new(db.take_bundle(), vec![receipts], block_number);
@@ -896,7 +896,7 @@ where
     let WithdrawalsOutcome { withdrawals_root, withdrawals } =
         commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
 
-    // merge transition, this would apply the withdrawal balance changes.
+    // merge transition, this would apply the withdrawal balance changes and 4788 contract call
     db.merge_transitions(BundleRetention::PlainState);
 
     // calculate the state root
@@ -1004,16 +1004,12 @@ fn pre_block_contract_call<'a>(
     let mut evm_pre_block = revm::EVM::with_env(env);
     evm_pre_block.database(db);
 
-    // TODO: figure out what this should actually be
-    let parent_beacon_block_root =
-        chain_spec.is_cancun_activated_at_timestamp(attributes.timestamp).then_some(H256::zero());
-
     // initialize a block from the env, because the pre block call needs the block itself
     match apply_pre_block_call(
         chain_spec,
         attributes.timestamp,
         block_number,
-        parent_beacon_block_root,
+        attributes.parent_beacon_block_root,
         &mut evm_pre_block,
     ) {
         Ok(()) => {}
