@@ -7,7 +7,7 @@ use crate::{
     error::PayloadBuilderError, metrics::PayloadBuilderServiceMetrics, traits::PayloadJobGenerator,
     BuiltPayload, KeepPayloadJobAlive, PayloadBuilderAttributes, PayloadJob,
 };
-use futures_util::{future::FutureExt, StreamExt};
+use futures_util::{future::FutureExt, stream::FuturesUnordered, StreamExt};
 use reth_rpc_types::engine::PayloadId;
 use std::{
     future::Future,
@@ -203,76 +203,91 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        loop {
-            // we poll all jobs first, so we always have the latest payload that we can report if
-            // requests
-            // we don't care about the order of the jobs, so we can just swap_remove them
-            for idx in (0..this.payload_jobs.len()).rev() {
-                let (mut job, id) = this.payload_jobs.swap_remove(idx);
+        // we poll all jobs first, so we always have the latest payload that we can report if
+        // requests
+        // we don't care about the order of the jobs, so we can just swap_remove them
+        for idx in (0..this.payload_jobs.len()).rev() {
+            let (mut job, id) = this.payload_jobs.swap_remove(idx);
 
-                // drain better payloads from the job
-                match job.poll_unpin(cx) {
-                    Poll::Ready(Ok(_)) => {
-                        this.metrics.set_active_jobs(this.payload_jobs.len());
-                        trace!(%id, "payload job finished");
-                    }
-                    Poll::Ready(Err(err)) => {
-                        warn!(?err, ?id, "Payload builder job failed; resolving payload");
-                        this.metrics.inc_failed_jobs();
-                        this.metrics.set_active_jobs(this.payload_jobs.len());
-                    }
-                    Poll::Pending => {
-                        // still pending, put it back
-                        this.payload_jobs.push((job, id));
-                    }
+            // drain better payloads from the job
+            match job.poll_unpin(cx) {
+                Poll::Ready(Ok(_)) => {
+                    this.metrics.set_active_jobs(this.payload_jobs.len());
+                    trace!(%id, "payload job finished");
                 }
-            }
-
-            // marker for exit condition
-            // TODO(mattsse): this could be optmized so we only poll new jobs
-            let mut new_job = false;
-
-            // drain all requests
-            while let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
-                match cmd {
-                    PayloadServiceCommand::BuildNewPayload(attr, tx) => {
-                        let id = attr.payload_id();
-                        let mut res = Ok(id);
-
-                        if this.contains_payload(id) {
-                            warn!(%id, parent = ?attr.parent, "Payload job already in progress, ignoring.");
-                        } else {
-                            // no job for this payload yet, create one
-                            match this.generator.new_payload_job(attr) {
-                                Ok(job) => {
-                                    this.metrics.inc_initiated_jobs();
-                                    new_job = true;
-                                    this.payload_jobs.push((job, id));
-                                }
-                                Err(err) => {
-                                    this.metrics.inc_failed_jobs();
-                                    warn!(?err, %id, "Failed to create payload builder job");
-                                    res = Err(err);
-                                }
-                            }
-                        }
-
-                        // return the id of the payload
-                        let _ = tx.send(res);
-                    }
-                    PayloadServiceCommand::BestPayload(id, tx) => {
-                        let _ = tx.send(this.best_payload(id));
-                    }
-                    PayloadServiceCommand::Resolve(id, tx) => {
-                        let _ = tx.send(this.resolve(id));
-                    }
+                Poll::Ready(Err(err)) => {
+                    warn!(?err, ?id, "Payload builder job failed; resolving payload");
+                    this.metrics.inc_failed_jobs();
+                    this.metrics.set_active_jobs(this.payload_jobs.len());
                 }
-            }
-
-            if !new_job {
-                return Poll::Pending
+                Poll::Pending => {
+                    // still pending, put it back
+                    this.payload_jobs.push((job, id));
+                }
             }
         }
+
+        let mut job_futures = FuturesUnordered::new();
+
+        // drain all requests
+        while let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
+            match cmd {
+                PayloadServiceCommand::BuildNewPayload(attr, tx) => {
+                    let id = attr.payload_id();
+                    let mut res = Ok(id);
+
+                    if this.contains_payload(id) {
+                        warn!(%id, parent = ?attr.parent, "Payload job already in progress, ignoring.");
+                    } else {
+                        // no job for this payload yet, create one
+                        match this.generator.new_payload_job(attr) {
+                            Ok(job) => {
+                                this.metrics.inc_initiated_jobs();
+                                // Push the new job future into FuturesUnordered
+                                job_futures.push(job);
+                            }
+                            Err(err) => {
+                                this.metrics.inc_failed_jobs();
+                                warn!(?err, %id, "Failed to create payload builder job");
+                                res = Err(err);
+                            }
+                        }
+                    }
+
+                    // return the id of the payload
+                    let _ = tx.send(res);
+                }
+                PayloadServiceCommand::BestPayload(id, tx) => {
+                    let _ = tx.send(this.best_payload(id));
+                }
+                PayloadServiceCommand::Resolve(id, tx) => {
+                    let _ = tx.send(this.resolve(id));
+                }
+            }
+        }
+
+        // Poll all job futures
+        while let Poll::Ready(Some(result)) = job_futures.poll_next_unpin(cx) {
+            match result {
+                Ok(_) => {
+                    // Job completed successfully
+                    this.metrics.set_active_jobs(job_futures.len());
+                    trace!("Payload job completed successfully")
+                }
+                Err(err) => {
+                    // Job failed
+                    this.metrics.inc_failed_jobs();
+                    warn!(?err, "Payload job failed");
+                }
+            }
+        }
+
+        // Check if there are any jobs or commands pending
+        if !this.payload_jobs.is_empty() || !job_futures.is_empty() {
+            return Poll::Pending
+        }
+
+        Poll::Ready(())
     }
 }
 
