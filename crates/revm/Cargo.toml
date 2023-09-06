@@ -18,7 +18,7 @@ reth-revm-inspectors = { path = "./revm-inspectors" }
 reth-consensus-common = { path = "../consensus/common" }
 
 # revm
-revm = { workspace = true, features = ["optional_no_base_fee"] }
+revm.workspace = true
 
 # common
 tracing.workspace = true
