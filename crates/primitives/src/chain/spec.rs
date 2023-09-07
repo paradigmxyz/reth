@@ -339,6 +339,11 @@ impl ChainSpec {
         }
     }
 
+    /// Get the timestamp of the genesis block.
+    pub fn genesis_timestamp(&self) -> u64 {
+        self.genesis.timestamp
+    }
+
     /// Returns the final total difficulty if the given block number is after the Paris hardfork.
     ///
     /// Note: technically this would also be valid for the block before the paris upgrade, but this
@@ -405,7 +410,7 @@ impl ChainSpec {
             })
         });
 
-        ForkFilter::new(head, self.genesis_hash(), forks)
+        ForkFilter::new(head, self.genesis_hash(), self.genesis_timestamp(), forks)
     }
 
     /// Compute the [`ForkId`] for the given [`Head`] folowing eip-6122 spec
@@ -434,19 +439,22 @@ impl ChainSpec {
         }
 
         // timestamp are ALWAYS applied after the merge.
-        for (_, cond) in self.forks_iter() {
-            if let ForkCondition::Timestamp(timestamp) = cond {
-                if cond.active_at_head(head) {
-                    if timestamp != current_applied {
-                        forkhash += timestamp;
-                        current_applied = timestamp;
-                    }
-                } else {
-                    // can safely return here because we have already handled all block forks and
-                    // have handled all active timestamp forks, and set the next value to the
-                    // timestamp that is known but not active yet
-                    return ForkId { hash: forkhash, next: timestamp }
+        //
+        // this filter ensures that no block-based forks are returned
+        for timestamp in self.forks_iter().filter_map(|(_, cond)| {
+            cond.as_timestamp().filter(|time| time > &self.genesis.timestamp)
+        }) {
+            let cond = ForkCondition::Timestamp(timestamp);
+            if cond.active_at_head(head) {
+                if timestamp != current_applied {
+                    forkhash += timestamp;
+                    current_applied = timestamp;
                 }
+            } else {
+                // can safely return here because we have already handled all block forks and
+                // have handled all active timestamp forks, and set the next value to the
+                // timestamp that is known but not active yet
+                return ForkId { hash: forkhash, next: timestamp }
             }
         }
 
@@ -594,7 +602,7 @@ impl From<AllGenesisFormats> for ChainSpec {
 }
 
 /// A helper to build custom chain specs
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ChainSpecBuilder {
     chain: Option<Chain>,
     genesis: Option<Genesis>,
@@ -1491,6 +1499,61 @@ Post-merge hard forks (timestamp based):
                 ), // Future Shanghai block
             ],
         );
+    }
+
+    /// Constructs a [ChainSpec] with the given [ChainSpecBuilder], shanghai, and cancun fork
+    /// timestamps.
+    fn construct_chainspec(
+        builder: ChainSpecBuilder,
+        shanghai_time: u64,
+        cancun_time: u64,
+    ) -> ChainSpec {
+        builder
+            .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(shanghai_time))
+            .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(cancun_time))
+            .build()
+    }
+
+    /// Tests that time-based forks which are active at genesis are not included in forkid hash.
+    ///
+    /// This is based off of the test vectors here:
+    /// <https://github.com/ethereum/go-ethereum/blob/2e02c1ffd9dffd1ec9e43c6b66f6c9bd1e556a0b/core/forkid/forkid_test.go#L390-L440>
+    #[test]
+    fn test_timestamp_fork_in_genesis() {
+        let timestamp = 1690475657u64;
+        let default_spec_builder = ChainSpecBuilder::default()
+            .chain(Chain::Id(1337))
+            .genesis(Genesis::default().with_timestamp(timestamp))
+            .paris_activated();
+
+        // test format: (chain spec, expected next value) - the forkhash will be determined by the
+        // genesis hash of the constructed chainspec
+        let tests = [
+            (
+                construct_chainspec(default_spec_builder.clone(), timestamp - 1, timestamp + 1),
+                timestamp + 1,
+            ),
+            (
+                construct_chainspec(default_spec_builder.clone(), timestamp, timestamp + 1),
+                timestamp + 1,
+            ),
+            (
+                construct_chainspec(default_spec_builder.clone(), timestamp + 1, timestamp + 2),
+                timestamp + 1,
+            ),
+        ];
+
+        for (spec, expected_timestamp) in tests {
+            let got_forkid = spec.fork_id(&Head { number: 0, timestamp: 0, ..Default::default() });
+            // This is slightly different from the geth test because we use the shanghai timestamp
+            // to determine whether or not to include a withdrawals root in the genesis header.
+            // This makes the genesis hash different, and as a result makes the ChainSpec fork hash
+            // different.
+            let genesis_hash = spec.genesis_hash();
+            let expected_forkid =
+                ForkId { hash: ForkHash::from(genesis_hash), next: expected_timestamp };
+            assert_eq!(got_forkid, expected_forkid);
+        }
     }
 
     /// Checks that the fork is not active at a terminal ttd block.
