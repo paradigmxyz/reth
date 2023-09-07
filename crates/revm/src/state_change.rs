@@ -1,12 +1,9 @@
 use reth_consensus_common::calc;
-use reth_interfaces::{
-    executor::{BlockExecutionError, BlockValidationError},
-    Error,
-};
+use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{Address, ChainSpec, Hardfork, Header, Withdrawal, H256, U256};
-use reth_revm_primitives::env::fill_tx_env_with_beacon_root_contract_call;
+use reth_revm_primitives::{env::fill_tx_env_with_beacon_root_contract_call, Database};
 use revm::{db::State, primitives::ResultAndState, DatabaseCommit, EVM};
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Debug};
 
 /// Collect all balance changes at the end of the block.
 ///
@@ -58,13 +55,16 @@ pub fn post_block_balance_increments(
 /// If cancun is not activated or the block is the genesis block, then this is a no-op, and no
 /// state changes are made.
 #[inline]
-pub fn apply_pre_block_call(
+pub fn apply_pre_block_call<DB: Database>(
     chain_spec: &ChainSpec,
     block_timestamp: u64,
     block_number: u64,
     block_parent_beacon_block_root: Option<H256>,
-    evm: &mut EVM<State<'_, Error>>,
-) -> Result<(), BlockExecutionError> {
+    evm: &mut EVM<State<DB>>,
+) -> Result<(), BlockExecutionError>
+where
+    <DB as Database>::Error: Debug,
+{
     if chain_spec.fork(Hardfork::Cancun).active_at_timestamp(block_timestamp) {
         // if the block number is zero (genesis block) then the parent beacon block root must
         // be 0x0 and no system transaction may occur as per EIP-4788

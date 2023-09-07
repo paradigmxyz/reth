@@ -34,10 +34,8 @@ use reth_primitives::{
 use reth_provider::{BlockReaderIdExt, BlockSource, BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::{
     database::RevmDatabase,
-    revm::db:StateDBBox,
     env::tx_env_with_recovered,
     into_reth_log,
-    revm::{State, StateBuilder},
     state_change::{apply_pre_block_call, post_block_withdrawals_balance_increments},
 };
 use reth_rlp::Encodable;
@@ -49,6 +47,7 @@ use revm::{
     Database, DatabaseCommit, State,
 };
 use std::{
+    fmt::Debug,
     future::Future,
     pin::Pin,
     sync::{atomic::AtomicBool, Arc},
@@ -640,7 +639,7 @@ where
 
     let state_provider = client.state_by_block_hash(config.parent_block.hash)?;
     let state = RevmDatabase::new(&state_provider);
-    let mut db =
+    let db =
         State::builder().with_database_ref(cached_reads.as_db(&state)).with_bundle_update().build();
     let PayloadConfig {
         initialized_block_env,
@@ -877,7 +876,7 @@ where
     debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number,  "building empty payload");
 
     let state = client.state_by_block_hash(parent_block.hash)?;
-    let mut db = State::builder().with_database_boxed(Box::new(RevmDatabase::new(&state))).build();
+    let db = State::builder().with_database_boxed(Box::new(RevmDatabase::new(&state))).build();
 
     let base_fee = initialized_block_env.basefee.to::<u64>();
     let block_number = initialized_block_env.number.to::<u64>();
@@ -985,14 +984,18 @@ fn commit_withdrawals<DB: Database<Error = Error>>(
 }
 
 /// TODO: docs
-fn pre_block_contract_call<'a>(
-    db: State<'a, Error>,
+fn pre_block_contract_call<DB>(
+    db: State<DB>,
     chain_spec: &ChainSpec,
     block_number: u64,
     initialized_cfg: &CfgEnv,
     initialized_block_env: &BlockEnv,
     attributes: &PayloadBuilderAttributes,
-) -> Result<State<'a, Error>, PayloadBuilderError> {
+) -> Result<State<DB>, PayloadBuilderError>
+where
+    DB: Database,
+    <DB as Database>::Error: Debug,
+{
     // Configure the environment for the block.
     let env = Env {
         cfg: initialized_cfg.clone(),
