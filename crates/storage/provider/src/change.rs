@@ -166,7 +166,7 @@ impl BundleStateWithReceipts {
     ///
     /// ```
     /// use reth_primitives::{Account, U256};
-    /// use reth_provider::BundleState;
+    /// use reth_provider::BundleStateWithReceipts;
     /// use reth_db::{test_utils::create_test_rw_db, database::Database};
     /// use std::collections::HashMap;
     ///
