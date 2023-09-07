@@ -660,6 +660,9 @@ where
 
     /// Removes all transactions that are present in the pool.
     pub(crate) fn retain_unknown(&self, hashes: &mut Vec<TxHash>) {
+        if hashes.is_empty() {
+            return
+        }
         let pool = self.pool.read();
         hashes.retain(|tx| !pool.contains(tx))
     }

@@ -1,13 +1,13 @@
 use crate::{
     constants::{
         EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR, EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
-        EIP1559_INITIAL_BASE_FEE, EMPTY_WITHDRAWALS,
+        EIP1559_INITIAL_BASE_FEE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
     },
     forkid::ForkFilterKey,
     header::Head,
     proofs::genesis_state_root,
     Address, BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, Hardfork, Header,
-    PruneBatchSizes, SealedHeader, H160, H256, U256,
+    PruneBatchSizes, SealedHeader, EMPTY_OMMER_ROOT, H160, H256, U256,
 };
 use hex_literal::hex;
 use once_cell::sync::Lazy;
@@ -304,7 +304,24 @@ impl ChainSpec {
             (self.fork(Hardfork::Shanghai).active_at_timestamp(self.genesis.timestamp))
                 .then_some(EMPTY_WITHDRAWALS);
 
+        // If Cancun is activated at genesis, we set:
+        // * parent beacon block root to 0x0
+        // * blob gas used to 0x0
+        // * excess blob gas to 0x0
+        let (parent_beacon_block_root, blob_gas_used, excess_blob_gas) =
+            if self.fork(Hardfork::Cancun).active_at_timestamp(self.genesis.timestamp) {
+                (Some(H256::zero()), Some(0), Some(0))
+            } else {
+                (None, None, None)
+            };
+
         Header {
+            parent_hash: H256::zero(),
+            number: 0,
+            transactions_root: EMPTY_TRANSACTIONS,
+            ommers_hash: EMPTY_OMMER_ROOT,
+            receipts_root: EMPTY_RECEIPTS,
+            logs_bloom: Default::default(),
             gas_limit: self.genesis.gas_limit,
             difficulty: self.genesis.difficulty,
             nonce: self.genesis.nonce,
@@ -313,9 +330,12 @@ impl ChainSpec {
             timestamp: self.genesis.timestamp,
             mix_hash: self.genesis.mix_hash,
             beneficiary: self.genesis.coinbase,
+            gas_used: Default::default(),
             base_fee_per_gas,
             withdrawals_root,
-            ..Default::default()
+            parent_beacon_block_root,
+            blob_gas_used,
+            excess_blob_gas,
         }
     }
 
@@ -337,6 +357,11 @@ impl ChainSpec {
         } else {
             self.genesis_header().hash_slow()
         }
+    }
+
+    /// Get the timestamp of the genesis block.
+    pub fn genesis_timestamp(&self) -> u64 {
+        self.genesis.timestamp
     }
 
     /// Returns the final total difficulty if the given block number is after the Paris hardfork.
@@ -405,7 +430,7 @@ impl ChainSpec {
             })
         });
 
-        ForkFilter::new(head, self.genesis_hash(), forks)
+        ForkFilter::new(head, self.genesis_hash(), self.genesis_timestamp(), forks)
     }
 
     /// Compute the [`ForkId`] for the given [`Head`] folowing eip-6122 spec
@@ -434,19 +459,22 @@ impl ChainSpec {
         }
 
         // timestamp are ALWAYS applied after the merge.
-        for (_, cond) in self.forks_iter() {
-            if let ForkCondition::Timestamp(timestamp) = cond {
-                if cond.active_at_head(head) {
-                    if timestamp != current_applied {
-                        forkhash += timestamp;
-                        current_applied = timestamp;
-                    }
-                } else {
-                    // can safely return here because we have already handled all block forks and
-                    // have handled all active timestamp forks, and set the next value to the
-                    // timestamp that is known but not active yet
-                    return ForkId { hash: forkhash, next: timestamp }
+        //
+        // this filter ensures that no block-based forks are returned
+        for timestamp in self.forks_iter().filter_map(|(_, cond)| {
+            cond.as_timestamp().filter(|time| time > &self.genesis.timestamp)
+        }) {
+            let cond = ForkCondition::Timestamp(timestamp);
+            if cond.active_at_head(head) {
+                if timestamp != current_applied {
+                    forkhash += timestamp;
+                    current_applied = timestamp;
                 }
+            } else {
+                // can safely return here because we have already handled all block forks and
+                // have handled all active timestamp forks, and set the next value to the
+                // timestamp that is known but not active yet
+                return ForkId { hash: forkhash, next: timestamp }
             }
         }
 
@@ -594,7 +622,7 @@ impl From<AllGenesisFormats> for ChainSpec {
 }
 
 /// A helper to build custom chain specs
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ChainSpecBuilder {
     chain: Option<Chain>,
     genesis: Option<Genesis>,
@@ -720,7 +748,7 @@ impl ChainSpecBuilder {
 
     /// Enable Cancun at genesis.
     pub fn cancun_activated(mut self) -> Self {
-        self = self.paris_activated();
+        self = self.shanghai_activated();
         self.hardforks.insert(Hardfork::Cancun, ForkCondition::Timestamp(0));
         self
     }
@@ -1053,13 +1081,15 @@ impl DepositContract {
 #[cfg(test)]
 mod tests {
     use crate::{
-        Address, AllGenesisFormats, Chain, ChainSpec, ChainSpecBuilder, DisplayHardforks,
-        ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head, DEV, GOERLI, H256, MAINNET,
-        SEPOLIA, U256,
+        constants::EMPTY_WITHDRAWALS, Address, AllGenesisFormats, Chain, ChainSpec,
+        ChainSpecBuilder, DisplayHardforks, ForkCondition, ForkHash, ForkId, Genesis, Hardfork,
+        Head, DEV, GOERLI, H256, MAINNET, SEPOLIA, U256,
     };
     use bytes::BytesMut;
     use ethers_core::types as EtherType;
     use reth_rlp::Encodable;
+    use std::str::FromStr;
+
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
         for (block, expected_id) in cases {
             let computed_id = spec.fork_id(block);
@@ -1493,6 +1523,61 @@ Post-merge hard forks (timestamp based):
         );
     }
 
+    /// Constructs a [ChainSpec] with the given [ChainSpecBuilder], shanghai, and cancun fork
+    /// timestamps.
+    fn construct_chainspec(
+        builder: ChainSpecBuilder,
+        shanghai_time: u64,
+        cancun_time: u64,
+    ) -> ChainSpec {
+        builder
+            .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(shanghai_time))
+            .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(cancun_time))
+            .build()
+    }
+
+    /// Tests that time-based forks which are active at genesis are not included in forkid hash.
+    ///
+    /// This is based off of the test vectors here:
+    /// <https://github.com/ethereum/go-ethereum/blob/2e02c1ffd9dffd1ec9e43c6b66f6c9bd1e556a0b/core/forkid/forkid_test.go#L390-L440>
+    #[test]
+    fn test_timestamp_fork_in_genesis() {
+        let timestamp = 1690475657u64;
+        let default_spec_builder = ChainSpecBuilder::default()
+            .chain(Chain::Id(1337))
+            .genesis(Genesis::default().with_timestamp(timestamp))
+            .paris_activated();
+
+        // test format: (chain spec, expected next value) - the forkhash will be determined by the
+        // genesis hash of the constructed chainspec
+        let tests = [
+            (
+                construct_chainspec(default_spec_builder.clone(), timestamp - 1, timestamp + 1),
+                timestamp + 1,
+            ),
+            (
+                construct_chainspec(default_spec_builder.clone(), timestamp, timestamp + 1),
+                timestamp + 1,
+            ),
+            (
+                construct_chainspec(default_spec_builder.clone(), timestamp + 1, timestamp + 2),
+                timestamp + 1,
+            ),
+        ];
+
+        for (spec, expected_timestamp) in tests {
+            let got_forkid = spec.fork_id(&Head { number: 0, timestamp: 0, ..Default::default() });
+            // This is slightly different from the geth test because we use the shanghai timestamp
+            // to determine whether or not to include a withdrawals root in the genesis header.
+            // This makes the genesis hash different, and as a result makes the ChainSpec fork hash
+            // different.
+            let genesis_hash = spec.genesis_hash();
+            let expected_forkid =
+                ForkId { hash: ForkHash::from(genesis_hash), next: expected_timestamp };
+            assert_eq!(got_forkid, expected_forkid);
+        }
+    }
+
     /// Checks that the fork is not active at a terminal ttd block.
     #[test]
     fn check_terminal_ttd() {
@@ -1768,5 +1853,43 @@ Post-merge hard forks (timestamp based):
         assert_eq!(acc.balance, U256::from(1));
         // assert that the cancun time was picked up
         assert_eq!(genesis.config.cancun_time, Some(4661));
+    }
+
+    #[test]
+    fn test_default_cancun_header_forkhash() {
+        // set the gas limit from the hive test genesis according to the hash
+        let genesis = Genesis { gas_limit: 0x2fefd8u64, ..Default::default() };
+        let default_chainspec = ChainSpecBuilder::default()
+            .chain(Chain::Id(1337))
+            .genesis(genesis)
+            .cancun_activated()
+            .build();
+        let mut header = default_chainspec.genesis_header();
+
+        // set the state root to the same as in the hive test the hash was pulled from
+        header.state_root =
+            H256::from_str("0x62e2595e017f0ca23e08d17221010721a71c3ae932f4ea3cb12117786bb392d4")
+                .unwrap();
+
+        // shanghai is activated so we should have a withdrawals root
+        assert_eq!(header.withdrawals_root, Some(EMPTY_WITHDRAWALS));
+
+        // cancun is activated so we should have a zero parent beacon block root, zero blob gas
+        // used, and zero excess blob gas
+        assert_eq!(header.parent_beacon_block_root, Some(H256::zero()));
+        assert_eq!(header.blob_gas_used, Some(0));
+        assert_eq!(header.excess_blob_gas, Some(0));
+        println!("header: {:?}", header);
+
+        // check the genesis hash
+        let genesis_hash = header.hash_slow();
+        let expected_hash = H256::from(hex_literal::hex!(
+            "16bb7c59613a5bad3f7c04a852fd056545ade2483968d9a25a1abb05af0c4d37"
+        ));
+        assert_eq!(genesis_hash, expected_hash);
+
+        // check that the forkhash is correct
+        let expected_forkhash = ForkHash(hex_literal::hex!("8062457a"));
+        assert_eq!(ForkHash::from(genesis_hash), expected_forkhash);
     }
 }

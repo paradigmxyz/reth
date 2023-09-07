@@ -267,14 +267,18 @@ pub struct LocalizedTransactionTrace {
     /// Hash of the block, if not pending
     ///
     /// Note: this deviates from <https://openethereum.github.io/JSONRPC-trace-module#trace_transaction> which always returns a block number
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub block_hash: Option<H256>,
     /// Block number the transaction is included in, None if pending.
     ///
     /// Note: this deviates from <https://openethereum.github.io/JSONRPC-trace-module#trace_transaction> which always returns a block number
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub block_number: Option<u64>,
     /// Hash of the transaction
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub transaction_hash: Option<H256>,
     /// Transaction index within the block, None if pending.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub transaction_position: Option<u64>,
 }
 
