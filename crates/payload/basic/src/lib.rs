@@ -314,7 +314,7 @@ where
         // check if the deadline is reached
         if this.deadline.as_mut().poll(cx).is_ready() {
             trace!("Payload building deadline reached");
-            return Poll::Ready(Ok(()))
+            return Poll::Ready(Ok(()));
         }
 
         // check if the interval is reached
@@ -398,7 +398,7 @@ where
 
     fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError> {
         if let Some(ref payload) = self.best_payload {
-            return Ok(payload.clone())
+            return Ok(payload.clone());
         }
         // No payload has been built yet, but we need to return something that the CL then can
         // deliver, so we need to return an empty payload.
@@ -466,13 +466,13 @@ impl Future for ResolveBestPayload {
             if let Poll::Ready(res) = fut.poll(cx) {
                 this.maybe_better = None;
                 if let Ok(BuildOutcome::Better { payload, .. }) = res {
-                    return Poll::Ready(Ok(Arc::new(payload)))
+                    return Poll::Ready(Ok(Arc::new(payload)));
                 }
             }
         }
 
         if let Some(best) = this.best_payload.take() {
-            return Poll::Ready(Ok(best))
+            return Poll::Ready(Ok(best));
         }
 
         let mut empty_payload = this.empty_payload.take().expect("polled after completion");
@@ -668,12 +668,12 @@ where
             // which also removes all dependent transaction from the iterator before we can
             // continue
             best_txs.mark_invalid(&pool_tx);
-            continue
+            continue;
         }
 
         // check if the job was cancelled, if so we can exit early
         if cancel.is_cancelled() {
-            return Ok(BuildOutcome::Cancelled)
+            return Ok(BuildOutcome::Cancelled);
         }
 
         // convert tx to a signed transaction
@@ -688,7 +688,7 @@ where
                 // which removes its dependent transactions from the iterator. This is similar to
                 // the gas limit condition for regular transactions above.
                 best_txs.mark_invalid(&pool_tx);
-                continue
+                continue;
             } else {
                 // add to the data gas if we're going to execute the transaction
                 sum_blob_gas_used += tx_blob_gas;
@@ -724,11 +724,11 @@ where
                             trace!(?err, ?tx, "skipping invalid transaction and its descendants");
                             best_txs.mark_invalid(&pool_tx);
                         }
-                        continue
+                        continue;
                     }
                     err => {
                         // this is an error that we should treat as fatal for this attempt
-                        return Err(PayloadBuilderError::EvmExecutionError(err))
+                        return Err(PayloadBuilderError::EvmExecutionError(err));
                     }
                 }
             }
@@ -760,10 +760,8 @@ where
 
     // check if we have a better block
     if !is_better_payload(best_payload.as_deref(), total_fees) {
-        // to release cached_reads
-        drop(db);
         // can skip building the block
-        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
+        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads });
     }
 
     let WithdrawalsOutcome { withdrawals_root, withdrawals } =
@@ -835,7 +833,6 @@ where
 
     let sealed_block = block.seal_slow();
 
-    drop(db);
     let mut payload = BuiltPayload::new(attributes.id, sealed_block, total_fees);
 
     if !blob_sidecars.is_empty() {
@@ -942,11 +939,11 @@ fn commit_withdrawals<DB: Database<Error = Error>>(
     withdrawals: Vec<Withdrawal>,
 ) -> Result<WithdrawalsOutcome, Error> {
     if !chain_spec.is_shanghai_activated_at_timestamp(timestamp) {
-        return Ok(WithdrawalsOutcome::pre_shanghai())
+        return Ok(WithdrawalsOutcome::pre_shanghai());
     }
 
     if withdrawals.is_empty() {
-        return Ok(WithdrawalsOutcome::empty())
+        return Ok(WithdrawalsOutcome::empty());
     }
 
     let balance_increments =

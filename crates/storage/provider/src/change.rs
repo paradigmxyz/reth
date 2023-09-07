@@ -25,6 +25,8 @@ use reth_trie::{
 };
 use std::collections::HashMap;
 
+pub use reth_revm_primitives::db::states::OriginalValuesKnown;
+
 /// Bundle state of post execution changes and reverts
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct BundleStateWithReceipts {
@@ -212,11 +214,11 @@ impl BundleStateWithReceipts {
     /// Transform block number to the index of block.
     fn block_number_to_index(&self, block_number: BlockNumber) -> Option<usize> {
         if self.first_block > block_number {
-            return None
+            return None;
         }
         let index = block_number - self.first_block;
         if index >= self.receipts.len() as u64 {
-            return None
+            return None;
         }
         Some(index as usize)
     }
@@ -302,10 +304,10 @@ impl BundleStateWithReceipts {
         let last_block = self.last_block();
         let first_block = self.first_block;
         if block_number >= last_block {
-            return None
+            return None;
         }
         if block_number < first_block {
-            return Some(Self::default())
+            return Some(Self::default());
         }
 
         // detached number should be included so we are adding +1 to it.
@@ -344,7 +346,7 @@ impl BundleStateWithReceipts {
     pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         self,
         tx: &TX,
-        omit_changed_check: bool,
+        is_value_known: OriginalValuesKnown,
     ) -> Result<(), DatabaseError> {
         // write receipts
         let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
@@ -357,7 +359,7 @@ impl BundleStateWithReceipts {
         }
 
         let (plain_state, reverts) =
-            self.bundle.into_sorted_plain_state_and_reverts(omit_changed_check);
+            self.bundle.into_sorted_plain_state_and_reverts(is_value_known);
 
         StateReverts(reverts).write_to_db(tx, self.first_block)?;
         StateChange(plain_state).write_to_db(tx)?;
@@ -578,7 +580,10 @@ mod tests {
     use reth_revm_primitives::{into_reth_acc, primitives::HashMap};
     use revm::{
         db::{
-            states::{bundle_state::BundleRetention, changes::PlainStorageRevert},
+            states::{
+                bundle_state::{BundleRetention, OriginalValuesKnown},
+                changes::PlainStorageRevert,
+            },
             BundleState,
         },
         primitives::{Account, AccountInfo as RevmAccountInfo, AccountStatus, StorageSlot},
@@ -630,7 +635,7 @@ mod tests {
 
         // Write plain state and reverts separately.
         let reverts = revm_bundle_state.take_all_reverts().into_plain_state_reverts();
-        let plain_state = revm_bundle_state.into_plain_state_sorted(false);
+        let plain_state = revm_bundle_state.into_plain_state_sorted(OriginalValuesKnown::Yes);
         assert!(plain_state.storage.is_empty());
         assert!(plain_state.contracts.is_empty());
         StateChange(plain_state)
@@ -693,7 +698,7 @@ mod tests {
 
         // Write plain state and reverts separately.
         let reverts = revm_bundle_state.take_all_reverts().into_plain_state_reverts();
-        let plain_state = revm_bundle_state.into_plain_state_sorted(false);
+        let plain_state = revm_bundle_state.into_plain_state_sorted(OriginalValuesKnown::Yes);
         assert!(plain_state.storage.is_empty());
         assert!(plain_state.contracts.is_empty());
         StateChange(plain_state)
@@ -783,7 +788,7 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
 
         BundleStateWithReceipts::new(state.take_bundle(), Vec::new(), 1)
-            .write_to_db(provider.tx_ref(), false)
+            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         // Check plain storage state
@@ -882,7 +887,7 @@ mod tests {
 
         state.merge_transitions(BundleRetention::Reverts);
         BundleStateWithReceipts::new(state.take_bundle(), Vec::new(), 2)
-            .write_to_db(provider.tx_ref(), false)
+            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         assert_eq!(
@@ -949,7 +954,7 @@ mod tests {
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
         BundleStateWithReceipts::new(init_state.take_bundle(), Vec::new(), 0)
-            .write_to_db(provider.tx_ref(), false)
+            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
         let mut cache_state = CacheState::new(true);
@@ -1095,7 +1100,7 @@ mod tests {
         let bundle = state.take_bundle();
 
         BundleStateWithReceipts::new(bundle, Vec::new(), 1)
-            .write_to_db(provider.tx_ref(), false)
+            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider
@@ -1260,7 +1265,7 @@ mod tests {
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
         BundleStateWithReceipts::new(init_state.take_bundle(), Vec::new(), 0)
-            .write_to_db(provider.tx_ref(), false)
+            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
         let mut cache_state = CacheState::new(true);
@@ -1306,7 +1311,7 @@ mod tests {
         // Commit block #1 changes to the database.
         state.merge_transitions(BundleRetention::Reverts);
         BundleStateWithReceipts::new(state.take_bundle(), Vec::new(), 1)
-            .write_to_db(provider.tx_ref(), false)
+            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider

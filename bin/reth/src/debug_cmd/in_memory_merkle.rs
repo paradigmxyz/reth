@@ -15,7 +15,8 @@ use reth_network_api::NetworkInfo;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec};
 use reth_provider::{
     AccountExtReader, BlockWriter, ExecutorFactory, HashingWriter, HeaderProvider,
-    LatestStateProviderRef, ProviderFactory, StageCheckpointReader, StorageReader,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
+    StorageReader,
 };
 use reth_tasks::TaskExecutor;
 use reth_trie::{hashed_cursor::HashedPostStateCursorFactory, updates::TrieKey, StateRoot};
@@ -189,14 +190,14 @@ impl Command {
 
         if in_memory_state_root == block.state_root {
             info!(target: "reth::cli", state_root = ?in_memory_state_root, "Computed in-memory state root matches");
-            return Ok(())
+            return Ok(());
         }
 
         let provider_rw = factory.provider_rw()?;
 
         // Insert block, state and hashes
         provider_rw.insert_block(block.clone(), None, None)?;
-        block_state.write_to_db(provider_rw.tx_ref(), false)?;
+        block_state.write_to_db(provider_rw.tx_ref(), OriginalValuesKnown::No)?;
         let storage_lists = provider_rw.changed_storages_with_range(block.number..=block.number)?;
         let storages = provider_rw.plainstate_storages(storage_lists)?;
         provider_rw.insert_storage_for_hashing(storages)?;
@@ -226,8 +227,8 @@ impl Command {
             match (in_mem_updates_iter.next(), incremental_updates_iter.next()) {
                 (Some(in_mem), Some(incr)) => {
                     pretty_assertions::assert_eq!(in_mem.0, incr.0, "Nibbles don't match");
-                    if in_mem.1 != incr.1 &&
-                        matches!(in_mem.0, TrieKey::AccountNode(ref nibbles) if nibbles.inner.len() > self.skip_node_depth.unwrap_or_default())
+                    if in_mem.1 != incr.1
+                        && matches!(in_mem.0, TrieKey::AccountNode(ref nibbles) if nibbles.inner.len() > self.skip_node_depth.unwrap_or_default())
                     {
                         in_mem_mismatched.push(in_mem);
                         incremental_mismatched.push(incr);

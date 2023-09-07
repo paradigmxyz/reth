@@ -155,7 +155,7 @@ proptest = "1.0"
 arbitrary = "1.1"
 assert_matches = "1.5.0"
 
-[patch."https://github.com/bluealloy/revm.git"]
-revm = { path = "../revm/crates/revm" }
-revm-primitives = { path = "../revm/crates/primitives" }
+# [patch."https://github.com/bluealloy/revm.git"]
+# revm = { path = "../revm/crates/revm" }
+# revm-primitives = { path = "../revm/crates/primitives" }
 

@@ -4,9 +4,9 @@ use crate::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
-    Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HistoryWriter, ProviderError,
-    PruneCheckpointReader, PruneCheckpointWriter, StageCheckpointReader, StorageReader,
-    TransactionsProvider, WithdrawalsProvider,
+    Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HistoryWriter, OriginalValuesKnown,
+    ProviderError, PruneCheckpointReader, PruneCheckpointWriter, StageCheckpointReader,
+    StorageReader, TransactionsProvider, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -135,7 +135,7 @@ where
     while let Some((sharded_key, list)) = item {
         // If the shard does not belong to the key, break.
         if !shard_belongs_to_key(&sharded_key) {
-            break
+            break;
         }
         cursor.delete_current()?;
 
@@ -144,12 +144,12 @@ where
         let first = list.iter(0).next().expect("List can't be empty");
         if first >= block_number as usize {
             item = cursor.prev()?;
-            continue
+            continue;
         } else if block_number <= sharded_key.as_ref().highest_block_number {
             // Filter out all elements greater than block number.
-            return Ok(list.iter(0).take_while(|i| *i < block_number as usize).collect::<Vec<_>>())
+            return Ok(list.iter(0).take_while(|i| *i < block_number as usize).collect::<Vec<_>>());
         } else {
-            return Ok(list.iter(0).collect::<Vec<_>>())
+            return Ok(list.iter(0).collect::<Vec<_>>());
         }
     }
 
@@ -208,7 +208,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         range: RangeInclusive<BlockNumber>,
     ) -> Result<BundleStateWithReceipts> {
         if range.is_empty() {
-            return Ok(BundleStateWithReceipts::default())
+            return Ok(BundleStateWithReceipts::default());
         }
         let start_block_number = *range.start();
 
@@ -389,7 +389,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         let block_bodies = self.get_or_take::<tables::BlockBodyIndices, false>(range)?;
 
         if block_bodies.is_empty() {
-            return Ok(Vec::new())
+            return Ok(Vec::new());
         }
 
         // Compute the first and last tx ID in the range
@@ -398,7 +398,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
         // If this is the case then all of the blocks in the range are empty
         if last_transaction < first_transaction {
-            return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect())
+            return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect());
         }
 
         // Get transactions and senders
@@ -527,7 +527,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
         let block_headers = self.get_or_take::<tables::Headers, TAKE>(range.clone())?;
         if block_headers.is_empty() {
-            return Ok(Vec::new())
+            return Ok(Vec::new());
         }
 
         let block_header_hashes =
@@ -633,7 +633,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
         while let Some(Ok((entry_key, _))) = reverse_walker.next() {
             if selector(entry_key.clone()) <= key {
-                break
+                break;
             }
             reverse_walker.delete_current()?;
             deleted += 1;
@@ -681,7 +681,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             }
 
             if deleted == limit {
-                break
+                break;
             }
         }
 
@@ -710,7 +710,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             }
 
             if deleted == limit {
-                break
+                break;
             }
         }
 
@@ -729,7 +729,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             // delete old shard so new one can be inserted.
             self.tx.delete::<T>(shard_key, None)?;
             let list = list.iter(0).map(|i| i as u64).collect::<Vec<_>>();
-            return Ok(list)
+            return Ok(list);
         }
         Ok(Vec::new())
     }
@@ -867,7 +867,7 @@ impl<'this, TX: DbTx<'this>> HeaderProvider for DatabaseProvider<'this, TX> {
         if let Some(td) = self.chain_spec.final_paris_total_difficulty(number) {
             // if this block is higher than the final paris(merge) block, return the final paris
             // difficulty
-            return Ok(Some(td))
+            return Ok(Some(td));
         }
 
         Ok(self.tx.get::<tables::HeaderTD>(number)?.map(|td| td.0))
@@ -974,7 +974,7 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
                     None => return Ok(None),
                 };
 
-                return Ok(Some(Block { header, body: transactions, ommers, withdrawals }))
+                return Ok(Some(Block { header, body: transactions, ommers, withdrawals }));
             }
         }
 
@@ -994,11 +994,11 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
             // If the Paris (Merge) hardfork block is known and block is after it, return empty
             // ommers.
             if self.chain_spec.final_paris_total_difficulty(number).is_some() {
-                return Ok(Some(Vec::new()))
+                return Ok(Some(Vec::new()));
             }
 
             let ommers = self.tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers);
-            return Ok(ommers)
+            return Ok(ommers);
         }
 
         Ok(None)
@@ -1118,7 +1118,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
                                 base_fee: header.base_fee_per_gas,
                             };
 
-                            return Ok(Some((transaction, meta)))
+                            return Ok(Some((transaction, meta)));
                         }
                     }
                 }
@@ -1149,7 +1149,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
                         .map(|result| result.map(|(_, tx)| tx.into()))
                         .collect::<std::result::Result<Vec<_>, _>>()?;
                     Ok(Some(transactions))
-                }
+                };
             }
         }
         Ok(None)
@@ -1231,7 +1231,7 @@ impl<'this, TX: DbTx<'this>> ReceiptProvider for DatabaseProvider<'this, TX> {
                         .map(|result| result.map(|(_, receipt)| receipt))
                         .collect::<std::result::Result<Vec<_>, _>>()?;
                     Ok(Some(receipts))
-                }
+                };
             }
         }
         Ok(None)
@@ -1253,7 +1253,7 @@ impl<'this, TX: DbTx<'this>> WithdrawalsProvider for DatabaseProvider<'this, TX>
                     .get::<tables::BlockWithdrawals>(number)
                     .map(|w| w.map(|w| w.withdrawals))?
                     .unwrap_or_default();
-                return Ok(Some(withdrawals))
+                return Ok(Some(withdrawals));
             }
         }
         Ok(None)
@@ -1500,7 +1500,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
                     block_number: *range.end(),
                     block_hash: end_block_hash,
                 }
-                .into())
+                .into());
             }
             trie_updates.flush(&self.tx)?;
         }
@@ -1740,8 +1740,8 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
                 StorageShardedKey::last(address, storage_key),
                 rem_index,
                 |storage_sharded_key| {
-                    storage_sharded_key.address == address &&
-                        storage_sharded_key.sharded_key.key == storage_key
+                    storage_sharded_key.address == address
+                        && storage_sharded_key.sharded_key.key == storage_key
                 },
             )?;
 
@@ -1874,7 +1874,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockExecutionWriter for DatabaseP
                     block_number: parent_number,
                     block_hash: parent_hash,
                 }
-                .into())
+                .into());
             }
             trie_updates.flush(&self.tx)?;
         }
@@ -1994,7 +1994,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
         prune_modes: Option<&PruneModes>,
     ) -> Result<()> {
         if blocks.is_empty() {
-            return Ok(())
+            return Ok(());
         }
         let new_tip = blocks.last().unwrap();
         let new_tip_number = new_tip.number;
@@ -2014,7 +2014,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
 
         // Write state and changesets to the database.
         // Must be written after blocks because of the receipt lookup.
-        state.write_to_db(self.tx_ref(), true)?;
+        state.write_to_db(self.tx_ref(), OriginalValuesKnown::No)?;
 
         self.insert_hashes(first_number..=last_block_number, last_block_hash, expected_state_root)?;
 
