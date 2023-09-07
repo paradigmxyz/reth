@@ -99,6 +99,8 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     fn latest(&self) -> Result<StateProviderBox<'_>>;
 
     /// Returns a [StateProvider] indexed by the given [BlockId].
+    ///
+    /// Note: if a number or hash is provided this will only look at historical(canonical) state.
     fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox<'_>> {
         match block_id {
             BlockId::Number(block_number) => self.state_by_block_number_or_tag(block_number),
@@ -107,6 +109,8 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     }
 
     /// Returns a [StateProvider] indexed by the given block number or tag.
+    ///
+    /// Note: if a number is provided this will only look at historical(canonical) state.
     fn state_by_block_number_or_tag(
         &self,
         number_or_tag: BlockNumberOrTag,
@@ -119,8 +123,8 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
                     Some(hash) => hash,
                     None => return Err(ProviderError::FinalizedBlockNotFound.into()),
                 };
-
-                self.state_by_block_hash(hash)
+                // only look at historical state
+                self.history_by_block_hash(hash)
             }
             BlockNumberOrTag::Safe => {
                 // we can only get the safe state by hash, not by num
@@ -129,11 +133,14 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
                     None => return Err(ProviderError::SafeBlockNotFound.into()),
                 };
 
-                self.state_by_block_hash(hash)
+                self.history_by_block_hash(hash)
             }
             BlockNumberOrTag::Earliest => self.history_by_block_number(0),
             BlockNumberOrTag::Pending => self.pending(),
-            BlockNumberOrTag::Number(num) => self.history_by_block_number(num),
+            BlockNumberOrTag::Number(num) => {
+                // Note: The `BlockchainProvider` could also lookup the tree for the given block number, if for example the block number is `latest + 1`, however this should only support canonical state: <https://github.com/paradigmxyz/reth/issues/4515>
+                self.history_by_block_number(num)
+            }
         }
     }
 
