@@ -26,6 +26,11 @@ use std::{
 };
 use tracing::info;
 
+/// Exposing the `reth_db` crate
+pub mod utils {
+    pub use reth_db::open_db_read_only;
+}
+
 /// Get a single header from network
 pub async fn get_single_header<Client>(
     client: Client,

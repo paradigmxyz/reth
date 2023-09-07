@@ -1,25 +1,25 @@
 // Talking to the DB
-use reth_db::open_db_read_only;
-use reth_primitives::ChainSpecBuilder;
-use reth_provider::{providers::BlockchainProvider, ProviderFactory};
+use reth::{primitives::ChainSpecBuilder, utils::db::open_db_read_only};
 
+use reth::providers::{providers::BlockchainProvider, ProviderFactory};
 // Bringing up the RPC
-use reth_rpc_builder::{
+use reth::rpc::builder::{
     RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig,
 };
 
 // Code which we'd ideally like to not need to import if you're only spinning up
 // read-only parts of the API and do not require access to pending state or to
 // EVM sims
-use reth_beacon_consensus::BeaconConsensus;
-use reth_blockchain_tree::{
-    BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
+use reth::{
+    beacon_consensus::BeaconConsensus,
+    blockchain_tree::{
+        BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
+    },
+    revm::Factory as ExecutionFactory,
 };
-use reth_revm::Factory as ExecutionFactory;
 
 // Configuring the network parts, ideally also wouldn't ned to think about this.
-use reth_provider::test_utils::TestCanonStateSubscriptions;
-use reth_tasks::TokioTaskExecutor;
+use reth::{providers::test_utils::TestCanonStateSubscriptions, tasks::TokioTaskExecutor};
 use std::{path::Path, sync::Arc};
 
 use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};

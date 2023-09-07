@@ -6334,17 +6334,7 @@ dependencies = [
  "eyre",
  "futures",
  "jsonrpsee",
- "reth-beacon-consensus",
- "reth-blockchain-tree",
- "reth-db",
- "reth-network-api",
- "reth-primitives",
- "reth-provider",
- "reth-revm",
- "reth-rpc",
- "reth-rpc-builder",
- "reth-tasks",
- "reth-transaction-pool",
+ "reth",
  "tokio",
 ]
 

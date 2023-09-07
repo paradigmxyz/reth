@@ -1,10 +1,9 @@
 // Reth block related imports
-use reth_primitives::Block;
-use reth_provider::BlockReaderIdExt;
+use reth::{primitives::Block, providers::BlockReaderIdExt};
 
 // Rpc related imports
 use jsonrpsee::proc_macros::rpc;
-use reth_rpc::eth::error::EthResult;
+use reth::rpc::eth::error::EthResult;
 
 /// trait interface for a custom rpc namespace: `MyRpc`
 ///
