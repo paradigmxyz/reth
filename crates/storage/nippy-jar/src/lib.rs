@@ -1,10 +1,9 @@
 use serde::{Deserialize, Serialize};
-use std::io::{Read, Seek, SeekFrom};
-use std::sync::Mutex;
 use std::{
     fs::File,
-    io::Write,
+    io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
+    sync::Mutex,
 };
 use thiserror::Error;
 use zstd::bulk::Decompressor;
@@ -46,11 +45,8 @@ impl NippyJar {
 
     /// Adds [`compression::Zstd`] compression.
     pub fn with_zstd(mut self, use_dict: bool, max_dict_size: usize) -> Self {
-        self.compressor = Some(Compressors::Zstd(compression::Zstd::new(
-            use_dict,
-            max_dict_size,
-            self.columns,
-        )));
+        self.compressor =
+            Some(Compressors::Zstd(compression::Zstd::new(use_dict, max_dict_size, self.columns)));
         self
     }
 
@@ -75,10 +71,10 @@ impl NippyJar {
     /// Returns the path from the index file
     pub fn index_path(&self) -> PathBuf {
         let data_path = self.data_path();
-        data_path.parent().expect("exists").join(format!(
-            "{}.idx",
-            data_path.file_name().expect("exists").to_string_lossy()
-        ))
+        data_path
+            .parent()
+            .expect("exists")
+            .join(format!("{}.idx", data_path.file_name().expect("exists").to_string_lossy()))
     }
 
     /// If required, prepares any compression algorithm to an early pass of the data.
@@ -104,23 +100,22 @@ impl NippyJar {
         self.freeze_config(&mut file)?;
 
         // Special case for zstd that might use custom dictionaries/compressors per column
-        // If any other compression algorithm is added and uses a similar flow, then revisit implementation
+        // If any other compression algorithm is added and uses a similar flow, then revisit
+        // implementation
         let mut maybe_zstd_compressors = None;
         if let Some(Compressors::Zstd(zstd)) = &self.compressor {
             maybe_zstd_compressors = zstd.generate_compressors()?;
         }
 
-        // Temporary buffer to avoid multiple reallocations if compressing to a buffer (eg. zstd w/ dict)
+        // Temporary buffer to avoid multiple reallocations if compressing to a buffer (eg. zstd w/
+        // dict)
         let mut tmp_buf = Vec::with_capacity(100);
 
         // Write all rows while taking all row start offsets
         let mut row_number = 0u64;
         let mut values_offsets = Vec::with_capacity(total_rows as usize * self.columns);
-        let mut column_iterators = columns
-            .into_iter()
-            .map(|v| v.into_iter())
-            .collect::<Vec<_>>()
-            .into_iter();
+        let mut column_iterators =
+            columns.into_iter().map(|v| v.into_iter()).collect::<Vec<_>>().into_iter();
 
         loop {
             let mut iterators = Vec::with_capacity(self.columns);
@@ -162,7 +157,7 @@ impl NippyJar {
 
             row_number += 1;
             if row_number == total_rows {
-                break;
+                break
             }
 
             column_iterators = iterators.into_iter();
@@ -180,12 +175,12 @@ impl NippyJar {
         columns: &Vec<impl IntoIterator<Item = Vec<u8>>>,
     ) -> Result<File, NippyJarError> {
         if columns.len() != self.columns {
-            return Err(NippyJarError::ColumnLenMismatch(self.columns, columns.len()));
+            return Err(NippyJarError::ColumnLenMismatch(self.columns, columns.len()))
         }
 
         if let Some(compression) = &self.compressor {
             if !compression.is_ready() {
-                return Err(NippyJarError::CompressorNotReady);
+                return Err(NippyJarError::CompressorNotReady)
             }
         }
 
@@ -194,7 +189,8 @@ impl NippyJar {
 
     /// Writes all necessary configuration to file.
     fn freeze_config(&self, handle: &mut File) -> Result<(), NippyJarError> {
-        // TODO Split Dictionaries and Bloomfilters Configuration so we dont have to load everything at once
+        // TODO Split Dictionaries and Bloomfilters Configuration so we dont have to load everything
+        // at once
         Ok(bincode::serialize_into(handle, &self)?)
     }
 }
@@ -257,7 +253,7 @@ impl<'a> NippyJarCursor<'a> {
     pub fn next_row(&mut self) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
         if self.row as usize * self.config.columns == self.data_offsets.len() {
             // Has reached the end
-            return Ok(None);
+            return Ok(None)
         }
 
         let mut decompressed = Vec::with_capacity(32);
@@ -303,7 +299,7 @@ impl<'a> NippyJarCursor<'a> {
         }
 
         if row.is_empty() {
-            return Ok(None);
+            return Ok(None)
         }
 
         self.row += 1;
@@ -363,10 +359,7 @@ mod tests {
         .with_zstd(true, 5000);
 
         if let Some(Compressors::Zstd(zstd)) = &mut data_file.compressor {
-            assert!(matches!(
-                zstd.generate_compressors(),
-                Err(NippyJarError::CompressorNotReady)
-            ));
+            assert!(matches!(zstd.generate_compressors(), Err(NippyJarError::CompressorNotReady)));
 
             // Make sure the number of column iterators match the initial set up ones.
             assert!(matches!(
@@ -379,7 +372,8 @@ mod tests {
 
         let data = vec![col1, col2];
 
-        // If ZSTD is enabled, do not write to the file unless the column dictionaries have been calculated.
+        // If ZSTD is enabled, do not write to the file unless the column dictionaries have been
+        // calculated.
         assert!(matches!(
             data_file.freeze(data.clone(), num_rows),
             Err(NippyJarError::CompressorNotReady)
@@ -389,10 +383,7 @@ mod tests {
 
         if let Some(Compressors::Zstd(zstd)) = &data_file.compressor {
             assert!(matches!(
-                (
-                    &zstd.state,
-                    zstd.raw_dictionaries.as_ref().map(|dict| dict.len())
-                ),
+                (&zstd.state, zstd.raw_dictionaries.as_ref().map(|dict| dict.len())),
                 (compression::ZstdState::Ready, Some(_num_columns))
             ));
         }
@@ -412,10 +403,7 @@ mod tests {
 
             let mut row_index = 0usize;
             while let Some(row) = cursor.next_row().unwrap() {
-                assert_eq!(
-                    (&row[0], &row[1]),
-                    (&data[0][row_index], &data[1][row_index])
-                );
+                assert_eq!((&row[0], &row[1]), (&data[0][row_index], &data[1][row_index]));
                 row_index += 1;
             }
         }
