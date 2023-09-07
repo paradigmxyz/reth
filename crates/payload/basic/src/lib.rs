@@ -45,6 +45,7 @@ use revm::{
     Database, DatabaseCommit, State,
 };
 use std::{
+    fmt::Debug,
     future::Future,
     pin::Pin,
     sync::{atomic::AtomicBool, Arc},
@@ -990,14 +991,18 @@ fn commit_withdrawals<DB: Database<Error = Error>>(
 }
 
 /// TODO: docs
-fn pre_block_contract_call<'a>(
-    db: State<'a, Error>,
+fn pre_block_contract_call<DB>(
+    db: State<DB>,
     chain_spec: &ChainSpec,
     block_number: u64,
     initialized_cfg: &CfgEnv,
     initialized_block_env: &BlockEnv,
     attributes: &PayloadBuilderAttributes,
-) -> Result<State<'a, Error>, PayloadBuilderError> {
+) -> Result<State<DB>, PayloadBuilderError>
+where
+    DB: Database,
+    <DB as Database>::Error: Debug,
+{
     // Configure the environment for the block.
     let env = Env {
         cfg: initialized_cfg.clone(),
