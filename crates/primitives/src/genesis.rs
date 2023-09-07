@@ -42,7 +42,7 @@ pub struct Genesis {
     // * base_fee_per_gas
     // * excess_blob_gas
     // * blob_gas_used
-    // should NOT be set in a real testnet genesis, but are included here for compatibility with
+    // should NOT be set in a real genesis file, but are included here for compatibility with
     // consensus tests, which have genesis files with these fields populated.
     /// The genesis header base fee
     #[serde(
