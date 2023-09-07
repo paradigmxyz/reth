@@ -32,6 +32,24 @@ pub struct Genesis {
     /// The genesis header difficulty.
     #[serde(deserialize_with = "deserialize_json_u256")]
     pub difficulty: U256,
+    /// The genesis header base fee
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_stringified_u64_opt"
+    )]
+    pub base_fee_per_gas: Option<u64>,
+    /// The genesis header excess blob gas
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_stringified_u64_opt"
+    )]
+    pub excess_blob_gas: Option<u64>,
+    /// The genesis header blob gas used
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_stringified_u64_opt"
+    )]
+    pub blob_gas_used: Option<u64>,
     /// The genesis header mix hash.
     pub mix_hash: H256,
     /// The genesis header coinbase address.
@@ -80,6 +98,24 @@ impl Genesis {
     /// Set the coinbase address.
     pub fn with_coinbase(mut self, address: Address) -> Self {
         self.coinbase = address;
+        self
+    }
+
+    /// Set the base fee.
+    pub fn with_base_fee(mut self, base_fee: Option<u64>) -> Self {
+        self.base_fee_per_gas = base_fee;
+        self
+    }
+
+    /// Set the excess blob gas.
+    pub fn with_excess_blob_gas(mut self, excess_blob_gas: Option<u64>) -> Self {
+        self.excess_blob_gas = excess_blob_gas;
+        self
+    }
+
+    /// Set the blob gas used.
+    pub fn with_blob_gas_used(mut self, blob_gas_used: Option<u64>) -> Self {
+        self.blob_gas_used = blob_gas_used;
         self
     }
 
@@ -413,6 +449,10 @@ mod ethers_compat {
                 mix_hash: genesis.mix_hash.0.into(),
                 coinbase: genesis.coinbase.0.into(),
                 extra_data: genesis.extra_data.0.into(),
+                base_fee_per_gas: genesis.base_fee_per_gas.map(|fee| fee.as_u64()),
+                // TODO: if/when ethers has cancun fields they should be added here
+                excess_blob_gas: None,
+                blob_gas_used: None,
                 alloc,
             }
         }
@@ -1126,6 +1166,9 @@ mod tests {
                 timestamp: 0x123456,
                 extra_data: Bytes::from_str("0xfafbfcfd").unwrap(),
                 gas_limit: 0x2fefd8,
+                base_fee_per_gas: None,
+                excess_blob_gas: None,
+                blob_gas_used: None,
                 alloc: HashMap::from_iter(vec![
                 (
                     Address::from_str("0xdbdbdb2cbd23b783741e8d7fcf51e459b497e4a6").unwrap(),
