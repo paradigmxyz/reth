@@ -4,9 +4,9 @@ use crate::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
-    Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HistoryWriter, ProviderError,
-    PruneCheckpointReader, PruneCheckpointWriter, StageCheckpointReader, StorageReader,
-    TransactionsProvider, WithdrawalsProvider,
+    Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HistoryWriter, OriginalValuesKnown,
+    ProviderError, PruneCheckpointReader, PruneCheckpointWriter, StageCheckpointReader,
+    StorageReader, TransactionsProvider, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -31,10 +31,10 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainInfo, ChainSpec, Hardfork, Head, Header, PruneCheckpoint, PrunePart, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta, TransactionSigned,
-    TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256,
-    U256,
+    ChainInfo, ChainSpec, Hardfork, Head, Header, PruneCheckpoint, PruneModes, PrunePart, Receipt,
+    SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
+    TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber,
+    Withdrawal, H256, U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
@@ -198,7 +198,12 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     // TODO(joshie) TEMPORARY should be moved to trait providers
 
     /// Unwind or peek at last N blocks of state
-    pub fn unwind_or_peek_state<const UNWIND: bool>(
+    ///
+    /// If UNWIND it set to true tip and latest state will be unwind
+    /// and returned back with all the blocks
+    ///
+    /// If UNWIND is false we will just read the state/blocks and return them.
+    fn unwind_or_peek_state<const UNWIND: bool>(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<BundleStateWithReceipts> {
@@ -376,7 +381,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     }
 
     /// Get requested blocks transaction with signer
-    fn get_take_block_transaction_range<const TAKE: bool>(
+    pub(crate) fn get_take_block_transaction_range<const TAKE: bool>(
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> Result<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>> {
@@ -403,8 +408,67 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             .map(|(id, tx)| (id, tx.into()))
             .collect::<Vec<(u64, TransactionSigned)>>();
 
-        let senders =
+        let mut senders =
             self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)?;
+
+        // Recover senders manually if not found in db
+        // SAFETY: Transactions are always guaranteed to be in the database whereas
+        // senders might be pruned.
+        if senders.len() != transactions.len() {
+            senders.reserve(transactions.len() - senders.len());
+            // Find all missing senders, their corresponding tx numbers and indexes to the original
+            // `senders` vector at which the recovered senders will be inserted.
+            let mut missing_senders = Vec::with_capacity(transactions.len() - senders.len());
+            {
+                let mut senders = senders.iter().peekable();
+
+                // `transactions` contain all entries. `senders` contain _some_ of the senders for
+                // these transactions. Both are sorted and indexed by `TxNumber`.
+                //
+                // The general idea is to iterate on both `transactions` and `senders`, and advance
+                // the `senders` iteration only if it matches the current `transactions` entry's
+                // `TxNumber`. Otherwise, add the transaction to the list of missing senders.
+                for (i, (tx_number, transaction)) in transactions.iter().enumerate() {
+                    if let Some((sender_tx_number, _)) = senders.peek() {
+                        if sender_tx_number == tx_number {
+                            // If current sender's `TxNumber` matches current transaction's
+                            // `TxNumber`, advance the senders iterator.
+                            senders.next();
+                        } else {
+                            // If current sender's `TxNumber` doesn't match current transaction's
+                            // `TxNumber`, add it to missing senders.
+                            missing_senders.push((i, tx_number, transaction));
+                        }
+                    } else {
+                        // If there's no more senders left, but we're still iterating over
+                        // transactions, add them to missing senders
+                        missing_senders.push((i, tx_number, transaction));
+                    }
+                }
+            }
+
+            // Recover senders
+            let recovered_senders = TransactionSigned::recover_signers(
+                missing_senders.iter().map(|(_, _, tx)| *tx).collect::<Vec<_>>(),
+                missing_senders.len(),
+            )
+            .ok_or(BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError))?;
+
+            // Insert recovered senders along with tx numbers at the corresponding indexes to the
+            // original `senders` vector
+            for ((i, tx_number, _), sender) in missing_senders.into_iter().zip(recovered_senders) {
+                // Insert will put recovered senders at necessary positions and shift the rest
+                senders.insert(i, (*tx_number, sender));
+            }
+
+            // Debug assertions which are triggered during the test to ensure that all senders are
+            // present and sorted
+            debug_assert_eq!(senders.len(), transactions.len(), "missing one or more senders");
+            debug_assert!(
+                senders.iter().tuple_windows().all(|(a, b)| a.0 < b.0),
+                "senders not sorted"
+            );
+        }
 
         if TAKE {
             // Remove TxHashNumber
@@ -635,7 +699,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         mut delete_callback: impl FnMut(TableRow<T>),
     ) -> std::result::Result<(usize, bool), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
-        let mut walker = cursor.walk_range(keys.clone())?;
+        let mut walker = cursor.walk_range(keys)?;
         let mut deleted = 0;
 
         while let Some(row) = walker.next().transpose()? {
@@ -1841,6 +1905,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
         &self,
         block: SealedBlock,
         senders: Option<Vec<Address>>,
+        prune_modes: Option<&PruneModes>,
     ) -> Result<StoredBlockBodyIndices> {
         let block_number = block.number;
         self.tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
@@ -1892,7 +1957,14 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
             let hash = transaction.hash();
             self.tx.put::<tables::TxSenders>(next_tx_num, sender)?;
             self.tx.put::<tables::Transactions>(next_tx_num, transaction.into())?;
-            self.tx.put::<tables::TxHashNumber>(hash, next_tx_num)?;
+
+            if prune_modes
+                .and_then(|modes| modes.transaction_lookup)
+                .filter(|prune_mode| prune_mode.is_full())
+                .is_none()
+            {
+                self.tx.put::<tables::TxHashNumber>(hash, next_tx_num)?;
+            }
             next_tx_num += 1;
         }
 
@@ -1919,6 +1991,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
         &self,
         blocks: Vec<SealedBlockWithSenders>,
         state: BundleStateWithReceipts,
+        prune_modes: Option<&PruneModes>,
     ) -> Result<()> {
         if blocks.is_empty() {
             return Ok(())
@@ -1936,12 +2009,12 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
         // Insert the blocks
         for block in blocks {
             let (block, senders) = block.into_components();
-            self.insert_block(block, Some(senders))?;
+            self.insert_block(block, Some(senders), prune_modes)?;
         }
 
         // Write state and changesets to the database.
         // Must be written after blocks because of the receipt lookup.
-        state.write_to_db(self.tx_ref(), true)?;
+        state.write_to_db(self.tx_ref(), OriginalValuesKnown::No)?;
 
         self.insert_hashes(first_number..=last_block_number, last_block_hash, expected_state_root)?;
 

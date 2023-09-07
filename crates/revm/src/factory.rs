@@ -34,7 +34,7 @@ impl Factory {
 }
 
 impl ExecutorFactory for Factory {
-    fn with_sp<'a, SP: StateProvider + 'a>(
+    fn with_state<'a, SP: StateProvider + 'a>(
         &'a self,
         sp: SP,
     ) -> Box<dyn PrunableBlockExecutor + 'a> {

@@ -12,7 +12,6 @@ use crate::{
     EthApi, EthApiSpec,
 };
 use async_trait::async_trait;
-use reth_interfaces::Error;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, Header,
@@ -26,9 +25,8 @@ use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_revm::{
-    database::RevmDatabase,
+    database::{RethStateDBBox, RevmDatabase},
     env::{fill_block_env_with_coinbase, tx_env_with_recovered},
-    revm::{State, StateBuilder},
     tracing::{TracingInspector, TracingInspectorConfig},
 };
 use reth_rpc_types::{
@@ -38,12 +36,9 @@ use reth_rpc_types::{
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::{
     primitives::{BlockEnv, CfgEnv},
-    Inspector,
+    Inspector, State,
 };
 use revm_primitives::{utilities::create_address, Env, ResultAndState, SpecId};
-
-/// Helper alias type for the state's [CacheDB]
-pub(crate) type StateCacheDB<'r> = State<'r, Error>;
 
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace.
 ///
@@ -144,7 +139,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<R>
     where
-        F: for<'r> FnOnce(StateCacheDB<'r>, Env) -> EthResult<R> + Send + 'static,
+        F: for<'r> FnOnce(RethStateDBBox<'r>, Env) -> EthResult<R> + Send + 'static,
         R: Send + 'static;
 
     /// Executes the call request at the given [BlockId].
@@ -165,7 +160,7 @@ pub trait EthTransactions: Send + Sync {
         inspector: I,
     ) -> EthResult<(ResultAndState, Env)>
     where
-        I: for<'r> Inspector<StateCacheDB<'r>> + Send + 'static;
+        I: for<'r> Inspector<RethStateDBBox<'r>> + Send + 'static;
 
     /// Executes the transaction on top of the given [BlockId] with a tracer configured by the
     /// config.
@@ -199,7 +194,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<R>
     where
-        F: for<'a> FnOnce(TracingInspector, ResultAndState, StateCacheDB<'a>) -> EthResult<R>
+        F: for<'a> FnOnce(TracingInspector, ResultAndState, RethStateDBBox<'a>) -> EthResult<R>
             + Send
             + 'static,
         R: Send + 'static;
@@ -230,7 +225,7 @@ pub trait EthTransactions: Send + Sync {
                 TransactionInfo,
                 TracingInspector,
                 ResultAndState,
-                StateCacheDB<'a>,
+                RethStateDBBox<'a>,
             ) -> EthResult<R>
             + Send
             + 'static,
@@ -401,20 +396,28 @@ where
     }
 
     async fn transaction_receipt(&self, hash: H256) -> EthResult<Option<TransactionReceipt>> {
-        self.on_blocking_task(|this| async move {
-            let (tx, meta) = match this.provider().transaction_by_hash_with_meta(hash)? {
-                Some((tx, meta)) => (tx, meta),
-                None => return Ok(None),
-            };
+        let result = self
+            .on_blocking_task(|this| async move {
+                let (tx, meta) = match this.provider().transaction_by_hash_with_meta(hash)? {
+                    Some((tx, meta)) => (tx, meta),
+                    None => return Ok(None),
+                };
 
-            let receipt = match this.provider().receipt_by_hash(hash)? {
-                Some(recpt) => recpt,
-                None => return Ok(None),
-            };
+                let receipt = match this.provider().receipt_by_hash(hash)? {
+                    Some(recpt) => recpt,
+                    None => return Ok(None),
+                };
 
-            this.build_transaction_receipt(tx, meta, receipt).await.map(Some)
-        })
-        .await
+                Ok(Some((tx, meta, receipt)))
+            })
+            .await?;
+
+        let (tx, meta, receipt) = match result {
+            Some((tx, meta, receipt)) => (tx, meta, receipt),
+            None => return Ok(None),
+        };
+
+        self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
     }
 
     async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256> {
@@ -513,7 +516,7 @@ where
         f: F,
     ) -> EthResult<R>
     where
-        F: for<'r> FnOnce(StateCacheDB<'r>, Env) -> EthResult<R> + Send + 'static,
+        F: for<'r> FnOnce(RethStateDBBox<'r>, Env) -> EthResult<R> + Send + 'static,
         R: Send + 'static,
     {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
@@ -522,9 +525,8 @@ where
             .tracing_call_pool
             .spawn(move || {
                 let state = this.state_at(at)?;
-                let mut db = StateBuilder::default()
-                    .with_database(Box::new(RevmDatabase::new(state)))
-                    .without_bundle_update()
+                let mut db = State::builder()
+                    .with_database_boxed(Box::new(RevmDatabase::new(state)))
                     .build();
 
                 let env = prepare_call_env(
@@ -559,7 +561,7 @@ where
         inspector: I,
     ) -> EthResult<(ResultAndState, Env)>
     where
-        I: for<'r> Inspector<StateCacheDB<'r>> + Send + 'static,
+        I: for<'r> Inspector<RethStateDBBox<'r>> + Send + 'static,
     {
         self.spawn_with_call_at(request, at, overrides, move |db, env| inspect(db, env, inspector))
             .await
@@ -576,10 +578,8 @@ where
         F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>,
     {
         self.with_state_at_block(at, |state| {
-            let mut db = StateBuilder::default()
-                .with_database(Box::new(RevmDatabase::new(state)))
-                .without_bundle_update()
-                .build();
+            let mut db =
+                State::builder().with_database_boxed(Box::new(RevmDatabase::new(state))).build();
 
             let mut inspector = TracingInspector::new(config);
             let (res, _) = inspect(&mut db, env, &mut inspector)?;
@@ -596,16 +596,14 @@ where
         f: F,
     ) -> EthResult<R>
     where
-        F: for<'a> FnOnce(TracingInspector, ResultAndState, StateCacheDB<'a>) -> EthResult<R>
+        F: for<'a> FnOnce(TracingInspector, ResultAndState, RethStateDBBox<'a>) -> EthResult<R>
             + Send
             + 'static,
         R: Send + 'static,
     {
         self.spawn_with_state_at_block(at, move |state| {
-            let mut db = StateBuilder::default()
-                .with_database(Box::new(RevmDatabase::new(state)))
-                .without_bundle_update()
-                .build();
+            let mut db =
+                State::builder().with_database_boxed(Box::new(RevmDatabase::new(state))).build();
             let mut inspector = TracingInspector::new(config);
             let (res, _) = inspect_and_return_db(&mut db, env, &mut inspector)?;
 
@@ -643,7 +641,7 @@ where
                 TransactionInfo,
                 TracingInspector,
                 ResultAndState,
-                StateCacheDB<'a>,
+                RethStateDBBox<'a>,
             ) -> EthResult<R>
             + Send
             + 'static,
@@ -663,19 +661,11 @@ where
         let block_txs = block.body;
 
         self.spawn_with_state_at_block(parent_block.into(), move |state| {
-            let mut db = StateBuilder::default()
-                .with_database(Box::new(RevmDatabase::new(state)))
-                .without_bundle_update()
-                .build();
+            let mut db =
+                State::builder().with_database_boxed(Box::new(RevmDatabase::new(state))).build();
 
             // replay all transactions prior to the targeted transaction
-            replay_transactions_until::<StateCacheDB<'_>, _, _>(
-                &mut db,
-                cfg.clone(),
-                block_env.clone(),
-                block_txs,
-                tx.hash,
-            )?;
+            replay_transactions_until(&mut db, cfg.clone(), block_env.clone(), block_txs, tx.hash)?;
 
             let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
 
@@ -893,6 +883,10 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         state_root: None,
         logs_bloom: receipt.bloom_slow(),
         status_code: if receipt.success { Some(U64::from(1)) } else { Some(U64::from(0)) },
+
+        // EIP-4844 fields
+        blob_gas_price: transaction.transaction.max_fee_per_blob_gas().map(U128::from),
+        blob_gas_used: transaction.transaction.blob_gas_used().map(U128::from),
     };
 
     match tx.transaction.kind() {

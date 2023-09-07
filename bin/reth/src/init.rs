@@ -8,7 +8,8 @@ use reth_db::{
 use reth_primitives::{stage::StageId, Account, Bytecode, ChainSpec, StorageEntry, H256, U256};
 use reth_provider::{
     change::{BundleStateInit, RevertsInit},
-    BundleStateWithReceipts, DatabaseProviderRW, HashingWriter, HistoryWriter, ProviderFactory,
+    BundleStateWithReceipts, DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown,
+    ProviderFactory,
 };
 use std::{
     collections::{BTreeMap, HashMap},
@@ -148,7 +149,7 @@ pub fn insert_genesis_state<DB: Database>(
         0,
     );
 
-    bundle.write_to_db(tx, true)?;
+    bundle.write_to_db(tx, OriginalValuesKnown::Yes)?;
 
     Ok(())
 }

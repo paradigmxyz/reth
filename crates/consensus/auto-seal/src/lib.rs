@@ -37,7 +37,7 @@ use reth_provider::{
 };
 use reth_revm::{
     database::RevmDatabase, db::states::bundle_state::BundleRetention, processor::EVMProcessor,
-    StateBuilder,
+    State,
 };
 use reth_transaction_pool::TransactionPool;
 use std::{
@@ -283,6 +283,7 @@ impl StorageInner {
             blob_gas_used: None,
             excess_blob_gas: None,
             extra_data: Default::default(),
+            parent_beacon_block_root: None,
         };
 
         header.transactions_root = if transactions.is_empty() {
@@ -294,7 +295,7 @@ impl StorageInner {
         header
     }
 
-    /// Executes the block with the given block and senders, on the provided [Executor].
+    /// Executes the block with the given block and senders, on the provided [EVMProcessor].
     ///
     /// This returns the poststate from execution and post-block changes, as well as the gas used.
     pub(crate) fn execute(
@@ -354,7 +355,7 @@ impl StorageInner {
         Ok(header)
     }
 
-    /// Builds and executes a new block with the given transactions, on the provided [Executor].
+    /// Builds and executes a new block with the given transactions, on the provided [EVMProcessor].
     ///
     /// This returns the header of the executed block, as well as the poststate from execution.
     pub(crate) fn build_and_execute(
@@ -373,9 +374,9 @@ impl StorageInner {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
         // now execute the block
-        let db = StateBuilder::default()
-            .with_database(Box::new(RevmDatabase::new(client.latest().unwrap())))
-            .without_bundle_update()
+        let db = State::builder()
+            .with_database_boxed(Box::new(RevmDatabase::new(client.latest().unwrap())))
+            .with_bundle_update()
             .build();
         let mut executor = EVMProcessor::new_with_state(chain_spec, db);
 

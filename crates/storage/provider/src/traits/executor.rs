@@ -1,10 +1,9 @@
 //! Executor Factory
 
-use std::time::Duration;
-
 use crate::{change::BundleStateWithReceipts, StateProvider};
 use reth_interfaces::executor::BlockExecutionError;
 use reth_primitives::{Address, Block, BlockNumber, ChainSpec, PruneModes, Receipt, U256};
+use std::time::Duration;
 use tracing::info;
 
 /// Executor factory that would create the EVM with particular state provider.
@@ -12,7 +11,7 @@ use tracing::info;
 /// It can be used to mock executor.
 pub trait ExecutorFactory: Send + Sync + 'static {
     /// Executor with [`StateProvider`]
-    fn with_sp<'a, SP: StateProvider + 'a>(
+    fn with_state<'a, SP: StateProvider + 'a>(
         &'a self,
         _sp: SP,
     ) -> Box<dyn PrunableBlockExecutor + 'a>;

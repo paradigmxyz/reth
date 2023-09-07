@@ -4,8 +4,11 @@ use reth_provider::StateProvider;
 use revm::{
     db::DatabaseRef,
     primitives::{AccountInfo, Bytecode},
-    Database,
+    Database, StateDBBox,
 };
+
+/// State boxed database with reth Error.
+pub type RethStateDBBox<'a> = StateDBBox<'a, Error>;
 
 /// Wrapper around StateProvider that implements revm database trait
 #[derive(Debug, Clone)]

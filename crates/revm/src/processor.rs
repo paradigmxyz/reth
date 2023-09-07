@@ -20,9 +20,9 @@ use reth_provider::{
     StateProvider,
 };
 use revm::{
-    db::{states::bundle_state::BundleRetention, State},
+    db::{states::bundle_state::BundleRetention, StateDBBox},
     primitives::ResultAndState,
-    DatabaseCommit, StateBuilder, EVM,
+    DatabaseCommit, State, EVM,
 };
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::{debug, trace};
@@ -31,7 +31,7 @@ use tracing::{debug, trace};
 pub struct EVMProcessor<'a> {
     /// The configured chain-spec
     chain_spec: Arc<ChainSpec>,
-    evm: EVM<State<'a, Error>>,
+    evm: EVM<StateDBBox<'a, Error>>,
     stack: InspectorStack,
     /// The collection of receipts.
     receipts: Vec<HashMap<usize, Receipt>>,
@@ -75,13 +75,16 @@ impl<'a> EVMProcessor<'a> {
         chain_spec: Arc<ChainSpec>,
         db: RevmDatabase<DB>,
     ) -> Self {
-        let revm_state =
-            StateBuilder::default().with_database(Box::new(db)).without_state_clear().build();
-        EVMProcessor::new_with_state(chain_spec, revm_state)
+        let state = State::builder()
+            .with_database_boxed(Box::new(db))
+            .with_bundle_update()
+            .without_state_clear()
+            .build();
+        EVMProcessor::new_with_state(chain_spec, state)
     }
 
     /// Create new EVM processor with a given revm state.
-    pub fn new_with_state(chain_spec: Arc<ChainSpec>, revm_state: State<'a, Error>) -> Self {
+    pub fn new_with_state(chain_spec: Arc<ChainSpec>, revm_state: StateDBBox<'a, Error>) -> Self {
         let mut evm = EVM::new();
         evm.database(revm_state);
         EVMProcessor {
@@ -103,7 +106,7 @@ impl<'a> EVMProcessor<'a> {
     }
 
     /// Gives a reference to the database
-    pub fn db(&mut self) -> &mut State<'a, Error> {
+    pub fn db(&mut self) -> &mut StateDBBox<'a, Error> {
         self.evm.db().expect("db to not be moved")
     }
 

@@ -69,7 +69,7 @@ impl TestExecutorFactory {
 }
 
 impl ExecutorFactory for TestExecutorFactory {
-    fn with_sp<'a, SP: StateProvider + 'a>(
+    fn with_state<'a, SP: StateProvider + 'a>(
         &'a self,
         _sp: SP,
     ) -> Box<dyn PrunableBlockExecutor + 'a> {

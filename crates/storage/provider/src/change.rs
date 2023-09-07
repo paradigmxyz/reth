@@ -25,6 +25,8 @@ use reth_trie::{
 };
 use std::collections::HashMap;
 
+pub use reth_revm_primitives::db::states::OriginalValuesKnown;
+
 /// Bundle state of post execution changes and reverts
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct BundleStateWithReceipts {
@@ -198,7 +200,7 @@ impl BundleStateWithReceipts {
     ///
     /// # Returns
     ///
-    /// The state root for this [PostState].
+    /// The state root for this [BundleState].
     pub fn state_root_slow<'a, 'tx, TX: DbTx<'tx>>(
         &self,
         tx: &'a TX,
@@ -278,18 +280,22 @@ impl BundleStateWithReceipts {
 
     /// Revert to given block number.
     ///
+    /// If number is in future, or in the past return false
+    ///
     /// Note: Given Block number will stay inside the bundle state.
-    pub fn revert_to(&mut self, block_number: BlockNumber) {
-        let Some(index) = self.block_number_to_index(block_number) else { return };
+    pub fn revert_to(&mut self, block_number: BlockNumber) -> bool {
+        let Some(index) = self.block_number_to_index(block_number) else { return false };
 
         // +1 is for number of blocks that we have as index is included.
-        let new_len = self.len() - (index + 1);
+        let new_len = index + 1;
         let rm_trx: usize = self.len() - new_len;
 
         // remove receipts
         self.receipts.truncate(new_len);
         // Revert last n reverts.
         self.bundle.revert(rm_trx);
+
+        true
     }
 
     /// This will detach lower part of the chain and return it back.
@@ -345,7 +351,7 @@ impl BundleStateWithReceipts {
     pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         self,
         tx: &TX,
-        omit_changed_check: bool,
+        is_value_known: OriginalValuesKnown,
     ) -> Result<(), DatabaseError> {
         // write receipts
         let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
@@ -366,7 +372,7 @@ impl BundleStateWithReceipts {
         }
 
         let (plain_state, reverts) =
-            self.bundle.into_sorted_plain_state_and_reverts(omit_changed_check);
+            self.bundle.into_sorted_plain_state_and_reverts(is_value_known);
 
         StateReverts(reverts).write_to_db(tx, self.first_block)?;
         StateChange(plain_state).write_to_db(tx)?;
@@ -583,12 +589,18 @@ mod tests {
         transaction::DbTx,
         DatabaseEnv,
     };
-    use reth_primitives::{Address, StorageEntry, H256, MAINNET, U256};
+    use reth_primitives::{Address, Receipt, StorageEntry, H256, MAINNET, U256};
     use reth_revm_primitives::{into_reth_acc, primitives::HashMap};
     use revm::{
-        db::states::{bundle_state::BundleRetention, changes::PlainStorageRevert},
+        db::{
+            states::{
+                bundle_state::{BundleRetention, OriginalValuesKnown},
+                changes::PlainStorageRevert,
+            },
+            BundleState,
+        },
         primitives::{Account, AccountInfo as RevmAccountInfo, AccountStatus, StorageSlot},
-        CacheState, DatabaseCommit, StateBuilder,
+        CacheState, DatabaseCommit, State,
     };
     use std::sync::Arc;
 
@@ -609,7 +621,8 @@ mod tests {
         let mut cache_state = CacheState::new(true);
         cache_state.insert_not_existing(address_a);
         cache_state.insert_account(address_b, account_b.clone());
-        let mut state = StateBuilder::default().with_cached_prestate(cache_state).build();
+        let mut state =
+            State::builder().with_cached_prestate(cache_state).with_bundle_update().build();
 
         // 0x00.. is created
         state.commit(HashMap::from([(
@@ -636,7 +649,7 @@ mod tests {
 
         // Write plain state and reverts separately.
         let reverts = revm_bundle_state.take_all_reverts().into_plain_state_reverts();
-        let plain_state = revm_bundle_state.into_plain_state_sorted(false);
+        let plain_state = revm_bundle_state.into_plain_state_sorted(OriginalValuesKnown::Yes);
         assert!(plain_state.storage.is_empty());
         assert!(plain_state.contracts.is_empty());
         StateChange(plain_state)
@@ -682,7 +695,8 @@ mod tests {
 
         let mut cache_state = CacheState::new(true);
         cache_state.insert_account(address_b, account_b_changed.clone());
-        let mut state = StateBuilder::default().with_cached_prestate(cache_state).build();
+        let mut state =
+            State::builder().with_cached_prestate(cache_state).with_bundle_update().build();
 
         // 0xff.. is destroyed
         state.commit(HashMap::from([(
@@ -699,7 +713,7 @@ mod tests {
 
         // Write plain state and reverts separately.
         let reverts = revm_bundle_state.take_all_reverts().into_plain_state_reverts();
-        let plain_state = revm_bundle_state.into_plain_state_sorted(false);
+        let plain_state = revm_bundle_state.into_plain_state_sorted(OriginalValuesKnown::Yes);
         assert!(plain_state.storage.is_empty());
         assert!(plain_state.contracts.is_empty());
         StateChange(plain_state)
@@ -747,7 +761,8 @@ mod tests {
             account_b.clone(),
             HashMap::from([(U256::from(1), U256::from(1))]),
         );
-        let mut state = StateBuilder::default().with_cached_prestate(cache_state).build();
+        let mut state =
+            State::builder().with_cached_prestate(cache_state).with_bundle_update().build();
 
         state.commit(HashMap::from([
             (
@@ -789,7 +804,7 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
 
         BundleStateWithReceipts::new(state.take_bundle(), Vec::new(), 1)
-            .write_to_db(provider.tx_ref(), false)
+            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         // Check plain storage state
@@ -875,7 +890,8 @@ mod tests {
         // Delete account A
         let mut cache_state = CacheState::new(true);
         cache_state.insert_account(address_a, RevmAccountInfo::default());
-        let mut state = StateBuilder::default().with_cached_prestate(cache_state).build();
+        let mut state =
+            State::builder().with_cached_prestate(cache_state).with_bundle_update().build();
 
         state.commit(HashMap::from([(
             address_a,
@@ -888,7 +904,7 @@ mod tests {
 
         state.merge_transitions(BundleRetention::Reverts);
         BundleStateWithReceipts::new(state.take_bundle(), Vec::new(), 2)
-            .write_to_db(provider.tx_ref(), false)
+            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         assert_eq!(
@@ -933,7 +949,8 @@ mod tests {
         // Block #0: initial state.
         let mut cache_state = CacheState::new(true);
         cache_state.insert_not_existing(address1);
-        let mut init_state = StateBuilder::default().with_cached_prestate(cache_state).build();
+        let mut init_state =
+            State::builder().with_cached_prestate(cache_state).with_bundle_update().build();
         init_state.commit(HashMap::from([(
             address1,
             Account {
@@ -955,7 +972,7 @@ mod tests {
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
         BundleStateWithReceipts::new(init_state.take_bundle(), Vec::new(), 0)
-            .write_to_db(provider.tx_ref(), false)
+            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
         let mut cache_state = CacheState::new(true);
@@ -964,7 +981,8 @@ mod tests {
             account_info.clone(),
             HashMap::from([(U256::ZERO, U256::from(1)), (U256::from(1), U256::from(2))]),
         );
-        let mut state = StateBuilder::default().with_cached_prestate(cache_state).build();
+        let mut state =
+            State::builder().with_cached_prestate(cache_state).with_bundle_update().build();
 
         // Block #1: change storage.
         state.commit(HashMap::from([(
@@ -1101,7 +1119,7 @@ mod tests {
         let bundle = state.take_bundle();
 
         BundleStateWithReceipts::new(bundle, Vec::new(), 1)
-            .write_to_db(provider.tx_ref(), false)
+            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider
@@ -1244,7 +1262,8 @@ mod tests {
         // Block #0: initial state.
         let mut cache_state = CacheState::new(true);
         cache_state.insert_not_existing(address1);
-        let mut init_state = StateBuilder::default().with_cached_prestate(cache_state).build();
+        let mut init_state =
+            State::builder().with_cached_prestate(cache_state).with_bundle_update().build();
         init_state.commit(HashMap::from([(
             address1,
             Account {
@@ -1266,7 +1285,7 @@ mod tests {
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
         BundleStateWithReceipts::new(init_state.take_bundle(), Vec::new(), 0)
-            .write_to_db(provider.tx_ref(), false)
+            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
         let mut cache_state = CacheState::new(true);
@@ -1275,7 +1294,8 @@ mod tests {
             account1.clone(),
             HashMap::from([(U256::ZERO, U256::from(1)), (U256::from(1), U256::from(2))]),
         );
-        let mut state = StateBuilder::default().with_cached_prestate(cache_state).build();
+        let mut state =
+            State::builder().with_cached_prestate(cache_state).with_bundle_update().build();
 
         // Block #1: Destroy, re-create, change storage.
         state.commit(HashMap::from([(
@@ -1312,7 +1332,7 @@ mod tests {
         // Commit block #1 changes to the database.
         state.merge_transitions(BundleRetention::Reverts);
         BundleStateWithReceipts::new(state.take_bundle(), Vec::new(), 1)
-            .write_to_db(provider.tx_ref(), false)
+            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider
@@ -1337,5 +1357,39 @@ mod tests {
             )))
         );
         assert_eq!(storage_changes.next(), None);
+    }
+
+    #[test]
+    fn revert_to_indices() {
+        let base = BundleStateWithReceipts {
+            bundle: BundleState::default(),
+            receipts: vec![
+                std::collections::HashMap::from_iter(
+                    (0..2).map(|idx| (idx, Receipt::default()))
+                );
+                7
+            ],
+            first_block: 10,
+        };
+
+        let mut this = base.clone();
+        assert!(this.revert_to(10));
+        assert_eq!(this.receipts.len(), 1);
+
+        let mut this = base.clone();
+        assert!(!this.revert_to(9));
+        assert_eq!(this.receipts.len(), 7);
+
+        let mut this = base.clone();
+        assert!(this.revert_to(15));
+        assert_eq!(this.receipts.len(), 6);
+
+        let mut this = base.clone();
+        assert!(this.revert_to(16));
+        assert_eq!(this.receipts.len(), 7);
+
+        let mut this = base.clone();
+        assert!(!this.revert_to(17));
+        assert_eq!(this.receipts.len(), 7);
     }
 }

@@ -124,10 +124,10 @@ impl PayloadBuilderHandle {
 ///
 /// This type is an endless future that manages the building of payloads.
 ///
-/// It tracks active payloads and their build jobs that run in the worker pool.
+/// It tracks active payloads and their build jobs that run in a worker pool.
 ///
-/// By design, this type relies entirely on the [PayloadJobGenerator] to create new payloads and
-/// does know nothing about how to build them, itt just drives the payload jobs.
+/// By design, this type relies entirely on the [`PayloadJobGenerator`] to create new payloads and
+/// does know nothing about how to build them, it just drives their jobs to completion.
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct PayloadBuilderService<Gen>
 where
@@ -141,7 +141,7 @@ where
     _service_tx: mpsc::UnboundedSender<PayloadServiceCommand>,
     /// Receiver half of the command channel.
     command_rx: UnboundedReceiverStream<PayloadServiceCommand>,
-    /// metrics for the payload builder service
+    /// Metrics for the payload builder service
     metrics: PayloadBuilderServiceMetrics,
 }
 

@@ -591,7 +591,7 @@ impl<DB: Database> Pruner<DB> {
             .collect::<Vec<_>>();
 
         // Number of transactions retrieved from the database should match the tx range count
-        let tx_count = tx_range.clone().count();
+        let tx_count = tx_range.count();
         if hashes.len() != tx_count {
             return Err(PrunerError::InconsistentData(
                 "Unexpected number of transaction hashes retrieved by transaction number range",
@@ -922,7 +922,7 @@ mod tests {
     fn is_pruning_needed() {
         let db = create_test_rw_db();
         let pruner =
-            Pruner::new(db, MAINNET.clone(), 5, PruneModes::default(), PruneBatchSizes::default());
+            Pruner::new(db, MAINNET.clone(), 5, PruneModes::none(), PruneBatchSizes::default());
 
         // No last pruned block number was set before
         let first_block_number = 1;

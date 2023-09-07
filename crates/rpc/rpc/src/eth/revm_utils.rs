@@ -5,7 +5,10 @@ use reth_interfaces::Error;
 use reth_primitives::{
     AccessList, Address, TransactionSigned, TransactionSignedEcRecovered, TxHash, H256, U256,
 };
-use reth_revm::env::{fill_tx_env, fill_tx_env_with_recovered};
+use reth_revm::{
+    database::RethStateDBBox,
+    env::{fill_tx_env, fill_tx_env_with_recovered},
+};
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
     BlockOverrides, CallRequest,
@@ -133,7 +136,7 @@ where
 {
     let mut evm = revm::EVM::with_env(env);
     evm.database(db);
-    let res: ResultAndState = evm.inspect(inspector)?;
+    let res = evm.inspect(inspector)?;
     Ok((res, evm.env))
 }
 
@@ -160,19 +163,17 @@ where
 /// Replays all the transactions until the target transaction is found.
 ///
 /// All transactions before the target transaction are executed and their changes are written to the
-/// _runtime_ db ([CacheDB]).
+/// _runtime_ db ([State]).
 ///
 /// Note: This assumes the target transaction is in the given iterator.
-pub(crate) fn replay_transactions_until<DB, I, Tx>(
-    db: &mut State<'_, DB::Error>,
+pub(crate) fn replay_transactions_until<I, Tx>(
+    db: &mut RethStateDBBox<'_>,
     cfg: CfgEnv,
     block_env: BlockEnv,
     transactions: I,
     target_tx_hash: H256,
 ) -> EthResult<()>
 where
-    DB: Database,
-    EthApiError: From<<DB as Database>::Error>,
     I: IntoIterator<Item = Tx>,
     Tx: FillableTransaction,
 {
@@ -200,7 +201,7 @@ pub(crate) fn prepare_call_env(
     block: BlockEnv,
     request: CallRequest,
     gas_limit: u64,
-    db: &mut State<'_, Error>,
+    db: &mut RethStateDBBox<'_>,
     overrides: EvmOverrides,
 ) -> EthResult<Env>
 where
@@ -433,8 +434,8 @@ fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
     }
 }
 
-/// Applies the given state overrides (a set of [AccountOverride]) to the [CacheDB].
-fn apply_state_overrides(overrides: StateOverride, db: &mut State<'_, Error>) -> EthResult<()>
+/// Applies the given state overrides (a set of [AccountOverride]) to the [RethStateDBBox].
+fn apply_state_overrides(overrides: StateOverride, db: &mut RethStateDBBox<'_>) -> EthResult<()>
 where
     EthApiError: From<Error>,
 {
@@ -444,15 +445,12 @@ where
     Ok(())
 }
 
-/// Applies a single [AccountOverride] to the [CacheState].
+/// Applies a single [AccountOverride] to the [revm::CacheState].
 fn apply_account_override(
     address: Address,
     account_override: AccountOverride,
-    db: &mut State<'_, Error>,
-) -> EthResult<()>
-where
-    EthApiError: From<Error>,
-{
+    db: &mut RethStateDBBox<'_>,
+) -> EthResult<()> {
     // Fetch account from cache or create a new one. Mark it as changed.
     let mut account = db
         .cache
@@ -500,13 +498,11 @@ where
     Ok(())
 }
 
-/// This clones and transforms the given [CacheDB] with an arbitrary [DatabaseRef] into a new
-/// [CacheDB] with [EmptyDB] as the database type
+/// This clones and transforms the given [RethStateDBBox] with an arbitrary [Database] into a new
+/// [RethStateDBBox] with [EmptyDBTyped] as the database type
 #[inline]
-pub(crate) fn clone_into_empty_db<DBError: Send + 'static>(
-    db: &State<'_, DBError>,
-) -> State<'static, DBError> {
-    let database = Box::new(EmptyDBTyped::<DBError>::new());
+pub(crate) fn clone_into_empty_db(db: &RethStateDBBox<'_>) -> RethStateDBBox<'static> {
+    let database = Box::new(EmptyDBTyped::<Error>::new());
     State {
         cache: db.cache.clone(),
         database,

@@ -6,7 +6,7 @@
 use crate::{
     blobstore::BlobStoreError,
     error::PoolError,
-    traits::{GetPooledTransactionLimit, PendingTransactionListenerKind},
+    traits::{GetPooledTransactionLimit, TransactionListenerKind},
     validate::ValidTransaction,
     AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPooledTransaction,
     NewTransactionEvent, PoolResult, PoolSize, PoolTransaction, PropagatedTransactions,
@@ -38,6 +38,7 @@ impl TransactionPool for NoopTransactionPool {
             last_seen_block_hash: Default::default(),
             last_seen_block_number: 0,
             pending_basefee: 0,
+            pending_blob_fee: None,
         }
     }
 
@@ -83,12 +84,19 @@ impl TransactionPool for NoopTransactionPool {
 
     fn pending_transactions_listener_for(
         &self,
-        _kind: PendingTransactionListenerKind,
+        _kind: TransactionListenerKind,
     ) -> Receiver<TxHash> {
         mpsc::channel(1).1
     }
 
     fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
+        mpsc::channel(1).1
+    }
+
+    fn new_transactions_listener_for(
+        &self,
+        _kind: TransactionListenerKind,
+    ) -> Receiver<NewTransactionEvent<Self::Transaction>> {
         mpsc::channel(1).1
     }
 
@@ -183,6 +191,16 @@ impl TransactionPool for NoopTransactionPool {
         _tx_hashes: Vec<TxHash>,
     ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError> {
         Ok(vec![])
+    }
+
+    fn get_all_blobs_exact(
+        &self,
+        tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
+        if tx_hashes.is_empty() {
+            return Ok(vec![])
+        }
+        Err(BlobStoreError::MissingSidecar(tx_hashes[0]))
     }
 }
 
