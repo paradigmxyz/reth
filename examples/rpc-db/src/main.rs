@@ -18,11 +18,11 @@ use reth_blockchain_tree::{
 use reth_revm::Factory as ExecutionFactory;
 
 // Configuring the network parts, ideally also wouldn't ned to think about this.
-use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
 use reth_provider::test_utils::TestCanonStateSubscriptions;
 use reth_tasks::TokioTaskExecutor;
 use std::{path::Path, sync::Arc};
 
+use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
 // Custom rpc extension
 pub mod myrpc_ext;
 
