@@ -111,7 +111,7 @@ where
 
         self.spawn_with_state_at_block(at.into(), move |state| {
             let mut results = Vec::with_capacity(transactions.len());
-            //let mut db = SubState::new(State::new(state));
+
             let mut db =
                 State::builder().with_database_boxed(Box::new(RevmDatabase::new(state))).build();
 

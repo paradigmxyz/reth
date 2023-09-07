@@ -143,8 +143,9 @@ where
             .eth_api
             .spawn_with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(calls.len());
-                let provider = Box::new(RevmDatabase::new(state));
-                let mut revm_state = State::builder().with_database_boxed(provider).build();
+                let mut revm_state = State::builder()
+                    .with_database_boxed(Box::new(RevmDatabase::new(state)))
+                    .build();
 
                 let mut calls = calls.into_iter().peekable();
 
@@ -341,7 +342,6 @@ where
                     let ResultAndState { result, state } = res;
                     results.push(f(tx_info, inspector, result, &state, &mut db)?);
 
-                    // TODO (rakita) revm state check if this is correct.
                     // need to apply the state changes of this transaction before executing the
                     // next transaction
                     if transactions.peek().is_some() {

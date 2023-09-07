@@ -136,7 +136,7 @@ where
 {
     let mut evm = revm::EVM::with_env(env);
     evm.database(db);
-    let res: ResultAndState = evm.inspect(inspector)?;
+    let res = evm.inspect(inspector)?;
     Ok((res, evm.env))
 }
 
@@ -174,8 +174,6 @@ pub(crate) fn replay_transactions_until<I, Tx>(
     target_tx_hash: H256,
 ) -> EthResult<()>
 where
-    //DB: Database,
-    //EthApiError: From<<DB as Database>::Error>,
     I: IntoIterator<Item = Tx>,
     Tx: FillableTransaction,
 {

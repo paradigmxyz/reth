@@ -12,13 +12,12 @@ use crate::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_interfaces::Error;
 use reth_primitives::{
     Account, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H160, H256,
 };
 use reth_provider::{BlockReaderIdExt, HeaderProvider};
 use reth_revm::{
-    database::RevmDatabase,
+    database::{RethStateDBBox, RevmDatabase},
     env::tx_env_with_recovered,
     revm::{
         primitives::{db::DatabaseCommit, BlockEnv, CfgEnv, Env},
@@ -39,7 +38,7 @@ use reth_rpc_types::{
     BlockError, Bundle, CallRequest, RichBlock, StateContext,
 };
 use reth_tasks::TaskSpawner;
-use revm::{Database, StateDBBox};
+use revm::Database;
 use std::sync::Arc;
 use tokio::sync::{mpsc, AcquireError, OwnedSemaphorePermit};
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
@@ -191,8 +190,9 @@ where
                 // configure env for the target transaction
                 let tx = transaction.into_recovered();
 
-                let provider = Box::new(RevmDatabase::new(state));
-                let mut db = State::builder().with_database_boxed(provider).build();
+                let mut db = State::builder()
+                    .with_database_boxed(Box::new(RevmDatabase::new(state)))
+                    .build();
                 // replay all transactions prior to the targeted transaction
                 replay_transactions_until(
                     &mut db,
@@ -383,7 +383,7 @@ where
             .eth_api
             .spawn_with_state_at_block(at.into(), move |state| {
                 let mut results = Vec::with_capacity(bundles.len());
-                //let mut db = SubState::new(State::new(state));
+
                 let mut db = State::builder()
                     .with_database_boxed(Box::new(RevmDatabase::new(state)))
                     .build();
@@ -458,7 +458,7 @@ where
         opts: GethDebugTracingOptions,
         env: Env,
         at: BlockId,
-        mut db: &mut StateDBBox<'_, Error>,
+        mut db: &mut RethStateDBBox<'_>,
     ) -> EthResult<(GethTrace, revm_primitives::State)> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
@@ -550,7 +550,7 @@ where
     fn spawn_js_trace_service(
         &self,
         at: BlockId,
-        db: Option<StateDBBox<'static, Error>>,
+        db: Option<RethStateDBBox<'static>>,
     ) -> EthResult<mpsc::Sender<JsDbRequest>> {
         let (to_db_service, rx) = mpsc::channel(1);
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
@@ -577,7 +577,7 @@ where
         at: BlockId,
         rx: mpsc::Receiver<JsDbRequest>,
         on_ready: std::sync::mpsc::Sender<EthResult<()>>,
-        db: Option<StateDBBox<'_, Error>>,
+        db: Option<RethStateDBBox<'_>>,
     ) {
         let state = match self.inner.eth_api.state_at(at) {
             Ok(state) => {
