@@ -130,7 +130,7 @@ impl ParityTraceBuilder {
     /// contain accounts with changed state, not including their balance changes because this is not
     /// tracked during inspection and requires the State map returned after inspection. Use
     /// [ParityTraceBuilder::into_trace_results_with_state] to populate the balance and nonce
-    /// changes for the [StateDiff] using the [DatabaseRef].
+    /// changes for the [StateDiff] using the [Database].
     pub fn into_trace_results(
         self,
         res: ExecutionResult,
@@ -155,7 +155,7 @@ impl ParityTraceBuilder {
     /// Consumes the inspector and returns the trace results according to the configured trace
     /// types.
     ///
-    /// This also takes the [DatabaseRef] to populate the balance and nonce changes for the
+    /// This also takes the [Database] to populate the balance and nonce changes for the
     /// [StateDiff].
     ///
     /// Note: this is considered a convenience method that takes the state map of

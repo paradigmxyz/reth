@@ -295,7 +295,7 @@ impl StorageInner {
         header
     }
 
-    /// Executes the block with the given block and senders, on the provided [Executor].
+    /// Executes the block with the given block and senders, on the provided [EVMProcessor].
     ///
     /// This returns the poststate from execution and post-block changes, as well as the gas used.
     pub(crate) fn execute(
@@ -351,7 +351,7 @@ impl StorageInner {
         Ok(header)
     }
 
-    /// Builds and executes a new block with the given transactions, on the provided [Executor].
+    /// Builds and executes a new block with the given transactions, on the provided [EVMProcessor].
     ///
     /// This returns the header of the executed block, as well as the poststate from execution.
     pub(crate) fn build_and_execute(

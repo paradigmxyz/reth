@@ -48,9 +48,6 @@ impl Account {
 /// Bytecode for an account.
 ///
 /// A wrapper around [`revm::primitives::Bytecode`][RevmBytecode] with encoding/decoding support.
-///
-/// Note: Upon decoding bytecode from the database, you *should* set the code hash using
-/// [`Self::with_code_hash`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Bytecode(pub RevmBytecode);
 

@@ -570,8 +570,8 @@ where
     /// A services that handles database requests issued from inside the JavaScript tracing engine.
     ///
     /// If this traces with modified state, this takes a `db` parameter that contains the modified
-    /// in memory state. This is required because [StateProviderBox] can not be cloned or shared
-    /// across threads.
+    /// in memory state. This is required because [reth_provider::StateProviderBox] can not be
+    /// cloned or shared across threads.
     async fn js_trace_db_service_task(
         self,
         at: BlockId,

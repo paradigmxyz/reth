@@ -445,7 +445,7 @@ where
     Ok(())
 }
 
-/// Applies a single [AccountOverride] to the [CacheState].
+/// Applies a single [AccountOverride] to the [revm::CacheState].
 fn apply_account_override(
     address: Address,
     account_override: AccountOverride,
@@ -498,7 +498,7 @@ fn apply_account_override(
     Ok(())
 }
 
-/// This clones and transforms the given [RethStateDBBox] with an arbitrary [DatabaseRef] into a new
+/// This clones and transforms the given [RethStateDBBox] with an arbitrary [Database] into a new
 /// [RethStateDBBox] with [EmptyDBTyped] as the database type
 #[inline]
 pub(crate) fn clone_into_empty_db(db: &RethStateDBBox<'_>) -> RethStateDBBox<'static> {

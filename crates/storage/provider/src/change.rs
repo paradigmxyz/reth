@@ -196,7 +196,7 @@ impl BundleStateWithReceipts {
     ///
     /// # Returns
     ///
-    /// The state root for this [PostState].
+    /// The state root for this [BundleState].
     pub fn state_root_slow<'a, 'tx, TX: DbTx<'tx>>(
         &self,
         tx: &'a TX,

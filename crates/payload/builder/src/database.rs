@@ -28,7 +28,7 @@ use std::{
 ///     // this is `Database` and can be used to build a payload, it never writes to `CachedReads` or the underlying database, but all reads from the underlying database are cached in `CachedReads`.
 ///     // Subsequent payload build attempts can use cached reads and avoid hitting the underlying database.
 ///     let db = State::builder().with_database_ref(db_ref).build();
-// }
+/// }
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct CachedReads {
