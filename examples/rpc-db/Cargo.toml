@@ -1,0 +1,23 @@
+[package]
+name = "rpc-db"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+eyre = "0.6.8"
+futures.workspace = true
+jsonrpsee.workspace = true
+reth-beacon-consensus.workspace = true
+reth-blockchain-tree.workspace = true
+reth-db.workspace = true
+reth-network-api.workspace = true
+reth-primitives.workspace = true
+reth-provider.workspace = true
+reth-revm.workspace = true
+reth-rpc = { version = "0.1.0-alpha.8", path = "../../crates/rpc/rpc" }
+reth-rpc-builder.workspace = true
+reth-tasks.workspace = true
+reth-transaction-pool.workspace = true
+tokio = { workspace = true, features = ["full"] }

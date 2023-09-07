@@ -16,16 +16,17 @@ use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
 use reth_revm::Factory as ExecutionFactory;
+
 // Configuring the network parts, ideally also wouldn't ned to think about this.
-use reth_network_api::noop::NoopNetwork;
+use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
 use reth_provider::test_utils::TestCanonStateSubscriptions;
 use reth_tasks::TokioTaskExecutor;
-use reth_transaction_pool::noop::NoopTransactionPool;
 use std::{path::Path, sync::Arc};
 
+// Custom rpc extension
+pub mod myrpc_ext;
+
 // Example illustrating how to run the ETH JSON RPC API as standalone over a DB file.
-// TODO: Add example showing how to spin up your own custom RPC namespace alongside
-// the other default name spaces.
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     // 1. Setup the DB
@@ -55,16 +56,20 @@ async fn main() -> eyre::Result<()> {
     };
 
     let rpc_builder = RpcModuleBuilder::default()
-        .with_provider(provider)
+        .with_provider(provider.clone())
         // Rest is just noops that do nothing
-        .with_pool(NoopTransactionPool::default())
-        .with_network(NoopNetwork::default())
+        .with_noop_pool()
+        .with_noop_network()
         .with_executor(TokioTaskExecutor::default())
         .with_events(TestCanonStateSubscriptions::default());
 
     // Pick which namespaces to expose.
     let config = TransportRpcModuleConfig::default().with_http([RethRpcModule::Eth]);
-    let server = rpc_builder.build(config);
+    let mut server = rpc_builder.build(config);
+
+    // Add a custom rpc namespace
+    let custom_rpc = MyRpcExt { provider };
+    server.merge_configured(custom_rpc.into_rpc())?;
 
     // Start the server & keep it alive
     let server_args =
