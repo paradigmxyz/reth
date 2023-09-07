@@ -8,6 +8,9 @@ use std::{
 use thiserror::Error;
 use zstd::bulk::Decompressor;
 
+pub mod filter;
+use filter::{Filters, Cuckoo};
+
 pub mod compression;
 use compression::{Compression, Compressors};
 
@@ -21,24 +24,24 @@ pub struct NippyJar {
     columns: usize,
     /// Compressor if required
     compressor: Option<Compressors>,
+    /// Filter
+    filter: Option<Filters>,
     #[serde(skip)]
     /// Data path for file. Index file will be `{path}.idx`
     path: Option<PathBuf>,
-    /// soon
-    bloom_filter: bool,
     /// soon
     phf: bool,
 }
 
 impl NippyJar {
     /// Creates new [`NippyJar`].
-    pub fn new(columns: usize, bloom_filter: bool, phf: bool, path: &Path) -> Self {
+    pub fn new(columns: usize, phf: bool, path: &Path) -> Self {
         NippyJar {
             version: NIPPY_JAR_VERSION,
             columns,
-            bloom_filter,
             phf,
             compressor: None,
+            filter: None,
             path: Some(path.to_path_buf()),
         }
     }
@@ -47,6 +50,13 @@ impl NippyJar {
     pub fn with_zstd(mut self, use_dict: bool, max_dict_size: usize) -> Self {
         self.compressor =
             Some(Compressors::Zstd(compression::Zstd::new(use_dict, max_dict_size, self.columns)));
+        self
+    }
+
+    /// Adds [`filter::Cuckoo`] filter.
+    pub fn with_cuckoo_filter(mut self, max_capacity: usize) -> Self {
+        self.filter =
+            Some(Filters::Cuckoo(Cuckoo::new(max_capacity)));
         self
     }
 
@@ -211,6 +221,8 @@ pub enum NippyJarError {
     ColumnLenMismatch(usize, usize),
     #[error("UnexpectedMissingValue row: {0} col:{1}")]
     UnexpectedMissingValue(u64, u64),
+    #[error("err")]
+    FilterError(#[from] cuckoofilter::CuckooError),
 }
 
 pub struct NippyJarCursor<'a> {
@@ -344,7 +356,6 @@ mod tests {
         let data_file = NippyJar::new(
             _num_columns,
             false,
-            false,
             &std::env::temp_dir().as_path().join(TEST_FILE_NAME),
         );
 
@@ -352,7 +363,6 @@ mod tests {
 
         let mut data_file = NippyJar::new(
             _num_columns,
-            false,
             false,
             &std::env::temp_dir().as_path().join(TEST_FILE_NAME),
         )
