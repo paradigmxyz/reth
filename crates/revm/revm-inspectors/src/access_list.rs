@@ -31,8 +31,8 @@ impl AccessListInspector {
             excluded: [from, to].iter().chain(precompiles.iter()).copied().collect(),
             access_list: access_list
                 .0
-                .iter()
-                .map(|v| (v.address, v.storage_keys.iter().copied().collect()))
+                .into_iter()
+                .map(|v| (v.address, v.storage_keys.into_iter().collect()))
                 .collect(),
         }
     }
