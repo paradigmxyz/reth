@@ -446,6 +446,11 @@ mod tests {
 
     use super::*;
 
+    /// Returns the beacon root contract code
+    fn beacon_root_contract_code() -> Bytes {
+        Bytes::from_str("0x3373fffffffffffffffffffffffffffffffffffffffe14604457602036146024575f5ffd5b620180005f350680545f35146037575f5ffd5b6201800001545f5260205ff35b6201800042064281555f359062018000015500").unwrap()
+    }
+
     #[derive(Debug, Default, Clone, Eq, PartialEq)]
     struct StateProviderTest {
         accounts: HashMap<Address, (HashMap<StorageKey, U256>, Account)>,
@@ -537,7 +542,7 @@ mod tests {
 
         let mut db = StateProviderTest::default();
 
-        let beacon_root_contract_code = Bytes::from_str("0x3373fffffffffffffffffffffffffffffffffffffffe14604457602036146024575f5ffd5b620180005f350680545f35146037575f5ffd5b6201800001545f5260205ff35b42620180004206555f3562018000420662018000015500").unwrap();
+        let beacon_root_contract_code = beacon_root_contract_code();
 
         let beacon_root_contract_account = Account {
             balance: U256::ZERO,
@@ -658,7 +663,7 @@ mod tests {
     fn eip_4788_genesis_call() {
         let mut db = StateProviderTest::default();
 
-        let beacon_root_contract_code = Bytes::from_str("0x3373fffffffffffffffffffffffffffffffffffffffe14604457602036146024575f5ffd5b620180005f350680545f35146037575f5ffd5b6201800001545f5260205ff35b42620180004206555f3562018000420662018000015500").unwrap();
+        let beacon_root_contract_code = beacon_root_contract_code();
 
         let beacon_root_contract_account = Account {
             balance: U256::ZERO,
@@ -735,7 +740,7 @@ mod tests {
 
         let mut db = StateProviderTest::default();
 
-        let beacon_root_contract_code = Bytes::from_str("0x3373fffffffffffffffffffffffffffffffffffffffe14604457602036146024575f5ffd5b620180005f350680545f35146037575f5ffd5b6201800001545f5260205ff35b42620180004206555f3562018000420662018000015500").unwrap();
+        let beacon_root_contract_code = beacon_root_contract_code();
 
         let beacon_root_contract_account = Account {
             balance: U256::ZERO,
