@@ -14,7 +14,7 @@
 //! reth task management
 
 use crate::{
-    metrics::TaskExecutorMetrics,
+    metrics::{IncCounterOnDrop, TaskExecutorMetrics},
     shutdown::{signal, Shutdown, Signal},
 };
 use dyn_clone::DynClone;
@@ -22,7 +22,6 @@ use futures_util::{
     future::{select, BoxFuture},
     pin_mut, Future, FutureExt, TryFutureExt,
 };
-use metrics::IncCounterOnDrop;
 use std::{
     any::Any,
     fmt::{Display, Formatter},
