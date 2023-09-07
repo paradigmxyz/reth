@@ -42,6 +42,8 @@ pub struct EVMProcessor<'a> {
     tip: Option<BlockNumber>,
     /// Pruning configuration.
     prune_modes: PruneModes,
+    /// Memoized address pruning filter.
+    pruning_address_filter: Option<(u64, Vec<Address>)>,
     /// Execution stats
     stats: BlockExecutorStats,
 }
@@ -63,6 +65,7 @@ impl<'a> EVMProcessor<'a> {
             first_block: None,
             tip: None,
             prune_modes: PruneModes::none(),
+            pruning_address_filter: None,
             stats: BlockExecutorStats::default(),
         }
     }
@@ -89,6 +92,7 @@ impl<'a> EVMProcessor<'a> {
             first_block: None,
             tip: None,
             prune_modes: PruneModes::none(),
+            pruning_address_filter: None,
             stats: BlockExecutorStats::default(),
         }
     }
@@ -222,19 +226,19 @@ impl<'a> EVMProcessor<'a> {
         block: &Block,
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
-    ) -> Result<u64, BlockExecutionError> {
+    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
         // perf: do not execute empty blocks
         if block.body.is_empty() {
-            self.receipts.push(HashMap::default());
-            return Ok(0)
+            return Ok((Vec::new(), 0))
         }
+
         let senders = self.recover_senders(&block.body, senders)?;
 
         self.init_env(&block.header, total_difficulty);
 
         let mut cumulative_gas_used = 0;
-        let mut receipts = HashMap::with_capacity(block.body.len());
-        for (idx, (transaction, sender)) in block.body.iter().zip(senders).enumerate() {
+        let mut receipts = Vec::with_capacity(block.body.len());
+        for (transaction, sender) in block.body.iter().zip(senders) {
             let time = Instant::now();
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
@@ -264,22 +268,86 @@ impl<'a> EVMProcessor<'a> {
             cumulative_gas_used += result.gas_used();
 
             // Push transaction changeset and calculate header bloom filter for receipt.
-            receipts.insert(
-                idx,
-                Receipt {
-                    tx_type: transaction.tx_type(),
-                    // Success flag was added in `EIP-658: Embedding transaction status code in
-                    // receipts`.
-                    success: result.is_success(),
-                    cumulative_gas_used,
-                    // convert to reth log
-                    logs: result.into_logs().into_iter().map(into_reth_log).collect(),
-                },
-            );
+            receipts.push(Receipt {
+                tx_type: transaction.tx_type(),
+                // Success flag was added in `EIP-658: Embedding transaction status code in
+                // receipts`.
+                success: result.is_success(),
+                cumulative_gas_used,
+                // convert to reth log
+                logs: result.into_logs().into_iter().map(into_reth_log).collect(),
+            });
         }
-        self.receipts.push(receipts);
 
-        Ok(cumulative_gas_used)
+        Ok((receipts, cumulative_gas_used))
+    }
+
+    /// Save receipts to the executor.
+    pub fn save_receipts(&mut self, receipts: Vec<Receipt>) -> Result<(), BlockExecutionError> {
+        // Index receipts by transaction index.
+        let mut receipts = receipts.into_iter().enumerate().collect();
+        // Prune receipts if necessary.
+        self.prune_receipts(&mut receipts)?;
+        // Save receipts.
+        self.receipts.push(receipts);
+        Ok(())
+    }
+
+    /// Prune receipts according to the pruning configuration.
+    fn prune_receipts(
+        &mut self,
+        receipts: &mut HashMap<usize, Receipt>,
+    ) -> Result<(), PrunePartError> {
+        let (first_block, tip) = match self.first_block.zip(self.tip) {
+            Some((block, tip)) => (block, tip),
+            _ => return Ok(()),
+        };
+
+        let block_number = first_block + self.receipts.len() as u64;
+
+        // Block receipts should not be retained
+        if self.prune_modes.receipts == Some(PruneMode::Full) ||
+                // [`PrunePart::Receipts`] takes priority over [`PrunePart::ContractLogs`]
+                self.prune_modes.should_prune_receipts(block_number, tip)
+        {
+            receipts.clear();
+            return Ok(())
+        }
+
+        // All receipts from the last 128 blocks are required for blockchain tree, even with
+        // [`PrunePart::ContractLogs`].
+        let prunable_receipts =
+            PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(block_number, tip);
+        if !prunable_receipts {
+            return Ok(())
+        }
+
+        let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
+
+        // Empty implies that there is going to be
+        // addresses to include in the filter in a future block. None means there isn't any kind
+        // of configuration.
+        if !contract_log_pruner.is_empty() {
+            let (prev_block, filter) = self.pruning_address_filter.get_or_insert((0, Vec::new()));
+            for (_, addresses) in contract_log_pruner.range(*prev_block..=block_number) {
+                filter.extend(addresses.into_iter().copied());
+            }
+        }
+
+        receipts.retain(|_, receipt| {
+            // If there is an address_filter, and it does not contain any of the
+            // contract addresses, then remove this receipts
+            if let Some((_, filter)) = &self.pruning_address_filter {
+                if !receipt.logs.iter().any(|log| filter.contains(&&log.address)) {
+                    return false
+                }
+            }
+            true
+        });
+
+        receipts.shrink_to_fit();
+
+        Ok(())
     }
 }
 
@@ -289,8 +357,9 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         block: &Block,
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
-    ) -> Result<(), BlockExecutionError> {
-        let cumulative_gas_used = self.execute_transactions(block, total_difficulty, senders)?;
+    ) -> Result<Vec<Receipt>, BlockExecutionError> {
+        let (receipts, cumulative_gas_used) =
+            self.execute_transactions(block, total_difficulty, senders)?;
 
         // Check if gas used matches the value set in header.
         if block.gas_used != cumulative_gas_used {
@@ -330,7 +399,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         if self.first_block.is_none() {
             self.first_block = Some(block.number);
         }
-        Ok(())
+        Ok(receipts)
     }
 
     fn execute_and_verify_receipt(
@@ -340,7 +409,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         senders: Option<Vec<Address>>,
     ) -> Result<(), BlockExecutionError> {
         // execute block
-        self.execute(block, total_difficulty, senders)?;
+        let receipts = self.execute(block, total_difficulty, senders)?;
 
         // TODO Before Byzantium, receipts contained state root that would mean that expensive
         // operation as hashing that is needed for state root got calculated in every
@@ -348,17 +417,16 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
         if self.chain_spec.fork(Hardfork::Byzantium).active_at_block(block.header.number) {
             let time = Instant::now();
-            let block_receipts = self.receipts.last().unwrap();
-            if let Err(error) = verify_receipt(
-                block.header.receipts_root,
-                block.header.logs_bloom,
-                block_receipts.values(),
-            ) {
-                debug!(target: "evm", ?error, receipts = ?block_receipts, "receipts verification failed");
+            if let Err(error) =
+                verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts.iter())
+            {
+                debug!(target: "evm", ?error, ?receipts, "receipts verification failed");
                 return Err(error)
             };
             self.stats.receipt_root_duration += time.elapsed();
         }
+
+        self.save_receipts(receipts)?;
 
         Ok(())
     }
@@ -384,65 +452,6 @@ impl<'a> PrunableBlockExecutor for EVMProcessor<'a> {
 
     fn set_prune_modes(&mut self, prune_modes: PruneModes) {
         self.prune_modes = prune_modes;
-    }
-
-    /// This method will prune all in-memory block receipts if pruning is enabled.
-    fn prune_receipts(&mut self, block: BlockNumber) -> Result<(), PrunePartError> {
-        let (first_block, tip) = match (self.first_block.filter(|f| *f <= block), self.tip) {
-            (Some(block), Some(tip)) => (block, tip),
-            _ => return Ok(()),
-        };
-
-        // SAFETY: validated above `block >= first_block`
-        let target_block_idx = block - first_block;
-        let Some(block_receipts) = self.receipts.get_mut(target_block_idx as usize) else {
-            return Ok(())
-        };
-
-        // Block receipts should not be retained
-        if self.prune_modes.receipts == Some(PruneMode::Full) ||
-            // [`PrunePart::Receipts`] takes priority over [`PrunePart::ContractLogs`]
-            self.prune_modes.should_prune_receipts(block, tip)
-        {
-            block_receipts.clear();
-            return Ok(())
-        }
-
-        // All receipts from the last 128 blocks are required for blockchain tree, even with
-        // [`PrunePart::ContractLogs`].
-        let prunable_receipts =
-            PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(block, tip);
-        if !prunable_receipts {
-            return Ok(())
-        }
-
-        let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
-
-        // Empty implies that there is going to be
-        // addresses to include in the filter in a future block. None means there isn't any kind
-        // of configuration.
-        let address_filter: Option<Vec<&Address>> = (!contract_log_pruner.is_empty()).then(|| {
-            let mut filter = Vec::new();
-            for (_, addresses) in contract_log_pruner.range(0..=block) {
-                filter.extend_from_slice(&addresses);
-            }
-            filter
-        });
-
-        block_receipts.retain(|_, receipt| {
-            // If there is an address_filter, and it does not contain any of the
-            // contract addresses, then remove this receipts
-            if let Some(filter) = &address_filter {
-                if !receipt.logs.iter().any(|log| filter.contains(&&log.address)) {
-                    return false
-                }
-            }
-            true
-        });
-
-        block_receipts.shrink_to_fit();
-
-        Ok(())
     }
 }
 

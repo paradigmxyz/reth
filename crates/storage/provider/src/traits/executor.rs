@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crate::{change::BundleStateWithReceipts, StateProvider};
 use reth_interfaces::executor::BlockExecutionError;
-use reth_primitives::{Address, Block, BlockNumber, ChainSpec, PruneModes, PrunePartError, U256};
+use reth_primitives::{Address, Block, BlockNumber, ChainSpec, PruneModes, Receipt, U256};
 use tracing::info;
 
 /// Executor factory that would create the EVM with particular state provider.
@@ -70,9 +70,9 @@ pub trait BlockExecutor {
         block: &Block,
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
-    ) -> Result<(), BlockExecutionError>;
+    ) -> Result<Vec<Receipt>, BlockExecutionError>;
 
-    /// Executes the block and checks receipts
+    /// Executes the block and checks receipts. Saves the receipts after verification.
     fn execute_and_verify_receipt(
         &mut self,
         block: &Block,
@@ -94,7 +94,4 @@ pub trait PrunableBlockExecutor: BlockExecutor {
 
     /// Set prune modes.
     fn set_prune_modes(&mut self, prune_modes: PruneModes);
-
-    /// Prune in-memory receipts.
-    fn prune_receipts(&mut self, block: BlockNumber) -> Result<(), PrunePartError>;
 }

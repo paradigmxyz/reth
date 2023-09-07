@@ -305,7 +305,11 @@ impl StorageInner {
     ) -> Result<(BundleStateWithReceipts, u64), BlockExecutionError> {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
-        let gas_used = executor.execute_transactions(block, U256::ZERO, Some(senders))?;
+        let (receipts, gas_used) =
+            executor.execute_transactions(block, U256::ZERO, Some(senders))?;
+
+        // Save receipts.
+        executor.save_receipts(receipts)?;
 
         // add post execution state change
         // Withdrawals, rewards etc.
