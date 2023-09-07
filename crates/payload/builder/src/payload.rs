@@ -164,7 +164,7 @@ impl PayloadBuilderAttributes {
     pub fn cfg_and_block_env(&self, chain_spec: &ChainSpec, parent: &Header) -> (CfgEnv, BlockEnv) {
         // configure evm env based on parent block
         let mut cfg = CfgEnv::default();
-        cfg.chain_id = U256::from(chain_spec.chain().id());
+        cfg.chain_id = chain_spec.chain().id();
         // ensure we're not missing any timestamp based hardforks
         cfg.spec_id = revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp);
 
