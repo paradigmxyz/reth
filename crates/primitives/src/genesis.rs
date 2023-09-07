@@ -32,6 +32,18 @@ pub struct Genesis {
     /// The genesis header difficulty.
     #[serde(deserialize_with = "deserialize_json_u256")]
     pub difficulty: U256,
+    /// The genesis header mix hash.
+    pub mix_hash: H256,
+    /// The genesis header coinbase address.
+    pub coinbase: Address,
+    /// The initial state of accounts in the genesis block.
+    pub alloc: HashMap<Address, GenesisAccount>,
+    // NOTE: the following fields:
+    // * base_fee_per_gas
+    // * excess_blob_gas
+    // * blob_gas_used
+    // should NOT be set in a real testnet genesis, but are included here for compatibility with
+    // consensus tests, which have genesis files with these fields populated.
     /// The genesis header base fee
     #[serde(
         skip_serializing_if = "Option::is_none",
@@ -50,12 +62,6 @@ pub struct Genesis {
         deserialize_with = "deserialize_stringified_u64_opt"
     )]
     pub blob_gas_used: Option<u64>,
-    /// The genesis header mix hash.
-    pub mix_hash: H256,
-    /// The genesis header coinbase address.
-    pub coinbase: Address,
-    /// The initial state of accounts in the genesis block.
-    pub alloc: HashMap<Address, GenesisAccount>,
 }
 
 impl Genesis {
