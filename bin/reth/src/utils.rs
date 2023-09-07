@@ -26,7 +26,7 @@ use std::{
 };
 use tracing::info;
 
-/// Exposing the `reth_db` crate
+/// Exposing `open_db_read_only` function
 pub mod utils {
     pub use reth_db::open_db_read_only;
 }
