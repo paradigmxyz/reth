@@ -1139,6 +1139,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
                                 block_hash,
                                 block_number,
                                 base_fee: header.base_fee_per_gas,
+                                excess_blob_gas: header.excess_blob_gas,
                             };
 
                             return Ok(Some((transaction, meta)))
