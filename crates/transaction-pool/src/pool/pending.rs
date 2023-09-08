@@ -333,6 +333,10 @@ impl<T: TransactionOrdering> PendingPool<T> {
     }
 
     /// Truncates the pool to the given limit.
+    ///
+    /// Removes transactions from the pending pool
+    /// The algorithm tries to reduce transaction counts by an approximately
+    /// equal number for all for accounts with many pending transactions.
     pub(crate) fn truncate_pool(
         &mut self,
         limit: SubPoolLimit,
@@ -342,18 +346,33 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let mut spammers = self.get_spammers(max_account_slots);
         spammers.sort_by(|(_, a), (_, b)| b.cmp(a));
 
-        // penalize spammers first by removing their oldest txs
-        for (sender, _) in spammers {
-            let txs = self.get_txs_by_sender(&sender);
-            let mut txs = txs.iter().map(|tx| tx.transaction_id).collect::<Vec<_>>();
-            txs.sort_by(|a, b| a.cmp(b));
-            for tx_id in txs {
-                while self.size() > limit.max_size || self.len() > limit.max_txs {
-                    if let Some(tx) = self.remove_transaction(&tx_id) {
-                        removed.push(tx);
+        // penalize spammers first by equalizing txs count first
+        let mut offenders = Vec::new();
+        let mut spammer_index = 0;
+        while self.len() > limit.max_txs && !spammers.is_empty() {
+            let (offender, offenders_tx_count) = spammers.pop().unwrap();
+            offenders.push(offender);
+
+            while offenders.len() > 1 {
+                let threshold = offenders_tx_count; // currenct spammer txs count
+
+                while self.len() > limit.max_txs && spammers[spammer_index - 1].1 > threshold {
+                    for current_offender in &offenders {
+                        let txs = self.get_txs_by_sender(&current_offender);
+                        let mut txs = txs.iter().map(|tx| tx.transaction_id).collect::<Vec<_>>();
+
+                        let txs = txs.split_off(threshold);
+
+                        // remove the txs exeeding the threshold
+                        for tx_id in txs {
+                            if let Some(tx) = self.remove_transaction(&tx_id) {
+                                removed.push(tx);
+                            }
+                        }
                     }
                 }
             }
+            spammer_index += 1;
         }
 
         // penalize non-local txs if limit is still exceeded
