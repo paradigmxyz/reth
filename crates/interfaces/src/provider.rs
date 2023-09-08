@@ -25,7 +25,7 @@ pub enum ProviderError {
     },
     /// The block number was found for the given address, but the changeset was not found.
     #[error("Account {address:?} ChangeSet for block #{block_number} does not exist")]
-    AccountChangeSetsNotFound {
+    AccountChangeSetNotFound {
         /// Block number found for the address
         block_number: BlockNumber,
         /// The account address
