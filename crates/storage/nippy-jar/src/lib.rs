@@ -127,7 +127,7 @@ impl NippyJar {
                             if let (Some(dict_compressors), Compressors::Zstd(zstd)) =
                                 (maybe_zstd_compressors.as_mut(), compression)
                             {
-                                zstd.compress_with_dictionaries(
+                                zstd.compress_with_dictionary(
                                     &value,
                                     &mut tmp_buf,
                                     &mut file,
