@@ -339,38 +339,47 @@ impl<T: TransactionOrdering> PendingPool<T> {
         max_account_slots: usize,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = Vec::new();
-        let mut txs_to_remove = Vec::new();
         let mut spammers = self.get_spammers(max_account_slots);
         spammers.sort_by(|(_, a), (_, b)| b.cmp(a));
 
+        // penalize spammers first by removing their oldest txs
         for (sender, _) in spammers {
             let txs = self.get_txs_by_sender(&sender);
             let mut txs = txs.iter().map(|tx| tx.transaction_id).collect::<Vec<_>>();
-            txs.sort_by(|a, b| b.cmp(a));
-            txs_to_remove.extend(txs);
-            if txs_to_remove.len() >= limit.max_txs {
-                break
+            txs.sort_by(|a, b| a.cmp(b));
+            for tx_id in txs {
+                while self.size() > limit.max_size || self.len() > limit.max_txs {
+                    if let Some(tx) = self.remove_transaction(&tx_id) {
+                        removed.push(tx);
+                    }
+                }
             }
         }
 
-        for tx_id in txs_to_remove {
-            if let Some(tx) = self.remove_transaction(&tx_id) {
-                removed.push(tx);
-            }
-        }
-
+        // penalize non-local txs if limit is still exceeded
         for tx in self.all.clone().iter() {
             if tx.transaction.is_local() {
                 continue
             }
-            if let Some(tx) = self.remove_transaction(tx.transaction.id()) {
+            while self.size() > limit.max_size || self.len() > limit.max_txs {
+                if let Some(tx) = self.remove_transaction(tx.transaction.id()) {
+                    removed.push(tx);
+                }
+            }
+        }
+
+        // penalize local txs at last
+        while self.size() > limit.max_size || self.len() > limit.max_txs {
+            if let Some(tx) = self.pop_worst() {
                 removed.push(tx);
             }
         }
+
         removed
     }
 
-    /// Returns account address and their txs_count that are not local and whose tx count > max_account_slots limit
+    /// Returns account address and their txs_count that are not local and whose tx count >
+    /// max_account_slots limit
     pub(crate) fn get_spammers(&self, max_account_slots: usize) -> Vec<(Address, usize)> {
         let mut spammers = Vec::new();
         for tx in self.all.iter() {
