@@ -375,14 +375,32 @@ impl<T: TransactionOrdering> PendingPool<T> {
             spammer_index += 1;
         }
 
-        // penalize non-local txs if limit is still exceeded
-        for tx in self.all.clone().iter() {
-            if tx.transaction.is_local() {
-                continue
-            }
-            while self.size() > limit.max_size || self.len() > limit.max_txs {
-                if let Some(tx) = self.remove_transaction(tx.transaction.id()) {
+        // If still above threshold, reduce to limit till each offenders tx count is below
+        // smax_account_slots
+        while self.len() > limit.max_txs && !offenders.is_empty() {
+            let offender = offenders.pop().unwrap();
+
+            let txs = self.get_txs_by_sender(&offender);
+            let mut txs = txs.iter().map(|tx| tx.transaction_id).collect::<Vec<_>>();
+
+            let txs = txs.split_off(max_account_slots);
+            for tx_id in txs {
+                if let Some(tx) = self.remove_transaction(&tx_id) {
                     removed.push(tx);
+                }
+            }
+        }
+
+        // penalize non-local txs if limit is still exceeded
+        if self.size() > limit.max_size || self.len() > limit.max_txs {
+            for tx in self.all.clone().iter() {
+                if tx.transaction.is_local() {
+                    continue
+                }
+                while self.size() > limit.max_size || self.len() > limit.max_txs {
+                    if let Some(tx) = self.pop_worst() {
+                        removed.push(tx);
+                    }
                 }
             }
         }

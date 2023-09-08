@@ -137,6 +137,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         for (sender, _) in spammers {
             let txs = self.get_txs_by_sender(&sender);
             let mut txs = txs.iter().map(|tx| tx.transaction_id).collect::<Vec<_>>();
+            // sort txs by their time in the pool, oldest first
             txs.sort_by(|a, b| a.cmp(b));
             for tx_id in txs {
                 while self.size() > limit.max_size || self.len() > limit.max_txs {
@@ -148,13 +149,15 @@ impl<T: ParkedOrd> ParkedPool<T> {
         }
 
         // penalize non-local txs if limit is still exceeded
-        for tx in self.clone().all() {
-            if tx.is_local() {
-                continue
-            }
-            while self.size() > limit.max_size || self.len() > limit.max_txs {
-                if let Some(tx) = self.remove_transaction(tx.id()) {
-                    removed.push(tx);
+        if self.size() > limit.max_size || self.len() > limit.max_txs {
+            for tx in self.clone().all() {
+                if tx.is_local() {
+                    continue
+                }
+                while self.size() > limit.max_size || self.len() > limit.max_txs {
+                    if let Some(tx) = self.remove_transaction(tx.id()) {
+                        removed.push(tx);
+                    }
                 }
             }
         }
