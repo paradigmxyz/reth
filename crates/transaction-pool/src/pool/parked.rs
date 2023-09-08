@@ -81,12 +81,6 @@ impl<T: ParkedOrd> ParkedPool<T> {
         Some(tx.transaction.into())
     }
 
-    /// Removes the worst transaction from this pool.
-    pub(crate) fn _pop_worst(&mut self) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let worst = self.best.iter().next().map(|tx| *tx.transaction.id())?;
-        self.remove_transaction(&worst)
-    }
-
     /// Get txs by sender
     pub(crate) fn get_txs_by_sender(
         &self,
