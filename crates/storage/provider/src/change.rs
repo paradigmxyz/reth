@@ -1,4 +1,5 @@
 //! Wrapper around revms state.
+use itertools::Itertools;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     models::{AccountBeforeTx, BlockNumberAddress},
@@ -357,16 +358,15 @@ impl BundleStateWithReceipts {
         let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
 
-        for (idx, mut receipts) in self.receipts.into_iter().enumerate() {
+        for (idx, receipts) in self.receipts.into_iter().enumerate() {
             if !receipts.is_empty() {
                 let (_, body_indices) = bodies_cursor
                     .seek_exact(self.first_block + idx as u64)?
                     .expect("body indices exist");
 
-                for (tx_idx, tx_num) in body_indices.tx_num_range().enumerate() {
-                    if let Some(receipt) = receipts.remove(&tx_idx) {
-                        receipts_cursor.append(tx_num, receipt)?;
-                    }
+                let first_tx_index = body_indices.first_tx_num();
+                for (tx_idx, receipt) in receipts.into_iter().sorted_by_key(|(idx, _)| *idx) {
+                    receipts_cursor.append(first_tx_index + tx_idx as u64, receipt)?;
                 }
             }
         }
