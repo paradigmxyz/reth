@@ -27,7 +27,7 @@ use std::{
 use tracing::info;
 
 /// Exposing `open_db_read_only` function
-pub mod utils {
+pub mod db {
     pub use reth_db::open_db_read_only;
 }
 
