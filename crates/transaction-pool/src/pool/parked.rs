@@ -146,11 +146,11 @@ impl<T: ParkedOrd> ParkedPool<T> {
                 removed.push(tx);
             }
         }
-        for tx in self.all.clone().iter() {
-            if tx.transaction.is_local() {
+        for tx in self.clone().all() {
+            if tx.is_local() {
                 continue
             }
-            if let Some(tx) = self.remove_transaction(tx.transaction.id()) {
+            if let Some(tx) = self.remove_transaction(tx.id()) {
                 removed.push(tx);
             }
         }
