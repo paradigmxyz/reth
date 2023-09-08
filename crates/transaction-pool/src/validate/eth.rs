@@ -380,6 +380,9 @@ pub struct EthTransactionValidatorBuilder {
 impl EthTransactionValidatorBuilder {
     /// Creates a new builder for the given [ChainSpec]
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        // If cancun is enabled at genesis, enable it
+        let cancun = chain_spec.is_cancun_activated_at_timestamp(chain_spec.genesis_timestamp());
+
         Self {
             chain_spec,
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
@@ -398,7 +401,7 @@ impl EthTransactionValidatorBuilder {
             shanghai: true,
 
             // TODO: can hard enable by default once mainnet transitioned
-            cancun: false,
+            cancun,
         }
     }
 
