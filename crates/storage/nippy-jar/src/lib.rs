@@ -68,9 +68,6 @@ impl NippyJar {
         if let Some(comp) = obj.compressor.as_mut() {
             comp.was_loaded();
         }
-        if let Some(filter) = obj.filter.as_mut() {
-            filter.was_loaded();
-        }
 
         Ok(obj)
     }
@@ -203,10 +200,6 @@ impl NippyJar {
     fn freeze_config(&mut self, handle: &mut File) -> Result<(), NippyJarError> {
         // TODO Split Dictionaries and Bloomfilters Configuration so we dont have to load everything
         // at once
-        if let Some(filter) = self.filter.as_mut() {
-            filter.freeze()
-        }
-
         Ok(bincode::serialize_into(handle, &self)?)
     }
 }
@@ -218,10 +211,6 @@ impl Filter for NippyJar {
 
     fn contains(&self, element: &[u8]) -> Result<bool, NippyJarError> {
         self.filter.as_ref().ok_or(NippyJarError::FilterMissing)?.contains(element)
-    }
-
-    fn is_ready(&self) -> bool {
-        self.filter.as_ref().is_some_and(|f| f.is_ready())
     }
 }
 
@@ -363,11 +352,9 @@ mod tests {
 
         let mut nippy = NippyJar::new(_num_columns, false, file_path.path());
 
-        assert!(!Filter::is_ready(&nippy));
         assert!(matches!(Filter::add(&mut nippy, &col1[0]), Err(NippyJarError::FilterMissing)));
 
         nippy = nippy.with_cuckoo_filter(4);
-        assert!(Filter::is_ready(&nippy));
 
         // Add col1[0]
         assert!(!Filter::contains(&nippy, &col1[0]).unwrap());
