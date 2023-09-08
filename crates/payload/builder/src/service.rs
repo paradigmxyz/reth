@@ -229,7 +229,6 @@ where
             }
 
             // marker for exit condition
-            // TODO(mattsse): this could be optmized so we only poll new jobs
             let mut new_job = false;
 
             // drain all requests
