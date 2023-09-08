@@ -1,5 +1,5 @@
 use crate::{compression::Compression, NippyJarError};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Deserializer};
 use std::{
     fs::File,
     io::{Read, Write},
@@ -15,7 +15,7 @@ pub enum ZstdState {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Zstd {
-    #[serde(skip)]
+    #[serde(deserialize_with = "deserialize_state_as_ready")]
     pub(crate) state: ZstdState,
     pub(crate) use_dict: bool,
     pub(crate) max_dict_size: usize,
@@ -33,10 +33,6 @@ impl Zstd {
             raw_dictionaries: None,
             columns,
         }
-    }
-
-    pub fn was_loaded(&mut self) {
-        self.state = ZstdState::Ready;
     }
 
     pub fn generate_decompressors(&self) -> Result<Vec<Decompressor<'_>>, NippyJarError> {
@@ -167,4 +163,13 @@ impl Compression for Zstd {
 
         Ok(())
     }
+}
+
+
+fn deserialize_state_as_ready<'de, D>(deserializer: D) -> Result<ZstdState, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let _ = ZstdState::deserialize(deserializer)?;
+    Ok(ZstdState::Ready)
 }

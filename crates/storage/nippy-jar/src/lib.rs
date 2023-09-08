@@ -56,10 +56,6 @@ impl NippyJar {
         let mut obj: Self = bincode::deserialize_from(&mut file)?;
 
         obj.path = Some(path.to_path_buf());
-        if let Some(comp) = &mut obj.compressor {
-            comp.was_loaded();
-        }
-
         Ok(obj)
     }
 
