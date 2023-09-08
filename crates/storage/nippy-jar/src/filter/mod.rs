@@ -1,53 +1,65 @@
-use serde::{Deserialize, Serialize};
-use std::{io::Write, collections::hash_map::DefaultHasher};
-use cuckoofilter::{self, ExportedCuckooFilter, CuckooFilter};
 use crate::NippyJarError;
+use serde::{Deserialize, Serialize};
+
+mod cuckoo;
+pub use cuckoo::Cuckoo;
 
 pub trait Filter {
     fn add(&mut self, element: &[u8]) -> Result<(), NippyJarError>;
-    fn contains(&self, element: &[u8]) -> bool;
+    fn contains(&self, element: &[u8]) -> Result<bool, NippyJarError>;
     fn is_ready(&self) -> bool {
         true
     }
-    fn was_loaded(&mut self);
+
+    fn was_loaded(&mut self) {
+        unreachable!()
+    }
+
+    fn freeze(&mut self) {
+        unreachable!()
+    }
 }
 
-#[derive(Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub enum Filters {
     Cuckoo(Cuckoo),
     // Avoids irrefutable let errors. Remove this after adding another one.
     Unused,
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct Cuckoo {
-    exported: Option<ExportedCuckooFilter>,
-    remaining: usize,
-    #[serde(skip)]
-    filter: Option<CuckooFilter<DefaultHasher>> // TODO does it need an actual hasher?
-}
-
-impl Cuckoo {
-    pub fn new(max_capacity: usize) -> Self {
-        Cuckoo { exported: None, remaining: 0, filter: Some(CuckooFilter::with_capacity(max_capacity)) }
-    }
-}
-
-impl Filter for Cuckoo {
+impl Filter for Filters {
     fn add(&mut self, element: &[u8]) -> Result<(), NippyJarError> {
-        Ok(self.filter.as_mut().expect("exists").add(element)?)
+        match self {
+            Filters::Cuckoo(c) => c.add(element),
+            Filters::Unused => todo!(),
+        }
     }
 
-    fn contains(&self, element: &[u8]) -> bool {
-        self.filter.as_ref().expect("exists").contains(element)
+    fn contains(&self, element: &[u8]) -> Result<bool, NippyJarError> {
+        match self {
+            Filters::Cuckoo(c) => c.contains(element),
+            Filters::Unused => todo!(),
+        }
     }
 
     fn is_ready(&self) -> bool {
-        self.filter.is_some()
+        match self {
+            Filters::Cuckoo(c) => c.is_ready(),
+            Filters::Unused => todo!(),
+        }
     }
 
     fn was_loaded(&mut self) {
-        self.filter = self.exported.take().map(Into::into);
+        match self {
+            Filters::Cuckoo(c) => c.was_loaded(),
+            Filters::Unused => todo!(),
+        }
+    }
+
+    fn freeze(&mut self) {
+        match self {
+            Filters::Cuckoo(c) => c.freeze(),
+            Filters::Unused => todo!(),
+        }
     }
 }
-
