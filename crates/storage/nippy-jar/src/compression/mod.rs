@@ -32,7 +32,7 @@ pub trait Compression {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Compressors {
     Zstd(Zstd),
-    // Acoids irrefutable let errors. Remove this after adding another one.
+    // Avoids irrefutable let errors. Remove this after adding another one.
     Unused,
 }
 

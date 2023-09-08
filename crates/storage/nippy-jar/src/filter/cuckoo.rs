@@ -6,10 +6,15 @@ use std::collections::hash_map::DefaultHasher;
 
 #[derive(Serialize, Deserialize)]
 pub struct Cuckoo {
-    exported: Option<ExportedCuckooFilter>,
+    /// Remaining number of elements that can be added.
     remaining: usize,
+
     #[serde(skip)]
+    /// CuckooFilter. Needs to be exported to `self.exported` before it can be serialized.
     filter: Option<CuckooFilter<DefaultHasher>>, // TODO does it need an actual hasher?
+
+    /// Serializable Cuckoo filter.
+    exported: Option<ExportedCuckooFilter>,
 }
 
 impl Cuckoo {

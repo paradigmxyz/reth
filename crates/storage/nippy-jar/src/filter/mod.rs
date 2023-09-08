@@ -5,18 +5,25 @@ mod cuckoo;
 pub use cuckoo::Cuckoo;
 
 pub trait Filter {
+    /// Add element to the inclusion list.
     fn add(&mut self, element: &[u8]) -> Result<(), NippyJarError>;
+
+    /// Checks if the element belongs to the inclusion list. There might be false positives.
     fn contains(&self, element: &[u8]) -> Result<bool, NippyJarError>;
+
+    /// Is the filter ready to be used.
     fn is_ready(&self) -> bool {
         true
     }
 
+    /// Informs the filter algorithm that it was loaded from disk.
     fn was_loaded(&mut self) {
-        unreachable!()
+        unimplemented!()
     }
 
+    /// Freezes the filter algorithm in use.
     fn freeze(&mut self) {
-        unreachable!()
+        unimplemented!()
     }
 }
 
