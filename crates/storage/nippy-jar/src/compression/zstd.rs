@@ -1,5 +1,5 @@
 use crate::{compression::Compression, NippyJarError};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::{
     fs::File,
     io::{Read, Write},
@@ -14,18 +14,25 @@ pub enum ZstdState {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
+/// Zstd compression structure. Supports compression dictionaries per column.
 pub struct Zstd {
-    #[serde(skip)]
+    #[serde(deserialize_with = "deserialize_state_as_ready")]
+    /// State. Should be ready before compressing.
     pub(crate) state: ZstdState,
+    /// Uses custom dictionaries to compress data.
     pub(crate) use_dict: bool,
+    /// Max size of a dictionary
     pub(crate) max_dict_size: usize,
+    /// List of column dictionaries.
     pub(crate) raw_dictionaries: Option<Vec<Vec<u8>>>,
+    /// Number of columns to compress.
     columns: usize,
 }
 
 impl Zstd {
+    /// Creates new [`Zstd`].
     pub fn new(use_dict: bool, max_dict_size: usize, columns: usize) -> Self {
-        // todo add level
+        // TODO add level
         Self {
             state: if use_dict { ZstdState::PendingDictionary } else { ZstdState::Ready },
             use_dict,
@@ -35,10 +42,7 @@ impl Zstd {
         }
     }
 
-    pub fn was_loaded(&mut self) {
-        self.state = ZstdState::Ready;
-    }
-
+    /// If using dictionaries, creates a list of [`Decompressor`].
     pub fn generate_decompressors(&self) -> Result<Vec<Decompressor<'_>>, NippyJarError> {
         if let Some(dictionaries) = &self.raw_dictionaries {
             return Ok((0..self.columns)
@@ -48,6 +52,7 @@ impl Zstd {
         Ok(vec![])
     }
 
+    /// If using dictionaries, creates a list of [`Compressor`].
     pub fn generate_compressors(&self) -> Result<Option<Vec<Compressor>>, NippyJarError> {
         match self.state {
             ZstdState::PendingDictionary => Err(NippyJarError::CompressorNotReady),
@@ -70,7 +75,8 @@ impl Zstd {
         }
     }
 
-    pub fn compress_with_dictionaries(
+    /// Compresses a value using a dictionary.
+    pub fn compress_with_dictionary(
         &self,
         value: &[u8],
         tmp_buf: &mut Vec<u8>,
@@ -167,4 +173,12 @@ impl Compression for Zstd {
 
         Ok(())
     }
+}
+
+fn deserialize_state_as_ready<'de, D>(deserializer: D) -> Result<ZstdState, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let _ = ZstdState::deserialize(deserializer)?;
+    Ok(ZstdState::Ready)
 }

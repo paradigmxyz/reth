@@ -65,9 +65,6 @@ impl NippyJar {
         let mut obj: Self = bincode::deserialize_from(&mut file)?;
 
         obj.path = Some(path.to_path_buf());
-        if let Some(comp) = obj.compressor.as_mut() {
-            comp.was_loaded();
-        }
 
         Ok(obj)
     }
@@ -140,7 +137,7 @@ impl NippyJar {
                             if let (Some(dict_compressors), Compressors::Zstd(zstd)) =
                                 (maybe_zstd_compressors.as_mut(), compression)
                             {
-                                zstd.compress_with_dictionaries(
+                                zstd.compress_with_dictionary(
                                     &value,
                                     &mut tmp_buf,
                                     &mut file,

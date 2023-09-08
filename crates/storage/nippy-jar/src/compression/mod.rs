@@ -17,9 +17,6 @@ pub trait Compression {
         true
     }
 
-    /// Informs the compression algorithm that it was loaded from disk.
-    fn was_loaded(&mut self) {}
-
     /// If required, prepares compression algorithm with an early pass on the data.
     fn prepare_compression(
         &mut self,
@@ -53,13 +50,6 @@ impl Compression for Compressors {
     fn is_ready(&self) -> bool {
         match self {
             Compressors::Zstd(zstd) => zstd.is_ready(),
-            Compressors::Unused => unimplemented!(),
-        }
-    }
-
-    fn was_loaded(&mut self) {
-        match self {
-            Compressors::Zstd(zstd) => zstd.was_loaded(),
             Compressors::Unused => unimplemented!(),
         }
     }
