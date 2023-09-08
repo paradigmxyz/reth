@@ -416,10 +416,10 @@ where
                 }
             }
             EngineApiMessageVersion::V3 => {
-                if !is_cancun {
-                    return Err(EngineApiError::UnsupportedFork)
-                } else if !has_parent_beacon_block_root {
+                if !has_parent_beacon_block_root {
                     return Err(EngineApiError::NoParentBeaconBlockRootPostCancun)
+                } else if !is_cancun {
+                    return Err(EngineApiError::UnsupportedFork)
                 }
             }
         };
