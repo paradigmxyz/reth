@@ -79,6 +79,7 @@ where
             let block_number = block.number;
             let base_fee = block.base_fee_per_gas;
             let block_hash = block.hash;
+            let excess_blob_gas = block.excess_blob_gas;
 
             #[cfg(feature = "optimism")]
             let (block_timestamp, l1_block_info): (_, Option<L1BlockInfo>) = {
@@ -99,6 +100,7 @@ where
                         block_hash,
                         block_number,
                         base_fee,
+                        excess_blob_gas,
                     };
 
                     #[cfg(feature = "optimism")]

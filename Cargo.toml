@@ -48,6 +48,7 @@ members = [
     "crates/rpc/rpc-types-compat",
     "examples",
     "examples/additional-rpc-namespace-in-cli",
+    "examples/rpc-db",
 ]
 default-members = ["bin/reth"]
 
@@ -152,6 +153,10 @@ secp256k1 = { version = "0.27.0", default-features = false, features = ["global-
 enr = { version = "0.9", default-features = false, features = ["k256"] }
 # for eip-4844
 c-kzg = { git = "https://github.com/ethereum/c-kzg-4844" }
+
+## config
+confy = "0.5"
+toml = "0.7"
 
 ### misc-testing
 proptest = "1.0"

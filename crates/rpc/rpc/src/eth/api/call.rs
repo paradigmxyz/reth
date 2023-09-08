@@ -340,7 +340,7 @@ where
 
     pub(crate) async fn create_access_list_at(
         &self,
-        request: CallRequest,
+        mut request: CallRequest,
         at: Option<BlockId>,
     ) -> EthResult<AccessList> {
         let block_id = at.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
@@ -373,7 +373,8 @@ where
             get_contract_address(from, nonce).into()
         };
 
-        let initial = request.access_list.clone().unwrap_or_default();
+        // can consume the list since we're not using the request anymore
+        let initial = request.access_list.take().unwrap_or_default();
 
         let precompiles = get_precompiles(&env.cfg.spec_id);
         let mut inspector = AccessListInspector::new(initial, from, to, precompiles);

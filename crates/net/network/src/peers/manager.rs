@@ -645,9 +645,9 @@ impl PeersManager {
     /// Returns `None` if no peer is available.
     fn best_unconnected(&mut self) -> Option<(PeerId, &mut Peer)> {
         let mut unconnected = self.peers.iter_mut().filter(|(_, peer)| {
-            peer.state.is_unconnected() &&
+            !peer.is_backed_off() &&
                 !peer.is_banned() &&
-                !peer.is_backed_off() &&
+                peer.state.is_unconnected() &&
                 (!self.connect_trusted_nodes_only || peer.is_trusted())
         });
 
@@ -759,9 +759,7 @@ impl PeersManager {
                 })
             }
 
-            if self.refill_slots_interval.poll_tick(cx).is_ready() {
-                // this ensures the manager will be polled periodically, see [Interval::poll_tick]
-                let _ = self.refill_slots_interval.poll_tick(cx);
+            while self.refill_slots_interval.poll_tick(cx).is_ready() {
                 self.fill_outbound_slots();
             }
 
@@ -1101,7 +1099,7 @@ pub struct PeersConfig {
 impl Default for PeersConfig {
     fn default() -> Self {
         Self {
-            refill_slots_interval: Duration::from_millis(1_000),
+            refill_slots_interval: Duration::from_millis(5_000),
             connection_info: Default::default(),
             reputation_weights: Default::default(),
             ban_list: Default::default(),

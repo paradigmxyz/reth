@@ -333,7 +333,7 @@ mod tests {
     #[tokio::test]
     async fn can_handshake() {
         let genesis = H256::random();
-        let fork_filter = ForkFilter::new(Head::default(), genesis, Vec::new());
+        let fork_filter = ForkFilter::new(Head::default(), genesis, 0, Vec::new());
 
         let status = Status {
             version: EthVersion::Eth67 as u8,
@@ -380,7 +380,7 @@ mod tests {
     #[tokio::test]
     async fn pass_handshake_on_low_td_bitlen() {
         let genesis = H256::random();
-        let fork_filter = ForkFilter::new(Head::default(), genesis, Vec::new());
+        let fork_filter = ForkFilter::new(Head::default(), genesis, 0, Vec::new());
 
         let status = Status {
             version: EthVersion::Eth67 as u8,
@@ -427,7 +427,7 @@ mod tests {
     #[tokio::test]
     async fn fail_handshake_on_high_td_bitlen() {
         let genesis = H256::random();
-        let fork_filter = ForkFilter::new(Head::default(), genesis, Vec::new());
+        let fork_filter = ForkFilter::new(Head::default(), genesis, 0, Vec::new());
 
         let status = Status {
             version: EthVersion::Eth67 as u8,
@@ -568,7 +568,7 @@ mod tests {
         );
 
         let genesis = H256::random();
-        let fork_filter = ForkFilter::new(Head::default(), genesis, Vec::new());
+        let fork_filter = ForkFilter::new(Head::default(), genesis, 0, Vec::new());
 
         let status = Status {
             version: EthVersion::Eth67 as u8,
