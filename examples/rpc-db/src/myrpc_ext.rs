@@ -11,7 +11,7 @@ use reth::rpc::eth::error::EthResult;
 #[rpc(server, namespace = "myrpcExt")]
 pub trait MyRpcExtApi {
     /// Returns block 0.
-    #[method(name = "custom_method")]
+    #[method(name = "customMethod")]
     fn custom_method(&self) -> EthResult<Option<Block>>;
 }
 

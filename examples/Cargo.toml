@@ -29,10 +29,6 @@ async-trait.workspace = true
 tokio.workspace = true
 
 [[example]]
-name = "rpc-db"
-path = "rpc-db.rs"
-
-[[example]]
 name = "db-access"
 path = "db-access.rs"
 

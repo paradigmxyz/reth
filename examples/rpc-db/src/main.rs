@@ -1,7 +1,21 @@
-// Talking to the DB
-use reth::{primitives::ChainSpecBuilder, utils::db::open_db_read_only};
-
-use reth::providers::{providers::BlockchainProvider, ProviderFactory};
+//! Example illustrating how to run the ETH JSON RPC API as standalone over a DB file.
+//!
+//! Run with
+//!
+//! ```not_rust
+//! cargo run -p rpc-db
+//! ```
+//!
+//! This installs an additional RPC method `myrpcExt_customMethod` that can queried via [cast](https://github.com/foundry-rs/foundry)
+//!
+//! ```sh
+//! cast rpc myrpcExt_customMethod
+//! ```
+use reth::{
+    primitives::ChainSpecBuilder,
+    providers::{providers::BlockchainProvider, ProviderFactory},
+    utils::db::open_db_read_only,
+};
 // Bringing up the RPC
 use reth::rpc::builder::{
     RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig,
@@ -26,7 +40,6 @@ use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
 // Custom rpc extension
 pub mod myrpc_ext;
 
-// Example illustrating how to run the ETH JSON RPC API as standalone over a DB file.
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     // 1. Setup the DB
