@@ -14,7 +14,7 @@ pub enum ZstdState {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-/// Zstd compression structure. Supports compression dictionaries per column.
+/// Zstd compression structure. Supports a compression dictionary per column.
 pub struct Zstd {
     #[serde(deserialize_with = "deserialize_state_as_ready")]
     /// State. Should be ready before compressing.
