@@ -1,6 +1,6 @@
 //! [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#parameters) protocol constants and utils for shard Blob Transactions.
 
-use crate::{kzg::KzgSettings, U256};
+use crate::{kzg::KzgSettings, U128};
 use once_cell::sync::Lazy;
 use std::{io::Write, sync::Arc};
 
@@ -67,11 +67,11 @@ pub enum LoadKzgSettingsError {
 }
 
 /// Calculates the blob fee for the given excess blob gas.
-pub fn blob_fee(excess_blob_gas: u64) -> U256 {
+pub fn blob_fee(excess_blob_gas: u64) -> U128 {
     fake_exponential(
-        U256::from(BLOB_TX_MIN_BLOB_GASPRICE),
-        U256::from(excess_blob_gas),
-        U256::from(BLOB_GASPRICE_UPDATE_FRACTION),
+        U128::from(BLOB_TX_MIN_BLOB_GASPRICE),
+        U128::from(excess_blob_gas),
+        U128::from(BLOB_GASPRICE_UPDATE_FRACTION),
     )
 }
 
@@ -80,14 +80,14 @@ pub fn blob_fee(excess_blob_gas: u64) -> U256 {
 /// This is used to calculate the blob price.
 ///
 /// See also <https://eips.ethereum.org/EIPS/eip-4844#helpers>
-pub fn fake_exponential(factor: U256, numerator: U256, denominator: U256) -> U256 {
-    let mut output = U256::ZERO;
+pub fn fake_exponential(factor: U128, numerator: U128, denominator: U128) -> U128 {
+    let mut output = U128::ZERO;
     let mut numerator_accum = factor.saturating_mul(denominator);
-    let mut i = U256::from(1u64);
-    while numerator_accum > U256::ZERO {
+    let mut i = U128::from(1u64);
+    while numerator_accum > U128::ZERO {
         output += numerator_accum;
         numerator_accum = numerator_accum * numerator / (denominator * i);
-        i += U256::from(1u64);
+        i += U128::from(1u64);
     }
     output / denominator
 }
@@ -121,8 +121,8 @@ mod tests {
             (2, 5, 2, 23),   // approximate 24.36
             (1, 50000000, 2225652, 5709098764),
         ] {
-            let res = fake_exponential(U256::from(*factor), U256::from(*num), U256::from(*denom));
-            assert_eq!(res, U256::from(*expected));
+            let res = fake_exponential(U128::from(*factor), U128::from(*num), U128::from(*denom));
+            assert_eq!(res, U128::from(*expected));
         }
     }
 }
