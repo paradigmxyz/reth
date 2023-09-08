@@ -1,7 +1,9 @@
 use crate::{
-    identifier::TransactionId, pool::size::SizeTracker, PoolTransaction, ValidPoolTransaction,
+    identifier::TransactionId, pool::size::SizeTracker, PoolTransaction, SubPoolLimit,
+    ValidPoolTransaction,
 };
 use fnv::FnvHashMap;
+use reth_primitives::Address;
 use std::{cmp::Ordering, collections::BTreeSet, ops::Deref, sync::Arc};
 
 /// A pool of transactions that are currently parked and are waiting for external changes (e.g.
@@ -83,6 +85,76 @@ impl<T: ParkedOrd> ParkedPool<T> {
     pub(crate) fn pop_worst(&mut self) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         let worst = self.best.iter().next().map(|tx| *tx.transaction.id())?;
         self.remove_transaction(&worst)
+    }
+
+    /// Returns account address and their txs_count that are not local and whose tx count >
+    /// max_account_slots
+    pub(crate) fn get_spammers(&self, max_account_slots: usize) -> Vec<(Address, usize)> {
+        let mut spammers = Vec::new();
+        for tx in self.all() {
+            if tx.is_local() {
+                continue
+            }
+            let sender = tx.transaction.sender();
+            let txs = self.get_txs_by_sender(&sender);
+            if txs.len() <= max_account_slots {
+                continue
+            }
+            if spammers.iter().any(|(s, _)| s == &sender) {
+                continue
+            }
+            spammers.push((sender, txs.len()));
+        }
+        spammers
+    }
+
+    /// Get txs by sender
+    pub(crate) fn get_txs_by_sender(
+        &self,
+        sender: &Address,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let mut txs = Vec::new();
+        for tx in self.by_id.values() {
+            if tx.transaction.sender() == *sender {
+                txs.push(tx.transaction.clone().into());
+            }
+        }
+        txs
+    }
+
+    /// Truncates the pool to the given limit.
+    pub(crate) fn truncate_pool(
+        &mut self,
+        limit: SubPoolLimit,
+        max_account_slots: usize,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let mut removed = Vec::new();
+        let mut txs_to_remove = Vec::new();
+        let mut spammers = self.get_spammers(max_account_slots);
+        spammers.sort_by(|(_, a), (_, b)| b.cmp(a));
+        for (sender, _) in spammers {
+            let txs = self.get_txs_by_sender(&sender);
+            let mut txs = txs.iter().map(|tx| tx.transaction_id).collect::<Vec<_>>();
+            txs.sort_by(|a, b| b.cmp(a));
+            txs_to_remove.extend(txs);
+            if txs_to_remove.len() >= limit.max_txs {
+                break
+            }
+        }
+        for tx_id in txs_to_remove {
+            if let Some(tx) = self.remove_transaction(&tx_id) {
+                removed.push(tx);
+            }
+        }
+        for tx in self.all.clone().iter() {
+            if tx.transaction.is_local() {
+                continue
+            }
+            if let Some(tx) = self.remove_transaction(tx.transaction.id()) {
+                removed.push(tx);
+            }
+        }
+        removed
     }
 
     fn next_id(&mut self) -> u64 {
