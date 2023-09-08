@@ -34,15 +34,20 @@ pub struct EVMProcessor<'a> {
     evm: EVM<StateDBBox<'a, Error>>,
     stack: InspectorStack,
     /// The collection of receipts.
+    /// Outer vector stores receipts for each block sequentially.
+    /// Inner [HashMap] stores receipts indexed by transaction index.
+    /// The map is used as receipts might be pruned.
     receipts: Vec<HashMap<usize, Receipt>>,
     /// First block will be initialized to ZERO
     /// and be set to the block number of first block executed.
     first_block: Option<BlockNumber>,
-    /// The maximum known block .
+    /// The maximum known block.
     tip: Option<BlockNumber>,
     /// Pruning configuration.
     prune_modes: PruneModes,
     /// Memoized address pruning filter.
+    /// Empty implies that there is going to be addresses to include in the filter in a future
+    /// block. None means there isn't any kind of configuration.
     pruning_address_filter: Option<(u64, Vec<Address>)>,
     /// Execution stats
     stats: BlockExecutorStats,
@@ -327,9 +332,6 @@ impl<'a> EVMProcessor<'a> {
 
         let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
 
-        // Empty implies that there is going to be
-        // addresses to include in the filter in a future block. None means there isn't any kind
-        // of configuration.
         if !contract_log_pruner.is_empty() {
             let (prev_block, filter) = self.pruning_address_filter.get_or_insert((0, Vec::new()));
             for (_, addresses) in contract_log_pruner.range(*prev_block..=block_number) {
