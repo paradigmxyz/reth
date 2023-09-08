@@ -1,5 +1,5 @@
 use crate::{
-    post_state::StorageChangeset,
+    post_state::StorageChangeSets,
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
@@ -202,7 +202,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     ///
     /// 1. Iterate over the [BlockBodyIndices][tables::BlockBodyIndices] table to get all
     /// the transaction ids.
-    /// 2. Iterate over the [StorageChangeSet][tables::StorageChangeSet] table
+    /// 2. Iterate over the [StorageChangeSets][tables::StorageChangeSets] table
     /// and the [AccountChangeSets][tables::AccountChangeSets] tables in reverse order to reconstruct
     /// the changesets.
     ///     - In order to have both the old and new values in the changesets, we also access the
@@ -242,7 +242,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         let storage_range = BlockNumberAddress::range(range.clone());
 
         let storage_changeset =
-            self.get_or_take::<tables::StorageChangeSet, TAKE>(storage_range)?;
+            self.get_or_take::<tables::StorageChangeSets, TAKE>(storage_range)?;
         let account_changeset = self.get_or_take::<tables::AccountChangeSets, TAKE>(range)?;
 
         // iterate previous value and get plain state value to create changeset
@@ -293,7 +293,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         }
 
         // add storage changeset changes
-        let mut storage_changes: BTreeMap<BlockNumberAddress, StorageChangeset> = BTreeMap::new();
+        let mut storage_changes: BTreeMap<BlockNumberAddress, StorageChangeSets> = BTreeMap::new();
         for (block_and_address, storage_entry) in storage_changeset.into_iter().rev() {
             let BlockNumberAddress((_, address)) = block_and_address;
             let new_storage =
@@ -1429,7 +1429,7 @@ impl<'this, TX: DbTx<'this>> StorageReader for DatabaseProvider<'this, TX> {
         range: RangeInclusive<BlockNumber>,
     ) -> Result<BTreeMap<Address, BTreeSet<H256>>> {
         self.tx
-            .cursor_read::<tables::StorageChangeSet>()?
+            .cursor_read::<tables::StorageChangeSets>()?
             .walk_range(BlockNumberAddress::range(range))?
             // fold all storages and save its old state so we can remove it from HashedStorages
             // it is needed as it is dup table.
@@ -1444,7 +1444,7 @@ impl<'this, TX: DbTx<'this>> StorageReader for DatabaseProvider<'this, TX> {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<BTreeMap<(Address, H256), Vec<u64>>> {
-        let mut changeset_cursor = self.tx.cursor_read::<tables::StorageChangeSet>()?;
+        let mut changeset_cursor = self.tx.cursor_read::<tables::StorageChangeSets>()?;
 
         let storage_changeset_lists =
             changeset_cursor.walk_range(BlockNumberAddress::range(range))?.try_fold(
@@ -1539,7 +1539,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
         // Aggregate all block changesets and make list of accounts that have been changed.
         let hashed_storages = self
             .tx
-            .cursor_read::<tables::StorageChangeSet>()?
+            .cursor_read::<tables::StorageChangeSets>()?
             .walk_range(range)?
             .collect::<std::result::Result<Vec<_>, _>>()?
             .into_iter()
@@ -1737,7 +1737,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
     fn unwind_storage_history_indices(&self, range: Range<BlockNumberAddress>) -> Result<usize> {
         let storage_changesets = self
             .tx
-            .cursor_read::<tables::StorageChangeSet>()?
+            .cursor_read::<tables::StorageChangeSets>()?
             .walk_range(range)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let changesets = storage_changesets.len();

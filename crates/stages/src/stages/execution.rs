@@ -45,7 +45,7 @@ use tracing::*;
 /// - [tables::PlainStorageState]
 /// - [tables::Bytecodes]
 /// - [tables::AccountChangeSets]
-/// - [tables::StorageChangeSet]
+/// - [tables::StorageChangeSets]
 ///
 /// For unwinds we are accessing:
 /// - [tables::BlockBodyIndices] get tx index to know what needs to be unwinded
@@ -348,7 +348,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         let tx = provider.tx_ref();
         // Acquire changeset cursors
         let mut account_changeset = tx.cursor_dup_write::<tables::AccountChangeSets>()?;
-        let mut storage_changeset = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
+        let mut storage_changeset = tx.cursor_dup_write::<tables::StorageChangeSets>()?;
 
         let (range, unwind_to, _) =
             input.unwind_block_range_with_threshold(self.thresholds.max_blocks.unwrap_or(u64::MAX));
@@ -911,7 +911,7 @@ mod tests {
         assert!(plain_storage.is_empty());
 
         let account_changesets = test_tx.table::<tables::AccountChangeSets>().unwrap();
-        let storage_changesets = test_tx.table::<tables::StorageChangeSet>().unwrap();
+        let storage_changesets = test_tx.table::<tables::StorageChangeSets>().unwrap();
 
         assert_eq!(
             account_changesets,

@@ -17,7 +17,7 @@ pub struct PruneBatchSizes {
     /// Measured in the number of `AccountChangeSets` table rows.
     account_history: usize,
     /// Maximum number of storage history entries to prune, per block.
-    /// Measured in the number of `StorageChangeSet` table rows.
+    /// Measured in the number of `StorageChangeSets` table rows.
     storage_history: usize,
 }
 

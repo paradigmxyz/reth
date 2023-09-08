@@ -61,7 +61,7 @@ impl Compact for AccountBeforeTx {
 }
 
 /// [`BlockNumber`] concatenated with [`Address`]. Used as the key for
-/// [`StorageChangeSet`](crate::tables::StorageChangeSet)
+/// [`StorageChangeSets`](crate::tables::StorageChangeSets)
 ///
 /// Since it's used as a key, it isn't compressed when encoding it.
 #[derive(

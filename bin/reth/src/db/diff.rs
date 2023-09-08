@@ -19,7 +19,7 @@ use reth_db::{
     AccountChangeSets, AccountHistories, AccountsTrie, BlockBodyIndices, BlockOmmers,
     BlockWithdrawals, Bytecodes, CanonicalHeaders, DatabaseEnvRO, HashedAccounts, HashedStorages,
     HeaderNumbers, HeaderTerminalDifficulties, Headers, PlainAccountState, PlainStorageState, PruneCheckpoints,
-    Receipts, StorageChangeSet, StorageHistories, StoragesTrie, SyncStages, SyncStagesProgresses, Tables,
+    Receipts, StorageChangeSets, StorageHistories, StoragesTrie, SyncStages, SyncStagesProgresses, Tables,
     TransactionBlocks, Transactions, TransactionHashNumbers, TransactionSenders,
 };
 use tracing::info;
@@ -117,8 +117,8 @@ impl Command {
                 Tables::AccountChangeSets => {
                     find_diffs::<AccountChangeSets>(primary_tx, secondary_tx, output_dir)?
                 }
-                Tables::StorageChangeSet => {
-                    find_diffs::<StorageChangeSet>(primary_tx, secondary_tx, output_dir)?
+                Tables::StorageChangeSets => {
+                    find_diffs::<StorageChangeSets>(primary_tx, secondary_tx, output_dir)?
                 }
                 Tables::HashedAccounts => {
                     find_diffs::<HashedAccounts>(primary_tx, secondary_tx, output_dir)?

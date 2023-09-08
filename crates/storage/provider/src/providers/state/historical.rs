@@ -26,7 +26,7 @@ use std::marker::PhantomData;
 /// - [tables::Bytecodes]
 /// - [tables::StorageHistories]
 /// - [tables::AccountChangeSets]
-/// - [tables::StorageChangeSet]
+/// - [tables::StorageChangeSets]
 pub struct HistoricalStateProviderRef<'a, 'b, TX: DbTx<'a>> {
     /// Transaction
     tx: &'b TX,
@@ -213,10 +213,10 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => Ok(Some(
                 self.tx
-                    .cursor_dup_read::<tables::StorageChangeSet>()?
+                    .cursor_dup_read::<tables::StorageChangeSets>()?
                     .seek_by_key_subkey((changeset_block_number, address).into(), storage_key)?
                     .filter(|entry| entry.key == storage_key)
-                    .ok_or(ProviderError::StorageChangesetNotFound {
+                    .ok_or(ProviderError::StorageChangeSetsNotFound {
                         block_number: changeset_block_number,
                         address,
                         storage_key,
@@ -506,11 +506,11 @@ mod tests {
         let entry_at3 = StorageEntry { key: STORAGE, value: U256::from(0) };
 
         // setup
-        tx.put::<tables::StorageChangeSet>((3, ADDRESS).into(), entry_at3).unwrap();
-        tx.put::<tables::StorageChangeSet>((4, HIGHER_ADDRESS).into(), higher_entry_at4).unwrap();
-        tx.put::<tables::StorageChangeSet>((7, ADDRESS).into(), entry_at7).unwrap();
-        tx.put::<tables::StorageChangeSet>((10, ADDRESS).into(), entry_at10).unwrap();
-        tx.put::<tables::StorageChangeSet>((15, ADDRESS).into(), entry_at15).unwrap();
+        tx.put::<tables::StorageChangeSets>((3, ADDRESS).into(), entry_at3).unwrap();
+        tx.put::<tables::StorageChangeSets>((4, HIGHER_ADDRESS).into(), higher_entry_at4).unwrap();
+        tx.put::<tables::StorageChangeSets>((7, ADDRESS).into(), entry_at7).unwrap();
+        tx.put::<tables::StorageChangeSets>((10, ADDRESS).into(), entry_at10).unwrap();
+        tx.put::<tables::StorageChangeSets>((15, ADDRESS).into(), entry_at15).unwrap();
 
         // setup plain state
         tx.put::<tables::PlainStorageState>(ADDRESS, entry_plain).unwrap();

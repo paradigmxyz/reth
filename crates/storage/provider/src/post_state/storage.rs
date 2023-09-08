@@ -3,7 +3,7 @@ use reth_primitives::{Address, BlockNumber, U256};
 use std::collections::{btree_map::Entry, BTreeMap};
 
 /// Storage for an account with the old and new values for each slot: (slot -> (old, new)).
-pub type StorageChangeset = BTreeMap<U256, (U256, U256)>;
+pub type StorageChangeSets = BTreeMap<U256, (U256, U256)>;
 
 /// The storage state of the account before the state transition.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]

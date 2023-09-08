@@ -753,7 +753,7 @@ impl<DB: Database> Pruner<DB> {
         let range_end = *range.end();
 
         let mut last_changeset_pruned_block = None;
-        let (rows, done) = provider.prune_table_with_range::<tables::StorageChangeSet>(
+        let (rows, done) = provider.prune_table_with_range::<tables::StorageChangeSets>(
             BlockNumberAddress::range(range),
             self.batch_sizes.storage_history(self.min_block_interval),
             |_| false,
@@ -1381,7 +1381,7 @@ mod tests {
         assert!(storage_occurences.into_iter().any(|(_, occurrences)| occurrences > 1));
 
         assert_eq!(
-            tx.table::<tables::StorageChangeSet>().unwrap().len(),
+            tx.table::<tables::StorageChangeSets>().unwrap().len(),
             changesets.iter().flatten().flat_map(|(_, _, entries)| entries).count()
         );
 
@@ -1446,7 +1446,7 @@ mod tests {
             );
 
             assert_eq!(
-                tx.table::<tables::StorageChangeSet>().unwrap().len(),
+                tx.table::<tables::StorageChangeSets>().unwrap().len(),
                 pruned_changesets.values().flatten().count()
             );
 

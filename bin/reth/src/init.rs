@@ -101,7 +101,7 @@ pub fn insert_genesis_state<DB: Database>(
             Account { nonce: account.nonce.unwrap_or(0), balance: account.balance, bytecode_hash },
         );
         if let Some(storage) = &account.storage {
-            let mut storage_changes = reth_provider::post_state::StorageChangeset::new();
+            let mut storage_changes = reth_provider::post_state::StorageChangeSets::new();
             for (&key, &value) in storage {
                 storage_changes
                     .insert(U256::from_be_bytes(key.0), (U256::ZERO, U256::from_be_bytes(value.0)));

@@ -655,7 +655,7 @@ mod tests {
                 tx.put::<tables::HashedStorages>(hashed_address, hashed_entry)?;
             }
 
-            tx.put::<tables::StorageChangeSet>(tid_address, prev_entry)?;
+            tx.put::<tables::StorageChangeSets>(tid_address, prev_entry)?;
             Ok(())
         }
 
@@ -664,7 +664,7 @@ mod tests {
             let target_block = input.unwind_to;
             self.tx.commit(|tx| {
                 let mut storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
-                let mut changeset_cursor = tx.cursor_dup_read::<tables::StorageChangeSet>()?;
+                let mut changeset_cursor = tx.cursor_dup_read::<tables::StorageChangeSets>()?;
 
                 let mut rev_changeset_walker = changeset_cursor.walk_back(None)?;
 

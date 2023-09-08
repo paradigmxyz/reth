@@ -97,11 +97,11 @@ AccountChangeSets {
     H256 Account "PK"
     ChangeSet AccountChangeSets "Account before transition"
 }
-StorageChangeSet {
+StorageChangeSets {
     u64 BlockNumber "PK"
     H256 Account "PK"
     H256 StorageKey "PK"
-    ChangeSet StorageChangeSet "Storage entry before transition"
+    ChangeSet StorageChangeSets "Storage entry before transition"
 }
 HashedAccounts {
     H256 HashedAddress "PK"
@@ -129,9 +129,9 @@ TransactionHashNumbers ||--|| Transactions : "hash -> tx id"
 TransactionBlocks ||--|{ Transactions : "tx id -> block number"
 BlockBodyIndices ||--o{ Transactions : "block number -> tx ids"
 Headers ||--o{ AccountChangeSets : "each block has zero or more changesets"
-Headers ||--o{ StorageChangeSet : "each block has zero or more changesets"
+Headers ||--o{ StorageChangeSets : "each block has zero or more changesets"
 AccountHistories }|--|{ AccountChangeSets : index
-StorageHistories }|--|{ StorageChangeSet : index
+StorageHistories }|--|{ StorageChangeSets : index
 Headers ||--o| BlockOmmers : "each block has 0 or more ommers"
 BlockBodyIndices ||--|| Headers : "index"
 HeaderNumbers |o--|| Headers : "block hash -> block number"

@@ -15,7 +15,7 @@ pub enum ProviderError {
     /// The transition id was found for the given address and storage key, but the changeset was
     /// not found.
     #[error("Storage ChangeSet address: ({address:?} key: {storage_key:?}) for block:#{block_number} does not exist")]
-    StorageChangesetNotFound {
+    StorageChangeSetsNotFound {
         /// The block number found for the address and storage key
         block_number: BlockNumber,
         /// The account address

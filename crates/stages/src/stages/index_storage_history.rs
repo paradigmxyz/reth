@@ -179,8 +179,8 @@ mod tests {
             .unwrap();
 
             // setup changeset that are going to be applied to history index
-            tx.put::<tables::StorageChangeSet>(trns(4), storage(STORAGE_KEY)).unwrap();
-            tx.put::<tables::StorageChangeSet>(trns(5), storage(STORAGE_KEY)).unwrap();
+            tx.put::<tables::StorageChangeSets>(trns(4), storage(STORAGE_KEY)).unwrap();
+            tx.put::<tables::StorageChangeSets>(trns(5), storage(STORAGE_KEY)).unwrap();
             Ok(())
         })
         .unwrap()
@@ -430,9 +430,9 @@ mod tests {
             .unwrap();
 
             // setup changeset that are going to be applied to history index
-            tx.put::<tables::StorageChangeSet>(trns(20), storage(STORAGE_KEY)).unwrap();
-            tx.put::<tables::StorageChangeSet>(trns(36), storage(STORAGE_KEY)).unwrap();
-            tx.put::<tables::StorageChangeSet>(trns(100), storage(STORAGE_KEY)).unwrap();
+            tx.put::<tables::StorageChangeSets>(trns(20), storage(STORAGE_KEY)).unwrap();
+            tx.put::<tables::StorageChangeSets>(trns(36), storage(STORAGE_KEY)).unwrap();
+            tx.put::<tables::StorageChangeSets>(trns(100), storage(STORAGE_KEY)).unwrap();
             Ok(())
         })
         .unwrap();
@@ -546,7 +546,7 @@ mod tests {
 
                 let provider = self.tx.inner();
                 let mut changeset_cursor =
-                    provider.tx_ref().cursor_read::<tables::StorageChangeSet>()?;
+                    provider.tx_ref().cursor_read::<tables::StorageChangeSets>()?;
 
                 let storage_transitions = changeset_cursor
                     .walk_range(BlockNumberAddress::range(start_block..=end_block))?

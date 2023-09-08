@@ -16,7 +16,7 @@ pub enum PrunePart {
     ContractLogs,
     /// Prune part responsible for the `AccountChangeSets` and `AccountHistories` tables.
     AccountHistories,
-    /// Prune part responsible for the `StorageChangeSet` and `StorageHistories` tables.
+    /// Prune part responsible for the `StorageChangeSets` and `StorageHistories` tables.
     StorageHistories,
 }
 

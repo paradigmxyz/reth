@@ -570,7 +570,7 @@ mod tests {
             self.tx
                 .commit(|tx| {
                     let mut storage_changesets_cursor =
-                        tx.cursor_dup_read::<tables::StorageChangeSet>().unwrap();
+                        tx.cursor_dup_read::<tables::StorageChangeSets>().unwrap();
                     let mut storage_cursor =
                         tx.cursor_dup_write::<tables::HashedStorages>().unwrap();
 

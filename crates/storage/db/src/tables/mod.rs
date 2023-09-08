@@ -176,7 +176,7 @@ tables!([
     (AccountHistories, TableType::Table),
     (StorageHistories, TableType::Table),
     (AccountChangeSets, TableType::DupSort),
-    (StorageChangeSet, TableType::DupSort),
+    (StorageChangeSets, TableType::DupSort),
     (HashedAccounts, TableType::Table),
     (HashedStorages, TableType::DupSort),
     (AccountsTrie, TableType::Table),
@@ -370,7 +370,7 @@ dupsort!(
     /// Stores the state of a storage key before a certain transaction changed it.
     /// If [`StorageEntry::value`] is zero, this means storage was not existing
     /// and needs to be removed.
-    ( StorageChangeSet ) BlockNumberAddress | [H256] StorageEntry
+    ( StorageChangeSets ) BlockNumberAddress | [H256] StorageEntry
 );
 
 table!(
@@ -452,7 +452,7 @@ mod tests {
         (TableType::Table, AccountHistories::const_name()),
         (TableType::Table, StorageHistories::const_name()),
         (TableType::DupSort, AccountChangeSets::const_name()),
-        (TableType::DupSort, StorageChangeSet::const_name()),
+        (TableType::DupSort, StorageChangeSets::const_name()),
         (TableType::Table, HashedAccounts::const_name()),
         (TableType::DupSort, HashedStorages::const_name()),
         (TableType::Table, AccountsTrie::const_name()),

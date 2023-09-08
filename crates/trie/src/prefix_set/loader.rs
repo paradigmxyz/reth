@@ -62,7 +62,7 @@ where
 
         // Walk storage changeset and insert storage prefixes as well as account prefixes if missing
         // from the account prefix set.
-        let mut storage_cursor = self.cursor_dup_read::<tables::StorageChangeSet>()?;
+        let mut storage_cursor = self.cursor_dup_read::<tables::StorageChangeSets>()?;
         let storage_range = BlockNumberAddress::range(range);
         for storage_entry in storage_cursor.walk_range(storage_range)? {
             let (BlockNumberAddress((_, address)), StorageEntry { key, .. }) = storage_entry?;

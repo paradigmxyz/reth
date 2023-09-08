@@ -38,7 +38,7 @@ pub fn assert_genesis_block<DB: Database>(provider: &DatabaseProviderRW<'_, DB>,
     // TODO check after this gets done: https://github.com/paradigmxyz/reth/issues/1588
     // Bytecodes are not reverted assert_eq!(tx.table::<tables::Bytecodes>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::AccountChangeSets>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::StorageChangeSet>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::StorageChangeSets>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::HashedAccounts>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::HashedStorages>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::AccountsTrie>().unwrap(), vec![]);

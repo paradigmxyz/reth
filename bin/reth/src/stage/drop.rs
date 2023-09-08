@@ -81,7 +81,7 @@ impl Command {
                     tx.clear::<tables::PlainAccountState>()?;
                     tx.clear::<tables::PlainStorageState>()?;
                     tx.clear::<tables::AccountChangeSets>()?;
-                    tx.clear::<tables::StorageChangeSet>()?;
+                    tx.clear::<tables::StorageChangeSets>()?;
                     tx.clear::<tables::Bytecodes>()?;
                     tx.clear::<tables::Receipts>()?;
                     tx.put::<tables::SyncStages>(

@@ -22,7 +22,7 @@ mod account;
 pub use account::AccountChanges;
 
 mod storage;
-pub use storage::{Storage, StorageChanges, StorageChangeset, StorageTransition, StorageWipe};
+pub use storage::{Storage, StorageChanges, StorageChangeSets, StorageTransition, StorageWipe};
 
 // todo: rewrite all the docs for this
 /// The state of accounts after execution of one or more transactions, including receipts and new
@@ -484,7 +484,7 @@ impl PostState {
         &mut self,
         block_number: BlockNumber,
         address: Address,
-        changeset: StorageChangeset,
+        changeset: StorageChangeSets,
     ) {
         self.storage
             .entry(address)
@@ -525,7 +525,7 @@ impl PostState {
         // Write storage changes
         tracing::trace!(target: "provider::post_state", "Writing storage changes");
         let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
-        let mut storage_changeset_cursor = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
+        let mut storage_changeset_cursor = tx.cursor_dup_write::<tables::StorageChangeSets>()?;
         for (block_number, storage_changes) in
             std::mem::take(&mut self.storage_changes).inner.into_iter()
         {
@@ -1281,7 +1281,7 @@ mod tests {
 
         // Check change set
         let mut changeset_cursor = tx
-            .cursor_dup_read::<tables::StorageChangeSet>()
+            .cursor_dup_read::<tables::StorageChangeSets>()
             .expect("Could not open storage changeset cursor");
         assert_eq!(
             changeset_cursor.seek_exact(BlockNumberAddress((1, address_a))).unwrap(),
@@ -1418,7 +1418,7 @@ mod tests {
         post_state.write_to_db(&tx, 0).expect("Could not write post state to DB");
 
         let mut storage_changeset_cursor = tx
-            .cursor_dup_read::<tables::StorageChangeSet>()
+            .cursor_dup_read::<tables::StorageChangeSets>()
             .expect("Could not open plain storage state cursor");
         let mut storage_changes = storage_changeset_cursor.walk_range(..).unwrap();
 

@@ -372,7 +372,7 @@ impl TestTransaction {
 
                     // Insert into storage changeset.
                     old_storage.into_iter().try_for_each(|entry| {
-                        tx.put::<tables::StorageChangeSet>(block_address, entry)
+                        tx.put::<tables::StorageChangeSets>(block_address, entry)
                     })
                 })
             })

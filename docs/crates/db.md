@@ -51,7 +51,7 @@ There are many tables within the node, all used to store different types of data
 - AccountHistories
 - StorageHistories
 - AccountChangeSets
-- StorageChangeSet
+- StorageChangeSets
 - HashedAccounts
 - HashedStorages
 - AccountsTrie
