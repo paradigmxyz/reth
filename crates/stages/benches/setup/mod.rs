@@ -173,7 +173,10 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         // initialize TD
         tx.commit(|tx| {
             let (head, _) = tx.cursor_read::<tables::Headers>()?.first()?.unwrap_or_default();
-            tx.put::<tables::HeaderTerminalDifficulties>(head, reth_primitives::U256::from(0).into())
+            tx.put::<tables::HeaderTerminalDifficulties>(
+                head,
+                reth_primitives::U256::from(0).into(),
+            )
         })
         .unwrap();
     }

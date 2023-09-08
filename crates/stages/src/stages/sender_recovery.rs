@@ -215,10 +215,11 @@ fn stage_checkpoint<DB: Database>(
         .and_then(|checkpoint| checkpoint.tx_number)
         .unwrap_or_default();
     Ok(EntitiesCheckpoint {
-        // If `TransactionSenders` table was pruned, we will have a number of entries in it not matching
-        // the actual number of processed transactions. To fix that, we add the number of pruned
-        // `TransactionSenders` entries.
-        processed: provider.tx_ref().entries::<tables::TransactionSenders>()? as u64 + pruned_entries,
+        // If `TransactionSenders` table was pruned, we will have a number of entries in it not
+        // matching the actual number of processed transactions. To fix that, we add the
+        // number of pruned `TransactionSenders` entries.
+        processed: provider.tx_ref().entries::<tables::TransactionSenders>()? as u64 +
+            pruned_entries,
         total: provider.tx_ref().entries::<tables::Transactions>()? as u64,
     })
 }
@@ -347,7 +348,8 @@ mod tests {
             ExecOutput {
                 checkpoint: StageCheckpoint::new(expected_progress).with_entities_stage_checkpoint(
                     EntitiesCheckpoint {
-                        processed: runner.tx.table::<tables::TransactionSenders>().unwrap().len() as u64,
+                        processed: runner.tx.table::<tables::TransactionSenders>().unwrap().len()
+                            as u64,
                         total: total_transactions
                     }
                 ),
@@ -452,10 +454,11 @@ mod tests {
 
         /// # Panics
         ///
-        /// 1. If there are any entries in the [tables::TransactionSenders] table above a given block number.
+        /// 1. If there are any entries in the [tables::TransactionSenders] table above a given
+        ///    block number.
         ///
-        /// 2. If the is no requested block entry in the bodies table, but [tables::TransactionSenders] is
-        ///    not empty.
+        /// 2. If the is no requested block entry in the bodies table, but
+        ///    [tables::TransactionSenders] is not empty.
         fn ensure_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self
                 .tx
@@ -463,9 +466,10 @@ mod tests {
                 .block_body_indices(block)?
                 .ok_or(ProviderError::BlockBodyIndicesNotFound(block));
             match body_result {
-                Ok(body) => self
-                    .tx
-                    .ensure_no_entry_above::<tables::TransactionSenders, _>(body.last_tx_num(), |key| key)?,
+                Ok(body) => self.tx.ensure_no_entry_above::<tables::TransactionSenders, _>(
+                    body.last_tx_num(),
+                    |key| key,
+                )?,
                 Err(_) => {
                     assert!(self.tx.table_is_empty::<tables::TransactionSenders>()?);
                 }

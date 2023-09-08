@@ -162,7 +162,9 @@ mod tests {
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
         database::Database,
         models::{AccountBeforeTx, ShardedKey},
-        tables::{AccountHistories, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState},
+        tables::{
+            AccountHistories, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState,
+        },
         test_utils::*,
         transaction::{DbTx, DbTxMut},
         AccountChangeSets, DatabaseError,
@@ -955,7 +957,8 @@ mod tests {
             let key = ShardedKey::new(real_key, i * 100);
             let list: IntegerList = vec![i * 100u64].into();
 
-            db.update(|tx| tx.put::<AccountHistories>(key.clone(), list.clone()).expect("")).unwrap();
+            db.update(|tx| tx.put::<AccountHistories>(key.clone(), list.clone()).expect(""))
+                .unwrap();
         }
 
         // Seek value with non existing key.

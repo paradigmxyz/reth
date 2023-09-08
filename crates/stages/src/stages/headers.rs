@@ -455,7 +455,9 @@ mod tests {
                 let head = random_header(&mut rng, start, None);
                 self.tx.insert_headers(std::iter::once(&head))?;
                 // patch td table for `update_head` call
-                self.tx.commit(|tx| tx.put::<tables::HeaderTerminalDifficulties>(head.number, U256::ZERO.into()))?;
+                self.tx.commit(|tx| {
+                    tx.put::<tables::HeaderTerminalDifficulties>(head.number, U256::ZERO.into())
+                })?;
 
                 // use previous checkpoint as seed size
                 let end = input.target.unwrap_or_default() + 1;

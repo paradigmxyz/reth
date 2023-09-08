@@ -599,11 +599,12 @@ impl<DB: Database> Pruner<DB> {
         }
 
         let mut last_pruned_transaction = tx_range_end;
-        let (deleted, done) = provider.prune_table_with_iterator::<tables::TransactionHashNumbers>(
-            hashes,
-            self.batch_sizes.transaction_lookup(self.min_block_interval),
-            |row| last_pruned_transaction = row.1,
-        )?;
+        let (deleted, done) = provider
+            .prune_table_with_iterator::<tables::TransactionHashNumbers>(
+                hashes,
+                self.batch_sizes.transaction_lookup(self.min_block_interval),
+                |row| last_pruned_transaction = row.1,
+            )?;
         trace!(target: "pruner", %deleted, %done, "Pruned transaction lookup");
 
         let last_pruned_block = provider

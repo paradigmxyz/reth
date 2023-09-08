@@ -22,7 +22,7 @@ mod account;
 pub use account::AccountChanges;
 
 mod storage;
-pub use storage::{Storage, StorageChanges, StorageChangeSets, StorageTransition, StorageWipe};
+pub use storage::{Storage, StorageChangeSets, StorageChanges, StorageTransition, StorageWipe};
 
 // todo: rewrite all the docs for this
 /// The state of accounts after execution of one or more transactions, including receipts and new

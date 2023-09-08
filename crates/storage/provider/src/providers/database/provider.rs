@@ -203,8 +203,8 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     /// 1. Iterate over the [BlockBodyIndices][tables::BlockBodyIndices] table to get all
     /// the transaction ids.
     /// 2. Iterate over the [StorageChangeSets][tables::StorageChangeSets] table
-    /// and the [AccountChangeSets][tables::AccountChangeSets] tables in reverse order to reconstruct
-    /// the changesets.
+    /// and the [AccountChangeSets][tables::AccountChangeSets] tables in reverse order to
+    /// reconstruct the changesets.
     ///     - In order to have both the old and new values in the changesets, we also access the
     ///       plain state tables.
     /// 3. While iterating over the changeset tables, if we encounter a new account or storage slot,
@@ -431,8 +431,9 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             .map(|(id, tx)| (id, tx.into()))
             .collect::<Vec<(u64, TransactionSigned)>>();
 
-        let mut senders =
-            self.get_or_take::<tables::TransactionSenders, TAKE>(first_transaction..=last_transaction)?;
+        let mut senders = self.get_or_take::<tables::TransactionSenders, TAKE>(
+            first_transaction..=last_transaction,
+        )?;
 
         // Recover senders manually if not found in db
         // SAFETY: Transactions are always guaranteed to be in the database whereas
@@ -1731,7 +1732,10 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
         &self,
         account_transitions: BTreeMap<Address, Vec<u64>>,
     ) -> Result<()> {
-        self.append_history_index::<_, tables::AccountHistories>(account_transitions, ShardedKey::new)
+        self.append_history_index::<_, tables::AccountHistories>(
+            account_transitions,
+            ShardedKey::new,
+        )
     }
 
     fn unwind_storage_history_indices(&self, range: Range<BlockNumberAddress>) -> Result<usize> {

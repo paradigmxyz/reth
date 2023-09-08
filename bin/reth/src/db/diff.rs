@@ -18,9 +18,10 @@ use reth_db::{
     cursor::DbCursorRO, database::Database, open_db_read_only, table::Table, transaction::DbTx,
     AccountChangeSets, AccountHistories, AccountsTrie, BlockBodyIndices, BlockOmmers,
     BlockWithdrawals, Bytecodes, CanonicalHeaders, DatabaseEnvRO, HashedAccounts, HashedStorages,
-    HeaderNumbers, HeaderTerminalDifficulties, Headers, PlainAccountState, PlainStorageState, PruneCheckpoints,
-    Receipts, StorageChangeSets, StorageHistories, StoragesTrie, SyncStages, SyncStagesProgresses, Tables,
-    TransactionBlocks, Transactions, TransactionHashNumbers, TransactionSenders,
+    HeaderNumbers, HeaderTerminalDifficulties, Headers, PlainAccountState, PlainStorageState,
+    PruneCheckpoints, Receipts, StorageChangeSets, StorageHistories, StoragesTrie, SyncStages,
+    SyncStagesProgresses, Tables, TransactionBlocks, TransactionHashNumbers, TransactionSenders,
+    Transactions,
 };
 use tracing::info;
 
@@ -77,7 +78,9 @@ impl Command {
                 Tables::CanonicalHeaders => {
                     find_diffs::<CanonicalHeaders>(primary_tx, secondary_tx, output_dir)?
                 }
-                Tables::HeaderTerminalDifficulties => find_diffs::<HeaderTerminalDifficulties>(primary_tx, secondary_tx, output_dir)?,
+                Tables::HeaderTerminalDifficulties => {
+                    find_diffs::<HeaderTerminalDifficulties>(primary_tx, secondary_tx, output_dir)?
+                }
                 Tables::HeaderNumbers => {
                     find_diffs::<HeaderNumbers>(primary_tx, secondary_tx, output_dir)?
                 }
@@ -132,8 +135,12 @@ impl Command {
                 Tables::StoragesTrie => {
                     find_diffs::<StoragesTrie>(primary_tx, secondary_tx, output_dir)?
                 }
-                Tables::TransactionSenders => find_diffs::<TransactionSenders>(primary_tx, secondary_tx, output_dir)?,
-                Tables::SyncStages => find_diffs::<SyncStages>(primary_tx, secondary_tx, output_dir)?,
+                Tables::TransactionSenders => {
+                    find_diffs::<TransactionSenders>(primary_tx, secondary_tx, output_dir)?
+                }
+                Tables::SyncStages => {
+                    find_diffs::<SyncStages>(primary_tx, secondary_tx, output_dir)?
+                }
                 Tables::SyncStagesProgresses => {
                     find_diffs::<SyncStagesProgresses>(primary_tx, secondary_tx, output_dir)?
                 }

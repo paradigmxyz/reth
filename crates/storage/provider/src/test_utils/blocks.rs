@@ -20,7 +20,10 @@ pub fn assert_genesis_block<DB: Database>(provider: &DatabaseProviderRW<'_, DB>,
 
     assert_eq!(tx.table::<tables::HeaderNumbers>().unwrap(), vec![(h, n)]);
     assert_eq!(tx.table::<tables::CanonicalHeaders>().unwrap(), vec![(n, h)]);
-    assert_eq!(tx.table::<tables::HeaderTerminalDifficulties>().unwrap(), vec![(n, g.difficulty.into())]);
+    assert_eq!(
+        tx.table::<tables::HeaderTerminalDifficulties>().unwrap(),
+        vec![(n, g.difficulty.into())]
+    );
     assert_eq!(
         tx.table::<tables::BlockBodyIndices>().unwrap(),
         vec![(0, StoredBlockBodyIndices::default())]

@@ -155,8 +155,10 @@ mod tests {
             );
 
             // Check AccountHistories
-            let mut acc_indexing_stage =
-                IndexAccountHistoriesStage { prune_modes: prune_modes.clone(), ..Default::default() };
+            let mut acc_indexing_stage = IndexAccountHistoriesStage {
+                prune_modes: prune_modes.clone(),
+                ..Default::default()
+            };
 
             if let Some(PruneMode::Full) = prune_modes.account_history {
                 // Full is not supported
@@ -169,8 +171,10 @@ mod tests {
             }
 
             // Check StorageHistories
-            let mut storage_indexing_stage =
-                IndexStorageHistoriesStage { prune_modes: prune_modes.clone(), ..Default::default() };
+            let mut storage_indexing_stage = IndexStorageHistoriesStage {
+                prune_modes: prune_modes.clone(),
+                ..Default::default()
+            };
 
             if let Some(PruneMode::Full) = prune_modes.storage_history {
                 // Full is not supported

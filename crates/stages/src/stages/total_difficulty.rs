@@ -18,8 +18,8 @@ use tracing::*;
 /// The total difficulty stage.
 ///
 /// This stage walks over inserted headers and computes total difficulty
-/// at each block. The entries are inserted into [`HeaderTerminalDifficulties`][reth_db::tables::HeaderTerminalDifficulties]
-/// table.
+/// at each block. The entries are inserted into
+/// [`HeaderTerminalDifficulties`][reth_db::tables::HeaderTerminalDifficulties] table.
 #[derive(Debug, Clone)]
 pub struct TotalDifficultyStage {
     /// Consensus client implementation
@@ -240,7 +240,10 @@ mod tests {
                     .map(|(_, v)| v)
                     .unwrap_or_default()
                     .into();
-                tx.put::<tables::HeaderTerminalDifficulties>(head.number, (td + head.difficulty).into())
+                tx.put::<tables::HeaderTerminalDifficulties>(
+                    head.number,
+                    (td + head.difficulty).into(),
+                )
             })?;
 
             // use previous progress as seed size
@@ -299,7 +302,8 @@ mod tests {
 
     impl TotalDifficultyTestRunner {
         fn check_no_td_above(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
-            self.tx.ensure_no_entry_above::<tables::HeaderTerminalDifficulties, _>(block, |num| num)?;
+            self.tx
+                .ensure_no_entry_above::<tables::HeaderTerminalDifficulties, _>(block, |num| num)?;
             Ok(())
         }
 

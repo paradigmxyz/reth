@@ -505,7 +505,10 @@ mod tests {
                 self.tx.commit(|tx| {
                     progress.body.iter().try_for_each(
                         |transaction| -> Result<(), reth_db::DatabaseError> {
-                            tx.put::<tables::TransactionHashNumbers>(transaction.hash(), next_tx_num)?;
+                            tx.put::<tables::TransactionHashNumbers>(
+                                transaction.hash(),
+                                next_tx_num,
+                            )?;
                             tx.put::<tables::Transactions>(
                                 next_tx_num,
                                 transaction.clone().into(),

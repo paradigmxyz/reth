@@ -50,7 +50,8 @@ use tracing::*;
 /// For unwinds we are accessing:
 /// - [tables::BlockBodyIndices] get tx index to know what needs to be unwinded
 /// - [tables::AccountHistories] to remove change set and apply old values to
-/// - [tables::PlainAccountState] [tables::StorageHistories] to remove change set and apply old values
+/// - [tables::PlainAccountState] [tables::StorageHistories] to remove change set and apply old
+///   values
 /// to [tables::PlainStorageState]
 // false positive, we cannot derive it if !DB: Debug.
 #[allow(missing_debug_implementations)]
