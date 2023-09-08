@@ -16,7 +16,7 @@ The most important requirement is by far the disk, whereas CPU and RAM requireme
 
 |           | Archive Node                          | Full Node                           |
 |-----------|---------------------------------------|-------------------------------------|
-| Disk      | At least 2.1TB (TLC NVMe recommended) | TBD                                 |
+| Disk      | At least 2.1TB (TLC NVMe recommended) | At least 1TB (TLC NVMe recommended) |
 | Memory    | 8GB+                                  | 8GB+                                |
 | CPU       | Higher clock speed over core count    | Higher clock speeds over core count |
 | Bandwidth | Stable 24Mbps+                        | Stable 24Mbps+                      |
