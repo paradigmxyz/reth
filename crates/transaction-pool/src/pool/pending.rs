@@ -358,7 +358,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
                 while self.len() > limit.max_txs && spammers[spammer_index - 1].1 > threshold {
                     for current_offender in &offenders {
-                        let txs = self.get_txs_by_sender(&current_offender);
+                        let txs = self.get_txs_by_sender(current_offender);
                         let mut txs = txs.iter().map(|tx| tx.transaction_id).collect::<Vec<_>>();
 
                         let txs = txs.split_off(threshold);
