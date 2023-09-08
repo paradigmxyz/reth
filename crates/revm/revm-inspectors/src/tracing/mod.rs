@@ -254,14 +254,12 @@ impl TracingInspector {
 
         self.step_stack.push(StackStep { trace_idx, step_idx: trace.trace.steps.len() });
 
-        let pc = interp.program_counter();
-
         let memory =
             self.config.record_memory_snapshots.then(|| interp.memory.clone()).unwrap_or_default();
         let stack =
             self.config.record_stack_snapshots.then(|| interp.stack.clone()).unwrap_or_default();
 
-        let op = OpCode::try_from_u8(interp.contract.bytecode.bytecode()[pc])
+        let op = OpCode::try_from_u8(interp.current_opcode())
             .or_else(|| {
                 // if the opcode is invalid, we'll use the invalid opcode to represent it because
                 // this is invoked before the opcode is executed, the evm will eventually return a
@@ -273,7 +271,7 @@ impl TracingInspector {
 
         trace.trace.steps.push(CallTraceStep {
             depth: data.journaled_state.depth(),
-            pc,
+            pc: interp.program_counter(),
             op,
             contract: interp.contract.address,
             stack,
@@ -315,38 +313,35 @@ impl TracingInspector {
             }
         }
 
-        if let Some(pc) = interp.program_counter().checked_sub(1) {
-            if self.config.record_state_diff {
-                let op = interp.contract.bytecode.bytecode()[pc];
+        if self.config.record_state_diff {
+            let op = interp.current_opcode();
 
-                let journal_entry = data
-                    .journaled_state
-                    .journal
-                    .last()
-                    // This should always work because revm initializes it as `vec![vec![]]`
-                    // See [JournaledState::new](revm::JournaledState)
-                    .expect("exists; initialized with vec")
-                    .last();
+            let journal_entry = data
+                .journaled_state
+                .journal
+                .last()
+                // This should always work because revm initializes it as `vec![vec![]]`
+                // See [JournaledState::new](revm::JournaledState)
+                .expect("exists; initialized with vec")
+                .last();
 
-                step.storage_change = match (op, journal_entry) {
-                    (
-                        opcode::SLOAD | opcode::SSTORE,
-                        Some(JournalEntry::StorageChange { address, key, had_value }),
-                    ) => {
-                        // SAFETY: (Address,key) exists if part if StorageChange
-                        let value =
-                            data.journaled_state.state[address].storage[key].present_value();
-                        let change = StorageChange { key: *key, value, had_value: *had_value };
-                        Some(change)
-                    }
-                    _ => None,
-                };
-            }
-
-            // The gas cost is the difference between the recorded gas remaining at the start of the
-            // step the remaining gas here, at the end of the step.
-            step.gas_cost = step.gas_remaining - self.gas_inspector.gas_remaining();
+            step.storage_change = match (op, journal_entry) {
+                (
+                    opcode::SLOAD | opcode::SSTORE,
+                    Some(JournalEntry::StorageChange { address, key, had_value }),
+                ) => {
+                    // SAFETY: (Address,key) exists if part if StorageChange
+                    let value = data.journaled_state.state[address].storage[key].present_value();
+                    let change = StorageChange { key: *key, value, had_value: *had_value };
+                    Some(change)
+                }
+                _ => None,
+            };
         }
+
+        // The gas cost is the difference between the recorded gas remaining at the start of the
+        // step the remaining gas here, at the end of the step.
+        step.gas_cost = step.gas_remaining - self.gas_inspector.gas_remaining();
 
         // set the status
         step.status = status;
