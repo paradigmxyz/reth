@@ -48,6 +48,7 @@ members = [
     "crates/rpc/rpc-types-compat",
     "examples",
     "examples/additional-rpc-namespace-in-cli",
+    "examples/rpc-db",
 ]
 default-members = ["bin/reth"]
 
