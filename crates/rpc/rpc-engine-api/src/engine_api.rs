@@ -388,16 +388,24 @@ where
     /// After Cancun, `parentBeaconBlockRoot` field must be [Some].
     /// Before Cancun, `parentBeaconBlockRoot` field must be [None].
     ///
-    /// If the payload attribute's timestamp is before the Cancun fork and the engine API message
-    /// version is V3, then this will return [EngineApiError::UnsupportedFork].
-    ///
     /// If the engine API message version is V1 or V2, and the payload attribute's timestamp is
     /// post-Cancun, then this will return [EngineApiError::NoParentBeaconBlockRootPostCancun].
     ///
-    /// Implements the following Engine API spec rule:
+    /// If the engine API message version is V3, but the `parentBeaconBlockRoot` is [None], then
+    /// this will return [EngineApiError::NoParentBeaconBlockRootPostCancun].
     ///
-    /// * Client software MUST return `-38005: Unsupported fork` error if the timestamp of the
-    /// payload does not fall within the time frame of the Cancun fork.
+    /// If the payload attribute's timestamp is before the Cancun fork and the engine API message
+    /// version is V3, then this will return [EngineApiError::UnsupportedFork].
+    ///
+    /// This implements the following Engine API spec rules:
+    ///
+    /// 1. Client software **MUST** check that provided set of parameters and their fields strictly
+    ///    matches the expected one and return `-32602: Invalid params` error if this check fails.
+    ///    Any field having `null` value **MUST** be considered as not provided.
+    ///
+    /// 2. Client software **MUST** return `-38005: Unsupported fork` error if the
+    ///    `payloadAttributes` is set and the `payloadAttributes.timestamp` does not fall within the
+    ///    time frame of the Cancun fork.
     fn validate_parent_beacon_block_root_presence(
         &self,
         version: EngineApiMessageVersion,
@@ -416,10 +424,10 @@ where
                 }
             }
             EngineApiMessageVersion::V3 => {
-                if !is_cancun {
-                    return Err(EngineApiError::UnsupportedFork)
-                } else if !has_parent_beacon_block_root {
+                if !has_parent_beacon_block_root {
                     return Err(EngineApiError::NoParentBeaconBlockRootPostCancun)
+                } else if !is_cancun {
+                    return Err(EngineApiError::UnsupportedFork)
                 }
             }
         };

@@ -254,14 +254,12 @@ impl TracingInspector {
 
         self.step_stack.push(StackStep { trace_idx, step_idx: trace.trace.steps.len() });
 
-        let pc = interp.program_counter();
-
         let memory =
             self.config.record_memory_snapshots.then(|| interp.memory.clone()).unwrap_or_default();
         let stack =
             self.config.record_stack_snapshots.then(|| interp.stack.clone()).unwrap_or_default();
 
-        let op = OpCode::try_from_u8(interp.contract.bytecode.bytecode()[pc])
+        let op = OpCode::try_from_u8(interp.current_opcode())
             .or_else(|| {
                 // if the opcode is invalid, we'll use the invalid opcode to represent it because
                 // this is invoked before the opcode is executed, the evm will eventually return a
@@ -273,7 +271,7 @@ impl TracingInspector {
 
         trace.trace.steps.push(CallTraceStep {
             depth: data.journaled_state.depth(),
-            pc,
+            pc: interp.program_counter(),
             op,
             contract: interp.contract.address,
             stack,
@@ -314,11 +312,8 @@ impl TracingInspector {
                 step.memory.resize(interp.memory.len());
             }
         }
-
-        let pc = step.pc;
-
         if self.config.record_state_diff {
-            let op = interp.contract.bytecode.bytecode()[pc];
+            let op = interp.current_opcode();
 
             let journal_entry = data
                 .journaled_state

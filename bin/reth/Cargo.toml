@@ -62,8 +62,8 @@ serde.workspace = true
 serde_json.workspace = true
 shellexpand = "3.0.0"
 dirs-next = "2.0.0"
-confy = "0.5"
-toml = { version = "0.7", features = ["display"] }
+confy.workspace = true
+toml = { workspace = true, features = ["display"] }
 
 # metrics
 metrics-exporter-prometheus = "0.12.1"

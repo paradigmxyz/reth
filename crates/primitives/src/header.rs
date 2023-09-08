@@ -4,7 +4,7 @@ use crate::{
     keccak256,
     proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
     BaseFeeParams, BlockBodyRoots, BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes, H160, H256,
-    H64, U256,
+    H64, U128, U256,
 };
 use bytes::{Buf, BufMut, BytesMut};
 
@@ -187,7 +187,7 @@ impl Header {
     /// Returns the blob fee for _this_ block according to the EIP-4844 spec.
     ///
     /// Returns `None` if `excess_blob_gas` is None
-    pub fn blob_fee(&self) -> Option<U256> {
+    pub fn blob_fee(&self) -> Option<U128> {
         self.excess_blob_gas.map(blob_fee)
     }
 
@@ -196,7 +196,7 @@ impl Header {
     /// Returns `None` if `excess_blob_gas` is None.
     ///
     /// See also [Self::next_block_excess_blob_gas]
-    pub fn next_block_blob_fee(&self) -> Option<U256> {
+    pub fn next_block_blob_fee(&self) -> Option<U128> {
         self.next_block_excess_blob_gas().map(blob_fee)
     }
 
