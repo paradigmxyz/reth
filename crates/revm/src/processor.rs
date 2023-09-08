@@ -335,7 +335,7 @@ impl<'a> EVMProcessor<'a> {
         if !contract_log_pruner.is_empty() {
             let (prev_block, filter) = self.pruning_address_filter.get_or_insert((0, Vec::new()));
             for (_, addresses) in contract_log_pruner.range(*prev_block..=block_number) {
-                filter.extend(addresses.into_iter().copied());
+                filter.extend(addresses.iter().copied());
             }
         }
 
@@ -343,7 +343,7 @@ impl<'a> EVMProcessor<'a> {
             // If there is an address_filter, and it does not contain any of the
             // contract addresses, then remove this receipts
             if let Some((_, filter)) = &self.pruning_address_filter {
-                if !receipt.logs.iter().any(|log| filter.contains(&&log.address)) {
+                if !receipt.logs.iter().any(|log| filter.contains(&log.address)) {
                     return false
                 }
             }
