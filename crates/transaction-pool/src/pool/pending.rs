@@ -370,8 +370,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         removed
     }
 
-    /// Returns spammers address and their txs_count that are not local and whose tx count >
-    /// max_account_slots limit
+    /// Returns account address and their txs_count that are not local and whose tx count > max_account_slots limit
     pub(crate) fn get_spammers(&self, max_account_slots: usize) -> Vec<(Address, usize)> {
         let mut spammers = Vec::new();
         for tx in self.all.iter() {

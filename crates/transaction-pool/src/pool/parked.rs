@@ -122,38 +122,50 @@ impl<T: ParkedOrd> ParkedPool<T> {
         txs
     }
 
-    /// Truncates the pool to the given limit.
+    /// Truncates the pool by dropping the oldest transaction first
     pub(crate) fn truncate_pool(
         &mut self,
         limit: SubPoolLimit,
         max_account_slots: usize,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = Vec::new();
-        let mut txs_to_remove = Vec::new();
+        // let mut txs_to_remove = Vec::new();
         let mut spammers = self.get_spammers(max_account_slots);
         spammers.sort_by(|(_, a), (_, b)| b.cmp(a));
+
+        // penalize spammers first by removing their oldest txs
         for (sender, _) in spammers {
             let txs = self.get_txs_by_sender(&sender);
             let mut txs = txs.iter().map(|tx| tx.transaction_id).collect::<Vec<_>>();
-            txs.sort_by(|a, b| b.cmp(a));
-            txs_to_remove.extend(txs);
-            if txs_to_remove.len() >= limit.max_txs {
-                break
+            txs.sort_by(|a, b| a.cmp(b));
+            for tx_id in txs {
+                while self.size() > limit.max_size || self.len() > limit.max_txs {
+                    if let Some(tx) = self.remove_transaction(&tx_id) {
+                        removed.push(tx);
+                    }
+                }
             }
         }
-        for tx_id in txs_to_remove {
-            if let Some(tx) = self.remove_transaction(&tx_id) {
-                removed.push(tx);
-            }
-        }
+
+        // penalize non-local txs if limit is still exceeded
         for tx in self.clone().all() {
             if tx.is_local() {
                 continue
             }
-            if let Some(tx) = self.remove_transaction(tx.id()) {
+            while self.size() > limit.max_size || self.len() > limit.max_txs {
+                if let Some(tx) = self.remove_transaction(tx.id()) {
+                    removed.push(tx);
+                }
+            }
+        }
+
+        // penalize local txs at last
+        while self.size() > limit.max_size || self.len() > limit.max_txs {
+            if let Some(tx) = self.pop_worst() {
                 removed.push(tx);
             }
         }
+
         removed
     }
 
