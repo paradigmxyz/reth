@@ -154,6 +154,10 @@ enr = { version = "0.9", default-features = false, features = ["k256"] }
 # for eip-4844
 c-kzg = { git = "https://github.com/ethereum/c-kzg-4844" }
 
+## config
+confy = "0.5"
+toml = "0.7"
+
 ### misc-testing
 proptest = "1.0"
 arbitrary = "1.1"
