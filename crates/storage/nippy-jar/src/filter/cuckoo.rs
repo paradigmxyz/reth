@@ -4,9 +4,10 @@ use cuckoofilter::{self, CuckooFilter, ExportedCuckooFilter};
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 
+/// [CuckooFilter](https://www.cs.cmu.edu/~dga/papers/cuckoo-conext2014.pdf). It builds and provides an approximated set-membership filter to answer queries such as "Does this element belong to this set?". Has a theoretical 3% false positive rate.
 #[derive(Serialize, Deserialize)]
 pub struct Cuckoo {
-    /// Remaining number of elements that can be added.
+    /// Remaining number of elements that can be added. This is necessary because the inner implementation will fail on adding an element past capacity, **but it will still add it and remove other**: [source](https://github.com/axiomhq/rust-cuckoofilter/tree/624da891bed1dd5d002c8fa92ce0dcd301975561#notes--todos)
     remaining: usize,
 
     #[serde(skip)]
