@@ -1,6 +1,6 @@
 use crate::{
     account::EthAccount,
-    hashed_cursor::{HashedAccountCursor, HashedCursorFactory},
+    hashed_cursor::{HashedAccountsCursor, HashedCursorFactory},
     prefix_set::PrefixSet,
     trie_cursor::{AccountTrieCursor, TrieCursor},
     walker::TrieWalker,

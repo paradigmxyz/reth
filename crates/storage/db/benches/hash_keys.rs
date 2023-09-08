@@ -12,7 +12,7 @@ use proptest::{
 };
 use reth_db::{
     cursor::{DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    TxHashNumber,
+    TransactionHashNumbers,
 };
 use std::{collections::HashSet, time::Instant};
 use test_fuzz::runtime::num_traits::Zero;
@@ -39,7 +39,7 @@ pub fn hash_keys(c: &mut Criterion) {
     group.sample_size(10);
 
     for size in [10_000, 100_000, 1_000_000] {
-        measure_table_insertion::<TxHashNumber>(&mut group, size);
+        measure_table_insertion::<TransactionHashNumbers>(&mut group, size);
     }
 }
 

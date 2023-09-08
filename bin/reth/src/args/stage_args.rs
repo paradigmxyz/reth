@@ -13,7 +13,7 @@ pub enum StageEnum {
     Hashing,
     Merkle,
     TxLookup,
-    AccountHistory,
-    StorageHistory,
+    AccountHistories,
+    StorageHistories,
     TotalDifficulty,
 }

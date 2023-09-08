@@ -13,7 +13,7 @@ use reth_primitives::{
     MINIMUM_PRUNING_DISTANCE, U256,
 };
 use reth_trie::{
-    hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
+    hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorages},
     StateRoot, StateRootError,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -216,7 +216,7 @@ impl PostState {
 
         // Insert accounts and storages with hashed keys from storage changes.
         for (address, storage) in self.storage() {
-            let mut hashed_storage = HashedStorage::new(storage.wiped());
+            let mut hashed_storage = HashedStorages::new(storage.wiped());
             for (slot, value) in &storage.storage {
                 let hashed_slot = keccak256(H256(slot.to_be_bytes()));
                 if *value == U256::ZERO {
@@ -579,7 +579,7 @@ impl PostState {
 
         // Write account changes
         tracing::trace!(target: "provider::post_state", "Writing account changes");
-        let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
+        let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSets>()?;
         for (block_number, account_changes) in
             std::mem::take(&mut self.account_changes).inner.into_iter()
         {
@@ -1182,7 +1182,7 @@ mod tests {
         // Check change set
         let mut changeset_cursor = provider
             .tx_ref()
-            .cursor_dup_read::<tables::AccountChangeSet>()
+            .cursor_dup_read::<tables::AccountChangeSets>()
             .expect("Could not open changeset cursor");
         assert_eq!(
             changeset_cursor.seek_exact(1).expect("Could not read account change set"),
@@ -1929,9 +1929,9 @@ mod tests {
         db.update(|tx| {
             for (address, (account, storage)) in state.iter() {
                 let hashed_address = keccak256(address);
-                tx.put::<tables::HashedAccount>(hashed_address, *account).unwrap();
+                tx.put::<tables::HashedAccounts>(hashed_address, *account).unwrap();
                 for (slot, value) in storage {
-                    tx.put::<tables::HashedStorage>(
+                    tx.put::<tables::HashedStorages>(
                         hashed_address,
                         StorageEntry { key: keccak256(slot), value: *value },
                     )

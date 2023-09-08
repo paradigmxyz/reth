@@ -14,8 +14,8 @@ pub enum StageId {
     StorageHashing,
     MerkleExecute,
     TransactionLookup,
-    IndexStorageHistory,
-    IndexAccountHistory,
+    IndexStorageHistories,
+    IndexAccountHistories,
     Finish,
     Other(&'static str),
 }
@@ -33,8 +33,8 @@ impl StageId {
         StageId::StorageHashing,
         StageId::MerkleExecute,
         StageId::TransactionLookup,
-        StageId::IndexStorageHistory,
-        StageId::IndexAccountHistory,
+        StageId::IndexStorageHistories,
+        StageId::IndexAccountHistories,
         StageId::Finish,
     ];
 
@@ -51,8 +51,8 @@ impl StageId {
             StageId::StorageHashing => "StorageHashing",
             StageId::MerkleExecute => "MerkleExecute",
             StageId::TransactionLookup => "TransactionLookup",
-            StageId::IndexAccountHistory => "IndexAccountHistory",
-            StageId::IndexStorageHistory => "IndexStorageHistory",
+            StageId::IndexAccountHistories => "IndexAccountHistories",
+            StageId::IndexStorageHistories => "IndexStorageHistories",
             StageId::Finish => "Finish",
             StageId::Other(s) => s,
         }
@@ -90,8 +90,8 @@ mod tests {
         assert_eq!(StageId::AccountHashing.to_string(), "AccountHashing");
         assert_eq!(StageId::StorageHashing.to_string(), "StorageHashing");
         assert_eq!(StageId::MerkleExecute.to_string(), "MerkleExecute");
-        assert_eq!(StageId::IndexAccountHistory.to_string(), "IndexAccountHistory");
-        assert_eq!(StageId::IndexStorageHistory.to_string(), "IndexStorageHistory");
+        assert_eq!(StageId::IndexAccountHistories.to_string(), "IndexAccountHistories");
+        assert_eq!(StageId::IndexStorageHistories.to_string(), "IndexStorageHistories");
         assert_eq!(StageId::TransactionLookup.to_string(), "TransactionLookup");
         assert_eq!(StageId::Finish.to_string(), "Finish");
 

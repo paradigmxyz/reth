@@ -41,7 +41,7 @@ mod tests {
     use super::*;
     use crate::{
         stage::Stage,
-        stages::{ExecutionStage, IndexAccountHistoryStage, IndexStorageHistoryStage},
+        stages::{ExecutionStage, IndexAccountHistoriesStage, IndexStorageHistoriesStage},
         test_utils::TestTransaction,
         ExecInput,
     };
@@ -50,7 +50,7 @@ mod tests {
         mdbx::{cursor::Cursor, RW},
         tables,
         transaction::{DbTx, DbTxMut},
-        AccountHistory, DatabaseEnv,
+        AccountHistories, DatabaseEnv,
     };
     use reth_interfaces::test_utils::generators::{self, random_block};
     use reth_primitives::{
@@ -154,23 +154,23 @@ mod tests {
                 expect_num_acc_changesets
             );
 
-            // Check AccountHistory
+            // Check AccountHistories
             let mut acc_indexing_stage =
-                IndexAccountHistoryStage { prune_modes: prune_modes.clone(), ..Default::default() };
+                IndexAccountHistoriesStage { prune_modes: prune_modes.clone(), ..Default::default() };
 
             if let Some(PruneMode::Full) = prune_modes.account_history {
                 // Full is not supported
                 assert!(acc_indexing_stage.execute(&provider, input).await.is_err());
             } else {
                 acc_indexing_stage.execute(&provider, input).await.unwrap();
-                let mut account_history: Cursor<'_, RW, AccountHistory> =
-                    provider.tx_ref().cursor_read::<tables::AccountHistory>().unwrap();
+                let mut account_history: Cursor<'_, RW, AccountHistories> =
+                    provider.tx_ref().cursor_read::<tables::AccountHistories>().unwrap();
                 assert_eq!(account_history.walk(None).unwrap().count(), expect_num_acc_changesets);
             }
 
-            // Check StorageHistory
+            // Check StorageHistories
             let mut storage_indexing_stage =
-                IndexStorageHistoryStage { prune_modes: prune_modes.clone(), ..Default::default() };
+                IndexStorageHistoriesStage { prune_modes: prune_modes.clone(), ..Default::default() };
 
             if let Some(PruneMode::Full) = prune_modes.storage_history {
                 // Full is not supported
@@ -179,7 +179,7 @@ mod tests {
                 storage_indexing_stage.execute(&provider, input).await.unwrap();
 
                 let mut storage_history =
-                    provider.tx_ref().cursor_read::<tables::StorageHistory>().unwrap();
+                    provider.tx_ref().cursor_read::<tables::StorageHistories>().unwrap();
                 assert_eq!(
                     storage_history.walk(None).unwrap().count(),
                     expect_num_storage_changesets

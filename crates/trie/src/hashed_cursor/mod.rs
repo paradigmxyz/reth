@@ -10,11 +10,11 @@ pub use post_state::*;
 /// The factory trait for creating cursors over the hashed state.
 pub trait HashedCursorFactory<'a> {
     /// The hashed account cursor type.
-    type AccountCursor: HashedAccountCursor
+    type AccountCursor: HashedAccountsCursor
     where
         Self: 'a;
     /// The hashed storage cursor type.
-    type StorageCursor: HashedStorageCursor
+    type StorageCursor: HashedStoragesCursor
     where
         Self: 'a;
 
@@ -26,7 +26,7 @@ pub trait HashedCursorFactory<'a> {
 }
 
 /// The cursor for iterating over hashed accounts.
-pub trait HashedAccountCursor {
+pub trait HashedAccountsCursor {
     /// Seek an entry greater or equal to the given key and position the cursor there.
     fn seek(&mut self, key: H256) -> Result<Option<(H256, Account)>, reth_db::DatabaseError>;
 
@@ -35,7 +35,7 @@ pub trait HashedAccountCursor {
 }
 
 /// The cursor for iterating over hashed storage entries.
-pub trait HashedStorageCursor {
+pub trait HashedStoragesCursor {
     /// Returns `true` if there are no entries for a given key.
     fn is_storage_empty(&mut self, key: H256) -> Result<bool, reth_db::DatabaseError>;
 

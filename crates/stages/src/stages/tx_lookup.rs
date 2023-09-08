@@ -24,7 +24,7 @@ use tracing::*;
 ///
 /// This stage walks over the bodies table, and sets the transaction hash of each transaction in a
 /// block to the corresponding `BlockNumber` at each block. This is written to the
-/// [`tables::TxHashNumber`] This is used for looking up changesets via the transaction hash.
+/// [`tables::TransactionHashNumbers`] This is used for looking up changesets via the transaction hash.
 #[derive(Debug, Clone)]
 pub struct TransactionLookupStage {
     /// The number of lookup entries to commit at once
@@ -134,7 +134,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         // Sort before inserting the reverse lookup for hash -> tx_id.
         tx_list.par_sort_unstable_by(|txa, txb| txa.0.cmp(&txb.0));
 
-        let mut txhash_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
+        let mut txhash_cursor = tx.cursor_write::<tables::TransactionHashNumbers>()?;
 
         // If the last inserted element in the database is equal or bigger than the first
         // in our set, then we need to insert inside the DB. If it is smaller then last
@@ -174,7 +174,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 
         // Cursors to unwind tx hash to number
         let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
-        let mut tx_hash_number_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
+        let mut tx_hash_number_cursor = tx.cursor_write::<tables::TransactionHashNumbers>()?;
         let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
         let mut rev_walker = body_cursor.walk_back(Some(*range.end()))?;
         while let Some((number, body)) = rev_walker.next().transpose()? {
@@ -221,10 +221,10 @@ fn stage_checkpoint<DB: Database>(
         .map(|tx_number| tx_number + 1)
         .unwrap_or_default();
     Ok(EntitiesCheckpoint {
-        // If `TxHashNumber` table was pruned, we will have a number of entries in it not matching
+        // If `TransactionHashNumbers` table was pruned, we will have a number of entries in it not matching
         // the actual number of processed transactions. To fix that, we add the number of pruned
-        // `TxHashNumber` entries.
-        processed: provider.tx_ref().entries::<tables::TxHashNumber>()? as u64 + pruned_entries,
+        // `TransactionHashNumbers` entries.
+        processed: provider.tx_ref().entries::<tables::TransactionHashNumbers>()? as u64 + pruned_entries,
         total: provider.tx_ref().entries::<tables::Transactions>()? as u64,
     })
 }
@@ -338,7 +338,7 @@ mod tests {
             ExecOutput {
                 checkpoint: StageCheckpoint::new(expected_progress).with_entities_stage_checkpoint(
                     EntitiesCheckpoint {
-                        processed: runner.tx.table::<tables::TxHashNumber>().unwrap().len() as u64,
+                        processed: runner.tx.table::<tables::TransactionHashNumbers>().unwrap().len() as u64,
                         total: total_txs
                     }
                 ),
@@ -495,10 +495,10 @@ mod tests {
 
         /// # Panics
         ///
-        /// 1. If there are any entries in the [tables::TxHashNumber] table above a given block
+        /// 1. If there are any entries in the [tables::TransactionHashNumbers] table above a given block
         ///    number.
         ///
-        /// 2. If the is no requested block entry in the bodies table, but [tables::TxHashNumber] is
+        /// 2. If the is no requested block entry in the bodies table, but [tables::TransactionHashNumbers] is
         ///    not empty.
         fn ensure_no_hash_by_block(&self, number: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self
@@ -507,12 +507,12 @@ mod tests {
                 .block_body_indices(number)?
                 .ok_or(ProviderError::BlockBodyIndicesNotFound(number));
             match body_result {
-                Ok(body) => self.tx.ensure_no_entry_above_by_value::<tables::TxHashNumber, _>(
+                Ok(body) => self.tx.ensure_no_entry_above_by_value::<tables::TransactionHashNumbers, _>(
                     body.last_tx_num(),
                     |key| key,
                 )?,
                 Err(_) => {
-                    assert!(self.tx.table_is_empty::<tables::TxHashNumber>()?);
+                    assert!(self.tx.table_is_empty::<tables::TransactionHashNumbers>()?);
                 }
             };
 

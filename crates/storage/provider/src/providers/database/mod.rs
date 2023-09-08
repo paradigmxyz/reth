@@ -103,9 +103,9 @@ impl<DB: Database> ProviderFactory<DB> {
         block_number += 1;
 
         let account_history_prune_checkpoint =
-            provider.get_prune_checkpoint(PrunePart::AccountHistory)?;
+            provider.get_prune_checkpoint(PrunePart::AccountHistories)?;
         let storage_history_prune_checkpoint =
-            provider.get_prune_checkpoint(PrunePart::StorageHistory)?;
+            provider.get_prune_checkpoint(PrunePart::StorageHistories)?;
 
         let mut state_provider = HistoricalStateProvider::new(provider.into_tx(), block_number);
 
@@ -509,7 +509,7 @@ mod tests {
 
             assert_matches!(provider.insert_block(block.clone(), None, None), Ok(_));
 
-            let senders = provider.get_or_take::<tables::TxSenders, true>(range.clone());
+            let senders = provider.get_or_take::<tables::TransactionSenders, true>(range.clone());
             assert_eq!(
                 senders,
                 Ok(range

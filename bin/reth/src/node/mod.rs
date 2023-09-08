@@ -63,7 +63,7 @@ use reth_stages::{
     prelude::*,
     stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, HeaderSyncMode,
-        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
+        IndexAccountHistoriesStage, IndexStorageHistoriesStage, MerkleStage, SenderRecoveryStage,
         StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
     },
     MetricEventsSender, MetricsListener,
@@ -869,11 +869,11 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     stage_config.transaction_lookup.commit_threshold,
                     prune_modes.clone(),
                 ))
-                .set(IndexAccountHistoryStage::new(
+                .set(IndexAccountHistoriesStage::new(
                     stage_config.index_account_history.commit_threshold,
                     prune_modes.clone(),
                 ))
-                .set(IndexStorageHistoryStage::new(
+                .set(IndexStorageHistoriesStage::new(
                     stage_config.index_storage_history.commit_threshold,
                     prune_modes,
                 )),

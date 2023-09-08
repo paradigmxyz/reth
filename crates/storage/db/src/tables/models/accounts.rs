@@ -12,7 +12,7 @@ use reth_codecs::{derive_arbitrary, Compact};
 use reth_primitives::{Account, Address, BlockNumber};
 use serde::{Deserialize, Serialize};
 
-/// Account as it is saved inside [`AccountChangeSet`][crate::tables::AccountChangeSet].
+/// Account as it is saved inside [`AccountChangeSets`][crate::tables::AccountChangeSets].
 ///
 /// [`Address`] is the subkey.
 #[derive_arbitrary(compact)]

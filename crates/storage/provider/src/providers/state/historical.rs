@@ -22,10 +22,10 @@ use std::marker::PhantomData;
 /// It means that all changes made in the provided block number are not included.
 ///
 /// Historical state provider reads the following tables:
-/// - [tables::AccountHistory]
+/// - [tables::AccountHistories]
 /// - [tables::Bytecodes]
-/// - [tables::StorageHistory]
-/// - [tables::AccountChangeSet]
+/// - [tables::StorageHistories]
+/// - [tables::AccountChangeSets]
 /// - [tables::StorageChangeSet]
 pub struct HistoricalStateProviderRef<'a, 'b, TX: DbTx<'a>> {
     /// Transaction
@@ -67,7 +67,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
         Self { tx, block_number, lowest_available_blocks, _phantom: PhantomData {} }
     }
 
-    /// Lookup an account in the AccountHistory table
+    /// Lookup an account in the AccountHistories table
     pub fn account_history_lookup(&self, address: Address) -> Result<HistoryInfo> {
         if !self.lowest_available_blocks.is_account_history_available(self.block_number) {
             return Err(ProviderError::StateAtBlockPruned(self.block_number).into())
@@ -75,14 +75,14 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
 
         // history key to search IntegerList of block number changesets.
         let history_key = ShardedKey::new(address, self.block_number);
-        self.history_info::<tables::AccountHistory, _>(
+        self.history_info::<tables::AccountHistories, _>(
             history_key,
             |key| key.key == address,
             self.lowest_available_blocks.account_history_block_number,
         )
     }
 
-    /// Lookup a storage key in the StorageHistory table
+    /// Lookup a storage key in the StorageHistories table
     pub fn storage_history_lookup(
         &self,
         address: Address,
@@ -94,7 +94,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
 
         // history key to search IntegerList of block number changesets.
         let history_key = StorageShardedKey::new(address, storage_key, self.block_number);
-        self.history_info::<tables::StorageHistory, _>(
+        self.history_info::<tables::StorageHistories, _>(
             history_key,
             |key| key.address == address && key.sharded_key.key == storage_key,
             self.lowest_available_blocks.storage_history_block_number,
@@ -165,10 +165,10 @@ impl<'a, 'b, TX: DbTx<'a>> AccountReader for HistoricalStateProviderRef<'a, 'b, 
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => Ok(self
                 .tx
-                .cursor_dup_read::<tables::AccountChangeSet>()?
+                .cursor_dup_read::<tables::AccountChangeSets>()?
                 .seek_by_key_subkey(changeset_block_number, address)?
                 .filter(|acc| acc.address == address)
-                .ok_or(ProviderError::AccountChangesetNotFound {
+                .ok_or(ProviderError::AccountChangeSetsNotFound {
                     block_number: changeset_block_number,
                     address,
                 })?
@@ -309,11 +309,11 @@ delegate_provider_impls!(HistoricalStateProvider<'a, TX> where [TX: DbTx<'a>]);
 #[derive(Default, Copy, Clone)]
 pub struct LowestAvailableBlocks {
     /// Lowest block number at which the account history is available. It may not be available if
-    /// [reth_primitives::PrunePart::AccountHistory] was pruned.
+    /// [reth_primitives::PrunePart::AccountHistories] was pruned.
     /// [Option::None] means all history is available.
     pub account_history_block_number: Option<BlockNumber>,
     /// Lowest block number at which the storage history is available. It may not be available if
-    /// [reth_primitives::PrunePart::StorageHistory] was pruned.
+    /// [reth_primitives::PrunePart::StorageHistories] was pruned.
     /// [Option::None] means all history is available.
     pub storage_history_block_number: Option<BlockNumber>,
 }
@@ -365,17 +365,17 @@ mod tests {
         let db = create_test_rw_db();
         let tx = db.tx_mut().unwrap();
 
-        tx.put::<tables::AccountHistory>(
+        tx.put::<tables::AccountHistories>(
             ShardedKey { key: ADDRESS, highest_block_number: 7 },
             BlockNumberList::new([1, 3, 7]).unwrap(),
         )
         .unwrap();
-        tx.put::<tables::AccountHistory>(
+        tx.put::<tables::AccountHistories>(
             ShardedKey { key: ADDRESS, highest_block_number: u64::MAX },
             BlockNumberList::new([10, 15]).unwrap(),
         )
         .unwrap();
-        tx.put::<tables::AccountHistory>(
+        tx.put::<tables::AccountHistories>(
             ShardedKey { key: HIGHER_ADDRESS, highest_block_number: u64::MAX },
             BlockNumberList::new([4]).unwrap(),
         )
@@ -390,29 +390,29 @@ mod tests {
         let higher_acc_plain = Account { nonce: 4, balance: U256::ZERO, bytecode_hash: None };
 
         // setup
-        tx.put::<tables::AccountChangeSet>(1, AccountBeforeTx { address: ADDRESS, info: None })
+        tx.put::<tables::AccountChangeSets>(1, AccountBeforeTx { address: ADDRESS, info: None })
             .unwrap();
-        tx.put::<tables::AccountChangeSet>(
+        tx.put::<tables::AccountChangeSets>(
             3,
             AccountBeforeTx { address: ADDRESS, info: Some(acc_at3) },
         )
         .unwrap();
-        tx.put::<tables::AccountChangeSet>(
+        tx.put::<tables::AccountChangeSets>(
             4,
             AccountBeforeTx { address: HIGHER_ADDRESS, info: None },
         )
         .unwrap();
-        tx.put::<tables::AccountChangeSet>(
+        tx.put::<tables::AccountChangeSets>(
             7,
             AccountBeforeTx { address: ADDRESS, info: Some(acc_at7) },
         )
         .unwrap();
-        tx.put::<tables::AccountChangeSet>(
+        tx.put::<tables::AccountChangeSets>(
             10,
             AccountBeforeTx { address: ADDRESS, info: Some(acc_at10) },
         )
         .unwrap();
-        tx.put::<tables::AccountChangeSet>(
+        tx.put::<tables::AccountChangeSets>(
             15,
             AccountBeforeTx { address: ADDRESS, info: Some(acc_at15) },
         )
@@ -472,7 +472,7 @@ mod tests {
         let db = create_test_rw_db();
         let tx = db.tx_mut().unwrap();
 
-        tx.put::<tables::StorageHistory>(
+        tx.put::<tables::StorageHistories>(
             StorageShardedKey {
                 address: ADDRESS,
                 sharded_key: ShardedKey { key: STORAGE, highest_block_number: 7 },
@@ -480,7 +480,7 @@ mod tests {
             BlockNumberList::new([3, 7]).unwrap(),
         )
         .unwrap();
-        tx.put::<tables::StorageHistory>(
+        tx.put::<tables::StorageHistories>(
             StorageShardedKey {
                 address: ADDRESS,
                 sharded_key: ShardedKey { key: STORAGE, highest_block_number: u64::MAX },
@@ -488,7 +488,7 @@ mod tests {
             BlockNumberList::new([10, 15]).unwrap(),
         )
         .unwrap();
-        tx.put::<tables::StorageHistory>(
+        tx.put::<tables::StorageHistories>(
             StorageShardedKey {
                 address: HIGHER_ADDRESS,
                 sharded_key: ShardedKey { key: STORAGE, highest_block_number: u64::MAX },

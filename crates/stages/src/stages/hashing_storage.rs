@@ -91,7 +91,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                     }
                 _ => {
                     // clear table, load all accounts and hash it
-                    tx.clear::<tables::HashedStorage>()?;
+                    tx.clear::<tables::HashedStorages>()?;
 
                     (None, None)
                 }
@@ -153,7 +153,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
 
             // iterate and put presorted hashed slots
             hashed_batch.into_iter().try_for_each(|((addr, key), value)| {
-                tx.put::<tables::HashedStorage>(addr, StorageEntry { key, value })
+                tx.put::<tables::HashedStorages>(addr, StorageEntry { key, value })
             })?;
 
             if current_key.is_some() {
@@ -217,7 +217,7 @@ fn stage_checkpoint_progress<DB: Database>(
     provider: &DatabaseProviderRW<'_, &DB>,
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
-        processed: provider.tx_ref().entries::<tables::HashedStorage>()? as u64,
+        processed: provider.tx_ref().entries::<tables::HashedStorages>()? as u64,
         total: provider.tx_ref().entries::<tables::PlainStorageState>()? as u64,
     })
 }
@@ -366,7 +366,7 @@ mod tests {
             }) if address == progress_address && storage == progress_key &&
                 total == runner.tx.table::<tables::PlainStorageState>().unwrap().len() as u64
         );
-        assert_eq!(runner.tx.table::<tables::HashedStorage>().unwrap().len(), 500);
+        assert_eq!(runner.tx.table::<tables::HashedStorages>().unwrap().len(), 500);
 
         // second run with commit threshold of 2 to check if subkey is set.
         runner.set_commit_threshold(2);
@@ -412,7 +412,7 @@ mod tests {
             }) if address == progress_address && storage == progress_key &&
                 total == runner.tx.table::<tables::PlainStorageState>().unwrap().len() as u64
         );
-        assert_eq!(runner.tx.table::<tables::HashedStorage>().unwrap().len(), 502);
+        assert_eq!(runner.tx.table::<tables::HashedStorages>().unwrap().len(), 502);
 
         // third last run, hash rest of storages.
         runner.set_commit_threshold(1000);
@@ -445,7 +445,7 @@ mod tests {
                 total == runner.tx.table::<tables::PlainStorageState>().unwrap().len() as u64
         );
         assert_eq!(
-            runner.tx.table::<tables::HashedStorage>().unwrap().len(),
+            runner.tx.table::<tables::HashedStorages>().unwrap().len(),
             runner.tx.table::<tables::PlainStorageState>().unwrap().len()
         );
 
@@ -505,7 +505,7 @@ mod tests {
                 self.tx.commit(|tx| {
                     progress.body.iter().try_for_each(
                         |transaction| -> Result<(), reth_db::DatabaseError> {
-                            tx.put::<tables::TxHashNumber>(transaction.hash(), next_tx_num)?;
+                            tx.put::<tables::TransactionHashNumbers>(transaction.hash(), next_tx_num)?;
                             tx.put::<tables::Transactions>(
                                 next_tx_num,
                                 transaction.clone().into(),
@@ -597,7 +597,7 @@ mod tests {
                 .query(|tx| {
                     let mut storage_cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
                     let mut hashed_storage_cursor =
-                        tx.cursor_dup_read::<tables::HashedStorage>()?;
+                        tx.cursor_dup_read::<tables::HashedStorages>()?;
 
                     let mut expected = 0;
 
@@ -612,7 +612,7 @@ mod tests {
                         );
                         expected += 1;
                     }
-                    let count = tx.cursor_dup_read::<tables::HashedStorage>()?.walk(None)?.count();
+                    let count = tx.cursor_dup_read::<tables::HashedStorages>()?.walk(None)?.count();
 
                     assert_eq!(count, expected);
                     Ok(())
@@ -644,15 +644,15 @@ mod tests {
                 let hashed_entry = StorageEntry { key: keccak256(entry.key), value: entry.value };
 
                 if let Some(e) = tx
-                    .cursor_dup_write::<tables::HashedStorage>()?
+                    .cursor_dup_write::<tables::HashedStorages>()?
                     .seek_by_key_subkey(hashed_address, hashed_entry.key)?
                     .filter(|e| e.key == hashed_entry.key)
                 {
-                    tx.delete::<tables::HashedStorage>(hashed_address, Some(e))
+                    tx.delete::<tables::HashedStorages>(hashed_address, Some(e))
                         .expect("failed to delete entry");
                 }
 
-                tx.put::<tables::HashedStorage>(hashed_address, hashed_entry)?;
+                tx.put::<tables::HashedStorages>(hashed_address, hashed_entry)?;
             }
 
             tx.put::<tables::StorageChangeSet>(tid_address, prev_entry)?;

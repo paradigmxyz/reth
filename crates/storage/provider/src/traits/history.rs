@@ -15,7 +15,7 @@ pub trait HistoryWriter: Send + Sync {
     /// Returns number of changesets walked.
     fn unwind_account_history_indices(&self, range: RangeInclusive<BlockNumber>) -> Result<usize>;
 
-    /// Insert account change index to database. Used inside AccountHistoryIndex stage
+    /// Insert account change index to database. Used inside AccountHistoriesIndex stage
     fn insert_account_history_index(
         &self,
         account_transitions: BTreeMap<Address, Vec<u64>>,
@@ -26,7 +26,7 @@ pub trait HistoryWriter: Send + Sync {
     /// Returns number of changesets walked.
     fn unwind_storage_history_indices(&self, range: Range<BlockNumberAddress>) -> Result<usize>;
 
-    /// Insert storage change index to database. Used inside StorageHistoryIndex stage
+    /// Insert storage change index to database. Used inside StorageHistoriesIndex stage
     fn insert_storage_history_index(
         &self,
         storage_transitions: BTreeMap<(Address, H256), Vec<u64>>,

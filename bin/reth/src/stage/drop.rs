@@ -64,15 +64,15 @@ impl Command {
                 StageEnum::Bodies => {
                     tx.clear::<tables::BlockBodyIndices>()?;
                     tx.clear::<tables::Transactions>()?;
-                    tx.clear::<tables::TransactionBlock>()?;
+                    tx.clear::<tables::TransactionBlocks>()?;
                     tx.clear::<tables::BlockOmmers>()?;
                     tx.clear::<tables::BlockWithdrawals>()?;
-                    tx.put::<tables::SyncStage>(StageId::Bodies.to_string(), Default::default())?;
+                    tx.put::<tables::SyncStages>(StageId::Bodies.to_string(), Default::default())?;
                     insert_genesis_header::<DatabaseEnv>(tx, self.chain)?;
                 }
                 StageEnum::Senders => {
-                    tx.clear::<tables::TxSenders>()?;
-                    tx.put::<tables::SyncStage>(
+                    tx.clear::<tables::TransactionSenders>()?;
+                    tx.put::<tables::SyncStages>(
                         StageId::SenderRecovery.to_string(),
                         Default::default(),
                     )?;
@@ -80,41 +80,41 @@ impl Command {
                 StageEnum::Execution => {
                     tx.clear::<tables::PlainAccountState>()?;
                     tx.clear::<tables::PlainStorageState>()?;
-                    tx.clear::<tables::AccountChangeSet>()?;
+                    tx.clear::<tables::AccountChangeSets>()?;
                     tx.clear::<tables::StorageChangeSet>()?;
                     tx.clear::<tables::Bytecodes>()?;
                     tx.clear::<tables::Receipts>()?;
-                    tx.put::<tables::SyncStage>(
+                    tx.put::<tables::SyncStages>(
                         StageId::Execution.to_string(),
                         Default::default(),
                     )?;
                     insert_genesis_state::<DatabaseEnv>(tx, self.chain.genesis())?;
                 }
                 StageEnum::AccountHashing => {
-                    tx.clear::<tables::HashedAccount>()?;
-                    tx.put::<tables::SyncStage>(
+                    tx.clear::<tables::HashedAccounts>()?;
+                    tx.put::<tables::SyncStages>(
                         StageId::AccountHashing.to_string(),
                         Default::default(),
                     )?;
                 }
                 StageEnum::StorageHashing => {
-                    tx.clear::<tables::HashedStorage>()?;
-                    tx.put::<tables::SyncStage>(
+                    tx.clear::<tables::HashedStorages>()?;
+                    tx.put::<tables::SyncStages>(
                         StageId::StorageHashing.to_string(),
                         Default::default(),
                     )?;
                 }
                 StageEnum::Hashing => {
                     // Clear hashed accounts
-                    tx.clear::<tables::HashedAccount>()?;
-                    tx.put::<tables::SyncStage>(
+                    tx.clear::<tables::HashedAccounts>()?;
+                    tx.put::<tables::SyncStages>(
                         StageId::AccountHashing.to_string(),
                         Default::default(),
                     )?;
 
                     // Clear hashed storages
-                    tx.clear::<tables::HashedStorage>()?;
-                    tx.put::<tables::SyncStage>(
+                    tx.clear::<tables::HashedStorages>()?;
+                    tx.put::<tables::SyncStages>(
                         StageId::StorageHashing.to_string(),
                         Default::default(),
                     )?;
@@ -122,42 +122,42 @@ impl Command {
                 StageEnum::Merkle => {
                     tx.clear::<tables::AccountsTrie>()?;
                     tx.clear::<tables::StoragesTrie>()?;
-                    tx.put::<tables::SyncStage>(
+                    tx.put::<tables::SyncStages>(
                         StageId::MerkleExecute.to_string(),
                         Default::default(),
                     )?;
-                    tx.put::<tables::SyncStage>(
+                    tx.put::<tables::SyncStages>(
                         StageId::MerkleUnwind.to_string(),
                         Default::default(),
                     )?;
-                    tx.delete::<tables::SyncStageProgress>(
+                    tx.delete::<tables::SyncStagesProgresses>(
                         StageId::MerkleExecute.to_string(),
                         None,
                     )?;
                 }
-                StageEnum::AccountHistory | StageEnum::StorageHistory => {
-                    tx.clear::<tables::AccountHistory>()?;
-                    tx.clear::<tables::StorageHistory>()?;
-                    tx.put::<tables::SyncStage>(
-                        StageId::IndexAccountHistory.to_string(),
+                StageEnum::AccountHistories | StageEnum::StorageHistories => {
+                    tx.clear::<tables::AccountHistories>()?;
+                    tx.clear::<tables::StorageHistories>()?;
+                    tx.put::<tables::SyncStages>(
+                        StageId::IndexAccountHistories.to_string(),
                         Default::default(),
                     )?;
-                    tx.put::<tables::SyncStage>(
-                        StageId::IndexStorageHistory.to_string(),
+                    tx.put::<tables::SyncStages>(
+                        StageId::IndexStorageHistories.to_string(),
                         Default::default(),
                     )?;
                 }
                 StageEnum::TotalDifficulty => {
-                    tx.clear::<tables::HeaderTD>()?;
-                    tx.put::<tables::SyncStage>(
+                    tx.clear::<tables::HeaderTerminalDifficulties>()?;
+                    tx.put::<tables::SyncStages>(
                         StageId::TotalDifficulty.to_string(),
                         Default::default(),
                     )?;
                     insert_genesis_header::<DatabaseEnv>(tx, self.chain)?;
                 }
                 StageEnum::TxLookup => {
-                    tx.clear::<tables::TxHashNumber>()?;
-                    tx.put::<tables::SyncStage>(
+                    tx.clear::<tables::TransactionHashNumbers>()?;
+                    tx.put::<tables::SyncStages>(
                         StageId::TransactionLookup.to_string(),
                         Default::default(),
                     )?;
@@ -169,7 +169,7 @@ impl Command {
                 }
             }
 
-            tx.put::<tables::SyncStage>(StageId::Finish.to_string(), Default::default())?;
+            tx.put::<tables::SyncStages>(StageId::Finish.to_string(), Default::default())?;
 
             Ok::<_, eyre::Error>(())
         })??;

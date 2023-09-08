@@ -48,7 +48,7 @@ where
         let mut loaded_prefix_sets = LoadedPrefixSets::default();
 
         // Walk account changeset and insert account prefixes.
-        let mut account_changeset_cursor = self.cursor_read::<tables::AccountChangeSet>()?;
+        let mut account_changeset_cursor = self.cursor_read::<tables::AccountChangeSets>()?;
         let mut account_plain_state_cursor = self.cursor_read::<tables::PlainAccountState>()?;
         for account_entry in account_changeset_cursor.walk_range(range.clone())? {
             let (_, AccountBeforeTx { address, .. }) = account_entry?;

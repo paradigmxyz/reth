@@ -12,9 +12,9 @@ use std::fmt::Debug;
 
 /// Stage is indexing history the account changesets generated in
 /// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
-/// on index sharding take a look at [`reth_db::tables::AccountHistory`]
+/// on index sharding take a look at [`reth_db::tables::AccountHistories`]
 #[derive(Debug)]
-pub struct IndexAccountHistoryStage {
+pub struct IndexAccountHistoriesStage {
     /// Number of blocks after which the control
     /// flow will be returned to the pipeline for commit.
     pub commit_threshold: u64,
@@ -22,24 +22,24 @@ pub struct IndexAccountHistoryStage {
     pub prune_modes: PruneModes,
 }
 
-impl IndexAccountHistoryStage {
-    /// Create new instance of [IndexAccountHistoryStage].
+impl IndexAccountHistoriesStage {
+    /// Create new instance of [IndexAccountHistoriesStage].
     pub fn new(commit_threshold: u64, prune_modes: PruneModes) -> Self {
         Self { commit_threshold, prune_modes }
     }
 }
 
-impl Default for IndexAccountHistoryStage {
+impl Default for IndexAccountHistoriesStage {
     fn default() -> Self {
         Self { commit_threshold: 100_000, prune_modes: PruneModes::none() }
     }
 }
 
 #[async_trait::async_trait]
-impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
+impl<DB: Database> Stage<DB> for IndexAccountHistoriesStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        StageId::IndexAccountHistory
+        StageId::IndexAccountHistories
     }
 
     /// Execute the stage.
@@ -56,9 +56,9 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
 
                 // Save prune checkpoint only if we don't have one already.
                 // Otherwise, pruner may skip the unpruned range of blocks.
-                if provider.get_prune_checkpoint(PrunePart::AccountHistory)?.is_none() {
+                if provider.get_prune_checkpoint(PrunePart::AccountHistories)?.is_none() {
                     provider.save_prune_checkpoint(
-                        PrunePart::AccountHistory,
+                        PrunePart::AccountHistories,
                         PruneCheckpoint {
                             block_number: Some(target_prunable_block),
                             tx_number: None,
@@ -169,8 +169,8 @@ mod tests {
             .unwrap();
 
             // setup changeset that are going to be applied to history index
-            tx.put::<tables::AccountChangeSet>(4, acc()).unwrap();
-            tx.put::<tables::AccountChangeSet>(5, acc()).unwrap();
+            tx.put::<tables::AccountChangeSets>(4, acc()).unwrap();
+            tx.put::<tables::AccountChangeSets>(5, acc()).unwrap();
             Ok(())
         })
         .unwrap()
@@ -178,7 +178,7 @@ mod tests {
 
     async fn run(tx: &TestTransaction, run_to: u64) {
         let input = ExecInput { target: Some(run_to), ..Default::default() };
-        let mut stage = IndexAccountHistoryStage::default();
+        let mut stage = IndexAccountHistoriesStage::default();
         let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
         let out = stage.execute(&provider, input).await.unwrap();
@@ -192,7 +192,7 @@ mod tests {
             unwind_to,
             ..Default::default()
         };
-        let mut stage = IndexAccountHistoryStage::default();
+        let mut stage = IndexAccountHistoriesStage::default();
         let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
         let out = stage.unwind(&provider, input).await.unwrap();
@@ -212,14 +212,14 @@ mod tests {
         run(&tx, 5).await;
 
         // verify
-        let table = cast(tx.table::<tables::AccountHistory>().unwrap());
+        let table = cast(tx.table::<tables::AccountHistories>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![4, 5])]));
 
         // unwind
         unwind(&tx, 5, 0).await;
 
         // verify initial state
-        let table = tx.table::<tables::AccountHistory>().unwrap();
+        let table = tx.table::<tables::AccountHistories>().unwrap();
         assert!(table.is_empty());
     }
 
@@ -231,7 +231,7 @@ mod tests {
         // setup
         partial_setup(&tx);
         tx.commit(|tx| {
-            tx.put::<tables::AccountHistory>(shard(u64::MAX), list(&[1, 2, 3])).unwrap();
+            tx.put::<tables::AccountHistories>(shard(u64::MAX), list(&[1, 2, 3])).unwrap();
             Ok(())
         })
         .unwrap();
@@ -240,14 +240,14 @@ mod tests {
         run(&tx, 5).await;
 
         // verify
-        let table = cast(tx.table::<tables::AccountHistory>().unwrap());
+        let table = cast(tx.table::<tables::AccountHistories>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3, 4, 5]),]));
 
         // unwind
         unwind(&tx, 5, 0).await;
 
         // verify initial state
-        let table = cast(tx.table::<tables::AccountHistory>().unwrap());
+        let table = cast(tx.table::<tables::AccountHistories>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3]),]));
     }
 
@@ -260,7 +260,7 @@ mod tests {
         // setup
         partial_setup(&tx);
         tx.commit(|tx| {
-            tx.put::<tables::AccountHistory>(shard(u64::MAX), list(&full_list)).unwrap();
+            tx.put::<tables::AccountHistories>(shard(u64::MAX), list(&full_list)).unwrap();
             Ok(())
         })
         .unwrap();
@@ -269,7 +269,7 @@ mod tests {
         run(&tx, 5).await;
 
         // verify
-        let table = cast(tx.table::<tables::AccountHistory>().unwrap());
+        let table = cast(tx.table::<tables::AccountHistories>().unwrap());
         assert_eq!(
             table,
             BTreeMap::from([(shard(3), full_list.clone()), (shard(u64::MAX), vec![4, 5])])
@@ -279,7 +279,7 @@ mod tests {
         unwind(&tx, 5, 0).await;
 
         // verify initial state
-        let table = cast(tx.table::<tables::AccountHistory>().unwrap());
+        let table = cast(tx.table::<tables::AccountHistories>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), full_list)]));
     }
 
@@ -292,7 +292,7 @@ mod tests {
         // setup
         partial_setup(&tx);
         tx.commit(|tx| {
-            tx.put::<tables::AccountHistory>(shard(u64::MAX), list(&close_full_list)).unwrap();
+            tx.put::<tables::AccountHistories>(shard(u64::MAX), list(&close_full_list)).unwrap();
             Ok(())
         })
         .unwrap();
@@ -303,7 +303,7 @@ mod tests {
         // verify
         close_full_list.push(4);
         close_full_list.push(5);
-        let table = cast(tx.table::<tables::AccountHistory>().unwrap());
+        let table = cast(tx.table::<tables::AccountHistories>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), close_full_list.clone()),]));
 
         // unwind
@@ -312,7 +312,7 @@ mod tests {
         // verify initial state
         close_full_list.pop();
         close_full_list.pop();
-        let table = cast(tx.table::<tables::AccountHistory>().unwrap());
+        let table = cast(tx.table::<tables::AccountHistories>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), close_full_list),]));
 
         // verify initial state
@@ -327,7 +327,7 @@ mod tests {
         // setup
         partial_setup(&tx);
         tx.commit(|tx| {
-            tx.put::<tables::AccountHistory>(shard(u64::MAX), list(&close_full_list)).unwrap();
+            tx.put::<tables::AccountHistories>(shard(u64::MAX), list(&close_full_list)).unwrap();
             Ok(())
         })
         .unwrap();
@@ -337,7 +337,7 @@ mod tests {
 
         // verify
         close_full_list.push(4);
-        let table = cast(tx.table::<tables::AccountHistory>().unwrap());
+        let table = cast(tx.table::<tables::AccountHistories>().unwrap());
         assert_eq!(
             table,
             BTreeMap::from([(shard(4), close_full_list.clone()), (shard(u64::MAX), vec![5])])
@@ -348,7 +348,7 @@ mod tests {
 
         // verify initial state
         close_full_list.pop();
-        let table = cast(tx.table::<tables::AccountHistory>().unwrap());
+        let table = cast(tx.table::<tables::AccountHistories>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), close_full_list),]));
     }
 
@@ -361,9 +361,9 @@ mod tests {
         // setup
         partial_setup(&tx);
         tx.commit(|tx| {
-            tx.put::<tables::AccountHistory>(shard(1), list(&full_list)).unwrap();
-            tx.put::<tables::AccountHistory>(shard(2), list(&full_list)).unwrap();
-            tx.put::<tables::AccountHistory>(shard(u64::MAX), list(&[2, 3])).unwrap();
+            tx.put::<tables::AccountHistories>(shard(1), list(&full_list)).unwrap();
+            tx.put::<tables::AccountHistories>(shard(2), list(&full_list)).unwrap();
+            tx.put::<tables::AccountHistories>(shard(u64::MAX), list(&[2, 3])).unwrap();
             Ok(())
         })
         .unwrap();
@@ -371,7 +371,7 @@ mod tests {
         run(&tx, 5).await;
 
         // verify
-        let table = cast(tx.table::<tables::AccountHistory>().unwrap());
+        let table = cast(tx.table::<tables::AccountHistories>().unwrap());
         assert_eq!(
             table,
             BTreeMap::from([
@@ -385,7 +385,7 @@ mod tests {
         unwind(&tx, 5, 0).await;
 
         // verify initial state
-        let table = cast(tx.table::<tables::AccountHistory>().unwrap());
+        let table = cast(tx.table::<tables::AccountHistories>().unwrap());
         assert_eq!(
             table,
             BTreeMap::from([
@@ -417,16 +417,16 @@ mod tests {
             .unwrap();
 
             // setup changeset that are going to be applied to history index
-            tx.put::<tables::AccountChangeSet>(20, acc()).unwrap();
-            tx.put::<tables::AccountChangeSet>(36, acc()).unwrap();
-            tx.put::<tables::AccountChangeSet>(100, acc()).unwrap();
+            tx.put::<tables::AccountChangeSets>(20, acc()).unwrap();
+            tx.put::<tables::AccountChangeSets>(36, acc()).unwrap();
+            tx.put::<tables::AccountChangeSets>(100, acc()).unwrap();
             Ok(())
         })
         .unwrap();
 
         // run
         let input = ExecInput { target: Some(100), ..Default::default() };
-        let mut stage = IndexAccountHistoryStage {
+        let mut stage = IndexAccountHistoriesStage {
             prune_modes: PruneModes {
                 account_history: Some(PruneMode::Before(36)),
                 ..Default::default()
@@ -440,26 +440,26 @@ mod tests {
         provider.commit().unwrap();
 
         // verify
-        let table = cast(tx.table::<tables::AccountHistory>().unwrap());
+        let table = cast(tx.table::<tables::AccountHistories>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![36, 100])]));
 
         // unwind
         unwind(&tx, 100, 0).await;
 
         // verify initial state
-        let table = tx.table::<tables::AccountHistory>().unwrap();
+        let table = tx.table::<tables::AccountHistories>().unwrap();
         assert!(table.is_empty());
     }
 
-    stage_test_suite_ext!(IndexAccountHistoryTestRunner, index_account_history);
+    stage_test_suite_ext!(IndexAccountHistoriesTestRunner, index_account_history);
 
-    struct IndexAccountHistoryTestRunner {
+    struct IndexAccountHistoriesTestRunner {
         pub(crate) tx: TestTransaction,
         commit_threshold: u64,
         prune_modes: PruneModes,
     }
 
-    impl Default for IndexAccountHistoryTestRunner {
+    impl Default for IndexAccountHistoriesTestRunner {
         fn default() -> Self {
             Self {
                 tx: TestTransaction::default(),
@@ -469,8 +469,8 @@ mod tests {
         }
     }
 
-    impl StageTestRunner for IndexAccountHistoryTestRunner {
-        type S = IndexAccountHistoryStage;
+    impl StageTestRunner for IndexAccountHistoriesTestRunner {
+        type S = IndexAccountHistoriesStage;
 
         fn tx(&self) -> &TestTransaction {
             &self.tx
@@ -484,7 +484,7 @@ mod tests {
         }
     }
 
-    impl ExecuteStageTestRunner for IndexAccountHistoryTestRunner {
+    impl ExecuteStageTestRunner for IndexAccountHistoriesTestRunner {
         type Seed = ();
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
@@ -533,7 +533,7 @@ mod tests {
 
                 let provider = self.tx.inner();
                 let mut changeset_cursor =
-                    provider.tx_ref().cursor_read::<tables::AccountChangeSet>()?;
+                    provider.tx_ref().cursor_read::<tables::AccountChangeSets>()?;
 
                 let account_transitions =
                     changeset_cursor.walk_range(start_block..=end_block)?.try_fold(
@@ -577,16 +577,16 @@ mod tests {
                     };
                 }
 
-                let table = cast(self.tx.table::<tables::AccountHistory>().unwrap());
+                let table = cast(self.tx.table::<tables::AccountHistories>().unwrap());
                 assert_eq!(table, result);
             }
             Ok(())
         }
     }
 
-    impl UnwindStageTestRunner for IndexAccountHistoryTestRunner {
+    impl UnwindStageTestRunner for IndexAccountHistoriesTestRunner {
         fn validate_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
-            let table = self.tx.table::<tables::AccountHistory>().unwrap();
+            let table = self.tx.table::<tables::AccountHistories>().unwrap();
             assert!(table.is_empty());
             Ok(())
         }

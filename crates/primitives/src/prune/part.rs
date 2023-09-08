@@ -6,18 +6,18 @@ use thiserror::Error;
 #[main_codec]
 #[derive(Debug, Display, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum PrunePart {
-    /// Prune part responsible for the `TxSenders` table.
+    /// Prune part responsible for the `TransactionSenders` table.
     SenderRecovery,
-    /// Prune part responsible for the `TxHashNumber` table.
+    /// Prune part responsible for the `TransactionHashNumbers` table.
     TransactionLookup,
     /// Prune part responsible for all `Receipts`.
     Receipts,
     /// Prune part responsible for some `Receipts` filtered by logs.
     ContractLogs,
-    /// Prune part responsible for the `AccountChangeSet` and `AccountHistory` tables.
-    AccountHistory,
-    /// Prune part responsible for the `StorageChangeSet` and `StorageHistory` tables.
-    StorageHistory,
+    /// Prune part responsible for the `AccountChangeSets` and `AccountHistories` tables.
+    AccountHistories,
+    /// Prune part responsible for the `StorageChangeSet` and `StorageHistories` tables.
+    StorageHistories,
 }
 
 /// PrunePart error type.

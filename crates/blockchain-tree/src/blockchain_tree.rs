@@ -1191,7 +1191,7 @@ mod tests {
         }
         provider
             .tx_ref()
-            .put::<tables::SyncStage>("Finish".to_string(), StageCheckpoint::new(10))
+            .put::<tables::SyncStages>("Finish".to_string(), StageCheckpoint::new(10))
             .unwrap();
         provider.commit().unwrap();
     }

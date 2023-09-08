@@ -194,11 +194,11 @@ At the end of the `execute()` function, a familiar value is returned, `Ok(ExecOu
 * TODO: explain stage
 <br>
 
-## IndexStorageHistoryStage
+## IndexStorageHistoriesStage
 * TODO: explain stage
 <br>
 
-## IndexAccountHistoryStage
+## IndexAccountHistoriesStage
 * TODO: explain stage
 <br>
 

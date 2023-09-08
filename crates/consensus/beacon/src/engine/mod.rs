@@ -2128,7 +2128,7 @@ mod tests {
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
             env.db
                 .update(|tx| {
-                    tx.put::<tables::SyncStage>(
+                    tx.put::<tables::SyncStages>(
                         StageId::Finish.to_string(),
                         StageCheckpoint::new(block1.number),
                     )
