@@ -82,30 +82,9 @@ impl<T: ParkedOrd> ParkedPool<T> {
     }
 
     /// Removes the worst transaction from this pool.
-    pub(crate) fn pop_worst(&mut self) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+    pub(crate) fn _pop_worst(&mut self) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         let worst = self.best.iter().next().map(|tx| *tx.transaction.id())?;
         self.remove_transaction(&worst)
-    }
-
-    /// Returns account address and their txs_count that are not local and whose tx count >
-    /// max_account_slots
-    pub(crate) fn get_spammers(&self, max_account_slots: usize) -> Vec<(Address, usize)> {
-        let mut spammers = Vec::new();
-        for tx in self.all() {
-            if tx.is_local() {
-                continue
-            }
-            let sender = tx.transaction.sender();
-            let txs = self.get_txs_by_sender(&sender);
-            if txs.len() <= max_account_slots {
-                continue
-            }
-            if spammers.iter().any(|(s, _)| s == &sender) {
-                continue
-            }
-            spammers.push((sender, txs.len()));
-        }
-        spammers
     }
 
     /// Get txs by sender
@@ -122,50 +101,69 @@ impl<T: ParkedOrd> ParkedPool<T> {
         txs
     }
 
+    /// Get submission ids by sender with oldest first
+    pub(crate) fn get_submission_ids_by_sender(&self, sender: &Address) -> Vec<u64> {
+        let mut ids = Vec::new();
+        for tx in self.by_id.values() {
+            if tx.transaction.sender() == *sender {
+                ids.push(tx.submission_id);
+            }
+        }
+        ids.sort();
+        ids
+    }
+
+    /// Returns addresses sorted by their last submission id
+    /// 
+    /// Similar to `Heartbeat` in Geth
+    pub(crate) fn get_senders_by_submission_id(&self) -> Vec<Address> {
+        let mut senders = Vec::new();
+        for tx in self.by_id.values() {
+            if senders.contains(&tx.transaction.sender()) {
+                continue
+            }
+            senders.push(tx.transaction.sender());
+        }
+        senders.sort_by(|a, b| {
+            let a_ids = self.get_submission_ids_by_sender(a);
+            let b_ids = self.get_submission_ids_by_sender(b);
+            a_ids.last().unwrap().cmp(b_ids.last().unwrap())
+        });
+        senders
+    }
+
     /// Truncates the pool by dropping the oldest transaction first
     pub(crate) fn truncate_pool(
         &mut self,
         limit: SubPoolLimit,
-        max_account_slots: usize,
+        _max_account_slots: usize,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = Vec::new();
-        // let mut txs_to_remove = Vec::new();
-        let mut spammers = self.get_spammers(max_account_slots);
-        spammers.sort_by(|(_, a), (_, b)| b.cmp(a));
 
-        // penalize spammers first by removing their oldest txs
-        for (sender, _) in spammers {
-            let txs = self.get_txs_by_sender(&sender);
-            let mut txs = txs.iter().map(|tx| tx.transaction_id).collect::<Vec<_>>();
-            // sort txs by their time in the pool, oldest first
-            txs.sort_by(|a, b| a.cmp(b));
-            for tx_id in txs {
-                while self.size() > limit.max_size || self.len() > limit.max_txs {
-                    if let Some(tx) = self.remove_transaction(&tx_id) {
-                        removed.push(tx);
-                    }
-                }
-            }
-        }
+        let mut addresses = self.get_senders_by_submission_id();
+        let queued = self.len();
+        let mut drop = queued - limit.max_txs;
 
-        // penalize non-local txs if limit is still exceeded
-        if self.size() > limit.max_size || self.len() > limit.max_txs {
-            for tx in self.clone().all() {
-                if tx.is_local() {
-                    continue
-                }
-                while self.size() > limit.max_size || self.len() > limit.max_txs {
+        while drop > 0 && !addresses.is_empty() {
+            let addr = addresses.pop().unwrap();
+            let list = self.get_txs_by_sender(&addr);
+
+            // Drop all transactions if they are less than the overflow
+            if list.len() <= drop {
+                for tx in &list {
                     if let Some(tx) = self.remove_transaction(tx.id()) {
                         removed.push(tx);
                     }
                 }
+                drop -= list.len();
+                continue
             }
-        }
-
-        // penalize local txs at last
-        while self.size() > limit.max_size || self.len() > limit.max_txs {
-            if let Some(tx) = self.pop_worst() {
-                removed.push(tx);
+            // Otherwise drop only last few transactions
+            for tx in list.iter().rev().take(drop) {
+                if let Some(tx) = self.remove_transaction(tx.id()) {
+                    removed.push(tx);
+                }
+                drop -= 1;
             }
         }
 
