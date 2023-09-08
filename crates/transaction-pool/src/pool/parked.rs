@@ -114,7 +114,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
     }
 
     /// Returns addresses sorted by their last submission id
-    /// 
+    ///
     /// Similar to `Heartbeat` in Geth
     pub(crate) fn get_senders_by_submission_id(&self) -> Vec<Address> {
         let mut senders = Vec::new();
