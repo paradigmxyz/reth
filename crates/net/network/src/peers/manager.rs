@@ -2194,15 +2194,16 @@ mod test {
         let mut peer_manager = PeersManager::new(config);
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
         let socket_addr = SocketAddr::new(ip, 8008);
-        for _ in 0..peer_manager.connection_info.max_concurrent_outbound_dials*2 {
+        for _ in 0..peer_manager.connection_info.max_concurrent_outbound_dials * 2 {
             peer_manager.add_peer(PeerId::random(), socket_addr, None);
         }
 
         peer_manager.fill_outbound_slots();
-        let dials = peer_manager.queued_actions.iter().filter(|ev| {
-            matches!(ev, PeerAction::Connect { .. })
-        }).count();
+        let dials = peer_manager
+            .queued_actions
+            .iter()
+            .filter(|ev| matches!(ev, PeerAction::Connect { .. }))
+            .count();
         assert_eq!(dials, peer_manager.connection_info.max_concurrent_outbound_dials);
-
     }
 }
