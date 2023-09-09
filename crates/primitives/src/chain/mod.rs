@@ -68,9 +68,7 @@ impl Chain {
     /// Returns the base mainnet chain.
     #[cfg(feature = "optimism")]
     pub const fn base_mainnet() -> Self {
-        // TODO: add to ethers-core
-        //Chain::Named(ethers_core::types::Chain::Base)
-        Chain::Id(8453)
+        Chain::Named(ethers_core::types::Chain::Base)
     }
 
     /// Returns the dev chain.
