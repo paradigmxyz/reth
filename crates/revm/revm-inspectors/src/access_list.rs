@@ -31,8 +31,8 @@ impl AccessListInspector {
             excluded: [from, to].iter().chain(precompiles.iter()).copied().collect(),
             access_list: access_list
                 .0
-                .iter()
-                .map(|v| (v.address, v.storage_keys.iter().copied().collect()))
+                .into_iter()
+                .map(|v| (v.address, v.storage_keys.into_iter().collect()))
                 .collect(),
         }
     }
@@ -68,10 +68,7 @@ where
         _data: &mut EVMData<'_, DB>,
         _is_static: bool,
     ) -> InstructionResult {
-        let pc = interpreter.program_counter();
-        let op = interpreter.contract.bytecode.bytecode()[pc];
-
-        match op {
+        match interpreter.current_opcode() {
             opcode::SLOAD | opcode::SSTORE => {
                 if let Ok(slot) = interpreter.stack().peek(0) {
                     let cur_contract = interpreter.contract.address;
