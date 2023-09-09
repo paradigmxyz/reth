@@ -401,6 +401,9 @@ where
                 _ if id == P2PMessageID::Ping as u8 => {
                     tracing::trace!("Received Ping, Sending Pong");
                     this.send_pong();
+                    // This is required because the `Sink` may not be polled externally, and if
+                    // that happens, the pong will never be sent.
+                    cx.waker().wake_by_ref();
                 }
                 _ if id == P2PMessageID::Disconnect as u8 => {
                     let reason = DisconnectReason::decode(&mut &decompress_buf[1..]).map_err(|err| {
