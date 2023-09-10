@@ -5,9 +5,9 @@ use eyre::WrapErr;
 use reth_primitives::hex;
 use reth_db::{
     database::Database,
-    mdbx::{Env, WriteMap},
     table::{DupSort, Table},
-    DatabaseEnvRO, TableType, TableViewer, Tables,
+    DatabaseEnvRO, TableType, TableViewer, Tables
+};
 use std::cell::RefCell;
 use tracing::error;
 
@@ -44,6 +44,7 @@ impl Command {
     /// Execute `db list` command
     pub fn execute(self, tool: &DbTool<'_, DatabaseEnvRO>) -> eyre::Result<()> {
 <<<<<<< HEAD
+<<<<<<< HEAD
         self.table.view(&ListTableViewer { tool, args: &self })
 =======
         if self.table.table_type() == TableType::DupSort {
@@ -51,6 +52,9 @@ impl Command {
         } else {
             self.table.view(&ListTableViewer { tool, args: &self })?;
         }
+=======
+        self.table.view(&ListTableViewer { tool, args: &self })?;
+>>>>>>> ad15a5c7 (Pass TableViewer view fn into macro)
 
         Ok(())
 >>>>>>> 5b1f48f2 (work in progress)

@@ -89,11 +89,11 @@ pub trait TableViewer<R> {
     fn view<T: Table>(&self) -> Result<R, Self::Error>;
 
     /// operate on dupsort table in generic way
-    fn view_dupsort<T: Table>(&self) -> Result<R, Self::Error>;
+    fn view_dupsort<T: Table + DupSort>(&self) -> Result<R, Self::Error>;
 }
 
 macro_rules! tables {
-    ([$(($table:ident, $type:expr)),*]) => {
+    ([$(($table:ident, $type:expr, $view_fn:ident)),*]) => {
         #[derive(Debug, PartialEq, Copy, Clone)]
         /// Default tables that should be present inside database.
         pub enum Tables {
@@ -132,22 +132,9 @@ macro_rules! tables {
             {
                 match self {
                     $(Tables::$table => {
-                        visitor.view::<$table>()
+                        visitor.$view_fn::<$table>()
                     },)*
                 }
-            }
-
-            /// Allows to operate on specific table type
-            pub fn view_dupsort<T, R>(&self, visitor: &T) -> Result<R, T::Error>
-            where
-                T: TableViewer<R>,
-            {
-                    match self {
-                        $(Tables::$table => {
-                            visitor.view_dupsort::<$table>()
-                        },)*
-                    }
-
             }
         }
 
@@ -175,32 +162,32 @@ macro_rules! tables {
 }
 
 tables!([
-    (CanonicalHeaders, TableType::Table),
-    (HeaderTD, TableType::Table),
-    (HeaderNumbers, TableType::Table),
-    (Headers, TableType::Table),
-    (BlockBodyIndices, TableType::Table),
-    (BlockOmmers, TableType::Table),
-    (BlockWithdrawals, TableType::Table),
-    (TransactionBlock, TableType::Table),
-    (Transactions, TableType::Table),
-    (TxHashNumber, TableType::Table),
-    (Receipts, TableType::Table),
-    (PlainAccountState, TableType::Table),
-    (PlainStorageState, TableType::DupSort),
-    (Bytecodes, TableType::Table),
-    (AccountHistory, TableType::Table),
-    (StorageHistory, TableType::Table),
-    (AccountChangeSet, TableType::DupSort),
-    (StorageChangeSet, TableType::DupSort),
-    (HashedAccount, TableType::Table),
-    (HashedStorage, TableType::DupSort),
-    (AccountsTrie, TableType::Table),
-    (StoragesTrie, TableType::DupSort),
-    (TxSenders, TableType::Table),
-    (SyncStage, TableType::Table),
-    (SyncStageProgress, TableType::Table),
-    (PruneCheckpoints, TableType::Table)
+    (CanonicalHeaders, TableType::Table, view),
+    (HeaderTD, TableType::Table, view),
+    (HeaderNumbers, TableType::Table, view),
+    (Headers, TableType::Table, view),
+    (BlockBodyIndices, TableType::Table, view),
+    (BlockOmmers, TableType::Table, view),
+    (BlockWithdrawals, TableType::Table, view),
+    (TransactionBlock, TableType::Table, view),
+    (Transactions, TableType::Table, view),
+    (TxHashNumber, TableType::Table, view),
+    (Receipts, TableType::Table, view),
+    (PlainAccountState, TableType::Table, view),
+    (PlainStorageState, TableType::DupSort, view_dupsort),
+    (Bytecodes, TableType::Table, view),
+    (AccountHistory, TableType::Table, view),
+    (StorageHistory, TableType::Table, view),
+    (AccountChangeSet, TableType::DupSort, view_dupsort),
+    (StorageChangeSet, TableType::DupSort, view_dupsort),
+    (HashedAccount, TableType::Table, view),
+    (HashedStorage, TableType::DupSort, view_dupsort),
+    (AccountsTrie, TableType::Table, view),
+    (StoragesTrie, TableType::DupSort, view_dupsort),
+    (TxSenders, TableType::Table, view),
+    (SyncStage, TableType::Table, view),
+    (SyncStageProgress, TableType::Table, view),
+    (PruneCheckpoints, TableType::Table, view)
 ]);
 
 #[macro_export]

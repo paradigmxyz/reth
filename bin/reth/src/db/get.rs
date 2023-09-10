@@ -1,14 +1,11 @@
-use std::error::Error;
-
 use crate::utils::DbTool;
 use clap::Parser;
 
 use reth_db::{
     database::Database,
     table::{DupSort, Table},
-    TableType, TableViewer, Tables,
+    TableViewer, Tables,
 };
-use serde::Deserialize;
 use tracing::error;
 
 /// The arguments for the `reth db get` command
@@ -31,13 +28,6 @@ pub struct Command {
 impl Command {
     /// Execute `db get` command
     pub fn execute<DB: Database>(self, tool: &DbTool<'_, DB>) -> eyre::Result<()> {
-        if self.table.table_type() == TableType::DupSort {
-            self.table.view_dupsort(&GetValueViewer { tool, args: &self })?;
-
-            error!(target: "reth::cli", "Unsupported table.");
-
-            return Ok(());
-        }
         self.table.view(&GetValueViewer { tool, args: &self })?;
 
         Ok(())

@@ -36,4 +36,12 @@ impl<DB: Database> TableViewer<()> for ClearViewer<'_, DB> {
 
         Ok(())
     }
+
+    fn view_dupsort<T: Table>(&self) -> Result<(), Self::Error> {
+        let tx = self.db.tx_mut()?;
+        tx.clear::<T>()?;
+        tx.commit()?;
+
+        Ok(())
+    }
 }
