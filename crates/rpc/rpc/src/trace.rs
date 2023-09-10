@@ -268,7 +268,8 @@ where
             .await
     }
 
-    /// Executes all transactions of a block and returns a list of callback results.
+    /// Executes all transactions of a block and returns a list of callback results invoked for each
+    /// transaction in the block.
     ///
     /// This
     /// 1. fetches all transactions of the block
