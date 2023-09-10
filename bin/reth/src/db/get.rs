@@ -57,13 +57,12 @@ impl<DB: Database> TableViewer<()> for GetValueViewer<'_, DB> {
 
     fn view<T: Table>(&self) -> Result<(), Self::Error> {
         let key = self.args.table_key::<T>()?;
-        assert_eq!(T::NAME, self.args.table.name());
-        match self.tool.clone().get::<T>(key)? {
+        match self.tool.get::<T>(key)? {
             Some(content) => {
                 println!("{}", serde_json::to_string_pretty(&content)?);
             }
             None => {
-                error!(target: "reth::cli", "No content for the given table key111.");
+                error!(target: "reth::cli", "No content for the given table key.");
             }
         };
 
@@ -78,12 +77,12 @@ impl<DB: Database> TableViewer<()> for GetValueViewer<'_, DB> {
         // process dupsort table
         let subkey = self.args.table_subkey::<T>()?;
 
-        match self.tool.clone().get_dup::<T>(key, subkey)? {
+        match self.tool.get_dup::<T>(key, subkey)? {
             Some(content) => {
                 println!("{}", serde_json::to_string_pretty(&content)?);
             }
             None => {
-                error!(target: "reth::cli", "No content for the given table subkey222s.");
+                error!(target: "reth::cli", "No content for the given table subkey.");
             }
         };
         Ok(())

@@ -132,7 +132,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
                     let result = || {
                         if filter.only_count {
-                            return None;
+                            return None
                         }
                         Some((
                             <T as Table>::Key::decode(&key).unwrap(),
@@ -151,12 +151,12 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 >>>>>>> 5b1f48f2 (work in progress)
                             {
                                 hits += 1;
-                                return result();
+                                return result()
                             }
                         }
                         None => {
                             hits += 1;
-                            return result();
+                            return result()
                         }
                     }
                 }
