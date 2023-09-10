@@ -132,7 +132,7 @@ impl NetworkHandle {
 
     /// Announce a block over devp2p
     ///
-    /// Caution: in PoS this is a noop, since new block propagation will happen over devp2p
+    /// Caution: in PoS this is a noop, since new block propagation will happen over libp2p
     pub fn announce_block(&self, block: NewBlock, hash: H256) {
         self.send_message(NetworkHandleMessage::AnnounceBlock(block, hash))
     }
