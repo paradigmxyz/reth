@@ -354,6 +354,11 @@ impl BundleStateWithReceipts {
         tx: &TX,
         is_value_known: OriginalValuesKnown,
     ) -> Result<(), DatabaseError> {
+        let (plain_state, reverts) =
+            self.bundle.into_sorted_plain_state_and_reverts(is_value_known);
+
+        StateReverts(reverts).write_to_db(tx, self.first_block)?;
+
         // write receipts
         let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
@@ -371,10 +376,6 @@ impl BundleStateWithReceipts {
             }
         }
 
-        let (plain_state, reverts) =
-            self.bundle.into_sorted_plain_state_and_reverts(is_value_known);
-
-        StateReverts(reverts).write_to_db(tx, self.first_block)?;
         StateChange(plain_state).write_to_db(tx)?;
 
         Ok(())
@@ -424,9 +425,6 @@ impl StateReverts {
                         while let Some(entry) = storages_cursor.next_dup_val()? {
                             wiped_storage.push((entry.key.into(), entry.value))
                         }
-                        // delete all values
-                        storages_cursor.seek_exact(address)?;
-                        storages_cursor.delete_current_duplicates()?;
                     }
                 }
                 tracing::trace!(target: "provider::reverts", "storage changes: {:?}",storage);
@@ -533,27 +531,6 @@ impl From<StateChangeset> for StateChange {
 impl StateChange {
     /// Write the post state to the database.
     pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(self, tx: &TX) -> Result<(), DatabaseError> {
-        // Write new storage state
-        tracing::trace!(target: "provider::post_state", len = self.0.storage.len(), "Writing new storage state");
-        let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
-        for PlainStorageChangeset { address, storage } in self.0.storage.into_iter() {
-            // Wipping of storage is done when appling the reverts.
-
-            for (key, value) in storage.into_iter() {
-                tracing::trace!(target: "provider::post_state", ?address, ?key, "Updating plain state storage");
-                let key: H256 = key.into();
-                if let Some(entry) = storages_cursor.seek_by_key_subkey(address, key)? {
-                    if entry.key == key {
-                        storages_cursor.delete_current()?;
-                    }
-                }
-
-                if value != U256::ZERO {
-                    storages_cursor.upsert(address, StorageEntry { key, value })?;
-                }
-            }
-        }
-
         // Write new account state
         tracing::trace!(target: "provider::post_state", len = self.0.accounts.len(), "Writing new account state");
         let mut accounts_cursor = tx.cursor_write::<tables::PlainAccountState>()?;
@@ -572,6 +549,30 @@ impl StateChange {
         let mut bytecodes_cursor = tx.cursor_write::<tables::Bytecodes>()?;
         for (hash, bytecode) in self.0.contracts.into_iter() {
             bytecodes_cursor.upsert(hash, Bytecode(bytecode))?;
+        }
+
+        // Write new storage state and wipe storage if needed.
+        tracing::trace!(target: "provider::post_state", len = self.0.storage.len(), "Writing new storage state");
+        let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
+        for PlainStorageChangeset { address, wipe_storage, storage } in self.0.storage.into_iter() {
+            // Wiping of storage.
+            if wipe_storage && storages_cursor.seek_exact(address)?.is_some() {
+                storages_cursor.delete_current_duplicates()?;
+            }
+
+            for (key, value) in storage.into_iter() {
+                tracing::trace!(target: "provider::post_state", ?address, ?key, "Updating plain state storage");
+                let key: H256 = key.into();
+                if let Some(entry) = storages_cursor.seek_by_key_subkey(address, key)? {
+                    if entry.key == key {
+                        storages_cursor.delete_current()?;
+                    }
+                }
+
+                if value != U256::ZERO {
+                    storages_cursor.upsert(address, StorageEntry { key, value })?;
+                }
+            }
         }
         Ok(())
     }
@@ -596,6 +597,7 @@ mod tests {
             states::{
                 bundle_state::{BundleRetention, OriginalValuesKnown},
                 changes::PlainStorageRevert,
+                PlainStorageChangeset,
             },
             BundleState,
         },
@@ -714,7 +716,11 @@ mod tests {
         // Write plain state and reverts separately.
         let reverts = revm_bundle_state.take_all_reverts().into_plain_state_reverts();
         let plain_state = revm_bundle_state.into_plain_state_sorted(OriginalValuesKnown::Yes);
-        assert!(plain_state.storage.is_empty());
+        // Account B selfdestructed so flag for it should be present.
+        assert_eq!(
+            plain_state.storage,
+            [PlainStorageChangeset { address: address_b, wipe_storage: true, storage: vec![] }]
+        );
         assert!(plain_state.contracts.is_empty());
         StateChange(plain_state)
             .write_to_db(provider.tx_ref())

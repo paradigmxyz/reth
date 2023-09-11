@@ -106,7 +106,7 @@ ethers-middleware = { version = "2.0", default-features = false }
 
 ## misc
 aquamarine = "0.3"
-bytes = "1.4"
+bytes = "1.5"
 bitflags = "2.3"
 tracing = "0.1.0"
 tracing-appender = "0.2"
