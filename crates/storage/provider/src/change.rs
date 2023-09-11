@@ -359,6 +359,8 @@ impl BundleStateWithReceipts {
 
         StateReverts(reverts).write_to_db(tx, self.first_block)?;
 
+        StateChange(plain_state).write_to_db(tx)?;
+
         // write receipts
         let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
@@ -375,8 +377,6 @@ impl BundleStateWithReceipts {
                 }
             }
         }
-
-        StateChange(plain_state).write_to_db(tx)?;
 
         Ok(())
     }
@@ -531,26 +531,6 @@ impl From<StateChangeset> for StateChange {
 impl StateChange {
     /// Write the post state to the database.
     pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(self, tx: &TX) -> Result<(), DatabaseError> {
-        // Write new account state
-        tracing::trace!(target: "provider::post_state", len = self.0.accounts.len(), "Writing new account state");
-        let mut accounts_cursor = tx.cursor_write::<tables::PlainAccountState>()?;
-        for (address, account) in self.0.accounts.into_iter() {
-            if let Some(account) = account {
-                tracing::trace!(target: "provider::post_state", ?address, "Updating plain state account");
-                accounts_cursor.upsert(address, into_reth_acc(account))?;
-            } else if accounts_cursor.seek_exact(address)?.is_some() {
-                tracing::trace!(target: "provider::post_state", ?address, "Deleting plain state account");
-                accounts_cursor.delete_current()?;
-            }
-        }
-
-        // Write bytecode
-        tracing::trace!(target: "provider::post_state", len = self.0.contracts.len(), "Writing bytecodes");
-        let mut bytecodes_cursor = tx.cursor_write::<tables::Bytecodes>()?;
-        for (hash, bytecode) in self.0.contracts.into_iter() {
-            bytecodes_cursor.upsert(hash, Bytecode(bytecode))?;
-        }
-
         // Write new storage state and wipe storage if needed.
         tracing::trace!(target: "provider::post_state", len = self.0.storage.len(), "Writing new storage state");
         let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
@@ -574,6 +554,27 @@ impl StateChange {
                 }
             }
         }
+
+        // Write new account state
+        tracing::trace!(target: "provider::post_state", len = self.0.accounts.len(), "Writing new account state");
+        let mut accounts_cursor = tx.cursor_write::<tables::PlainAccountState>()?;
+        for (address, account) in self.0.accounts.into_iter() {
+            if let Some(account) = account {
+                tracing::trace!(target: "provider::post_state", ?address, "Updating plain state account");
+                accounts_cursor.upsert(address, into_reth_acc(account))?;
+            } else if accounts_cursor.seek_exact(address)?.is_some() {
+                tracing::trace!(target: "provider::post_state", ?address, "Deleting plain state account");
+                accounts_cursor.delete_current()?;
+            }
+        }
+
+        // Write bytecode
+        tracing::trace!(target: "provider::post_state", len = self.0.contracts.len(), "Writing bytecodes");
+        let mut bytecodes_cursor = tx.cursor_write::<tables::Bytecodes>()?;
+        for (hash, bytecode) in self.0.contracts.into_iter() {
+            bytecodes_cursor.upsert(hash, Bytecode(bytecode))?;
+        }
+
         Ok(())
     }
 }
