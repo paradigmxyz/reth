@@ -1,4 +1,5 @@
 //! Wrapper around revms state.
+use itertools::Itertools;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     models::{AccountBeforeTx, BlockNumberAddress},
@@ -33,7 +34,7 @@ pub struct BundleStateWithReceipts {
     /// Bundle state with reverts.
     bundle: BundleState,
     /// Receipts.
-    receipts: Vec<Vec<Receipt>>,
+    receipts: Vec<HashMap<usize, Receipt>>,
     /// First block of bundle state.
     first_block: BlockNumber,
 }
@@ -50,7 +51,11 @@ pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>
 
 impl BundleStateWithReceipts {
     /// Create Bundle State.
-    pub fn new(bundle: BundleState, receipts: Vec<Vec<Receipt>>, first_block: BlockNumber) -> Self {
+    pub fn new(
+        bundle: BundleState,
+        receipts: Vec<HashMap<usize, Receipt>>,
+        first_block: BlockNumber,
+    ) -> Self {
         Self { bundle, receipts, first_block }
     }
 
@@ -59,7 +64,7 @@ impl BundleStateWithReceipts {
         state_init: BundleStateInit,
         revert_init: RevertsInit,
         contracts_init: Vec<(H256, Bytecode)>,
-        receipts: Vec<Vec<Receipt>>,
+        receipts: Vec<HashMap<usize, Receipt>>,
         first_block: BlockNumber,
     ) -> Self {
         // sort reverts by block number
@@ -166,7 +171,7 @@ impl BundleStateWithReceipts {
     ///
     /// ```
     /// use reth_primitives::{Account, U256};
-    /// use reth_provider::BundleState;
+    /// use reth_provider::BundleStateWithReceipts;
     /// use reth_db::{test_utils::create_test_rw_db, database::Database};
     /// use std::collections::HashMap;
     ///
@@ -226,7 +231,7 @@ impl BundleStateWithReceipts {
     /// Returns an iterator over all block logs.
     pub fn logs(&self, block_number: BlockNumber) -> Option<impl Iterator<Item = &Log>> {
         let index = self.block_number_to_index(block_number)?;
-        Some(self.receipts[index].iter().flat_map(|r| r.logs.iter()))
+        Some(self.receipts[index].values().flat_map(|r| r.logs.iter()))
     }
 
     /// Return blocks logs bloom
@@ -239,18 +244,19 @@ impl BundleStateWithReceipts {
     /// of receipt. This is a expensive operation.
     pub fn receipts_root_slow(&self, block_number: BlockNumber) -> Option<H256> {
         let index = self.block_number_to_index(block_number)?;
-        Some(calculate_receipt_root_ref(&self.receipts[index]))
+        let values = self.receipts[index].values().collect::<Vec<_>>();
+        Some(calculate_receipt_root_ref(&values))
     }
 
     /// Return reference to receipts.
-    pub fn receipts(&self) -> &Vec<Vec<Receipt>> {
+    pub fn receipts(&self) -> &Vec<HashMap<usize, Receipt>> {
         &self.receipts
     }
 
     /// Return all block receipts
-    pub fn receipts_by_block(&self, block_number: BlockNumber) -> &[Receipt] {
-        let Some(index) = self.block_number_to_index(block_number) else { return &[] };
-        self.receipts[index].as_slice()
+    pub fn receipts_by_block(&self, block_number: BlockNumber) -> Vec<&Receipt> {
+        let Some(index) = self.block_number_to_index(block_number) else { return Vec::new() };
+        self.receipts[index].values().collect()
     }
 
     /// Is bundle state empty of blocks.
@@ -348,20 +354,28 @@ impl BundleStateWithReceipts {
         tx: &TX,
         is_value_known: OriginalValuesKnown,
     ) -> Result<(), DatabaseError> {
-        // write receipts
-        let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
-        let mut next_number = receipts_cursor.last()?.map(|(i, _)| i + 1).unwrap_or_default();
-        for block_receipts in self.receipts.into_iter() {
-            for receipt in block_receipts {
-                receipts_cursor.append(next_number, receipt)?;
-                next_number += 1;
-            }
-        }
-
         let (plain_state, reverts) =
             self.bundle.into_sorted_plain_state_and_reverts(is_value_known);
 
         StateReverts(reverts).write_to_db(tx, self.first_block)?;
+
+        // write receipts
+        let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
+        let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
+
+        for (idx, receipts) in self.receipts.into_iter().enumerate() {
+            if !receipts.is_empty() {
+                let (_, body_indices) = bodies_cursor
+                    .seek_exact(self.first_block + idx as u64)?
+                    .expect("body indices exist");
+
+                let first_tx_index = body_indices.first_tx_num();
+                for (tx_idx, receipt) in receipts.into_iter().sorted_by_key(|(idx, _)| *idx) {
+                    receipts_cursor.append(first_tx_index + tx_idx as u64, receipt)?;
+                }
+            }
+        }
+
         StateChange(plain_state).write_to_db(tx)?;
 
         Ok(())
@@ -411,9 +425,6 @@ impl StateReverts {
                         while let Some(entry) = storages_cursor.next_dup_val()? {
                             wiped_storage.push((entry.key.into(), entry.value))
                         }
-                        // delete all values
-                        storages_cursor.seek_exact(address)?;
-                        storages_cursor.delete_current_duplicates()?;
                     }
                 }
                 tracing::trace!(target: "provider::reverts", "storage changes: {:?}",storage);
@@ -520,27 +531,6 @@ impl From<StateChangeset> for StateChange {
 impl StateChange {
     /// Write the post state to the database.
     pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(self, tx: &TX) -> Result<(), DatabaseError> {
-        // Write new storage state
-        tracing::trace!(target: "provider::post_state", len = self.0.storage.len(), "Writing new storage state");
-        let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
-        for PlainStorageChangeset { address, storage } in self.0.storage.into_iter() {
-            // Wipping of storage is done when appling the reverts.
-
-            for (key, value) in storage.into_iter() {
-                tracing::trace!(target: "provider::post_state", ?address, ?key, "Updating plain state storage");
-                let key: H256 = key.into();
-                if let Some(entry) = storages_cursor.seek_by_key_subkey(address, key)? {
-                    if entry.key == key {
-                        storages_cursor.delete_current()?;
-                    }
-                }
-
-                if value != U256::ZERO {
-                    storages_cursor.upsert(address, StorageEntry { key, value })?;
-                }
-            }
-        }
-
         // Write new account state
         tracing::trace!(target: "provider::post_state", len = self.0.accounts.len(), "Writing new account state");
         let mut accounts_cursor = tx.cursor_write::<tables::PlainAccountState>()?;
@@ -559,6 +549,30 @@ impl StateChange {
         let mut bytecodes_cursor = tx.cursor_write::<tables::Bytecodes>()?;
         for (hash, bytecode) in self.0.contracts.into_iter() {
             bytecodes_cursor.upsert(hash, Bytecode(bytecode))?;
+        }
+
+        // Write new storage state and wipe storage if needed.
+        tracing::trace!(target: "provider::post_state", len = self.0.storage.len(), "Writing new storage state");
+        let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
+        for PlainStorageChangeset { address, wipe_storage, storage } in self.0.storage.into_iter() {
+            // Wiping of storage.
+            if wipe_storage && storages_cursor.seek_exact(address)?.is_some() {
+                storages_cursor.delete_current_duplicates()?;
+            }
+
+            for (key, value) in storage.into_iter() {
+                tracing::trace!(target: "provider::post_state", ?address, ?key, "Updating plain state storage");
+                let key: H256 = key.into();
+                if let Some(entry) = storages_cursor.seek_by_key_subkey(address, key)? {
+                    if entry.key == key {
+                        storages_cursor.delete_current()?;
+                    }
+                }
+
+                if value != U256::ZERO {
+                    storages_cursor.upsert(address, StorageEntry { key, value })?;
+                }
+            }
         }
         Ok(())
     }
@@ -583,6 +597,7 @@ mod tests {
             states::{
                 bundle_state::{BundleRetention, OriginalValuesKnown},
                 changes::PlainStorageRevert,
+                PlainStorageChangeset,
             },
             BundleState,
         },
@@ -701,7 +716,11 @@ mod tests {
         // Write plain state and reverts separately.
         let reverts = revm_bundle_state.take_all_reverts().into_plain_state_reverts();
         let plain_state = revm_bundle_state.into_plain_state_sorted(OriginalValuesKnown::Yes);
-        assert!(plain_state.storage.is_empty());
+        // Account B selfdestructed so flag for it should be present.
+        assert_eq!(
+            plain_state.storage,
+            [PlainStorageChangeset { address: address_b, wipe_storage: true, storage: vec![] }]
+        );
         assert!(plain_state.contracts.is_empty());
         StateChange(plain_state)
             .write_to_db(provider.tx_ref())
@@ -1350,7 +1369,12 @@ mod tests {
     fn revert_to_indices() {
         let base = BundleStateWithReceipts {
             bundle: BundleState::default(),
-            receipts: vec![vec![Receipt::default(); 2]; 7],
+            receipts: vec![
+                std::collections::HashMap::from_iter(
+                    (0..2).map(|idx| (idx, Receipt::default()))
+                );
+                7
+            ],
             first_block: 10,
         };
 

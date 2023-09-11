@@ -37,7 +37,7 @@ pub fn fill_cfg_env(
         },
     );
 
-    cfg_env.chain_id = U256::from(chain_spec.chain().id());
+    cfg_env.chain_id = chain_spec.chain().id();
     cfg_env.spec_id = spec_id;
     cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
 }

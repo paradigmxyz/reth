@@ -48,6 +48,7 @@ use revm::{
 };
 use std::{
     fmt::Debug,
+    collections::HashMap,
     future::Future,
     pin::Pin,
     sync::{atomic::AtomicBool, Arc},
@@ -673,7 +674,8 @@ where
         &attributes,
     )?;
 
-    let mut receipts = Vec::new();
+    let mut receipt_idx = 0;
+    let mut receipts = HashMap::default();
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
         if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
@@ -755,12 +757,16 @@ where
         cumulative_gas_used += gas_used;
 
         // Push transaction changeset and calculate header bloom filter for receipt.
-        receipts.push(Receipt {
-            tx_type: tx.tx_type(),
-            success: result.is_success(),
-            cumulative_gas_used,
-            logs: result.logs().into_iter().map(into_reth_log).collect(),
-        });
+        receipts.insert(
+            receipt_idx,
+            Receipt {
+                tx_type: tx.tx_type(),
+                success: result.is_success(),
+                cumulative_gas_used,
+                logs: result.logs().into_iter().map(into_reth_log).collect(),
+            },
+        );
+        receipt_idx += 1;
 
         // update add to total fees
         let miner_fee =

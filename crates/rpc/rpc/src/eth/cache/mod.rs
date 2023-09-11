@@ -481,7 +481,7 @@ where
             for block in &blocks {
                 let block_receipts = BlockReceipts {
                     block_hash: block.hash,
-                    receipts: state.receipts_by_block(block.number).to_vec(),
+                    receipts: state.receipts_by_block(block.number).into_iter().cloned().collect(),
                 };
                 receipts.push(block_receipts);
             }

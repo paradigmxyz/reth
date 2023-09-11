@@ -22,7 +22,7 @@ use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, ChainSpec, PruneBatchSizes, PruneModes, H256, U256};
 use reth_provider::{
     providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockExecutor,
-    BundleStateWithReceipts, ExecutorFactory, ProviderFactory,
+    BundleStateWithReceipts, ExecutorFactory, ProviderFactory, PrunableBlockExecutor,
 };
 use reth_prune::Pruner;
 use reth_revm::Factory;
@@ -211,6 +211,19 @@ where
         }
     }
 
+    fn stats(&self) -> reth_provider::BlockExecutorStats {
+        match self {
+            EitherBlockExecutor::Left(a) => a.stats(),
+            EitherBlockExecutor::Right(b) => b.stats(),
+        }
+    }
+}
+
+impl<A, B> PrunableBlockExecutor for EitherBlockExecutor<A, B>
+where
+    B: PrunableBlockExecutor,
+    A: PrunableBlockExecutor,
+{
     fn set_prune_modes(&mut self, prune_modes: PruneModes) {
         match self {
             EitherBlockExecutor::Left(a) => a.set_prune_modes(prune_modes),
@@ -222,13 +235,6 @@ where
         match self {
             EitherBlockExecutor::Left(a) => a.set_tip(tip),
             EitherBlockExecutor::Right(b) => b.set_tip(tip),
-        }
-    }
-
-    fn stats(&self) -> reth_provider::BlockExecutorStats {
-        match self {
-            EitherBlockExecutor::Left(a) => a.stats(),
-            EitherBlockExecutor::Right(b) => b.stats(),
         }
     }
 }
@@ -248,7 +254,7 @@ where
     fn with_state<'a, SP: reth_provider::StateProvider + 'a>(
         &'a self,
         sp: SP,
-    ) -> Box<dyn BlockExecutor + 'a> {
+    ) -> Box<dyn PrunableBlockExecutor + 'a> {
         match self {
             EitherExecutorFactory::Left(a) => a.with_state::<'a, SP>(sp),
             EitherExecutorFactory::Right(b) => b.with_state::<'a, SP>(sp),
