@@ -11,7 +11,10 @@ use tracing::info;
 /// It can be used to mock executor.
 pub trait ExecutorFactory: Send + Sync + 'static {
     /// Executor with [`StateProvider`]
-    fn with_state<'a, SP: StateProvider + 'a>(&'a self, _sp: SP) -> Box<dyn BlockExecutor + 'a>;
+    fn with_state<'a, SP: StateProvider + 'a>(
+        &'a self,
+        _sp: SP,
+    ) -> Box<dyn PrunableBlockExecutor + 'a>;
 
     /// Return internal chainspec
     fn chain_spec(&self) -> &ChainSpec;
@@ -68,7 +71,7 @@ pub trait BlockExecutor {
         senders: Option<Vec<Address>>,
     ) -> Result<(), BlockExecutionError>;
 
-    /// Executes the block and checks receipts
+    /// Executes the block and checks receipts.
     fn execute_and_verify_receipt(
         &mut self,
         block: &Block,
@@ -76,15 +79,18 @@ pub trait BlockExecutor {
         senders: Option<Vec<Address>>,
     ) -> Result<(), BlockExecutionError>;
 
-    /// Set prune modes.
-    fn set_prune_modes(&mut self, prune_modes: PruneModes);
-
-    /// Set tip - highest known block number.
-    fn set_tip(&mut self, tip: BlockNumber);
-
     /// Return bundle state. This is output of the execution.
     fn take_output_state(&mut self) -> BundleStateWithReceipts;
 
     /// Internal statistics of execution.
     fn stats(&self) -> BlockExecutorStats;
+}
+
+/// A [BlockExecutor] capable of in-memory pruning of the data that will be written to the database.
+pub trait PrunableBlockExecutor: BlockExecutor {
+    /// Set tip - highest known block number.
+    fn set_tip(&mut self, tip: BlockNumber);
+
+    /// Set prune modes.
+    fn set_prune_modes(&mut self, prune_modes: PruneModes);
 }

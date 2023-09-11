@@ -306,7 +306,11 @@ impl StorageInner {
     ) -> Result<(BundleStateWithReceipts, u64), BlockExecutionError> {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
-        let gas_used = executor.execute_transactions(block, U256::ZERO, Some(senders))?;
+        let (receipts, gas_used) =
+            executor.execute_transactions(block, U256::ZERO, Some(senders))?;
+
+        // Save receipts.
+        executor.save_receipts(receipts)?;
 
         // add post execution state change
         // Withdrawals, rewards etc.
@@ -333,7 +337,7 @@ impl StorageInner {
             EMPTY_RECEIPTS
         } else {
             let receipts_with_bloom =
-                receipts.iter().map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
+                receipts.iter().map(|r| (**r).clone().into()).collect::<Vec<ReceiptWithBloom>>();
             header.logs_bloom =
                 receipts_with_bloom.iter().fold(Bloom::zero(), |bloom, r| bloom | r.bloom);
             proofs::calculate_receipt_root(&receipts_with_bloom)

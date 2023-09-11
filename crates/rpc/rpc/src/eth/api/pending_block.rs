@@ -11,7 +11,7 @@ use reth_revm::{database::RevmDatabase, env::tx_env_with_recovered, into_reth_lo
 use reth_transaction_pool::TransactionPool;
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
 use revm_primitives::{BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState};
-use std::time::Instant;
+use std::{collections::HashMap, time::Instant};
 
 /// Configured [BlockEnv] and [CfgEnv] for a pending block
 #[derive(Debug, Clone)]
@@ -50,7 +50,8 @@ impl PendingBlockEnv {
         let mut executed_txs = Vec::new();
         let mut best_txs = pool.best_transactions_with_base_fee(base_fee);
 
-        let mut receipts = Vec::new();
+        let mut receipt_idx = 0;
+        let mut receipts = HashMap::default();
 
         while let Some(pool_tx) = best_txs.next() {
             // ensure we still have capacity for this transaction
@@ -102,12 +103,17 @@ impl PendingBlockEnv {
             cumulative_gas_used += gas_used;
 
             // Push transaction changeset and calculate header bloom filter for receipt.
-            receipts.push(Receipt {
-                tx_type: tx.tx_type(),
-                success: result.is_success(),
-                cumulative_gas_used,
-                logs: result.logs().into_iter().map(into_reth_log).collect(),
-            });
+            receipts.insert(
+                receipt_idx,
+                Receipt {
+                    tx_type: tx.tx_type(),
+                    success: result.is_success(),
+                    cumulative_gas_used,
+                    logs: result.logs().into_iter().map(into_reth_log).collect(),
+                },
+            );
+            receipt_idx += 1;
+
             // append transaction to the list of executed transactions
             executed_txs.push(tx.into_signed());
         }

@@ -181,13 +181,14 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
     fn pending_block_and_receipts(&self) -> Option<(SealedBlock, Vec<Receipt>)> {
         let tree = self.tree.read();
         let pending_block = tree.pending_block()?.clone();
-        let receipts = tree.receipts_by_block_hash(pending_block.hash)?.to_vec();
+        let receipts =
+            tree.receipts_by_block_hash(pending_block.hash)?.into_iter().cloned().collect();
         Some((pending_block, receipts))
     }
 
     fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<Receipt>> {
         let tree = self.tree.read();
-        Some(tree.receipts_by_block_hash(block_hash)?.to_vec())
+        Some(tree.receipts_by_block_hash(block_hash)?.into_iter().cloned().collect())
     }
 }
 
