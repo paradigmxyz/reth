@@ -230,8 +230,26 @@ impl BundleStateWithReceipts {
 
     /// Returns an iterator over all block logs.
     pub fn logs(&self, block_number: BlockNumber) -> Option<impl Iterator<Item = &Log>> {
+        Some(self.receipts_ordered(block_number)?.flat_map(|r| r.logs.iter()))
+    }
+
+    /// Returns the receipts for the block, ordered by their position in the block. If the block
+    /// doesn't exist, this returns `None`.
+    pub fn receipts_ordered(
+        &self,
+        block_number: BlockNumber,
+    ) -> Option<impl Iterator<Item = &Receipt>> {
         let index = self.block_number_to_index(block_number)?;
-        Some(self.receipts[index].values().flat_map(|r| r.logs.iter()))
+        let receipts = &self.receipts[index];
+
+        // Using a range over the length allows us to collect receipts in order, rather than using
+        // an iterator over the map, which has arbitrary order
+        let receipts_by_idx = (0..receipts.len()).map(|idx| {
+            // ASSUMPTION: receipts have indexes (keys) that are exactly 0..receipts.len()
+            receipts.get(&idx).expect("receipt exists")
+        });
+
+        Some(receipts_by_idx)
     }
 
     /// Return blocks logs bloom
@@ -243,17 +261,7 @@ impl BundleStateWithReceipts {
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
     /// of receipt. This is a expensive operation.
     pub fn receipts_root_slow(&self, block_number: BlockNumber) -> Option<H256> {
-        let index = self.block_number_to_index(block_number)?;
-        let receipts = &self.receipts[index];
-
-        // Using a range over the length allows us to collect receipts in order, rather than using
-        // an iterator over the map, which has arbitrary order
-        let receipts_by_idx = (0..receipts.len())
-            .map(|idx| {
-                // ASSUMPTION: receipts have indexes (keys) that are exactly 0..receipts.len()
-                receipts.get(&idx).expect("receipt exists")
-            })
-            .collect::<Vec<_>>();
+        let receipts_by_idx = self.receipts_ordered(block_number)?.collect::<Vec<_>>();
         Some(calculate_receipt_root_ref(&receipts_by_idx))
     }
 
@@ -262,10 +270,10 @@ impl BundleStateWithReceipts {
         &self.receipts
     }
 
-    /// Return all block receipts
+    /// Return all block receipts. If the block cannot be found, this returns an empty [Vec].
     pub fn receipts_by_block(&self, block_number: BlockNumber) -> Vec<&Receipt> {
-        let Some(index) = self.block_number_to_index(block_number) else { return Vec::new() };
-        self.receipts[index].values().collect()
+        let Some(receipts) = self.receipts_ordered(block_number) else { return Vec::new() };
+        receipts.collect()
     }
 
     /// Is bundle state empty of blocks.
