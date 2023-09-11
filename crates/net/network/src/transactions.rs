@@ -174,8 +174,14 @@ where
         TransactionsHandle { manager_tx: self.command_tx.clone() }
     }
 
+    #[inline]
     fn update_import_metrics(&self) {
         self.metrics.pending_pool_imports.set(self.pool_imports.len() as f64);
+    }
+
+    #[inline]
+    fn update_request_metrics(&self) {
+        self.metrics.inflight_transaction_requests.set(self.inflight_requests.len() as f64);
     }
 
     /// Request handler for an incoming request for transactions
@@ -591,6 +597,8 @@ where
             this.on_network_tx_event(event);
         }
 
+        this.update_request_metrics();
+
         // Advance all requests.
         while let Poll::Ready(Some(GetPooledTxResponse { peer_id, result })) =
             this.inflight_requests.poll_next_unpin(cx)
@@ -609,6 +617,7 @@ where
             }
         }
 
+        this.update_request_metrics();
         this.update_import_metrics();
 
         // Advance all imports
