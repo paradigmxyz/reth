@@ -8,6 +8,9 @@ use std::{
 use thiserror::Error;
 use zstd::bulk::Decompressor;
 
+pub mod filter;
+use filter::{Cuckoo, Filter, Filters};
+
 pub mod compression;
 use compression::{Compression, Compressors};
 
@@ -21,24 +24,24 @@ pub struct NippyJar {
     columns: usize,
     /// Compressor if required
     compressor: Option<Compressors>,
+    /// Filter
+    filter: Option<Filters>,
     #[serde(skip)]
     /// Data path for file. Index file will be `{path}.idx`
     path: Option<PathBuf>,
-    /// soon
-    bloom_filter: bool,
     /// soon
     phf: bool,
 }
 
 impl NippyJar {
     /// Creates new [`NippyJar`].
-    pub fn new(columns: usize, bloom_filter: bool, phf: bool, path: &Path) -> Self {
+    pub fn new(columns: usize, phf: bool, path: &Path) -> Self {
         NippyJar {
             version: NIPPY_JAR_VERSION,
             columns,
-            bloom_filter,
             phf,
             compressor: None,
+            filter: None,
             path: Some(path.to_path_buf()),
         }
     }
@@ -50,12 +53,19 @@ impl NippyJar {
         self
     }
 
+    /// Adds [`filter::Cuckoo`] filter.
+    pub fn with_cuckoo_filter(mut self, max_capacity: usize) -> Self {
+        self.filter = Some(Filters::Cuckoo(Cuckoo::new(max_capacity)));
+        self
+    }
+
     /// Loads the file configuration and returns [`Self`].
     pub fn load(path: &Path) -> Result<Self, NippyJarError> {
         let mut file = File::open(path)?;
         let mut obj: Self = bincode::deserialize_from(&mut file)?;
 
         obj.path = Some(path.to_path_buf());
+
         Ok(obj)
     }
 
@@ -184,10 +194,20 @@ impl NippyJar {
     }
 
     /// Writes all necessary configuration to file.
-    fn freeze_config(&self, handle: &mut File) -> Result<(), NippyJarError> {
+    fn freeze_config(&mut self, handle: &mut File) -> Result<(), NippyJarError> {
         // TODO Split Dictionaries and Bloomfilters Configuration so we dont have to load everything
         // at once
         Ok(bincode::serialize_into(handle, &self)?)
+    }
+}
+
+impl Filter for NippyJar {
+    fn add(&mut self, element: &[u8]) -> Result<(), NippyJarError> {
+        self.filter.as_mut().ok_or(NippyJarError::FilterMissing)?.add(element)
+    }
+
+    fn contains(&self, element: &[u8]) -> Result<bool, NippyJarError> {
+        self.filter.as_ref().ok_or(NippyJarError::FilterMissing)?.contains(element)
     }
 }
 
@@ -207,6 +227,14 @@ pub enum NippyJarError {
     ColumnLenMismatch(usize, usize),
     #[error("UnexpectedMissingValue row: {0} col:{1}")]
     UnexpectedMissingValue(u64, u64),
+    #[error("err")]
+    FilterError(#[from] cuckoofilter::CuckooError),
+    #[error("NippyJar initialized without filter.")]
+    FilterMissing,
+    #[error("Filter has reached max capacity.")]
+    FilterMaxCapacity,
+    #[error("Cuckoo was not properly initialized after loaded.")]
+    FilterCuckooNotLoaded,
 }
 
 pub struct NippyJarCursor<'a> {
@@ -308,53 +336,64 @@ impl<'a> NippyJarCursor<'a> {
 mod tests {
     use super::*;
 
-    const TEST_FILE_NAME: &str = "nippyjar.nj";
+    fn test_data() -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+        ((0..10u8).map(|a| vec![2, a]).collect(), (10..20u8).map(|a| vec![3, a]).collect())
+    }
+
+    #[test]
+    fn filter() {
+        let (col1, col2) = test_data();
+        let _num_columns = 2;
+        let num_rows = col1.len() as u64;
+        let file_path = tempfile::NamedTempFile::new().unwrap();
+
+        let mut nippy = NippyJar::new(_num_columns, false, file_path.path());
+
+        assert!(matches!(Filter::add(&mut nippy, &col1[0]), Err(NippyJarError::FilterMissing)));
+
+        nippy = nippy.with_cuckoo_filter(4);
+
+        // Add col1[0]
+        assert!(!Filter::contains(&nippy, &col1[0]).unwrap());
+        assert!(Filter::add(&mut nippy, &col1[0]).is_ok());
+        assert!(Filter::contains(&nippy, &col1[0]).unwrap());
+
+        // Add col1[1]
+        assert!(!Filter::contains(&nippy, &col1[1]).unwrap());
+        assert!(Filter::add(&mut nippy, &col1[1]).is_ok());
+        assert!(Filter::contains(&nippy, &col1[1]).unwrap());
+
+        // // Add more columns until max_capacity
+        assert!(Filter::add(&mut nippy, &col1[2]).is_ok());
+        assert!(Filter::add(&mut nippy, &col1[3]).is_ok());
+        assert!(matches!(Filter::add(&mut nippy, &col1[4]), Err(NippyJarError::FilterMaxCapacity)));
+
+        nippy.freeze(vec![col1.clone(), col2.clone()], num_rows).unwrap();
+        let loaded_nippy = NippyJar::load(file_path.path()).unwrap();
+
+        assert_eq!(nippy, loaded_nippy);
+
+        assert!(Filter::contains(&loaded_nippy, &col1[0]).unwrap());
+        assert!(Filter::contains(&loaded_nippy, &col1[1]).unwrap());
+        assert!(Filter::contains(&loaded_nippy, &col1[2]).unwrap());
+        assert!(Filter::contains(&loaded_nippy, &col1[3]).unwrap());
+        assert!(!Filter::contains(&loaded_nippy, &col1[4]).unwrap());
+    }
 
     #[test]
     fn zstd() {
-        let col1 = vec![
-            vec![3, 0],
-            vec![3, 1],
-            vec![3, 2],
-            vec![3, 3],
-            vec![3, 4],
-            vec![3, 5],
-            vec![3, 6],
-            vec![3, 7],
-            vec![3, 8],
-        ];
-        let col2 = vec![
-            vec![3, 10],
-            vec![3, 11],
-            vec![3, 12],
-            vec![3, 13],
-            vec![3, 14],
-            vec![3, 15],
-            vec![3, 16],
-            vec![3, 17],
-            vec![3, 18],
-        ];
+        let (col1, col2) = test_data();
         let num_rows = col1.len() as u64;
         let _num_columns = 2;
+        let file_path = tempfile::NamedTempFile::new().unwrap();
 
-        let data_file = NippyJar::new(
-            _num_columns,
-            false,
-            false,
-            &std::env::temp_dir().as_path().join(TEST_FILE_NAME),
-        );
+        let nippy = NippyJar::new(_num_columns, false, file_path.path());
+        assert!(nippy.compressor.is_none());
 
-        assert_eq!(data_file.compressor, None);
+        let mut nippy = NippyJar::new(_num_columns, false, file_path.path()).with_zstd(true, 5000);
+        assert!(nippy.compressor.is_some());
 
-        let mut data_file = NippyJar::new(
-            _num_columns,
-            false,
-            false,
-            &std::env::temp_dir().as_path().join(TEST_FILE_NAME),
-        )
-        .with_zstd(true, 5000);
-
-        if let Some(Compressors::Zstd(zstd)) = &mut data_file.compressor {
+        if let Some(Compressors::Zstd(zstd)) = &mut nippy.compressor {
             assert!(matches!(zstd.generate_compressors(), Err(NippyJarError::CompressorNotReady)));
 
             // Make sure the number of column iterators match the initial set up ones.
@@ -362,8 +401,6 @@ mod tests {
                 zstd.prepare_compression(vec![col1.clone(), col2.clone(), col2.clone()]),
                 Err(NippyJarError::ColumnLenMismatch(_num_columns, 3))
             ));
-        } else {
-            panic!("Expected ZSTD compressor");
         }
 
         let data = vec![col1, col2];
@@ -371,28 +408,27 @@ mod tests {
         // If ZSTD is enabled, do not write to the file unless the column dictionaries have been
         // calculated.
         assert!(matches!(
-            data_file.freeze(data.clone(), num_rows),
+            nippy.freeze(data.clone(), num_rows),
             Err(NippyJarError::CompressorNotReady)
         ));
 
-        data_file.prepare(data.clone()).unwrap();
+        nippy.prepare(data.clone()).unwrap();
 
-        if let Some(Compressors::Zstd(zstd)) = &data_file.compressor {
+        if let Some(Compressors::Zstd(zstd)) = &nippy.compressor {
             assert!(matches!(
                 (&zstd.state, zstd.raw_dictionaries.as_ref().map(|dict| dict.len())),
                 (compression::ZstdState::Ready, Some(_num_columns))
             ));
         }
 
-        data_file.freeze(data.clone(), num_rows).unwrap();
+        nippy.freeze(data.clone(), num_rows).unwrap();
 
-        let written_data =
-            NippyJar::load(&std::env::temp_dir().as_path().join(TEST_FILE_NAME)).unwrap();
-        assert_eq!(data_file, written_data);
+        let loaded_nippy = NippyJar::load(file_path.path()).unwrap();
+        assert_eq!(nippy, loaded_nippy);
 
-        if let Some(Compressors::Zstd(zstd)) = &data_file.compressor {
+        if let Some(Compressors::Zstd(zstd)) = &nippy.compressor {
             let mut cursor = NippyJarCursor::new(
-                &written_data,
+                &loaded_nippy,
                 Some(Mutex::new(zstd.generate_decompressors().unwrap())),
             )
             .unwrap();
