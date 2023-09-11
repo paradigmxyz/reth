@@ -79,6 +79,7 @@ impl<'de> Deserialize<'de> for Cuckoo {
 }
 
 impl Serialize for Cuckoo {
+    /// Potentially expensive, but should be used only when creating the file.
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
