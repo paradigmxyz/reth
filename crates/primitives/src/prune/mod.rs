@@ -13,6 +13,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 pub use target::{PruneModes, MINIMUM_PRUNING_DISTANCE};
 
+/// Configuration for pruning storage history not associated with specifies address.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct StorageHistoryPruneConfig(pub BTreeMap<Address, PruneMode>);
+
 /// Configuration for pruning receipts not associated with logs emitted by the specified contracts.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ReceiptsLogPruneConfig(pub BTreeMap<Address, PruneMode>);

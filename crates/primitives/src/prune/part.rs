@@ -18,6 +18,9 @@ pub enum PrunePart {
     AccountHistory,
     /// Prune part responsible for the `StorageChangeSet` and `StorageHistory` tables.
     StorageHistory,
+    /// Prune part responsible for some `StorageChangeSet` and `StorageHistory` tables filtered by
+    /// contract address.
+    StorageHistoryFilteredByContract,
 }
 
 /// PrunePart error type.

@@ -1,6 +1,6 @@
 use crate::{
     prune::PrunePartError, serde_helper::deserialize_opt_prune_mode_with_min_blocks, BlockNumber,
-    PruneMode, PrunePart, ReceiptsLogPruneConfig,
+    PruneMode, PrunePart, ReceiptsLogPruneConfig, StorageHistoryPruneConfig,
 };
 use paste::paste;
 use serde::{Deserialize, Serialize};
@@ -43,6 +43,13 @@ pub struct PruneModes {
     /// The [`BlockNumber`] represents the starting block from which point onwards the receipts are
     /// preserved.
     pub receipts_log_filter: ReceiptsLogPruneConfig,
+    /// Storage history pruning configuration by retaining only the storage history of the
+    /// specified contract addresses, discarding others'. This setting is overridden by
+    /// `storage_history`.
+    ///
+    /// The [`BlockNumber`] represents the starting block from which point onwards storage history
+    /// is preserved.
+    pub storage_history_filter: StorageHistoryPruneConfig,
 }
 
 macro_rules! impl_prune_parts {
@@ -85,7 +92,8 @@ macro_rules! impl_prune_parts {
                 $(
                     $part: Some(PruneMode::Full),
                 )+
-                receipts_log_filter: Default::default()
+                receipts_log_filter: Default::default(),
+                storage_history_filter: Default::default(),
             }
         }
 

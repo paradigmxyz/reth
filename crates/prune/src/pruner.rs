@@ -219,6 +219,19 @@ impl<DB: Database> Pruner<DB> {
             );
         }
 
+        if !self.modes.storage_history_filter.is_empty() {
+            let part_start = Instant::now();
+            let part_done =
+                self.prune_storage_history_by_contract_address(&provider, tip_block_number)?;
+            done = done && part_done;
+            self.metrics
+                .get_prune_part_metrics(PrunePart::ContractLogs)
+                .duration_seconds
+                .record(part_start.elapsed())
+        } else {
+            trace!(target: "pruner", prune_part = ?PrunePart::StorageHistoryFilteredByContract, "No filter to prune");
+        }
+
         provider.commit()?;
         self.last_pruned_block_number = Some(tip_block_number);
 
