@@ -430,6 +430,13 @@ impl<T: TransactionOrdering> TxPool<T> {
                         *transaction.hash(),
                         InvalidPoolTransactionError::Overdraft,
                     )),
+                    InsertErr::TxTypeConflict { transaction } => {
+                        Err(PoolError::ExistingConflictingTransactionType(
+                            transaction.sender(),
+                            *transaction.hash(),
+                            transaction.tx_type(),
+                        ))
+                    }
                 }
             }
         }
@@ -1169,6 +1176,23 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// Note: For EIP-4844 blob transactions additional constraints are enforced:
     ///      - new blob transactions must not have any nonce gaps
     ///      - blob transactions cannot go into overdraft
+    ///
+    /// ## Transaction type Exclusivity
+    ///
+    /// The pool enforces exclusivity of eip-4844 blob vs non-blob transactions on a per sender
+    /// basis:
+    ///   - If the pool already includes a blob transaction from the `transaction`'s sender, then
+    ///     the  `transaction` must also be a blob transaction
+    ///  - If the pool already includes a non-blob transaction from the `transaction`'s sender, then
+    ///    the  `transaction` must _not_ be a blob transaction.
+    ///
+    /// In other words, the presence of blob transactions exclude non-blob transactions and vice
+    /// versa:
+    ///
+    /// ## Replacements
+    ///
+    /// The replacement candidate must satisfy given price bump constraints: replacement candidate
+    /// must not be underpriced
     pub(crate) fn insert_tx(
         &mut self,
         transaction: ValidPoolTransaction<T>,
@@ -1225,7 +1249,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let mut replaced_tx = None;
 
         let pool_tx = PoolInternalTransaction {
-            transaction: transaction.clone(),
+            transaction: Arc::clone(&transaction),
             subpool: state.into(),
             state,
             cumulative_cost,
@@ -1239,13 +1263,18 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 entry.insert(pool_tx);
             }
             Entry::Occupied(mut entry) => {
+                // Transaction with the same nonce already exists: replacement candidate
+                let existing_transaction = entry.get().transaction.as_ref();
+                let maybe_replacement = transaction.as_ref();
+                if existing_transaction.tx_type_conflicts_with(maybe_replacement) {
+                    // blob vs non blob replacement
+                    return Err(InsertErr::TxTypeConflict { transaction: pool_tx.transaction })
+                }
+
                 // Transaction already exists
                 // Ensure the new transaction is not underpriced
-                if Self::is_underpriced(
-                    entry.get().transaction.as_ref(),
-                    transaction.as_ref(),
-                    &self.price_bumps,
-                ) {
+                if Self::is_underpriced(existing_transaction, maybe_replacement, &self.price_bumps)
+                {
                     return Err(InsertErr::Underpriced {
                         transaction: pool_tx.transaction,
                         existing: *entry.get().transaction.hash(),
@@ -1418,6 +1447,8 @@ pub(crate) enum InsertErr<T: PoolTransaction> {
         block_gas_limit: u64,
         tx_gas_limit: u64,
     },
+    /// Thrown if the mutual exclusivity constraint (blob vs normal transaction) is violated.
+    TxTypeConflict { transaction: Arc<ValidPoolTransaction<T>> },
 }
 
 /// Transaction was successfully inserted into the pool
