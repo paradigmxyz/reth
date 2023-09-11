@@ -127,6 +127,7 @@ impl NippyJar {
             let mut iterators = Vec::with_capacity(self.columns);
 
             // Write the column value of each row
+            // TODO: iter_mut if we remove the IntoIterator interface.
             for (column_number, mut column_iter) in column_iterators.enumerate() {
                 values_offsets.push(file.stream_position()? as usize);
 
