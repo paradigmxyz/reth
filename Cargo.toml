@@ -112,8 +112,8 @@ discv5 = { git = "https://github.com/sigp/discv5", rev = "d2e30e04ee62418b9e5727
 igd = { git = "https://github.com/stevefan1999-personal/rust-igd", rev = "c2d1f83eb1612a462962453cb0703bc93258b173" }
 
 ## js
-boa_engine = { git = "https://github.com/boa-dev/boa", rev = "306709177bf742425a61d0205d6f25e7811f6ebf" }
-boa_gc = { git = "https://github.com/boa-dev/boa", rev = "306709177bf742425a61d0205d6f25e7811f6ebf" }
+boa_engine = "0.17"
+boa_gc = "0.17"
 
 ## misc
 aquamarine = "0.3"
