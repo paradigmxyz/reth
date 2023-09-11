@@ -95,7 +95,7 @@ impl NippyJar {
         Ok(())
     }
 
-    /// Writes all necessary configuration to file.
+    /// Writes all data and configuration to a file and the offset index to another.
     pub fn freeze(
         &mut self,
         columns: Vec<impl IntoIterator<Item = Vec<u8>>>,
