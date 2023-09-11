@@ -23,7 +23,7 @@ reth-stages = { path = "../stages" }
 
 # common
 parking_lot.workspace = true
-lru = "0.10"
+lru = "0.11"
 tracing.workspace = true
 
 # metrics
