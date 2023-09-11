@@ -63,9 +63,7 @@ rust-version = "1.70" # Remember to update .clippy.toml and README.md
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
-exclude = [
-    ".github/",
-]
+exclude = [".github/"]
 
 # Like release, but with full debug symbols. Useful for e.g. `perf`.
 [profile.debug-fast]
@@ -78,14 +76,8 @@ lto = "fat"
 codegen-units = 1
 incremental = false
 
-[patch.crates-io]
-revm = { git = "https://github.com/bluealloy/revm/", branch = "release/v25" }
-revm-primitives = { git = "https://github.com/bluealloy/revm/", branch = "release/v25" }
-
 [workspace.dependencies]
 ## reth
-revm = { version = "3" }
-revm-primitives = "1.1"
 reth = { path = "./bin/reth" }
 reth-primitives = { path = "./crates/primitives" }
 reth-interfaces = { path = "./crates/interfaces" }
@@ -103,14 +95,25 @@ reth-transaction-pool = { path = "./crates/transaction-pool" }
 reth-tasks = { path = "./crates/tasks" }
 reth-network = { path = "./crates/net/network" }
 reth-network-api = { path = "./crates/net/network-api" }
-reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat"}
+reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat" }
 
+revm = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
+revm-precompile = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
 
 ## eth
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
 ethers-signers = { version = "2.0", default-features = false }
 ethers-middleware = { version = "2.0", default-features = false }
+
+discv5 = { git = "https://github.com/sigp/discv5", rev = "d2e30e04ee62418b9e57278cee907c02b99d5bd1" }
+igd = { git = "https://github.com/stevefan1999-personal/rust-igd", rev = "c2d1f83eb1612a462962453cb0703bc93258b173" }
+
+## js
+boa_engine = "0.17"
+boa_gc = "0.17"
 
 ## misc
 aquamarine = "0.3"
@@ -149,10 +152,14 @@ jsonrpsee-core = { version = "0.20" }
 jsonrpsee-types = { version = "0.20" }
 
 ## crypto
-secp256k1 = { version = "0.27.0", default-features = false, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { version = "0.27.0", default-features = false, features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
 enr = { version = "0.9", default-features = false, features = ["k256"] }
 # for eip-4844
-c-kzg = { git = "https://github.com/ethereum/c-kzg-4844" }
+c-kzg = { git = "https://github.com/ethereum/c-kzg-4844", rev = "f5f6f863d475847876a2bd5ee252058d37c3a15d" }
 
 ## config
 confy = "0.5"
@@ -162,3 +169,9 @@ toml = "0.7"
 proptest = "1.0"
 arbitrary = "1.1"
 assert_matches = "1.5.0"
+
+[patch.crates-io]
+revm = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
+revm-precompile = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
