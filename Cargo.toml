@@ -130,6 +130,7 @@ rayon = "1.7"
 itertools = "0.11"
 parking_lot = "0.12"
 metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
+hex-literal = "0.4"
 
 ### proc-macros
 proc-macro2 = "1.0"
@@ -166,9 +167,12 @@ confy = "0.5"
 toml = "0.7"
 
 ### misc-testing
-proptest = "1.0"
 arbitrary = "1.1"
 assert_matches = "1.5.0"
+
+proptest = "1.0"
+proptest-derive = "0.4"
+serial_test = "2"
 
 [patch.crates-io]
 revm = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }

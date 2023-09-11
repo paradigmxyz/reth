@@ -15,7 +15,7 @@ reth-rpc-types.workspace = true
 
 revm.workspace = true
 # remove from reth and reexport from revm
-hashbrown = "0.13"
+hashbrown = "0.14"
 
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true, optional = true }
