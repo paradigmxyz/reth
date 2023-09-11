@@ -39,12 +39,10 @@ impl Filter for Cuckoo {
 
 impl std::fmt::Debug for Cuckoo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Cuckoo {{ remaining_elements: {:?}, filter size: {:?} }}",
-            self.remaining,
-            self.filter.memory_usage(),
-        )
+        f.debug_struct("Cuckoo")
+            .field("remaining", &self.remaining)
+            .field("filter_size", &self.filter.memory_usage())
+            .finish_non_exhaustive()
     }
 }
 
