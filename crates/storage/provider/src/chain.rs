@@ -137,7 +137,7 @@ impl Chain {
     /// Get all receipts for the given block.
     pub fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<&Receipt>> {
         let num = self.block_number(block_hash)?;
-        self.state.receipts_by_block(num).into_iter().map(Option::as_ref).collect()
+        self.state.receipts_by_block(num).iter().map(Option::as_ref).collect()
     }
 
     /// Get all receipts with attachment.
@@ -148,7 +148,7 @@ impl Chain {
         for ((block_num, block), receipts) in self.blocks().iter().zip(self.state.receipts().iter())
         {
             let mut tx_receipts = Vec::new();
-            for (tx, receipt) in block.body.iter().zip(receipts.into_iter()) {
+            for (tx, receipt) in block.body.iter().zip(receipts.iter()) {
                 tx_receipts.push((
                     tx.hash(),
                     receipt.as_ref().expect("receipts have not been pruned").clone(),
