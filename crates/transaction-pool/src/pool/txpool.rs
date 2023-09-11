@@ -990,7 +990,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             .take_while(move |(other, _)| sender == other.sender)
     }
 
-    /// Returns all transactions that _follow_ after the given id but have the same sender.
+    /// Returns all transactions that _follow_ after the given id and have the same sender.
     ///
     /// NOTE: The range is _exclusive_
     pub(crate) fn descendant_txs_exclusive<'a, 'b: 'a>(
@@ -1002,11 +1002,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
     /// Returns all transactions that _follow_ after the given id but have the same sender.
     ///
-    /// NOTE: The range is _inclusive_: if the transaction that belongs to `id` it field be the
+    /// NOTE: The range is _inclusive_: if the transaction that belongs to `id` it will be the
     /// first value.
-    #[cfg(test)]
-    #[allow(unused)]
-    pub(crate) fn descendant_txs<'a, 'b: 'a>(
+    pub(crate) fn descendant_txs_inclusive<'a, 'b: 'a>(
         &'a self,
         id: &'b TransactionId,
     ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + '_ {
@@ -1085,34 +1083,59 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// Enforces additional constraints for blob transactions before attempting to insert:
     ///    - new blob transactions must not have any nonce gaps
     ///    - blob transactions cannot go into overdraft
+    ///    - replacement blob transaction with a higher fee must not shift an already propagated
+    ///      descending blob transaction into overdraft
     fn ensure_valid_blob_transaction(
         &self,
-        transaction: ValidPoolTransaction<T>,
+        new_blob_tx: ValidPoolTransaction<T>,
         on_chain_balance: U256,
         ancestor: Option<TransactionId>,
     ) -> Result<ValidPoolTransaction<T>, InsertErr<T>> {
         if let Some(ancestor) = ancestor {
-            let Some(tx) = self.txs.get(&ancestor) else {
+            let Some(ancestor_tx) = self.txs.get(&ancestor) else {
                 // ancestor tx is missing, so we can't insert the new blob
-                return Err(InsertErr::BlobTxHasNonceGap { transaction: Arc::new(transaction) })
+                return Err(InsertErr::BlobTxHasNonceGap { transaction: Arc::new(new_blob_tx) })
             };
-            if tx.state.has_nonce_gap() {
+            if ancestor_tx.state.has_nonce_gap() {
                 // the ancestor transaction already has a nonce gap, so we can't insert the new
                 // blob
-                return Err(InsertErr::BlobTxHasNonceGap { transaction: Arc::new(transaction) })
+                return Err(InsertErr::BlobTxHasNonceGap { transaction: Arc::new(new_blob_tx) })
             }
+
+            // the max cost executing this transaction requires
+            let mut cumulative_cost = ancestor_tx.next_cumulative_cost() + new_blob_tx.cost();
 
             // check if the new blob would go into overdraft
-            if tx.next_cumulative_cost() + transaction.cost() > on_chain_balance {
+            if cumulative_cost > on_chain_balance {
                 // the transaction would go into overdraft
-                return Err(InsertErr::Overdraft { transaction: Arc::new(transaction) })
+                return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
             }
-        } else if transaction.cost() > on_chain_balance {
+
+            // ensure that a replacement would not shift already propagated blob transactions into
+            // overdraft
+            let id = new_blob_tx.transaction_id;
+            let mut descendants = self.descendant_txs_inclusive(&id).peekable();
+            if let Some((maybe_replacement, _)) = descendants.peek() {
+                if **maybe_replacement == new_blob_tx.transaction_id {
+                    // replacement transaction
+                    descendants.next();
+
+                    // check if any of descendant blob transactions should be shifted into overdraft
+                    for (_, tx) in descendants {
+                        cumulative_cost += tx.transaction.cost();
+                        if tx.transaction.is_eip4844() && cumulative_cost > on_chain_balance {
+                            // the transaction would shift
+                            return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
+                        }
+                    }
+                }
+            }
+        } else if new_blob_tx.cost() > on_chain_balance {
             // the transaction would go into overdraft
-            return Err(InsertErr::Overdraft { transaction: Arc::new(transaction) })
+            return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
         }
 
-        Ok(transaction)
+        Ok(new_blob_tx)
     }
 
     /// Returns true if the replacement candidate is underpriced and can't replace the existing
