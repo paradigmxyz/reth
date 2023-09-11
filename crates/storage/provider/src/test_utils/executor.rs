@@ -4,7 +4,7 @@ use crate::{
 };
 use parking_lot::Mutex;
 use reth_interfaces::executor::BlockExecutionError;
-use reth_primitives::{Address, Block, BlockNumber, ChainSpec, PruneModes, Receipt, U256};
+use reth_primitives::{Address, Block, BlockNumber, ChainSpec, PruneModes, U256};
 use std::sync::Arc;
 /// Test executor with mocked result.
 pub struct TestExecutor(pub Option<BundleStateWithReceipts>);
@@ -15,11 +15,11 @@ impl BlockExecutor for TestExecutor {
         _block: &Block,
         _total_difficulty: U256,
         _senders: Option<Vec<Address>>,
-    ) -> Result<Vec<Receipt>, BlockExecutionError> {
+    ) -> Result<(), BlockExecutionError> {
         if self.0.is_none() {
             return Err(BlockExecutionError::UnavailableForTest)
         }
-        Ok(Vec::new())
+        Ok(())
     }
 
     fn execute_and_verify_receipt(

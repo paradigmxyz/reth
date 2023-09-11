@@ -2,7 +2,7 @@
 
 use crate::{change::BundleStateWithReceipts, StateProvider};
 use reth_interfaces::executor::BlockExecutionError;
-use reth_primitives::{Address, Block, BlockNumber, ChainSpec, PruneModes, Receipt, U256};
+use reth_primitives::{Address, Block, BlockNumber, ChainSpec, PruneModes, U256};
 use std::time::Duration;
 use tracing::info;
 
@@ -69,9 +69,9 @@ pub trait BlockExecutor {
         block: &Block,
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
-    ) -> Result<Vec<Receipt>, BlockExecutionError>;
+    ) -> Result<(), BlockExecutionError>;
 
-    /// Executes the block and checks receipts. Saves the receipts after verification.
+    /// Executes the block and checks receipts.
     fn execute_and_verify_receipt(
         &mut self,
         block: &Block,

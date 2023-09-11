@@ -19,7 +19,7 @@ use reth_interfaces::{
     test_utils::{NoopFullBlockClient, TestConsensus},
 };
 use reth_payload_builder::test_utils::spawn_test_payload_service;
-use reth_primitives::{BlockNumber, ChainSpec, PruneBatchSizes, PruneModes, Receipt, H256, U256};
+use reth_primitives::{BlockNumber, ChainSpec, PruneBatchSizes, PruneModes, H256, U256};
 use reth_provider::{
     providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockExecutor,
     BundleStateWithReceipts, ExecutorFactory, ProviderFactory, PrunableBlockExecutor,
@@ -181,7 +181,7 @@ where
         block: &reth_primitives::Block,
         total_difficulty: U256,
         senders: Option<Vec<reth_primitives::Address>>,
-    ) -> Result<Vec<Receipt>, BlockExecutionError> {
+    ) -> Result<(), BlockExecutionError> {
         match self {
             EitherBlockExecutor::Left(a) => a.execute(block, total_difficulty, senders),
             EitherBlockExecutor::Right(b) => b.execute(block, total_difficulty, senders),

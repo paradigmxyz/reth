@@ -290,6 +290,58 @@ impl<'a> EVMProcessor<'a> {
         Ok((receipts, cumulative_gas_used))
     }
 
+    /// Execute the block, verify gas usage and apply post-block state changes.
+    fn execute_inner(
+        &mut self,
+        block: &Block,
+        total_difficulty: U256,
+        senders: Option<Vec<Address>>,
+    ) -> Result<Vec<Receipt>, BlockExecutionError> {
+        let (receipts, cumulative_gas_used) =
+            self.execute_transactions(block, total_difficulty, senders)?;
+
+        // Check if gas used matches the value set in header.
+        if block.gas_used != cumulative_gas_used {
+            return Err(BlockValidationError::BlockGasUsed {
+                got: cumulative_gas_used,
+                expected: block.gas_used,
+                receipts: self
+                    .receipts
+                    .last()
+                    .map(|block_r| {
+                        block_r
+                            .values()
+                            .enumerate()
+                            .map(|(id, tx_r)| (id as u64, tx_r.cumulative_gas_used))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            }
+            .into())
+        }
+        let time = Instant::now();
+        self.post_execution_state_change(block, total_difficulty)?;
+        self.stats.apply_post_execution_changes_duration += time.elapsed();
+
+        let time = Instant::now();
+        let retention = if self.tip.map_or(true, |tip| {
+            !self.prune_modes.should_prune_account_history(block.number, tip) &&
+                !self.prune_modes.should_prune_storage_history(block.number, tip)
+        }) {
+            BundleRetention::Reverts
+        } else {
+            BundleRetention::PlainState
+        };
+        self.db().merge_transitions(retention);
+        self.stats.merge_transitions_duration += time.elapsed();
+
+        if self.first_block.is_none() {
+            self.first_block = Some(block.number);
+        }
+
+        Ok(receipts)
+    }
+
     /// Save receipts to the executor.
     pub fn save_receipts(&mut self, receipts: Vec<Receipt>) -> Result<(), BlockExecutionError> {
         // Index receipts by transaction index.
@@ -362,49 +414,9 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         block: &Block,
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
-    ) -> Result<Vec<Receipt>, BlockExecutionError> {
-        let (receipts, cumulative_gas_used) =
-            self.execute_transactions(block, total_difficulty, senders)?;
-
-        // Check if gas used matches the value set in header.
-        if block.gas_used != cumulative_gas_used {
-            return Err(BlockValidationError::BlockGasUsed {
-                got: cumulative_gas_used,
-                expected: block.gas_used,
-                receipts: self
-                    .receipts
-                    .last()
-                    .map(|block_r| {
-                        block_r
-                            .values()
-                            .enumerate()
-                            .map(|(id, tx_r)| (id as u64, tx_r.cumulative_gas_used))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-            }
-            .into())
-        }
-        let time = Instant::now();
-        self.post_execution_state_change(block, total_difficulty)?;
-        self.stats.apply_post_execution_changes_duration += time.elapsed();
-
-        let time = Instant::now();
-        let retention = if self.tip.map_or(true, |tip| {
-            !self.prune_modes.should_prune_account_history(block.number, tip) &&
-                !self.prune_modes.should_prune_storage_history(block.number, tip)
-        }) {
-            BundleRetention::Reverts
-        } else {
-            BundleRetention::PlainState
-        };
-        self.db().merge_transitions(retention);
-        self.stats.merge_transitions_duration += time.elapsed();
-
-        if self.first_block.is_none() {
-            self.first_block = Some(block.number);
-        }
-        Ok(receipts)
+    ) -> Result<(), BlockExecutionError> {
+        let receipts = self.execute_inner(block, total_difficulty, senders)?;
+        self.save_receipts(receipts)
     }
 
     fn execute_and_verify_receipt(
@@ -414,7 +426,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         senders: Option<Vec<Address>>,
     ) -> Result<(), BlockExecutionError> {
         // execute block
-        let receipts = self.execute(block, total_difficulty, senders)?;
+        let receipts = self.execute_inner(block, total_difficulty, senders)?;
 
         // TODO Before Byzantium, receipts contained state root that would mean that expensive
         // operation as hashing that is needed for state root got calculated in every
@@ -431,9 +443,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
             self.stats.receipt_root_duration += time.elapsed();
         }
 
-        self.save_receipts(receipts)?;
-
-        Ok(())
+        self.save_receipts(receipts)
     }
 
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
