@@ -97,8 +97,10 @@ reth-network = { path = "./crates/net/network" }
 reth-network-api = { path = "./crates/net/network-api" }
 reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat" }
 
-revm = "3"
-revm-primitives = "1.1"
+revm = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
+revm-precompile = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
 
 ## eth
 ethers-core = { version = "2.0", default-features = false }
@@ -170,4 +172,6 @@ assert_matches = "1.5.0"
 
 [patch.crates-io]
 revm = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
+revm-precompile = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
 revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
