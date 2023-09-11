@@ -726,7 +726,7 @@ dependencies = [
 [[package]]
 name = "boa_ast"
 version = "0.17.0"
-source = "git+https://github.com/boa-dev/boa#306709177bf742425a61d0205d6f25e7811f6ebf"
+source = "git+https://github.com/boa-dev/boa?rev=306709177bf742425a61d0205d6f25e7811f6ebf#306709177bf742425a61d0205d6f25e7811f6ebf"
 dependencies = [
  "bitflags 2.4.0",
  "boa_interner",
@@ -739,7 +739,7 @@ dependencies = [
 [[package]]
 name = "boa_engine"
 version = "0.17.0"
-source = "git+https://github.com/boa-dev/boa#306709177bf742425a61d0205d6f25e7811f6ebf"
+source = "git+https://github.com/boa-dev/boa?rev=306709177bf742425a61d0205d6f25e7811f6ebf#306709177bf742425a61d0205d6f25e7811f6ebf"
 dependencies = [
  "bitflags 2.4.0",
  "boa_ast",
@@ -777,7 +777,7 @@ dependencies = [
 [[package]]
 name = "boa_gc"
 version = "0.17.0"
-source = "git+https://github.com/boa-dev/boa#306709177bf742425a61d0205d6f25e7811f6ebf"
+source = "git+https://github.com/boa-dev/boa?rev=306709177bf742425a61d0205d6f25e7811f6ebf#306709177bf742425a61d0205d6f25e7811f6ebf"
 dependencies = [
  "boa_macros",
  "boa_profiler",
@@ -788,7 +788,7 @@ dependencies = [
 [[package]]
 name = "boa_icu_provider"
 version = "0.17.0"
-source = "git+https://github.com/boa-dev/boa#306709177bf742425a61d0205d6f25e7811f6ebf"
+source = "git+https://github.com/boa-dev/boa?rev=306709177bf742425a61d0205d6f25e7811f6ebf#306709177bf742425a61d0205d6f25e7811f6ebf"
 dependencies = [
  "icu_collections",
  "icu_normalizer",
@@ -801,7 +801,7 @@ dependencies = [
 [[package]]
 name = "boa_interner"
 version = "0.17.0"
-source = "git+https://github.com/boa-dev/boa#306709177bf742425a61d0205d6f25e7811f6ebf"
+source = "git+https://github.com/boa-dev/boa?rev=306709177bf742425a61d0205d6f25e7811f6ebf#306709177bf742425a61d0205d6f25e7811f6ebf"
 dependencies = [
  "boa_gc",
  "boa_macros",
@@ -816,7 +816,7 @@ dependencies = [
 [[package]]
 name = "boa_macros"
 version = "0.17.0"
-source = "git+https://github.com/boa-dev/boa#306709177bf742425a61d0205d6f25e7811f6ebf"
+source = "git+https://github.com/boa-dev/boa?rev=306709177bf742425a61d0205d6f25e7811f6ebf#306709177bf742425a61d0205d6f25e7811f6ebf"
 dependencies = [
  "proc-macro2 1.0.66",
  "quote 1.0.33",
@@ -827,7 +827,7 @@ dependencies = [
 [[package]]
 name = "boa_parser"
 version = "0.17.0"
-source = "git+https://github.com/boa-dev/boa#306709177bf742425a61d0205d6f25e7811f6ebf"
+source = "git+https://github.com/boa-dev/boa?rev=306709177bf742425a61d0205d6f25e7811f6ebf#306709177bf742425a61d0205d6f25e7811f6ebf"
 dependencies = [
  "bitflags 2.4.0",
  "boa_ast",
@@ -847,7 +847,7 @@ dependencies = [
 [[package]]
 name = "boa_profiler"
 version = "0.17.0"
-source = "git+https://github.com/boa-dev/boa#306709177bf742425a61d0205d6f25e7811f6ebf"
+source = "git+https://github.com/boa-dev/boa?rev=306709177bf742425a61d0205d6f25e7811f6ebf#306709177bf742425a61d0205d6f25e7811f6ebf"
 
 [[package]]
 name = "boyer-moore-magiclen"
@@ -936,7 +936,7 @@ dependencies = [
 [[package]]
 name = "c-kzg"
 version = "0.1.0"
-source = "git+https://github.com/ethereum/c-kzg-4844#f5f6f863d475847876a2bd5ee252058d37c3a15d"
+source = "git+https://github.com/ethereum/c-kzg-4844?rev=f5f6f863d475847876a2bd5ee252058d37c3a15d#f5f6f863d475847876a2bd5ee252058d37c3a15d"
 dependencies = [
  "bindgen 0.66.1",
  "blst",
@@ -1841,7 +1841,7 @@ dependencies = [
 [[package]]
 name = "discv5"
 version = "0.3.1"
-source = "git+https://github.com/sigp/discv5#d2e30e04ee62418b9e57278cee907c02b99d5bd1"
+source = "git+https://github.com/sigp/discv5?rev=d2e30e04ee62418b9e57278cee907c02b99d5bd1#d2e30e04ee62418b9e57278cee907c02b99d5bd1"
 dependencies = [
  "aes 0.7.5",
  "aes-gcm",
@@ -3241,7 +3241,7 @@ checksum = "cb56e1aa765b4b4f3aadfab769793b7087bb03a4ea4920644a6d238e2df5b9ed"
 [[package]]
 name = "igd"
 version = "0.12.0"
-source = "git+https://github.com/stevefan1999-personal/rust-igd#c2d1f83eb1612a462962453cb0703bc93258b173"
+source = "git+https://github.com/stevefan1999-personal/rust-igd?rev=c2d1f83eb1612a462962453cb0703bc93258b173#c2d1f83eb1612a462962453cb0703bc93258b173"
 dependencies = [
  "attohttpc",
  "bytes",
@@ -6190,7 +6190,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "3.3.0"
-source = "git+https://github.com/bluealloy/revm/?branch=release/v25#6084e0fa2d457931cd8c9d29934bca0812b5b8d6"
+source = "git+https://github.com/bluealloy/revm?branch=release/v25#6084e0fa2d457931cd8c9d29934bca0812b5b8d6"
 dependencies = [
  "auto_impl",
  "revm-interpreter",
@@ -6200,7 +6200,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "1.1.2"
-source = "git+https://github.com/bluealloy/revm/?branch=release/v25#6084e0fa2d457931cd8c9d29934bca0812b5b8d6"
+source = "git+https://github.com/bluealloy/revm?branch=release/v25#6084e0fa2d457931cd8c9d29934bca0812b5b8d6"
 dependencies = [
  "derive_more",
  "enumn",
@@ -6211,7 +6211,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "2.0.3"
-source = "git+https://github.com/bluealloy/revm/?branch=release/v25#6084e0fa2d457931cd8c9d29934bca0812b5b8d6"
+source = "git+https://github.com/bluealloy/revm?branch=release/v25#6084e0fa2d457931cd8c9d29934bca0812b5b8d6"
 dependencies = [
  "k256",
  "num",
@@ -6227,7 +6227,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "1.1.2"
-source = "git+https://github.com/bluealloy/revm/?branch=release/v25#6084e0fa2d457931cd8c9d29934bca0812b5b8d6"
+source = "git+https://github.com/bluealloy/revm?branch=release/v25#6084e0fa2d457931cd8c9d29934bca0812b5b8d6"
 dependencies = [
  "arbitrary",
  "auto_impl",
