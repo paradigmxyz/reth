@@ -82,12 +82,35 @@ impl TracingInspector {
         }
     }
 
+    /// Manually the gas used of the root trace.
+    ///
+    /// This is useful if the root trace's gasUsed should mirror the actual gas used by the
+    /// transaction.
+    ///
+    /// This allows setting it manually by consuming the execution result's gas for example.
+    #[inline]
+    pub fn set_transaction_gas_used(&mut self, gas_used: u64) {
+        if let Some(node) = self.traces.arena.first_mut() {
+            node.trace.gas_used = gas_used;
+        }
+    }
+
+    /// Convenience function for [ParityTraceBuilder::set_transaction_gas_used] that consumes the
+    /// type.
+    #[inline]
+    pub fn with_transaction_gas_used(mut self, gas_used: u64) -> Self {
+        self.set_transaction_gas_used(gas_used);
+        self
+    }
+
     /// Consumes the Inspector and returns a [ParityTraceBuilder].
+    #[inline]
     pub fn into_parity_builder(self) -> ParityTraceBuilder {
         ParityTraceBuilder::new(self.traces.arena, self.spec_id, self.config)
     }
 
     /// Consumes the Inspector and returns a [GethTraceBuilder].
+    #[inline]
     pub fn into_geth_builder(self) -> GethTraceBuilder {
         GethTraceBuilder::new(self.traces.arena, self.config)
     }
