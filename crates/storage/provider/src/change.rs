@@ -244,8 +244,17 @@ impl BundleStateWithReceipts {
     /// of receipt. This is a expensive operation.
     pub fn receipts_root_slow(&self, block_number: BlockNumber) -> Option<H256> {
         let index = self.block_number_to_index(block_number)?;
-        let values = self.receipts[index].values().collect::<Vec<_>>();
-        Some(calculate_receipt_root_ref(&values))
+        let receipts = &self.receipts[index];
+
+        // Using a range over the length allows us to collect receipts in order, rather than using
+        // an iterator over the map, which has arbitrary order
+        let receipts_by_idx = (0..receipts.len())
+            .map(|idx| {
+                // ASSUMPTION: receipts have indexes (keys) that are exactly 0..receipts.len()
+                receipts.get(&idx).expect("receipt exists")
+            })
+            .collect::<Vec<_>>();
+        Some(calculate_receipt_root_ref(&receipts_by_idx))
     }
 
     /// Return reference to receipts.
