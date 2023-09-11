@@ -597,6 +597,7 @@ mod tests {
             states::{
                 bundle_state::{BundleRetention, OriginalValuesKnown},
                 changes::PlainStorageRevert,
+                PlainStorageChangeset,
             },
             BundleState,
         },
@@ -715,7 +716,11 @@ mod tests {
         // Write plain state and reverts separately.
         let reverts = revm_bundle_state.take_all_reverts().into_plain_state_reverts();
         let plain_state = revm_bundle_state.into_plain_state_sorted(OriginalValuesKnown::Yes);
-        assert!(plain_state.storage.is_empty());
+        // Account B selfdestructed so flag for it should be present.
+        assert_eq!(
+            plain_state.storage,
+            [PlainStorageChangeset { address: address_b, wipe_storage: true, storage: vec![] }]
+        );
         assert!(plain_state.contracts.is_empty());
         StateChange(plain_state)
             .write_to_db(provider.tx_ref())
