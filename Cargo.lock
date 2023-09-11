@@ -928,9 +928,9 @@ checksum = "14c189c53d098945499cdfa7ecc63567cf3886b3332b312a5b4585d8d3a6a610"
 
 [[package]]
 name = "bytes"
-version = "1.4.0"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89b2fd2a0dcf38d7971e2194b6b6eebab45ae01067456a7fd93d5547a61b70be"
+checksum = "a2bd12c1caf447e69cd4528f47f94d203fd2582878ecb9e9465484c4148a8223"
 dependencies = [
  "serde",
 ]
@@ -6202,7 +6202,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "3.3.0"
-source = "git+https://github.com/bluealloy/revm.git#616cc7e5478fc21b2a7bfab5abe5b43c07a6ebac"
+source = "git+https://github.com/bluealloy/revm.git#26dc07dda5bf43d645b90ecaa986a3c4f6fe73b0"
 dependencies = [
  "auto_impl",
  "rayon",
@@ -6213,7 +6213,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "1.1.2"
-source = "git+https://github.com/bluealloy/revm.git#616cc7e5478fc21b2a7bfab5abe5b43c07a6ebac"
+source = "git+https://github.com/bluealloy/revm.git#26dc07dda5bf43d645b90ecaa986a3c4f6fe73b0"
 dependencies = [
  "derive_more",
  "enumn",
@@ -6224,7 +6224,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "2.0.3"
-source = "git+https://github.com/bluealloy/revm.git#616cc7e5478fc21b2a7bfab5abe5b43c07a6ebac"
+source = "git+https://github.com/bluealloy/revm.git#26dc07dda5bf43d645b90ecaa986a3c4f6fe73b0"
 dependencies = [
  "k256",
  "num",
@@ -6240,7 +6240,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "1.1.2"
-source = "git+https://github.com/bluealloy/revm.git#616cc7e5478fc21b2a7bfab5abe5b43c07a6ebac"
+source = "git+https://github.com/bluealloy/revm.git#26dc07dda5bf43d645b90ecaa986a3c4f6fe73b0"
 dependencies = [
  "arbitrary",
  "auto_impl",
