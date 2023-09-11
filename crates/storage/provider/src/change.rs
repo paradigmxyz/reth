@@ -1,5 +1,4 @@
 //! Wrapper around revms state.
-use itertools::Itertools;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     models::{AccountBeforeTx, BlockNumberAddress},
@@ -34,7 +33,7 @@ pub struct BundleStateWithReceipts {
     /// Bundle state with reverts.
     bundle: BundleState,
     /// Receipts.
-    receipts: Vec<HashMap<usize, Receipt>>,
+    receipts: Vec<Vec<Option<Receipt>>>,
     /// First block of bundle state.
     first_block: BlockNumber,
 }
@@ -53,7 +52,7 @@ impl BundleStateWithReceipts {
     /// Create Bundle State.
     pub fn new(
         bundle: BundleState,
-        receipts: Vec<HashMap<usize, Receipt>>,
+        receipts: Vec<Vec<Option<Receipt>>>,
         first_block: BlockNumber,
     ) -> Self {
         Self { bundle, receipts, first_block }
@@ -64,7 +63,7 @@ impl BundleStateWithReceipts {
         state_init: BundleStateInit,
         revert_init: RevertsInit,
         contracts_init: Vec<(H256, Bytecode)>,
-        receipts: Vec<HashMap<usize, Receipt>>,
+        receipts: Vec<Vec<Option<Receipt>>>,
         first_block: BlockNumber,
     ) -> Self {
         // sort reverts by block number
@@ -231,7 +230,7 @@ impl BundleStateWithReceipts {
     /// Returns an iterator over all block logs.
     pub fn logs(&self, block_number: BlockNumber) -> Option<impl Iterator<Item = &Log>> {
         let index = self.block_number_to_index(block_number)?;
-        Some(self.receipts[index].values().flat_map(|r| r.logs.iter()))
+        Some(self.receipts[index].iter().filter_map(|r| Some(r.as_ref()?.logs.iter())).flatten())
     }
 
     /// Return blocks logs bloom
@@ -244,19 +243,20 @@ impl BundleStateWithReceipts {
     /// of receipt. This is a expensive operation.
     pub fn receipts_root_slow(&self, block_number: BlockNumber) -> Option<H256> {
         let index = self.block_number_to_index(block_number)?;
-        let values = self.receipts[index].values().collect::<Vec<_>>();
-        Some(calculate_receipt_root_ref(&values))
+        let block_receipts =
+            self.receipts[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?;
+        Some(calculate_receipt_root_ref(&block_receipts))
     }
 
     /// Return reference to receipts.
-    pub fn receipts(&self) -> &Vec<HashMap<usize, Receipt>> {
+    pub fn receipts(&self) -> &Vec<Vec<Option<Receipt>>> {
         &self.receipts
     }
 
     /// Return all block receipts
-    pub fn receipts_by_block(&self, block_number: BlockNumber) -> Vec<&Receipt> {
-        let Some(index) = self.block_number_to_index(block_number) else { return Vec::new() };
-        self.receipts[index].values().collect()
+    pub fn receipts_by_block(&self, block_number: BlockNumber) -> &[Option<Receipt>] {
+        let Some(index) = self.block_number_to_index(block_number) else { return &[] };
+        &self.receipts[index]
     }
 
     /// Is bundle state empty of blocks.
@@ -370,8 +370,10 @@ impl BundleStateWithReceipts {
                     .expect("body indices exist");
 
                 let first_tx_index = body_indices.first_tx_num();
-                for (tx_idx, receipt) in receipts.into_iter().sorted_by_key(|(idx, _)| *idx) {
-                    receipts_cursor.append(first_tx_index + tx_idx as u64, receipt)?;
+                for (tx_idx, receipt) in receipts.into_iter().enumerate() {
+                    if let Some(receipt) = receipt {
+                        receipts_cursor.append(first_tx_index + tx_idx as u64, receipt)?;
+                    }
                 }
             }
         }
@@ -1369,12 +1371,7 @@ mod tests {
     fn revert_to_indices() {
         let base = BundleStateWithReceipts {
             bundle: BundleState::default(),
-            receipts: vec![
-                std::collections::HashMap::from_iter(
-                    (0..2).map(|idx| (idx, Receipt::default()))
-                );
-                7
-            ],
+            receipts: vec![vec![Some(Receipt::default()); 2]; 7],
             first_block: 10,
         };
 
