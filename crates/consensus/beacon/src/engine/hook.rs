@@ -49,7 +49,7 @@ impl HookEvent {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum HookAction {
     UpdateSyncState(SyncState),
     RestoreCanonicalHashes,

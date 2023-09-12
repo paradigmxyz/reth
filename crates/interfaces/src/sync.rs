@@ -29,7 +29,7 @@ pub trait NetworkSyncUpdater: std::fmt::Debug + Send + Sync + 'static {
 }
 
 /// The state the network is currently in when it comes to synchronization.
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum SyncState {
     /// Node sync is complete.
     ///

@@ -202,7 +202,8 @@ where
     /// be used to download and execute the missing blocks.
     pipeline_run_threshold: u64,
     hooks: Vec<Option<Box<dyn Hook>>>,
-    running_hook_with_db_write: Option<Box<dyn Hook>>,
+    hook_idx: usize,
+    running_hook_with_db_write: Option<(usize, Box<dyn Hook>)>,
 }
 
 impl<DB, BT, Client> BeaconConsensusEngine<DB, BT, Client>
@@ -300,6 +301,7 @@ where
             metrics: EngineMetrics::default(),
             pipeline_run_threshold,
             hooks: hooks.into_iter().map(Some).collect(),
+            hook_idx: 0,
             running_hook_with_db_write: None,
         };
 
@@ -1734,7 +1736,7 @@ where
         loop {
             // Poll a running hook with db write access first, as we will not be able to process
             // any engine messages until it's finished.
-            if let Some(mut hook) = this.running_hook_with_db_write.take() {
+            if let Some((i, mut hook)) = this.running_hook_with_db_write.take() {
                 match hook.poll(
                     cx,
                     HookArguments { tip_block_number: this.blockchain.canonical_tip().number },
@@ -1747,15 +1749,19 @@ where
                         debug!(target: "consensus::engine::hooks", ?hook, ?action, event = %event_name, "Polled running hook with db write");
 
                         if !finished {
-                            this.running_hook_with_db_write = Some(hook);
+                            this.running_hook_with_db_write = Some((i, hook));
+                        } else {
+                            this.hooks[i] = Some(hook);
                         }
 
-                        if let Some(Err(err)) = action.map(|action| this.on_hook_action(action)) {
-                            return Poll::Ready(Err(err))
+                        if let Some(action) = action {
+                            if let Err(err) = this.on_hook_action(action) {
+                                return Poll::Ready(Err(err))
+                            }
                         }
                     }
                     Poll::Pending => {
-                        this.running_hook_with_db_write = Some(hook);
+                        this.running_hook_with_db_write = Some((i, hook));
                     }
                 }
             }
@@ -1820,22 +1826,21 @@ where
             // 1. No engine and sync messages are pending
             // 2. Latest FCU status is not INVALID
             if is_pending && !this.forkchoice_state_tracker.is_latest_invalid() {
-                for item in this.hooks.iter_mut().filter(|hook| hook.is_some()) {
-                    if item
-                        .as_ref()
-                        .map(|hook| {
-                            let db_write = this.running_hook_with_db_write.is_some() &&
-                                hook.dependencies().db_write;
-                            let pipeline_idle =
-                                this.sync.is_pipeline_active() && hook.dependencies().pipeline_idle;
-                            db_write || pipeline_idle
-                        })
-                        // SAFETY: None hooks are filtered while iterating
-                        .unwrap()
-                    {
-                        continue
-                    }
+                let hook_idx = this.hook_idx % this.hooks.len();
+                let mut item = this.hooks.get_mut(hook_idx).unwrap();
 
+                if !item
+                    .as_ref()
+                    .map(|hook| {
+                        let db_write = this.running_hook_with_db_write.is_some() &&
+                            hook.dependencies().db_write;
+                        let pipeline_idle =
+                            this.sync.is_pipeline_active() && hook.dependencies().pipeline_idle;
+                        db_write || pipeline_idle
+                    })
+                    // SAFETY: None hooks are filtered while iterating
+                    .unwrap()
+                {
                     let mut hook = item.take().unwrap();
 
                     if let Poll::Ready(event) = hook.poll(
@@ -1848,19 +1853,23 @@ where
 
                         debug!(target: "consensus::engine::hooks", ?hook, ?action, event = %event_name, "Polled hook");
 
-                        if started {
-                            this.running_hook_with_db_write = Some(hook);
+                        if started && hook.dependencies().db_write {
+                            this.running_hook_with_db_write = Some((hook_idx, hook));
                         } else {
-                            *item = Some(hook);
+                            this.hooks[hook_idx] = Some(hook);
                         }
 
-                        if let Some(Err(err)) = action.map(|action| this.on_hook_action(action)) {
-                            return Poll::Ready(Err(err))
+                        if let Some(action) = action {
+                            if let Err(err) = this.on_hook_action(action) {
+                                return Poll::Ready(Err(err))
+                            }
                         }
                     } else {
-                        *item = Some(hook);
+                        this.hooks[hook_idx] = Some(hook);
                     }
                 }
+
+                this.hook_idx += 1;
             }
 
             if is_pending {
