@@ -84,6 +84,9 @@ pub trait BlockExecutor {
 
     /// Internal statistics of execution.
     fn stats(&self) -> BlockExecutorStats;
+
+    /// Returns the size hint of current in-memory changes.
+    fn size_hint(&self) -> Option<usize>;
 }
 
 /// A [BlockExecutor] capable of in-memory pruning of the data that will be written to the database.

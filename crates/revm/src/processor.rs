@@ -462,6 +462,10 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
     fn stats(&self) -> BlockExecutorStats {
         self.stats.clone()
     }
+
+    fn size_hint(&self) -> Option<usize> {
+        self.evm.db.as_ref().map(|db| db.bundle_size_hint())
+    }
 }
 
 impl<'a> PrunableBlockExecutor for EVMProcessor<'a> {
