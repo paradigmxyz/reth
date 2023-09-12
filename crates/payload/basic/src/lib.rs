@@ -48,7 +48,6 @@ use revm::{
 };
 use std::{
     fmt::Debug,
-    collections::HashMap,
     future::Future,
     pin::Pin,
     sync::{atomic::AtomicBool, Arc},
