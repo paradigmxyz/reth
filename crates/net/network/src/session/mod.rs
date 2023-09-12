@@ -458,6 +458,7 @@ impl SessionManager {
                     ),
                     internal_request_timeout: Arc::clone(&timeout),
                     protocol_breach_request_timeout: self.protocol_breach_request_timeout,
+                    terminate_message: None,
                 };
 
                 self.spawn(session);
