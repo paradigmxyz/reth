@@ -217,6 +217,13 @@ where
             EitherBlockExecutor::Right(b) => b.stats(),
         }
     }
+
+    fn size_hint(&self) -> Option<usize> {
+        match self {
+            EitherBlockExecutor::Left(a) => a.size_hint(),
+            EitherBlockExecutor::Right(b) => b.size_hint(),
+        }
+    }
 }
 
 impl<A, B> PrunableBlockExecutor for EitherBlockExecutor<A, B>

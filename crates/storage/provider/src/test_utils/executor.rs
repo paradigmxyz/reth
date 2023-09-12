@@ -41,6 +41,10 @@ impl BlockExecutor for TestExecutor {
     fn stats(&self) -> BlockExecutorStats {
         BlockExecutorStats::default()
     }
+
+    fn size_hint(&self) -> Option<usize> {
+        None
+    }
 }
 
 impl PrunableBlockExecutor for TestExecutor {

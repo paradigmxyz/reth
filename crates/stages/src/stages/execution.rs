@@ -175,7 +175,12 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             stage_checkpoint.progress.processed += block.gas_used;
 
             // Check if we should commit now
-            if self.thresholds.is_end_of_batch(block_number - start_block, 0, cumulative_gas) {
+            let bundle_size_hint = executor.size_hint().unwrap_or_default() as u64;
+            if self.thresholds.is_end_of_batch(
+                block_number - start_block,
+                bundle_size_hint,
+                cumulative_gas,
+            ) {
                 break
             }
         }
