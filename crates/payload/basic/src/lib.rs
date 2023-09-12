@@ -869,7 +869,10 @@ where
     debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number,  "building empty payload");
 
     let state = client.state_by_block_hash(parent_block.hash)?;
-    let mut db = State::builder().with_database_boxed(Box::new(RevmDatabase::new(&state))).build();
+    let mut db = State::builder()
+        .with_database_boxed(Box::new(RevmDatabase::new(&state)))
+        .with_bundle_update()
+        .build();
 
     let base_fee = initialized_block_env.basefee.to::<u64>();
     let block_number = initialized_block_env.number.to::<u64>();
