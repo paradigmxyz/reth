@@ -1051,12 +1051,29 @@ impl<T: PoolTransaction> AllTransactions<T> {
         self.by_hash.remove(internal.transaction.hash()).map(|tx| (tx, internal.subpool))
     }
 
+    /// Checks if the given transaction's type conflicts with an existing transaction.
+    ///
+    /// See also [ValidPoolTransaction::tx_type_conflicts_with].
+    ///
+    /// Caution: This assumes that mutually exclusive invariant is always true for the same sender.
+    #[inline]
+    fn contains_conflicting_transaction(&self, tx: &ValidPoolTransaction<T>) -> bool {
+        let mut iter = self.txs_iter(tx.transaction_id.sender);
+        if let Some((_, existing)) = iter.next() {
+            return tx.tx_type_conflicts_with(&existing.transaction)
+        }
+        // no existing transaction for this sender
+        false
+    }
+
     /// Additional checks for a new transaction.
     ///
     /// This will enforce all additional rules in the context of this pool, such as:
     ///   - Spam protection: reject new non-local transaction from a sender that exhausted its slot
     ///     capacity.
     ///   - Gas limit: reject transactions if they exceed a block's maximum gas.
+    ///   - Ensures transaction types are not conflicting for the sender: blob vs normal
+    ///     transactions are mutually exclusive for the same sender.
     fn ensure_valid(
         &self,
         transaction: ValidPoolTransaction<T>,
@@ -1077,6 +1094,12 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 transaction: Arc::new(transaction),
             })
         }
+
+        if self.contains_conflicting_transaction(&transaction) {
+            // blob vs non blob transactions are mutually exclusive for the same sender
+            return Err(InsertErr::TxTypeConflict { transaction: Arc::new(transaction) })
+        }
+
         Ok(transaction)
     }
 
@@ -1240,7 +1263,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         );
 
         // before attempting to insert a blob transaction, we need to ensure that additional
-        // constraints are met
+        // constraints are met that only apply to blob transactions
         if transaction.is_eip4844() {
             transaction =
                 self.ensure_valid_blob_transaction(transaction, on_chain_balance, ancestor)?;
@@ -1289,12 +1312,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 // Transaction with the same nonce already exists: replacement candidate
                 let existing_transaction = entry.get().transaction.as_ref();
                 let maybe_replacement = transaction.as_ref();
-                if existing_transaction.tx_type_conflicts_with(maybe_replacement) {
-                    // blob vs non blob replacement
-                    return Err(InsertErr::TxTypeConflict { transaction: pool_tx.transaction })
-                }
 
-                // Transaction already exists
                 // Ensure the new transaction is not underpriced
                 if Self::is_underpriced(existing_transaction, maybe_replacement, &self.price_bumps)
                 {
@@ -1375,7 +1393,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 tx.subpool = tx.state.into();
 
                 if inserted_tx_id.eq(id) {
-                    // if it is the new transaction, track the state
+                    // if it is the new transaction, track its updated state
                     state = tx.state;
                 } else {
                     // check if anything changed
@@ -1698,6 +1716,38 @@ mod tests {
         replacement.transaction = replacement.transaction.decr_price();
         let err = pool.insert_tx(replacement, on_chain_balance, on_chain_nonce).unwrap_err();
         assert!(matches!(err, InsertErr::Underpriced { .. }));
+    }
+
+    #[test]
+    fn insert_conflicting_type_normal_to_blob() {
+        let on_chain_balance = U256::from(10_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+        let tx = MockTransaction::eip1559().inc_price().inc_limit();
+        let first = f.validated(tx.clone());
+        pool.insert_tx(first, on_chain_balance, on_chain_nonce).unwrap();
+        let tx =
+            MockTransaction::eip4844().set_sender(tx.get_sender()).inc_price_by(100).inc_limit();
+        let blob = f.validated(tx);
+        let err = pool.insert_tx(blob, on_chain_balance, on_chain_nonce).unwrap_err();
+        assert!(matches!(err, InsertErr::TxTypeConflict { .. }), "{:?}", err);
+    }
+
+    #[test]
+    fn insert_conflicting_type_blob_to_normal() {
+        let on_chain_balance = U256::from(10_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+        let tx = MockTransaction::eip4844().inc_price().inc_limit();
+        let first = f.validated(tx.clone());
+        pool.insert_tx(first, on_chain_balance, on_chain_nonce).unwrap();
+        let tx =
+            MockTransaction::eip1559().set_sender(tx.get_sender()).inc_price_by(100).inc_limit();
+        let tx = f.validated(tx);
+        let err = pool.insert_tx(tx, on_chain_balance, on_chain_nonce).unwrap_err();
+        assert!(matches!(err, InsertErr::TxTypeConflict { .. }), "{:?}", err);
     }
 
     // insert nonce then nonce - 1
