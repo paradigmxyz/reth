@@ -179,18 +179,16 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 break
             }
         }
-        let time = Instant::now();
         let state = executor.take_output_state();
-        let write_preparation_duration = time.elapsed();
+        executor.stats().log_info();
+        drop(executor);
 
         let time = Instant::now();
         // write output
         state.write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)?;
         let db_write_duration = time.elapsed();
         info!(target: "sync::stages::execution", block_fetch=?fetch_block_duration, execution=?execution_duration, 
-            write_preperation=?write_preparation_duration, write=?db_write_duration, " Execution duration.");
-
-        executor.stats().log_info();
+            write=?db_write_duration, " Execution duration.");
 
         let done = stage_progress == max_block;
         Ok(ExecOutput {
