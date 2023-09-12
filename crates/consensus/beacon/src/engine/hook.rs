@@ -39,6 +39,16 @@ pub enum HookEvent {
     Finished(Result<(), HookError>),
 }
 
+impl HookEvent {
+    pub fn is_started(&self) -> bool {
+        matches!(self, Self::Started(_))
+    }
+
+    pub fn is_finished(&self) -> bool {
+        matches!(self, Self::Finished(_))
+    }
+}
+
 #[derive(Debug)]
 pub enum HookAction {
     UpdateSyncState(SyncState),

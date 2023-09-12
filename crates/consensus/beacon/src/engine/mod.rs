@@ -1739,12 +1739,12 @@ where
                 ) {
                     Poll::Ready(event) => {
                         let event_name = format!("{event:?}");
-                        let has_finished = matches!(event, HookEvent::Finished(_));
+                        let finished = event.is_finished();
                         let action = hook.on_event(event)?;
 
                         debug!(target: "consensus::engine::hooks", ?hook, ?action, event = %event_name, "Polled running hook with db write");
 
-                        if !has_finished {
+                        if !finished {
                             this.running_hook_with_db_write = Some(hook);
                         }
 
@@ -1841,12 +1841,12 @@ where
                         HookArguments { tip_block_number: this.blockchain.canonical_tip().number },
                     ) {
                         let event_name = format!("{event:?}");
-                        let has_started = matches!(event, HookEvent::Started(_));
+                        let started = event.is_started();
                         let action = hook.on_event(event)?;
 
                         debug!(target: "consensus::engine::hooks", ?hook, ?action, event = %event_name, "Polled hook");
 
-                        if has_started {
+                        if started {
                             this.running_hook_with_db_write = Some(hook);
                         } else {
                             *item = Some(hook);
