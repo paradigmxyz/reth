@@ -412,6 +412,10 @@ where
         build_empty_payload(&self.client, self.config.clone()).map(Arc::new)
     }
 
+    fn payload_attributes(&self) -> Result<PayloadBuilderAttributes, PayloadBuilderError> {
+        Ok(self.config.attributes.clone())
+    }
+
     fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
         let best_payload = self.best_payload.take();
         let maybe_better = self.pending_block.take();
