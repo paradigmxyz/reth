@@ -5,11 +5,9 @@ use std::task::{Context, Poll};
 pub trait Hook: Send + Sync + 'static {
     fn poll(&mut self, cx: &mut Context<'_>, args: HookArguments) -> Poll<HookEvent>;
 
-    fn on_event(&mut self, event: HookEvent) -> Option<Result<HookAction, HookError>>;
+    fn on_event(&mut self, event: HookEvent) -> Result<Option<HookAction>, HookError>;
 
     fn capabilities(&self) -> HookCapabilities;
-
-    fn is_running(&self) -> bool;
 }
 
 pub struct HookArguments {
@@ -25,9 +23,6 @@ pub enum HookEvent {
     ///
     /// If this is returned, the hook is idle.
     Finished(Result<(), HookError>),
-    /// Hook task was dropped after it was started, unable to receive it because channel
-    /// closed. This would indicate a panicked hook task.
-    TaskDropped,
 }
 
 pub enum HookAction {

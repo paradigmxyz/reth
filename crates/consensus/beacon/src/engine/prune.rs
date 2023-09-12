@@ -12,7 +12,7 @@ use reth_prune::{Pruner, PrunerError, PrunerWithResult};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
 use tokio::sync::oneshot;
-use tracing::{error, trace};
+use tracing::trace;
 
 /// Manages pruning under the control of the engine.
 ///
@@ -59,7 +59,7 @@ impl<DB: Database + 'static> EnginePruneController<DB> {
             }
             Err(_) => {
                 // failed to receive the pruner
-                HookEvent::TaskDropped
+                HookEvent::Finished(Err(HookError::ChannelClosed))
             }
         };
         Poll::Ready(ev)
@@ -113,27 +113,23 @@ impl<DB: Database + 'static> Hook for EnginePruneController<DB> {
         self.poll_pruner(cx)
     }
 
-    fn on_event(&mut self, event: HookEvent) -> Option<Result<HookAction, HookError>> {
+    fn on_event(&mut self, event: HookEvent) -> Result<Option<HookAction>, HookError> {
         match event {
-            HookEvent::NotReady => None,
+            HookEvent::NotReady => Ok(None),
             HookEvent::Started(tip_block_number) => {
                 trace!(target: "consensus::engine", %tip_block_number, "Pruner started");
                 self.metrics.runs.increment(1);
                 // Engine can't process any FCU/payload messages from CL while we're pruning, as
                 // pruner needs an exclusive write access to the database. To prevent CL from
                 // sending us unneeded updates, we need to respond `true` on `eth_syncing` request.
-                Some(Ok(HookAction::UpdateSyncState(SyncState::Syncing)))
-            }
-            HookEvent::TaskDropped => {
-                error!(target: "consensus::engine", "Failed to receive spawned pruner");
-                Some(Err(HookError::ChannelClosed))
+                Ok(Some(HookAction::UpdateSyncState(SyncState::Syncing)))
             }
             HookEvent::Finished(result) => {
                 trace!(target: "consensus::engine", ?result, "Pruner finished");
                 match result {
-                    Ok(_) => Some(Ok(HookAction::RestoreCanonicalHashes)),
+                    Ok(_) => Ok(Some(HookAction::RestoreCanonicalHashes)),
                     // Any pruner error at this point is fatal.
-                    Err(error) => Some(Err(error.into())),
+                    Err(error) => Err(error.into()),
                 }
             }
         }
@@ -141,10 +137,6 @@ impl<DB: Database + 'static> Hook for EnginePruneController<DB> {
 
     fn capabilities(&self) -> HookCapabilities {
         HookCapabilities { db_write: true }
-    }
-
-    fn is_running(&self) -> bool {
-        self.pruner_state.is_running()
     }
 }
 
@@ -162,13 +154,6 @@ enum PrunerState<DB> {
     Idle(Option<Pruner<DB>>),
     /// Pruner is running and waiting for a response
     Running(oneshot::Receiver<PrunerWithResult<DB>>),
-}
-
-impl<DB> PrunerState<DB> {
-    /// Returns `true` if the state matches runing.
-    fn is_running(&self) -> bool {
-        matches!(self, PrunerState::Running(_))
-    }
 }
 
 #[derive(reth_metrics::Metrics)]

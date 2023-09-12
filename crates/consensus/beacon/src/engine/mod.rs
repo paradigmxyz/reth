@@ -67,7 +67,7 @@ mod handle;
 pub use handle::BeaconConsensusEngineHandle;
 
 mod forkchoice;
-use crate::engine::hook::{Hook, HookAction, HookArguments};
+use crate::engine::hook::{Hook, HookAction, HookArguments, HookEvent};
 pub use forkchoice::ForkchoiceStatus;
 
 mod metrics;
@@ -199,7 +199,8 @@ where
     /// blocks using the pipeline. Otherwise, the engine, sync controller, and blockchain tree will
     /// be used to download and execute the missing blocks.
     pipeline_run_threshold: u64,
-    hooks: Vec<Box<dyn Hook>>,
+    hooks: Vec<Option<Box<dyn Hook>>>,
+    running_hook_with_db_write: Option<Box<dyn Hook>>,
 }
 
 impl<DB, BT, Client> BeaconConsensusEngine<DB, BT, Client>
@@ -296,7 +297,8 @@ where
             invalid_headers: InvalidHeaderCache::new(MAX_INVALID_HEADERS),
             metrics: EngineMetrics::default(),
             pipeline_run_threshold,
-            hooks,
+            hooks: hooks.into_iter().map(Some).collect(),
+            running_hook_with_db_write: None,
         };
 
         let maybe_pipeline_target = match target {
@@ -1679,7 +1681,7 @@ where
     }
 
     fn is_hook_with_db_write_running(&self) -> bool {
-        self.hooks.iter().any(|hook| hook.capabilities().db_write && hook.is_running())
+        self.running_hook_with_db_write.is_some()
     }
 
     fn on_hook_action(&self, action: HookAction) -> Result<(), BeaconConsensusEngineError> {
@@ -1728,21 +1730,27 @@ where
         // Process all incoming messages from the CL, these can affect the state of the
         // SyncController, hence they are polled first, and they're also time sensitive.
         loop {
-            // Poll any running hooks with db write access first, as we will not be able to process
-            // any engine messages until they're finished.
-            for hook in this.hooks.iter_mut() {
-                if hook.is_running() && hook.capabilities().db_write {
-                    if let Poll::Ready(Some(result)) = hook
-                        .poll(
-                            cx,
-                            HookArguments {
-                                tip_block_number: this.blockchain.canonical_tip().number,
-                            },
-                        )
-                        .map(|event| hook.on_event(event))
-                    {
-                        let action = result?;
-                        return Poll::Ready(this.on_hook_action(action))
+            // Poll a running hook with db write access first, as we will not be able to process
+            // any engine messages until it's finished.
+            if let Some(mut hook) = this.running_hook_with_db_write.take() {
+                match hook.poll(
+                    cx,
+                    HookArguments { tip_block_number: this.blockchain.canonical_tip().number },
+                ) {
+                    Poll::Ready(event) => {
+                        let has_finished = matches!(event, HookEvent::Finished(_));
+                        let action = hook.on_event(event)?;
+
+                        if !has_finished {
+                            this.running_hook_with_db_write = Some(hook);
+                        }
+
+                        if let Some(action) = action {
+                            return Poll::Ready(this.on_hook_action(action))
+                        }
+                    }
+                    Poll::Pending => {
+                        this.running_hook_with_db_write = Some(hook);
                     }
                 }
             }
@@ -1811,18 +1819,32 @@ where
                 is_pending &&
                 !this.forkchoice_state_tracker.is_latest_invalid()
             {
-                for hook in this.hooks.iter_mut() {
-                    if let Poll::Ready(Some(result)) = hook
-                        .poll(
-                            cx,
-                            HookArguments {
-                                tip_block_number: this.blockchain.canonical_tip().number,
-                            },
-                        )
-                        .map(|event| hook.on_event(event))
+                for item in this.hooks.iter_mut().filter(|hook| hook.is_some()) {
+                    if this.running_hook_with_db_write.is_some() &&
+                        item.as_ref().map(|hook| hook.capabilities().db_write).unwrap()
                     {
-                        let action = result?;
-                        return Poll::Ready(this.on_hook_action(action))
+                        continue
+                    }
+                    let mut hook = item.take().unwrap();
+
+                    if let Poll::Ready(event) = hook.poll(
+                        cx,
+                        HookArguments { tip_block_number: this.blockchain.canonical_tip().number },
+                    ) {
+                        let has_started = matches!(event, HookEvent::Started(_));
+                        let action = hook.on_event(event)?;
+
+                        if has_started {
+                            this.running_hook_with_db_write = Some(hook);
+                        } else {
+                            *item = Some(hook);
+                        }
+
+                        if let Some(action) = action {
+                            return Poll::Ready(this.on_hook_action(action))
+                        }
+                    } else {
+                        *item = Some(hook);
                     }
                 }
             }
