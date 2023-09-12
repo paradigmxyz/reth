@@ -1829,17 +1829,16 @@ where
                 let hook_idx = this.hook_idx % this.hooks.len();
                 let mut item = this.hooks.get_mut(hook_idx).unwrap();
 
-                if !item
+                if item
                     .as_ref()
                     .map(|hook| {
                         let db_write = this.running_hook_with_db_write.is_some() &&
                             hook.dependencies().db_write;
                         let pipeline_idle =
                             this.sync.is_pipeline_active() && hook.dependencies().pipeline_idle;
-                        db_write || pipeline_idle
+                        !(db_write || pipeline_idle)
                     })
-                    // SAFETY: None hooks are filtered while iterating
-                    .unwrap()
+                    .unwrap_or(false)
                 {
                     let mut hook = item.take().unwrap();
 
