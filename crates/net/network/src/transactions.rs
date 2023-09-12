@@ -20,7 +20,7 @@ use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{Peers, ReputationChangeKind};
 use reth_primitives::{
     FromRecoveredPooledTransaction, IntoRecoveredTransaction, PeerId, PooledTransactionsElement,
-    TransactionSigned, TxHash, TxType, H256,
+    TransactionSigned, TxHash, H256,
 };
 use reth_rlp::Encodable;
 use reth_transaction_pool::{
@@ -244,7 +244,7 @@ where
     /// The message for new pooled hashes depends on the negotiated version of the stream.
     /// See [NewPooledTransactionHashes](NewPooledTransactionHashes)
     ///
-    /// TODO add note that this never broadcasts full 4844 transactions
+    /// Note: EIP-4844 are disallowed from being broadcast in full and are only ever sent as hashes, see also <https://eips.ethereum.org/EIPS/eip-4844#networking>.
     fn propagate_transactions(
         &mut self,
         to_propagate: Vec<PropagateTransaction>,
@@ -276,7 +276,7 @@ where
                     //  via `GetPooledTransactions`.
                     //
                     // From: <https://eips.ethereum.org/EIPS/eip-4844#networking>
-                    if tx.tx_type() != TxType::EIP4844 {
+                    if !tx.transaction.is_eip4844() {
                         full_transactions.push(tx);
                     }
                 }
@@ -670,10 +670,6 @@ struct PropagateTransaction {
 impl PropagateTransaction {
     fn hash(&self) -> TxHash {
         self.transaction.hash()
-    }
-
-    fn tx_type(&self) -> TxType {
-        self.transaction.tx_type()
     }
 
     fn new(transaction: Arc<TransactionSigned>) -> Self {
