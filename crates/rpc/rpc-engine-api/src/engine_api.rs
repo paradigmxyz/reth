@@ -208,6 +208,32 @@ where
         &self,
         payload_id: PayloadId,
     ) -> EngineApiResult<ExecutionPayloadEnvelopeV3> {
+        // First get the best payload, do not resolve it (we need to check the timestamp). If we
+        // were to resolve the payload here, and it is before cancun, then it's possible a
+        // subsequent call to `get_payload_v3` would return `UnknownPayload` because the payload
+        // may no longer exist in the payload store.
+        let payload = self
+            .inner
+            .payload_store
+            .best_payload(payload_id)
+            .await
+            .ok_or(EngineApiError::UnknownPayload)??;
+
+        // From the Engine API spec:
+        // <https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/cancun.md#specification-2>
+        //
+        // 1. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
+        //    the built payload does not fall within the time frame of the Cancun fork.
+        if !self
+            .inner
+            .chain_spec
+            .fork(Hardfork::Cancun)
+            .active_at_timestamp(payload.block().timestamp)
+        {
+            return Err(EngineApiError::UnsupportedFork)
+        }
+
+        // Now resolve the payload
         Ok(self
             .inner
             .payload_store
