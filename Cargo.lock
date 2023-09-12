@@ -5195,6 +5195,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "metrics-process",
  "metrics-util",
+ "parking_lot 0.12.1",
  "pin-project",
  "pretty_assertions",
  "proptest",
@@ -5229,6 +5230,7 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie",
+ "revm-utils",
  "secp256k1",
  "serde",
  "serde_json",
@@ -5831,6 +5833,7 @@ dependencies = [
  "reth-revm-primitives",
  "reth-rlp",
  "reth-trie",
+ "revm-utils",
  "tempfile",
  "tokio",
  "tokio-stream",
@@ -5868,6 +5871,7 @@ dependencies = [
  "reth-revm-primitives",
  "reth-rlp",
  "revm",
+ "revm-utils",
  "tracing",
 ]
 
@@ -6104,6 +6108,7 @@ dependencies = [
  "reth-revm",
  "reth-rlp",
  "reth-trie",
+ "revm-utils",
  "serde",
  "serde_json",
  "thiserror",
@@ -6190,28 +6195,31 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "3.3.0"
-source = "git+https://github.com/bluealloy/revm/?branch=release/v25#6084e0fa2d457931cd8c9d29934bca0812b5b8d6"
+source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#039e722c8526d7e0f4ec1efe51596fe7710ebc6e"
 dependencies = [
  "auto_impl",
  "revm-interpreter",
  "revm-precompile",
+ "revm-utils",
 ]
 
 [[package]]
 name = "revm-interpreter"
 version = "1.1.2"
-source = "git+https://github.com/bluealloy/revm/?branch=release/v25#6084e0fa2d457931cd8c9d29934bca0812b5b8d6"
+source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#039e722c8526d7e0f4ec1efe51596fe7710ebc6e"
 dependencies = [
  "derive_more",
  "enumn",
  "revm-primitives",
+ "revm-utils",
  "sha3",
+ "tracing",
 ]
 
 [[package]]
 name = "revm-precompile"
 version = "2.0.3"
-source = "git+https://github.com/bluealloy/revm/?branch=release/v25#6084e0fa2d457931cd8c9d29934bca0812b5b8d6"
+source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#039e722c8526d7e0f4ec1efe51596fe7710ebc6e"
 dependencies = [
  "k256",
  "num",
@@ -6227,7 +6235,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "1.1.2"
-source = "git+https://github.com/bluealloy/revm/?branch=release/v25#6084e0fa2d457931cd8c9d29934bca0812b5b8d6"
+source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#039e722c8526d7e0f4ec1efe51596fe7710ebc6e"
 dependencies = [
  "arbitrary",
  "auto_impl",
@@ -6242,10 +6250,19 @@ dependencies = [
  "primitive-types",
  "proptest",
  "proptest-derive",
+ "revm-utils",
  "rlp",
  "ruint",
  "serde",
  "sha3",
+]
+
+[[package]]
+name = "revm-utils"
+version = "0.1.0"
+source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#039e722c8526d7e0f4ec1efe51596fe7710ebc6e"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

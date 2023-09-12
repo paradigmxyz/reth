@@ -21,6 +21,8 @@ use revm::{
     },
     EVM,
 };
+#[cfg(feature = "open_revm_metrics_record")]
+use revm_utils::types::RevmMetricRecord;
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
@@ -35,6 +37,9 @@ where
     pub chain_spec: Arc<ChainSpec>,
     evm: EVM<SubState<DB>>,
     stack: InspectorStack,
+    /// Used for record duration of instruction.
+    #[cfg(feature = "open_revm_metrics_record")]
+    pub revm_metric_record: RevmMetricRecord,
 }
 
 impl<DB> From<Arc<ChainSpec>> for Executor<DB>
@@ -45,7 +50,14 @@ where
     /// `with_db` to set the database before executing.
     fn from(chain_spec: Arc<ChainSpec>) -> Self {
         let evm = EVM::new();
-        Executor { chain_spec, evm, stack: InspectorStack::new(InspectorStackConfig::default()) }
+        Executor {
+            chain_spec,
+            evm,
+            stack: InspectorStack::new(InspectorStackConfig::default()),
+            #[cfg(feature = "open_revm_metrics_record")]
+            // revm_metric_records: HashMap::new(),
+            revm_metric_record: RevmMetricRecord::default(),
+        }
     }
 }
 
@@ -58,7 +70,14 @@ where
         let mut evm = EVM::new();
         evm.database(db);
 
-        Executor { chain_spec, evm, stack: InspectorStack::new(InspectorStackConfig::default()) }
+        Executor {
+            chain_spec,
+            evm,
+            stack: InspectorStack::new(InspectorStackConfig::default()),
+            #[cfg(feature = "open_revm_metrics_record")]
+            // revm_metric_records: HashMap::new(),
+            revm_metric_record: RevmMetricRecord::default(),
+        }
     }
 
     /// Configures the executor with the given inspectors.
@@ -98,6 +117,8 @@ where
             header,
             total_difficulty,
         );
+        // #[cfg(feature = "open_revm_metrics_record")]// Error: why this?
+        self.evm.env.cpu_frequency = revm_utils::time::get_cpu_frequency().unwrap_or_default();
     }
 
     /// Commit change to the run-time database, and update the given [PostState] with the changes
@@ -238,7 +259,19 @@ where
                 .into())
             }
             // Execute transaction.
+            #[cfg(not(feature = "open_revm_metrics_record"))]
             let ResultAndState { result, state } = self.transact(transaction, sender)?;
+
+            #[cfg(feature = "open_revm_metrics_record")]
+            let ResultAndState { result, state, mut revm_metric_record } =
+                self.transact(transaction, sender)?;
+
+            #[cfg(feature = "open_revm_metrics_record")]
+            {
+                if revm_metric_record.not_empty() {
+                    self.revm_metric_record.update(&mut revm_metric_record);
+                }
+            }
 
             // commit changes
             self.commit_changes(
@@ -271,6 +304,19 @@ where
                     logs: result.into_logs().into_iter().map(into_reth_log).collect(),
                 },
             );
+        }
+
+        #[cfg(feature = "open_revm_metrics_record")]
+        {
+            // println!("");
+            // println!("block number: {:?}, =============================== ", block.number);
+            // println!("revm result: {:?}", self.revm_metric_record);
+            // println!(
+            //     "cache_db size is {:?} bytes",
+            //     self.evm.db.as_ref().expect("db is empty").size()
+            // );
+            // println!("====================================================");
+            // println!("");
         }
 
         Ok((post_state, cumulative_gas_used))
@@ -344,6 +390,12 @@ where
         }
 
         Ok(post_state)
+    }
+
+    /// Handle revm metric records.
+    #[cfg(feature = "open_revm_metrics_record")]
+    fn get_revm_metric_record(&self) -> (RevmMetricRecord, usize) {
+        (self.revm_metric_record.clone(), self.evm.db.as_ref().expect("db is empty").size())
     }
 }
 

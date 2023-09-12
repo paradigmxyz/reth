@@ -667,7 +667,9 @@ where
             // replay all transactions prior to the targeted transaction
             replay_transactions_until(&mut db, cfg.clone(), block_env.clone(), block_txs, tx.hash)?;
 
-            let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
+            // #[cfg(feature = "open_revm_metrics_record")]// Error: why this?
+            let env =
+                Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx), cpu_frequency: 0f64 };
 
             let mut inspector = TracingInspector::new(config);
             let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;

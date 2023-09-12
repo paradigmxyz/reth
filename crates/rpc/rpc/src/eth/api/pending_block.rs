@@ -66,13 +66,42 @@ impl PendingBlockEnv {
             let tx = pool_tx.to_recovered_transaction();
 
             // Configure the environment for the block.
-            let env =
-                Env { cfg: cfg.clone(), block: block_env.clone(), tx: tx_env_with_recovered(&tx) };
+            // #[cfg(feature = "open_revm_metrics_record")]// Error: why this?
+            let env = Env {
+                cfg: cfg.clone(),
+                block: block_env.clone(),
+                tx: tx_env_with_recovered(&tx),
+                cpu_frequency: 0f64,
+            };
 
             let mut evm = revm::EVM::with_env(env);
             evm.database(&mut db);
 
+            #[cfg(not(feature = "open_revm_metrics_record"))]
             let ResultAndState { result, state } = match evm.transact() {
+                Ok(res) => res,
+                Err(err) => {
+                    match err {
+                        EVMError::Transaction(err) => {
+                            if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
+                                // if the nonce is too low, we can skip this transaction
+                            } else {
+                                // if the transaction is invalid, we can skip it and all of its
+                                // descendants
+                                best_txs.mark_invalid(&pool_tx);
+                            }
+                            continue
+                        }
+                        err => {
+                            // this is an error that we should treat as fatal for this attempt
+                            return Err(err.into())
+                        }
+                    }
+                }
+            };
+
+            #[cfg(feature = "open_revm_metrics_record")]
+            let ResultAndState { result, state, .. } = match evm.transact() {
                 Ok(res) => res,
                 Err(err) => {
                     match err {

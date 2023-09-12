@@ -24,6 +24,9 @@ use reth_provider::{
 use std::{ops::RangeInclusive, time::Instant};
 use tracing::*;
 
+#[cfg(feature = "open_performance_dashboard")]
+use revm_utils::time::{get_cpu_frequency, TimeRecorder};
+
 /// The execution stage executes all transactions and
 /// update history indexes.
 ///
@@ -131,36 +134,106 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let mut state = PostState::default();
         state.add_prune_modes(prune_modes);
 
+        #[cfg(feature = "open_performance_dashboard")]
+        let mut cnt = 0u64;
+        #[cfg(feature = "open_performance_dashboard")]
+        let mut total_txs = 0u64;
+        #[cfg(feature = "open_performance_dashboard")]
+        let mut total_gas = 0u64;
+        #[cfg(feature = "open_performance_dashboard")]
+        const N: u64 = 1;
+        #[cfg(feature = "open_performance_dashboard")]
+        let cpu_frequency = get_cpu_frequency().expect("Get cpu frequency error!");
+
+        #[cfg(feature = "open_revm_metrics_record")]
+        let mut cnt1 = 0u64;
+        #[cfg(feature = "open_revm_metrics_record")]
+        const N1: u64 = 100;
+
         for block_number in start_block..=max_block {
+            #[cfg(feature = "open_performance_dashboard")]
+            let mut time_record = TimeRecorder::now();
             let td = provider
                 .header_td_by_number(block_number)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
             let block = provider
                 .block_with_senders(block_number)?
                 .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
+            #[cfg(feature = "open_performance_dashboard")]
+            if let Some(metrics_tx) = &mut self.metrics_tx {
+                let time = time_record.elapsed().to_nanoseconds(cpu_frequency);
+                let _ = metrics_tx.send(MetricEvent::ReadBlockInfoTime { time });
+            }
 
             // Configure the executor to use the current state.
             trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
 
             // Execute the block
             let (block, senders) = block.into_components();
+            #[cfg(feature = "open_performance_dashboard")]
+            let mut time_record = TimeRecorder::now();
             let block_state = executor
                 .execute_and_verify_receipt(&block, td, Some(senders))
                 .map_err(|error| StageError::ExecutionError {
                     block: block.header.clone().seal_slow(),
                     error,
                 })?;
+            #[cfg(feature = "open_performance_dashboard")]
+            if let Some(metrics_tx) = &mut self.metrics_tx {
+                let time = time_record.elapsed().to_nanoseconds(cpu_frequency);
+                let _ = metrics_tx.send(MetricEvent::RevmExecuteTxTime { time });
+            }
 
-            // Gas metrics
+            // Gas and txs metrics
             if let Some(metrics_tx) = &mut self.metrics_tx {
                 let _ =
                     metrics_tx.send(MetricEvent::ExecutionStageGas { gas: block.header.gas_used });
+
+                #[cfg(feature = "open_performance_dashboard")]
+                {
+                    if cnt % N == 1 {
+                        let _ = metrics_tx.send(MetricEvent::ExecutionStageGas { gas: total_gas });
+                        let _ = metrics_tx.send(MetricEvent::ExecutionStageTxs { txs: total_txs });
+
+                        println!(
+                            "cnt: {:?}, block_number: {:?}, txs: {:?}, gas: {:?}",
+                            cnt, block_number, total_txs, total_gas
+                        );
+
+                        total_txs = block.body.len() as u64;
+                        total_gas = block.header.gas_used;
+                    } else {
+                        total_txs += block.body.len() as u64;
+                        total_gas += block.header.gas_used;
+                    }
+
+                    cnt += 1;
+                }
+
+                #[cfg(feature = "open_revm_metrics_record")]
+                {
+                    if cnt1 % N1 == 0 {
+                        let record = executor.get_revm_metric_record();
+                        println!("");
+                        println!("revm_record = {:?}", record.0);
+                        println!("cachedb_size = {:?}", record.1);
+                        println!("");
+                    }
+                    cnt1 += 1;
+                }
             }
 
             // Merge state changes
+            #[cfg(feature = "open_performance_dashboard")]
+            let mut time_record = TimeRecorder::now();
             state.extend(block_state);
             stage_progress = block_number;
             stage_checkpoint.progress.processed += block.gas_used;
+            #[cfg(feature = "open_performance_dashboard")]
+            if let Some(metrics_tx) = &mut self.metrics_tx {
+                let time = time_record.elapsed().to_nanoseconds(cpu_frequency);
+                let _ = metrics_tx.send(MetricEvent::PostProcessTime { time });
+            }
 
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(block_number - start_block, state.size_hint() as u64)
@@ -172,6 +245,17 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         // Write remaining changes
         trace!(target: "sync::stages::execution", accounts = state.accounts().len(), "Writing updated state to database");
         let start = Instant::now();
+        #[cfg(feature = "open_performance_dashboard")]
+        {
+            let mut time_record = TimeRecorder::now();
+            state.write_to_db(provider.tx_ref(), max_block)?;
+            let time = time_record.elapsed().to_nanoseconds(cpu_frequency);
+            if let Some(metrics_tx) = &mut self.metrics_tx {
+                let _ = metrics_tx.send(MetricEvent::WriteToDbTime { time });
+            }
+        }
+
+        #[cfg(not(feature = "open_performance_dashboard"))]
         state.write_to_db(provider.tx_ref(), max_block)?;
         trace!(target: "sync::stages::execution", took = ?start.elapsed(), "Wrote state");
 

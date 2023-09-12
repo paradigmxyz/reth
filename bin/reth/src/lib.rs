@@ -41,6 +41,9 @@ pub mod test_vectors;
 pub mod utils;
 pub mod version;
 
+#[cfg(feature = "open_performance_dashboard")]
+mod performance_metrics;
+
 /// Re-exported from `reth_provider`.
 pub mod providers {
     pub use reth_provider::*;

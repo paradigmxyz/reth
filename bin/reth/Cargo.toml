@@ -72,6 +72,7 @@ metrics-process = "1.0.9"
 reth-metrics.workspace = true
 metrics.workspace = true
 
+
 # test vectors generation
 proptest.workspace = true
 
@@ -102,6 +103,12 @@ humantime = "2.1.0"
 const-str = "0.5.6"
 boyer-moore-magiclen = "0.2.16"
 
+# performance-dashboard
+revm-utils = { git = "https://github.com/megaeth-labs/revm", branch = "andy/debug/performance-dashboard", optional = true }
+# revm-utils = { path = "/home/andy/Source/work/revm/crates/utils", optional = true }
+
+parking_lot = { version = "0.12", optional = true }
+
 [target.'cfg(not(windows))'.dependencies]
 jemallocator = { version = "0.5.0", optional = true }
 jemalloc-ctl = { version = "0.5.0", optional = true }
@@ -115,6 +122,16 @@ min-warn-logs = ["tracing/release_max_level_warn"]
 min-info-logs = ["tracing/release_max_level_info"]
 min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
+open_performance_dashboard = ["reth-stages/open_performance_dashboard", "revm-utils", "parking_lot"]
+open_revm_metrics_record = [
+    "reth-revm/open_revm_metrics_record",
+    "reth-revm-inspectors/open_revm_metrics_record",
+    "reth-rpc-builder/open_revm_metrics_record",
+    "reth-basic-payload-builder/open_revm_metrics_record",
+    "reth-provider/open_revm_metrics_record",
+    "reth-stages/open_revm_metrics_record",
+    ]
+open_revm_instruction_log = ["reth-revm/open_revm_instruction_log"]
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }

@@ -102,7 +102,9 @@ where
                 while let Some(tx) = transactions.next() {
                     let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
                     let tx = tx_env_with_recovered(&tx);
-                    let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                    // #[cfg(feature = "open_revm_metrics_record")]// Error: why this?
+                    let env =
+                        Env { cfg: cfg.clone(), block: block_env.clone(), tx, cpu_frequency: 0f64 };
                     let (result, state_changes) =
                         this.trace_transaction(opts.clone(), env, at, &mut db)?;
                     results.push(TraceResult::Success { result });
@@ -200,7 +202,13 @@ where
                     tx.hash,
                 )?;
 
-                let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
+                // #[cfg(feature = "open_revm_metrics_record")]// Error: why this?
+                let env = Env {
+                    cfg,
+                    block: block_env,
+                    tx: tx_env_with_recovered(&tx),
+                    cpu_frequency: 0f64,
+                };
                 this.trace_transaction(opts, env, state_at, &mut db).map(|(trace, _)| trace)
             })
             .await
@@ -390,7 +398,13 @@ where
                     for tx in transactions {
                         let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
                         let tx = tx_env_with_recovered(&tx);
-                        let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                        // #[cfg(feature = "open_revm_metrics_record")]// Error: why this?
+                        let env = Env {
+                            cfg: cfg.clone(),
+                            block: block_env.clone(),
+                            tx,
+                            cpu_frequency: 0f64,
+                        };
                         let (res, _) = transact(&mut db, env)?;
                         db.commit(res.state);
                     }
@@ -585,7 +599,21 @@ where
 
         let db = if let Some(db) = db {
             let CacheDB { accounts, contracts, logs, block_hashes, .. } = db;
-            CacheDB { accounts, contracts, logs, block_hashes, db: State::new(state) }
+            CacheDB {
+                accounts,
+                contracts,
+                logs,
+                block_hashes,
+                db: State::new(state),
+                #[cfg(feature = "open_revm_metrics_record")]
+                cache_hits: (0u64, 0u64, 0u64, 0u64),
+                #[cfg(feature = "open_revm_metrics_record")]
+                cache_misses: (0u64, 0u64, 0u64, 0u64),
+                #[cfg(feature = "open_revm_metrics_record")]
+                cache_misses_penalty: (0u128, 0u128, 0u128, 0u128),
+                #[cfg(feature = "open_revm_metrics_record")]
+                cpu_frequency: 0f64,
+            }
         } else {
             CacheDB::new(State::new(state))
         };

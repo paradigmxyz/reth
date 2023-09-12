@@ -1,3 +1,5 @@
+#[cfg(feature = "open_performance_dashboard")]
+use reth_metrics::metrics::Counter;
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives::stage::StageId;
 use std::collections::HashMap;
@@ -32,6 +34,22 @@ pub(crate) struct StageMetrics {
 #[derive(Metrics)]
 #[metrics(scope = "sync.execution")]
 pub(crate) struct ExecutionStageMetrics {
-    /// The total amount of gas processed (in millions)
+    /// The total amount of gas processed (in millions).
     pub(crate) mgas_processed_total: Gauge,
+    /// The total amount of transactions processed.
+    #[cfg(feature = "open_performance_dashboard")]
+    pub(crate) txs_processed_total: Counter,
+    #[cfg(feature = "open_performance_dashboard")]
+    /// Time of read block info.
+    #[cfg(feature = "open_performance_dashboard")]
+    pub(crate) read_block_info_time: Counter,
+    /// Time of revm execute tx.
+    #[cfg(feature = "open_performance_dashboard")]
+    pub(crate) revm_execute_time: Counter,
+    /// Post process time.
+    #[cfg(feature = "open_performance_dashboard")]
+    pub(crate) post_process_time: Counter,
+    /// Time of write to db.
+    #[cfg(feature = "open_performance_dashboard")]
+    pub(crate) write_to_db_time: Counter,
 }

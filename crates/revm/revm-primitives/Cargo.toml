@@ -13,3 +13,6 @@ description = "core reth specific revm utilities"
 reth-primitives.workspace = true
 
 revm.workspace = true
+
+[features]
+open_revm_metrics_record = ["revm/open_revm_metrics_record",]

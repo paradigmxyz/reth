@@ -150,7 +150,10 @@ impl JsInspector {
 
     /// Calls the result function and returns the result.
     pub fn result(&mut self, res: ResultAndState, env: &Env) -> Result<JsValue, JsInspectorError> {
+        #[cfg(not(feature = "open_revm_metrics_record"))]
         let ResultAndState { result, state } = res;
+        #[cfg(feature = "open_revm_metrics_record")]
+        let ResultAndState { result, state, .. } = res;
         let db = EvmDb::new(state, self.to_db_service.clone());
 
         let gas_used = result.gas_used();

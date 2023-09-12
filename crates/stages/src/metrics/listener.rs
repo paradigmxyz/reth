@@ -12,6 +12,9 @@ use std::{
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::trace;
 
+// #[cfg(feature = "open_revm_metrics_record")]
+// use revm_utils::types::RevmMetricRecord;
+
 /// Alias type for metric producers to use.
 pub type MetricEventsSender = UnboundedSender<MetricEvent>;
 
@@ -37,6 +40,44 @@ pub enum MetricEvent {
     ExecutionStageGas {
         /// Gas processed.
         gas: u64,
+    },
+    /// Execution stage processed some amount of txs.
+    #[cfg(feature = "open_performance_dashboard")]
+    ExecutionStageTxs {
+        /// Txs processed.
+        txs: u64,
+    },
+    // /// Revm metric record.
+    // #[cfg(feature = "open_revm_metrics_record")]
+    // RevmMetricRecord {
+    //     /// Revm metric record.
+    //     record: RevmMetricRecord,
+    //     /// size of cacheDb.
+    //     cachedb_size: usize,
+    // },
+    /// Time of get block info.
+    #[cfg(feature = "open_performance_dashboard")]
+    ReadBlockInfoTime {
+        /// time.
+        time: u64,
+    },
+    /// Time of revm execute tx.
+    #[cfg(feature = "open_performance_dashboard")]
+    RevmExecuteTxTime {
+        /// time.
+        time: u64,
+    },
+    /// Post process time.
+    #[cfg(feature = "open_performance_dashboard")]
+    PostProcessTime {
+        /// time.
+        time: u64,
+    },
+    /// Time of write to db.
+    #[cfg(feature = "open_performance_dashboard")]
+    WriteToDbTime {
+        /// time.
+        time: u64,
     },
 }
 
@@ -90,6 +131,26 @@ impl MetricsListener {
                 .execution_stage
                 .mgas_processed_total
                 .increment(gas as f64 / MGAS_TO_GAS as f64),
+            #[cfg(feature = "open_performance_dashboard")]
+            MetricEvent::ExecutionStageTxs { txs } => {
+                self.sync_metrics.execution_stage.txs_processed_total.increment(txs)
+            }
+            #[cfg(feature = "open_performance_dashboard")]
+            MetricEvent::ReadBlockInfoTime { time } => {
+                self.sync_metrics.execution_stage.read_block_info_time.increment(time)
+            }
+            #[cfg(feature = "open_performance_dashboard")]
+            MetricEvent::RevmExecuteTxTime { time } => {
+                self.sync_metrics.execution_stage.revm_execute_time.increment(time)
+            }
+            #[cfg(feature = "open_performance_dashboard")]
+            MetricEvent::PostProcessTime { time } => {
+                self.sync_metrics.execution_stage.post_process_time.increment(time)
+            }
+            #[cfg(feature = "open_performance_dashboard")]
+            MetricEvent::WriteToDbTime { time } => {
+                self.sync_metrics.execution_stage.write_to_db_time.increment(time)
+            }
         }
     }
 }

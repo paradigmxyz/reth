@@ -32,3 +32,9 @@ metrics.workspace = true
 
 ## misc
 tracing.workspace = true
+
+[features]
+open_revm_metrics_record = [
+    "revm/open_revm_metrics_record",
+    "reth-revm/open_revm_metrics_record",
+]

@@ -3,6 +3,8 @@
 use crate::{post_state::PostState, StateProvider};
 use reth_interfaces::executor::BlockExecutionError;
 use reth_primitives::{Address, Block, ChainSpec, U256};
+#[cfg(feature = "open_revm_metrics_record")]
+use revm_utils::types::RevmMetricRecord;
 
 /// Executor factory that would create the EVM with particular state provider.
 ///
@@ -42,4 +44,10 @@ pub trait BlockExecutor<SP: StateProvider> {
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<PostState, BlockExecutionError>;
+
+    /// Handle revm metric records.
+    #[cfg(feature = "open_revm_metrics_record")]
+    fn get_revm_metric_record(&self) -> (RevmMetricRecord, usize) {
+        (RevmMetricRecord::default(), 0)
+    }
 }

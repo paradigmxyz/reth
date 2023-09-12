@@ -73,3 +73,10 @@ jsonrpsee = { workspace = true, features = ["client"] }
 assert_matches.workspace = true
 tempfile = "3.5.0"
 reth-interfaces = { workspace = true, features = ["test-utils"] }
+
+[features]
+open_revm_metrics_record = [
+    "revm/open_revm_metrics_record",
+    "revm-primitives/open_revm_metrics_record",
+    "reth-revm/open_revm_metrics_record",
+]
