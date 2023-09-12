@@ -3,13 +3,17 @@ use reth_primitives::BlockNumber;
 use std::task::{Context, Poll};
 
 pub trait Hook: Send + Sync + 'static {
-    fn poll(&mut self, cx: &mut Context<'_>, tip_block_number: BlockNumber) -> Poll<HookEvent>;
+    fn poll(&mut self, cx: &mut Context<'_>, args: HookArguments) -> Poll<HookEvent>;
 
     fn on_event(&mut self, event: HookEvent) -> Option<Result<HookAction, HookError>>;
 
     fn capabilities(&self) -> HookCapabilities;
 
     fn is_running(&self) -> bool;
+}
+
+pub struct HookArguments {
+    pub tip_block_number: BlockNumber,
 }
 
 pub enum HookEvent {

@@ -1,6 +1,8 @@
 //! Prune management for the engine implementation.
 
-use crate::engine::hook::{Hook, HookAction, HookCapabilities, HookError, HookEvent};
+use crate::engine::hook::{
+    Hook, HookAction, HookArguments, HookCapabilities, HookError, HookEvent,
+};
 use futures::FutureExt;
 use metrics::Counter;
 use reth_db::database::Database;
@@ -99,9 +101,9 @@ impl<DB: Database + 'static> EnginePruneController<DB> {
 }
 
 impl<DB: Database + 'static> Hook for EnginePruneController<DB> {
-    fn poll(&mut self, cx: &mut Context<'_>, tip_block_number: BlockNumber) -> Poll<HookEvent> {
+    fn poll(&mut self, cx: &mut Context<'_>, args: HookArguments) -> Poll<HookEvent> {
         // Try to spawn a pruner
-        match self.try_spawn_pruner(tip_block_number) {
+        match self.try_spawn_pruner(args.tip_block_number) {
             Some(HookEvent::NotReady) => return Poll::Pending,
             Some(event) => return Poll::Ready(event),
             None => (),

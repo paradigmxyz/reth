@@ -67,7 +67,7 @@ mod handle;
 pub use handle::BeaconConsensusEngineHandle;
 
 mod forkchoice;
-use crate::engine::hook::{Hook, HookAction};
+use crate::engine::hook::{Hook, HookAction, HookArguments};
 pub use forkchoice::ForkchoiceStatus;
 
 mod metrics;
@@ -1733,7 +1733,12 @@ where
             for hook in this.hooks.iter_mut() {
                 if hook.is_running() && hook.capabilities().db_write {
                     if let Poll::Ready(Some(result)) = hook
-                        .poll(cx, this.blockchain.canonical_tip().number)
+                        .poll(
+                            cx,
+                            HookArguments {
+                                tip_block_number: this.blockchain.canonical_tip().number,
+                            },
+                        )
                         .map(|event| hook.on_event(event))
                     {
                         let action = result?;
@@ -1808,7 +1813,12 @@ where
             {
                 for hook in this.hooks.iter_mut() {
                     if let Poll::Ready(Some(result)) = hook
-                        .poll(cx, this.blockchain.canonical_tip().number)
+                        .poll(
+                            cx,
+                            HookArguments {
+                                tip_block_number: this.blockchain.canonical_tip().number,
+                            },
+                        )
                         .map(|event| hook.on_event(event))
                     {
                         let action = result?;
