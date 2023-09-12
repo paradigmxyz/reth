@@ -1,7 +1,7 @@
 //! Prune management for the engine implementation.
 
 use crate::engine::hook::{
-    Hook, HookAction, HookArguments, HookCapabilities, HookError, HookEvent,
+    Hook, HookAction, HookArguments, HookDependencies, HookError, HookEvent,
 };
 use futures::FutureExt;
 use metrics::Counter;
@@ -135,8 +135,8 @@ impl<DB: Database + 'static> Hook for EnginePruneController<DB> {
         }
     }
 
-    fn capabilities(&self) -> HookCapabilities {
-        HookCapabilities { db_write: true }
+    fn dependencies(&self) -> HookDependencies {
+        HookDependencies { db_write: true, pipeline_idle: true }
     }
 }
 

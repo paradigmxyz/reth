@@ -3,21 +3,35 @@ use reth_primitives::BlockNumber;
 use std::task::{Context, Poll};
 
 pub trait Hook: Send + Sync + 'static {
+    fn name(&self) -> &'static str {
+        return std::any::type_name::<Self>()
+    }
     fn poll(&mut self, cx: &mut Context<'_>, args: HookArguments) -> Poll<HookEvent>;
 
     fn on_event(&mut self, event: HookEvent) -> Result<Option<HookAction>, HookError>;
 
-    fn capabilities(&self) -> HookCapabilities;
+    fn dependencies(&self) -> HookDependencies;
+}
+
+impl std::fmt::Debug for dyn Hook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
+    }
 }
 
 pub struct HookArguments {
     pub tip_block_number: BlockNumber,
 }
 
+#[derive(Debug)]
 pub enum HookEvent {
     /// Hook is not ready.
+    ///
+    /// If this is returned, the hook is idle.
     NotReady,
     /// Hook started with tip block number.
+    ///
+    /// If this is returned, the hook is running.
     Started(BlockNumber),
     /// Hook finished.
     ///
@@ -25,6 +39,7 @@ pub enum HookEvent {
     Finished(Result<(), HookError>),
 }
 
+#[derive(Debug)]
 pub enum HookAction {
     UpdateSyncState(SyncState),
     RestoreCanonicalHashes,
@@ -41,6 +56,7 @@ pub enum HookError {
     Internal(#[from] Box<dyn std::error::Error + Send>),
 }
 
-pub struct HookCapabilities {
+pub struct HookDependencies {
     pub db_write: bool,
+    pub pipeline_idle: bool,
 }

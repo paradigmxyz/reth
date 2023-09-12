@@ -1738,8 +1738,11 @@ where
                     HookArguments { tip_block_number: this.blockchain.canonical_tip().number },
                 ) {
                     Poll::Ready(event) => {
+                        let event_name = format!("{event:?}");
                         let has_finished = matches!(event, HookEvent::Finished(_));
                         let action = hook.on_event(event)?;
+
+                        debug!(target: "consensus::engine::hooks", ?hook, ?action, event = %event_name, "Polled running hook with db write");
 
                         if !has_finished {
                             this.running_hook_with_db_write = Some(hook);
@@ -1812,27 +1815,36 @@ where
             let is_pending = engine_messages_pending && sync_pending;
 
             // Poll hooks if all conditions are met:
-            // 1. Pipeline is idle
-            // 2. No engine and sync messages are pending
-            // 3. Latest FCU status is not INVALID
-            if this.sync.is_pipeline_idle() &&
-                is_pending &&
-                !this.forkchoice_state_tracker.is_latest_invalid()
-            {
+            // 1. No engine and sync messages are pending
+            // 2. Latest FCU status is not INVALID
+            if is_pending && !this.forkchoice_state_tracker.is_latest_invalid() {
                 for item in this.hooks.iter_mut().filter(|hook| hook.is_some()) {
-                    if this.running_hook_with_db_write.is_some() &&
-                        item.as_ref().map(|hook| hook.capabilities().db_write).unwrap()
+                    if item
+                        .as_ref()
+                        .map(|hook| {
+                            let db_write = this.running_hook_with_db_write.is_some() &&
+                                hook.dependencies().db_write;
+                            let pipeline_idle =
+                                this.sync.is_pipeline_active() && hook.dependencies().pipeline_idle;
+                            db_write || pipeline_idle
+                        })
+                        // SAFETY: None hooks are filtered while iterating
+                        .unwrap()
                     {
                         continue
                     }
+
                     let mut hook = item.take().unwrap();
 
                     if let Poll::Ready(event) = hook.poll(
                         cx,
                         HookArguments { tip_block_number: this.blockchain.canonical_tip().number },
                     ) {
+                        let event_name = format!("{event:?}");
                         let has_started = matches!(event, HookEvent::Started(_));
                         let action = hook.on_event(event)?;
+
+                        debug!(target: "consensus::engine::hooks", ?hook, ?action, event = %event_name, "Polled hook");
 
                         if has_started {
                             this.running_hook_with_db_write = Some(hook);
