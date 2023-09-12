@@ -1,6 +1,7 @@
 use crate::{
     engine::{
         forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker},
+        hook::{HookAction, HookArguments},
         message::OnForkChoiceUpdated,
         metrics::EngineMetrics,
     },
@@ -67,7 +68,6 @@ mod handle;
 pub use handle::BeaconConsensusEngineHandle;
 
 mod forkchoice;
-use crate::engine::hook::{Hook, HookAction, HookArguments, HookEvent};
 pub use forkchoice::ForkchoiceStatus;
 
 mod metrics;
@@ -76,6 +76,8 @@ pub use prune::EnginePruneController;
 pub(crate) mod sync;
 
 mod hook;
+pub use hook::Hook;
+
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 

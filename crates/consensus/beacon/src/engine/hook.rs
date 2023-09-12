@@ -63,7 +63,7 @@ pub enum HookError {
     #[error(transparent)]
     Common(#[from] reth_interfaces::Error),
     #[error("Internal hook error occurred.")]
-    Internal(#[from] Box<dyn std::error::Error + Send>),
+    Internal(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
 pub struct HookDependencies {

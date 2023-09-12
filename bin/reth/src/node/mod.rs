@@ -448,7 +448,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             None
         };
 
-        let mut hooks = Vec::new();
+        let mut hooks = Vec::<Box<dyn reth_beacon_consensus::Hook>>::new();
 
         if let Some(prune_config) = prune_config {
             info!(target: "reth::cli", "Pruner initialized");
