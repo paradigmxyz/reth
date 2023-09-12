@@ -337,13 +337,13 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         let mut receipts = Vec::new();
         // loop break if we are at the end of the blocks.
         for (_, block_body) in block_bodies.into_iter() {
-            let mut block_receipt = HashMap::with_capacity(block_body.tx_count as usize);
-            for (idx, _) in block_body.tx_num_range().enumerate() {
+            let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
+            for _ in block_body.tx_num_range() {
                 if let Some((_, receipt)) = receipt_iter.next() {
-                    block_receipt.insert(idx, receipt);
+                    block_receipts.push(Some(receipt));
                 }
             }
-            receipts.push(block_receipt);
+            receipts.push(block_receipts);
         }
 
         Ok(BundleStateWithReceipts::new_init(

@@ -128,19 +128,16 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
             ]),
         )]),
         vec![],
-        vec![std::collections::HashMap::from([(
-            0,
-            Receipt {
-                tx_type: TxType::EIP2930,
-                success: true,
-                cumulative_gas_used: 300,
-                logs: vec![Log {
-                    address: H160([0x60; 20]),
-                    topics: vec![H256::from_low_u64_be(1), H256::from_low_u64_be(2)],
-                    data: Bytes::default(),
-                }],
-            },
-        )])],
+        vec![vec![Some(Receipt {
+            tx_type: TxType::EIP2930,
+            success: true,
+            cumulative_gas_used: 300,
+            logs: vec![Log {
+                address: H160([0x60; 20]),
+                topics: vec![H256::from_low_u64_be(1), H256::from_low_u64_be(2)],
+                data: Bytes::default(),
+            }],
+        })]],
         number,
     );
 
@@ -187,19 +184,16 @@ fn block2(
             )]),
         )]),
         vec![],
-        vec![std::collections::HashMap::from([(
-            0,
-            Receipt {
-                tx_type: TxType::EIP1559,
-                success: false,
-                cumulative_gas_used: 400,
-                logs: vec![Log {
-                    address: H160([0x61; 20]),
-                    topics: vec![H256::from_low_u64_be(3), H256::from_low_u64_be(4)],
-                    data: Bytes::default(),
-                }],
-            },
-        )])],
+        vec![vec![Some(Receipt {
+            tx_type: TxType::EIP1559,
+            success: false,
+            cumulative_gas_used: 400,
+            logs: vec![Log {
+                address: H160([0x61; 20]),
+                topics: vec![H256::from_low_u64_be(3), H256::from_low_u64_be(4)],
+                data: Bytes::default(),
+            }],
+        })]],
         number,
     );
     (SealedBlockWithSenders { block, senders: vec![H160([0x31; 20])] }, bundle)
