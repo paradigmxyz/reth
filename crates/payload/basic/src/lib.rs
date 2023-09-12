@@ -674,8 +674,7 @@ where
         &attributes,
     )?;
 
-    let mut receipt_idx = 0;
-    let mut receipts = HashMap::default();
+    let mut receipts = Vec::new();
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
         if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
@@ -757,16 +756,12 @@ where
         cumulative_gas_used += gas_used;
 
         // Push transaction changeset and calculate header bloom filter for receipt.
-        receipts.insert(
-            receipt_idx,
-            Receipt {
-                tx_type: tx.tx_type(),
-                success: result.is_success(),
-                cumulative_gas_used,
-                logs: result.logs().into_iter().map(into_reth_log).collect(),
-            },
-        );
-        receipt_idx += 1;
+        receipts.push(Some(Receipt {
+            tx_type: tx.tx_type(),
+            success: result.is_success(),
+            cumulative_gas_used,
+            logs: result.logs().into_iter().map(into_reth_log).collect(),
+        }));
 
         // update add to total fees
         let miner_fee =
@@ -882,7 +877,10 @@ where
     debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number,  "building empty payload");
 
     let state = client.state_by_block_hash(parent_block.hash)?;
-    let db = State::builder().with_database_boxed(Box::new(RevmDatabase::new(&state))).build();
+    let db = State::builder()
+        .with_database_boxed(Box::new(RevmDatabase::new(&state)))
+        .with_bundle_update()
+        .build();
 
     let base_fee = initialized_block_env.basefee.to::<u64>();
     let block_number = initialized_block_env.number.to::<u64>();

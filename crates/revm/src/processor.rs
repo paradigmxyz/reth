@@ -24,7 +24,7 @@ use revm::{
     primitives::ResultAndState,
     DatabaseCommit, State, EVM,
 };
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant};
 use tracing::{debug, trace};
 
 /// Main block executor
@@ -35,9 +35,8 @@ pub struct EVMProcessor<'a> {
     stack: InspectorStack,
     /// The collection of receipts.
     /// Outer vector stores receipts for each block sequentially.
-    /// Inner [HashMap] stores receipts indexed by transaction index.
-    /// The map is used as receipts might be pruned.
-    receipts: Vec<HashMap<usize, Receipt>>,
+    /// The inner vector stores receipts that were not pruned.
+    receipts: Vec<Vec<Option<Receipt>>>,
     /// First block will be initialized to ZERO
     /// and be set to the block number of first block executed.
     first_block: Option<BlockNumber>,
@@ -326,9 +325,16 @@ impl<'a> EVMProcessor<'a> {
                     .last()
                     .map(|block_r| {
                         block_r
-                            .values()
+                            .iter()
                             .enumerate()
-                            .map(|(id, tx_r)| (id as u64, tx_r.cumulative_gas_used))
+                            .map(|(id, tx_r)| {
+                                (
+                                    id as u64,
+                                    tx_r.as_ref()
+                                        .expect("receipts have not been pruned")
+                                        .cumulative_gas_used,
+                                )
+                            })
                             .collect()
                     })
                     .unwrap_or_default(),
@@ -360,8 +366,7 @@ impl<'a> EVMProcessor<'a> {
 
     /// Save receipts to the executor.
     pub fn save_receipts(&mut self, receipts: Vec<Receipt>) -> Result<(), BlockExecutionError> {
-        // Index receipts by transaction index.
-        let mut receipts = receipts.into_iter().enumerate().collect();
+        let mut receipts = receipts.into_iter().map(Option::Some).collect();
         // Prune receipts if necessary.
         self.prune_receipts(&mut receipts)?;
         // Save receipts.
@@ -372,7 +377,7 @@ impl<'a> EVMProcessor<'a> {
     /// Prune receipts according to the pruning configuration.
     fn prune_receipts(
         &mut self,
-        receipts: &mut HashMap<usize, Receipt>,
+        receipts: &mut Vec<Option<Receipt>>,
     ) -> Result<(), PrunePartError> {
         let (first_block, tip) = match self.first_block.zip(self.tip) {
             Some((block, tip)) => (block, tip),
@@ -407,18 +412,17 @@ impl<'a> EVMProcessor<'a> {
             }
         }
 
-        receipts.retain(|_, receipt| {
+        for receipt in receipts.iter_mut() {
+            let inner_receipt = receipt.as_ref().expect("receipts have not been pruned");
+
             // If there is an address_filter, and it does not contain any of the
             // contract addresses, then remove this receipts
             if let Some((_, filter)) = &self.pruning_address_filter {
-                if !receipt.logs.iter().any(|log| filter.contains(&log.address)) {
-                    return false
+                if !inner_receipt.logs.iter().any(|log| filter.contains(&log.address)) {
+                    receipt.take();
                 }
             }
-            true
-        });
-
-        receipts.shrink_to_fit();
+        }
 
         Ok(())
     }
@@ -473,6 +477,10 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
 
     fn stats(&self) -> BlockExecutorStats {
         self.stats.clone()
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        self.evm.db.as_ref().map(|db| db.bundle_size_hint())
     }
 }
 

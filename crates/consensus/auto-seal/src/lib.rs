@@ -338,8 +338,10 @@ impl StorageInner {
         header.receipts_root = if receipts.is_empty() {
             EMPTY_RECEIPTS
         } else {
-            let receipts_with_bloom =
-                receipts.iter().map(|r| (**r).clone().into()).collect::<Vec<ReceiptWithBloom>>();
+            let receipts_with_bloom = receipts
+                .iter()
+                .map(|r| (*r).clone().expect("receipts have not been pruned").into())
+                .collect::<Vec<ReceiptWithBloom>>();
             header.logs_bloom =
                 receipts_with_bloom.iter().fold(Bloom::zero(), |bloom, r| bloom | r.bloom);
             proofs::calculate_receipt_root(&receipts_with_bloom)
