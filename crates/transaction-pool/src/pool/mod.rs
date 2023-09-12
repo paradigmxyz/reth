@@ -696,6 +696,9 @@ where
 
     /// Notify about propagated transactions.
     pub(crate) fn on_propagated(&self, txs: PropagatedTransactions) {
+        if txs.0.is_empty() {
+            return
+        }
         let mut listener = self.event_listener.write();
 
         txs.0.into_iter().for_each(|(hash, peers)| listener.propagated(&hash, peers))

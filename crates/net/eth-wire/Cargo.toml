@@ -17,14 +17,8 @@ serde = { workspace = true, optional = true }
 reth-codecs = { path = "../../storage/codecs" }
 reth-primitives.workspace = true
 reth-ecies = { path = "../ecies" }
-reth-rlp = { workspace = true, features = [
-    "alloc",
-    "derive",
-    "std",
-    "ethereum-types",
-    "smol_str",
-] }
-reth-discv4 = {path = "../discv4" }
+reth-rlp = { workspace = true, features = ["alloc", "derive", "std", "ethereum-types", "smol_str"] }
+reth-discv4 = { path = "../discv4" }
 
 # metrics
 reth-metrics.workspace = true
@@ -46,7 +40,7 @@ async-trait.workspace = true
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
-proptest-derive = { version = "0.3", optional = true }
+proptest-derive = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-primitives = { workspace = true, features = ["arbitrary"] }
@@ -55,14 +49,14 @@ ethers-core = { workspace = true, default-features = false }
 
 test-fuzz = "4"
 tokio-util = { workspace = true, features = ["io", "codec"] }
-hex-literal = "0.3"
+hex-literal.workspace = true
 hex = "0.4"
 rand.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
-proptest-derive = "0.3"
+proptest-derive.workspace = true
 
 [features]
 default = ["serde"]

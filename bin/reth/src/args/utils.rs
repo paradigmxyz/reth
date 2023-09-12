@@ -1,7 +1,7 @@
 //! Clap parser utilities
 
 use reth_primitives::{
-    fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, DEV, GOERLI, MAINNET, SEPOLIA,
+    fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
 };
 use reth_revm::primitives::B256 as H256;
 use std::{
@@ -28,6 +28,7 @@ pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Er
         "mainnet" => MAINNET.clone(),
         "goerli" => GOERLI.clone(),
         "sepolia" => SEPOLIA.clone(),
+        "holesky" => HOLESKY.clone(),
         "dev" => DEV.clone(),
         #[cfg(feature = "optimism")]
         "base-goerli" => BASE_GOERLI.clone(),
@@ -47,6 +48,7 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
         "mainnet" => MAINNET.clone(),
         "goerli" => GOERLI.clone(),
         "sepolia" => SEPOLIA.clone(),
+        "holesky" => HOLESKY.clone(),
         "dev" => DEV.clone(),
         #[cfg(feature = "optimism")]
         "base-goerli" => BASE_GOERLI.clone(),
@@ -130,7 +132,7 @@ mod tests {
 
     #[test]
     fn parse_chain_spec() {
-        for chain in ["mainnet", "sepolia", "goerli"] {
+        for chain in ["mainnet", "sepolia", "goerli", "holesky"] {
             chain_spec_value_parser(chain).unwrap();
             genesis_value_parser(chain).unwrap();
         }
