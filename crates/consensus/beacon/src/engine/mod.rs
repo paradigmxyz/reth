@@ -1751,7 +1751,10 @@ where
                         }
 
                         if let Some(action) = action {
-                            return Poll::Ready(this.on_hook_action(action))
+                            if let Err(err) = this.on_hook_action(action) {
+                                return Poll::Ready(Err(err))
+                            }
+                            return Poll::Pending
                         }
                     }
                     Poll::Pending => {
@@ -1855,7 +1858,10 @@ where
                         }
 
                         if let Some(action) = action {
-                            return Poll::Ready(this.on_hook_action(action))
+                            if let Err(err) = this.on_hook_action(action) {
+                                return Poll::Ready(Err(err))
+                            }
+                            return Poll::Pending
                         }
                     } else {
                         *item = Some(hook);
