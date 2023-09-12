@@ -1750,11 +1750,8 @@ where
                             this.running_hook_with_db_write = Some(hook);
                         }
 
-                        if let Some(action) = action {
-                            if let Err(err) = this.on_hook_action(action) {
-                                return Poll::Ready(Err(err))
-                            }
-                            return Poll::Pending
+                        if let Some(Err(err)) = action.map(|action| this.on_hook_action(action)) {
+                            return Poll::Ready(Err(err))
                         }
                     }
                     Poll::Pending => {
@@ -1857,11 +1854,8 @@ where
                             *item = Some(hook);
                         }
 
-                        if let Some(action) = action {
-                            if let Err(err) = this.on_hook_action(action) {
-                                return Poll::Ready(Err(err))
-                            }
-                            return Poll::Pending
+                        if let Some(Err(err)) = action.map(|action| this.on_hook_action(action)) {
+                            return Poll::Ready(Err(err))
                         }
                     } else {
                         *item = Some(hook);
