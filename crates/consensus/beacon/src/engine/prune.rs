@@ -1,38 +1,42 @@
 //! Prune management for the engine implementation.
 
+use crate::engine::hook::{Hook, HookAction, HookCapabilities, HookError, HookEvent};
 use futures::FutureExt;
+use metrics::Counter;
 use reth_db::database::Database;
+use reth_interfaces::sync::SyncState;
 use reth_primitives::BlockNumber;
-use reth_prune::{Pruner, PrunerResult, PrunerWithResult};
+use reth_prune::{Pruner, PrunerError, PrunerWithResult};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
 use tokio::sync::oneshot;
+use tracing::{error, trace};
 
 /// Manages pruning under the control of the engine.
 ///
 /// This type controls the [Pruner].
-pub(crate) struct EnginePruneController<DB> {
+pub struct EnginePruneController<DB> {
     /// The current state of the pruner.
     pruner_state: PrunerState<DB>,
     /// The type that can spawn the pruner task.
     pruner_task_spawner: Box<dyn TaskSpawner>,
+    metrics: Metrics,
 }
 
 impl<DB: Database + 'static> EnginePruneController<DB> {
     /// Create a new instance
-    pub(crate) fn new(pruner: Pruner<DB>, pruner_task_spawner: Box<dyn TaskSpawner>) -> Self {
-        Self { pruner_state: PrunerState::Idle(Some(pruner)), pruner_task_spawner }
-    }
-
-    /// Returns `true` if the pruner is idle.
-    pub(crate) fn is_pruner_idle(&self) -> bool {
-        self.pruner_state.is_idle()
+    pub fn new(pruner: Pruner<DB>, pruner_task_spawner: Box<dyn TaskSpawner>) -> Self {
+        Self {
+            pruner_state: PrunerState::Idle(Some(pruner)),
+            pruner_task_spawner,
+            metrics: Metrics::default(),
+        }
     }
 
     /// Advances the pruner state.
     ///
     /// This checks for the result in the channel, or returns pending if the pruner is idle.
-    fn poll_pruner(&mut self, cx: &mut Context<'_>) -> Poll<EnginePruneEvent> {
+    fn poll_pruner(&mut self, cx: &mut Context<'_>) -> Poll<HookEvent> {
         let res = match self.pruner_state {
             PrunerState::Idle(_) => return Poll::Pending,
             PrunerState::Running(ref mut fut) => {
@@ -42,11 +46,18 @@ impl<DB: Database + 'static> EnginePruneController<DB> {
         let ev = match res {
             Ok((pruner, result)) => {
                 self.pruner_state = PrunerState::Idle(Some(pruner));
-                EnginePruneEvent::Finished { result }
+                HookEvent::Finished(result.map(|_| ()).map_err(|error| match error {
+                    PrunerError::PrunePart(_) | PrunerError::InconsistentData(_) => {
+                        HookError::Internal(Box::new(error))
+                    }
+                    PrunerError::Interface(err) => err.into(),
+                    PrunerError::Database(err) => reth_interfaces::Error::Database(err).into(),
+                    PrunerError::Provider(err) => reth_interfaces::Error::Provider(err).into(),
+                }))
             }
             Err(_) => {
                 // failed to receive the pruner
-                EnginePruneEvent::TaskDropped
+                HookEvent::TaskDropped
             }
         };
         Poll::Ready(ev)
@@ -59,7 +70,7 @@ impl<DB: Database + 'static> EnginePruneController<DB> {
     /// 2b. If pruning is not needed, set pruner state back to [PrunerState::Idle].
     ///
     /// If pruner is already running, do nothing.
-    fn try_spawn_pruner(&mut self, tip_block_number: BlockNumber) -> Option<EnginePruneEvent> {
+    fn try_spawn_pruner(&mut self, tip_block_number: BlockNumber) -> Option<HookEvent> {
         match &mut self.pruner_state {
             PrunerState::Idle(pruner) => {
                 let mut pruner = pruner.take()?;
@@ -76,25 +87,22 @@ impl<DB: Database + 'static> EnginePruneController<DB> {
                     );
                     self.pruner_state = PrunerState::Running(rx);
 
-                    Some(EnginePruneEvent::Started(tip_block_number))
+                    Some(HookEvent::Started(tip_block_number))
                 } else {
                     self.pruner_state = PrunerState::Idle(Some(pruner));
-                    Some(EnginePruneEvent::NotReady)
+                    Some(HookEvent::NotReady)
                 }
             }
             PrunerState::Running(_) => None,
         }
     }
+}
 
-    /// Advances the prune process with the tip block number.
-    pub(crate) fn poll(
-        &mut self,
-        cx: &mut Context<'_>,
-        tip_block_number: BlockNumber,
-    ) -> Poll<EnginePruneEvent> {
+impl<DB: Database + 'static> Hook for EnginePruneController<DB> {
+    fn poll(&mut self, cx: &mut Context<'_>, tip_block_number: BlockNumber) -> Poll<HookEvent> {
         // Try to spawn a pruner
         match self.try_spawn_pruner(tip_block_number) {
-            Some(EnginePruneEvent::NotReady) => return Poll::Pending,
+            Some(HookEvent::NotReady) => return Poll::Pending,
             Some(event) => return Poll::Ready(event),
             None => (),
         }
@@ -102,25 +110,40 @@ impl<DB: Database + 'static> EnginePruneController<DB> {
         // Poll pruner and check its status
         self.poll_pruner(cx)
     }
-}
 
-/// The event type emitted by the [EnginePruneController].
-#[derive(Debug)]
-pub(crate) enum EnginePruneEvent {
-    /// Pruner is not ready
-    NotReady,
-    /// Pruner started with tip block number
-    Started(BlockNumber),
-    /// Pruner finished
-    ///
-    /// If this is returned, the pruner is idle.
-    Finished {
-        /// Final result of the pruner run.
-        result: PrunerResult,
-    },
-    /// Pruner task was dropped after it was started, unable to receive it because channel
-    /// closed. This would indicate a panicked pruner task
-    TaskDropped,
+    fn on_event(&mut self, event: HookEvent) -> Option<Result<HookAction, HookError>> {
+        match event {
+            HookEvent::NotReady => None,
+            HookEvent::Started(tip_block_number) => {
+                trace!(target: "consensus::engine", %tip_block_number, "Pruner started");
+                self.metrics.runs.increment(1);
+                // Engine can't process any FCU/payload messages from CL while we're pruning, as
+                // pruner needs an exclusive write access to the database. To prevent CL from
+                // sending us unneeded updates, we need to respond `true` on `eth_syncing` request.
+                Some(Ok(HookAction::UpdateSyncState(SyncState::Syncing)))
+            }
+            HookEvent::TaskDropped => {
+                error!(target: "consensus::engine", "Failed to receive spawned pruner");
+                Some(Err(HookError::ChannelClosed))
+            }
+            HookEvent::Finished(result) => {
+                trace!(target: "consensus::engine", ?result, "Pruner finished");
+                match result {
+                    Ok(_) => Some(Ok(HookAction::RestoreCanonicalHashes)),
+                    // Any pruner error at this point is fatal.
+                    Err(error) => Some(Err(error.into())),
+                }
+            }
+        }
+    }
+
+    fn capabilities(&self) -> HookCapabilities {
+        HookCapabilities { db_write: true }
+    }
+
+    fn is_running(&self) -> bool {
+        self.pruner_state.is_running()
+    }
 }
 
 /// The possible pruner states within the sync controller.
@@ -140,8 +163,15 @@ enum PrunerState<DB> {
 }
 
 impl<DB> PrunerState<DB> {
-    /// Returns `true` if the state matches idle.
-    fn is_idle(&self) -> bool {
-        matches!(self, PrunerState::Idle(_))
+    /// Returns `true` if the state matches runing.
+    fn is_running(&self) -> bool {
+        matches!(self, PrunerState::Running(_))
     }
+}
+
+#[derive(reth_metrics::Metrics)]
+#[metrics(scope = "consensus.engine.prune")]
+struct Metrics {
+    /// The number of times the pruner was run.
+    runs: Counter,
 }
