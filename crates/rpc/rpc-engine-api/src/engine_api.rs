@@ -448,7 +448,25 @@ where
                     return Err(EngineApiError::ParentBeaconBlockRootNotSupportedBeforeV3)
                 }
                 if is_cancun {
-                    return Err(EngineApiError::NoParentBeaconBlockRootPostCancun)
+                    // From the Engine API spec:
+                    //
+                    // ### Update the methods of previous forks
+                    //
+                    // This document defines how Cancun payload should be handled by the [`Shanghai
+                    // API`](https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/shanghai.md).
+                    //
+                    // For the following methods:
+                    //
+                    // - [`engine_forkchoiceUpdatedV2`](https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/shanghai.md#engine_forkchoiceupdatedv2)
+                    // - [`engine_newPayloadV2`](https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/shanghai.md#engine_newpayloadV2)
+                    // - [`engine_getPayloadV2`](https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/shanghai.md#engine_getpayloadv2)
+                    //
+                    // a validation **MUST** be added:
+                    //
+                    // 1. Client software **MUST** return `-38005: Unsupported fork` error if the
+                    //    `timestamp` of payload or payloadAttributes greater or equal to the Cancun
+                    //    activation timestamp.
+                    return Err(EngineApiError::UnsupportedFork)
                 }
             }
             EngineApiMessageVersion::V3 => {
