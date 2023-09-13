@@ -264,7 +264,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         self.all.remove(&tx);
         self.size_of -= tx.transaction.size();
         self.independent_transactions.remove(&tx);
-        Some(tx.transaction.clone())
+        Some(tx.transaction)
     }
 
     fn next_id(&mut self) -> u64 {

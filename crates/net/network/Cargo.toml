@@ -88,8 +88,8 @@ enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
 
 # misc
 hex = "0.4"
+serial_test.workspace = true
 tempfile = "3.3"
-serial_test = "2.0"
 
 [features]
 default = ["serde"]
