@@ -6,6 +6,21 @@ use tracing::debug;
 mod prune;
 pub use prune::EnginePruneController;
 
+#[derive(Default)]
+pub struct Hooks {
+    inner: Vec<Box<dyn Hook>>,
+}
+
+impl Hooks {
+    pub fn new() -> Self {
+        Self { inner: Vec::new() }
+    }
+
+    pub fn add<H: Hook>(&mut self, hook: H) {
+        self.inner.push(Box::new(hook))
+    }
+}
+
 pub trait Hook: Send + Sync + 'static {
     fn name(&self) -> &'static str;
     fn poll(&mut self, cx: &mut Context<'_>, args: HookArguments) -> Poll<HookEvent>;
@@ -82,9 +97,9 @@ pub(crate) struct HooksController {
 }
 
 impl HooksController {
-    pub(crate) fn new(hooks: impl IntoIterator<Item = Box<dyn Hook>>) -> Self {
+    pub(crate) fn new(hooks: Hooks) -> Self {
         Self {
-            hooks: hooks.into_iter().map(Some).collect(),
+            hooks: hooks.inner.into_iter().map(Some).collect(),
             hook_idx: 0,
             running_hook_with_db_write: None,
         }

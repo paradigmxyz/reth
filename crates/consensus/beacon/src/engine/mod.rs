@@ -4,7 +4,7 @@ use crate::{
         message::OnForkChoiceUpdated,
         metrics::EngineMetrics,
     },
-    hooks::{Hook, HookAction, HookArguments, HooksController},
+    hooks::{HookAction, HookArguments, HooksController},
     sync::{EngineSyncController, EngineSyncEvent},
 };
 use futures::{Future, StreamExt};
@@ -68,6 +68,7 @@ mod handle;
 pub use handle::BeaconConsensusEngineHandle;
 
 mod forkchoice;
+use crate::hooks::Hooks;
 pub use forkchoice::ForkchoiceStatus;
 
 mod metrics;
@@ -227,7 +228,7 @@ where
         payload_builder: PayloadBuilderHandle,
         target: Option<H256>,
         pipeline_run_threshold: u64,
-        hooks: Vec<Box<dyn Hook>>,
+        hooks: Hooks,
     ) -> Result<(Self, BeaconConsensusEngineHandle), Error> {
         let (to_engine, rx) = mpsc::unbounded_channel();
         Self::with_channel(
@@ -273,7 +274,7 @@ where
         pipeline_run_threshold: u64,
         to_engine: UnboundedSender<BeaconEngineMessage>,
         rx: UnboundedReceiver<BeaconEngineMessage>,
-        hooks: Vec<Box<dyn Hook>>,
+        hooks: Hooks,
     ) -> Result<(Self, BeaconConsensusEngineHandle), Error> {
         let handle = BeaconConsensusEngineHandle { to_engine };
         let sync = EngineSyncController::new(
