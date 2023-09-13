@@ -8,7 +8,7 @@ use metrics::Counter;
 use reth_db::database::Database;
 use reth_interfaces::sync::SyncState;
 use reth_primitives::BlockNumber;
-use reth_prune::{Pruner, PrunerError, PrunerWithResult};
+use reth_prune::{Pruner, PrunerError, PrunerResult, PrunerWithResult};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
 use tokio::sync::oneshot;
@@ -48,14 +48,18 @@ impl<DB: Database + 'static> EnginePruneController<DB> {
         let ev = match res {
             Ok((pruner, result)) => {
                 self.pruner_state = PrunerState::Idle(Some(pruner));
-                HookEvent::Finished(result.map(|_| ()).map_err(|error| match error {
-                    PrunerError::PrunePart(_) | PrunerError::InconsistentData(_) => {
-                        HookError::Internal(Box::new(error))
-                    }
-                    PrunerError::Interface(err) => err.into(),
-                    PrunerError::Database(err) => reth_interfaces::Error::Database(err).into(),
-                    PrunerError::Provider(err) => reth_interfaces::Error::Provider(err).into(),
-                }))
+
+                HookEvent::Finished(match result {
+                    Ok(_) => Ok(()),
+                    Err(err) => Err(match err {
+                        PrunerError::PrunePart(_) | PrunerError::InconsistentData(_) => {
+                            HookError::Internal(Box::new(err))
+                        }
+                        PrunerError::Interface(err) => err.into(),
+                        PrunerError::Database(err) => reth_interfaces::Error::Database(err).into(),
+                        PrunerError::Provider(err) => reth_interfaces::Error::Provider(err).into(),
+                    }),
+                })
             }
             Err(_) => {
                 // failed to receive the pruner
