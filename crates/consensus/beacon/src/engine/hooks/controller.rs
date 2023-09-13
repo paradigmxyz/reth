@@ -16,7 +16,7 @@ pub(crate) struct HooksController {
 }
 
 impl HooksController {
-    /// Creates new [`HookController`]
+    /// Creates a new [`HooksController`].
     pub(crate) fn new(hooks: Hooks) -> Self {
         Self {
             hooks: hooks.inner.into_iter().map(Some).collect(),
