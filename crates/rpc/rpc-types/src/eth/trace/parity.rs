@@ -46,7 +46,7 @@ impl TraceResults {
     ///
     /// The root trace's gasUsed should mirror the actual gas used by the transaction.
     ///
-    /// This allows setting int manually by consuming the execution result's gas for example.
+    /// This allows setting it manually by consuming the execution result's gas for example.
     pub fn set_root_trace_gas_used(&mut self, gas_used: u64) {
         if let Some(r) = self.trace.first_mut().and_then(|t| t.result.as_mut()) {
             r.set_gas_used(gas_used)

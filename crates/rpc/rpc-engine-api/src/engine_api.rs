@@ -208,6 +208,24 @@ where
         &self,
         payload_id: PayloadId,
     ) -> EngineApiResult<ExecutionPayloadEnvelopeV3> {
+        // First we fetch the payload attributes to check the timestamp
+        let attributes = self
+            .inner
+            .payload_store
+            .payload_attributes(payload_id)
+            .await
+            .ok_or(EngineApiError::UnknownPayload)??;
+
+        // From the Engine API spec:
+        // <https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/cancun.md#specification-2>
+        //
+        // 1. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
+        //    the built payload does not fall within the time frame of the Cancun fork.
+        if !self.inner.chain_spec.is_cancun_activated_at_timestamp(attributes.timestamp) {
+            return Err(EngineApiError::UnsupportedFork)
+        }
+
+        // Now resolve the payload
         Ok(self
             .inner
             .payload_store

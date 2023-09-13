@@ -41,6 +41,26 @@ impl ParityTraceBuilder {
         self.nodes.iter().map(|node| node.trace.caller).collect()
     }
 
+    /// Manually the gas used of the root trace.
+    ///
+    /// The root trace's gasUsed should mirror the actual gas used by the transaction.
+    ///
+    /// This allows setting it manually by consuming the execution result's gas for example.
+    #[inline]
+    pub fn set_transaction_gas_used(&mut self, gas_used: u64) {
+        if let Some(node) = self.nodes.first_mut() {
+            node.trace.gas_used = gas_used;
+        }
+    }
+
+    /// Convenience function for [ParityTraceBuilder::set_transaction_gas_used] that consumes the
+    /// type.
+    #[inline]
+    pub fn with_transaction_gas_used(mut self, gas_used: u64) -> Self {
+        self.set_transaction_gas_used(gas_used);
+        self
+    }
+
     /// Returns the trace addresses of all call nodes in the set
     ///
     /// Each entry in the returned vector represents the [Self::trace_address] of the corresponding
