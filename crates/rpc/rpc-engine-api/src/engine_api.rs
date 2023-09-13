@@ -119,7 +119,28 @@ where
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(ref attrs) = payload_attrs {
-            self.validate_version_specific_fields(EngineApiMessageVersion::V1, &attrs.into())?;
+            let attr_validation_res =
+                self.validate_version_specific_fields(EngineApiMessageVersion::V1, &attrs.into());
+
+            // From the engine API spec:
+            //
+            // Client software MUST ensure that payloadAttributes.timestamp is greater than
+            // timestamp of a block referenced by forkchoiceState.headBlockHash. If this condition
+            // isn't held client software MUST respond with -38003: Invalid payload attributes and
+            // MUST NOT begin a payload build process. In such an event, the forkchoiceState
+            // update MUST NOT be rolled back.
+            //
+            // To do this, we set the payload attrs to `None` if attribute validation failed, but
+            // we still apply the forkchoice update.
+            if let Err(err) = attr_validation_res {
+                let fcu_res = self.inner.beacon_consensus.fork_choice_updated(state, None).await?;
+                // TODO: decide if we want this branch - the FCU INVALID response might be more
+                // useful than the payload attributes INVALID response
+                if fcu_res.is_invalid() {
+                    return Ok(fcu_res)
+                }
+                return Err(err)
+            }
         }
         Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
     }
@@ -134,7 +155,31 @@ where
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(ref attrs) = payload_attrs {
-            self.validate_version_specific_fields(EngineApiMessageVersion::V2, &attrs.into())?;
+            let attr_validation_res =
+                self.validate_version_specific_fields(EngineApiMessageVersion::V2, &attrs.into());
+
+            // From the engine API spec:
+            //
+            // Client software MUST ensure that payloadAttributes.timestamp is greater than
+            // timestamp of a block referenced by forkchoiceState.headBlockHash. If this condition
+            // isn't held client software MUST respond with -38003: Invalid payload attributes and
+            // MUST NOT begin a payload build process. In such an event, the forkchoiceState
+            // update MUST NOT be rolled back.
+            //
+            // NOTE: This will also apply to the validation result for the shanghai-specific fields
+            // provided in the payload attributes.
+            //
+            // To do this, we set the payload attrs to `None` if attribute validation failed, but
+            // we still apply the forkchoice update.
+            if let Err(err) = attr_validation_res {
+                let fcu_res = self.inner.beacon_consensus.fork_choice_updated(state, None).await?;
+                // TODO: decide if we want this branch - the FCU INVALID response might be more
+                // useful than the payload attributes INVALID response
+                if fcu_res.is_invalid() {
+                    return Ok(fcu_res)
+                }
+                return Err(err)
+            }
         }
         Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
     }
@@ -149,7 +194,31 @@ where
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(ref attrs) = payload_attrs {
-            self.validate_version_specific_fields(EngineApiMessageVersion::V3, &attrs.into())?;
+            let attr_validation_res =
+                self.validate_version_specific_fields(EngineApiMessageVersion::V3, &attrs.into());
+
+            // From the engine API spec:
+            //
+            // Client software MUST ensure that payloadAttributes.timestamp is greater than
+            // timestamp of a block referenced by forkchoiceState.headBlockHash. If this condition
+            // isn't held client software MUST respond with -38003: Invalid payload attributes and
+            // MUST NOT begin a payload build process. In such an event, the forkchoiceState
+            // update MUST NOT be rolled back.
+            //
+            // NOTE: This will also apply to the validation result for the cancun-specific fields
+            // provided in the payload attributes.
+            //
+            // To do this, we set the payload attrs to `None` if attribute validation failed, but
+            // we still apply the forkchoice update.
+            if let Err(err) = attr_validation_res {
+                let fcu_res = self.inner.beacon_consensus.fork_choice_updated(state, None).await?;
+                // TODO: decide if we want this branch - the FCU INVALID response might be more
+                // useful than the payload attributes INVALID response
+                if fcu_res.is_invalid() {
+                    return Ok(fcu_res)
+                }
+                return Err(err)
+            }
         }
 
         Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
