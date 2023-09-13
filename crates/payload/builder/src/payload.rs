@@ -81,10 +81,6 @@ impl From<BuiltPayload> for ExecutionPayloadV1 {
 }
 
 // V2 engine_getPayloadV2 response
-// TODO(rjected): we could improve this by wrapping envelope / payload types by version, so we can
-// have explicitly versioned return types for getPayload. Then BuiltPayload could essentially be a
-// builder for those types, and it would not be possible to e.g. return cancun fields for a
-// pre-cancun endpoint.
 impl From<BuiltPayload> for ExecutionPayloadEnvelopeV2 {
     fn from(value: BuiltPayload) -> Self {
         let BuiltPayload { block, fees, .. } = value;
@@ -98,7 +94,7 @@ impl From<BuiltPayload> for ExecutionPayloadEnvelopeV3 {
         let BuiltPayload { block, fees, sidecars, .. } = value;
 
         ExecutionPayloadEnvelopeV3 {
-            payload_inner: block.into(),
+            execution_payload: block.into(),
             block_value: fees,
             // From the engine API spec:
             //

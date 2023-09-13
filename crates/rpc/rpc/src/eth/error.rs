@@ -481,6 +481,12 @@ pub enum RpcPoolError {
     /// Eip-4844 related error
     #[error(transparent)]
     Eip4844(#[from] Eip4844PoolTransactionError),
+    /// Thrown if a conflicting transaction type is already in the pool
+    ///
+    /// In other words, thrown if a transaction with the same sender that violates the exclusivity
+    /// constraint (blob vs normal tx)
+    #[error("address already reserved")]
+    AddressAlreadyReserved,
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
@@ -504,6 +510,9 @@ impl From<PoolError> for RpcPoolError {
             PoolError::InvalidTransaction(_, err) => err.into(),
             PoolError::Other(_, err) => RpcPoolError::Other(err),
             PoolError::AlreadyImported(_) => RpcPoolError::AlreadyKnown,
+            PoolError::ExistingConflictingTransactionType(_, _, _) => {
+                RpcPoolError::AddressAlreadyReserved
+            }
         }
     }
 }
@@ -520,6 +529,9 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             InvalidPoolTransactionError::Underpriced => RpcPoolError::Underpriced,
             InvalidPoolTransactionError::Other(err) => RpcPoolError::PoolTransactionError(err),
             InvalidPoolTransactionError::Eip4844(err) => RpcPoolError::Eip4844(err),
+            InvalidPoolTransactionError::Overdraft => {
+                RpcPoolError::Invalid(RpcInvalidTransactionError::InsufficientFunds)
+            }
         }
     }
 }

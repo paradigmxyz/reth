@@ -16,7 +16,7 @@ The most important requirement is by far the disk, whereas CPU and RAM requireme
 
 |           | Archive Node                          | Full Node                           |
 |-----------|---------------------------------------|-------------------------------------|
-| Disk      | At least 2.1TB (TLC NVMe recommended) | TBD                                 |
+| Disk      | At least 2.1TB (TLC NVMe recommended) | At least 1TB (TLC NVMe recommended) |
 | Memory    | 8GB+                                  | 8GB+                                |
 | CPU       | Higher clock speed over core count    | Higher clock speeds over core count |
 | Bandwidth | Stable 24Mbps+                        | Stable 24Mbps+                      |
@@ -73,4 +73,4 @@ Once you're synced to the tip you will need a reliable connection, especially if
 
 If you are buying your own NVMe SSD, please consult [this hardware comparison](https://gist.github.com/yorickdowne/f3a3e79a573bf35767cd002cc977b038) which is being actively maintained. We recommend against buying DRAM-less or QLC devices as these are noticeably slower.
 
-All our benchmarks have been produced on [Latitude.sh](https://www.latitude.sh/), a bare metal provider. We use `c3.large.x86` boxes. So far our experience has been smooth with some users reporting that the NVMEs there outperform AWS NVMEs by 3x or more. We're excited for more Reth nodes on Latitude.sh, so for a limited time you can use `RETH200` for a $200 discount. [Run a node now!](https://metal.new/reth)
+All our benchmarks have been produced on [Latitude.sh](https://www.latitude.sh/), a bare metal provider. We use `c3.large.x86` boxes, and also recommend trying the `s2.small.x86` box for pruned/full nodes. So far our experience has been smooth with some users reporting that the NVMEs there outperform AWS NVMEs by 3x or more. We're excited for more Reth nodes on Latitude.sh, so for a limited time you can use `RETH400` for a $250 discount. [Run a node now!](https://metal.new/reth)

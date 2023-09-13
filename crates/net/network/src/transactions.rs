@@ -20,7 +20,7 @@ use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{Peers, ReputationChangeKind};
 use reth_primitives::{
     FromRecoveredPooledTransaction, IntoRecoveredTransaction, PeerId, PooledTransactionsElement,
-    TransactionSigned, TxHash, TxType, H256,
+    TransactionSigned, TxHash, H256,
 };
 use reth_rlp::Encodable;
 use reth_transaction_pool::{
@@ -174,8 +174,14 @@ where
         TransactionsHandle { manager_tx: self.command_tx.clone() }
     }
 
+    #[inline]
     fn update_import_metrics(&self) {
         self.metrics.pending_pool_imports.set(self.pool_imports.len() as f64);
+    }
+
+    #[inline]
+    fn update_request_metrics(&self) {
+        self.metrics.inflight_transaction_requests.set(self.inflight_requests.len() as f64);
     }
 
     /// Request handler for an incoming request for transactions
@@ -238,7 +244,7 @@ where
     /// The message for new pooled hashes depends on the negotiated version of the stream.
     /// See [NewPooledTransactionHashes](NewPooledTransactionHashes)
     ///
-    /// TODO add note that this never broadcasts full 4844 transactions
+    /// Note: EIP-4844 are disallowed from being broadcast in full and are only ever sent as hashes, see also <https://eips.ethereum.org/EIPS/eip-4844#networking>.
     fn propagate_transactions(
         &mut self,
         to_propagate: Vec<PropagateTransaction>,
@@ -270,7 +276,7 @@ where
                     //  via `GetPooledTransactions`.
                     //
                     // From: <https://eips.ethereum.org/EIPS/eip-4844#networking>
-                    if tx.tx_type() != TxType::EIP4844 {
+                    if !tx.transaction.is_eip4844() {
                         full_transactions.push(tx);
                     }
                 }
@@ -591,6 +597,8 @@ where
             this.on_network_tx_event(event);
         }
 
+        this.update_request_metrics();
+
         // Advance all requests.
         while let Poll::Ready(Some(GetPooledTxResponse { peer_id, result })) =
             this.inflight_requests.poll_next_unpin(cx)
@@ -609,6 +617,7 @@ where
             }
         }
 
+        this.update_request_metrics();
         this.update_import_metrics();
 
         // Advance all imports
@@ -661,10 +670,6 @@ struct PropagateTransaction {
 impl PropagateTransaction {
     fn hash(&self) -> TxHash {
         self.transaction.hash()
-    }
-
-    fn tx_type(&self) -> TxType {
-        self.transaction.tx_type()
     }
 
     fn new(transaction: Arc<TransactionSigned>) -> Self {

@@ -39,6 +39,21 @@ pub struct TraceResults {
     pub vm_trace: Option<VmTrace>,
 }
 
+// === impl TraceResults ===
+
+impl TraceResults {
+    /// Sets the gas used of the root trace.
+    ///
+    /// The root trace's gasUsed should mirror the actual gas used by the transaction.
+    ///
+    /// This allows setting it manually by consuming the execution result's gas for example.
+    pub fn set_root_trace_gas_used(&mut self, gas_used: u64) {
+        if let Some(r) = self.trace.first_mut().and_then(|t| t.result.as_mut()) {
+            r.set_gas_used(gas_used)
+        }
+    }
+}
+
 /// A `FullTrace` with an additional transaction hash
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -240,13 +255,37 @@ pub struct CreateOutput {
     pub address: Address,
 }
 
+/// Represents the output of a trace.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum TraceOutput {
+    /// Output of a regular call transaction.
     Call(CallOutput),
+    /// Output of a CREATE transaction.
     Create(CreateOutput),
 }
 
+// === impl TraceOutput ===
+
+impl TraceOutput {
+    /// Returns the gas used by this trace.
+    pub fn gas_used(&self) -> U64 {
+        match self {
+            TraceOutput::Call(call) => call.gas_used,
+            TraceOutput::Create(create) => create.gas_used,
+        }
+    }
+
+    /// Sets the gas used by this trace.
+    pub fn set_gas_used(&mut self, gas_used: u64) {
+        match self {
+            TraceOutput::Call(call) => call.gas_used = U64::from(gas_used),
+            TraceOutput::Create(create) => create.gas_used = U64::from(gas_used),
+        }
+    }
+}
+
+/// A parity style trace of a transaction.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionTrace {
@@ -267,14 +306,18 @@ pub struct LocalizedTransactionTrace {
     /// Hash of the block, if not pending
     ///
     /// Note: this deviates from <https://openethereum.github.io/JSONRPC-trace-module#trace_transaction> which always returns a block number
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub block_hash: Option<H256>,
     /// Block number the transaction is included in, None if pending.
     ///
     /// Note: this deviates from <https://openethereum.github.io/JSONRPC-trace-module#trace_transaction> which always returns a block number
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub block_number: Option<u64>,
     /// Hash of the transaction
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub transaction_hash: Option<H256>,
     /// Transaction index within the block, None if pending.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub transaction_position: Option<u64>,
 }
 
