@@ -5837,6 +5837,7 @@ dependencies = [
  "itertools 0.11.0",
  "parking_lot 0.12.1",
  "pin-project",
+ "rayon",
  "reth-db",
  "reth-interfaces",
  "reth-primitives",
@@ -6202,10 +6203,9 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "3.3.0"
-source = "git+https://github.com/bluealloy/revm.git#26dc07dda5bf43d645b90ecaa986a3c4f6fe73b0"
+source = "git+https://github.com/bluealloy/revm.git#9f00e3796e165efb2c76feb2c335d1d7468a9b3d"
 dependencies = [
  "auto_impl",
- "rayon",
  "revm-interpreter",
  "revm-precompile",
 ]
@@ -6213,7 +6213,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "1.1.2"
-source = "git+https://github.com/bluealloy/revm.git#26dc07dda5bf43d645b90ecaa986a3c4f6fe73b0"
+source = "git+https://github.com/bluealloy/revm.git#9f00e3796e165efb2c76feb2c335d1d7468a9b3d"
 dependencies = [
  "derive_more",
  "enumn",
@@ -6224,7 +6224,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "2.0.3"
-source = "git+https://github.com/bluealloy/revm.git#26dc07dda5bf43d645b90ecaa986a3c4f6fe73b0"
+source = "git+https://github.com/bluealloy/revm.git#9f00e3796e165efb2c76feb2c335d1d7468a9b3d"
 dependencies = [
  "k256",
  "num",
@@ -6240,7 +6240,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "1.1.2"
-source = "git+https://github.com/bluealloy/revm.git#26dc07dda5bf43d645b90ecaa986a3c4f6fe73b0"
+source = "git+https://github.com/bluealloy/revm.git#9f00e3796e165efb2c76feb2c335d1d7468a9b3d"
 dependencies = [
  "arbitrary",
  "auto_impl",
