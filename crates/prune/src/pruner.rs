@@ -843,18 +843,18 @@ impl<DB: Database> Pruner<DB> {
         let initial_last_pruned_block = last_pruned_block;
 
         // Figure out what storage history have already been pruned, so we can have an accurate
-        // `address_slot_filter`
-        let address_slot_filter = self
+        // `address_slots_filter`
+        let address_slots_filter = self
             .modes
             .storage_history_filter
             .group_by_block(tip_block_number, last_pruned_block)?;
 
-        // Splits all transactions in different block ranges. Each block range will have its own
+        // Splits all addresses in different block ranges. Each block range will have its own
         // filter address and slot list and will check it while going through the table
         //
         // Example:
         // For an `address_filter` such as:
-        // { block9: [(a1, ()), (a2, ())], block20: [(a3, (s1)), (a4, ()), (a5, (s1, s2))] }
+        // { block9: [(a1, []), (a2, [])], block20: [(a3, [s1]), (a4, []), (a5, [s1, s2])] }
         //
         // The following structures will be created in the exact order as showed:
         // `block_ranges`: [
@@ -862,7 +862,7 @@ impl<DB: Database> Pruner<DB> {
         //    (block9, block19, 2 addresses),
         //    (block20, to_block, 5 addresses)
         //  ]
-        // `filtered_addresses_slots`: [(a1, ()), (a2, ()), (a3, (s1)), (a4, ()), (a5, (s1, s2))]
+        // `filtered_address_slots`: [(a1, []), (a2, []), (a3, [s1]), (a4, []), (a5, [s1, s2])]
         //
         // The first range will delete all storage history between block0 - block8
         // The second range will delete all storage history between block9 - 19, except the ones
@@ -871,11 +871,11 @@ impl<DB: Database> Pruner<DB> {
         // addresses and slots: [a1: all slots, a2: all slots, a3: slot1, a4: all slots, a5: slot1
         // and slot2]
         let mut block_ranges = vec![];
-        let mut blocks_iter = address_slot_filter.iter().peekable();
-        let mut filtered_addresses_slots = vec![];
+        let mut blocks_iter = address_slots_filter.iter().peekable();
+        let mut filtered_address_slots = vec![];
 
         while let Some((start_block, addresses_and_slots)) = blocks_iter.next() {
-            filtered_addresses_slots.extend_from_slice(addresses_and_slots);
+            filtered_address_slots.extend_from_slice(addresses_and_slots);
 
             // This will clear all storage history before the first appearance of a contract address
             // or since the block after the last pruned one.
@@ -891,13 +891,13 @@ impl<DB: Database> Pruner<DB> {
 
             // Addresses in lower block ranges, are still included in the inclusion list for future
             // ranges.
-            block_ranges.push((*start_block, end_block, filtered_addresses_slots.len()));
+            block_ranges.push((*start_block, end_block, filtered_address_slots.len()));
         }
 
         trace!(
             target: "pruner",
             ?block_ranges,
-            ?filtered_addresses_slots,
+            ?filtered_address_slots,
             "Calculated block ranges and filtered addresses and slots",
         );
 
@@ -915,10 +915,11 @@ impl<DB: Database> Pruner<DB> {
                 limit,
                 |(block_num_address, storage_entry)| {
                     let mut skip = num_addresses > 0;
-                    if let Some(&(_, slots)) = filtered_addresses_slots[..num_addresses]
+                    if let Some(&address_slots) = filtered_address_slots[..num_addresses]
                         .iter()
-                        .find(|(address, _)| address == &&block_num_address.address())
+                        .find(|&address_slot| address_slot.address == block_num_address.address())
                     {
+                        let slots = &address_slots.slots;
                         if slots.is_empty() {
                             // if slots is empty, save all slots
                             skip &= true;
@@ -958,10 +959,11 @@ impl<DB: Database> Pruner<DB> {
                 |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
                 |key| StorageShardedKey::last(key.address, key.sharded_key.key),
                 |storage_sharded_key| {
-                    if let Some(&(_, slots)) = filtered_addresses_slots[..num_addresses]
+                    if let Some(&address_slots) = filtered_address_slots[..num_addresses]
                         .iter()
-                        .find(|(address, _)| address == &&storage_sharded_key.address)
+                        .find(|&address_slots| address_slots.address == storage_sharded_key.address)
                     {
+                        let slots = &address_slots.slots;
                         if slots.is_empty() {
                             // if slots is empty, save all slots
                             true
@@ -1141,8 +1143,8 @@ mod tests {
         },
     };
     use reth_primitives::{
-        BlockNumber, PruneBatchSizes, PruneCheckpoint, PruneMode, PruneModes, PrunePart,
-        ReceiptsLogPruneConfig, StorageHistoryPruneConfig, TxNumber, H256, MAINNET,
+        AddressAndSlots, BlockNumber, PruneBatchSizes, PruneCheckpoint, PruneMode, PruneModes,
+        PrunePart, ReceiptsLogPruneConfig, StorageHistoryPruneConfig, TxNumber, H256, MAINNET,
     };
     use reth_provider::{PruneCheckpointReader, TransactionsProvider};
     use reth_stages::test_utils::TestTransaction;
@@ -1846,17 +1848,14 @@ mod tests {
             changesets.iter().flatten().flat_map(|(_, _, entries)| entries).count()
         );
 
-        let original_shards = tx.table::<tables::StorageHistory>().unwrap();
-
-        let test_prune = |to_block: BlockNumber, run: usize, expect_done: bool| {
-            let prune_mode = PruneMode::Before(to_block);
+        let run_prune = |prune_mode: PruneMode| {
             let pruner = Pruner::new(
                 tx.inner_raw(),
                 MAINNET.clone(),
                 1,
                 PruneModes {
                     storage_history_filter: StorageHistoryPruneConfig(BTreeMap::from([(
-                        BTreeMap::from([(address1, vec![])]),
+                        AddressAndSlots { address: address1, slots: vec![] },
                         prune_mode,
                     )])),
                     ..Default::default()
@@ -1869,83 +1868,28 @@ mod tests {
             let result = pruner.prune_storage_history_by_contract_and_slots(&provider, tip);
             assert_matches!(result, Ok(_));
             let done = result.unwrap();
-            assert_eq!(done, expect_done);
             provider.commit().expect("commit");
-            /*
-            let changesets = changesets
-                .iter()
-                .enumerate()
-                .flat_map(|(block_number, changeset)| {
-                    changeset.into_iter().flat_map(move |(address, _, entries)| {
-                        entries.into_iter().map(move |entry| (block_number, address, entry))
-                    })
-                })
-                .collect::<Vec<_>>();
 
-            let pruned = changesets
-                .iter()
-                .enumerate()
-                .skip_while(|(i, (block_number, _, _))| {
-                    *i < pruner.batch_sizes.storage_history(pruner.min_block_interval) * run &&
-                        *block_number <= to_block as usize
-                })
-                .next()
-                .map(|(i, _)| i)
-                .unwrap_or_default();
-
-            let mut pruned_changesets = changesets
-                .iter()
-                // Skip what we've pruned so far, subtracting one to get last pruned block number
-                // further down
-                .skip(pruned.saturating_sub(1));
-
-            let last_pruned_block_number = pruned_changesets
-                .next()
-                .map(|(block_number, _, _)| if done { *block_number } else { block_number.saturating_sub(1) } as BlockNumber)
-                .unwrap_or(to_block);
-
-            let pruned_changesets = pruned_changesets.fold(
-                BTreeMap::new(),
-                |mut acc, (block_number, address, entry)| {
-                    acc.entry((block_number, address)).or_insert_with(Vec::new).push(entry);
-                    acc
-                },
-            );
-
-            assert_eq!(
-                tx.table::<tables::StorageChangeSet>().unwrap().len(),
-                pruned_changesets.values().flatten().count()
-            );
-
-            let actual_shards = tx.table::<tables::StorageHistory>().unwrap();
-
-            let expected_shards = original_shards
-                .iter()
-                .filter(|(key, _)| key.sharded_key.highest_block_number > last_pruned_block_number)
-                .map(|(key, blocks)| {
-                    let new_blocks = blocks
-                        .iter(0)
-                        .skip_while(|block| *block <= last_pruned_block_number as usize)
-                        .collect::<Vec<_>>();
-                    (key.clone(), BlockNumberList::new_pre_sorted(new_blocks))
-                })
-                .collect::<Vec<_>>();
-
-            assert_eq!(actual_shards, expected_shards);
-
-            assert_eq!(
-                tx.inner().get_prune_checkpoint(PrunePart::StorageHistory).unwrap(),
-                Some(PruneCheckpoint {
-                    block_number: Some(last_pruned_block_number),
-                    tx_number: None,
-                    prune_mode
-                })
-            );
-            */
+            done
         };
 
-        test_prune(2300, 1, false);
-        test_prune(2300, 2, false);
-        test_prune(3000, 3, true);
+        let to_block = 2300;
+        let prune_mode = PruneMode::Before(to_block);
+        while !run_prune(prune_mode) {}
+
+        let provider = tx.inner();
+        let mut cursor = provider.tx_ref().cursor_read::<tables::StorageChangeSet>().unwrap();
+        let walker = cursor.walk(None).unwrap();
+
+        for storage_change_set in walker {
+            let (block_num_address, _storage_entry) = storage_change_set.unwrap();
+
+            // Either we only find our contract and slots, or the changes are part of the unprunable
+            // changes set by tip - 128
+            assert!(
+                block_num_address.address() == address1 ||
+                    block_num_address.block_number() > tip - 128,
+            );
+        }
     }
 }

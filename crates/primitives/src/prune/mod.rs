@@ -13,9 +13,18 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 pub use target::{PruneModes, MINIMUM_PRUNING_DISTANCE};
 
+/// Helper struct for `StorageHistoryPruneConfig`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Ord, PartialOrd)]
+pub struct AddressAndSlots {
+    /// Address to exclude from storage history pruning
+    pub address: Address,
+    /// Slots to exclude from storage history pruning
+    pub slots: Vec<StorageKey>,
+}
+
 /// Configuration for pruning storage history not associated with specifies address.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct StorageHistoryPruneConfig(pub BTreeMap<BTreeMap<Address, Vec<StorageKey>>, PruneMode>);
+pub struct StorageHistoryPruneConfig(pub BTreeMap<AddressAndSlots, PruneMode>);
 
 impl StorageHistoryPruneConfig {
     /// Checks if the configuration is empty
@@ -28,25 +37,25 @@ impl StorageHistoryPruneConfig {
     ///
     /// Example:
     ///
-    /// `{ (addrA, ()): Before(872), (addrB, ()): Before(500), (addrC, (slot1, slot2)):
+    /// `{ (addrA, []): Before(872), (addrB, []): Before(500), (addrC, [slot1, slot2]):
     /// Distance(128) }`  
     ///    for `tip: 1000`, gets transformed to a map such as:
     ///
-    /// `{ 500: [(addrB, ())], 872: [(addrA, ()), (addrC, (slot1, slot2))] }`
+    /// `{ 500: [(addrB, [])], 872: [(addrA, []), (addrC, [slot1, slot2])] }`
     ///
     /// The [`BlockNumber`] key of the new map should be viewed as `PruneMode::Before(block)`, which
     /// makes the previous result equivalent to
     ///
-    /// `{ Before(500): [(addrB, ())], Before(872): [(addrA, ()), (addrC, (slot1, slot2))] }`
+    /// `{ Before(500): [(addrB, [])], Before(872): [(addrA, []), (addrC, [slot1, slot2])] }`
     pub fn group_by_block(
         &self,
         tip: BlockNumber,
         pruned_block: Option<BlockNumber>,
-    ) -> Result<BTreeMap<BlockNumber, Vec<(&Address, &Vec<StorageKey>)>>, PrunePartError> {
+    ) -> Result<BTreeMap<BlockNumber, Vec<&AddressAndSlots>>, PrunePartError> {
         let mut map = BTreeMap::new();
         let pruned_block = pruned_block.unwrap_or_default();
 
-        for (address_slot_map, mode) in self.0.iter() {
+        for (address_and_slots, mode) in self.0.iter() {
             // Getting `None`, means that there is nothing to prune yet, so we need it to include in
             // the BTreeMap (block = 0), otherwise it will be excluded.
             // Reminder that this BTreeMap works as an inclusion list that excludes (prunes) all
@@ -64,9 +73,7 @@ impl StorageHistoryPruneConfig {
                 .unwrap_or_default() +
                     1,
             );
-            for (address, slots) in address_slot_map.iter() {
-                map.entry(block).or_insert_with(Vec::new).push((address, slots))
-            }
+            map.entry(block).or_insert_with(Vec::new).push(address_and_slots)
         }
         Ok(map)
     }
