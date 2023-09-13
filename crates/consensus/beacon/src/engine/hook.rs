@@ -126,9 +126,7 @@ impl HooksController {
     ) -> Result<Poll<HookAction>, HookError> {
         let hook_idx = self.hook_idx % self.hooks.len();
         // SAFETY: bounds are respected in the modulo above
-        let Some(mut hook) = self.hooks.get_mut(hook_idx).unwrap().take() else {
-            return Ok(Poll::Pending)
-        };
+        let Some(mut hook) = self.hooks[hook_idx].take() else { return Ok(Poll::Pending) };
 
         // Hook with DB write dependency is not allowed to run due to already
         // running hook with DB write dependency.
