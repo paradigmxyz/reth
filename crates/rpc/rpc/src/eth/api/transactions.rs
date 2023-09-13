@@ -578,8 +578,9 @@ where
         F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>,
     {
         self.with_state_at_block(at, |state| {
-            let mut db =
-                State::builder().with_database_boxed(Box::new(StateProviderDatabase::new(state))).build();
+            let mut db = State::builder()
+                .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
+                .build();
 
             let mut inspector = TracingInspector::new(config);
             let (res, _) = inspect(&mut db, env, &mut inspector)?;
@@ -602,8 +603,9 @@ where
         R: Send + 'static,
     {
         self.spawn_with_state_at_block(at, move |state| {
-            let mut db =
-                State::builder().with_database_boxed(Box::new(StateProviderDatabase::new(state))).build();
+            let mut db = State::builder()
+                .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
+                .build();
             let mut inspector = TracingInspector::new(config);
             let (res, _) = inspect_and_return_db(&mut db, env, &mut inspector)?;
 
@@ -661,8 +663,9 @@ where
         let block_txs = block.body;
 
         self.spawn_with_state_at_block(parent_block.into(), move |state| {
-            let mut db =
-                State::builder().with_database_boxed(Box::new(StateProviderDatabase::new(state))).build();
+            let mut db = State::builder()
+                .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
+                .build();
 
             // replay all transactions prior to the targeted transaction
             replay_transactions_until(&mut db, cfg.clone(), block_env.clone(), block_txs, tx.hash)?;

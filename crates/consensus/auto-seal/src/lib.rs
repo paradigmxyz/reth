@@ -36,8 +36,8 @@ use reth_provider::{
     StateProviderFactory,
 };
 use reth_revm::{
-    database::StateProviderDatabase, db::states::bundle_state::BundleRetention, processor::EVMProcessor,
-    State,
+    database::StateProviderDatabase, db::states::bundle_state::BundleRetention,
+    processor::EVMProcessor, State,
 };
 use reth_transaction_pool::TransactionPool;
 use std::{

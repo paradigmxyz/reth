@@ -355,8 +355,7 @@ impl BundleStateWithReceipts {
         tx: &TX,
         is_value_known: OriginalValuesKnown,
     ) -> Result<(), DatabaseError> {
-        let (plain_state, reverts) =
-            self.bundle.into_sorted_plain_state_and_reverts(is_value_known);
+        let (plain_state, reverts) = self.bundle.into_plain_state_and_reverts(is_value_known);
 
         StateReverts(reverts).write_to_db(tx, self.first_block)?;
 
@@ -677,7 +676,7 @@ mod tests {
 
         // Write plain state and reverts separately.
         let reverts = revm_bundle_state.take_all_reverts().into_plain_state_reverts();
-        let plain_state = revm_bundle_state.into_plain_state_sorted(OriginalValuesKnown::Yes);
+        let plain_state = revm_bundle_state.into_plain_state(OriginalValuesKnown::Yes);
         assert!(plain_state.storage.is_empty());
         assert!(plain_state.contracts.is_empty());
         StateChange(plain_state)
@@ -741,7 +740,7 @@ mod tests {
 
         // Write plain state and reverts separately.
         let reverts = revm_bundle_state.take_all_reverts().into_plain_state_reverts();
-        let plain_state = revm_bundle_state.into_plain_state_sorted(OriginalValuesKnown::Yes);
+        let plain_state = revm_bundle_state.into_plain_state(OriginalValuesKnown::Yes);
         // Account B selfdestructed so flag for it should be present.
         assert_eq!(
             plain_state.storage,
