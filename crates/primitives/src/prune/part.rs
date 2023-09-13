@@ -20,7 +20,7 @@ pub enum PrunePart {
     StorageHistory,
     /// Prune part responsible for some `StorageChangeSet` and `StorageHistory` tables filtered by
     /// contract address.
-    StorageHistoryFilteredByContract,
+    StorageHistoryFilteredByContractAndSlots,
 }
 
 /// PrunePart error type.

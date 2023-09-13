@@ -222,14 +222,14 @@ impl<DB: Database> Pruner<DB> {
         if !self.modes.storage_history_filter.is_empty() {
             let part_start = Instant::now();
             let part_done =
-                self.prune_storage_history_by_contract_address(&provider, tip_block_number)?;
+                self.prune_storage_history_by_contract_and_slots(&provider, tip_block_number)?;
             done = done && part_done;
             self.metrics
-                .get_prune_part_metrics(PrunePart::ContractLogs)
+                .get_prune_part_metrics(PrunePart::StorageHistoryFilteredByContractAndSlots)
                 .duration_seconds
                 .record(part_start.elapsed())
         } else {
-            trace!(target: "pruner", prune_part = ?PrunePart::StorageHistoryFilteredByContract, "No filter to prune");
+            trace!(target: "pruner", prune_part = ?PrunePart::StorageHistoryFilteredByContractAndSlots, "No filter to prune");
         }
 
         provider.commit()?;
@@ -729,6 +729,7 @@ impl<DB: Database> Pruner<DB> {
             last_changeset_pruned_block,
             |a, b| a.key == b.key,
             |key| ShardedKey::last(key.key),
+            |_| false,
         )?;
         trace!(target: "pruner", %processed, %deleted, %done, "Pruned account history (history)" );
 
@@ -785,6 +786,7 @@ impl<DB: Database> Pruner<DB> {
             last_changeset_pruned_block,
             |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
             |key| StorageShardedKey::last(key.address, key.sharded_key.key),
+            |_| false,
         )?;
         trace!(target: "pruner", %processed, %deleted, %done, "Pruned storage history (history)" );
 
@@ -797,6 +799,213 @@ impl<DB: Database> Pruner<DB> {
             },
         )?;
 
+        // `PrunePart::StorageHistory` overrides
+        // `PrunePart::StorageHistoryFilteredByContractAndSlots`, so we can preemptively
+        // limit their pruning start point.
+        provider.save_prune_checkpoint(
+            PrunePart::StorageHistoryFilteredByContractAndSlots,
+            PruneCheckpoint {
+                block_number: Some(last_changeset_pruned_block),
+                tx_number: None,
+                prune_mode,
+            },
+        )?;
+
+        Ok(done)
+    }
+
+    /// Prune storage history up to the provided block, inclusive, by filtering contract addresses
+    /// and slots. Works as in inclusion list, and removes every storage changes not belonging to
+    /// it. Respects the batch size.
+    #[instrument(level = "trace", skip(self, provider), target = "pruner")]
+    fn prune_storage_history_by_contract_and_slots(
+        &self,
+        provider: &DatabaseProviderRW<'_, DB>,
+        tip_block_number: BlockNumber,
+    ) -> PrunerResult {
+        // Storage history filtering removes every storage changes possible except the ones in the
+        // list. So, for the other storage changes it's as if they had a
+        // `PruneMode::Distance()` of 128.
+        let to_block = PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)
+            .prune_target_block(
+                tip_block_number,
+                MINIMUM_PRUNING_DISTANCE,
+                PrunePart::StorageHistoryFilteredByContractAndSlots,
+            )?
+            .map(|(bn, _)| bn)
+            .unwrap_or_default();
+
+        // Get status checkpoint from latest run
+        let mut last_pruned_block = provider
+            .get_prune_checkpoint(PrunePart::StorageHistoryFilteredByContractAndSlots)?
+            .and_then(|checkpoint| checkpoint.block_number);
+
+        let initial_last_pruned_block = last_pruned_block;
+
+        // Figure out what storage history have already been pruned, so we can have an accurate
+        // `address_slot_filter`
+        let address_slot_filter = self
+            .modes
+            .storage_history_filter
+            .group_by_block(tip_block_number, last_pruned_block)?;
+
+        // Splits all transactions in different block ranges. Each block range will have its own
+        // filter address and slot list and will check it while going through the table
+        //
+        // Example:
+        // For an `address_filter` such as:
+        // { block9: [(a1, ()), (a2, ())], block20: [(a3, (s1)), (a4, ()), (a5, (s1, s2))] }
+        //
+        // The following structures will be created in the exact order as showed:
+        // `block_ranges`: [
+        //    (block0, block8, 0 addresses),
+        //    (block9, block19, 2 addresses),
+        //    (block20, to_block, 5 addresses)
+        //  ]
+        // `filtered_addresses_slots`: [(a1, ()), (a2, ()), (a3, (s1)), (a4, ()), (a5, (s1, s2))]
+        //
+        // The first range will delete all storage history between block0 - block8
+        // The second range will delete all storage history between block9 - 19, except the ones
+        // with these addresses and slots: [a1: all slots, a2: all slot]. The third range will
+        // delete all storage history between block20 - to_block, except the ones with these
+        // addresses and slots: [a1: all slots, a2: all slots, a3: slot1, a4: all slots, a5: slot1
+        // and slot2]
+        let mut block_ranges = vec![];
+        let mut blocks_iter = address_slot_filter.iter().peekable();
+        let mut filtered_addresses_slots = vec![];
+
+        while let Some((start_block, addresses_and_slots)) = blocks_iter.next() {
+            filtered_addresses_slots.extend_from_slice(addresses_and_slots);
+
+            // This will clear all storage history before the first appearance of a contract address
+            // or since the block after the last pruned one.
+            if block_ranges.is_empty() {
+                let init = last_pruned_block.map(|b| b + 1).unwrap_or_default();
+                if init < *start_block {
+                    block_ranges.push((init, *start_block - 1, 0));
+                }
+            }
+
+            let end_block =
+                blocks_iter.peek().map(|(next_block, _)| *next_block - 1).unwrap_or(to_block);
+
+            // Addresses in lower block ranges, are still included in the inclusion list for future
+            // ranges.
+            block_ranges.push((*start_block, end_block, filtered_addresses_slots.len()));
+        }
+
+        trace!(
+            target: "pruner",
+            ?block_ranges,
+            ?filtered_addresses_slots,
+            "Calculated block ranges and filtered addresses and slots",
+        );
+
+        let mut limit = self.batch_sizes.storage_history(self.min_block_interval);
+        let mut done = true;
+        let mut last_changeset_pruned_block = None;
+        for (start_block, end_block, num_addresses) in block_ranges {
+            let block_range = start_block..=end_block;
+
+            // Delete storage history (changesets), except the ones in the inclusion list
+            let mut last_changeset_skipped_block = 0;
+            let rows;
+            (rows, done) = provider.prune_table_with_range::<tables::StorageChangeSet>(
+                BlockNumberAddress::range(block_range.clone()),
+                limit,
+                |(block_num_address, storage_entry)| {
+                    let mut skip = num_addresses > 0;
+                    if let Some(&(_, slots)) = filtered_addresses_slots[..num_addresses]
+                        .iter()
+                        .find(|(address, _)| address == &&block_num_address.address())
+                    {
+                        if slots.is_empty() {
+                            // if slots is empty, save all slots
+                            skip &= true;
+                        } else {
+                            // else, save only slots specified in filtered_address_slots
+                            skip &= slots.contains(&storage_entry.key);
+                        }
+                    } else {
+                        // if address is not in the list, delete its storage history
+                        skip &= false;
+                    }
+                    if skip {
+                        last_changeset_skipped_block = block_num_address.block_number();
+                    }
+                    skip
+                },
+                |row| last_changeset_pruned_block = Some(row.0.block_number()),
+            )?;
+            trace!(target: "pruner", %rows, %done, ?block_range, "Pruned storage history (changesets)");
+
+            limit = limit.saturating_sub(rows);
+
+            let last_changeset_pruned_block = last_changeset_pruned_block
+                // If there's more account storage changesets to prune, set the checkpoint block
+                // number to previous, so we could finish pruning its storage
+                // changesets on the next run.
+                .map(
+                    |block_number| if done { block_number } else { block_number.saturating_sub(1) },
+                )
+                .unwrap_or(to_block);
+
+            last_pruned_block = Some(last_changeset_pruned_block);
+
+            let (processed, deleted) = self.prune_history_indices::<tables::StorageHistory, _>(
+                provider,
+                last_changeset_pruned_block,
+                |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
+                |key| StorageShardedKey::last(key.address, key.sharded_key.key),
+                |storage_sharded_key| {
+                    if let Some(&(_, slots)) = filtered_addresses_slots[..num_addresses]
+                        .iter()
+                        .find(|(address, _)| address == &&storage_sharded_key.address)
+                    {
+                        if slots.is_empty() {
+                            // if slots is empty, save all slots
+                            true
+                        } else {
+                            // else, save only slots specified in filtered_address_slots
+                            slots.contains(&storage_sharded_key.sharded_key.key)
+                        }
+                    } else {
+                        // if address is not in the list, delete its storage history indices
+                        false
+                    }
+                },
+            )?;
+            trace!(target: "pruner", %processed, %deleted, %done, "Pruned storage history (history)" );
+
+            if limit == 0 {
+                done &= end_block == to_block;
+                break
+            }
+        }
+
+        // If there are contracts using `PruneMode::Distance(_)` there will be storage history
+        // before `to_block` that become eligible to be pruned in future runs. Therefore,
+        // our checkpoint is not actually `to_block`, but the `lowest_block_with_distance`
+        // from any contract. This ensures that in future pruner runs we can prune all these
+        // storage history between the previous `lowest_block_with_distance` and the new one using
+        // `get_next_block_range_from_checkpoint`.
+        //
+        // Only applies if we were able to prune everything intended for this run, otherwise the
+        // checkpoing is the `last_pruned_block`.
+        let prune_mode_block = self
+            .modes
+            .storage_history_filter
+            .lowest_block_with_distance(tip_block_number, initial_last_pruned_block)?
+            .unwrap_or(to_block);
+
+        provider.save_prune_checkpoint(
+            PrunePart::StorageHistoryFilteredByContractAndSlots,
+            PruneCheckpoint {
+                block_number: Some(prune_mode_block.min(last_pruned_block.unwrap_or(u64::MAX))),
+                tx_number: None,
+                prune_mode: PruneMode::Before(prune_mode_block),
+            },
+        )?;
         Ok(done)
     }
 
@@ -809,6 +1018,7 @@ impl<DB: Database> Pruner<DB> {
         to_block: BlockNumber,
         key_matches: impl Fn(&T::Key, &T::Key) -> bool,
         last_key: impl Fn(&T::Key) -> T::Key,
+        mut skip_filter: impl FnMut(&T::Key) -> bool,
     ) -> Result<(usize, usize), PrunerError>
     where
         T: Table<Value = BlockNumberList>,
@@ -827,77 +1037,84 @@ impl<DB: Database> Pruner<DB> {
         while let Some(result) = cursor.next()? {
             let (key, blocks): (T::Key, BlockNumberList) = result;
 
-            // If shard consists only of block numbers less than the target one, delete shard
-            // completely.
-            if key.as_ref().highest_block_number <= to_block {
-                cursor.delete_current()?;
-                deleted += 1;
-                if key.as_ref().highest_block_number == to_block {
-                    // Shard contains only block numbers up to the target one, so we can skip to
-                    // the last shard for this key. It is guaranteed that further shards for this
-                    // sharded key will not contain the target block number, as it's in this shard.
-                    cursor.seek_exact(last_key(&key))?;
-                }
-            }
-            // Shard contains block numbers that are higher than the target one, so we need to
-            // filter it. It is guaranteed that further shards for this sharded key will not
-            // contain the target block number, as it's in this shard.
-            else {
-                let new_blocks = blocks
-                    .iter(0)
-                    .skip_while(|block| *block <= to_block as usize)
-                    .collect::<Vec<_>>();
-
-                // If there were blocks less than or equal to the target one
-                // (so the shard has changed), update the shard.
-                if blocks.len() != new_blocks.len() {
-                    // If there are no more blocks in this shard, we need to remove it, as empty
-                    // shards are not allowed.
-                    if new_blocks.is_empty() {
-                        if key.as_ref().highest_block_number == u64::MAX {
-                            let prev_row = cursor.prev()?;
-                            match prev_row {
-                                // If current shard is the last shard for the sharded key that
-                                // has previous shards, replace it with the previous shard.
-                                Some((prev_key, prev_value)) if key_matches(&prev_key, &key) => {
-                                    cursor.delete_current()?;
-                                    deleted += 1;
-                                    // Upsert will replace the last shard for this sharded key with
-                                    // the previous value.
-                                    cursor.upsert(key.clone(), prev_value)?;
-                                }
-                                // If there's no previous shard for this sharded key,
-                                // just delete last shard completely.
-                                _ => {
-                                    // If we successfully moved the cursor to a previous row,
-                                    // jump to the original last shard.
-                                    if prev_row.is_some() {
-                                        cursor.next()?;
-                                    }
-                                    // Delete shard.
-                                    cursor.delete_current()?;
-                                    deleted += 1;
-                                }
-                            }
-                        }
-                        // If current shard is not the last shard for this sharded key,
-                        // just delete it.
-                        else {
-                            cursor.delete_current()?;
-                            deleted += 1;
-                        }
-                    } else {
-                        cursor.upsert(key.clone(), BlockNumberList::new_pre_sorted(new_blocks))?;
+            if !skip_filter(&key) {
+                // If shard consists only of block numbers less than the target one, delete shard
+                // completely.
+                if key.as_ref().highest_block_number <= to_block {
+                    cursor.delete_current()?;
+                    deleted += 1;
+                    if key.as_ref().highest_block_number == to_block {
+                        // Shard contains only block numbers up to the target one, so we can skip to
+                        // the last shard for this key. It is guaranteed that further shards for
+                        // this sharded key will not contain the target
+                        // block number, as it's in this shard.
+                        cursor.seek_exact(last_key(&key))?;
                     }
                 }
+                // Shard contains block numbers that are higher than the target one, so we need to
+                // filter it. It is guaranteed that further shards for this sharded key will not
+                // contain the target block number, as it's in this shard.
+                else {
+                    let new_blocks = blocks
+                        .iter(0)
+                        .skip_while(|block| *block <= to_block as usize)
+                        .collect::<Vec<_>>();
 
-                // Jump to the last shard for this key, if current key isn't already the last shard.
-                if key.as_ref().highest_block_number != u64::MAX {
-                    cursor.seek_exact(last_key(&key))?;
+                    // If there were blocks less than or equal to the target one
+                    // (so the shard has changed), update the shard.
+                    if blocks.len() != new_blocks.len() {
+                        // If there are no more blocks in this shard, we need to remove it, as empty
+                        // shards are not allowed.
+                        if new_blocks.is_empty() {
+                            if key.as_ref().highest_block_number == u64::MAX {
+                                let prev_row = cursor.prev()?;
+                                match prev_row {
+                                    // If current shard is the last shard for the sharded key that
+                                    // has previous shards, replace it with the previous shard.
+                                    Some((prev_key, prev_value))
+                                        if key_matches(&prev_key, &key) =>
+                                    {
+                                        cursor.delete_current()?;
+                                        deleted += 1;
+                                        // Upsert will replace the last shard for this sharded key
+                                        // with the previous
+                                        // value.
+                                        cursor.upsert(key.clone(), prev_value)?;
+                                    }
+                                    // If there's no previous shard for this sharded key,
+                                    // just delete last shard completely.
+                                    _ => {
+                                        // If we successfully moved the cursor to a previous row,
+                                        // jump to the original last shard.
+                                        if prev_row.is_some() {
+                                            cursor.next()?;
+                                        }
+                                        // Delete shard.
+                                        cursor.delete_current()?;
+                                        deleted += 1;
+                                    }
+                                }
+                            }
+                            // If current shard is not the last shard for this sharded key,
+                            // just delete it.
+                            else {
+                                cursor.delete_current()?;
+                                deleted += 1;
+                            }
+                        } else {
+                            cursor
+                                .upsert(key.clone(), BlockNumberList::new_pre_sorted(new_blocks))?;
+                        }
+                    }
+
+                    // Jump to the last shard for this key, if current key isn't already the last
+                    // shard.
+                    if key.as_ref().highest_block_number != u64::MAX {
+                        cursor.seek_exact(last_key(&key))?;
+                    }
                 }
+                processed += 1;
             }
-
-            processed += 1;
         }
 
         Ok((processed, deleted))
@@ -925,7 +1142,7 @@ mod tests {
     };
     use reth_primitives::{
         BlockNumber, PruneBatchSizes, PruneCheckpoint, PruneMode, PruneModes, PrunePart,
-        ReceiptsLogPruneConfig, TxNumber, H256, MAINNET,
+        ReceiptsLogPruneConfig, StorageHistoryPruneConfig, TxNumber, H256, MAINNET,
     };
     use reth_provider::{PruneCheckpointReader, TransactionsProvider};
     use reth_stages::test_utils::TestTransaction;
@@ -1589,5 +1806,146 @@ mod tests {
                     provider.transaction_block(tx_num).unwrap().unwrap() > tip - 128,
             );
         }
+    }
+
+    #[test]
+    fn prune_storage_history_by_contract_and_slots() {
+        let tx = TestTransaction::default();
+        let mut rng = generators::rng();
+
+        let tip = 7000;
+        let blocks = random_block_range(&mut rng, 0..=tip, H256::zero(), 0..1);
+        tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
+
+        let accounts =
+            random_eoa_account_range(&mut rng, 1..3).into_iter().collect::<BTreeMap<_, _>>();
+
+        let address1 = *accounts.iter().next().map(|(addr, _)| addr).unwrap();
+
+        let (changesets, _) = random_changeset_range(
+            &mut rng,
+            blocks.iter(),
+            accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+            1..2,
+            1..2,
+        );
+        tx.insert_changesets(changesets.clone(), None).expect("insert changesets");
+        tx.insert_history(changesets.clone(), None).expect("insert history");
+
+        let storage_occurences = tx.table::<tables::StorageHistory>().unwrap().into_iter().fold(
+            BTreeMap::<_, usize>::new(),
+            |mut map, (key, _)| {
+                map.entry((key.address, key.sharded_key.key)).or_default().add_assign(1);
+                map
+            },
+        );
+        assert!(storage_occurences.into_iter().any(|(_, occurrences)| occurrences > 1));
+
+        assert_eq!(
+            tx.table::<tables::StorageChangeSet>().unwrap().len(),
+            changesets.iter().flatten().flat_map(|(_, _, entries)| entries).count()
+        );
+
+        let original_shards = tx.table::<tables::StorageHistory>().unwrap();
+
+        let test_prune = |to_block: BlockNumber, run: usize, expect_done: bool| {
+            let prune_mode = PruneMode::Before(to_block);
+            let pruner = Pruner::new(
+                tx.inner_raw(),
+                MAINNET.clone(),
+                1,
+                PruneModes {
+                    storage_history_filter: StorageHistoryPruneConfig(BTreeMap::from([(
+                        BTreeMap::from([(address1, vec![])]),
+                        prune_mode,
+                    )])),
+                    ..Default::default()
+                },
+                // Less than total amount of blocks to prune to test the batching logic
+                PruneBatchSizes::default().with_storage_history(2000),
+            );
+
+            let provider = tx.inner_rw();
+            let result = pruner.prune_storage_history_by_contract_and_slots(&provider, tip);
+            assert_matches!(result, Ok(_));
+            let done = result.unwrap();
+            assert_eq!(done, expect_done);
+            provider.commit().expect("commit");
+            /*
+            let changesets = changesets
+                .iter()
+                .enumerate()
+                .flat_map(|(block_number, changeset)| {
+                    changeset.into_iter().flat_map(move |(address, _, entries)| {
+                        entries.into_iter().map(move |entry| (block_number, address, entry))
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            let pruned = changesets
+                .iter()
+                .enumerate()
+                .skip_while(|(i, (block_number, _, _))| {
+                    *i < pruner.batch_sizes.storage_history(pruner.min_block_interval) * run &&
+                        *block_number <= to_block as usize
+                })
+                .next()
+                .map(|(i, _)| i)
+                .unwrap_or_default();
+
+            let mut pruned_changesets = changesets
+                .iter()
+                // Skip what we've pruned so far, subtracting one to get last pruned block number
+                // further down
+                .skip(pruned.saturating_sub(1));
+
+            let last_pruned_block_number = pruned_changesets
+                .next()
+                .map(|(block_number, _, _)| if done { *block_number } else { block_number.saturating_sub(1) } as BlockNumber)
+                .unwrap_or(to_block);
+
+            let pruned_changesets = pruned_changesets.fold(
+                BTreeMap::new(),
+                |mut acc, (block_number, address, entry)| {
+                    acc.entry((block_number, address)).or_insert_with(Vec::new).push(entry);
+                    acc
+                },
+            );
+
+            assert_eq!(
+                tx.table::<tables::StorageChangeSet>().unwrap().len(),
+                pruned_changesets.values().flatten().count()
+            );
+
+            let actual_shards = tx.table::<tables::StorageHistory>().unwrap();
+
+            let expected_shards = original_shards
+                .iter()
+                .filter(|(key, _)| key.sharded_key.highest_block_number > last_pruned_block_number)
+                .map(|(key, blocks)| {
+                    let new_blocks = blocks
+                        .iter(0)
+                        .skip_while(|block| *block <= last_pruned_block_number as usize)
+                        .collect::<Vec<_>>();
+                    (key.clone(), BlockNumberList::new_pre_sorted(new_blocks))
+                })
+                .collect::<Vec<_>>();
+
+            assert_eq!(actual_shards, expected_shards);
+
+            assert_eq!(
+                tx.inner().get_prune_checkpoint(PrunePart::StorageHistory).unwrap(),
+                Some(PruneCheckpoint {
+                    block_number: Some(last_pruned_block_number),
+                    tx_number: None,
+                    prune_mode
+                })
+            );
+            */
+        };
+
+        test_prune(2300, 1, false);
+        test_prune(2300, 2, false);
+        test_prune(3000, 3, true);
     }
 }

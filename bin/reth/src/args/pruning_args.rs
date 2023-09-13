@@ -3,7 +3,8 @@
 use clap::Args;
 use reth_config::config::PruneConfig;
 use reth_primitives::{
-    ChainSpec, PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE,
+    ChainSpec, PruneMode, PruneModes, ReceiptsLogPruneConfig, StorageHistoryPruneConfig,
+    MINIMUM_PRUNING_DISTANCE,
 };
 use std::sync::Arc;
 
@@ -37,6 +38,19 @@ impl PruningArgs {
                             .deposit_contract
                             .as_ref()
                             .map(|contract| (contract.address, PruneMode::Before(contract.block)))
+                            .into_iter()
+                            .collect(),
+                    ),
+                    storage_history_filter: StorageHistoryPruneConfig(
+                        chain_spec
+                            .deposit_contract
+                            .as_ref()
+                            .map(|contract| {
+                                (
+                                    vec![(contract.address, vec![])].into_iter().collect(),
+                                    PruneMode::Before(contract.block),
+                                )
+                            })
                             .into_iter()
                             .collect(),
                     ),

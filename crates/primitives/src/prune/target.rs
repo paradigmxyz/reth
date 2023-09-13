@@ -31,7 +31,8 @@ pub struct PruneModes {
         deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<64, _>"
     )]
     pub account_history: Option<PruneMode>,
-    /// Storage History pruning configuration.
+    /// Storage History pruning configuration. This setting overrides `storage_history_filter` and
+    /// offers improved performance.
     #[serde(
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<64, _>"
