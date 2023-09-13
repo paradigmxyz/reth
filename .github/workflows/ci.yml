@@ -38,7 +38,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: fmt
-          args: --all --check --benches --tests
+          args: --all --check
 
       - name: cargo clippy
         uses: actions-rs/cargo@v1
