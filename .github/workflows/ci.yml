@@ -38,13 +38,13 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: fmt
-          args: --all --check
+          args: --all --check --benches --tests
 
       - name: cargo clippy
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: --all --all-features
+          args: --all --all-features --benches --tests
 
   doc-lint:
     name: doc lint
