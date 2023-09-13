@@ -1,4 +1,4 @@
-use crate::hooks::{Hook, HookAction, HookArguments, HookError, Hooks};
+use crate::hooks::{Hook, HookAction, HookArguments, HookDependencies, HookError, Hooks};
 use std::task::{Context, Poll};
 use tracing::debug;
 
@@ -53,7 +53,7 @@ impl HooksController {
         &mut self,
         cx: &mut Context<'_>,
         args: HookArguments,
-        is_pipeline_active: bool,
+        active_dependencies: HookDependencies,
     ) -> Result<Poll<HookAction>, HookError> {
         let hook_idx = self.hook_idx % self.hooks.len();
         self.hook_idx = hook_idx + 1;
@@ -62,14 +62,10 @@ impl HooksController {
         let Some(mut hook) = self.hooks[hook_idx].take() else { return Ok(Poll::Pending) };
 
         // Hook with DB write dependency is not allowed to run due to already
-        // running hook with DB write dependency.
-        let db_write = hook.dependencies().db_write && self.running_hook_with_db_write.is_some();
-        // Hook with idle pipeline dependency is not allowed to run due to pipeline
-        // being active.
-        let pipeline_idle = hook.dependencies().pipeline_idle && is_pipeline_active;
-
-        let skip_hook = db_write || pipeline_idle;
-        if skip_hook {
+        // running hook with DB write dependency or active DB write according to passed dependencies
+        if hook.dependencies().db_write &&
+            (self.running_hook_with_db_write.is_some() || active_dependencies.db_write)
+        {
             return Ok(Poll::Pending)
         }
 

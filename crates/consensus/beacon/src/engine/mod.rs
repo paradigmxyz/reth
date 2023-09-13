@@ -68,7 +68,7 @@ mod handle;
 pub use handle::BeaconConsensusEngineHandle;
 
 mod forkchoice;
-use crate::hooks::Hooks;
+use crate::hooks::{HookDependencies, Hooks};
 pub use forkchoice::ForkchoiceStatus;
 
 mod metrics;
@@ -1803,7 +1803,7 @@ where
                     .poll_next_hook(
                         cx,
                         HookArguments { tip_block_number: this.blockchain.canonical_tip().number },
-                        this.sync.is_pipeline_active(),
+                        HookDependencies { db_write: this.sync.is_pipeline_active() },
                     )?
                     .map(|action| this.on_hook_action(action))
                 {

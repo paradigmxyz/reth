@@ -88,5 +88,4 @@ pub enum HookError {
 
 pub struct HookDependencies {
     pub db_write: bool,
-    pub pipeline_idle: bool,
 }

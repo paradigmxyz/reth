@@ -1,4 +1,4 @@
-//! Prune management for the engine implementation.
+//! Prune hook for the engine implementation.
 
 use crate::engine::hooks::{
     Hook, HookAction, HookArguments, HookDependencies, HookError, HookEvent,
@@ -8,7 +8,7 @@ use metrics::Counter;
 use reth_db::database::Database;
 use reth_interfaces::sync::SyncState;
 use reth_primitives::BlockNumber;
-use reth_prune::{Pruner, PrunerError, PrunerResult, PrunerWithResult};
+use reth_prune::{Pruner, PrunerError, PrunerWithResult};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
 use tokio::sync::oneshot;
@@ -144,7 +144,7 @@ impl<DB: Database + 'static> Hook for EnginePruneController<DB> {
     }
 
     fn dependencies(&self) -> HookDependencies {
-        HookDependencies { db_write: true, pipeline_idle: true }
+        HookDependencies { db_write: true }
     }
 }
 
