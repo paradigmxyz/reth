@@ -132,7 +132,9 @@ impl NetworkHandle {
 
     /// Announce a block over devp2p
     ///
-    /// Caution: in PoS this is a noop, since new block propagation will happen over devp2p
+    /// Caution: in PoS this is a noop, since new block are no longer announced over devp2p, but are
+    /// instead sent to node node by the CL. However, they can still be requested over devp2p, but
+    /// broadcasting them is a considered a protocol violation..
     pub fn announce_block(&self, block: NewBlock, hash: H256) {
         self.send_message(NetworkHandleMessage::AnnounceBlock(block, hash))
     }

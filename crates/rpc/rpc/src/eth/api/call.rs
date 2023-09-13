@@ -19,7 +19,7 @@ use reth_provider::{
 };
 use reth_revm::{
     access_list::AccessListInspector,
-    database::{RethStateDBBox, RevmDatabase},
+    database::{RethStateDBBox, StateProviderDatabase},
     env::tx_env_with_recovered,
     revm::State,
 };
@@ -112,8 +112,9 @@ where
         self.spawn_with_state_at_block(at.into(), move |state| {
             let mut results = Vec::with_capacity(transactions.len());
 
-            let mut db =
-                State::builder().with_database_boxed(Box::new(RevmDatabase::new(state))).build();
+            let mut db = State::builder()
+                .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
+                .build();
 
             if replay_block_txs {
                 // only need to replay the transactions in the block if not all transactions are
@@ -202,8 +203,9 @@ where
 
         // Configure the evm env
         let mut env = build_call_evm_env(cfg, block, request)?;
-        let mut db =
-            State::builder().with_database_boxed(Box::new(RevmDatabase::new(state))).build();
+        let mut db = State::builder()
+            .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
+            .build();
 
         // if the request is a simple transfer we can optimize
         if env.tx.data.is_empty() {
@@ -345,7 +347,7 @@ where
 
     pub(crate) async fn create_access_list_at(
         &self,
-        request: CallRequest,
+        mut request: CallRequest,
         at: Option<BlockId>,
     ) -> EthResult<AccessList> {
         let block_id = at.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
@@ -363,8 +365,9 @@ where
         // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
         env.cfg.disable_base_fee = true;
 
-        let mut db =
-            State::builder().with_database_boxed(Box::new(RevmDatabase::new(state))).build();
+        let mut db = State::builder()
+            .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
+            .build();
 
         if request.gas.is_none() && env.tx.gas_price > U256::ZERO {
             // no gas limit was provided in the request, so we need to cap the request's gas limit
@@ -379,7 +382,8 @@ where
             get_contract_address(from, nonce).into()
         };
 
-        let initial = request.access_list.clone().unwrap_or_default();
+        // can consume the list since we're not using the request anymore
+        let initial = request.access_list.take().unwrap_or_default();
 
         let precompiles = get_precompiles(&env.cfg.spec_id);
         let mut inspector = AccessListInspector::new(initial, from, to, precompiles);

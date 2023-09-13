@@ -468,6 +468,10 @@ mod tests {
         {
             let provider = factory.provider_rw().unwrap();
             assert_matches!(provider.insert_block(block.clone(), None, None), Ok(_));
+            assert_matches!(
+                provider.transaction_sender(0), Ok(Some(sender))
+                if sender == block.body[0].recover_signer().unwrap()
+            );
             assert_matches!(provider.transaction_id(block.body[0].hash), Ok(Some(0)));
         }
 
@@ -478,12 +482,14 @@ mod tests {
                     block.clone(),
                     None,
                     Some(&PruneModes {
+                        sender_recovery: Some(PruneMode::Full),
                         transaction_lookup: Some(PruneMode::Full),
                         ..PruneModes::none()
                     })
                 ),
                 Ok(_)
             );
+            assert_matches!(provider.transaction_sender(0), Ok(None));
             assert_matches!(provider.transaction_id(block.body[0].hash), Ok(None));
         }
     }

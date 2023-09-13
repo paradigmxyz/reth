@@ -1116,6 +1116,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
                                 block_hash,
                                 block_number,
                                 base_fee: header.base_fee_per_gas,
+                                excess_blob_gas: header.excess_blob_gas,
                             };
 
                             return Ok(Some((transaction, meta)))
@@ -1955,7 +1956,15 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
 
         for (transaction, sender) in tx_iter {
             let hash = transaction.hash();
-            self.tx.put::<tables::TxSenders>(next_tx_num, sender)?;
+
+            if prune_modes
+                .and_then(|modes| modes.sender_recovery)
+                .filter(|prune_mode| prune_mode.is_full())
+                .is_none()
+            {
+                self.tx.put::<tables::TxSenders>(next_tx_num, sender)?;
+            }
+
             self.tx.put::<tables::Transactions>(next_tx_num, transaction.into())?;
 
             if prune_modes

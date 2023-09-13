@@ -104,7 +104,6 @@ where
 
         let cancun_fields = CancunPayloadFields { versioned_hashes, parent_beacon_block_root };
 
-        // TODO: validate versioned hashes and figure out what to do with parent_beacon_block_root
         Ok(self.inner.beacon_consensus.new_payload(payload, Some(cancun_fields)).await?)
     }
 
@@ -209,6 +208,24 @@ where
         &self,
         payload_id: PayloadId,
     ) -> EngineApiResult<ExecutionPayloadEnvelopeV3> {
+        // First we fetch the payload attributes to check the timestamp
+        let attributes = self
+            .inner
+            .payload_store
+            .payload_attributes(payload_id)
+            .await
+            .ok_or(EngineApiError::UnknownPayload)??;
+
+        // From the Engine API spec:
+        // <https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/cancun.md#specification-2>
+        //
+        // 1. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
+        //    the built payload does not fall within the time frame of the Cancun fork.
+        if !self.inner.chain_spec.is_cancun_activated_at_timestamp(attributes.timestamp) {
+            return Err(EngineApiError::UnsupportedFork)
+        }
+
+        // Now resolve the payload
         Ok(self
             .inner
             .payload_store
@@ -389,16 +406,24 @@ where
     /// After Cancun, `parentBeaconBlockRoot` field must be [Some].
     /// Before Cancun, `parentBeaconBlockRoot` field must be [None].
     ///
-    /// If the payload attribute's timestamp is before the Cancun fork and the engine API message
-    /// version is V3, then this will return [EngineApiError::UnsupportedFork].
-    ///
     /// If the engine API message version is V1 or V2, and the payload attribute's timestamp is
     /// post-Cancun, then this will return [EngineApiError::NoParentBeaconBlockRootPostCancun].
     ///
-    /// Implements the following Engine API spec rule:
+    /// If the engine API message version is V3, but the `parentBeaconBlockRoot` is [None], then
+    /// this will return [EngineApiError::NoParentBeaconBlockRootPostCancun].
     ///
-    /// * Client software MUST return `-38005: Unsupported fork` error if the timestamp of the
-    /// payload does not fall within the time frame of the Cancun fork.
+    /// If the payload attribute's timestamp is before the Cancun fork and the engine API message
+    /// version is V3, then this will return [EngineApiError::UnsupportedFork].
+    ///
+    /// This implements the following Engine API spec rules:
+    ///
+    /// 1. Client software **MUST** check that provided set of parameters and their fields strictly
+    ///    matches the expected one and return `-32602: Invalid params` error if this check fails.
+    ///    Any field having `null` value **MUST** be considered as not provided.
+    ///
+    /// 2. Client software **MUST** return `-38005: Unsupported fork` error if the
+    ///    `payloadAttributes` is set and the `payloadAttributes.timestamp` does not fall within the
+    ///    time frame of the Cancun fork.
     fn validate_parent_beacon_block_root_presence(
         &self,
         version: EngineApiMessageVersion,
@@ -417,10 +442,10 @@ where
                 }
             }
             EngineApiMessageVersion::V3 => {
-                if !is_cancun {
-                    return Err(EngineApiError::UnsupportedFork)
-                } else if !has_parent_beacon_block_root {
+                if !has_parent_beacon_block_root {
                     return Err(EngineApiError::NoParentBeaconBlockRootPostCancun)
+                } else if !is_cancun {
+                    return Err(EngineApiError::UnsupportedFork)
                 }
             }
         };
@@ -472,11 +497,13 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
     async fn new_payload_v3(
         &self,
-        _payload: ExecutionPayloadV3,
-        _versioned_hashes: Vec<H256>,
-        _parent_beacon_block_root: H256,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<H256>,
+        parent_beacon_block_root: H256,
     ) -> RpcResult<PayloadStatus> {
-        Err(jsonrpsee_types::error::ErrorCode::MethodNotFound.into())
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV3");
+        Ok(EngineApi::new_payload_v3(self, payload, versioned_hashes, parent_beacon_block_root)
+            .await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV1`
@@ -508,10 +535,11 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
     async fn fork_choice_updated_v3(
         &self,
-        _fork_choice_state: ForkchoiceState,
-        _payload_attributes: Option<PayloadAttributes>,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
-        Err(jsonrpsee_types::error::ErrorCode::MethodNotFound.into())
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
+        Ok(EngineApi::fork_choice_updated_v3(self, fork_choice_state, payload_attributes).await?)
     }
 
     /// Handler for `engine_getPayloadV1`
@@ -553,11 +581,9 @@ where
     ///
     /// Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
-    async fn get_payload_v3(
-        &self,
-        _payload_id: PayloadId,
-    ) -> RpcResult<ExecutionPayloadEnvelopeV3> {
-        Err(jsonrpsee_types::error::ErrorCode::MethodNotFound.into())
+    async fn get_payload_v3(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelopeV3> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadV3");
+        Ok(EngineApi::get_payload_v3(self, payload_id).await?)
     }
 
     /// Handler for `engine_getPayloadBodiesByHashV1`

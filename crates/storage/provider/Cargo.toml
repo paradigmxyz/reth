@@ -32,6 +32,9 @@ parking_lot.workspace = true
 # test-utils
 reth-rlp = { workspace = true, optional = true }
 
+# parallel utils
+rayon = "1.7"
+
 [dev-dependencies]
 reth-db = { path = "../db", features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }

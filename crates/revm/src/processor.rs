@@ -1,5 +1,5 @@
 use crate::{
-    database::RevmDatabase,
+    database::StateProviderDatabase,
     env::{fill_cfg_and_block_env, fill_tx_env},
     eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     into_reth_log,
@@ -77,7 +77,7 @@ impl<'a> EVMProcessor<'a> {
     /// Creates a new executor from the given chain spec and database.
     pub fn new_with_db<DB: StateProvider + 'a>(
         chain_spec: Arc<ChainSpec>,
-        db: RevmDatabase<DB>,
+        db: StateProviderDatabase<DB>,
     ) -> Self {
         let state = State::builder()
             .with_database_boxed(Box::new(db))
@@ -656,7 +656,7 @@ mod tests {
         );
 
         // execute invalid header (no parent beacon block root)
-        let mut executor = EVMProcessor::new_with_db(chain_spec, RevmDatabase::new(db));
+        let mut executor = EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
 
         // attempt to execute a block without parent beacon block root, expect err
         let err = executor
@@ -729,7 +729,7 @@ mod tests {
                 .build(),
         );
 
-        let mut executor = EVMProcessor::new_with_db(chain_spec, RevmDatabase::new(db));
+        let mut executor = EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
 
         // get the env
         // TODO: wait for https://github.com/bluealloy/revm/pull/689 to be merged
@@ -778,7 +778,7 @@ mod tests {
 
         let mut header = chain_spec.genesis_header();
 
-        let mut executor = EVMProcessor::new_with_db(chain_spec, RevmDatabase::new(db));
+        let mut executor = EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
 
         // attempt to execute the genesis block with non-zero parent beacon block root, expect err
         header.parent_beacon_block_root = Some(H256::from_low_u64_be(0x1337));
@@ -854,7 +854,7 @@ mod tests {
         );
 
         // execute header
-        let mut executor = EVMProcessor::new_with_db(chain_spec, RevmDatabase::new(db));
+        let mut executor = EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
         executor.init_env(&header, U256::ZERO);
 
         // ensure that the env is configured with a base fee

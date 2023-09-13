@@ -14,7 +14,8 @@ use crate::{
 use async_trait::async_trait;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, Header,
+    constants::eip4844::blob_fee,
+    Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
     IntoRecoveredTransaction, Receipt, SealedBlock,
     TransactionKind::{Call, Create},
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, H256, U128, U256, U64,
@@ -25,7 +26,7 @@ use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_revm::{
-    database::{RethStateDBBox, RevmDatabase},
+    database::{RethStateDBBox, StateProviderDatabase},
     env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     tracing::{TracingInspector, TracingInspectorConfig},
 };
@@ -500,7 +501,7 @@ where
         let recovered =
             signed_tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
 
-        let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered);
+        let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered.into());
 
         // submit the transaction to the pool with a `Local` origin
         let hash = self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
@@ -526,7 +527,7 @@ where
             .spawn(move || {
                 let state = this.state_at(at)?;
                 let mut db = State::builder()
-                    .with_database_boxed(Box::new(RevmDatabase::new(state)))
+                    .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
                     .build();
 
                 let env = prepare_call_env(
@@ -578,8 +579,9 @@ where
         F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>,
     {
         self.with_state_at_block(at, |state| {
-            let mut db =
-                State::builder().with_database_boxed(Box::new(RevmDatabase::new(state))).build();
+            let mut db = State::builder()
+                .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
+                .build();
 
             let mut inspector = TracingInspector::new(config);
             let (res, _) = inspect(&mut db, env, &mut inspector)?;
@@ -602,8 +604,9 @@ where
         R: Send + 'static,
     {
         self.spawn_with_state_at_block(at, move |state| {
-            let mut db =
-                State::builder().with_database_boxed(Box::new(RevmDatabase::new(state))).build();
+            let mut db = State::builder()
+                .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
+                .build();
             let mut inspector = TracingInspector::new(config);
             let (res, _) = inspect_and_return_db(&mut db, env, &mut inspector)?;
 
@@ -661,8 +664,9 @@ where
         let block_txs = block.body;
 
         self.spawn_with_state_at_block(parent_block.into(), move |state| {
-            let mut db =
-                State::builder().with_database_boxed(Box::new(RevmDatabase::new(state))).build();
+            let mut db = State::builder()
+                .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
+                .build();
 
             // replay all transactions prior to the targeted transaction
             replay_transactions_until(&mut db, cfg.clone(), block_env.clone(), block_txs, tx.hash)?;
@@ -885,7 +889,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         status_code: if receipt.success { Some(U64::from(1)) } else { Some(U64::from(0)) },
 
         // EIP-4844 fields
-        blob_gas_price: transaction.transaction.max_fee_per_blob_gas().map(U128::from),
+        blob_gas_price: meta.excess_blob_gas.map(blob_fee),
         blob_gas_used: transaction.transaction.blob_gas_used().map(U128::from),
     };
 

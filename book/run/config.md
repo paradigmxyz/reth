@@ -377,9 +377,9 @@ We can also prune receipts more granular, using the logs filtering:
 # by the specified addresses, discarding all others. This setting is overridden by `receipts`.
 [prune.parts.receipts_log_filter]
 # Prune all receipts, leaving only those which:
-# - Contain logs from address `0x7ea2be2df7ba6e54b1a9c70676f668455e329d29`, starting from the block 17000000
+# - Contain logs from address `0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48`, starting from the block 17000000
 # - Contain logs from address `0xdac17f958d2ee523a2206206994597c13d831ec7` in the last 1001 blocks
-"0x7ea2be2df7ba6e54b1a9c70676f668455e329d29" = { before = 17000000 }
+"0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" = { before = 17000000 }
 "0xdac17f958d2ee523a2206206994597c13d831ec7" = { distance = 1000 }
 ```
 

@@ -598,7 +598,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     /// `MAINNET_KZG_TRUSTED_SETUP`.
     fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
         if let Some(ref trusted_setup_file) = self.trusted_setup_file {
-            let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file.into())
+            let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file)
                 .map_err(LoadKzgSettingsError::KzgError)?;
             Ok(Arc::new(trusted_setup))
         } else {

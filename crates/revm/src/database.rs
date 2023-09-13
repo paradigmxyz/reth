@@ -12,9 +12,9 @@ pub type RethStateDBBox<'a> = StateDBBox<'a, Error>;
 
 /// Wrapper around StateProvider that implements revm database trait
 #[derive(Debug, Clone)]
-pub struct RevmDatabase<DB: StateProvider>(pub DB);
+pub struct StateProviderDatabase<DB: StateProvider>(pub DB);
 
-impl<DB: StateProvider> RevmDatabase<DB> {
+impl<DB: StateProvider> StateProviderDatabase<DB> {
     /// Create new State with generic StateProvider.
     pub fn new(db: DB) -> Self {
         Self(db)
@@ -36,7 +36,7 @@ impl<DB: StateProvider> RevmDatabase<DB> {
     }
 }
 
-impl<DB: StateProvider> Database for RevmDatabase<DB> {
+impl<DB: StateProvider> Database for StateProviderDatabase<DB> {
     type Error = Error;
 
     fn basic(&mut self, address: H160) -> Result<Option<AccountInfo>, Self::Error> {
@@ -70,7 +70,7 @@ impl<DB: StateProvider> Database for RevmDatabase<DB> {
     }
 }
 
-impl<DB: StateProvider> DatabaseRef for RevmDatabase<DB> {
+impl<DB: StateProvider> DatabaseRef for StateProviderDatabase<DB> {
     type Error = <Self as Database>::Error;
 
     fn basic(&self, address: H160) -> Result<Option<AccountInfo>, Self::Error> {

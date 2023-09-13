@@ -48,6 +48,16 @@ impl PayloadStore {
     ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>> {
         self.inner.best_payload(id).await
     }
+
+    /// Returns the payload attributes associated with the given identifier.
+    ///
+    /// Note: this returns the attributes of the payload and does not resolve the job.
+    pub async fn payload_attributes(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<PayloadBuilderAttributes, PayloadBuilderError>> {
+        self.inner.payload_attributes(id).await
+    }
 }
 
 impl From<PayloadBuilderHandle> for PayloadStore {
@@ -91,6 +101,18 @@ impl PayloadBuilderHandle {
     ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
         self.to_service.send(PayloadServiceCommand::BestPayload(id, tx)).ok()?;
+        rx.await.ok()?
+    }
+
+    /// Returns the payload attributes associated with the given identifier.
+    ///
+    /// Note: this returns the attributes of the payload and does not resolve the job.
+    pub async fn payload_attributes(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<PayloadBuilderAttributes, PayloadBuilderError>> {
+        let (tx, rx) = oneshot::channel();
+        self.to_service.send(PayloadServiceCommand::PayloadAttributes(id, tx)).ok()?;
         rx.await.ok()?
     }
 
@@ -178,6 +200,17 @@ where
         self.payload_jobs.iter().find(|(_, job_id)| *job_id == id).map(|(j, _)| j.best_payload())
     }
 
+    /// Returns the payload attributes for the given payload.
+    fn payload_attributes(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<PayloadBuilderAttributes, PayloadBuilderError>> {
+        self.payload_jobs
+            .iter()
+            .find(|(_, job_id)| *job_id == id)
+            .map(|(j, _)| j.payload_attributes())
+    }
+
     /// Returns the best payload for the given identifier that has been built so far and terminates
     /// the job if requested.
     fn resolve(&mut self, id: PayloadId) -> Option<PayloadFuture> {
@@ -229,7 +262,6 @@ where
             }
 
             // marker for exit condition
-            // TODO(mattsse): this could be optmized so we only poll new jobs
             let mut new_job = false;
 
             // drain all requests
@@ -263,6 +295,9 @@ where
                     PayloadServiceCommand::BestPayload(id, tx) => {
                         let _ = tx.send(this.best_payload(id));
                     }
+                    PayloadServiceCommand::PayloadAttributes(id, tx) => {
+                        let _ = tx.send(this.payload_attributes(id));
+                    }
                     PayloadServiceCommand::Resolve(id, tx) => {
                         let _ = tx.send(this.resolve(id));
                     }
@@ -288,6 +323,11 @@ enum PayloadServiceCommand {
     ),
     /// Get the best payload so far
     BestPayload(PayloadId, oneshot::Sender<Option<Result<Arc<BuiltPayload>, PayloadBuilderError>>>),
+    /// Get the payload attributes for the given payload
+    PayloadAttributes(
+        PayloadId,
+        oneshot::Sender<Option<Result<PayloadBuilderAttributes, PayloadBuilderError>>>,
+    ),
     /// Resolve the payload and return the payload
     Resolve(PayloadId, oneshot::Sender<Option<PayloadFuture>>),
 }

@@ -14,7 +14,7 @@ use reth_consensus_common::calc::{base_block_reward, block_reward};
 use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, SealedHeader, H256, U256};
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::{
-    database::{RethStateDBBox, RevmDatabase},
+    database::{RethStateDBBox, StateProviderDatabase},
     env::tx_env_with_recovered,
     tracing::{
         parity::populate_account_balance_nonce_diffs, TracingInspector, TracingInspectorConfig,
@@ -108,7 +108,7 @@ where
             .eth_api
             .evm_env_at(block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)))
             .await?;
-        let tx = tx_env_with_recovered(&tx);
+        let tx = tx_env_with_recovered(&tx.into_ecrecovered_transaction());
         let env = Env { cfg, block, tx };
 
         let config = tracing_config(&trace_types);
@@ -144,7 +144,7 @@ where
             .spawn_with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(calls.len());
                 let mut revm_state = State::builder()
-                    .with_database_boxed(Box::new(RevmDatabase::new(state)))
+                    .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
                     .build();
 
                 let mut calls = calls.into_iter().peekable();
@@ -259,16 +259,19 @@ where
             .spawn_trace_transaction_in_block(
                 hash,
                 TracingInspectorConfig::default_parity(),
-                move |tx_info, inspector, _, _| {
-                    let traces =
-                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+                move |tx_info, inspector, res, _| {
+                    let traces = inspector
+                        .with_transaction_gas_used(res.result.gas_used())
+                        .into_parity_builder()
+                        .into_localized_transaction_traces(tx_info);
                     Ok(traces)
                 },
             )
             .await
     }
 
-    /// Executes all transactions of a block and returns a list of callback results.
+    /// Executes all transactions of a block and returns a list of callback results invoked for each
+    /// transaction in the block.
     ///
     /// This
     /// 1. fetches all transactions of the block
@@ -319,7 +322,7 @@ where
             .spawn_with_state_at_block(state_at.into(), move |state| {
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = State::builder()
-                    .with_database_boxed(Box::new(RevmDatabase::new(state)))
+                    .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
                     .build();
 
                 let mut transactions = transactions.into_iter().enumerate().peekable();
@@ -365,9 +368,11 @@ where
         let traces = self.trace_block_with(
             block_id,
             TracingInspectorConfig::default_parity(),
-            |tx_info, inspector, _, _, _| {
-                let traces =
-                    inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+            |tx_info, inspector, res, _, _| {
+                let traces = inspector
+                    .with_transaction_gas_used(res.gas_used())
+                    .into_parity_builder()
+                    .into_localized_transaction_traces(tx_info);
                 Ok(traces)
             },
         );

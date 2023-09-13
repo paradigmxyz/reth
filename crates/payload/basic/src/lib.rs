@@ -33,7 +33,7 @@ use reth_primitives::{
 };
 use reth_provider::{BlockReaderIdExt, BlockSource, BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::{
-    database::RevmDatabase,
+    database::StateProviderDatabase,
     env::tx_env_with_recovered,
     into_reth_log,
     state_change::{apply_pre_block_call, post_block_withdrawals_balance_increments},
@@ -413,6 +413,10 @@ where
         build_empty_payload(&self.client, self.config.clone()).map(Arc::new)
     }
 
+    fn payload_attributes(&self) -> Result<PayloadBuilderAttributes, PayloadBuilderError> {
+        Ok(self.config.attributes.clone())
+    }
+
     fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
         let best_payload = self.best_payload.take();
         let maybe_better = self.pending_block.take();
@@ -638,7 +642,7 @@ where
     let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
 
     let state_provider = client.state_by_block_hash(config.parent_block.hash)?;
-    let state = RevmDatabase::new(&state_provider);
+    let state = StateProviderDatabase::new(&state_provider);
     let db =
         State::builder().with_database_ref(cached_reads.as_db(&state)).with_bundle_update().build();
     let PayloadConfig {
@@ -877,7 +881,7 @@ where
 
     let state = client.state_by_block_hash(parent_block.hash)?;
     let db = State::builder()
-        .with_database_boxed(Box::new(RevmDatabase::new(&state)))
+        .with_database_boxed(Box::new(StateProviderDatabase::new(&state)))
         .with_bundle_update()
         .build();
 

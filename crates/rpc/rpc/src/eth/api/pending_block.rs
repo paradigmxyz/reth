@@ -7,7 +7,7 @@ use reth_primitives::{
     EMPTY_OMMER_ROOT, H256, U256,
 };
 use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
-use reth_revm::{database::RevmDatabase, env::tx_env_with_recovered, into_reth_log};
+use reth_revm::{database::StateProviderDatabase, env::tx_env_with_recovered, into_reth_log};
 use reth_transaction_pool::TransactionPool;
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
 use revm_primitives::{BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState};
@@ -39,7 +39,7 @@ impl PendingBlockEnv {
 
         let parent_hash = origin.build_target_hash();
         let state_provider = client.history_by_block_hash(parent_hash)?;
-        let state = RevmDatabase::new(&state_provider);
+        let state = StateProviderDatabase::new(&state_provider);
         let mut db = State::builder().with_database(Box::new(state)).with_bundle_update().build();
 
         let mut cumulative_gas_used = 0;

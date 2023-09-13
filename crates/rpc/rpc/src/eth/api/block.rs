@@ -73,6 +73,7 @@ where
             let block_number = block.number;
             let base_fee = block.base_fee_per_gas;
             let block_hash = block.hash;
+            let excess_blob_gas = block.excess_blob_gas;
             let receipts = block
                 .body
                 .into_iter()
@@ -85,6 +86,7 @@ where
                         block_hash,
                         block_number,
                         base_fee,
+                        excess_blob_gas,
                     };
                     build_transaction_receipt_with_block_receipts(tx, meta, receipt, &receipts)
                 })
