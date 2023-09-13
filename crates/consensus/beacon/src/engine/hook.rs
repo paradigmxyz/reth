@@ -125,6 +125,8 @@ impl HooksController {
         args: HookArguments,
     ) -> Result<Poll<HookAction>, HookError> {
         let hook_idx = self.hook_idx % self.hooks.len();
+        self.hook_idx = hook_idx + 1;
+
         // SAFETY: bounds are respected in the modulo above
         let Some(mut hook) = self.hooks[hook_idx].take() else { return Ok(Poll::Pending) };
 
@@ -159,8 +161,6 @@ impl HooksController {
         } else {
             self.hooks[hook_idx] = Some(hook);
         }
-
-        self.hook_idx = hook_idx + 1;
 
         Ok(Poll::Pending)
     }
