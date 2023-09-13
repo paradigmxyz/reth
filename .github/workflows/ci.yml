@@ -41,11 +41,10 @@ jobs:
           args: --all --check
 
       - name: cargo clippy
-        uses: giraffate/clippy-action@v1
+        uses: actions-rs/clippy-check@v1
         with:
-          clippy_flags: --all --all-features -- -A clippy::incorrect_clone_impl_on_copy_type -A clippy::arc_with_non_send_sync
-          reporter: 'github-pr-check'
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all --all-features -- -A clippy::incorrect_clone_impl_on_copy_type -A clippy::arc_with_non_send_sync
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   doc-lint:
     name: doc lint
