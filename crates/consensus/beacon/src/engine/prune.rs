@@ -101,6 +101,10 @@ impl<DB: Database + 'static> EnginePruneController<DB> {
 }
 
 impl<DB: Database + 'static> Hook for EnginePruneController<DB> {
+    fn name(&self) -> &'static str {
+        "EnginePruneController"
+    }
+
     fn poll(&mut self, cx: &mut Context<'_>, args: HookArguments) -> Poll<HookEvent> {
         // Try to spawn a pruner
         match self.try_spawn_pruner(args.tip_block_number) {

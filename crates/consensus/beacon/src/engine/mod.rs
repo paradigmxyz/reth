@@ -76,6 +76,7 @@ pub use prune::EnginePruneController;
 pub(crate) mod sync;
 
 mod hook;
+use crate::engine::hook::HooksController;
 pub use hook::Hook;
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -201,9 +202,7 @@ where
     /// blocks using the pipeline. Otherwise, the engine, sync controller, and blockchain tree will
     /// be used to download and execute the missing blocks.
     pipeline_run_threshold: u64,
-    hooks: Vec<Option<Box<dyn Hook>>>,
-    hook_idx: usize,
-    running_hook_with_db_write: Option<(usize, Box<dyn Hook>)>,
+    hooks: HooksController,
 }
 
 impl<DB, BT, Client> BeaconConsensusEngine<DB, BT, Client>
@@ -300,9 +299,7 @@ where
             invalid_headers: InvalidHeaderCache::new(MAX_INVALID_HEADERS),
             metrics: EngineMetrics::default(),
             pipeline_run_threshold,
-            hooks: hooks.into_iter().map(Some).collect(),
-            hook_idx: 0,
-            running_hook_with_db_write: None,
+            hooks: HooksController::new(hooks),
         };
 
         let maybe_pipeline_target = match target {
@@ -644,7 +641,7 @@ where
             return Ok(OnForkChoiceUpdated::syncing())
         }
 
-        if self.is_hook_with_db_write_running() {
+        if self.hooks.is_hook_with_db_write_running() {
             // We can only process new forkchoice updates if no hook with db write is running,
             // since it requires exclusive access to the database
             warn!(
@@ -1089,12 +1086,12 @@ where
             return Ok(status)
         }
 
-        let res = if self.sync.is_pipeline_idle() && !self.is_hook_with_db_write_running() {
+        let res = if self.sync.is_pipeline_idle() && !self.hooks.is_hook_with_db_write_running() {
             // we can only insert new payloads if the pipeline and any hook with db write
             // are _not_ running, because they hold exclusive access to the database
             self.try_insert_new_payload(block)
         } else {
-            if self.is_hook_with_db_write_running() {
+            if self.hooks.is_hook_with_db_write_running() {
                 debug!(target: "consensus::engine", "Hook is in progress, buffering new payload.");
             }
             self.try_buffer_payload(block)
@@ -1684,10 +1681,6 @@ where
         None
     }
 
-    fn is_hook_with_db_write_running(&self) -> bool {
-        self.running_hook_with_db_write.is_some()
-    }
-
     fn on_hook_action(&self, action: HookAction) -> Result<(), BeaconConsensusEngineError> {
         match action {
             HookAction::UpdateSyncState(state) => self.sync_state_updater.update_sync_state(state),
@@ -1736,34 +1729,18 @@ where
         loop {
             // Poll a running hook with db write access first, as we will not be able to process
             // any engine messages until it's finished.
-            if let Some((i, mut hook)) = this.running_hook_with_db_write.take() {
-                match hook.poll(
+            if let Poll::Ready(Err(err)) = this
+                .hooks
+                .poll_running_hook_with_db_write(
                     cx,
-                    HookArguments { tip_block_number: this.blockchain.canonical_tip().number },
-                ) {
-                    Poll::Ready(event) => {
-                        let event_name = format!("{event:?}");
-                        let finished = event.is_finished();
-                        let action = hook.on_event(event)?;
-
-                        debug!(target: "consensus::engine::hooks", ?hook, ?action, event = %event_name, "Polled running hook with db write");
-
-                        if !finished {
-                            this.running_hook_with_db_write = Some((i, hook));
-                        } else {
-                            this.hooks[i] = Some(hook);
-                        }
-
-                        if let Some(action) = action {
-                            if let Err(err) = this.on_hook_action(action) {
-                                return Poll::Ready(Err(err))
-                            }
-                        }
-                    }
-                    Poll::Pending => {
-                        this.running_hook_with_db_write = Some((i, hook));
-                    }
-                }
+                    HookArguments {
+                        tip_block_number: this.blockchain.canonical_tip().number,
+                        is_pipeline_active: this.sync.is_pipeline_active(),
+                    },
+                )?
+                .map(|action| this.on_hook_action(action))
+            {
+                return Poll::Ready(Err(err))
             }
 
             let mut engine_messages_pending = false;
@@ -1822,53 +1799,23 @@ where
             // we're pending if both engine messages and sync events are pending (fully drained)
             let is_pending = engine_messages_pending && sync_pending;
 
-            // Poll hooks if all conditions are met:
+            // Poll next hook if all conditions are met:
             // 1. No engine and sync messages are pending
             // 2. Latest FCU status is not INVALID
             if is_pending && !this.forkchoice_state_tracker.is_latest_invalid() {
-                let hook_idx = this.hook_idx % this.hooks.len();
-                let mut item = this.hooks.get_mut(hook_idx).unwrap();
-
-                if item
-                    .as_ref()
-                    .map(|hook| {
-                        let db_write = this.running_hook_with_db_write.is_some() &&
-                            hook.dependencies().db_write;
-                        let pipeline_idle =
-                            this.sync.is_pipeline_active() && hook.dependencies().pipeline_idle;
-                        !(db_write || pipeline_idle)
-                    })
-                    .unwrap_or(false)
-                {
-                    let mut hook = item.take().unwrap();
-
-                    if let Poll::Ready(event) = hook.poll(
+                if let Poll::Ready(Err(err)) = this
+                    .hooks
+                    .poll_next_hook(
                         cx,
-                        HookArguments { tip_block_number: this.blockchain.canonical_tip().number },
-                    ) {
-                        let event_name = format!("{event:?}");
-                        let started = event.is_started();
-                        let action = hook.on_event(event)?;
-
-                        debug!(target: "consensus::engine::hooks", ?hook, ?action, event = %event_name, "Polled hook");
-
-                        if started && hook.dependencies().db_write {
-                            this.running_hook_with_db_write = Some((hook_idx, hook));
-                        } else {
-                            this.hooks[hook_idx] = Some(hook);
-                        }
-
-                        if let Some(action) = action {
-                            if let Err(err) = this.on_hook_action(action) {
-                                return Poll::Ready(Err(err))
-                            }
-                        }
-                    } else {
-                        this.hooks[hook_idx] = Some(hook);
-                    }
+                        HookArguments {
+                            tip_block_number: this.blockchain.canonical_tip().number,
+                            is_pipeline_active: this.sync.is_pipeline_active(),
+                        },
+                    )?
+                    .map(|action| this.on_hook_action(action))
+                {
+                    return Poll::Ready(Err(err))
                 }
-
-                this.hook_idx += 1;
             }
 
             if is_pending {
