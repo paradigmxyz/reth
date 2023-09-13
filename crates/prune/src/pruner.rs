@@ -1282,10 +1282,11 @@ mod tests {
                 .iter()
                 .enumerate()
                 .flat_map(|(block_number, changeset)| {
-                    changeset.into_iter().map(move |change| (block_number, change))
+                    changeset.iter().map(move |change| (block_number, change))
                 })
                 .collect::<Vec<_>>();
 
+            #[allow(clippy::skip_while_next)]
             let pruned = changesets
                 .iter()
                 .enumerate()
@@ -1308,11 +1309,13 @@ mod tests {
                 .map(|(block_number, _)| if done { *block_number } else { block_number.saturating_sub(1) } as BlockNumber)
                 .unwrap_or(to_block);
 
-            let pruned_changesets =
-                pruned_changesets.fold(BTreeMap::new(), |mut acc, (block_number, change)| {
-                    acc.entry(block_number).or_insert_with(Vec::new).push(change);
+            let pruned_changesets = pruned_changesets.fold(
+                BTreeMap::<_, Vec<_>>::new(),
+                |mut acc, (block_number, change)| {
+                    acc.entry(block_number).or_default().push(change);
                     acc
-                });
+                },
+            );
 
             assert_eq!(
                 tx.table::<tables::AccountChangeSet>().unwrap().len(),
@@ -1409,12 +1412,13 @@ mod tests {
                 .iter()
                 .enumerate()
                 .flat_map(|(block_number, changeset)| {
-                    changeset.into_iter().flat_map(move |(address, _, entries)| {
-                        entries.into_iter().map(move |entry| (block_number, address, entry))
+                    changeset.iter().flat_map(move |(address, _, entries)| {
+                        entries.iter().map(move |entry| (block_number, address, entry))
                     })
                 })
                 .collect::<Vec<_>>();
 
+            #[allow(clippy::skip_while_next)]
             let pruned = changesets
                 .iter()
                 .enumerate()
@@ -1438,9 +1442,9 @@ mod tests {
                 .unwrap_or(to_block);
 
             let pruned_changesets = pruned_changesets.fold(
-                BTreeMap::new(),
+                BTreeMap::<_, Vec<_>>::new(),
                 |mut acc, (block_number, address, entry)| {
-                    acc.entry((block_number, address)).or_insert_with(Vec::new).push(entry);
+                    acc.entry((block_number, address)).or_default().push(entry);
                     acc
                 },
             );
@@ -1544,9 +1548,7 @@ mod tests {
                 .inner()
                 .get_prune_checkpoint(PrunePart::ContractLogs)
                 .unwrap()
-                .and_then(|checkpoint| {
-                    Some((checkpoint.block_number.unwrap(), checkpoint.tx_number.unwrap()))
-                })
+                .map(|checkpoint| (checkpoint.block_number.unwrap(), checkpoint.tx_number.unwrap()))
                 .unwrap_or_default();
 
             // All receipts are in the end of the block
@@ -1558,7 +1560,7 @@ mod tests {
                     ((pruned_tx + 1) - unprunable) as usize
             );
 
-            return done
+            done
         };
 
         while !run_prune() {}
