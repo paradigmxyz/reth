@@ -2,7 +2,10 @@ use crate::hooks::{Hook, HookAction, HookArguments, HookDependencies, HookError,
 use std::task::{Context, Poll};
 use tracing::debug;
 
-/// Manages hooks,
+/// Manages hooks under the control of the engine.
+///
+/// This type polls the initialized hooks one by one, respecting the dependencies (such as DB write
+/// access that enforces running at most one such hook).
 pub(crate) struct HooksController {
     /// Collection of hooks.
     ///
