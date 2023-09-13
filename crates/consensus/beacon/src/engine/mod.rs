@@ -1803,6 +1803,7 @@ where
                     .poll_next_hook(
                         cx,
                         HookArguments { tip_block_number: this.blockchain.canonical_tip().number },
+                        this.sync.is_pipeline_active(),
                     )?
                     .map(|action| this.on_hook_action(action))
                 {
