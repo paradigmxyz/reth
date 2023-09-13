@@ -36,7 +36,7 @@ use reth_provider::{
     StateProviderFactory,
 };
 use reth_revm::{
-    database::RevmDatabase, db::states::bundle_state::BundleRetention, processor::EVMProcessor,
+    database::StateProviderDatabase, db::states::bundle_state::BundleRetention, processor::EVMProcessor,
     State,
 };
 use reth_transaction_pool::TransactionPool;
@@ -377,7 +377,7 @@ impl StorageInner {
 
         // now execute the block
         let db = State::builder()
-            .with_database_boxed(Box::new(RevmDatabase::new(client.latest().unwrap())))
+            .with_database_boxed(Box::new(StateProviderDatabase::new(client.latest().unwrap())))
             .with_bundle_update()
             .build();
         let mut executor = EVMProcessor::new_with_state(chain_spec, db);

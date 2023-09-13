@@ -14,7 +14,7 @@ use reth_consensus_common::calc::{base_block_reward, block_reward};
 use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, SealedHeader, H256, U256};
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::{
-    database::{RethStateDBBox, RevmDatabase},
+    database::{RethStateDBBox, StateProviderDatabase},
     env::tx_env_with_recovered,
     tracing::{
         parity::populate_account_balance_nonce_diffs, TracingInspector, TracingInspectorConfig,
@@ -144,7 +144,7 @@ where
             .spawn_with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(calls.len());
                 let mut revm_state = State::builder()
-                    .with_database_boxed(Box::new(RevmDatabase::new(state)))
+                    .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
                     .build();
 
                 let mut calls = calls.into_iter().peekable();
@@ -319,7 +319,7 @@ where
             .spawn_with_state_at_block(state_at.into(), move |state| {
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = State::builder()
-                    .with_database_boxed(Box::new(RevmDatabase::new(state)))
+                    .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
                     .build();
 
                 let mut transactions = transactions.into_iter().enumerate().peekable();

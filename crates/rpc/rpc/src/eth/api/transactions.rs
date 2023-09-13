@@ -25,7 +25,7 @@ use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_revm::{
-    database::{RethStateDBBox, RevmDatabase},
+    database::{RethStateDBBox, StateProviderDatabase},
     env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     tracing::{TracingInspector, TracingInspectorConfig},
 };
@@ -526,7 +526,7 @@ where
             .spawn(move || {
                 let state = this.state_at(at)?;
                 let mut db = State::builder()
-                    .with_database_boxed(Box::new(RevmDatabase::new(state)))
+                    .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
                     .build();
 
                 let env = prepare_call_env(
@@ -579,7 +579,7 @@ where
     {
         self.with_state_at_block(at, |state| {
             let mut db =
-                State::builder().with_database_boxed(Box::new(RevmDatabase::new(state))).build();
+                State::builder().with_database_boxed(Box::new(StateProviderDatabase::new(state))).build();
 
             let mut inspector = TracingInspector::new(config);
             let (res, _) = inspect(&mut db, env, &mut inspector)?;
@@ -603,7 +603,7 @@ where
     {
         self.spawn_with_state_at_block(at, move |state| {
             let mut db =
-                State::builder().with_database_boxed(Box::new(RevmDatabase::new(state))).build();
+                State::builder().with_database_boxed(Box::new(StateProviderDatabase::new(state))).build();
             let mut inspector = TracingInspector::new(config);
             let (res, _) = inspect_and_return_db(&mut db, env, &mut inspector)?;
 
@@ -662,7 +662,7 @@ where
 
         self.spawn_with_state_at_block(parent_block.into(), move |state| {
             let mut db =
-                State::builder().with_database_boxed(Box::new(RevmDatabase::new(state))).build();
+                State::builder().with_database_boxed(Box::new(StateProviderDatabase::new(state))).build();
 
             // replay all transactions prior to the targeted transaction
             replay_transactions_until(&mut db, cfg.clone(), block_env.clone(), block_txs, tx.hash)?;

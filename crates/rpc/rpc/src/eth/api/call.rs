@@ -19,7 +19,7 @@ use reth_provider::{
 };
 use reth_revm::{
     access_list::AccessListInspector,
-    database::{RethStateDBBox, RevmDatabase},
+    database::{RethStateDBBox, StateProviderDatabase},
     env::tx_env_with_recovered,
     revm::State,
 };
@@ -113,7 +113,7 @@ where
             let mut results = Vec::with_capacity(transactions.len());
 
             let mut db =
-                State::builder().with_database_boxed(Box::new(RevmDatabase::new(state))).build();
+                State::builder().with_database_boxed(Box::new(StateProviderDatabase::new(state))).build();
 
             if replay_block_txs {
                 // only need to replay the transactions in the block if not all transactions are
@@ -203,7 +203,7 @@ where
         // Configure the evm env
         let mut env = build_call_evm_env(cfg, block, request)?;
         let mut db =
-            State::builder().with_database_boxed(Box::new(RevmDatabase::new(state))).build();
+            State::builder().with_database_boxed(Box::new(StateProviderDatabase::new(state))).build();
 
         // if the request is a simple transfer we can optimize
         if env.tx.data.is_empty() {
@@ -364,7 +364,7 @@ where
         env.cfg.disable_base_fee = true;
 
         let mut db =
-            State::builder().with_database_boxed(Box::new(RevmDatabase::new(state))).build();
+            State::builder().with_database_boxed(Box::new(StateProviderDatabase::new(state))).build();
 
         if request.gas.is_none() && env.tx.gas_price > U256::ZERO {
             // no gas limit was provided in the request, so we need to cap the request's gas limit

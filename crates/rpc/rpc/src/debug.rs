@@ -17,7 +17,7 @@ use reth_primitives::{
 };
 use reth_provider::{BlockReaderIdExt, HeaderProvider};
 use reth_revm::{
-    database::{RethStateDBBox, RevmDatabase},
+    database::{RethStateDBBox, StateProviderDatabase},
     env::tx_env_with_recovered,
     revm::{
         primitives::{db::DatabaseCommit, BlockEnv, CfgEnv, Env},
@@ -95,7 +95,7 @@ where
                 let mut results = Vec::with_capacity(transactions.len());
 
                 let mut db = State::builder()
-                    .with_database_boxed(Box::new(RevmDatabase::new(state)))
+                    .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
                     .build();
 
                 let mut transactions = transactions.into_iter().peekable();
@@ -191,7 +191,7 @@ where
                 let tx = transaction.into_recovered();
 
                 let mut db = State::builder()
-                    .with_database_boxed(Box::new(RevmDatabase::new(state)))
+                    .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
                     .build();
                 // replay all transactions prior to the targeted transaction
                 replay_transactions_until(
@@ -292,7 +292,7 @@ where
                     let (_, _, at) = self.inner.eth_api.evm_env_at(at).await?;
                     let state = self.inner.eth_api.state_at(at)?;
                     let db = State::builder()
-                        .with_database_boxed(Box::new(RevmDatabase::new(state)))
+                        .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
                         .build();
                     let has_state_overrides = overrides.has_state();
 
@@ -385,7 +385,7 @@ where
                 let mut results = Vec::with_capacity(bundles.len());
 
                 let mut db = State::builder()
-                    .with_database_boxed(Box::new(RevmDatabase::new(state)))
+                    .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
                     .build();
 
                 if replay_block_txs {
@@ -590,7 +590,7 @@ where
             }
         };
 
-        let database = Box::new(RevmDatabase::new(state));
+        let database = Box::new(StateProviderDatabase::new(state));
 
         let mut db = if let Some(db) = db {
             let State {

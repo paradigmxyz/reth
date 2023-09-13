@@ -1,5 +1,5 @@
 use crate::{
-    database::RevmDatabase,
+    database::StateProviderDatabase,
     processor::EVMProcessor,
     stack::{InspectorStack, InspectorStackConfig},
 };
@@ -38,7 +38,7 @@ impl ExecutorFactory for Factory {
         &'a self,
         sp: SP,
     ) -> Box<dyn PrunableBlockExecutor + 'a> {
-        let database_state = RevmDatabase::new(sp);
+        let database_state = StateProviderDatabase::new(sp);
         let mut evm = Box::new(EVMProcessor::new_with_db(self.chain_spec.clone(), database_state));
         if let Some(ref stack) = self.stack {
             evm.set_stack(stack.clone());

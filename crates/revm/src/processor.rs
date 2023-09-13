@@ -1,5 +1,5 @@
 use crate::{
-    database::RevmDatabase,
+    database::StateProviderDatabase,
     env::{fill_cfg_and_block_env, fill_tx_env},
     eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     into_reth_log,
@@ -77,7 +77,7 @@ impl<'a> EVMProcessor<'a> {
     /// Creates a new executor from the given chain spec and database.
     pub fn new_with_db<DB: StateProvider + 'a>(
         chain_spec: Arc<ChainSpec>,
-        db: RevmDatabase<DB>,
+        db: StateProviderDatabase<DB>,
     ) -> Self {
         let state = State::builder()
             .with_database_boxed(Box::new(db))
