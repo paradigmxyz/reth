@@ -102,7 +102,7 @@ impl<DB: Database + 'static> EnginePruneController<DB> {
 
 impl<DB: Database + 'static> Hook for EnginePruneController<DB> {
     fn name(&self) -> &'static str {
-        "EnginePruneController"
+        "Prune"
     }
 
     fn poll(&mut self, cx: &mut Context<'_>, args: HookArguments) -> Poll<HookEvent> {
