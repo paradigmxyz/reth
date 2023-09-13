@@ -205,7 +205,7 @@ where
         }
     }
 
-    /// Invoked when a new transaction is pending.
+    /// Invoked when a new transaction is pending in the local pool.
     ///
     /// When new transactions appear in the pool, we propagate them to the network using the
     /// `Transactions` and `NewPooledTransactionHashes` messages. The Transactions message relays
@@ -224,14 +224,13 @@ where
 
         trace!(target: "net::tx", "Start propagating transactions");
 
+        // This fetches all transaction from the pool, including the blob sidecars because we need
+        // the exact size of the transaction even if they're never propagated in full.
         let propagated = self.propagate_transactions(
             self.pool
-                .get_all(hashes)
+                .get_pooled_transaction_elements(hashes, GetPooledTransactionLimit::None)
                 .into_iter()
-                .map(|tx| {
-                    let tx = Arc::new(tx.transaction.to_recovered_transaction().into_signed());
-                    PropagateTransaction::new(tx)
-                })
+                .map(PropagateTransaction::new)
                 .collect(),
         );
 
@@ -672,8 +671,10 @@ impl PropagateTransaction {
         self.transaction.hash()
     }
 
-    fn new(transaction: Arc<TransactionSigned>) -> Self {
-        Self { size: transaction.length(), transaction }
+    /// Create a new instance from a pooled transaction
+    fn new(transaction: PooledTransactionsElement) -> Self {
+        let size = transaction.length();
+        Self { size, transaction: Arc::new(transaction.into_transaction()) }
     }
 }
 
