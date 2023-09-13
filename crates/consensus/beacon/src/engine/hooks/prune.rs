@@ -137,7 +137,7 @@ impl<DB: Database + 'static> Hook for PruneHook<DB> {
                 match result {
                     Ok(_) => Ok(Some(HookAction::RestoreCanonicalHashes)),
                     // Any pruner error at this point is fatal.
-                    Err(error) => Err(error.into()),
+                    Err(error) => Err(error),
                 }
             }
         }
