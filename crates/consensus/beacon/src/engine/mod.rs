@@ -1227,12 +1227,12 @@ where
         Ok(())
     }
 
-    /// When the pipeline or the pruner is active, the tree is unable to commit any additional
-    /// blocks since the pipeline holds exclusive access to the database.
+    /// When the pipeline or a hook with DB write access is active, the tree is unable to commit
+    /// any additional blocks since the pipeline holds exclusive access to the database.
     ///
     /// In this scenario we buffer the payload in the tree if the payload is valid, once the
-    /// pipeline or pruner is finished, the tree is then able to also use the buffered payloads to
-    /// commit to a (newer) canonical chain.
+    /// pipeline or a hook with DB write access is finished, the tree is then able to also use the
+    /// buffered payloads to commit to a (newer) canonical chain.
     ///
     /// This will return `SYNCING` if the block was buffered successfully, and an error if an error
     /// occurred while buffering the block.
@@ -1247,7 +1247,7 @@ where
 
     /// Attempts to insert a new payload into the tree.
     ///
-    /// Caution: This expects that the pipeline and the pruner are idle.
+    /// Caution: This expects that the pipeline and a hook with DB write access are idle.
     #[instrument(level = "trace", skip_all, target = "consensus::engine", ret)]
     fn try_insert_new_payload(
         &mut self,
