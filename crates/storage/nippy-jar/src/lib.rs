@@ -14,6 +14,8 @@ use filter::{Cuckoo, Filter, Filters};
 pub mod compression;
 use compression::{Compression, Compressors};
 
+pub mod mmap;
+
 const NIPPY_JAR_VERSION: usize = 1;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]

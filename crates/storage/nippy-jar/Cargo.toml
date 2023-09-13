@@ -22,6 +22,20 @@ serde = { version = "1.0",  features = ["derive"] }
 bytes = "1.5"
 cuckoofilter = { version = "0.5.0", features = ["serde_support", "serde_bytes"] }
 tempfile = "3.4"
+proptest = { workspace = true, optional = true }
+
+[dev-dependencies]
+reth-primitives = { workspace = true, features = ["test-utils"] }
+reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-rlp = { workspace = true }
+rand = "0.8"
+criterion = "0.5"
 
 [features]
 default = []
+bench = ["proptest", "reth-primitives/arbitrary"]
+
+[[bench]]
+name = "mmap"
+required-features = ["bench"]
+harness = false
