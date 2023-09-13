@@ -1731,10 +1731,7 @@ where
                 .hooks
                 .poll_running_hook_with_db_write(
                     cx,
-                    HookArguments {
-                        tip_block_number: this.blockchain.canonical_tip().number,
-                        is_pipeline_active: this.sync.is_pipeline_active(),
-                    },
+                    HookArguments { tip_block_number: this.blockchain.canonical_tip().number },
                 )?
                 .map(|action| this.on_hook_action(action))
             {
@@ -1805,10 +1802,7 @@ where
                     .hooks
                     .poll_next_hook(
                         cx,
-                        HookArguments {
-                            tip_block_number: this.blockchain.canonical_tip().number,
-                            is_pipeline_active: this.sync.is_pipeline_active(),
-                        },
+                        HookArguments { tip_block_number: this.blockchain.canonical_tip().number },
                     )?
                     .map(|action| this.on_hook_action(action))
                 {

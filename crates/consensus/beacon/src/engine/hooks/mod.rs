@@ -39,7 +39,6 @@ impl std::fmt::Debug for dyn Hook {
 #[derive(Copy, Clone, Debug)]
 pub struct HookArguments {
     pub tip_block_number: BlockNumber,
-    pub is_pipeline_active: bool,
 }
 
 #[derive(Debug)]
@@ -141,6 +140,7 @@ impl HooksController {
         &mut self,
         cx: &mut Context<'_>,
         args: HookArguments,
+        is_pipeline_active: bool,
     ) -> Result<Poll<HookAction>, HookError> {
         let hook_idx = self.hook_idx % self.hooks.len();
         self.hook_idx = hook_idx + 1;
@@ -153,7 +153,7 @@ impl HooksController {
         let db_write = hook.dependencies().db_write && self.running_hook_with_db_write.is_some();
         // Hook with idle pipeline dependency is not allowed to run due to pipeline
         // being active.
-        let pipeline_idle = hook.dependencies().pipeline_idle && args.is_pipeline_active;
+        let pipeline_idle = hook.dependencies().pipeline_idle && is_pipeline_active;
 
         let skip_hook = db_write || pipeline_idle;
         if skip_hook {
