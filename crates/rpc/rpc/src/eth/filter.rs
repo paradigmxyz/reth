@@ -90,15 +90,12 @@ where
                 Err(EthApiError::Unsupported("pending transaction filter not supported").into())
             }
             FilterKind::Block => {
-                let mut block_hashes = Vec::new();
-                for block_num in start_block..best_number {
-                    let block_hash = self
-                        .inner
-                        .provider
-                        .block_hash(block_num)?
-                        .ok_or(EthApiError::UnknownBlockNumber)?;
-                    block_hashes.push(block_hash);
-                }
+                // Note: this range is exclusive
+                let block_hashes = self
+                    .inner
+                    .provider
+                    .canonical_hashes_range(start_block, best_number)
+                    .map_err(|_| EthApiError::UnknownBlockNumber)?;
                 Ok(FilterChanges::Hashes(block_hashes))
             }
             FilterKind::Log(filter) => {
