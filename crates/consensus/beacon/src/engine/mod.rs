@@ -1,10 +1,10 @@
 use crate::{
     engine::{
         forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker},
-        hook::{HookAction, HookArguments},
         message::OnForkChoiceUpdated,
         metrics::EngineMetrics,
     },
+    hooks::{Hook, HookAction, HookArguments, HooksController},
     sync::{EngineSyncController, EngineSyncEvent},
 };
 use futures::{Future, StreamExt};
@@ -71,13 +71,10 @@ mod forkchoice;
 pub use forkchoice::ForkchoiceStatus;
 
 mod metrics;
-pub(crate) mod prune;
-pub use prune::EnginePruneController;
+
 pub(crate) mod sync;
 
-mod hook;
-use crate::engine::hook::HooksController;
-pub use hook::Hook;
+pub mod hooks;
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;

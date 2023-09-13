@@ -1,7 +1,7 @@
 use crate::{
-    BeaconConsensus, BeaconConsensusEngine, BeaconConsensusEngineError,
-    BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError, BeaconOnNewPayloadError,
-    EnginePruneController, MIN_BLOCKS_FOR_PIPELINE_RUN,
+    engine::hooks::EnginePruneController, BeaconConsensus, BeaconConsensusEngine,
+    BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
+    BeaconOnNewPayloadError, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, post_state::PostState, BlockchainTree,

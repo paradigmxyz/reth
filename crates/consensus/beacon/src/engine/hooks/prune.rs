@@ -1,6 +1,6 @@
 //! Prune management for the engine implementation.
 
-use crate::engine::hook::{
+use crate::engine::hooks::{
     Hook, HookAction, HookArguments, HookDependencies, HookError, HookEvent,
 };
 use futures::FutureExt;

@@ -3,6 +3,9 @@ use reth_primitives::BlockNumber;
 use std::task::{Context, Poll};
 use tracing::debug;
 
+mod prune;
+pub use prune::EnginePruneController;
+
 pub trait Hook: Send + Sync + 'static {
     fn name(&self) -> &'static str;
     fn poll(&mut self, cx: &mut Context<'_>, args: HookArguments) -> Poll<HookEvent>;

@@ -1,4 +1,4 @@
-use crate::engine::hook::HookError;
+use crate::engine::hooks::HookError;
 use reth_rpc_types::engine::ForkchoiceUpdateError;
 use reth_stages::PipelineError;
 
