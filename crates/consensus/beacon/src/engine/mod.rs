@@ -75,6 +75,8 @@ mod metrics;
 
 pub(crate) mod sync;
 
+/// Hooks for running during the main loop of
+/// [consensus engine][`crate::engine::BeaconConsensusEngine`].
 pub mod hooks;
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -1727,15 +1729,13 @@ where
         loop {
             // Poll a running hook with db write access first, as we will not be able to process
             // any engine messages until it's finished.
-            if let Poll::Ready(Err(err)) = this
-                .hooks
-                .poll_running_hook_with_db_write(
-                    cx,
-                    HookArguments { tip_block_number: this.blockchain.canonical_tip().number },
-                )?
-                .map(|action| this.on_hook_action(action))
-            {
-                return Poll::Ready(Err(err))
+            if let Poll::Ready(result) = this.hooks.poll_running_hook_with_db_write(
+                cx,
+                HookArguments { tip_block_number: this.blockchain.canonical_tip().number },
+            ) {
+                if let Err(err) = this.on_hook_action(result?) {
+                    return Poll::Ready(Err(err))
+                }
             }
 
             let mut engine_messages_pending = false;
@@ -1798,16 +1798,14 @@ where
             // 1. No engine and sync messages are pending
             // 2. Latest FCU status is not INVALID
             if is_pending && !this.forkchoice_state_tracker.is_latest_invalid() {
-                if let Poll::Ready(Err(err)) = this
-                    .hooks
-                    .poll_next_hook(
-                        cx,
-                        HookArguments { tip_block_number: this.blockchain.canonical_tip().number },
-                        HookDependencies { db_write: this.sync.is_pipeline_active() },
-                    )?
-                    .map(|action| this.on_hook_action(action))
-                {
-                    return Poll::Ready(Err(err))
+                if let Poll::Ready(result) = this.hooks.poll_next_hook(
+                    cx,
+                    HookArguments { tip_block_number: this.blockchain.canonical_tip().number },
+                    HookDependencies { db_write: this.sync.is_pipeline_active() },
+                ) {
+                    if let Err(err) = this.on_hook_action(result?) {
+                        return Poll::Ready(Err(err))
+                    }
                 }
             }
 

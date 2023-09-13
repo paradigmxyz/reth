@@ -26,7 +26,7 @@ use fdlimit::raise_fd_limit;
 use futures::{future::Either, pin_mut, stream, stream_select, StreamExt};
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
 use reth_beacon_consensus::{
-    hooks::{EnginePruneController, Hooks},
+    hooks::{Hooks, PruneHook},
     BeaconConsensus, BeaconConsensusEngine, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
 use reth_blockchain_tree::{
@@ -460,7 +460,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 prune_config.parts,
                 self.chain.prune_batch_sizes,
             );
-            hooks.add(EnginePruneController::new(pruner, Box::new(ctx.task_executor.clone())));
+            hooks.add(PruneHook::new(pruner, Box::new(ctx.task_executor.clone())));
         }
 
         // Configure the consensus engine

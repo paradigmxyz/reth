@@ -17,7 +17,7 @@ use tracing::trace;
 /// Manages pruning under the control of the engine.
 ///
 /// This type controls the [Pruner].
-pub struct EnginePruneController<DB> {
+pub struct PruneHook<DB> {
     /// The current state of the pruner.
     pruner_state: PrunerState<DB>,
     /// The type that can spawn the pruner task.
@@ -25,7 +25,7 @@ pub struct EnginePruneController<DB> {
     metrics: Metrics,
 }
 
-impl<DB: Database + 'static> EnginePruneController<DB> {
+impl<DB: Database + 'static> PruneHook<DB> {
     /// Create a new instance
     pub fn new(pruner: Pruner<DB>, pruner_task_spawner: Box<dyn TaskSpawner>) -> Self {
         Self {
@@ -104,7 +104,7 @@ impl<DB: Database + 'static> EnginePruneController<DB> {
     }
 }
 
-impl<DB: Database + 'static> Hook for EnginePruneController<DB> {
+impl<DB: Database + 'static> Hook for PruneHook<DB> {
     fn name(&self) -> &'static str {
         "Prune"
     }
