@@ -1,8 +1,14 @@
 use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
-use reth_primitives::{Address, ChainSpec, Hardfork, Header, Withdrawal, H256, U256};
+use reth_primitives::{
+    constants::SYSTEM_ADDRESS, Address, ChainSpec, Hardfork, Header, Withdrawal, H256, U256,
+};
 use reth_revm_primitives::{env::fill_tx_env_with_beacon_root_contract_call, Database};
-use revm::{db::State, primitives::ResultAndState, DatabaseCommit, EVM};
+use revm::{
+    db::State,
+    primitives::{AccountStatus, ResultAndState},
+    DatabaseCommit, EVM,
+};
 use std::{collections::HashMap, fmt::Debug};
 
 /// Collect all balance changes at the end of the block.
@@ -83,7 +89,7 @@ where
             // modify env for pre block call
             fill_tx_env_with_beacon_root_contract_call(&mut evm.env, parent_beacon_block_root);
 
-            let ResultAndState { state, .. } = match evm.transact() {
+            let ResultAndState { mut state, .. } = match evm.transact() {
                 Ok(res) => res,
                 Err(e) => {
                     evm.env = previous_env;
@@ -93,6 +99,13 @@ where
                     }))
                 }
             };
+
+            // set the nonce to zero, and ensure account status is just [AccountStatus::Loaded]
+            // because `transact` will increment it internally
+            if let Some(system_account) = state.get_mut(&SYSTEM_ADDRESS) {
+                system_account.info.nonce = 0;
+                system_account.status = AccountStatus::Loaded;
+            }
 
             let db = evm.db().expect("db to not be moved");
             db.commit(state);
