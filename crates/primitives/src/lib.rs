@@ -10,7 +10,7 @@
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
-#![allow(clippy::incorrect_clone_impl_on_copy_type)]
+#![allow(clippy::non_canonical_clone_impl)]
 
 //! Commonly used types in reth.
 //!
