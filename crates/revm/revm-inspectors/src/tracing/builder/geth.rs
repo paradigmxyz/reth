@@ -236,16 +236,7 @@ impl GethTraceBuilder {
                 let pre_state = AccountState {
                     balance: Some(db_acc.balance),
                     nonce: Some(db_acc.nonce),
-                    code: match pre_code {
-                        Some(code) => {
-                            if code.len() > 0 {
-                                Some(code)
-                            } else {
-                                None
-                            }
-                        }
-                        None => None,
-                    },
+                    code: pre_code.filter(|code| !code.is_empty()),
                     storage: None,
                     change_type: if db_acc.is_empty() {
                         ChangeType::Create
