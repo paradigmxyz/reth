@@ -157,6 +157,47 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     .into()
 });
 
+/// The Holesky spec
+pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    ChainSpec {
+        chain: Chain::holesky(),
+        genesis: serde_json::from_str(include_str!("../../res/genesis/holesky.json"))
+            .expect("Can't deserialize Holesky genesis json"),
+        genesis_hash: Some(H256(hex!(
+            "ff9006519a8ce843ac9c28549d24211420b546e12ce2d170c77a8cca7964f23d"
+        ))),
+        paris_block_and_final_difficulty: Some((0, U256::from(1))),
+        fork_timestamps: ForkTimestamps::default().shanghai(1694790240),
+        hardforks: BTreeMap::from([
+            (Hardfork::Frontier, ForkCondition::Block(0)),
+            (Hardfork::Homestead, ForkCondition::Block(0)),
+            (Hardfork::Dao, ForkCondition::Block(0)),
+            (Hardfork::Tangerine, ForkCondition::Block(0)),
+            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+            (Hardfork::Byzantium, ForkCondition::Block(0)),
+            (Hardfork::Constantinople, ForkCondition::Block(0)),
+            (Hardfork::Petersburg, ForkCondition::Block(0)),
+            (Hardfork::Istanbul, ForkCondition::Block(0)),
+            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
+            (Hardfork::Berlin, ForkCondition::Block(0)),
+            (Hardfork::London, ForkCondition::Block(0)),
+            (
+                Hardfork::Paris,
+                ForkCondition::TTD { fork_block: None, total_difficulty: U256::ZERO },
+            ),
+            (Hardfork::Shanghai, ForkCondition::Timestamp(1694790240)),
+        ]),
+        deposit_contract: Some(DepositContract::new(
+            H160(hex!("4242424242424242424242424242424242424242")),
+            0,
+            H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
+        )),
+        base_fee_params: BaseFeeParams::ethereum(),
+        prune_batch_sizes: PruneBatchSizes::testnet(),
+    }
+    .into()
+});
+
 /// Dev testnet specification
 ///
 /// Includes 20 prefunded accounts with 10_000 ETH each derived from mnemonic "test test test test
@@ -306,11 +347,13 @@ impl ChainSpec {
 
         // If Cancun is activated at genesis, we set:
         // * parent beacon block root to 0x0
-        // * blob gas used to 0x0
-        // * excess blob gas to 0x0
+        // * blob gas used to provided genesis or 0x0
+        // * excess blob gas to provided genesis or 0x0
         let (parent_beacon_block_root, blob_gas_used, excess_blob_gas) =
             if self.fork(Hardfork::Cancun).active_at_timestamp(self.genesis.timestamp) {
-                (Some(H256::zero()), Some(0), Some(0))
+                let blob_gas_used = self.genesis.blob_gas_used.unwrap_or(0);
+                let excess_blob_gas = self.genesis.excess_blob_gas.unwrap_or(0);
+                (Some(H256::zero()), Some(blob_gas_used), Some(excess_blob_gas))
             } else {
                 (None, None, None)
             };
@@ -346,8 +389,11 @@ impl ChainSpec {
 
     /// Get the initial base fee of the genesis block.
     pub fn initial_base_fee(&self) -> Option<u64> {
+        // If the base fee is set in the genesis block, we use that instead of the default.
+        let genesis_base_fee = self.genesis.base_fee_per_gas.unwrap_or(EIP1559_INITIAL_BASE_FEE);
+
         // If London is activated at genesis, we set the initial base fee as per EIP-1559.
-        (self.fork(Hardfork::London).active_at_block(0)).then_some(EIP1559_INITIAL_BASE_FEE)
+        (self.fork(Hardfork::London).active_at_block(0)).then_some(genesis_base_fee)
     }
 
     /// Get the hash of the genesis block.
@@ -1083,7 +1129,7 @@ mod tests {
     use crate::{
         constants::EMPTY_WITHDRAWALS, Address, AllGenesisFormats, Chain, ChainSpec,
         ChainSpecBuilder, DisplayHardforks, ForkCondition, ForkHash, ForkId, Genesis, Hardfork,
-        Head, DEV, GOERLI, H256, MAINNET, SEPOLIA, U256,
+        Head, DEV, GOERLI, H256, HOLESKY, MAINNET, SEPOLIA, U256,
     };
     use bytes::BytesMut;
     use ethers_core::types as EtherType;
@@ -1833,13 +1879,14 @@ Post-merge hard forks (timestamp based):
 
     #[test]
     fn test_parse_genesis_json() {
-        let s = r#"{"config":{"ethash":{},"chainId":1337,"homesteadBlock":0,"eip150Block":0,"eip155Block":0,"eip158Block":0,"byzantiumBlock":0,"constantinopleBlock":0,"petersburgBlock":0,"istanbulBlock":0,"berlinBlock":0,"londonBlock":0,"terminalTotalDifficulty":0,"terminalTotalDifficultyPassed":true,"shanghaiTime":0},"nonce":"0x0","timestamp":"0x0","extraData":"0x","gasLimit":"0x4c4b40","difficulty":"0x1","mixHash":"0x0000000000000000000000000000000000000000000000000000000000000000","coinbase":"0x0000000000000000000000000000000000000000","alloc":{"658bdf435d810c91414ec09147daa6db62406379":{"balance":"0x487a9a304539440000"},"aa00000000000000000000000000000000000000":{"code":"0x6042","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x1","nonce":"0x1"},"bb00000000000000000000000000000000000000":{"code":"0x600154600354","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x2","nonce":"0x1"}},"number":"0x0","gasUsed":"0x0","parentHash":"0x0000000000000000000000000000000000000000000000000000000000000000","baseFeePerGas":"0x3b9aca00"}"#;
+        let s = r#"{"config":{"ethash":{},"chainId":1337,"homesteadBlock":0,"eip150Block":0,"eip155Block":0,"eip158Block":0,"byzantiumBlock":0,"constantinopleBlock":0,"petersburgBlock":0,"istanbulBlock":0,"berlinBlock":0,"londonBlock":0,"terminalTotalDifficulty":0,"terminalTotalDifficultyPassed":true,"shanghaiTime":0},"nonce":"0x0","timestamp":"0x0","extraData":"0x","gasLimit":"0x4c4b40","difficulty":"0x1","mixHash":"0x0000000000000000000000000000000000000000000000000000000000000000","coinbase":"0x0000000000000000000000000000000000000000","alloc":{"658bdf435d810c91414ec09147daa6db62406379":{"balance":"0x487a9a304539440000"},"aa00000000000000000000000000000000000000":{"code":"0x6042","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x1","nonce":"0x1"},"bb00000000000000000000000000000000000000":{"code":"0x600154600354","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x2","nonce":"0x1"}},"number":"0x0","gasUsed":"0x0","parentHash":"0x0000000000000000000000000000000000000000000000000000000000000000","baseFeePerGas":"0x1337"}"#;
         let genesis: Genesis = serde_json::from_str(s).unwrap();
         let acc = genesis
             .alloc
             .get(&"0xaa00000000000000000000000000000000000000".parse::<Address>().unwrap())
             .unwrap();
         assert_eq!(acc.balance, U256::from(1));
+        assert_eq!(genesis.base_fee_per_gas, Some(0x1337));
     }
 
     #[test]
@@ -1891,5 +1938,12 @@ Post-merge hard forks (timestamp based):
         // check that the forkhash is correct
         let expected_forkhash = ForkHash(hex_literal::hex!("8062457a"));
         assert_eq!(ForkHash::from(genesis_hash), expected_forkhash);
+    }
+
+    #[test]
+    fn holesky_paris_activated_at_genesis() {
+        assert!(HOLESKY
+            .fork(Hardfork::Paris)
+            .active_at_ttd(HOLESKY.genesis.difficulty, HOLESKY.genesis.difficulty));
     }
 }

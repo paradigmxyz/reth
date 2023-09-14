@@ -1,0 +1,13 @@
+[package]
+name = "rpc-db"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+futures.workspace = true
+jsonrpsee.workspace = true
+reth.workspace = true
+tokio = { workspace = true, features = ["full"] }
+eyre = "0.6.8"

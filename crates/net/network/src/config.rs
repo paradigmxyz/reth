@@ -7,7 +7,7 @@ use crate::{
     session::SessionsConfig,
     NetworkHandle, NetworkManager,
 };
-use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
+use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_ecies::util::pk2id;
 use reth_eth_wire::{HelloMessage, Status};
@@ -17,11 +17,7 @@ use reth_primitives::{
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::SECP256K1;
-use std::{
-    collections::HashSet,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::Arc,
-};
+use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 // re-export for convenience
 pub use secp256k1::SecretKey;
 
@@ -244,14 +240,15 @@ impl NetworkConfigBuilder {
     /// This is a convenience function for both [NetworkConfigBuilder::listener_addr] and
     /// [NetworkConfigBuilder::discovery_addr].
     ///
-    /// By default, both are on the same port: [DEFAULT_DISCOVERY_PORT]
+    /// By default, both are on the same port:
+    /// [DEFAULT_DISCOVERY_PORT](reth_discv4::DEFAULT_DISCOVERY_PORT)
     pub fn set_addrs(self, addr: SocketAddr) -> Self {
         self.listener_addr(addr).discovery_addr(addr)
     }
 
     /// Sets the socket address the network will listen on.
     ///
-    /// By default, this is [Ipv4Addr::UNSPECIFIED] on [DEFAULT_DISCOVERY_PORT]
+    /// By default, this is [DEFAULT_DISCOVERY_ADDRESS]
     pub fn listener_addr(mut self, listener_addr: SocketAddr) -> Self {
         self.listener_addr = Some(listener_addr);
         self
@@ -259,17 +256,23 @@ impl NetworkConfigBuilder {
 
     /// Sets the port of the address the network will listen on.
     ///
-    /// By default, this is [DEFAULT_DISCOVERY_PORT]
+    /// By default, this is [DEFAULT_DISCOVERY_PORT](reth_discv4::DEFAULT_DISCOVERY_PORT)
     pub fn listener_port(mut self, port: u16) -> Self {
-        self.listener_addr
-            .get_or_insert(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_DISCOVERY_PORT).into())
-            .set_port(port);
+        self.listener_addr.get_or_insert(DEFAULT_DISCOVERY_ADDRESS).set_port(port);
         self
     }
 
     /// Sets the socket address the discovery network will listen on
     pub fn discovery_addr(mut self, discovery_addr: SocketAddr) -> Self {
         self.discovery_addr = Some(discovery_addr);
+        self
+    }
+
+    /// Sets the port of the address the discovery network will listen on.
+    ///
+    /// By default, this is [DEFAULT_DISCOVERY_PORT](reth_discv4::DEFAULT_DISCOVERY_PORT)
+    pub fn discovery_port(mut self, port: u16) -> Self {
+        self.discovery_addr.get_or_insert(DEFAULT_DISCOVERY_ADDRESS).set_port(port);
         self
     }
 
@@ -369,9 +372,7 @@ impl NetworkConfigBuilder {
             head,
         } = self;
 
-        let listener_addr = listener_addr.unwrap_or_else(|| {
-            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_DISCOVERY_PORT))
-        });
+        let listener_addr = listener_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS);
 
         let mut hello_message =
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
@@ -408,9 +409,7 @@ impl NetworkConfigBuilder {
             boot_nodes,
             dns_discovery_config,
             discovery_v4_config: discovery_v4_builder.map(|builder| builder.build()),
-            discovery_addr: discovery_addr.unwrap_or_else(|| {
-                SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_DISCOVERY_PORT))
-            }),
+            discovery_addr: discovery_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS),
             listener_addr,
             peers_config: peers_config.unwrap_or_default(),
             sessions_config: sessions_config.unwrap_or_default(),

@@ -200,6 +200,8 @@ where
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
 {
     /// Returns the state at the given [BlockId] enum.
+    ///
+    /// Note: if not [BlockNumberOrTag::Pending] then this will only return canonical state. See also <https://github.com/paradigmxyz/reth/issues/4515>
     pub fn state_at_block_id(&self, at: BlockId) -> EthResult<StateProviderBox<'_>> {
         Ok(self.provider().state_by_block_id(at)?)
     }
