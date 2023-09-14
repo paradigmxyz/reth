@@ -410,7 +410,7 @@ impl StateReverts {
         for (block_index, mut storage_changes) in self.0.storage.into_iter().enumerate() {
             let block_number = first_block + block_index as BlockNumber;
 
-            tracing::trace!(target: "provider::reverts", block_number=block_number,"Writing block change");
+            tracing::trace!(target: "provider::reverts", block_number, "Writing block change");
             // sort changes by address.
             storage_changes.par_sort_unstable_by_key(|a| a.address);
             for PlainStorageRevert { address, wiped, storage_revert } in storage_changes.into_iter()
@@ -423,13 +423,13 @@ impl StateReverts {
                     .collect::<Vec<_>>();
                 // sort storage slots by key.
                 storage.par_sort_unstable_by_key(|a| a.0);
-                tracing::trace!(target: "provider::reverts","Writting revert for {:?}", address);
+
                 // If we are writing the primary storage wipe transition, the pre-existing plain
                 // storage state has to be taken from the database and written to storage history.
                 // See [StorageWipe::Primary] for more details.
                 let mut wiped_storage = Vec::new();
                 if wiped {
-                    tracing::trace!(target: "provider::reverts", "wipe storage storage changes");
+                    tracing::trace!(target: "provider::reverts", ?address, "Wiping storage");
                     if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
                         wiped_storage.push((entry.key, entry.value));
                         while let Some(entry) = storages_cursor.next_dup_val()? {
@@ -437,8 +437,8 @@ impl StateReverts {
                         }
                     }
                 }
-                tracing::trace!(target: "provider::reverts", "storage changes: {:?}",storage);
 
+                tracing::trace!(target: "provider::reverts", ?address, ?storage, "Writing storage reverts");
                 for (key, value) in StorageRevertsIter::new(storage, wiped_storage) {
                     storage_changeset_cursor.append_dup(storage_id, StorageEntry { key, value })?;
                 }
@@ -450,7 +450,7 @@ impl StateReverts {
         let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
         for (block_index, mut account_block_reverts) in self.0.accounts.into_iter().enumerate() {
             let block_number = first_block + block_index as BlockNumber;
-            // sort accounts by address.
+            // Sort accounts by address.
             account_block_reverts.par_sort_by_key(|a| a.0);
             for (address, info) in account_block_reverts {
                 account_changeset_cursor.append_dup(
