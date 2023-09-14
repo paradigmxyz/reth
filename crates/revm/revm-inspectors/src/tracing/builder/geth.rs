@@ -248,16 +248,12 @@ impl GethTraceBuilder {
                 let post_state = AccountState {
                     balance: Some(changed_acc.info.balance),
                     nonce: Some(changed_acc.info.nonce),
-                    code: match changed_acc.info.code {
-                        Some(ref code) => {
-                            if code.len() > 0 {
-                                Some(Bytes::from(code.original_bytes()))
-                            } else {
-                                None
-                            }
-                        }
-                        None => None,
-                    },
+                    code: changed_acc
+                        .info
+                        .code
+                        .as_ref()
+                        .filter(|code| !code.is_empty())
+                        .map(|code| Bytes::from(code.original_bytes())),
                     storage: None,
                     change_type: if changed_acc.is_destroyed {
                         ChangeType::Destroy
