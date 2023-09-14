@@ -15,6 +15,7 @@ use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodyV1, PayloadError, StandaloneWithdraw,
 };
 use reth_rpc_types_compat::engine::payload::convert_standalonewithdraw_to_withdrawal;
+
 fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> ExecutionPayload {
     let unsealed = src.unseal();
     let mut transformed: Block = f(unsealed);
@@ -65,7 +66,8 @@ fn payload_validation() {
         b.header.extra_data = BytesMut::zeroed(32).freeze().into();
         b
     });
-    assert_matches!(try_convert_from_execution_payload_to_sealed_block(block_with_valid_extra_data), Ok(_));
+
+    assert_matches!(block_with_valid_extra_data.try_into_sealed_block(None), Ok(_));
 
     // Invalid extra data
     let block_with_invalid_extra_data: Bytes = BytesMut::zeroed(33).freeze();
@@ -74,7 +76,8 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-        try_convert_from_execution_payload_to_sealed_block(invalid_extra_data_block),
+
+        invalid_extra_data_block.try_into_sealed_block(None),
         Err(PayloadError::ExtraData(data)) if data == block_with_invalid_extra_data
     );
 
@@ -84,15 +87,18 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-        try_convert_from_execution_payload_to_sealed_block(block_with_zero_base_fee),
+
+        block_with_zero_base_fee.try_into_sealed_block(None),
         Err(PayloadError::BaseFee(val)) if val == U256::ZERO
     );
 
     // Invalid encoded transactions
     let mut payload_with_invalid_txs: ExecutionPayload = convert_to_execution_payload(block.clone());
+
     payload_with_invalid_txs.transactions.iter_mut().for_each(|tx| {
         *tx = Bytes::new().into();
     });
+    let payload_with_invalid_txs = Block::try_from(payload_with_invalid_txs);
     assert_matches!(
        try_convert_from_execution_payload_to_sealed_block(payload_with_invalid_txs),
         Err(PayloadError::Decode(DecodeError::InputTooShort))
@@ -105,8 +111,9 @@ fn payload_validation() {
     });
     assert_matches!(
        try_convert_from_execution_payload_to_sealed_block(block_with_ommers.clone()),
+
         Err(PayloadError::BlockHash { consensus, .. })
-            if consensus == block_with_ommers.block_hash
+            if consensus == block_with_ommers.block_hash()
     );
 
     // None zero difficulty
@@ -117,6 +124,7 @@ fn payload_validation() {
     assert_matches!(
        try_convert_from_execution_payload_to_sealed_block(block_with_difficulty.clone()),
         Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_difficulty.block_hash
+
     );
 
     // None zero nonce
@@ -127,6 +135,7 @@ fn payload_validation() {
     assert_matches!(
        try_convert_from_execution_payload_to_sealed_block(block_with_nonce.clone()),
         Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_nonce.block_hash
+
     );
 
     // Valid block

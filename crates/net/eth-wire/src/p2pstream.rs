@@ -9,7 +9,7 @@ use crate::{
 use futures::{Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_codecs::derive_arbitrary;
-use reth_metrics::metrics::{self, counter};
+use reth_metrics::metrics::counter;
 use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
     hex,
@@ -74,6 +74,11 @@ impl<S> UnauthedP2PStream<S> {
     /// Create a new `UnauthedP2PStream` from a type `S` which implements `Stream` and `Sink`.
     pub fn new(inner: S) -> Self {
         Self { inner }
+    }
+
+    /// Returns a reference to the inner stream.
+    pub fn inner(&self) -> &S {
+        &self.inner
     }
 }
 
@@ -242,6 +247,11 @@ impl<S> P2PStream<S> {
         }
     }
 
+    /// Returns a reference to the inner stream.
+    pub fn inner(&self) -> &S {
+        &self.inner
+    }
+
     /// Sets a custom outgoing message buffer capacity.
     ///
     /// # Panics
@@ -391,6 +401,9 @@ where
                 _ if id == P2PMessageID::Ping as u8 => {
                     tracing::trace!("Received Ping, Sending Pong");
                     this.send_pong();
+                    // This is required because the `Sink` may not be polled externally, and if
+                    // that happens, the pong will never be sent.
+                    cx.waker().wake_by_ref();
                 }
                 _ if id == P2PMessageID::Disconnect as u8 => {
                     let reason = DisconnectReason::decode(&mut &decompress_buf[1..]).map_err(|err| {
@@ -827,6 +840,7 @@ impl Decodable for ProtocolVersion {
 mod tests {
     use super::*;
     use crate::{DisconnectReason, EthVersion};
+    use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use reth_ecies::util::pk2id;
     use secp256k1::{SecretKey, SECP256K1};
     use tokio::net::{TcpListener, TcpStream};
@@ -839,7 +853,7 @@ mod tests {
             protocol_version: ProtocolVersion::V5,
             client_version: "bitcoind/1.0.0".to_string(),
             capabilities: vec![EthVersion::Eth67.into()],
-            port: 30303,
+            port: DEFAULT_DISCOVERY_PORT,
             id: pk2id(&server_key.public_key(SECP256K1)),
         };
         (hello, server_key)

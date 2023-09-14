@@ -111,14 +111,18 @@ impl<DB: Database> ProviderFactory<DB> {
 
         // If we pruned account or storage history, we can't return state on every historical block.
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune part.
-        if let Some(prune_checkpoint) = account_history_prune_checkpoint {
+        if let Some(prune_checkpoint_block_number) =
+            account_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
+        {
             state_provider = state_provider.with_lowest_available_account_history_block_number(
-                prune_checkpoint.block_number + 1,
+                prune_checkpoint_block_number + 1,
             );
         }
-        if let Some(prune_checkpoint) = storage_history_prune_checkpoint {
+        if let Some(prune_checkpoint_block_number) =
+            storage_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
+        {
             state_provider = state_provider.with_lowest_available_storage_history_block_number(
-                prune_checkpoint.block_number + 1,
+                prune_checkpoint_block_number + 1,
             );
         }
 
@@ -389,13 +393,19 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
 #[cfg(test)]
 mod tests {
     use super::ProviderFactory;
-    use crate::{BlockHashReader, BlockNumReader};
+    use crate::{BlockHashReader, BlockNumReader, BlockWriter, TransactionsProvider};
+    use assert_matches::assert_matches;
     use reth_db::{
+        tables,
         test_utils::{create_test_rw_db, ERROR_TEMPDIR},
         DatabaseEnv,
     };
-    use reth_primitives::{ChainSpecBuilder, H256};
-    use std::sync::Arc;
+    use reth_interfaces::test_utils::{generators, generators::random_block};
+    use reth_primitives::{
+        hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, TxNumber, H256,
+    };
+    use reth_rlp::Decodable;
+    use std::{ops::RangeInclusive, sync::Arc};
 
     #[test]
     fn common_history_provider() {
@@ -444,5 +454,84 @@ mod tests {
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw.block_hash(0).unwrap();
         provider.block_hash(0).unwrap();
+    }
+
+    #[test]
+    fn insert_block_with_prune_modes() {
+        let chain_spec = ChainSpecBuilder::mainnet().build();
+        let db = create_test_rw_db();
+        let factory = ProviderFactory::new(db, Arc::new(chain_spec));
+
+        let mut block_rlp = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0").as_slice();
+        let block = SealedBlock::decode(&mut block_rlp).unwrap();
+
+        {
+            let provider = factory.provider_rw().unwrap();
+            assert_matches!(provider.insert_block(block.clone(), None, None), Ok(_));
+            assert_matches!(
+                provider.transaction_sender(0), Ok(Some(sender))
+                if sender == block.body[0].recover_signer().unwrap()
+            );
+            assert_matches!(provider.transaction_id(block.body[0].hash), Ok(Some(0)));
+        }
+
+        {
+            let provider = factory.provider_rw().unwrap();
+            assert_matches!(
+                provider.insert_block(
+                    block.clone(),
+                    None,
+                    Some(&PruneModes {
+                        sender_recovery: Some(PruneMode::Full),
+                        transaction_lookup: Some(PruneMode::Full),
+                        ..PruneModes::none()
+                    })
+                ),
+                Ok(_)
+            );
+            assert_matches!(provider.transaction_sender(0), Ok(None));
+            assert_matches!(provider.transaction_id(block.body[0].hash), Ok(None));
+        }
+    }
+
+    #[test]
+    fn get_take_block_transaction_range_recover_senders() {
+        let chain_spec = ChainSpecBuilder::mainnet().build();
+        let db = create_test_rw_db();
+        let factory = ProviderFactory::new(db, Arc::new(chain_spec));
+
+        let mut rng = generators::rng();
+        let block = random_block(&mut rng, 0, None, Some(3), None);
+
+        let tx_ranges: Vec<RangeInclusive<TxNumber>> = vec![0..=0, 1..=1, 2..=2, 0..=1, 1..=2];
+        for range in tx_ranges {
+            let provider = factory.provider_rw().unwrap();
+
+            assert_matches!(provider.insert_block(block.clone(), None, None), Ok(_));
+
+            let senders = provider.get_or_take::<tables::TxSenders, true>(range.clone());
+            assert_eq!(
+                senders,
+                Ok(range
+                    .clone()
+                    .map(|tx_number| (
+                        tx_number,
+                        block.body[tx_number as usize].recover_signer().unwrap()
+                    ))
+                    .collect())
+            );
+
+            let db_senders = provider.senders_by_tx_range(range);
+            assert_eq!(db_senders, Ok(vec![]));
+
+            let result = provider.get_take_block_transaction_range::<true>(0..=0);
+            assert_eq!(
+                result,
+                Ok(vec![(
+                    0,
+                    block.body.iter().cloned().map(|tx| tx.into_ecrecovered().unwrap()).collect()
+                )])
+            )
+        }
     }
 }

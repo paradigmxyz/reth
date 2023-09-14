@@ -7,7 +7,8 @@ use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::Result;
 use reth_primitives::{
     Address, Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders,
-    ChainSpec, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, H256,
+    ChainSpec, Header, PruneModes, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    H256,
 };
 use std::ops::RangeInclusive;
 
@@ -242,13 +243,29 @@ pub trait BlockWriter: Send + Sync {
         &self,
         block: SealedBlock,
         senders: Option<Vec<Address>>,
+        prune_modes: Option<&PruneModes>,
     ) -> Result<StoredBlockBodyIndices>;
 
-    /// Append blocks and insert its post state.
-    /// This will insert block data to all related tables and will update pipeline progress.
+    /// Appends a batch of sealed blocks to the blockchain, including sender information, and
+    /// updates the post-state.
+    ///
+    /// Inserts the blocks into the database and updates the state with
+    /// provided `PostState`.
+    ///
+    /// # Parameters
+    ///
+    /// - `blocks`: Vector of `SealedBlockWithSenders` instances to append.
+    /// - `state`: Post-state information to update after appending.
+    /// - `prune_modes`: Optional pruning configuration.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or an error if any operation fails.
+
     fn append_blocks_with_post_state(
         &self,
         blocks: Vec<SealedBlockWithSenders>,
         state: PostState,
+        prune_modes: Option<&PruneModes>,
     ) -> Result<()>;
 }

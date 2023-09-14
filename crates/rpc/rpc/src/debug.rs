@@ -12,7 +12,9 @@ use crate::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_primitives::{Account, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H256};
+use reth_primitives::{
+    Account, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H160, H256,
+};
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderBox};
 use reth_revm::{
     database::{State, SubState},
@@ -25,7 +27,6 @@ use reth_revm::{
 use reth_rlp::{Decodable, Encodable};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::{
-    state::StateOverride,
     trace::geth::{
         BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
         GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult,
@@ -248,9 +249,10 @@ where
                             .inner
                             .eth_api
                             .spawn_with_call_at(call, at, overrides, move |db, env| {
-                                inspect(db, env, &mut inspector)?;
-                                let frame =
-                                    inspector.into_geth_builder().geth_call_traces(call_config);
+                                let (res, _) = inspect(db, env, &mut inspector)?;
+                                let frame = inspector
+                                    .into_geth_builder()
+                                    .geth_call_traces(call_config, res.result.gas_used());
                                 Ok(frame.into())
                             })
                             .await?;
@@ -340,8 +342,7 @@ where
         &self,
         bundles: Vec<Bundle>,
         state_context: Option<StateContext>,
-        opts: Option<GethDebugTracingOptions>,
-        state_override: Option<StateOverride>,
+        opts: Option<GethDebugTracingCallOptions>,
     ) -> EthResult<Vec<GethTrace>> {
         if bundles.is_empty() {
             return Err(EthApiError::InvalidParams(String::from("bundles are empty.")))
@@ -356,8 +357,9 @@ where
             self.inner.eth_api.block_by_id(target_block),
         )?;
 
+        let opts = opts.unwrap_or_default();
         let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-        let tracing_options = opts.unwrap_or_default();
+        let GethDebugTracingCallOptions { tracing_options, mut state_overrides, .. } = opts;
         let gas_limit = self.inner.eth_api.call_gas_limit();
 
         // we're essentially replaying the transactions in the block here, hence we need the state
@@ -399,18 +401,22 @@ where
                 while let Some(bundle) = bundles.next() {
                     //let mut result = Vec::with_capacity(bundle.len());
                     let Bundle { transactions, block_override } = bundle;
-                    let overrides =
-                        EvmOverrides::new(state_override.clone(), block_override.map(Box::new));
+
+                    let block_overrides = block_override.map(Box::new);
 
                     let mut transactions = transactions.into_iter().peekable();
                     while let Some(tx) = transactions.next() {
+                        // apply state overrides only once, before the first transaction
+                        let state_overrides = state_overrides.take();
+                        let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
+
                         let env = prepare_call_env(
                             cfg.clone(),
                             block_env.clone(),
                             tx,
                             gas_limit,
                             &mut db,
-                            overrides.clone(),
+                            overrides,
                         )?;
 
                         let (trace, state) = this.trace_transaction(
@@ -420,7 +426,9 @@ where
                             &mut db,
                         )?;
 
-                        if bundles.peek().is_none() && transactions.peek().is_none() {
+                        // If there is more transactions, commit the database
+                        // If there is no transactions, but more bundles, commit to the database too
+                        if transactions.peek().is_some() || bundles.peek().is_some() {
                             db.commit(state);
                         }
                         results.push(trace);
@@ -467,7 +475,9 @@ where
 
                         let (res, _) = inspect(db, env, &mut inspector)?;
 
-                        let frame = inspector.into_geth_builder().geth_call_traces(call_config);
+                        let frame = inspector
+                            .into_geth_builder()
+                            .geth_call_traces(call_config, res.result.gas_used());
 
                         return Ok((frame.into(), res.state))
                     }
@@ -538,7 +548,9 @@ where
         let (to_db_service, rx) = mpsc::channel(1);
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let this = self.clone();
-        self.inner.task_spawner.spawn(Box::pin(async move {
+        // this needs to be on a blocking task because it only does blocking work besides waiting
+        // for db requests
+        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
             this.js_trace_db_service_task(at, rx, ready_tx, db).await
         }));
         // wait for initialization
@@ -637,6 +649,217 @@ where
         }
 
         Ok(res.into())
+    }
+
+    async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_account_range(
+        &self,
+        _block_number: BlockNumberOrTag,
+        _start: Bytes,
+        _max_results: u64,
+        _nocode: bool,
+        _nostorage: bool,
+        _incompletes: bool,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_block_profile(&self, _file: String, _seconds: u64) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_chaindb_compact(&self) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_chaindb_property(&self, _property: String) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_cpu_profile(&self, _file: String, _seconds: u64) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_db_ancient(&self, _kind: String, _number: u64) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_db_ancients(&self) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_db_get(&self, _key: String) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_dump_block(&self, _number: BlockId) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_free_os_memory(&self) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_freeze_client(&self, _node: String) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_gc_stats(&self) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_get_accessible_state(
+        &self,
+        _from: BlockNumberOrTag,
+        _to: BlockNumberOrTag,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_get_modified_accounts_by_hash(
+        &self,
+        _start_hash: H256,
+        _end_hash: H256,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_get_modified_accounts_by_number(
+        &self,
+        _start_number: u64,
+        _end_number: u64,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_go_trace(&self, _file: String, _seconds: u64) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_intermediate_roots(
+        &self,
+        _block_hash: H256,
+        _opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_mem_stats(&self) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_mutex_profile(&self, _file: String, _nsec: u64) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_preimage(&self, _hash: H256) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_print_block(&self, _number: u64) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_seed_hash(&self, _number: u64) -> RpcResult<H256> {
+        Ok(Default::default())
+    }
+
+    async fn debug_set_block_profile_rate(&self, _rate: u64) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_set_gc_percent(&self, _v: i32) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_set_head(&self, _number: u64) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_set_mutex_profile_fraction(&self, _rate: i32) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_set_trie_flush_interval(&self, _interval: String) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_stacks(&self) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_standard_trace_bad_block_to_file(
+        &self,
+        _block: BlockNumberOrTag,
+        _opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_standard_trace_block_to_file(
+        &self,
+        _block: BlockNumberOrTag,
+        _opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_start_cpu_profile(&self, _file: String) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_start_go_trace(&self, _file: String) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_stop_cpu_profile(&self) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_stop_go_trace(&self) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_storage_range_at(
+        &self,
+        _block_hash: H256,
+        _tx_idx: usize,
+        _contract_address: H160,
+        _key_start: H256,
+        _max_result: u64,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_trace_bad_block(
+        &self,
+        _block_hash: H256,
+        _opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_verbosity(&self, _level: usize) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_vmodule(&self, _pattern: String) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_write_block_profile(&self, _file: String) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_write_mem_profile(&self, _file: String) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn debug_write_mutex_profile(&self, _file: String) -> RpcResult<()> {
+        Ok(())
     }
 
     /// Handler for `debug_getRawBlock`
@@ -754,12 +977,10 @@ where
         &self,
         bundles: Vec<Bundle>,
         state_context: Option<StateContext>,
-        opts: Option<GethDebugTracingOptions>,
-        state_override: Option<StateOverride>,
+        opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<GethTrace>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(DebugApi::debug_trace_call_many(self, bundles, state_context, opts, state_override)
-            .await?)
+        Ok(DebugApi::debug_trace_call_many(self, bundles, state_context, opts).await?)
     }
 }
 

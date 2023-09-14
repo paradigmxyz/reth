@@ -1,4 +1,6 @@
-use crate::{EngineApiError, EngineApiMessageVersion, EngineApiResult};
+use crate::{
+    payload::PayloadOrAttributes, EngineApiError, EngineApiMessageVersion, EngineApiResult,
+};
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
@@ -8,8 +10,10 @@ use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hard
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadEnvelope, ForkchoiceUpdated,
-    PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration, CAPABILITIES,
+    CancunPayloadFields, ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadEnvelopeV2,
+    ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    ForkchoiceUpdated, PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration,
+    CAPABILITIES,
 };
 use reth_rpc_types_compat::engine::payload::{convert_to_execution_payloadv1,convert_to_execution_payload};
 use reth_tasks::TaskSpawner;
@@ -68,27 +72,40 @@ where
     /// Caution: This should not accept the `withdrawals` field
     pub async fn new_payload_v1(
         &self,
-        payload: ExecutionPayload,
+        payload: ExecutionPayloadV1,
     ) -> EngineApiResult<PayloadStatus> {
-        self.validate_withdrawals_presence(
-            EngineApiMessageVersion::V1,
-            payload.timestamp.as_u64(),
-            payload.withdrawals.is_some(),
-        )?;
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+        let payload = ExecutionPayload::from(payload);
+        let payload_or_attrs = PayloadOrAttributes::from_execution_payload(&payload, None);
+        self.validate_version_specific_fields(EngineApiMessageVersion::V1, &payload_or_attrs)?;
+        Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_newpayloadv2>
     pub async fn new_payload_v2(
         &self,
-        payload: ExecutionPayload,
+        payload: ExecutionPayloadV2,
     ) -> EngineApiResult<PayloadStatus> {
-        self.validate_withdrawals_presence(
-            EngineApiMessageVersion::V2,
-            payload.timestamp.as_u64(),
-            payload.withdrawals.is_some(),
-        )?;
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+        let payload = ExecutionPayload::from(payload);
+        let payload_or_attrs = PayloadOrAttributes::from_execution_payload(&payload, None);
+        self.validate_version_specific_fields(EngineApiMessageVersion::V2, &payload_or_attrs)?;
+        Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
+    }
+
+    /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
+    pub async fn new_payload_v3(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<H256>,
+        parent_beacon_block_root: H256,
+    ) -> EngineApiResult<PayloadStatus> {
+        let payload = ExecutionPayload::from(payload);
+        let payload_or_attrs =
+            PayloadOrAttributes::from_execution_payload(&payload, Some(parent_beacon_block_root));
+        self.validate_version_specific_fields(EngineApiMessageVersion::V3, &payload_or_attrs)?;
+
+        let cancun_fields = CancunPayloadFields { versioned_hashes, parent_beacon_block_root };
+
+        Ok(self.inner.beacon_consensus.new_payload(payload, Some(cancun_fields)).await?)
     }
 
     /// Sends a message to the beacon consensus engine to update the fork choice _without_
@@ -103,11 +120,7 @@ where
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(ref attrs) = payload_attrs {
-            self.validate_withdrawals_presence(
-                EngineApiMessageVersion::V1,
-                attrs.timestamp.as_u64(),
-                attrs.withdrawals.is_some(),
-            )?;
+            self.validate_version_specific_fields(EngineApiMessageVersion::V1, &attrs.into())?;
         }
         Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
     }
@@ -122,11 +135,7 @@ where
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(ref attrs) = payload_attrs {
-            self.validate_withdrawals_presence(
-                EngineApiMessageVersion::V2,
-                attrs.timestamp.as_u64(),
-                attrs.withdrawals.is_some(),
-            )?;
+            self.validate_version_specific_fields(EngineApiMessageVersion::V2, &attrs.into())?;
         }
         Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
     }
@@ -141,11 +150,7 @@ where
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(ref attrs) = payload_attrs {
-            self.validate_withdrawals_presence(
-                EngineApiMessageVersion::V3,
-                attrs.timestamp.as_u64(),
-                attrs.withdrawals.is_some(),
-            )?;
+            self.validate_version_specific_fields(EngineApiMessageVersion::V3, &attrs.into())?;
         }
 
         Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
@@ -160,7 +165,10 @@ where
     ///
     /// Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
-    pub async fn get_payload_v1(&self, payload_id: PayloadId) -> EngineApiResult<ExecutionPayload> {
+    pub async fn get_payload_v1(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<ExecutionPayloadV1> {
         Ok(self
             .inner
             .payload_store
@@ -177,10 +185,10 @@ where
     ///
     /// Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
-    async fn get_payload_v2(
+    pub async fn get_payload_v2(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<ExecutionPayloadEnvelope> {
+    ) -> EngineApiResult<ExecutionPayloadEnvelopeV2> {
         Ok(self
             .inner
             .payload_store
@@ -188,6 +196,44 @@ where
             .await
             .ok_or(EngineApiError::UnknownPayload)?
             .map(|payload| (*payload).clone().into_v2_payload())?)
+    }
+
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_getpayloadv3>
+    ///
+    /// Note:
+    /// > Provider software MAY stop the corresponding build process after serving this call.
+    pub async fn get_payload_v3(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<ExecutionPayloadEnvelopeV3> {
+        // First we fetch the payload attributes to check the timestamp
+        let attributes = self
+            .inner
+            .payload_store
+            .payload_attributes(payload_id)
+            .await
+            .ok_or(EngineApiError::UnknownPayload)??;
+
+        // From the Engine API spec:
+        // <https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/cancun.md#specification-2>
+        //
+        // 1. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
+        //    the built payload does not fall within the time frame of the Cancun fork.
+        if !self.inner.chain_spec.is_cancun_activated_at_timestamp(attributes.timestamp) {
+            return Err(EngineApiError::UnsupportedFork)
+        }
+
+        // Now resolve the payload
+        Ok(self
+            .inner
+            .payload_store
+            .resolve(payload_id)
+            .await
+            .ok_or(EngineApiError::UnknownPayload)?
+            .map(|payload| (*payload).clone().into_v3_payload())?)
     }
 
     /// Returns the execution payload bodies by the range starting at `start`, containing `count`
@@ -221,8 +267,18 @@ where
 
             let mut result = Vec::with_capacity(count as usize);
 
-            let end = start.saturating_add(count);
-            for num in start..end {
+            // -1 so range is inclusive
+            let mut end = start.saturating_add(count - 1);
+
+            // > Client software MUST NOT return trailing null values if the request extends past the current latest known block.
+            // truncate the end if it's greater than the last block
+            if let Ok(best_block) = inner.provider.best_block_number() {
+                if end > best_block {
+                    end = best_block;
+                }
+            }
+
+            for num in start..=end {
                 let block_result = inner.provider.block(BlockHashOrNumber::Number(num));
                 match block_result {
                     Ok(block) => {
@@ -354,6 +410,78 @@ where
 
         Ok(())
     }
+
+    /// Validate the presence of the `parentBeaconBlockRoot` field according to the payload
+    /// timestamp.
+    ///
+    /// After Cancun, `parentBeaconBlockRoot` field must be [Some].
+    /// Before Cancun, `parentBeaconBlockRoot` field must be [None].
+    ///
+    /// If the engine API message version is V1 or V2, and the payload attribute's timestamp is
+    /// post-Cancun, then this will return [EngineApiError::NoParentBeaconBlockRootPostCancun].
+    ///
+    /// If the engine API message version is V3, but the `parentBeaconBlockRoot` is [None], then
+    /// this will return [EngineApiError::NoParentBeaconBlockRootPostCancun].
+    ///
+    /// If the payload attribute's timestamp is before the Cancun fork and the engine API message
+    /// version is V3, then this will return [EngineApiError::UnsupportedFork].
+    ///
+    /// This implements the following Engine API spec rules:
+    ///
+    /// 1. Client software **MUST** check that provided set of parameters and their fields strictly
+    ///    matches the expected one and return `-32602: Invalid params` error if this check fails.
+    ///    Any field having `null` value **MUST** be considered as not provided.
+    ///
+    /// 2. Client software **MUST** return `-38005: Unsupported fork` error if the
+    ///    `payloadAttributes` is set and the `payloadAttributes.timestamp` does not fall within the
+    ///    time frame of the Cancun fork.
+    fn validate_parent_beacon_block_root_presence(
+        &self,
+        version: EngineApiMessageVersion,
+        timestamp: u64,
+        has_parent_beacon_block_root: bool,
+    ) -> EngineApiResult<()> {
+        let is_cancun = self.inner.chain_spec.fork(Hardfork::Cancun).active_at_timestamp(timestamp);
+
+        match version {
+            EngineApiMessageVersion::V1 | EngineApiMessageVersion::V2 => {
+                if has_parent_beacon_block_root {
+                    return Err(EngineApiError::ParentBeaconBlockRootNotSupportedBeforeV3)
+                }
+                if is_cancun {
+                    return Err(EngineApiError::NoParentBeaconBlockRootPostCancun)
+                }
+            }
+            EngineApiMessageVersion::V3 => {
+                if !has_parent_beacon_block_root {
+                    return Err(EngineApiError::NoParentBeaconBlockRootPostCancun)
+                } else if !is_cancun {
+                    return Err(EngineApiError::UnsupportedFork)
+                }
+            }
+        };
+
+        Ok(())
+    }
+
+    /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
+    /// and the message version.
+    fn validate_version_specific_fields(
+        &self,
+        version: EngineApiMessageVersion,
+        payload_or_attrs: &PayloadOrAttributes<'_>,
+    ) -> EngineApiResult<()> {
+        self.validate_withdrawals_presence(
+            version,
+            payload_or_attrs.timestamp(),
+            payload_or_attrs.withdrawals().is_some(),
+        )?;
+        self.validate_parent_beacon_block_root_presence(
+            version,
+            payload_or_attrs.timestamp(),
+            payload_or_attrs.parent_beacon_block_root().is_some(),
+        )
+    }
 }
 
 #[async_trait]
@@ -364,25 +492,29 @@ where
     /// Handler for `engine_newPayloadV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
-    async fn new_payload_v1(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus> {
+    async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV1");
         Ok(EngineApi::new_payload_v1(self, payload).await?)
     }
 
     /// Handler for `engine_newPayloadV2`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_newpayloadv2>
-    async fn new_payload_v2(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus> {
+    async fn new_payload_v2(&self, payload: ExecutionPayloadV2) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV2");
         Ok(EngineApi::new_payload_v2(self, payload).await?)
     }
 
+    /// Handler for `engine_newPayloadV3`
+    /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
     async fn new_payload_v3(
         &self,
-        _payload: ExecutionPayload,
-        _versioned_hashes: Vec<H256>,
-        _parent_beacon_block_root: H256,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<H256>,
+        parent_beacon_block_root: H256,
     ) -> RpcResult<PayloadStatus> {
-        Err(jsonrpsee_types::error::ErrorCode::MethodNotFound.into())
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV3");
+        Ok(EngineApi::new_payload_v3(self, payload, versioned_hashes, parent_beacon_block_root)
+            .await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV1`
@@ -414,10 +546,11 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
     async fn fork_choice_updated_v3(
         &self,
-        _fork_choice_state: ForkchoiceState,
-        _payload_attributes: Option<PayloadAttributes>,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
-        Err(jsonrpsee_types::error::ErrorCode::MethodNotFound.into())
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
+        Ok(EngineApi::fork_choice_updated_v3(self, fork_choice_state, payload_attributes).await?)
     }
 
     /// Handler for `engine_getPayloadV1`
@@ -431,7 +564,7 @@ where
     ///
     /// Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
-    async fn get_payload_v1(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayload> {
+    async fn get_payload_v1(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV1");
         Ok(EngineApi::get_payload_v1(self, payload_id).await?)
     }
@@ -445,13 +578,23 @@ where
     ///
     /// Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
-    async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelope> {
+    async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelopeV2> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV2");
         Ok(EngineApi::get_payload_v2(self, payload_id).await?)
     }
 
-    async fn get_payload_v3(&self, _payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelope> {
-        Err(jsonrpsee_types::error::ErrorCode::MethodNotFound.into())
+    /// Handler for `engine_getPayloadV3`
+    ///
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_getpayloadv3>
+    ///
+    /// Note:
+    /// > Provider software MAY stop the corresponding build process after serving this call.
+    async fn get_payload_v3(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelopeV3> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadV3");
+        Ok(EngineApi::get_payload_v3(self, payload_id).await?)
     }
 
     /// Handler for `engine_getPayloadBodiesByHashV1`
@@ -631,6 +774,26 @@ mod tests {
             let expected = blocks
                 .iter()
                 .cloned()
+                // filter anything after the second missing range to ensure we don't expect trailing
+                // `None`s
+                .filter(|b| !second_missing_range.contains(&b.number))
+                .map(|b| {
+                    if first_missing_range.contains(&b.number) {
+                        None
+                    } else {
+                        Some(b.unseal().into())
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let res = api.get_payload_bodies_by_range(start, count).await.unwrap();
+            assert_eq!(res, expected);
+
+            let expected = blocks
+                .iter()
+                .cloned()
+                // ensure we still return trailing `None`s here because by-hash will not be aware
+                // of the missing block's number, and cannot compare it to the current best block
                 .map(|b| {
                     if first_missing_range.contains(&b.number) ||
                         second_missing_range.contains(&b.number)
@@ -641,9 +804,6 @@ mod tests {
                     }
                 })
                 .collect::<Vec<_>>();
-
-            let res = api.get_payload_bodies_by_range(start, count).await.unwrap();
-            assert_eq!(res, expected);
 
             let hashes = blocks.iter().map(|b| b.hash()).collect();
             let res = api.get_payload_bodies_by_hash(hashes).unwrap();

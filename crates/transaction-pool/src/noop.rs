@@ -4,13 +4,16 @@
 //! to be generic over it.
 
 use crate::{
-    error::PoolError, traits::PendingTransactionListenerKind, AllPoolTransactions,
-    AllTransactionsEvents, BestTransactions, BlockInfo, NewTransactionEvent, PoolResult, PoolSize,
-    PoolTransaction, PooledTransaction, PropagatedTransactions, TransactionEvents,
-    TransactionOrigin, TransactionPool, TransactionValidationOutcome, TransactionValidator,
-    ValidPoolTransaction,
+    blobstore::BlobStoreError,
+    error::PoolError,
+    traits::{GetPooledTransactionLimit, TransactionListenerKind},
+    validate::ValidTransaction,
+    AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPooledTransaction,
+    NewTransactionEvent, PoolResult, PoolSize, PoolTransaction, PropagatedTransactions,
+    TransactionEvents, TransactionOrigin, TransactionPool, TransactionValidationOutcome,
+    TransactionValidator, ValidPoolTransaction,
 };
-use reth_primitives::{Address, TxHash};
+use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash};
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
@@ -24,7 +27,7 @@ pub struct NoopTransactionPool;
 
 #[async_trait::async_trait]
 impl TransactionPool for NoopTransactionPool {
-    type Transaction = PooledTransaction;
+    type Transaction = EthPooledTransaction;
 
     fn pool_size(&self) -> PoolSize {
         Default::default()
@@ -35,6 +38,7 @@ impl TransactionPool for NoopTransactionPool {
             last_seen_block_hash: Default::default(),
             last_seen_block_number: 0,
             pending_basefee: 0,
+            pending_blob_fee: None,
         }
     }
 
@@ -80,12 +84,19 @@ impl TransactionPool for NoopTransactionPool {
 
     fn pending_transactions_listener_for(
         &self,
-        _kind: PendingTransactionListenerKind,
+        _kind: TransactionListenerKind,
     ) -> Receiver<TxHash> {
         mpsc::channel(1).1
     }
 
     fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
+        mpsc::channel(1).1
+    }
+
+    fn new_transactions_listener_for(
+        &self,
+        _kind: TransactionListenerKind,
+    ) -> Receiver<NewTransactionEvent<Self::Transaction>> {
         mpsc::channel(1).1
     }
 
@@ -105,6 +116,14 @@ impl TransactionPool for NoopTransactionPool {
         &self,
         _max: usize,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
+    fn get_pooled_transaction_elements(
+        &self,
+        _tx_hashes: Vec<TxHash>,
+        _limit: GetPooledTransactionLimit,
+    ) -> Vec<PooledTransactionsElement> {
         vec![]
     }
 
@@ -162,6 +181,27 @@ impl TransactionPool for NoopTransactionPool {
     fn unique_senders(&self) -> HashSet<Address> {
         Default::default()
     }
+
+    fn get_blob(&self, _tx_hash: TxHash) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
+        Ok(None)
+    }
+
+    fn get_all_blobs(
+        &self,
+        _tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError> {
+        Ok(vec![])
+    }
+
+    fn get_all_blobs_exact(
+        &self,
+        tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
+        if tx_hashes.is_empty() {
+            return Ok(vec![])
+        }
+        Err(BlobStoreError::MissingSidecar(tx_hashes[0]))
+    }
 }
 
 /// A [`TransactionValidator`] that does nothing.
@@ -184,7 +224,7 @@ impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
         TransactionValidationOutcome::Valid {
             balance: Default::default(),
             state_nonce: 0,
-            transaction,
+            transaction: ValidTransaction::Valid(transaction),
             propagate: match origin {
                 TransactionOrigin::External => true,
                 TransactionOrigin::Local => self.propagate_local,
@@ -212,16 +252,16 @@ impl<T> Default for MockTransactionValidator<T> {
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("Can't insert transaction into the noop pool that does nothing.")]
 pub struct NoopInsertError {
-    tx: PooledTransaction,
+    tx: EthPooledTransaction,
 }
 
 impl NoopInsertError {
-    fn new(tx: PooledTransaction) -> Self {
+    fn new(tx: EthPooledTransaction) -> Self {
         Self { tx }
     }
 
     /// Returns the transaction that failed to be inserted.
-    pub fn into_inner(self) -> PooledTransaction {
+    pub fn into_inner(self) -> EthPooledTransaction {
         self.tx
     }
 }

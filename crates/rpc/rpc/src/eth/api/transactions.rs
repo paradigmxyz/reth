@@ -14,7 +14,8 @@ use crate::{
 use async_trait::async_trait;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, Header,
+    constants::eip4844::blob_fee,
+    Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
     IntoRecoveredTransaction, Receipt, SealedBlock,
     TransactionKind::{Call, Create},
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, H256, U128, U256, U64,
@@ -400,20 +401,28 @@ where
     }
 
     async fn transaction_receipt(&self, hash: H256) -> EthResult<Option<TransactionReceipt>> {
-        self.on_blocking_task(|this| async move {
-            let (tx, meta) = match this.provider().transaction_by_hash_with_meta(hash)? {
-                Some((tx, meta)) => (tx, meta),
-                None => return Ok(None),
-            };
+        let result = self
+            .on_blocking_task(|this| async move {
+                let (tx, meta) = match this.provider().transaction_by_hash_with_meta(hash)? {
+                    Some((tx, meta)) => (tx, meta),
+                    None => return Ok(None),
+                };
 
-            let receipt = match this.provider().receipt_by_hash(hash)? {
-                Some(recpt) => recpt,
-                None => return Ok(None),
-            };
+                let receipt = match this.provider().receipt_by_hash(hash)? {
+                    Some(recpt) => recpt,
+                    None => return Ok(None),
+                };
 
-            this.build_transaction_receipt(tx, meta, receipt).await.map(Some)
-        })
-        .await
+                Ok(Some((tx, meta, receipt)))
+            })
+            .await?;
+
+        let (tx, meta, receipt) = match result {
+            Some((tx, meta, receipt)) => (tx, meta, receipt),
+            None => return Ok(None),
+        };
+
+        self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
     }
 
     async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256> {
@@ -496,7 +505,7 @@ where
         let recovered =
             signed_tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
 
-        let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered);
+        let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered.into());
 
         // submit the transaction to the pool with a `Local` origin
         let hash = self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
@@ -859,7 +868,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
 
     let mut res_receipt = TransactionReceipt {
         transaction_hash: Some(meta.tx_hash),
-        transaction_index: Some(U256::from(meta.index)),
+        transaction_index: meta.index.into(),
         block_hash: Some(meta.block_hash),
         block_number: Some(U256::from(meta.block_number)),
         from: transaction.signer(),
@@ -874,6 +883,10 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         state_root: None,
         logs_bloom: receipt.bloom_slow(),
         status_code: if receipt.success { Some(U64::from(1)) } else { Some(U64::from(0)) },
+
+        // EIP-4844 fields
+        blob_gas_price: meta.excess_blob_gas.map(blob_fee),
+        blob_gas_used: transaction.transaction.blob_gas_used().map(U128::from),
     };
 
     match tx.transaction.kind() {

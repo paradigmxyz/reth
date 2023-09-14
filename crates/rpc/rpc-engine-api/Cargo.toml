@@ -34,4 +34,4 @@ reth-rlp.workspace = true
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
-assert_matches = "1.5.0"
+assert_matches.workspace = true

@@ -46,6 +46,25 @@ pub mod providers {
     pub use reth_provider::*;
 }
 
+/// Re-exported from `reth_primitives`.
+pub mod primitives {
+    pub use reth_primitives::*;
+}
+
+/// Re-exported from `reth_beacon_consensus`.
+pub mod beacon_consensus {
+    pub use reth_beacon_consensus::*;
+}
+/// Re-exported from `reth_blockchain_tree`.
+pub mod blockchain_tree {
+    pub use reth_blockchain_tree::*;
+}
+
+/// Re-exported from `reth_revm`.
+pub mod revm {
+    pub use reth_revm::*;
+}
+
 /// Re-exported from `reth_tasks`.
 pub mod tasks {
     pub use reth_tasks::*;
@@ -79,7 +98,14 @@ pub mod rpc {
     pub mod api {
         pub use reth_rpc_api::*;
     }
+    /// Re-exported from `reth_rpc::eth`.
+    pub mod eth {
+        pub use reth_rpc::eth::*;
+    }
 }
 
 #[cfg(all(feature = "jemalloc", unix))]
 use jemallocator as _;
+
+// for rendering diagrams
+use aquamarine as _;

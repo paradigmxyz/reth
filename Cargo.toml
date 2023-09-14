@@ -48,6 +48,7 @@ members = [
     "crates/rpc/rpc-types-compat",
     "examples",
     "examples/additional-rpc-namespace-in-cli",
+    "examples/rpc-db",
 ]
 default-members = ["bin/reth"]
 
@@ -56,15 +57,13 @@ default-members = ["bin/reth"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.8"
 edition = "2021"
 rust-version = "1.70" # Remember to update .clippy.toml and README.md
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
-exclude = [
-    ".github/",
-]
+exclude = [".github/"]
 
 # Like release, but with full debug symbols. Useful for e.g. `perf`.
 [profile.debug-fast]
@@ -77,14 +76,8 @@ lto = "fat"
 codegen-units = 1
 incremental = false
 
-[patch.crates-io]
-revm = { git = "https://github.com/bluealloy/revm/", branch = "release/v25" }
-revm-primitives = { git = "https://github.com/bluealloy/revm/", branch = "release/v25" }
-
 [workspace.dependencies]
 ## reth
-revm = { version = "3" }
-revm-primitives = "1.1"
 reth = { path = "./bin/reth" }
 reth-primitives = { path = "./crates/primitives" }
 reth-interfaces = { path = "./crates/interfaces" }
@@ -102,26 +95,42 @@ reth-transaction-pool = { path = "./crates/transaction-pool" }
 reth-tasks = { path = "./crates/tasks" }
 reth-network = { path = "./crates/net/network" }
 reth-network-api = { path = "./crates/net/network-api" }
-reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat"}
+reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat" }
 
+revm = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
+revm-precompile = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
 
 ## eth
-ethers-core = { version = "2.0.8", default-features = false }
-ethers-providers = { version = "2.0.8", default-features = false }
-ethers-signers = { version = "2.0.8", default-features = false }
-ethers-middleware = { version = "2.0.8", default-features = false }
+ethers-core = { version = "2.0", default-features = false }
+ethers-providers = { version = "2.0", default-features = false }
+ethers-signers = { version = "2.0", default-features = false }
+ethers-middleware = { version = "2.0", default-features = false }
+
+discv5 = { git = "https://github.com/sigp/discv5", rev = "d2e30e04ee62418b9e57278cee907c02b99d5bd1" }
+igd = { git = "https://github.com/stevefan1999-personal/rust-igd", rev = "c2d1f83eb1612a462962453cb0703bc93258b173" }
+
+## js
+boa_engine = "0.17"
+boa_gc = "0.17"
 
 ## misc
+aquamarine = "0.3"
 bytes = "1.4"
+bitflags = "2.3"
 tracing = "0.1.0"
 tracing-appender = "0.2"
-thiserror = "1.0.37"
+thiserror = "1.0"
 serde_json = "1.0.94"
 serde = { version = "1.0", default-features = false }
 rand = "0.8.5"
 strum = "0.25"
 rayon = "1.7"
 itertools = "0.11"
+parking_lot = "0.12"
+metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
+hex-literal = "0.4"
 
 ### proc-macros
 proc-macro2 = "1.0"
@@ -139,15 +148,34 @@ pin-project = "1.0.12"
 futures-util = "0.3.25"
 
 ## json
-jsonrpsee = { version = "0.19" }
-jsonrpsee-core = { version = "0.19" }
-jsonrpsee-types = { version = "0.19" }
+jsonrpsee = { version = "0.20" }
+jsonrpsee-core = { version = "0.20" }
+jsonrpsee-types = { version = "0.20" }
 
 ## crypto
-secp256k1 = { version = "0.27.0", default-features = false, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { version = "0.27.0", default-features = false, features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
+enr = { version = "0.9", default-features = false, features = ["k256"] }
 # for eip-4844
-c-kzg = { git = "https://github.com/ethereum/c-kzg-4844" }
+c-kzg = { git = "https://github.com/ethereum/c-kzg-4844", rev = "f5f6f863d475847876a2bd5ee252058d37c3a15d" }
+
+## config
+confy = "0.5"
+toml = "0.7"
 
 ### misc-testing
-proptest = "1.0"
 arbitrary = "1.1"
+assert_matches = "1.5.0"
+
+proptest = "1.0"
+proptest-derive = "0.4"
+serial_test = "2"
+
+[patch.crates-io]
+revm = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
+revm-precompile = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }

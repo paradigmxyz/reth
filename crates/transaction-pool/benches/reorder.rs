@@ -1,5 +1,5 @@
 use criterion::{
-    black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
+    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
 use proptest::{
     prelude::*,
@@ -78,7 +78,7 @@ fn txpool_reordering_bench<T: BenchTxPool>(
     );
     group.bench_function(group_id, |b| {
         b.iter_with_setup(setup, |(mut txpool, new_txs)| {
-            black_box({
+            {
                 // Reorder with new base fee
                 let bigger_base_fee = base_fee.saturating_add(10);
                 txpool.reorder(bigger_base_fee);
@@ -88,8 +88,9 @@ fn txpool_reordering_bench<T: BenchTxPool>(
                     txpool.add_transaction(new_tx);
                 }
                 let smaller_base_fee = base_fee.saturating_sub(10);
-                txpool.reorder(smaller_base_fee);
-            })
+                txpool.reorder(smaller_base_fee)
+            };
+            std::hint::black_box(());
         });
     });
 }
@@ -177,7 +178,7 @@ mod implementations {
 
     impl PartialOrd for MockTransactionWithPriority {
         fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-            self.priority.partial_cmp(&other.priority)
+            Some(self.cmp(other))
         }
     }
 

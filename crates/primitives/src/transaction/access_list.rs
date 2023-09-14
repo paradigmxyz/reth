@@ -48,15 +48,17 @@ pub struct AccessList(
 impl AccessList {
     /// Converts the list into a vec, expected by revm
     pub fn flattened(self) -> Vec<(Address, Vec<U256>)> {
-        self.0
-            .into_iter()
-            .map(|item| {
-                (
-                    item.address,
-                    item.storage_keys.into_iter().map(|slot| U256::from_be_bytes(slot.0)).collect(),
-                )
-            })
-            .collect()
+        self.flatten().collect()
+    }
+
+    /// Returns an iterator over the list's addresses and storage keys.
+    pub fn flatten(self) -> impl Iterator<Item = (Address, Vec<U256>)> {
+        self.0.into_iter().map(|item| {
+            (
+                item.address,
+                item.storage_keys.into_iter().map(|slot| U256::from_be_bytes(slot.0)).collect(),
+            )
+        })
     }
 
     /// Calculates a heuristic for the in-memory size of the [AccessList].

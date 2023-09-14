@@ -20,14 +20,16 @@ use reth_interfaces::{
     test_utils::{NoopFullBlockClient, TestConsensus},
 };
 use reth_payload_builder::test_utils::spawn_test_payload_service;
-use reth_primitives::{BlockNumber, ChainSpec, PruneModes, H256, U256};
+use reth_primitives::{BlockNumber, ChainSpec, PruneBatchSizes, PruneModes, H256, U256};
 use reth_provider::{
     providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockExecutor, ExecutorFactory,
     ProviderFactory, StateProvider,
 };
-use reth_prune::{BatchSizes, Pruner};
+use reth_prune::Pruner;
 use reth_revm::Factory;
-use reth_rpc_types::engine::{ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
+use reth_rpc_types::engine::{
+    CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
+};
 use reth_stages::{
     sets::DefaultStages, stages::HeaderSyncMode, test_utils::TestStages, ExecOutput, Pipeline,
     StageError,
@@ -66,21 +68,24 @@ impl<DB> TestEnv<DB> {
         Self { db, tip_rx, engine_handle }
     }
 
-    pub async fn send_new_payload(
+    pub async fn send_new_payload<T: Into<ExecutionPayload>>(
         &self,
-        payload: ExecutionPayload,
+        payload: T,
+        cancun_fields: Option<CancunPayloadFields>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
-        self.engine_handle.new_payload(payload).await
+        self.engine_handle.new_payload(payload.into(), cancun_fields).await
     }
 
     /// Sends the `ExecutionPayload` message to the consensus engine and retries if the engine
     /// is syncing.
-    pub async fn send_new_payload_retry_on_syncing(
+    pub async fn send_new_payload_retry_on_syncing<T: Into<ExecutionPayload>>(
         &self,
-        payload: ExecutionPayload,
+        payload: T,
+        cancun_fields: Option<CancunPayloadFields>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
+        let payload: ExecutionPayload = payload.into();
         loop {
-            let result = self.send_new_payload(payload.clone()).await?;
+            let result = self.send_new_payload(payload.clone(), cancun_fields.clone()).await?;
             if !result.is_syncing() {
                 return Ok(result)
             }
@@ -458,7 +463,7 @@ where
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
         let (canon_state_notification_sender, _) = tokio::sync::broadcast::channel(3);
         let tree = ShareableBlockchainTree::new(
-            BlockchainTree::new(externals, canon_state_notification_sender, config)
+            BlockchainTree::new(externals, canon_state_notification_sender, config, None)
                 .expect("failed to create tree"),
         );
         let shareable_db = ProviderFactory::new(db.clone(), self.base_config.chain_spec.clone());
@@ -469,8 +474,8 @@ where
             db.clone(),
             self.base_config.chain_spec.clone(),
             5,
-            PruneModes::default(),
-            BatchSizes::default(),
+            PruneModes::none(),
+            PruneBatchSizes::default(),
         );
 
         let (mut engine, handle) = BeaconConsensusEngine::new(

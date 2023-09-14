@@ -161,9 +161,14 @@ impl SealedBlock {
         )
     }
 
+    /// Returns only the blob transactions, if any, from the block body.
+    pub fn blob_transactions(&self) -> Vec<&TransactionSigned> {
+        self.body.iter().filter(|tx| tx.is_eip4844()).collect()
+    }
+
     /// Expensive operation that recovers transaction signer. See [SealedBlockWithSenders].
     pub fn senders(&self) -> Option<Vec<Address>> {
-        self.body.iter().map(|tx| tx.recover_signer()).collect::<Option<Vec<Address>>>()
+        TransactionSigned::recover_signers(&self.body, self.body.len())
     }
 
     /// Seal sealed block with recovered transaction senders.

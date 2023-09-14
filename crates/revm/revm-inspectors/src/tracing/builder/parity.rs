@@ -7,7 +7,7 @@ use reth_primitives::{Address, U64};
 use reth_rpc_types::{trace::parity::*, TransactionInfo};
 use revm::{
     db::DatabaseRef,
-    interpreter::opcode::spec_opcode_gas,
+    interpreter::opcode::{self, spec_opcode_gas},
     primitives::{AccountInfo, ExecutionResult, ResultAndState, SpecId, KECCAK_EMPTY},
 };
 use std::collections::{HashSet, VecDeque};
@@ -39,6 +39,26 @@ impl ParityTraceBuilder {
     /// Returns a list of all addresses that appeared as callers.
     pub fn callers(&self) -> HashSet<Address> {
         self.nodes.iter().map(|node| node.trace.caller).collect()
+    }
+
+    /// Manually the gas used of the root trace.
+    ///
+    /// The root trace's gasUsed should mirror the actual gas used by the transaction.
+    ///
+    /// This allows setting it manually by consuming the execution result's gas for example.
+    #[inline]
+    pub fn set_transaction_gas_used(&mut self, gas_used: u64) {
+        if let Some(node) = self.nodes.first_mut() {
+            node.trace.gas_used = gas_used;
+        }
+    }
+
+    /// Convenience function for [ParityTraceBuilder::set_transaction_gas_used] that consumes the
+    /// type.
+    #[inline]
+    pub fn with_transaction_gas_used(mut self, gas_used: u64) -> Self {
+        self.set_transaction_gas_used(gas_used);
+        self
     }
 
     /// Returns the trace addresses of all call nodes in the set
@@ -136,6 +156,7 @@ impl ParityTraceBuilder {
         res: ExecutionResult,
         trace_types: &HashSet<TraceType>,
     ) -> TraceResults {
+        let gas_used = res.gas_used();
         let output = match res {
             ExecutionResult::Success { output, .. } => output.into_data(),
             ExecutionResult::Revert { output, .. } => output,
@@ -144,12 +165,18 @@ impl ParityTraceBuilder {
 
         let (trace, vm_trace, state_diff) = self.into_trace_type_traces(trace_types);
 
-        TraceResults {
+        let mut trace = TraceResults {
             output: output.into(),
             trace: trace.unwrap_or_default(),
             vm_trace,
             state_diff,
-        }
+        };
+
+        // we're setting the gas used of the root trace explicitly to the gas used of the execution
+        // result
+        trace.set_root_trace_gas_used(gas_used);
+
+        trace
     }
 
     /// Consumes the inspector and returns the trace results according to the configured trace
@@ -289,10 +316,7 @@ impl ParityTraceBuilder {
     ///
     /// does not have the code fields filled in
     pub fn vm_trace(&self) -> VmTrace {
-        match self.nodes.get(0) {
-            Some(current) => self.make_vm_trace(current),
-            None => VmTrace { code: Default::default(), ops: Vec::new() },
-        }
+        self.nodes.first().map(|node| self.make_vm_trace(node)).unwrap_or_default()
     }
 
     /// Returns a VM trace without the code filled in
@@ -366,16 +390,91 @@ impl ParityTraceBuilder {
             val: storage_change.value,
         });
 
-        let maybe_memory = match step.memory.len() {
-            0 => None,
-            _ => {
-                Some(MemoryDelta { off: step.memory_size, data: step.memory.data().clone().into() })
+        let maybe_memory = if step.memory.is_empty() {
+            None
+        } else {
+            Some(MemoryDelta { off: step.memory_size, data: step.memory.data().clone().into() })
+        };
+
+        // Calculate the stack items at this step
+        let push_stack = {
+            let step_op = step.op.u8();
+            let show_stack: usize;
+            if (opcode::PUSH0..=opcode::PUSH32).contains(&step_op) {
+                show_stack = 1;
+            } else if (opcode::SWAP1..=opcode::SWAP16).contains(&step_op) {
+                show_stack = (step_op - opcode::SWAP1) as usize + 2;
+            } else if (opcode::DUP1..=opcode::DUP16).contains(&step_op) {
+                show_stack = (step_op - opcode::DUP1) as usize + 2;
+            } else {
+                show_stack = match step_op {
+                    opcode::CALLDATALOAD |
+                    opcode::SLOAD |
+                    opcode::MLOAD |
+                    opcode::CALLDATASIZE |
+                    opcode::LT |
+                    opcode::GT |
+                    opcode::DIV |
+                    opcode::SDIV |
+                    opcode::SAR |
+                    opcode::AND |
+                    opcode::EQ |
+                    opcode::CALLVALUE |
+                    opcode::ISZERO |
+                    opcode::ADD |
+                    opcode::EXP |
+                    opcode::CALLER |
+                    opcode::SHA3 |
+                    opcode::SUB |
+                    opcode::ADDRESS |
+                    opcode::GAS |
+                    opcode::MUL |
+                    opcode::RETURNDATASIZE |
+                    opcode::NOT |
+                    opcode::SHR |
+                    opcode::SHL |
+                    opcode::EXTCODESIZE |
+                    opcode::SLT |
+                    opcode::OR |
+                    opcode::NUMBER |
+                    opcode::PC |
+                    opcode::TIMESTAMP |
+                    opcode::BALANCE |
+                    opcode::SELFBALANCE |
+                    opcode::MULMOD |
+                    opcode::ADDMOD |
+                    opcode::BASEFEE |
+                    opcode::BLOCKHASH |
+                    opcode::BYTE |
+                    opcode::XOR |
+                    opcode::ORIGIN |
+                    opcode::CODESIZE |
+                    opcode::MOD |
+                    opcode::SIGNEXTEND |
+                    opcode::GASLIMIT |
+                    opcode::DIFFICULTY |
+                    opcode::SGT |
+                    opcode::GASPRICE |
+                    opcode::MSIZE |
+                    opcode::EXTCODEHASH |
+                    opcode::SMOD |
+                    opcode::CHAINID |
+                    opcode::COINBASE => 1,
+                    _ => 0,
+                }
+            };
+            let mut push_stack = step.push_stack.clone().unwrap_or_default();
+            for idx in (0..show_stack).rev() {
+                if step.stack.len() > idx {
+                    push_stack.push(step.stack.peek(idx).unwrap_or_default())
+                }
             }
+            push_stack
         };
 
         let maybe_execution = Some(VmExecutedOperation {
             used: step.gas_remaining,
-            push: step.push_stack.clone().unwrap_or_default(),
+            push: push_stack,
             mem: maybe_memory,
             store: maybe_storage,
         });

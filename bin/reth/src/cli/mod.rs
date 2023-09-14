@@ -10,14 +10,14 @@ use crate::{
     stage, test_vectors,
     version::{LONG_VERSION, SHORT_VERSION},
 };
-use clap::{ArgAction, Args, Parser, Subcommand};
+use clap::{value_parser, ArgAction, Args, Parser, Subcommand, ValueEnum};
 use reth_primitives::ChainSpec;
 use reth_tracing::{
     tracing::{metadata::LevelFilter, Level, Subscriber},
     tracing_subscriber::{filter::Directive, registry::LookupSpan, EnvFilter},
     BoxedLayer, FileWorkerGuard,
 };
-use std::sync::Arc;
+use std::{fmt, fmt::Display, sync::Arc};
 
 pub mod config;
 pub mod ext;
@@ -43,13 +43,28 @@ pub struct Cli<Ext: RethCliExt = ()> {
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        global = true,
         verbatim_doc_comment,
         default_value = "mainnet",
         value_parser = genesis_value_parser,
         global = true,
     )]
     chain: Arc<ChainSpec>,
+
+    /// Add a new instance of a node.
+    ///
+    /// Configures the ports of the node to avoid conflicts with the defaults.
+    /// This is useful for running multiple nodes on the same machine.
+    ///
+    /// Max number of instances is 200. It is chosen in a way so that it's not possible to have
+    /// port numbers that conflict with each other.
+    ///
+    /// Changes to the following port numbers:
+    /// - DISCOVERY_PORT: default + `instance` - 1
+    /// - AUTH_PORT: default + `instance` * 100 - 100
+    /// - HTTP_RPC_PORT: default - `instance` + 1
+    /// - WS_RPC_PORT: default + `instance` * 2 - 2
+    #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
+    instance: u16,
 
     #[clap(flatten)]
     logs: Logs,
@@ -86,7 +101,8 @@ impl<Ext: RethCliExt> Cli<Ext> {
     /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
     /// that all logs are flushed to disk.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
-        let mut layers = vec![reth_tracing::stdout(self.verbosity.directive())];
+        let mut layers =
+            vec![reth_tracing::stdout(self.verbosity.directive(), &self.logs.color.to_string())];
         let guard = self.logs.layer()?.map(|(layer, guard)| {
             layers.push(layer);
             guard
@@ -163,6 +179,16 @@ pub struct Logs {
     /// The filter to use for logs written to the log file.
     #[arg(long = "log.filter", value_name = "FILTER", global = true, default_value = "error")]
     filter: String,
+
+    /// Sets whether or not the formatter emits ANSI terminal escape codes for colors and other
+    /// text formatting.
+    #[arg(
+        long,
+        value_name = "COLOR",
+        global = true,
+        default_value_t = ColorMode::Always
+    )]
+    color: ColorMode,
 }
 
 impl Logs {
@@ -224,10 +250,37 @@ impl Verbosity {
     }
 }
 
+/// The color mode for the cli.
+#[derive(Debug, Copy, Clone, ValueEnum, Eq, PartialEq)]
+pub enum ColorMode {
+    /// Colors on
+    Always,
+    /// Colors on
+    Auto,
+    /// Colors off
+    Never,
+}
+
+impl Display for ColorMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ColorMode::Always => write!(f, "always"),
+            ColorMode::Auto => write!(f, "auto"),
+            ColorMode::Never => write!(f, "never"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn parse_color_mode() {
+        let reth = Cli::<()>::try_parse_from(["reth", "node", "--color", "always"]).unwrap();
+        assert_eq!(reth.logs.color, ColorMode::Always);
+    }
 
     /// Tests that the help message is parsed correctly. This ensures that clap args are configured
     /// correctly and no conflicts are introduced via attributes that would result in a panic at
@@ -263,5 +316,14 @@ mod tests {
         reth.logs.log_directory = reth.logs.log_directory.join(reth.chain.chain.to_string());
         let log_dir = reth.logs.log_directory;
         assert!(log_dir.as_ref().ends_with("reth/logs/sepolia"), "{:?}", log_dir);
+    }
+
+    #[test]
+    fn override_trusted_setup_file() {
+        // We already have a test that asserts that this has been initialized,
+        // so we cheat a little bit and check that loading a random file errors.
+        let reth = Cli::<()>::try_parse_from(["reth", "node", "--trusted-setup-file", "README.md"])
+            .unwrap();
+        assert!(reth.run().is_err());
     }
 }

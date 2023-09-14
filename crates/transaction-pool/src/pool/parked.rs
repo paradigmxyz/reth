@@ -107,6 +107,12 @@ impl<T: ParkedOrd> ParkedPool<T> {
     pub(crate) fn is_empty(&self) -> bool {
         self.by_id.is_empty()
     }
+
+    /// Returns `true` if the transaction with the given id is already included in this pool.
+    #[cfg(test)]
+    pub(crate) fn contains(&self, id: &TransactionId) -> bool {
+        self.by_id.contains_key(id)
+    }
 }
 
 impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {

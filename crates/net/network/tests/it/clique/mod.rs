@@ -1,5 +1,5 @@
-pub mod clique;
 pub mod clique_middleware;
+mod geth;
 
-pub use clique::CliqueGethInstance;
 pub use clique_middleware::{CliqueError, CliqueMiddleware, CliqueMiddlewareError};
+pub use geth::CliqueGethInstance;

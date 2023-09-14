@@ -133,3 +133,11 @@ binary](../installation/binaries.md).
 If compilation fails with `error: linking with cc failed: exit code: 1`, try running `cargo clean`.
 
 _(Thanks to Sigma Prime for this section from [their Lighthouse book](https://lighthouse-book.sigmaprime.io/installation.html)!)_
+
+### Bus error (WSL2)
+
+In WSL 2 on Windows, the default virtual disk size is set to 1TB. 
+
+You must increase the allocated disk size for your WSL2 instance before syncing reth.
+
+You can follow the instructions here: [how to expand the size of your WSL2 virtual hard disk.](https://learn.microsoft.com/en-us/windows/wsl/disk-space#how-to-expand-the-size-of-your-wsl-2-virtual-hard-disk)

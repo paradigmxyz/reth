@@ -61,6 +61,8 @@ pub enum BlockExecutionError {
 
 impl BlockExecutionError {
     /// Returns `true` if the error is fatal.
+    ///
+    /// This represents an unrecoverable database related error.
     pub fn is_fatal(&self) -> bool {
         matches!(self, Self::CanonicalCommit { .. } | Self::CanonicalRevert { .. })
     }

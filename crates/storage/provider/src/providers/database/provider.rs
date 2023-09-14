@@ -17,21 +17,24 @@ use reth_db::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
         ShardedKey, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals,
     },
-    table::Table,
+    table::{Table, TableRow},
     tables,
     transaction::{DbTx, DbTxMut},
     BlockNumberList, DatabaseError,
 };
-use reth_interfaces::Result;
+use reth_interfaces::{
+    executor::{BlockExecutionError, BlockValidationError},
+    Result,
+};
 use reth_primitives::{
     keccak256,
     stage::{StageCheckpoint, StageId},
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainInfo, ChainSpec, Hardfork, Head, Header, PruneCheckpoint, PrunePart, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta, TransactionSigned,
-    TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256,
-    U256,
+    ChainInfo, ChainSpec, Hardfork, Head, Header, PruneCheckpoint, PruneModes, PrunePart, Receipt,
+    SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
+    TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber,
+    Withdrawal, H256, U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
@@ -401,7 +404,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     }
 
     /// Get requested blocks transaction with signer
-    fn get_take_block_transaction_range<const TAKE: bool>(
+    pub(crate) fn get_take_block_transaction_range<const TAKE: bool>(
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> Result<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>> {
@@ -428,8 +431,67 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             .map(|(id, tx)| (id, tx.into()))
             .collect::<Vec<(u64, TransactionSigned)>>();
 
-        let senders =
+        let mut senders =
             self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)?;
+
+        // Recover senders manually if not found in db
+        // SAFETY: Transactions are always guaranteed to be in the database whereas
+        // senders might be pruned.
+        if senders.len() != transactions.len() {
+            senders.reserve(transactions.len() - senders.len());
+            // Find all missing senders, their corresponding tx numbers and indexes to the original
+            // `senders` vector at which the recovered senders will be inserted.
+            let mut missing_senders = Vec::with_capacity(transactions.len() - senders.len());
+            {
+                let mut senders = senders.iter().peekable();
+
+                // `transactions` contain all entries. `senders` contain _some_ of the senders for
+                // these transactions. Both are sorted and indexed by `TxNumber`.
+                //
+                // The general idea is to iterate on both `transactions` and `senders`, and advance
+                // the `senders` iteration only if it matches the current `transactions` entry's
+                // `TxNumber`. Otherwise, add the transaction to the list of missing senders.
+                for (i, (tx_number, transaction)) in transactions.iter().enumerate() {
+                    if let Some((sender_tx_number, _)) = senders.peek() {
+                        if sender_tx_number == tx_number {
+                            // If current sender's `TxNumber` matches current transaction's
+                            // `TxNumber`, advance the senders iterator.
+                            senders.next();
+                        } else {
+                            // If current sender's `TxNumber` doesn't match current transaction's
+                            // `TxNumber`, add it to missing senders.
+                            missing_senders.push((i, tx_number, transaction));
+                        }
+                    } else {
+                        // If there's no more senders left, but we're still iterating over
+                        // transactions, add them to missing senders
+                        missing_senders.push((i, tx_number, transaction));
+                    }
+                }
+            }
+
+            // Recover senders
+            let recovered_senders = TransactionSigned::recover_signers(
+                missing_senders.iter().map(|(_, _, tx)| *tx).collect::<Vec<_>>(),
+                missing_senders.len(),
+            )
+            .ok_or(BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError))?;
+
+            // Insert recovered senders along with tx numbers at the corresponding indexes to the
+            // original `senders` vector
+            for ((i, tx_number, _), sender) in missing_senders.into_iter().zip(recovered_senders) {
+                // Insert will put recovered senders at necessary positions and shift the rest
+                senders.insert(i, (*tx_number, sender));
+            }
+
+            // Debug assertions which are triggered during the test to ensure that all senders are
+            // present and sorted
+            debug_assert_eq!(senders.len(), transactions.len(), "missing one or more senders");
+            debug_assert!(
+                senders.iter().tuple_windows().all(|(a, b)| a.0 < b.0),
+                "senders not sorted"
+            );
+        }
 
         if TAKE {
             // Remove TxHashNumber
@@ -621,80 +683,61 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     }
 
     /// Prune the table for the specified pre-sorted key iterator.
+    ///
     /// Returns number of rows pruned.
     pub fn prune_table_with_iterator<T: Table>(
         &self,
         keys: impl IntoIterator<Item = T::Key>,
-    ) -> std::result::Result<usize, DatabaseError> {
-        self.prune_table_with_iterator_in_batches::<T>(keys, usize::MAX, |_| {})
-    }
-
-    /// Prune the table for the specified pre-sorted key iterator, calling `chunk_callback` after
-    /// every `batch_size` pruned rows.
-    ///
-    /// Returns number of rows pruned.
-    pub fn prune_table_with_iterator_in_batches<T: Table>(
-        &self,
-        keys: impl IntoIterator<Item = T::Key>,
-        batch_size: usize,
-        mut batch_callback: impl FnMut(usize),
-    ) -> std::result::Result<usize, DatabaseError> {
+        limit: usize,
+        mut delete_callback: impl FnMut(TableRow<T>),
+    ) -> std::result::Result<(usize, bool), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut deleted = 0;
 
-        for key in keys {
-            if cursor.seek_exact(key)?.is_some() {
+        let mut keys = keys.into_iter();
+        for key in &mut keys {
+            let row = cursor.seek_exact(key.clone())?;
+            if let Some(row) = row {
                 cursor.delete_current()?;
+                deleted += 1;
+                delete_callback(row);
             }
-            deleted += 1;
 
-            if deleted % batch_size == 0 {
-                batch_callback(batch_size);
+            if deleted == limit {
+                break
             }
         }
 
-        if deleted % batch_size != 0 {
-            batch_callback(deleted % batch_size);
-        }
-
-        Ok(deleted)
+        Ok((deleted, keys.next().is_none()))
     }
 
-    /// Prune the table for the specified key range, calling `chunk_callback` after every
-    /// `batch_size` pruned rows with number of total unique keys and total rows pruned. For dupsort
-    /// tables, these numbers will be different as one key can correspond to multiple rows.
+    /// Prune the table for the specified key range.
     ///
-    /// Returns number of rows pruned.
-    pub fn prune_table_with_range_in_batches<T: Table>(
+    /// Returns number of total unique keys and total rows pruned pruned.
+    pub fn prune_table_with_range<T: Table>(
         &self,
-        keys: impl RangeBounds<T::Key>,
-        batch_size: usize,
-        mut batch_callback: impl FnMut(usize, usize),
-    ) -> std::result::Result<(), DatabaseError> {
+        keys: impl RangeBounds<T::Key> + Clone + Debug,
+        limit: usize,
+        mut skip_filter: impl FnMut(&TableRow<T>) -> bool,
+        mut delete_callback: impl FnMut(TableRow<T>),
+    ) -> std::result::Result<(usize, bool), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut walker = cursor.walk_range(keys)?;
-        let mut deleted_keys = 0;
-        let mut deleted_rows = 0;
-        let mut previous_key = None;
+        let mut deleted = 0;
 
-        while let Some((key, _)) = walker.next().transpose()? {
-            walker.delete_current()?;
-            deleted_rows += 1;
-            if previous_key.as_ref().map(|previous_key| previous_key != &key).unwrap_or(true) {
-                deleted_keys += 1;
-                previous_key = Some(key);
+        while let Some(row) = walker.next().transpose()? {
+            if !skip_filter(&row) {
+                walker.delete_current()?;
+                deleted += 1;
+                delete_callback(row);
             }
 
-            if deleted_rows % batch_size == 0 {
-                batch_callback(deleted_keys, deleted_rows);
+            if deleted == limit {
+                break
             }
         }
 
-        if deleted_rows % batch_size != 0 {
-            batch_callback(deleted_keys, deleted_rows);
-        }
-
-        Ok(())
+        Ok((deleted, walker.next().transpose()?.is_none()))
     }
 
     /// Load shard and remove it. If list is empty, last shard was full or
@@ -935,14 +978,24 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
         }
     }
 
+    /// Returns the block with matching number from database.
+    ///
+    /// If the header for this block is not found, this returns `None`.
+    /// If the header is found, but the transactions either do not exist, or are not indexed, this
+    /// will return None.
     fn block(&self, id: BlockHashOrNumber) -> Result<Option<Block>> {
         if let Some(number) = self.convert_hash_or_number(id)? {
             if let Some(header) = self.header_by_number(number)? {
                 let withdrawals = self.withdrawals_by_block(number.into(), header.timestamp)?;
                 let ommers = self.ommers(number.into())?.unwrap_or_default();
-                let transactions = self
-                    .transactions_by_block(number.into())?
-                    .ok_or(ProviderError::BlockBodyIndicesNotFound(number))?;
+                // If the body indices are not found, this means that the transactions either do not
+                // exist in the database yet, or they do exit but are not indexed.
+                // If they exist but are not indexed, we don't have enough
+                // information to return the block anyways, so we return `None`.
+                let transactions = match self.transactions_by_block(number.into())? {
+                    Some(transactions) => transactions,
+                    None => return Ok(None),
+                };
 
                 return Ok(Some(Block { header, body: transactions, ommers, withdrawals }))
             }
@@ -983,7 +1036,9 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
     /// **NOTE: The transactions have invalid hashes, since they would need to be calculated on the
     /// spot, and we want fast querying.**
     ///
-    /// Returns `None` if block is not found.
+    /// If the header for this block is not found, this returns `None`.
+    /// If the header is found, but the transactions either do not exist, or are not indexed, this
+    /// will return None.
     fn block_with_senders(&self, block_number: BlockNumber) -> Result<Option<BlockWithSenders>> {
         let header = self
             .header_by_number(block_number)?
@@ -993,9 +1048,16 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
         let withdrawals = self.withdrawals_by_block(block_number.into(), header.timestamp)?;
 
         // Get the block body
-        let body = self
-            .block_body_indices(block_number)?
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(block_number))?;
+        //
+        // If the body indices are not found, this means that the transactions either do not exist
+        // in the database yet, or they do exit but are not indexed. If they exist but are not
+        // indexed, we don't have enough information to return the block anyways, so we return
+        // `None`.
+        let body = match self.block_body_indices(block_number)? {
+            Some(body) => body,
+            None => return Ok(None),
+        };
+
         let tx_range = body.tx_num_range();
 
         let (transactions, senders) = if tx_range.is_empty() {
@@ -1077,6 +1139,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
                                 block_hash,
                                 block_number,
                                 base_fee: header.base_fee_per_gas,
+                                excess_blob_gas: header.excess_blob_gas,
                             };
 
                             return Ok(Some((transaction, meta)))
@@ -1868,6 +1931,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
         &self,
         block: SealedBlock,
         senders: Option<Vec<Address>>,
+        prune_modes: Option<&PruneModes>,
     ) -> Result<StoredBlockBodyIndices> {
         let block_number = block.number;
         self.tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
@@ -1908,21 +1972,33 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
         let tx_iter = if Some(block.body.len()) == senders_len {
             block.body.into_iter().zip(senders.unwrap()).collect::<Vec<(_, _)>>()
         } else {
-            block
-                .body
-                .into_iter()
-                .map(|tx| {
-                    let signer = tx.recover_signer();
-                    (tx, signer.unwrap_or_default())
-                })
-                .collect::<Vec<(_, _)>>()
+            let senders = TransactionSigned::recover_signers(&block.body, block.body.len()).ok_or(
+                BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError),
+            )?;
+            debug_assert_eq!(senders.len(), block.body.len(), "missing one or more senders");
+            block.body.into_iter().zip(senders).collect()
         };
 
         for (transaction, sender) in tx_iter {
             let hash = transaction.hash();
-            self.tx.put::<tables::TxSenders>(next_tx_num, sender)?;
+
+            if prune_modes
+                .and_then(|modes| modes.sender_recovery)
+                .filter(|prune_mode| prune_mode.is_full())
+                .is_none()
+            {
+                self.tx.put::<tables::TxSenders>(next_tx_num, sender)?;
+            }
+
             self.tx.put::<tables::Transactions>(next_tx_num, transaction.into())?;
-            self.tx.put::<tables::TxHashNumber>(hash, next_tx_num)?;
+
+            if prune_modes
+                .and_then(|modes| modes.transaction_lookup)
+                .filter(|prune_mode| prune_mode.is_full())
+                .is_none()
+            {
+                self.tx.put::<tables::TxHashNumber>(hash, next_tx_num)?;
+            }
             next_tx_num += 1;
         }
 
@@ -1949,6 +2025,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
         &self,
         blocks: Vec<SealedBlockWithSenders>,
         state: PostState,
+        prune_modes: Option<&PruneModes>,
     ) -> Result<()> {
         if blocks.is_empty() {
             return Ok(())
@@ -1966,7 +2043,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
         // Insert the blocks
         for block in blocks {
             let (block, senders) = block.into_components();
-            self.insert_block(block, Some(senders))?;
+            self.insert_block(block, Some(senders), prune_modes)?;
         }
 
         // Write state and changesets to the database.

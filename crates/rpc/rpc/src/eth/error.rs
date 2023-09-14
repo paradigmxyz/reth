@@ -8,7 +8,9 @@ use jsonrpsee::{
 use reth_primitives::{abi::decode_revert_reason, Address, Bytes, U256};
 use reth_revm::tracing::js::JsInspectorError;
 use reth_rpc_types::{error::EthRpcErrorCode, BlockError, CallInputError};
-use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolError};
+use reth_transaction_pool::error::{
+    Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolTransactionError,
+};
 use revm::primitives::{EVMError, ExecutionResult, Halt, OutOfGasError};
 use std::time::Duration;
 
@@ -381,10 +383,9 @@ impl From<reth_primitives::InvalidTransactionError> for RpcInvalidTransactionErr
                 RpcInvalidTransactionError::OldLegacyChainId
             }
             InvalidTransactionError::ChainIdMismatch => RpcInvalidTransactionError::InvalidChainId,
-            InvalidTransactionError::Eip2930Disabled => {
-                RpcInvalidTransactionError::TxTypeNotSupported
-            }
-            InvalidTransactionError::Eip1559Disabled => {
+            InvalidTransactionError::Eip2930Disabled |
+            InvalidTransactionError::Eip1559Disabled |
+            InvalidTransactionError::Eip4844Disabled => {
                 RpcInvalidTransactionError::TxTypeNotSupported
             }
             InvalidTransactionError::TxTypeNotSupported => {
@@ -468,6 +469,18 @@ pub enum RpcPoolError {
     ExceedsMaxInitCodeSize,
     #[error(transparent)]
     Invalid(#[from] RpcInvalidTransactionError),
+    /// Custom pool error
+    #[error("{0:?}")]
+    PoolTransactionError(Box<dyn PoolTransactionError>),
+    /// Eip-4844 related error
+    #[error(transparent)]
+    Eip4844(#[from] Eip4844PoolTransactionError),
+    /// Thrown if a conflicting transaction type is already in the pool
+    ///
+    /// In other words, thrown if a transaction with the same sender that violates the exclusivity
+    /// constraint (blob vs normal tx)
+    #[error("address already reserved")]
+    AddressAlreadyReserved,
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
@@ -491,6 +504,9 @@ impl From<PoolError> for RpcPoolError {
             PoolError::InvalidTransaction(_, err) => err.into(),
             PoolError::Other(_, err) => RpcPoolError::Other(err),
             PoolError::AlreadyImported(_) => RpcPoolError::AlreadyKnown,
+            PoolError::ExistingConflictingTransactionType(_, _, _) => {
+                RpcPoolError::AddressAlreadyReserved
+            }
         }
     }
 }
@@ -505,6 +521,11 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             }
             InvalidPoolTransactionError::OversizedData(_, _) => RpcPoolError::OversizedData,
             InvalidPoolTransactionError::Underpriced => RpcPoolError::Underpriced,
+            InvalidPoolTransactionError::Other(err) => RpcPoolError::PoolTransactionError(err),
+            InvalidPoolTransactionError::Eip4844(err) => RpcPoolError::Eip4844(err),
+            InvalidPoolTransactionError::Overdraft => {
+                RpcPoolError::Invalid(RpcInvalidTransactionError::InsufficientFunds)
+            }
         }
     }
 }

@@ -47,8 +47,12 @@ where
     /// Estimate gas needed for execution of the `request` at the [BlockId].
     pub async fn estimate_gas_at(&self, request: CallRequest, at: BlockId) -> EthResult<U256> {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
-        let state = self.state_at(at)?;
-        self.estimate_gas_with(cfg, block_env, request, state)
+
+        self.on_blocking_task(|this| async move {
+            let state = this.state_at(at)?;
+            this.estimate_gas_with(cfg, block_env, request, state)
+        })
+        .await
     }
 
     /// Executes the call request (`eth_call`) and returns the output
@@ -75,7 +79,7 @@ where
         &self,
         bundle: Bundle,
         state_context: Option<StateContext>,
-        state_override: Option<StateOverride>,
+        mut state_override: Option<StateOverride>,
     ) -> EthResult<Vec<EthCallResponse>> {
         let Bundle { transactions, block_override } = bundle;
         if transactions.is_empty() {
@@ -123,17 +127,21 @@ where
                 }
             }
 
-            let overrides = EvmOverrides::new(state_override.clone(), block_override.map(Box::new));
+            let block_overrides = block_override.map(Box::new);
 
             let mut transactions = transactions.into_iter().peekable();
             while let Some(tx) = transactions.next() {
+                // apply state overrides only once, before the first transaction
+                let state_overrides = state_override.take();
+                let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
+
                 let env = prepare_call_env(
                     cfg.clone(),
                     block_env.clone(),
                     tx,
                     gas_limit,
                     &mut db,
-                    overrides.clone(),
+                    overrides,
                 )?;
                 let (res, _) = transact(&mut db, env)?;
 
@@ -332,7 +340,7 @@ where
 
     pub(crate) async fn create_access_list_at(
         &self,
-        request: CallRequest,
+        mut request: CallRequest,
         at: Option<BlockId>,
     ) -> EthResult<AccessList> {
         let block_id = at.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
@@ -365,7 +373,8 @@ where
             get_contract_address(from, nonce).into()
         };
 
-        let initial = request.access_list.clone().unwrap_or_default();
+        // can consume the list since we're not using the request anymore
+        let initial = request.access_list.take().unwrap_or_default();
 
         let precompiles = get_precompiles(&env.cfg.spec_id);
         let mut inspector = AccessListInspector::new(initial, from, to, precompiles);

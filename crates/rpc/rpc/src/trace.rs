@@ -110,7 +110,7 @@ where
             .eth_api
             .evm_env_at(block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)))
             .await?;
-        let tx = tx_env_with_recovered(&tx);
+        let tx = tx_env_with_recovered(&tx.into_ecrecovered_transaction());
         let env = Env { cfg, block, tx };
 
         let config = tracing_config(&trace_types);
@@ -259,16 +259,19 @@ where
             .spawn_trace_transaction_in_block(
                 hash,
                 TracingInspectorConfig::default_parity(),
-                move |tx_info, inspector, _, _| {
-                    let traces =
-                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+                move |tx_info, inspector, res, _| {
+                    let traces = inspector
+                        .with_transaction_gas_used(res.result.gas_used())
+                        .into_parity_builder()
+                        .into_localized_transaction_traces(tx_info);
                     Ok(traces)
                 },
             )
             .await
     }
 
-    /// Executes all transactions of a block and returns a list of callback results.
+    /// Executes all transactions of a block and returns a list of callback results invoked for each
+    /// transaction in the block.
     ///
     /// This
     /// 1. fetches all transactions of the block
@@ -363,9 +366,11 @@ where
         let traces = self.trace_block_with(
             block_id,
             TracingInspectorConfig::default_parity(),
-            |tx_info, inspector, _, _, _| {
-                let traces =
-                    inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+            |tx_info, inspector, res, _, _| {
+                let traces = inspector
+                    .with_transaction_gas_used(res.gas_used())
+                    .into_parity_builder()
+                    .into_localized_transaction_traces(tx_info);
                 Ok(traces)
             },
         );

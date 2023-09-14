@@ -11,11 +11,14 @@ services:
       - '8545:8545' # rpc
       - '8551:8551' # engine
     volumes:
-      - rethdata:/root/.local/share/reth/mainnet/db
+      - rethdata_mainnet:/root/.local/share/reth/mainnet/db
+      - rethdata_sepolia:/root/.local/share/reth/sepolia/db
       - rethlogs:/root/rethlogs
       - ./jwttoken:/root/jwt:ro
+    # For Sepolia, replace `--chain mainnet` with `--chain sepolia`
     command: >
       node
+      --chain mainnet
       --metrics 0.0.0.0:9001
       --log.persistent
       --log.directory /root/rethlogs
@@ -41,7 +44,7 @@ services:
 
   grafana:
     restart: unless-stopped
-    image: grafana/grafana
+    image: grafana/grafana:10.1.0
     depends_on:
       - reth
       - prometheus
@@ -62,7 +65,9 @@ services:
              /run.sh"
     
 volumes:
-  rethdata:
+  rethdata_mainnet:
+    driver: local
+  rethdata_sepolia:
     driver: local
   rethlogs:
     driver: local
