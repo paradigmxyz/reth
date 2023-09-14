@@ -1,6 +1,6 @@
 use super::KeySet;
 use crate::NippyJarError;
-use ph::fmph::{Function, BuildConf};
+use ph::fmph::{BuildConf, Function};
 use serde::{
     de::Error as DeSerdeError, ser::Error as SerdeError, Deserialize, Deserializer, Serialize,
     Serializer,
@@ -24,7 +24,10 @@ impl KeySet for Fmph {
         &mut self,
         keys: &[T],
     ) -> Result<(), NippyJarError> {
-        self.function = Some(Function::from_slice_with_conf(keys, BuildConf { use_multiple_threads: true, ..Default::default() }));
+        self.function = Some(Function::from_slice_with_conf(
+            keys,
+            BuildConf { use_multiple_threads: true, ..Default::default() },
+        ));
         Ok(())
     }
 
@@ -99,8 +102,7 @@ impl<'de> Deserialize<'de> for Fmph {
         if let Some(buffer) = <Option<Vec<u8>>>::deserialize(deserializer)? {
             return Ok(Fmph {
                 function: Some(
-                    Function::read(&mut std::io::Cursor::new(buffer))
-                        .map_err(D::Error::custom)?,
+                    Function::read(&mut std::io::Cursor::new(buffer)).map_err(D::Error::custom)?,
                 ),
             })
         }

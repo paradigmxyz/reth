@@ -24,7 +24,10 @@ impl KeySet for GoFmph {
         &mut self,
         keys: &[T],
     ) -> Result<(), NippyJarError> {
-        self.function = Some(GOFunction::from_slice_with_conf(keys, GOBuildConf { use_multiple_threads: true, ..Default::default() }));
+        self.function = Some(GOFunction::from_slice_with_conf(
+            keys,
+            GOBuildConf { use_multiple_threads: true, ..Default::default() },
+        ));
         Ok(())
     }
 
