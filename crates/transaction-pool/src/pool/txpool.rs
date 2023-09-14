@@ -257,6 +257,16 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.all_transactions.contains(tx_hash)
     }
 
+    /// Returns `true` if the transaction with the given id is already included in the given subpool
+    #[cfg(test)]
+    pub(crate) fn subpool_contains(&self, subpool: SubPool, id: &TransactionId) -> bool {
+        match subpool {
+            SubPool::Queued => self.queued_pool.contains(id),
+            SubPool::Pending => self.pending_pool.contains(id),
+            SubPool::BaseFee => self.basefee_pool.contains(id),
+        }
+    }
+
     /// Returns the transaction for the given hash.
     pub(crate) fn get(
         &self,
@@ -376,13 +386,15 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
             Ok(InsertOk { transaction, move_to, replaced_tx, updates, .. }) => {
+                // replace the new tx and remove the replaced in the subpool(s)
                 self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
                 // Update inserted transactions metric
                 self.metrics.inserted_transactions.increment(1);
                 let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
 
-                // This transaction was moved to the pending pool.
                 let replaced = replaced_tx.map(|(tx, _)| tx);
+
+                // This transaction was moved to the pending pool.
                 let res = if move_to.is_pending() {
                     AddedTransaction::Pending(AddedPendingTransaction {
                         transaction,
@@ -675,6 +687,14 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Whether the pool is empty
     pub(crate) fn is_empty(&self) -> bool {
         self.all_transactions.is_empty()
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl TxPool<crate::test_utils::MockOrdering> {
+    /// Creates a mock instance for testing.
+    pub fn mock() -> Self {
+        Self::new(crate::test_utils::MockOrdering::default(), PoolConfig::default())
     }
 }
 
@@ -1698,7 +1718,7 @@ mod tests {
         let mut pool = AllTransactions::default();
         let tx = MockTransaction::eip1559().inc_price().inc_limit();
         let first = f.validated(tx.clone());
-        let _res = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce);
+        let _ = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce).unwrap();
         let replacement = f.validated(tx.rng_hash().inc_price());
         let InsertOk { updates, replaced_tx, .. } =
             pool.insert_tx(replacement.clone(), on_chain_balance, on_chain_nonce).unwrap();
@@ -1706,9 +1726,36 @@ mod tests {
         let replaced = replaced_tx.unwrap();
         assert_eq!(replaced.0.hash(), first.hash());
 
+        // ensure replaced tx is fully removed
         assert!(!pool.contains(first.hash()));
         assert!(pool.contains(replacement.hash()));
         assert_eq!(pool.len(), 1);
+    }
+
+    #[test]
+    fn insert_replace_txpool() {
+        let on_chain_balance = U256::ZERO;
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::mock();
+
+        let tx = MockTransaction::eip1559().inc_price().inc_limit();
+        let first = f.validated(tx.clone());
+        let first_added =
+            pool.add_transaction(first.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let replacement = f.validated(tx.rng_hash().inc_price());
+        let replacement_added =
+            pool.add_transaction(replacement.clone(), on_chain_balance, on_chain_nonce).unwrap();
+
+        // // ensure replaced tx removed
+        assert!(!pool.contains(first_added.hash()));
+        // but the replacement is still there
+        assert!(pool.subpool_contains(replacement_added.subpool(), replacement_added.id()));
+
+        assert!(pool.contains(replacement.hash()));
+        let size = pool.size();
+        assert_eq!(size.total, 1);
+        size.assert_invariants();
     }
 
     #[test]
