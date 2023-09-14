@@ -319,10 +319,9 @@ impl GethTraceBuilder {
             if pre_state.change_type != ChangeType::Create && pre_state != &post_state {
                 let mut pre_clone = pre_state.clone();
                 pre_clone.storage.get_or_insert_with(BTreeMap::new).retain(|_, v| !v.is_zero());
-                pre_clone.storage = match pre_clone.storage.as_ref().unwrap().len() {
-                    0 => None,
-                    _ => pre_clone.storage,
-                };
+                pre_clone.storage = (pre_clone.storage.as_ref().unwrap().len() > 0)
+                    .then_some(pre_clone.storage)
+                    .unwrap_or(None);
                 out_diff.pre.insert(*addr, pre_clone);
             }
         }
