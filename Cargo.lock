@@ -4137,6 +4137,7 @@ dependencies = [
  "ph",
  "proptest",
  "rand 0.8.5",
+ "reth-db",
  "reth-interfaces",
  "reth-primitives",
  "reth-rlp",

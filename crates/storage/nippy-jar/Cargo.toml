@@ -28,6 +28,7 @@ proptest = { workspace = true, optional = true }
 reth-primitives = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-rlp = { workspace = true }
+reth-db = { path = "../db", features = ["mdbx", "test-utils"] }
 rand = "0.8"
 criterion = "0.5"
 
