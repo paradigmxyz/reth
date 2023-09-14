@@ -1,15 +1,16 @@
 use super::KeySet;
 use crate::NippyJarError;
+use ph::fmph::{GOBuildConf, GOFunction};
 use serde::{
     de::Error as DeSerdeError, ser::Error as SerdeError, Deserialize, Deserializer, Serialize,
     Serializer,
 };
 use std::{clone::Clone, hash::Hash, marker::Sync};
 
-/// Wrapper struct for [`ph::fmph::GOFunction`]. Implementation of the following [paper](https://dl.acm.org/doi/10.1145/3596453).
+/// Wrapper struct for [`GOFunction`]. Implementation of the following [paper](https://dl.acm.org/doi/10.1145/3596453).
 #[derive(Default)]
 pub struct GoFmph {
-    function: Option<ph::fmph::GOFunction>,
+    function: Option<GOFunction>,
 }
 
 impl GoFmph {
@@ -23,7 +24,7 @@ impl KeySet for GoFmph {
         &mut self,
         keys: &[T],
     ) -> Result<(), NippyJarError> {
-        self.function = Some(ph::fmph::GOFunction::from(keys));
+        self.function = Some(GOFunction::from_slice_with_conf(keys, GOBuildConf { use_multiple_threads: true, ..Default::default() }));
         Ok(())
     }
 
@@ -98,7 +99,7 @@ impl<'de> Deserialize<'de> for GoFmph {
         if let Some(buffer) = <Option<Vec<u8>>>::deserialize(deserializer)? {
             return Ok(GoFmph {
                 function: Some(
-                    ph::fmph::GOFunction::read(&mut std::io::Cursor::new(buffer))
+                    GOFunction::read(&mut std::io::Cursor::new(buffer))
                         .map_err(D::Error::custom)?,
                 ),
             })

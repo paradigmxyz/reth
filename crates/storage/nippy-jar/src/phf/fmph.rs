@@ -1,15 +1,16 @@
 use super::KeySet;
 use crate::NippyJarError;
+use ph::fmph::{Function, BuildConf};
 use serde::{
     de::Error as DeSerdeError, ser::Error as SerdeError, Deserialize, Deserializer, Serialize,
     Serializer,
 };
 use std::{clone::Clone, hash::Hash, marker::Sync};
 
-/// Wrapper struct for [`ph::fmph::Function`]. Implementation of the following [paper](https://dl.acm.org/doi/10.1145/3596453).
+/// Wrapper struct for [`Function`]. Implementation of the following [paper](https://dl.acm.org/doi/10.1145/3596453).
 #[derive(Default)]
 pub struct Fmph {
-    function: Option<ph::fmph::Function>,
+    function: Option<Function>,
 }
 
 impl Fmph {
@@ -23,7 +24,7 @@ impl KeySet for Fmph {
         &mut self,
         keys: &[T],
     ) -> Result<(), NippyJarError> {
-        self.function = Some(ph::fmph::Function::from(keys));
+        self.function = Some(Function::from_slice_with_conf(keys, BuildConf { use_multiple_threads: true, ..Default::default() }));
         Ok(())
     }
 
@@ -98,7 +99,7 @@ impl<'de> Deserialize<'de> for Fmph {
         if let Some(buffer) = <Option<Vec<u8>>>::deserialize(deserializer)? {
             return Ok(Fmph {
                 function: Some(
-                    ph::fmph::Function::read(&mut std::io::Cursor::new(buffer))
+                    Function::read(&mut std::io::Cursor::new(buffer))
                         .map_err(D::Error::custom)?,
                 ),
             })
