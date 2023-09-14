@@ -352,10 +352,9 @@ impl GethTraceBuilder {
             }
 
             post_clone.storage.get_or_insert_with(BTreeMap::new).retain(|_, v| !v.is_zero());
-            post_clone.storage = match post_clone.storage.as_ref().unwrap().len() {
-                0 => None,
-                _ => post_clone.storage,
-            };
+            post_clone.storage = (post_clone.storage.as_ref().unwrap().len() > 0)
+                .then_some(post_clone.storage)
+                .unwrap_or(None);
             out_diff.post.insert(*addr, post_clone);
         }
 
