@@ -82,9 +82,9 @@ impl Serialize for Fmph {
             Some(f) => {
                 let mut v = Vec::with_capacity(f.write_bytes());
                 f.write(&mut v).map_err(S::Error::custom)?;
-                serializer.serialize_bytes(&v)
+                serializer.serialize_some(&v)
             }
-            None => serializer.serialize_bytes(&[]),
+            None => serializer.serialize_none(),
         }
     }
 }
@@ -94,17 +94,14 @@ impl<'de> Deserialize<'de> for Fmph {
     where
         D: Deserializer<'de>,
     {
-        let buffer = <&[u8]>::deserialize(deserializer)?;
-
-        if buffer.is_empty() {
-            return Ok(Fmph { function: None })
+        if let Some(buffer) = <Option<Vec<u8>>>::deserialize(deserializer)? {
+            return Ok(Fmph {
+                function: Some(
+                    ph::fmph::Function::read(&mut std::io::Cursor::new(buffer))
+                        .map_err(D::Error::custom)?,
+                ),
+            })
         }
-
-        Ok(Fmph {
-            function: Some(
-                ph::fmph::Function::read(&mut std::io::Cursor::new(buffer))
-                    .map_err(D::Error::custom)?,
-            ),
-        })
+        Ok(Fmph { function: None })
     }
 }

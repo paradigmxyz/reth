@@ -364,22 +364,39 @@ impl<'a> NippyJarCursor<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use rand::RngCore;
 
     use super::*;
+    use std::collections::HashSet;
 
     fn test_data() -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
-        ((0..10u8).map(|a| vec![2, a]).collect(), (10..20u8).map(|a| vec![3, a]).collect())
+        let mut rng = rand::thread_rng();
+        let mut vec: Vec<u8> = vec![0; 32];
+
+        (
+            (0..100)
+                .map(|_| {
+                    rng.fill_bytes(&mut vec[..]);
+                    vec.clone()
+                })
+                .collect(),
+            (0..100)
+                .map(|_| {
+                    rng.fill_bytes(&mut vec[..]);
+                    vec.clone()
+                })
+                .collect(),
+        )
     }
 
     #[test]
     fn phf() {
-        let (col1, _col2) = test_data();
-        let _num_columns = 2;
-        let _num_rows = col1.len() as u64;
+        let (col1, col2) = test_data();
+        let num_columns = 2;
+        let num_rows = col1.len() as u64;
         let file_path = tempfile::NamedTempFile::new().unwrap();
 
-        let mut nippy = NippyJar::new(_num_columns, file_path.path());
+        let mut nippy = NippyJar::new(num_columns, file_path.path());
         assert!(matches!(NippyJar::set_keys(&mut nippy, &col1), Err(NippyJarError::PHFMissing)));
 
         nippy = nippy.with_mphf();
@@ -389,21 +406,24 @@ mod tests {
         ));
         assert!(NippyJar::set_keys(&mut nippy, &col1).is_ok());
 
-        let mut indexes = Vec::with_capacity(col1.len());
-        for value in &col1 {
-            indexes.push(NippyJar::get_index(&nippy, value).unwrap().unwrap());
-        }
+        let collect_indexes = |nippy: &NippyJar| -> Vec<u64> {
+            col1.iter()
+                .map(|value| NippyJar::get_index(nippy, value.as_slice()).unwrap().unwrap())
+                .collect()
+        };
+
+        // Ensure all indexes are unique
+        let indexes = collect_indexes(&nippy);
+        assert_eq!(indexes.iter().collect::<HashSet<_>>().len(), indexes.len());
 
         // Ensure reproducibility
         assert!(NippyJar::set_keys(&mut nippy, &col1).is_ok());
-        let mut indexes_again = Vec::with_capacity(col1.len());
-        for value in &col1 {
-            indexes_again.push(NippyJar::get_index(&nippy, value).unwrap().unwrap());
-        }
-        assert_eq!(indexes, indexes_again);
+        assert_eq!(indexes, collect_indexes(&nippy));
 
-        // Ensure all indexes are different
-        assert_eq!(indexes.iter().collect::<HashSet<_>>().len(), indexes.len());
+        // Ensure that loaded phf provides the same function outputs
+        nippy.freeze(vec![col1.clone(), col2.clone()], num_rows).unwrap();
+        let loaded_nippy = NippyJar::load(file_path.path()).unwrap();
+        assert_eq!(indexes, collect_indexes(&loaded_nippy));
     }
 
     #[test]
