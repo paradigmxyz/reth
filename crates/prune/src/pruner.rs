@@ -233,7 +233,6 @@ impl<DB: Database> Pruner<DB> {
         let elapsed = start.elapsed();
         self.metrics.duration_seconds.record(elapsed);
 
-        trace!(target: "pruner", %tip_block_number, ?elapsed, "Pruner finished");
         info!(
             target: "pruner",
             %tip_block_number,
