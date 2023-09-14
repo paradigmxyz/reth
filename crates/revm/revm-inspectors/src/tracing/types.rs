@@ -563,10 +563,7 @@ impl CallTraceNode {
             for change in changes {
                 if initial_value.is_none() {
                     initial_value = match change.reason {
-                        StorageChangeReason::SSTORE => match change.had_value {
-                            Some(had_value) => Some(had_value),
-                            None => Some(U256::default()),
-                        },
+                        StorageChangeReason::SSTORE => Some(change.had_value.unwrap_or_default()),
                         StorageChangeReason::SLOAD => Some(change.value),
                     };
                 }
