@@ -15,13 +15,18 @@ name = "reth_nippy_jar"
 memmap2 = "0.7.1"
 bloomfilter = "1"
 zstd = { version = "0.12", features = ["experimental", "zdict_builder"] }
-ph = "0.8.0"
+ph = "0.8"
 thiserror = "1.0"
 bincode = "1.3"
 serde = { version = "1.0",  features = ["derive"] }
 bytes = "1.5"
 cuckoofilter = { version = "0.5.0", features = ["serde_support", "serde_bytes"] }
 tempfile = "3.4"
+
+
+[dev-dependencies]
+rand = "0.8"
+
 
 [features]
 default = []
