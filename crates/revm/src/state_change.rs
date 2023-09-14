@@ -100,12 +100,7 @@ where
                 }
             };
 
-            // set the nonce to zero, and ensure account status is just [AccountStatus::Loaded]
-            // because `transact` will increment it internally
-            if let Some(system_account) = state.get_mut(&SYSTEM_ADDRESS) {
-                system_account.info.nonce = 0;
-                system_account.status = AccountStatus::Loaded;
-            }
+            state.remove(&SYSTEM_ADDRESS);
 
             let db = evm.db().expect("db to not be moved");
             db.commit(state);
