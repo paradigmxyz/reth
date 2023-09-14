@@ -4,11 +4,7 @@ use reth_primitives::{
     constants::SYSTEM_ADDRESS, Address, ChainSpec, Hardfork, Header, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::{env::fill_tx_env_with_beacon_root_contract_call, Database};
-use revm::{
-    db::State,
-    primitives::{AccountStatus, ResultAndState},
-    DatabaseCommit, EVM,
-};
+use revm::{db::State, primitives::ResultAndState, DatabaseCommit, EVM};
 use std::{collections::HashMap, fmt::Debug};
 
 /// Collect all balance changes at the end of the block.
@@ -101,6 +97,7 @@ where
             };
 
             state.remove(&SYSTEM_ADDRESS);
+            state.remove(&evm.env.block.coinbase);
 
             let db = evm.db().expect("db to not be moved");
             db.commit(state);
