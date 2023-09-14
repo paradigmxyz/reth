@@ -299,12 +299,11 @@ where
 
         let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
 
-        let pc = interp.program_counter();
         let step = StepLog {
             stack: StackObj(interp.stack.clone()),
-            op: interp.contract.bytecode.bytecode()[pc].into(),
+            op: interp.current_opcode().into(),
             memory: MemoryObj(interp.memory.clone()),
-            pc: pc as u64,
+            pc: interp.program_counter() as u64,
             gas_remaining: interp.gas.remaining(),
             cost: interp.gas.spend(),
             depth: data.journaled_state.depth(),
@@ -342,12 +341,11 @@ where
         if matches!(eval, return_revert!()) {
             let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
 
-            let pc = interp.program_counter();
             let step = StepLog {
                 stack: StackObj(interp.stack.clone()),
-                op: interp.contract.bytecode.bytecode()[pc].into(),
+                op: interp.current_opcode().into(),
                 memory: MemoryObj(interp.memory.clone()),
-                pc: pc as u64,
+                pc: interp.program_counter() as u64,
                 gas_remaining: interp.gas.remaining(),
                 cost: interp.gas.spend(),
                 depth: data.journaled_state.depth(),

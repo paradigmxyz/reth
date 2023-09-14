@@ -295,6 +295,16 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     pub(crate) fn size(&self) -> usize {
         self.transaction.size()
     }
+
+    /// EIP-4844 blob transactions and normal transactions are treated as mutually exclusive per
+    /// account.
+    ///
+    /// Returns true if the transaction is an EIP-4844 blob transaction and the other is not, or
+    /// vice versa.
+    #[inline]
+    pub(crate) fn tx_type_conflicts_with(&self, other: &Self) -> bool {
+        self.is_eip4844() != other.is_eip4844()
+    }
 }
 
 impl<T: PoolTransaction> IntoRecoveredTransaction for ValidPoolTransaction<T> {

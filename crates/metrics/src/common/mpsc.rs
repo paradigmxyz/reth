@@ -11,6 +11,7 @@ use std::{
 use tokio::sync::mpsc::{
     self,
     error::{SendError, TryRecvError, TrySendError},
+    OwnedPermit,
 };
 
 /// Wrapper around [mpsc::unbounded_channel] that returns a new unbounded metered channel.
@@ -140,6 +141,18 @@ impl<T> MeteredSender<T> {
     /// Creates a new [`MeteredSender`] wrapping around the provided [Sender](mpsc::Sender)
     pub fn new(sender: mpsc::Sender<T>, scope: &'static str) -> Self {
         Self { sender, metrics: MeteredSenderMetrics::new(scope) }
+    }
+
+    /// Tries to acquire a permit to send a message.
+    ///
+    /// See also [Sender](mpsc::Sender)'s `try_reserve_owned`.
+    pub fn try_reserve_owned(&self) -> Result<OwnedPermit<T>, TrySendError<mpsc::Sender<T>>> {
+        self.sender.clone().try_reserve_owned()
+    }
+
+    /// Returns the underlying [Sender](mpsc::Sender).
+    pub fn inner(&self) -> &mpsc::Sender<T> {
+        &self.sender
     }
 
     /// Calls the underlying [Sender](mpsc::Sender)'s `try_send`, incrementing the appropriate

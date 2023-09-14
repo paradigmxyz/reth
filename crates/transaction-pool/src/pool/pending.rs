@@ -264,7 +264,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         self.all.remove(&tx);
         self.size_of -= tx.transaction.size();
         self.independent_transactions.remove(&tx);
-        Some(tx.transaction.clone())
+        Some(tx.transaction)
     }
 
     fn next_id(&mut self) -> u64 {
@@ -293,6 +293,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.by_id.is_empty()
+    }
+
+    /// Returns `true` if the transaction with the given id is already included in this pool.
+    #[cfg(test)]
+    pub(crate) fn contains(&self, id: &TransactionId) -> bool {
+        self.by_id.contains_key(id)
     }
 }
 

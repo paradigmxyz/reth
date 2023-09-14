@@ -130,13 +130,10 @@ where
         let mut net = self;
         let handle = tokio::task::spawn(async move {
             let mut tx = None;
-            loop {
-                tokio::select! {
-                    _ = &mut net => { break}
-                    inc = rx => {
-                        tx = inc.ok();
-                        break
-                    }
+            tokio::select! {
+                _ = &mut net => {}
+                inc = rx => {
+                    tx = inc.ok();
                 }
             }
             if let Some(tx) = tx {

@@ -762,7 +762,7 @@ impl EthPooledTransaction {
 
         if let Some(blob_tx) = transaction.as_eip4844() {
             // add max blob cost
-            cost += U256::from(blob_tx.max_fee_per_gas * blob_tx.blob_gas() as u128);
+            cost += U256::from(blob_tx.max_fee_per_blob_gas * blob_tx.blob_gas() as u128);
         }
 
         Self { transaction, cost, blob_sidecar }
@@ -959,6 +959,16 @@ pub struct PoolSize {
     ///
     /// Note: this is the sum of ```pending + basefee + queued```
     pub total: usize,
+}
+
+// === impl PoolSize ===
+
+impl PoolSize {
+    /// Asserts that the invariants of the pool size are met.
+    #[cfg(test)]
+    pub(crate) fn assert_invariants(&self) {
+        assert_eq!(self.total, self.pending + self.basefee + self.queued);
+    }
 }
 
 /// Represents the current status of the pool.
