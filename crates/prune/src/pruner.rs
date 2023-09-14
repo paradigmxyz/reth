@@ -237,9 +237,8 @@ impl<DB: Database> Pruner<DB> {
             target: "pruner",
             %tip_block_number,
             %done,
-            "Pruner finished after {:?} nanosec, pruned {} entries",
-            elapsed.subsec_nanos(),
-            total_pruned_entries
+            elapsed_nanos = elapsed.subsec_nanos(),
+            %total_pruned_entries
         );
         Ok(done)
     }
