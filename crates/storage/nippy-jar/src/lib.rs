@@ -14,6 +14,9 @@ use filter::{Cuckoo, Filter, Filters};
 pub mod compression;
 use compression::{Compression, Compressors};
 
+pub mod phf;
+use phf::{Fmph, Functions};
+
 const NIPPY_JAR_VERSION: usize = 1;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -26,22 +29,22 @@ pub struct NippyJar {
     compressor: Option<Compressors>,
     /// Filter
     filter: Option<Filters>,
+    /// Perfect Hashing Function
+    phf: Option<Functions>,
     #[serde(skip)]
     /// Data path for file. Index file will be `{path}.idx`
     path: Option<PathBuf>,
-    /// soon
-    phf: bool,
 }
 
 impl NippyJar {
     /// Creates new [`NippyJar`].
-    pub fn new(columns: usize, phf: bool, path: &Path) -> Self {
+    pub fn new(columns: usize, path: &Path) -> Self {
         NippyJar {
             version: NIPPY_JAR_VERSION,
             columns,
-            phf,
             compressor: None,
             filter: None,
+            phf: None,
             path: Some(path.to_path_buf()),
         }
     }
@@ -56,6 +59,12 @@ impl NippyJar {
     /// Adds [`filter::Cuckoo`] filter.
     pub fn with_cuckoo_filter(mut self, max_capacity: usize) -> Self {
         self.filter = Some(Filters::Cuckoo(Cuckoo::new(max_capacity)));
+        self
+    }
+
+    /// Adds [`phf::Fmph`] perfect hashing function.
+    pub fn with_mphf(mut self) -> Self {
+        self.phf = Some(Functions::Fmph(Fmph::new()));
         self
     }
 
@@ -236,6 +245,8 @@ pub enum NippyJarError {
     FilterMaxCapacity,
     #[error("Cuckoo was not properly initialized after loaded.")]
     FilterCuckooNotLoaded,
+    #[error("Perfect hashing function wasn't added any keys.")]
+    PHFMissingKeys,
 }
 
 pub struct NippyJarCursor<'a> {
@@ -342,13 +353,23 @@ mod tests {
     }
 
     #[test]
+    fn phf() {
+        let (col1, _col2) = test_data();
+        let _num_columns = 2;
+        let _num_rows = col1.len() as u64;
+        let file_path = tempfile::NamedTempFile::new().unwrap();
+
+        let _nippy = NippyJar::new(_num_columns, file_path.path());
+    }
+
+    #[test]
     fn filter() {
         let (col1, col2) = test_data();
         let _num_columns = 2;
         let num_rows = col1.len() as u64;
         let file_path = tempfile::NamedTempFile::new().unwrap();
 
-        let mut nippy = NippyJar::new(_num_columns, false, file_path.path());
+        let mut nippy = NippyJar::new(_num_columns, file_path.path());
 
         assert!(matches!(Filter::add(&mut nippy, &col1[0]), Err(NippyJarError::FilterMissing)));
 
@@ -388,10 +409,10 @@ mod tests {
         let _num_columns = 2;
         let file_path = tempfile::NamedTempFile::new().unwrap();
 
-        let nippy = NippyJar::new(_num_columns, false, file_path.path());
+        let nippy = NippyJar::new(_num_columns, file_path.path());
         assert!(nippy.compressor.is_none());
 
-        let mut nippy = NippyJar::new(_num_columns, false, file_path.path()).with_zstd(true, 5000);
+        let mut nippy = NippyJar::new(_num_columns, file_path.path()).with_zstd(true, 5000);
         assert!(nippy.compressor.is_some());
 
         if let Some(Compressors::Zstd(zstd)) = &mut nippy.compressor {
