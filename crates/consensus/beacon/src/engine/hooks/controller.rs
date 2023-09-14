@@ -1,5 +1,8 @@
 use crate::hooks::{Hook, HookAction, HookArguments, HookDependencies, HookError, Hooks};
-use std::task::{Context, Poll};
+use std::{
+    collections::VecDeque,
+    task::{Context, Poll},
+};
 use tracing::debug;
 
 /// Manages hooks under the control of the engine.
@@ -9,23 +12,17 @@ use tracing::debug;
 pub(crate) struct HooksController {
     /// Collection of hooks.
     ///
-    /// [`Option::None`] means that the hook is taken, and will be returned upon completion.
-    /// In the current implementation, it means that it was moved to `running_hook_with_db_write`.
-    hooks: Vec<Option<Box<dyn Hook>>>,
-    /// Next hook index to poll.
-    next_hook_idx: usize,
+    /// Hooks might be removed from the collection, and returned upon completion.
+    /// In the current implementation, it only happens when moved to `running_hook_with_db_write`.
+    hooks: VecDeque<Box<dyn Hook>>,
     /// Currently running hook with DB write access, if any.
-    running_hook_with_db_write: Option<(usize, Box<dyn Hook>)>,
+    running_hook_with_db_write: Option<Box<dyn Hook>>,
 }
 
 impl HooksController {
     /// Creates a new [`HooksController`].
     pub(crate) fn new(hooks: Hooks) -> Self {
-        Self {
-            hooks: hooks.inner.into_iter().map(Some).collect(),
-            next_hook_idx: 0,
-            running_hook_with_db_write: None,
-        }
+        Self { hooks: hooks.inner.into(), running_hook_with_db_write: None }
     }
 
     /// Polls currently running hook with DB write access, if any.
@@ -36,35 +33,29 @@ impl HooksController {
     /// Returns [`Poll::Pending`] in all other cases:
     /// 1. No hook with DB write access is running.
     /// 2. Currently running hook with DB write access returned [`Poll::Pending`] on polling.
-    /// 3. Currently running hook with DB write access returned [`Poll::Ready`] on polling, but
-    ///    [`Hook::on_event`] returned [`Option::None`], so there's no action to act upon.
+    /// 3. Currently running hook with DB write access returned [`Poll::Ready`] on polling, but no
+    ///    action to act upon.
     pub(crate) fn poll_running_hook_with_db_write(
         &mut self,
         cx: &mut Context<'_>,
         args: HookArguments,
     ) -> Poll<Result<HookAction, HookError>> {
-        let Some((hook_idx, mut hook)) = self.running_hook_with_db_write.take() else {
-            return Poll::Pending
-        };
+        let Some(mut hook) = self.running_hook_with_db_write.take() else { return Poll::Pending };
 
         match hook.poll(cx, args) {
-            Poll::Ready(event) => {
-                let event_name = format!("{event:?}");
-                let finished = event.is_finished();
-                let action = hook.on_event(event)?;
-
+            Poll::Ready((event, action)) => {
                 debug!(
                     target: "consensus::engine::hooks",
-                    ?hook,
+                    hook = hook.name(),
                     ?action,
-                    event = %event_name,
+                    ?event,
                     "Polled running hook with db write access"
                 );
 
-                if !finished {
-                    self.running_hook_with_db_write = Some((hook_idx, hook));
+                if !event.is_finished() {
+                    self.running_hook_with_db_write = Some(hook);
                 } else {
-                    self.hooks[hook_idx] = Some(hook);
+                    self.hooks.push_back(hook);
                 }
 
                 if let Some(action) = action {
@@ -72,7 +63,7 @@ impl HooksController {
                 }
             }
             Poll::Pending => {
-                self.running_hook_with_db_write = Some((hook_idx, hook));
+                self.running_hook_with_db_write = Some(hook);
             }
         }
 
@@ -91,19 +82,14 @@ impl HooksController {
     ///    running, or [active_dependencies][`HookDependencies`] passed into arguments has `db_write
     ///    = true`.
     /// 3. Next hook returned [`Poll::Pending`] on polling.
-    /// 4. Next hook returned [`Poll::Ready`] on polling, but [`Hook::on_event`] returned
-    ///    [`Option::None`], so there's no action to act upon.
+    /// 4. Next hook returned [`Poll::Ready`] on polling, but no action to act upon.
     pub(crate) fn poll_next_hook(
         &mut self,
         cx: &mut Context<'_>,
         args: HookArguments,
         active_dependencies: HookDependencies,
     ) -> Poll<Result<HookAction, HookError>> {
-        let hook_idx = self.next_hook_idx % self.hooks.len();
-        self.next_hook_idx = hook_idx + 1;
-
-        // SAFETY: bounds are respected in the modulo above
-        let Some(mut hook) = self.hooks[hook_idx].take() else { return Poll::Pending };
+        let Some(mut hook) = self.hooks.pop_front() else { return Poll::Pending };
 
         // Hook with DB write dependency is not allowed to run due to already
         // running hook with DB write dependency or active DB write according to passed dependencies
@@ -113,24 +99,26 @@ impl HooksController {
             return Poll::Pending
         }
 
-        if let Poll::Ready(event) = hook.poll(cx, args) {
-            let event_name = format!("{event:?}");
-            let started = event.is_started();
-            let action = hook.on_event(event)?;
+        if let Poll::Ready((event, action)) = hook.poll(cx, args) {
+            debug!(
+                target: "consensus::engine::hooks",
+                hook = hook.name(),
+                ?action,
+                ?event,
+                "Polled next hook"
+            );
 
-            debug!(target: "consensus::engine::hooks", ?hook, ?action, event = %event_name, "Polled next hook");
-
-            if started && hook.dependencies().db_write {
-                self.running_hook_with_db_write = Some((hook_idx, hook));
+            if event.is_started() && hook.dependencies().db_write {
+                self.running_hook_with_db_write = Some(hook);
             } else {
-                self.hooks[hook_idx] = Some(hook);
+                self.hooks.push_back(hook);
             }
 
             if let Some(action) = action {
                 return Poll::Ready(Ok(action))
             }
         } else {
-            self.hooks[hook_idx] = Some(hook);
+            self.hooks.push_back(hook);
         }
 
         Poll::Pending

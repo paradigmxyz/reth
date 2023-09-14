@@ -12,7 +12,6 @@ use reth_prune::{Pruner, PrunerError, PrunerWithResult};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
 use tokio::sync::oneshot;
-use tracing::trace;
 
 /// Manages pruning under the control of the engine.
 ///
@@ -38,35 +37,43 @@ impl<DB: Database + 'static> PruneHook<DB> {
     /// Advances the pruner state.
     ///
     /// This checks for the result in the channel, or returns pending if the pruner is idle.
-    fn poll_pruner(&mut self, cx: &mut Context<'_>) -> Poll<HookEvent> {
-        let res = match self.pruner_state {
+    fn poll_pruner(&mut self, cx: &mut Context<'_>) -> Poll<(HookEvent, Option<HookAction>)> {
+        let result = match self.pruner_state {
             PrunerState::Idle(_) => return Poll::Pending,
             PrunerState::Running(ref mut fut) => {
                 ready!(fut.poll_unpin(cx))
             }
         };
-        let ev = match res {
+
+        let event = match result {
             Ok((pruner, result)) => {
                 self.pruner_state = PrunerState::Idle(Some(pruner));
 
-                HookEvent::Finished(match result {
-                    Ok(_) => Ok(()),
-                    Err(err) => Err(match err {
+                match result {
+                    Ok(_) => HookEvent::Finished(Ok(())),
+                    Err(err) => HookEvent::Finished(Err(match err {
                         PrunerError::PrunePart(_) | PrunerError::InconsistentData(_) => {
                             HookError::Internal(Box::new(err))
                         }
                         PrunerError::Interface(err) => err.into(),
                         PrunerError::Database(err) => reth_interfaces::Error::Database(err).into(),
                         PrunerError::Provider(err) => reth_interfaces::Error::Provider(err).into(),
-                    }),
-                })
+                    })),
+                }
             }
             Err(_) => {
                 // failed to receive the pruner
                 HookEvent::Finished(Err(HookError::ChannelClosed))
             }
         };
-        Poll::Ready(ev)
+
+        let action = if matches!(event, HookEvent::Finished(Ok(_))) {
+            Some(HookAction::RestoreCanonicalHashes)
+        } else {
+            None
+        };
+
+        Poll::Ready((event, action))
     }
 
     /// This will try to spawn the pruner if it is idle:
@@ -76,7 +83,10 @@ impl<DB: Database + 'static> PruneHook<DB> {
     /// 2b. If pruning is not needed, set pruner state back to [PrunerState::Idle].
     ///
     /// If pruner is already running, do nothing.
-    fn try_spawn_pruner(&mut self, tip_block_number: BlockNumber) -> Option<HookEvent> {
+    fn try_spawn_pruner(
+        &mut self,
+        tip_block_number: BlockNumber,
+    ) -> Option<(HookEvent, Option<HookAction>)> {
         match &mut self.pruner_state {
             PrunerState::Idle(pruner) => {
                 let mut pruner = pruner.take()?;
@@ -91,12 +101,20 @@ impl<DB: Database + 'static> PruneHook<DB> {
                             let _ = tx.send((pruner, result));
                         }),
                     );
+                    self.metrics.runs.increment(1);
                     self.pruner_state = PrunerState::Running(rx);
 
-                    Some(HookEvent::Started(tip_block_number))
+                    Some((
+                        HookEvent::Started,
+                        // Engine can't process any FCU/payload messages from CL while we're
+                        // pruning, as pruner needs an exclusive write access to the database. To
+                        // prevent CL from sending us unneeded updates, we need to respond `true`
+                        // on `eth_syncing` request.
+                        Some(HookAction::UpdateSyncState(SyncState::Syncing)),
+                    ))
                 } else {
                     self.pruner_state = PrunerState::Idle(Some(pruner));
-                    Some(HookEvent::NotReady)
+                    Some((HookEvent::NotReady, None))
                 }
             }
             PrunerState::Running(_) => None,
@@ -109,38 +127,20 @@ impl<DB: Database + 'static> Hook for PruneHook<DB> {
         "Prune"
     }
 
-    fn poll(&mut self, cx: &mut Context<'_>, args: HookArguments) -> Poll<HookEvent> {
+    fn poll(
+        &mut self,
+        cx: &mut Context<'_>,
+        args: HookArguments,
+    ) -> Poll<(HookEvent, Option<HookAction>)> {
         // Try to spawn a pruner
         match self.try_spawn_pruner(args.tip_block_number) {
-            Some(HookEvent::NotReady) => return Poll::Pending,
-            Some(event) => return Poll::Ready(event),
+            Some((HookEvent::NotReady, _)) => return Poll::Pending,
+            Some((event, action)) => return Poll::Ready((event, action)),
             None => (),
         }
 
         // Poll pruner and check its status
         self.poll_pruner(cx)
-    }
-
-    fn on_event(&mut self, event: HookEvent) -> Result<Option<HookAction>, HookError> {
-        match event {
-            HookEvent::NotReady => Ok(None),
-            HookEvent::Started(tip_block_number) => {
-                trace!(target: "consensus::engine", %tip_block_number, "Pruner started");
-                self.metrics.runs.increment(1);
-                // Engine can't process any FCU/payload messages from CL while we're pruning, as
-                // pruner needs an exclusive write access to the database. To prevent CL from
-                // sending us unneeded updates, we need to respond `true` on `eth_syncing` request.
-                Ok(Some(HookAction::UpdateSyncState(SyncState::Syncing)))
-            }
-            HookEvent::Finished(result) => {
-                trace!(target: "consensus::engine", ?result, "Pruner finished");
-                match result {
-                    Ok(_) => Ok(Some(HookAction::RestoreCanonicalHashes)),
-                    // Any pruner error at this point is fatal.
-                    Err(error) => Err(error),
-                }
-            }
-        }
     }
 
     fn dependencies(&self) -> HookDependencies {

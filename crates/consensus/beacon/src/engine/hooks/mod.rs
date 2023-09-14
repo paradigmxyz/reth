@@ -1,6 +1,9 @@
 use reth_interfaces::sync::SyncState;
 use reth_primitives::BlockNumber;
-use std::task::{Context, Poll};
+use std::{
+    fmt::Debug,
+    task::{Context, Poll},
+};
 
 mod controller;
 pub(crate) use controller::HooksController;
@@ -32,20 +35,16 @@ pub trait Hook: Send + Sync + 'static {
     /// Returns a human-readable name for the hook.
     fn name(&self) -> &'static str;
 
-    /// Advances the hook execution, emitting an [event][`HookEvent`].
-    fn poll(&mut self, cx: &mut Context<'_>, args: HookArguments) -> Poll<HookEvent>;
-
-    /// Returns an [action][`HookAction`], if any, according to the passed [event][`HookEvent`].
-    fn on_event(&mut self, event: HookEvent) -> Result<Option<HookAction>, HookError>;
+    /// Advances the hook execution, emitting an [event][`HookEvent`] and an optional
+    /// [action][`HookAction`].
+    fn poll(
+        &mut self,
+        cx: &mut Context<'_>,
+        args: HookArguments,
+    ) -> Poll<(HookEvent, Option<HookAction>)>;
 
     /// Returns [dependencies][`HookDependencies`] for running this hook.
     fn dependencies(&self) -> HookDependencies;
-}
-
-impl std::fmt::Debug for dyn Hook {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.name())
-    }
 }
 
 /// Arguments passed to the [hook polling function][`Hook::poll`].
@@ -62,10 +61,10 @@ pub enum HookEvent {
     ///
     /// If this is returned, the hook is idle.
     NotReady,
-    /// Hook started with tip block number.
+    /// Hook started.
     ///
     /// If this is returned, the hook is running.
-    Started(BlockNumber),
+    Started,
     /// Hook finished.
     ///
     /// If this is returned, the hook is idle.
@@ -75,7 +74,7 @@ pub enum HookEvent {
 impl HookEvent {
     /// Returns `true` if the event is [`HookEvent::Started`].
     pub fn is_started(&self) -> bool {
-        matches!(self, Self::Started(_))
+        matches!(self, Self::Started)
     }
 
     /// Returns `true` if the event is [`HookEvent::Finished`].
