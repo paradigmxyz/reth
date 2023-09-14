@@ -4134,6 +4134,7 @@ dependencies = [
  "cuckoofilter",
  "memmap2 0.7.1",
  "ph",
+ "rand 0.8.5",
  "serde",
  "tempfile",
  "thiserror",

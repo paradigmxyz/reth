@@ -18,7 +18,7 @@ pub mod compression;
 use compression::{Compression, Compressors};
 
 pub mod phf;
-use phf::{Fmph, Functions, KeySet};
+use phf::{Fmph, Functions, GoFmph, KeySet};
 
 const NIPPY_JAR_VERSION: usize = 1;
 
@@ -68,6 +68,12 @@ impl NippyJar {
     /// Adds [`phf::Fmph`] perfect hashing function.
     pub fn with_mphf(mut self) -> Self {
         self.phf = Some(Functions::Fmph(Fmph::new()));
+        self
+    }
+
+    /// Adds [`phf::GoFmph`] perfect hashing function.
+    pub fn with_gomphf(mut self) -> Self {
+        self.phf = Some(Functions::GoFmph(GoFmph::new()));
         self
     }
 
@@ -399,31 +405,40 @@ mod tests {
         let mut nippy = NippyJar::new(num_columns, file_path.path());
         assert!(matches!(NippyJar::set_keys(&mut nippy, &col1), Err(NippyJarError::PHFMissing)));
 
-        nippy = nippy.with_mphf();
-        assert!(matches!(
-            NippyJar::get_index(&nippy, &col1[0]),
-            Err(NippyJarError::PHFMissingKeys)
-        ));
-        assert!(NippyJar::set_keys(&mut nippy, &col1).is_ok());
+        let check_phf = |nippy: &mut NippyJar| {
+            assert!(matches!(
+                NippyJar::get_index(nippy, &col1[0]),
+                Err(NippyJarError::PHFMissingKeys)
+            ));
+            assert!(NippyJar::set_keys(nippy, &col1).is_ok());
 
-        let collect_indexes = |nippy: &NippyJar| -> Vec<u64> {
-            col1.iter()
-                .map(|value| NippyJar::get_index(nippy, value.as_slice()).unwrap().unwrap())
-                .collect()
+            let collect_indexes = |nippy: &NippyJar| -> Vec<u64> {
+                col1.iter()
+                    .map(|value| NippyJar::get_index(nippy, value.as_slice()).unwrap().unwrap())
+                    .collect()
+            };
+
+            // Ensure all indexes are unique
+            let indexes = collect_indexes(nippy);
+            assert_eq!(indexes.iter().collect::<HashSet<_>>().len(), indexes.len());
+
+            // Ensure reproducibility
+            assert!(NippyJar::set_keys(nippy, &col1).is_ok());
+            assert_eq!(indexes, collect_indexes(nippy));
+
+            // Ensure that loaded phf provides the same function outputs
+            nippy.freeze(vec![col1.clone(), col2.clone()], num_rows).unwrap();
+            let loaded_nippy = NippyJar::load(file_path.path()).unwrap();
+            assert_eq!(indexes, collect_indexes(&loaded_nippy));
         };
 
-        // Ensure all indexes are unique
-        let indexes = collect_indexes(&nippy);
-        assert_eq!(indexes.iter().collect::<HashSet<_>>().len(), indexes.len());
+        // mphf bytes size for 100 values of 32 bytes: 54
+        nippy = nippy.with_mphf();
+        check_phf(&mut nippy);
 
-        // Ensure reproducibility
-        assert!(NippyJar::set_keys(&mut nippy, &col1).is_ok());
-        assert_eq!(indexes, collect_indexes(&nippy));
-
-        // Ensure that loaded phf provides the same function outputs
-        nippy.freeze(vec![col1.clone(), col2.clone()], num_rows).unwrap();
-        let loaded_nippy = NippyJar::load(file_path.path()).unwrap();
-        assert_eq!(indexes, collect_indexes(&loaded_nippy));
+        // mphf bytes size for 100 values of 32 bytes: 46
+        nippy = nippy.with_gomphf();
+        check_phf(&mut nippy);
     }
 
     #[test]

@@ -5,7 +5,10 @@ use std::{clone::Clone, hash::Hash, marker::Sync};
 mod fmph;
 pub use fmph::Fmph;
 
-/// Trait to build and query a perfect hashing function. 
+mod go_fmph;
+pub use go_fmph::GoFmph;
+
+/// Trait to build and query a perfect hashing function.
 pub trait KeySet {
     /// Adds the key set and builds the perfect hashing function.
     fn set_keys<T: AsRef<[u8]> + Sync + Clone + Hash>(
@@ -21,8 +24,7 @@ pub trait KeySet {
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub enum Functions {
     Fmph(Fmph),
-    //Avoids irrefutable let errors. Remove this after adding another one.
-    Unused,
+    GoFmph(GoFmph),
 }
 
 impl KeySet for Functions {
@@ -32,13 +34,13 @@ impl KeySet for Functions {
     ) -> Result<(), NippyJarError> {
         match self {
             Functions::Fmph(f) => f.set_keys(keys),
-            Functions::Unused => unreachable!(),
+            Functions::GoFmph(f) => f.set_keys(keys),
         }
     }
     fn get_index(&self, key: &[u8]) -> Result<Option<u64>, NippyJarError> {
         match self {
             Functions::Fmph(f) => f.get_index(key),
-            Functions::Unused => unreachable!(),
+            Functions::GoFmph(f) => f.get_index(key),
         }
     }
 }
