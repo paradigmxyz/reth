@@ -5,21 +5,22 @@ use std::{clone::Clone, hash::Hash, marker::Sync};
 mod fmph;
 pub use fmph::Fmph;
 
+/// Trait to build and query a perfect hashing function. 
 pub trait KeySet {
-    /// Add key to the list.
+    /// Adds the key set and builds the perfect hashing function.
     fn set_keys<T: AsRef<[u8]> + Sync + Clone + Hash>(
         &mut self,
         keys: &[T],
     ) -> Result<(), NippyJarError>;
 
-    /// Get key index.
+    /// Get corresponding key index.
     fn get_index(&self, key: &[u8]) -> Result<Option<u64>, NippyJarError>;
 }
 
+/// Enumerates all types of perfect hashing functions.
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub enum Functions {
     Fmph(Fmph),
-    // GoFmph(GoFmph),
     //Avoids irrefutable let errors. Remove this after adding another one.
     Unused,
 }

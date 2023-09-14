@@ -6,6 +6,7 @@ use serde::{
 };
 use std::{clone::Clone, hash::Hash, marker::Sync};
 
+/// Wrapper struct for [`ph::fmph::Function`]. Implementation of the following [paper](https://dl.acm.org/doi/10.1145/3596453).
 #[derive(Default)]
 pub struct Fmph {
     function: Option<ph::fmph::Function>,
