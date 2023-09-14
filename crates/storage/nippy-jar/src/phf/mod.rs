@@ -21,9 +21,6 @@ pub trait KeySet {
 }
 
 /// Enumerates all types of perfect hashing functions.
-///
-/// This can create a function that given a set of keys, it is able to create an unique integer
-/// between 0 and the length of the set.
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub enum Functions {
     Fmph(Fmph),
