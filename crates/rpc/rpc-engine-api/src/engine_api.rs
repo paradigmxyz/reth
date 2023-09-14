@@ -266,8 +266,18 @@ where
 
             let mut result = Vec::with_capacity(count as usize);
 
-            let end = start.saturating_add(count);
-            for num in start..end {
+            // -1 so range is inclusive
+            let mut end = start.saturating_add(count - 1);
+
+            // > Client software MUST NOT return trailing null values if the request extends past the current latest known block.
+            // truncate the end if it's greater than the last block
+            if let Ok(best_block) = inner.provider.best_block_number() {
+                if end > best_block {
+                    end = best_block;
+                }
+            }
+
+            for num in start..=end {
                 let block_result = inner.provider.block(BlockHashOrNumber::Number(num));
                 match block_result {
                     Ok(block) => {
@@ -763,6 +773,26 @@ mod tests {
             let expected = blocks
                 .iter()
                 .cloned()
+                // filter anything after the second missing range to ensure we don't expect trailing
+                // `None`s
+                .filter(|b| !second_missing_range.contains(&b.number))
+                .map(|b| {
+                    if first_missing_range.contains(&b.number) {
+                        None
+                    } else {
+                        Some(b.unseal().into())
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let res = api.get_payload_bodies_by_range(start, count).await.unwrap();
+            assert_eq!(res, expected);
+
+            let expected = blocks
+                .iter()
+                .cloned()
+                // ensure we still return trailing `None`s here because by-hash will not be aware
+                // of the missing block's number, and cannot compare it to the current best block
                 .map(|b| {
                     if first_missing_range.contains(&b.number) ||
                         second_missing_range.contains(&b.number)
@@ -773,9 +803,6 @@ mod tests {
                     }
                 })
                 .collect::<Vec<_>>();
-
-            let res = api.get_payload_bodies_by_range(start, count).await.unwrap();
-            assert_eq!(res, expected);
 
             let hashes = blocks.iter().map(|b| b.hash()).collect();
             let res = api.get_payload_bodies_by_hash(hashes).unwrap();
