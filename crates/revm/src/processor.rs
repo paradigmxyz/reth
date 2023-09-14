@@ -527,8 +527,8 @@ pub fn verify_receipt<'a>(
 #[cfg(test)]
 mod tests {
     use reth_primitives::{
-        constants::BEACON_ROOTS_ADDRESS, keccak256, Account, Bytecode, Bytes, ChainSpecBuilder,
-        ForkCondition, StorageKey, MAINNET,
+        constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
+        keccak256, Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, MAINNET,
     };
     use reth_provider::{AccountReader, BlockHashReader, StateRootProvider};
     use reth_revm_primitives::TransitionState;
@@ -732,10 +732,9 @@ mod tests {
         let mut executor = EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
 
         // get the env
-        // TODO: wait for https://github.com/bluealloy/revm/pull/689 to be merged
-        // let previous_env = executor.evm.env.clone();
+        let previous_env = executor.evm.env.clone();
 
-        // attempt to execute a block without parent beacon block root, expect err
+        // attempt to execute an empty block with parent beacon block root, this should not fail
         executor
             .execute_and_verify_receipt(
                 &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
@@ -747,7 +746,11 @@ mod tests {
             );
 
         // ensure that the env has not changed
-        // assert_eq!(executor.evm.env, previous_env);
+        assert_eq!(executor.evm.env, previous_env);
+
+        // ensure that the nonce of the system address account has not changed
+        let nonce = executor.db().basic(SYSTEM_ADDRESS).unwrap().unwrap().nonce;
+        assert_eq!(nonce, 0);
     }
 
     #[test]
