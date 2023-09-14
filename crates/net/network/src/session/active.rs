@@ -485,6 +485,9 @@ impl Future for ActiveSession {
             return this.poll_disconnect(cx)
         }
 
+        let smtx = this.to_session_manager.inner().to_owned();
+        let mut to_session_manager_poll_tx = PollSender::new(smtx);
+
         // The receive loop can be CPU intensive since it involves message decoding which could take
         // up a lot of resources and increase latencies for other sessions if not yielded manually.
         // If the budget is exhausted we manually yield back control to the (coop) scheduler. This
@@ -575,22 +578,19 @@ impl Future for ActiveSession {
                 }
 
                 // try to resend the pending message that we could not send because the channel was
-                // full.
+                // full. [`PollSender`] will ensure that we're woken up again when the channel is
+                // ready to receive the message, and will only error if the channel is closed.
                 if let Some(msg) = this.pending_message_to_session.take() {
-                    match this.to_session_manager.try_send(msg) {
-                        Ok(_) => {}
-                        Err(err) => {
-                            match err {
-                                TrySendError::Full(msg) => {
-                                    this.pending_message_to_session = Some(msg);
-                                    // ensure we're woken up again
-                                    cx.waker().wake_by_ref();
-                                    break 'receive
-                                }
-                                TrySendError::Closed(_) => {}
-                            }
+                    match to_session_manager_poll_tx.poll_reserve(cx) {
+                        Poll::Ready(Ok(_)) => {
+                            let _ = to_session_manager_poll_tx.send_item(msg);
                         }
-                    }
+                        Poll::Ready(Err(_)) => {}
+                        Poll::Pending => {
+                            this.pending_message_to_session = Some(msg);
+                            break 'receive
+                        }
+                    };
                 }
 
                 match this.conn.poll_next_unpin(cx) {
@@ -641,9 +641,11 @@ impl Future for ActiveSession {
         while this.internal_request_timeout_interval.poll_tick(cx).is_ready() {
             // check for timed out requests
             if this.check_timed_out_requests(Instant::now()) {
-                let _ = this.to_session_manager.clone().try_send(
-                    ActiveSessionMessage::ProtocolBreach { peer_id: this.remote_peer_id },
-                );
+                if let Poll::Ready(Ok(_)) = to_session_manager_poll_tx.poll_reserve(cx) {
+                    let _ = to_session_manager_poll_tx.send_item(
+                        ActiveSessionMessage::ProtocolBreach { peer_id: this.remote_peer_id },
+                    );
+                }
             }
         }
 
