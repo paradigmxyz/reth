@@ -1,5 +1,4 @@
 use crate::{
-    holesky_nodes,
     net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
     NodeRecord, U256, U64,
 };
@@ -12,7 +11,7 @@ use std::{fmt, str::FromStr};
 mod spec;
 pub use spec::{
     AllGenesisFormats, BaseFeeParams, ChainSpec, ChainSpecBuilder, DisplayHardforks, ForkCondition,
-    ForkTimestamps, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
+    ForkTimestamps, DEV, GOERLI, MAINNET, SEPOLIA,
 };
 
 // The chain info module.
@@ -43,11 +42,6 @@ impl Chain {
     /// Returns the sepolia chain.
     pub const fn sepolia() -> Self {
         Chain::Named(ethers_core::types::Chain::Sepolia)
-    }
-
-    /// Returns the holesky chain.
-    pub const fn holesky() -> Self {
-        Chain::Named(ethers_core::types::Chain::Holesky)
     }
 
     /// Returns the dev chain.
@@ -94,7 +88,6 @@ impl Chain {
             Mainnet => Some(mainnet_nodes()),
             Goerli => Some(goerli_nodes()),
             Sepolia => Some(sepolia_nodes()),
-            Holesky => Some(holesky_nodes()),
             _ => None,
         }
     }

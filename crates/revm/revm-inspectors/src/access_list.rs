@@ -68,7 +68,10 @@ where
         _data: &mut EVMData<'_, DB>,
         _is_static: bool,
     ) -> InstructionResult {
-        match interpreter.current_opcode() {
+        let pc = interpreter.program_counter();
+        let op = interpreter.contract.bytecode.bytecode()[pc];
+
+        match op {
             opcode::SLOAD | opcode::SSTORE => {
                 if let Ok(slot) = interpreter.stack().peek(0) {
                     let cur_contract = interpreter.contract.address;

@@ -176,14 +176,12 @@ impl SessionManager {
 
     /// Invoked on a received status update.
     ///
-    /// If the updated activated another fork, this will return a [ForkTransition] and updates the
-    /// active [ForkId]. See also [ForkFilter::set_head].
+    /// If the updated activated another fork, this will return a [`ForkTransition`] and updates the
+    /// active [`ForkId`](ForkId). See also [`ForkFilter::set_head`].
     pub(crate) fn on_status_update(&mut self, head: Head) -> Option<ForkTransition> {
         self.status.blockhash = head.hash;
         self.status.total_difficulty = head.total_difficulty;
-        let transition = self.fork_filter.set_head(head);
-        self.status.forkid = self.fork_filter.current();
-        transition
+        self.fork_filter.set_head(head)
     }
 
     /// An incoming TCP connection was received. This starts the authentication process to turn this
@@ -458,7 +456,6 @@ impl SessionManager {
                     ),
                     internal_request_timeout: Arc::clone(&timeout),
                     protocol_breach_request_timeout: self.protocol_breach_request_timeout,
-                    terminate_message: None,
                 };
 
                 self.spawn(session);

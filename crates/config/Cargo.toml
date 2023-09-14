@@ -23,9 +23,6 @@ serde_json.workspace = true
 # crypto
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
-# misc
-confy.workspace = true
-tempfile = "3.4"
+confy = "0.5"
 
-[dev-dependencies]
-toml.workspace = true
+tempfile = "3.4"

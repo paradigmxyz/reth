@@ -1,45 +1,31 @@
-//! Example illustrating how to run the ETH JSON RPC API as standalone over a DB file.
-//!
-//! Run with
-//!
-//! ```not_rust
-//! cargo run -p rpc-db
-//! ```
-//!
-//! This installs an additional RPC method `myrpcExt_customMethod` that can queried via [cast](https://github.com/foundry-rs/foundry)
-//!
-//! ```sh
-//! cast rpc myrpcExt_customMethod
-//! ```
-use reth::{
-    primitives::ChainSpecBuilder,
-    providers::{providers::BlockchainProvider, ProviderFactory},
-    utils::db::open_db_read_only,
-};
+// Talking to the DB
+use reth_db::open_db_read_only;
+use reth_primitives::ChainSpecBuilder;
+use reth_provider::{providers::BlockchainProvider, ProviderFactory};
+
 // Bringing up the RPC
-use reth::rpc::builder::{
+use reth_rpc_builder::{
     RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig,
 };
 
 // Code which we'd ideally like to not need to import if you're only spinning up
 // read-only parts of the API and do not require access to pending state or to
 // EVM sims
-use reth::{
-    beacon_consensus::BeaconConsensus,
-    blockchain_tree::{
-        BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
-    },
-    revm::Factory as ExecutionFactory,
+use reth_beacon_consensus::BeaconConsensus;
+use reth_blockchain_tree::{
+    BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
-
+use reth_revm::Factory as ExecutionFactory;
 // Configuring the network parts, ideally also wouldn't ned to think about this.
-use reth::{providers::test_utils::TestCanonStateSubscriptions, tasks::TokioTaskExecutor};
+use reth_network_api::noop::NoopNetwork;
+use reth_provider::test_utils::TestCanonStateSubscriptions;
+use reth_tasks::TokioTaskExecutor;
+use reth_transaction_pool::noop::NoopTransactionPool;
 use std::{path::Path, sync::Arc};
 
-use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
-// Custom rpc extension
-pub mod myrpc_ext;
-
+// Example illustrating how to run the ETH JSON RPC API as standalone over a DB file.
+// TODO: Add example showing how to spin up your own custom RPC namespace alongside
+// the other default name spaces.
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     // 1. Setup the DB
@@ -69,20 +55,16 @@ async fn main() -> eyre::Result<()> {
     };
 
     let rpc_builder = RpcModuleBuilder::default()
-        .with_provider(provider.clone())
+        .with_provider(provider)
         // Rest is just noops that do nothing
-        .with_noop_pool()
-        .with_noop_network()
+        .with_pool(NoopTransactionPool::default())
+        .with_network(NoopNetwork::default())
         .with_executor(TokioTaskExecutor::default())
         .with_events(TestCanonStateSubscriptions::default());
 
     // Pick which namespaces to expose.
     let config = TransportRpcModuleConfig::default().with_http([RethRpcModule::Eth]);
-    let mut server = rpc_builder.build(config);
-
-    // Add a custom rpc namespace
-    let custom_rpc = MyRpcExt { provider };
-    server.merge_configured(custom_rpc.into_rpc())?;
+    let server = rpc_builder.build(config);
 
     // Start the server & keep it alive
     let server_args =
