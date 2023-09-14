@@ -471,11 +471,11 @@ where
     /// If the engine API message version is V1 or V2, and the payload attribute's timestamp is
     /// post-Cancun, then this will return [EngineApiError::UnsupportedFork].
     ///
-    /// If the engine API message version is V3, but the `parentBeaconBlockRoot` is [None], then
-    /// this will return [EngineApiError::NoParentBeaconBlockRootPostCancun].
-    ///
     /// If the payload attribute's timestamp is before the Cancun fork and the engine API message
     /// version is V3, then this will return [EngineApiError::UnsupportedFork].
+    ///
+    /// If the engine API message version is V3, but the `parentBeaconBlockRoot` is [None], then
+    /// this will return [EngineApiError::NoParentBeaconBlockRootPostCancun].
     ///
     /// This implements the following Engine API spec rules:
     ///
@@ -492,8 +492,9 @@ where
         timestamp: u64,
         has_parent_beacon_block_root: bool,
     ) -> EngineApiResult<()> {
-        self.validate_payload_timestamp(version, timestamp)?;
-
+        // 1. Client software **MUST** check that provided set of parameters and their fields
+        //    strictly matches the expected one and return `-32602: Invalid params` error if this
+        //    check fails. Any field having `null` value **MUST** be considered as not provided.
         match version {
             EngineApiMessageVersion::V1 | EngineApiMessageVersion::V2 => {
                 if has_parent_beacon_block_root {
@@ -506,6 +507,11 @@ where
                 }
             }
         };
+
+        // 2. Client software **MUST** return `-38005: Unsupported fork` error if the
+        //    `payloadAttributes` is set and the `payloadAttributes.timestamp` does not fall within
+        //    the time frame of the Cancun fork.
+        self.validate_payload_timestamp(version, timestamp)?;
 
         Ok(())
     }
