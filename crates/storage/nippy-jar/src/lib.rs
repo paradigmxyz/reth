@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::{
+    clone::Clone,
     fs::File,
+    hash::Hash,
     io::{Read, Seek, SeekFrom, Write},
+    marker::Sync,
     path::{Path, PathBuf},
     sync::Mutex,
 };
@@ -15,7 +18,7 @@ pub mod compression;
 use compression::{Compression, Compressors};
 
 pub mod phf;
-use phf::{Fmph, Functions};
+use phf::{Fmph, Functions, KeySet};
 
 const NIPPY_JAR_VERSION: usize = 1;
 
@@ -221,6 +224,19 @@ impl Filter for NippyJar {
     }
 }
 
+impl KeySet for NippyJar {
+    fn set_keys<T: AsRef<[u8]> + Sync + Clone + Hash>(
+        &mut self,
+        keys: &[T],
+    ) -> Result<(), NippyJarError> {
+        self.phf.as_mut().ok_or(NippyJarError::PHFMissing)?.set_keys(keys)
+    }
+
+    fn get_index(&self, key: &[u8]) -> Result<Option<u64>, NippyJarError> {
+        self.phf.as_ref().ok_or(NippyJarError::PHFMissing)?.get_index(key)
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum NippyJarError {
     #[error("err")]
@@ -247,6 +263,8 @@ pub enum NippyJarError {
     FilterCuckooNotLoaded,
     #[error("Perfect hashing function wasn't added any keys.")]
     PHFMissingKeys,
+    #[error("NippyJar initialized without perfect hashing function.")]
+    PHFMissing,
 }
 
 pub struct NippyJarCursor<'a> {
@@ -346,6 +364,8 @@ impl<'a> NippyJarCursor<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
 
     fn test_data() -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
@@ -359,7 +379,31 @@ mod tests {
         let _num_rows = col1.len() as u64;
         let file_path = tempfile::NamedTempFile::new().unwrap();
 
-        let _nippy = NippyJar::new(_num_columns, file_path.path());
+        let mut nippy = NippyJar::new(_num_columns, file_path.path());
+        assert!(matches!(NippyJar::set_keys(&mut nippy, &col1), Err(NippyJarError::PHFMissing)));
+
+        nippy = nippy.with_mphf();
+        assert!(matches!(
+            NippyJar::get_index(&nippy, &col1[0]),
+            Err(NippyJarError::PHFMissingKeys)
+        ));
+        assert!(NippyJar::set_keys(&mut nippy, &col1).is_ok());
+
+        let mut indexes = Vec::with_capacity(col1.len());
+        for value in &col1 {
+            indexes.push(NippyJar::get_index(&nippy, value).unwrap().unwrap());
+        }
+
+        // Ensure reproducibility
+        assert!(NippyJar::set_keys(&mut nippy, &col1).is_ok());
+        let mut indexes_again = Vec::with_capacity(col1.len());
+        for value in &col1 {
+            indexes_again.push(NippyJar::get_index(&nippy, value).unwrap().unwrap());
+        }
+        assert_eq!(indexes, indexes_again);
+
+        // Ensure all indexes are different
+        assert_eq!(indexes.iter().collect::<HashSet<_>>().len(), indexes.len());
     }
 
     #[test]
