@@ -28,7 +28,7 @@ pub(crate) struct PendingPool<T: TransactionOrdering> {
     ordering: T,
     /// Keeps track of transactions inserted in the pool.
     ///
-    /// This way we can determine when transactions where submitted to the pool.
+    /// This way we can determine when transactions were submitted to the pool.
     submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
     by_id: BTreeMap<TransactionId, PendingTransaction<T>>,

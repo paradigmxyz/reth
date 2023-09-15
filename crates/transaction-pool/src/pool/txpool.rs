@@ -6,6 +6,7 @@ use crate::{
     metrics::TxPoolMetrics,
     pool::{
         best::BestTransactions,
+        blob::BlobTransactions,
         parked::{BasefeeOrd, ParkedPool, QueuedOrd},
         pending::PendingPool,
         state::{SubPool, TxState},
@@ -86,6 +87,9 @@ pub struct TxPool<T: TransactionOrdering> {
     /// Holds all parked transactions that currently violate the dynamic fee requirement but could
     /// be moved to pending if the base fee changes in their favor (decreases) in future blocks.
     basefee_pool: ParkedPool<BasefeeOrd<T::Transaction>>,
+    /// All blob transactions in the pool
+    #[allow(unused)]
+    blob_transactions: BlobTransactions<T::Transaction>,
     /// All transactions in the pool.
     all_transactions: AllTransactions<T::Transaction>,
     /// Transaction pool metrics
@@ -102,6 +106,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             pending_pool: PendingPool::new(ordering),
             queued_pool: Default::default(),
             basefee_pool: Default::default(),
+            blob_transactions: Default::default(),
             all_transactions: AllTransactions::new(&config),
             config,
             metrics: Default::default(),
