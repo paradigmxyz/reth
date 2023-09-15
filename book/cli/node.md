@@ -57,7 +57,7 @@ Networking:
           The UDP port to use for P2P discovery/networking. default: 30303
 
       --trusted-peers <TRUSTED_PEERS>
-          Target trusted peer enodes --trusted-peers enode://abcd@192.168.0.1:30303
+          Target trusted peer enodes --trusted-peers enode://abcd@192.168.0.1:30303,enode://cdef@192.168.0.2:30303
 
       --trusted-only
           Connect only to trusted peers
