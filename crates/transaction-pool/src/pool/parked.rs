@@ -17,7 +17,7 @@ use std::{cmp::Ordering, collections::BTreeSet, ops::Deref, sync::Arc};
 pub(crate) struct ParkedPool<T: ParkedOrd> {
     /// Keeps track of transactions inserted in the pool.
     ///
-    /// This way we can determine when transactions where submitted to the pool.
+    /// This way we can determine when transactions were submitted to the pool.
     submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
     by_id: FnvHashMap<TransactionId, ParkedPoolTransaction<T>>,
