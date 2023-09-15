@@ -20,7 +20,7 @@ pub trait ExecutorFactory: Send + Sync + 'static {
     fn chain_spec(&self) -> &ChainSpec;
 }
 
-/// Statistic data of bock execution
+/// Block execution statistics
 #[derive(Clone, Debug, Default)]
 pub struct BlockExecutorStats {
     /// How long execution took
