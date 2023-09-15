@@ -33,7 +33,7 @@ jobs:
 
       - name: Install Valgrind
         run: |
-          sudo apt install valgrind
+          sudo apt update && sudo apt install valgrind
 
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@stable
