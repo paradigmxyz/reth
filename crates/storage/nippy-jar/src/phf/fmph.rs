@@ -1,5 +1,4 @@
-use super::KeySet;
-use crate::NippyJarError;
+use crate::{KeySet, NippyJarError};
 use ph::fmph::{BuildConf, Function};
 use serde::{
     de::Error as DeSerdeError, ser::Error as SerdeError, Deserialize, Deserializer, Serialize,

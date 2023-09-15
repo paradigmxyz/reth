@@ -16,7 +16,7 @@ pub trait KeySet {
         keys: &[T],
     ) -> Result<(), NippyJarError>;
 
-    /// Get corresponding key index.
+    /// Get corresponding associated integer. There might be false positives.
     fn get_index(&self, key: &[u8]) -> Result<Option<u64>, NippyJarError>;
 }
 

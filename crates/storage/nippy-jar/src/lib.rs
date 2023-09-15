@@ -3,18 +3,15 @@ use std::{
     clone::Clone,
     fs::File,
     hash::Hash,
-    io::{Read, Seek, SeekFrom, Write},
+    io::{Seek, Write},
     marker::Sync,
     path::{Path, PathBuf},
-    sync::Mutex,
 };
 use sucds::{
-    int_vectors::{Access, PrefixSummedEliasFano},
+    int_vectors::PrefixSummedEliasFano,
     mii_sequences::{EliasFano, EliasFanoBuilder},
     Serializable,
 };
-use thiserror::Error;
-use zstd::bulk::Decompressor;
 
 pub mod filter;
 use filter::{Cuckoo, Filter, Filters};
@@ -24,6 +21,12 @@ use compression::{Compression, Compressors};
 
 pub mod phf;
 use phf::{Fmph, Functions, GoFmph, KeySet};
+
+mod error;
+pub use error::NippyJarError;
+
+mod cursor;
+pub use cursor::NippyJarCursor;
 
 const NIPPY_JAR_VERSION: usize = 1;
 
@@ -93,9 +96,7 @@ impl NippyJar {
 
     /// Loads the file configuration and returns [`Self`].
     pub fn load(path: &Path) -> Result<Self, NippyJarError> {
-        let mut file = File::open(path)?;
-        let mut obj: Self = bincode::deserialize_from(&mut file)?;
-
+        let mut obj: Self = bincode::deserialize_from(&mut File::open(path)?)?;
         obj.path = Some(path.to_path_buf());
 
         let mut offsets_file = File::open(obj.index_path())?;
@@ -236,7 +237,17 @@ impl NippyJar {
             column_iterators = iterators.into_iter();
         }
 
+        // Drop mut borrow
+        drop(maybe_zstd_compressors);
+
         // Write offset index to file
+        self.freeze_offsets(offsets)?;
+
+        Ok(())
+    }
+
+    // Freezes both
+    fn freeze_offsets(&mut self, offsets: Vec<usize>) -> Result<(), NippyJarError> {
         if !offsets.is_empty() {
             let mut builder =
                 EliasFanoBuilder::new(*offsets.last().expect("qed") + 1, offsets.len()).unwrap();
@@ -246,11 +257,9 @@ impl NippyJar {
             }
             self.offsets = builder.build().enable_rank();
         }
-
         let mut f = File::create(self.index_path())?;
         self.offsets.serialize_into(&mut f).unwrap();
         self.offsets_index.serialize_into(f).unwrap();
-
         Ok(())
     }
 
@@ -308,185 +317,34 @@ impl KeySet for NippyJar {
     }
 }
 
-#[derive(Debug, Error)]
-pub enum NippyJarError {
-    #[error(transparent)]
-    Disconnect(#[from] std::io::Error),
-    #[error(transparent)]
-    Bincode(#[from] Box<bincode::ErrorKind>),
-    #[error("Compression was enabled, but it's not ready yet.")]
-    CompressorNotReady,
-    #[error("Decompression was enabled, but it's not ready yet.")]
-    DecompressorNotReady,
-    #[error("Number of columns does not match. {0} != {1}")]
-    ColumnLenMismatch(usize, usize),
-    #[error("UnexpectedMissingValue row: {0} col:{1}")]
-    UnexpectedMissingValue(u64, u64),
-    #[error(transparent)]
-    FilterError(#[from] cuckoofilter::CuckooError),
-    #[error("NippyJar initialized without filter.")]
-    FilterMissing,
-    #[error("Filter has reached max capacity.")]
-    FilterMaxCapacity,
-    #[error("Cuckoo was not properly initialized after loaded.")]
-    FilterCuckooNotLoaded,
-    #[error("Perfect hashing function wasn't added any keys.")]
-    PHFMissingKeys,
-    #[error("NippyJar initialized without perfect hashing function.")]
-    PHFMissing,
-}
-
-pub struct NippyJarCursor<'a> {
-    config: &'a NippyJar,
-    zstd_decompressors: Option<Mutex<Vec<Decompressor<'a>>>>,
-    data_handle: File,
-    tmp_buf: Vec<u8>,
-    row: u64,
-    col: u64,
-}
-
-impl<'a> std::fmt::Debug for NippyJarCursor<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "NippyJarCursor {{ config: {:?} }}", self.config)
-    }
-}
-
-impl<'a> NippyJarCursor<'a> {
-    pub fn new(
-        config: &'a NippyJar,
-        zstd_decompressors: Option<Mutex<Vec<Decompressor<'a>>>>,
-    ) -> Result<Self, NippyJarError> {
-        Ok(NippyJarCursor {
-            config,
-            zstd_decompressors,
-            data_handle: File::open(config.data_path())?,
-            tmp_buf: vec![],
-            row: 0,
-            col: 0,
-        })
-    }
-
-    pub fn reset(&mut self) {
-        self.row = 0;
-        self.col = 0;
-    }
-
-    // eg. transaction_by_hash
-    // may have false positives
-    pub fn row_by_filter(&mut self, value: &[u8]) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
-        if let (Some(filter), Some(phf)) = (&self.config.filter, &self.config.phf) {
-            // May have false positives
-            if filter.contains(value)? {
-                // May have false positives
-                let row_index = phf.get_index(value)?.unwrap();
-
-                self.row = self.config.offsets_index.access(row_index as usize).unwrap() as u64;
-                return self.next_row()
-            }
-        } else {
-            panic!("requires it");
-        }
-
-        panic!("didnt find it");
-    }
-
-    // eg. transaction_by_nnumber
-    pub fn row_by_number(&mut self, row: usize) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
-        self.row = row as u64;
-        self.next_row()
-    }
-
-    pub fn next_row(&mut self) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
-        if self.row as usize * self.config.columns == self.config.offsets.len() {
-            // Has reached the end
-            return Ok(None)
-        }
-
-        let mut row = Vec::with_capacity(self.config.columns);
-        let mut column_value = Vec::with_capacity(32);
-
-        for column in 0..self.config.columns {
-            let index_offset = self.row as usize * self.config.columns + column;
-            let value_offset = self.config.offsets.select(index_offset).unwrap();
-
-            self.data_handle.seek(SeekFrom::Start(value_offset as u64))?;
-
-            // It's the last column of the last row
-            if self.config.offsets.len() == (index_offset + 1) {
-                column_value.clear();
-                self.data_handle.read_to_end(&mut column_value)?;
-            } else {
-                let len = self.config.offsets.select(index_offset + 1).unwrap() - value_offset;
-                column_value.resize(len, 0);
-                self.data_handle.read_exact(&mut column_value[..len])?;
-            }
-
-            if let Some(zstd_dict_decompressors) = &self.zstd_decompressors {
-                // Decompress using zstd dictionaries
-                let extra_capacity =
-                    (column_value.len() * 2).saturating_sub(self.tmp_buf.capacity());
-                self.tmp_buf.clear();
-                self.tmp_buf.reserve(extra_capacity);
-
-                zstd_dict_decompressors
-                    .lock()
-                    .unwrap()
-                    .get_mut(column)
-                    .unwrap()
-                    .decompress_to_buffer(&column_value, &mut self.tmp_buf)?;
-
-                row.push(self.tmp_buf.clone());
-            } else if let Some(compression) = &self.config.compressor {
-                // Decompress using the vanilla
-                row.push(compression.decompress(&column_value)?);
-            } else {
-                // It's not compressed
-                row.push(column_value.clone())
-            }
-        }
-
-        if row.is_empty() {
-            return Ok(None)
-        }
-
-        self.row += 1;
-
-        Ok(Some(row))
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use rand::{seq::SliceRandom, RngCore};
-
     use super::*;
-    use std::collections::HashSet;
+    use rand::{rngs::SmallRng, seq::SliceRandom, RngCore, SeedableRng};
+    use std::{collections::HashSet, sync::Mutex};
 
-    fn test_data() -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
-        let mut rng = rand::thread_rng();
-        let value_size = 32;
+    fn test_data(seed: Option<u64>) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+        let value_length = 32;
         let num_rows = 100;
-        let mut vec: Vec<u8> = vec![0; value_size];
 
-        (
+        let mut vec: Vec<u8> = vec![0; value_length];
+        let mut rng = seed.map(SmallRng::seed_from_u64).unwrap_or_else(SmallRng::from_entropy);
+
+        let mut gen = || {
             (0..num_rows)
                 .map(|_| {
                     rng.fill_bytes(&mut vec[..]);
                     vec.clone()
                 })
-                .collect(),
-            (0..num_rows)
-                .map(|_| {
-                    rng.fill_bytes(&mut vec[..]);
-                    vec.clone()
-                })
-                .collect(),
-        )
+                .collect()
+        };
+
+        (gen(), gen())
     }
 
     #[test]
-    fn phf() {
-        let (col1, col2) = test_data();
+    fn test_phf() {
+        let (col1, col2) = test_data(None);
         let num_columns = 2;
         let num_rows = col1.len() as u64;
         let file_path = tempfile::NamedTempFile::new().unwrap();
@@ -532,8 +390,8 @@ mod tests {
     }
 
     #[test]
-    fn filter() {
-        let (col1, col2) = test_data();
+    fn test_filter() {
+        let (col1, col2) = test_data(Some(1));
         let _num_columns = 2;
         let num_rows = col1.len() as u64;
         let file_path = tempfile::NamedTempFile::new().unwrap();
@@ -571,10 +429,9 @@ mod tests {
         assert!(!Filter::contains(&loaded_nippy, &col1[4]).unwrap());
     }
 
-    /// Tests NippyJar with everything enabled. Zstd, filter and
     #[test]
-    fn test_full_nippy_jar() {
-        let (col1, col2) = test_data();
+    fn test_zstd() {
+        let (col1, col2) = test_data(None);
         let num_rows = col1.len() as u64;
         let _num_columns = 2;
         let file_path = tempfile::NamedTempFile::new().unwrap();
@@ -612,9 +469,7 @@ mod tests {
                 (compression::ZstdState::Ready, Some(_num_columns))
             ));
         }
-        nippy = nippy.with_cuckoo_filter(col1.len());
-        nippy = nippy.with_mphf();
-        nippy.prepare_index(&col1).unwrap();
+
         nippy.freeze(data.clone(), num_rows).unwrap();
 
         let loaded_nippy = NippyJar::load(file_path.path()).unwrap();
@@ -633,20 +488,66 @@ mod tests {
                 assert_eq!((&row[0], &row[1]), (&data[0][row_index], &data[1][row_index]));
                 row_index += 1;
             }
+        }
+    }
 
-            // Shuffled for chaos.
-            let mut data = col1.iter().zip(col2.iter()).enumerate().collect::<Vec<_>>();
-            data.shuffle(&mut rand::thread_rng());
+    /// Tests NippyJar with everything enabled: compression, filter, offset list and offset index.
+    #[test]
+    fn test_full_nippy_jar() {
+        let (col1, col2) = test_data(None);
+        let num_rows = col1.len() as u64;
+        let _num_columns = 2;
+        let file_path = tempfile::NamedTempFile::new().unwrap();
+        let data = vec![col1.clone(), col2.clone()];
 
-            for (row_num, (v0, v1)) in data {
-                // Simulates `by_hash` queries by iterating col1 values, which were used to create
-                // the inner index.
-                let row_by_value = cursor.row_by_filter(v0).unwrap().unwrap();
-                assert_eq!((&row_by_value[0], &row_by_value[1]), (v0, v1));
+        // Create file
+        {
+            let mut nippy = NippyJar::new(_num_columns, file_path.path())
+                .with_zstd(true, 5000)
+                .with_cuckoo_filter(col1.len())
+                .with_mphf();
 
-                // Simulates `by_number` queries
-                let row_by_num = cursor.row_by_number(row_num).unwrap().unwrap();
-                assert_eq!(row_by_value, row_by_num);
+            nippy.prepare_compression(data.clone()).unwrap();
+            nippy.prepare_index(&col1).unwrap();
+            nippy.freeze(data.clone(), num_rows).unwrap();
+        }
+
+        // Read file
+        {
+            let loaded_nippy = NippyJar::load(file_path.path()).unwrap();
+
+            assert!(loaded_nippy.compressor.is_some());
+            assert!(loaded_nippy.filter.is_some());
+            assert!(loaded_nippy.phf.is_some());
+
+            if let Some(Compressors::Zstd(zstd)) = &loaded_nippy.compressor {
+                let mut cursor = NippyJarCursor::new(
+                    &loaded_nippy,
+                    Some(Mutex::new(zstd.generate_decompressors().unwrap())),
+                )
+                .unwrap();
+
+                // Iterate over compressed values and compare
+                let mut row_num = 0usize;
+                while let Some(row) = cursor.next_row().unwrap() {
+                    assert_eq!((&row[0], &row[1]), (&data[0][row_num], &data[1][row_num]));
+                    row_num += 1;
+                }
+
+                // Shuffled for chaos.
+                let mut data = col1.iter().zip(col2.iter()).enumerate().collect::<Vec<_>>();
+                data.shuffle(&mut rand::thread_rng());
+
+                for (row_num, (v0, v1)) in data {
+                    // Simulates `by_hash` queries by iterating col1 values, which were used to
+                    // create the inner index.
+                    let row_by_value = cursor.row_by_filter(v0).unwrap().unwrap();
+                    assert_eq!((&row_by_value[0], &row_by_value[1]), (v0, v1));
+
+                    // Simulates `by_number` queries
+                    let row_by_num = cursor.row_by_number(row_num).unwrap().unwrap();
+                    assert_eq!(row_by_value, row_by_num);
+                }
             }
         }
     }
