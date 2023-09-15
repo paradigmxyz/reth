@@ -643,7 +643,7 @@ where
 
     let state_provider = client.state_by_block_hash(config.parent_block.hash)?;
     let state = StateProviderDatabase::new(&state_provider);
-    let db =
+    let mut db =
         State::builder().with_database_ref(cached_reads.as_db(&state)).with_bundle_update().build();
     let PayloadConfig {
         initialized_block_env,
@@ -668,8 +668,8 @@ where
     let block_number = initialized_block_env.number.to::<u64>();
 
     // apply eip-4788 pre block contract call
-    let mut db = pre_block_beacon_root_contract_call(
-        db,
+    pre_block_beacon_root_contract_call(
+        &mut db,
         &chain_spec,
         block_number,
         &initialized_cfg,
@@ -880,7 +880,7 @@ where
     debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number,  "building empty payload");
 
     let state = client.state_by_block_hash(parent_block.hash)?;
-    let db = State::builder()
+    let mut db = State::builder()
         .with_database_boxed(Box::new(StateProviderDatabase::new(&state)))
         .with_bundle_update()
         .build();
@@ -890,8 +890,8 @@ where
     let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
 
     // apply eip-4788 pre block contract call
-    let mut db = pre_block_beacon_root_contract_call(
-        db,
+    pre_block_beacon_root_contract_call(
+        &mut db,
         &chain_spec,
         block_number,
         &initialized_cfg,
@@ -992,15 +992,15 @@ fn commit_withdrawals<DB: Database<Error = Error>>(
 
 /// TODO: docs
 fn pre_block_beacon_root_contract_call<DB>(
-    db: State<DB>,
+    db: &mut DB,
     chain_spec: &ChainSpec,
     block_number: u64,
     initialized_cfg: &CfgEnv,
     initialized_block_env: &BlockEnv,
     attributes: &PayloadBuilderAttributes,
-) -> Result<State<DB>, PayloadBuilderError>
+) -> Result<(), PayloadBuilderError>
 where
-    DB: Database,
+    DB: Database + DatabaseCommit,
     <DB as Database>::Error: Debug,
 {
     // Configure the environment for the block.
@@ -1015,22 +1015,14 @@ where
     evm_pre_block.database(db);
 
     // initialize a block from the env, because the pre block call needs the block itself
-    match apply_beacon_root_contract_call(
+    apply_beacon_root_contract_call(
         chain_spec,
         attributes.timestamp,
         block_number,
         attributes.parent_beacon_block_root,
         &mut evm_pre_block,
-    ) {
-        Ok(()) => {}
-        Err(err) => return Err(PayloadBuilderError::Internal(err.into())),
-    }
-
-    // give the state back
-    let db = evm_pre_block.take_db();
-    drop(evm_pre_block);
-
-    Ok(db)
+    )
+    .map_err(|err| PayloadBuilderError::Internal(err.into()))
 }
 
 /// Checks if the new payload is better than the current best.
