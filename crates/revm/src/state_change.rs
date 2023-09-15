@@ -67,7 +67,7 @@ pub fn apply_beacon_root_contract_call<DB: Database>(
 where
     <DB as Database>::Error: Debug,
 {
-    if chain_spec.fork(Hardfork::Cancun).active_at_timestamp(block_timestamp) {
+    if chain_spec.is_cancun_activated_at_timestamp(block_timestamp) {
         // if the block number is zero (genesis block) then the parent beacon block root must
         // be 0x0 and no system transaction may occur as per EIP-4788
         if block_number == 0 {
