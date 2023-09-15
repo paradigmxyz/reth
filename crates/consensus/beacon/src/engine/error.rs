@@ -1,4 +1,4 @@
-use crate::engine::hooks::HookError;
+use crate::engine::hooks::EngineHookError;
 use reth_rpc_types::engine::ForkchoiceUpdateError;
 use reth_stages::PipelineError;
 
@@ -22,7 +22,7 @@ pub enum BeaconConsensusEngineError {
     PrunerChannelClosed,
     /// Hook error.
     #[error(transparent)]
-    Hook(#[from] HookError),
+    Hook(#[from] EngineHookError),
     /// Common error. Wrapper around [reth_interfaces::Error].
     #[error(transparent)]
     Common(#[from] reth_interfaces::Error),

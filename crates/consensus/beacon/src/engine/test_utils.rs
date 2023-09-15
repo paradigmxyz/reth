@@ -1,5 +1,5 @@
 use crate::{
-    engine::hooks::PruneHook, hooks::Hooks, BeaconConsensus, BeaconConsensusEngine,
+    engine::hooks::PruneHook, hooks::EngineHooks, BeaconConsensus, BeaconConsensusEngine,
     BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
     BeaconOnNewPayloadError, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
@@ -478,7 +478,7 @@ where
             PruneBatchSizes::default(),
         );
 
-        let mut hooks = Hooks::new();
+        let mut hooks = EngineHooks::new();
         hooks.add(PruneHook::new(pruner, Box::<TokioTaskExecutor>::default()));
 
         let (mut engine, handle) = BeaconConsensusEngine::new(

@@ -26,7 +26,7 @@ use fdlimit::raise_fd_limit;
 use futures::{future::Either, pin_mut, stream, stream_select, StreamExt};
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
 use reth_beacon_consensus::{
-    hooks::{Hooks, PruneHook},
+    hooks::{EngineHooks, PruneHook},
     BeaconConsensus, BeaconConsensusEngine, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
 use reth_blockchain_tree::{
@@ -449,7 +449,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             None
         };
 
-        let mut hooks = Hooks::new();
+        let mut hooks = EngineHooks::new();
 
         if let Some(prune_config) = prune_config {
             info!(target: "reth::cli", "Pruner initialized");

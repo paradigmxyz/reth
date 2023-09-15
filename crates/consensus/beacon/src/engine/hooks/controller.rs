@@ -1,4 +1,4 @@
-use crate::hooks::{Hook, HookAction, HookArguments, HookError, Hooks};
+use crate::hooks::{EngineContext, EngineHook, EngineHookAction, EngineHookError, EngineHooks};
 use std::{
     collections::VecDeque,
     task::{Context, Poll},
@@ -8,27 +8,29 @@ use tracing::debug;
 /// Manages hooks under the control of the engine.
 ///
 /// This type polls the initialized hooks one by one, respecting the DB access level
-/// (i.e. [crate::hooks::HookDBAccessLevel::ReadWrite] that enforces running at most one such hook).
-pub(crate) struct HooksController {
+/// (i.e. [crate::hooks::EngineHookDBAccessLevel::ReadWrite] that enforces running at most one such
+/// hook).
+pub(crate) struct EngineHooksController {
     /// Collection of hooks.
     ///
     /// Hooks might be removed from the collection, and returned upon completion.
     /// In the current implementation, it only happens when moved to `running_hook_with_db_write`.
-    hooks: VecDeque<Box<dyn Hook>>,
+    hooks: VecDeque<Box<dyn EngineHook>>,
     /// Currently running hook with DB write access, if any.
-    running_hook_with_db_write: Option<Box<dyn Hook>>,
+    running_hook_with_db_write: Option<Box<dyn EngineHook>>,
 }
 
-impl HooksController {
-    /// Creates a new [`HooksController`].
-    pub(crate) fn new(hooks: Hooks) -> Self {
+impl EngineHooksController {
+    /// Creates a new [`EngineHooksController`].
+    pub(crate) fn new(hooks: EngineHooks) -> Self {
         Self { hooks: hooks.inner.into(), running_hook_with_db_write: None }
     }
 
     /// Polls currently running hook with DB write access, if any.
     ///
     /// Returns [`Poll::Ready`] if currently running hook with DB write access returned
-    /// an [event][`crate::hooks::HookEvent`] that resulted in [action][`HookAction`] or error.
+    /// an [event][`crate::hooks::EngineHookEvent`] that resulted in [action][`EngineHookAction`] or
+    /// error.
     ///
     /// Returns [`Poll::Pending`] in all other cases:
     /// 1. No hook with DB write access is running.
@@ -38,8 +40,8 @@ impl HooksController {
     pub(crate) fn poll_running_hook_with_db_write(
         &mut self,
         cx: &mut Context<'_>,
-        args: HookArguments,
-    ) -> Poll<Result<HookAction, HookError>> {
+        args: EngineContext,
+    ) -> Poll<Result<EngineHookAction, EngineHookError>> {
         let Some(mut hook) = self.running_hook_with_db_write.take() else { return Poll::Pending };
 
         match hook.poll(cx, args) {
@@ -70,10 +72,10 @@ impl HooksController {
         Poll::Pending
     }
 
-    /// Polls next hook from the collection.
+    /// Polls next engine from the collection.
     ///
-    /// Returns [`Poll::Ready`] if next hook returned an [event][`crate::hooks::HookEvent`] that
-    /// resulted in [action][`HookAction`].
+    /// Returns [`Poll::Ready`] if next hook returned an [event][`crate::hooks::EngineHookEvent`]
+    /// that resulted in [action][`EngineHookAction`].
     ///
     /// Returns [`Poll::Pending`] in all other cases:
     /// 1. Next hook is [`Option::None`], i.e. taken, meaning it's currently running and has a DB
@@ -85,9 +87,9 @@ impl HooksController {
     pub(crate) fn poll_next_hook(
         &mut self,
         cx: &mut Context<'_>,
-        args: HookArguments,
+        args: EngineContext,
         db_write_active: bool,
-    ) -> Poll<Result<HookAction, HookError>> {
+    ) -> Poll<Result<EngineHookAction, EngineHookError>> {
         let Some(mut hook) = self.hooks.pop_front() else { return Poll::Pending };
 
         // Hook with DB write access level is not allowed to run due to already running hook with DB

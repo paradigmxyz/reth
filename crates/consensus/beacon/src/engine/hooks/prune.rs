@@ -1,8 +1,10 @@
 //! Prune hook for the engine implementation.
 
 use crate::{
-    engine::hooks::{Hook, HookAction, HookArguments, HookError, HookEvent},
-    hooks::HookDBAccessLevel,
+    engine::hooks::{
+        EngineContext, EngineHook, EngineHookAction, EngineHookError, EngineHookEvent,
+    },
+    hooks::EngineHookDBAccessLevel,
 };
 use futures::FutureExt;
 use metrics::Counter;
@@ -38,7 +40,10 @@ impl<DB: Database + 'static> PruneHook<DB> {
     /// Advances the pruner state.
     ///
     /// This checks for the result in the channel, or returns pending if the pruner is idle.
-    fn poll_pruner(&mut self, cx: &mut Context<'_>) -> Poll<(HookEvent, Option<HookAction>)> {
+    fn poll_pruner(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<(EngineHookEvent, Option<EngineHookAction>)> {
         let result = match self.pruner_state {
             PrunerState::Idle(_) => return Poll::Pending,
             PrunerState::Running(ref mut fut) => {
@@ -51,10 +56,10 @@ impl<DB: Database + 'static> PruneHook<DB> {
                 self.pruner_state = PrunerState::Idle(Some(pruner));
 
                 match result {
-                    Ok(_) => HookEvent::Finished(Ok(())),
-                    Err(err) => HookEvent::Finished(Err(match err {
+                    Ok(_) => EngineHookEvent::Finished(Ok(())),
+                    Err(err) => EngineHookEvent::Finished(Err(match err {
                         PrunerError::PrunePart(_) | PrunerError::InconsistentData(_) => {
-                            HookError::Internal(Box::new(err))
+                            EngineHookError::Internal(Box::new(err))
                         }
                         PrunerError::Interface(err) => err.into(),
                         PrunerError::Database(err) => reth_interfaces::Error::Database(err).into(),
@@ -64,12 +69,12 @@ impl<DB: Database + 'static> PruneHook<DB> {
             }
             Err(_) => {
                 // failed to receive the pruner
-                HookEvent::Finished(Err(HookError::ChannelClosed))
+                EngineHookEvent::Finished(Err(EngineHookError::ChannelClosed))
             }
         };
 
-        let action = if matches!(event, HookEvent::Finished(Ok(_))) {
-            Some(HookAction::RestoreCanonicalHashes)
+        let action = if matches!(event, EngineHookEvent::Finished(Ok(_))) {
+            Some(EngineHookAction::RestoreCanonicalHashes)
         } else {
             None
         };
@@ -87,7 +92,7 @@ impl<DB: Database + 'static> PruneHook<DB> {
     fn try_spawn_pruner(
         &mut self,
         tip_block_number: BlockNumber,
-    ) -> Option<(HookEvent, Option<HookAction>)> {
+    ) -> Option<(EngineHookEvent, Option<EngineHookAction>)> {
         match &mut self.pruner_state {
             PrunerState::Idle(pruner) => {
                 let mut pruner = pruner.take()?;
@@ -106,16 +111,16 @@ impl<DB: Database + 'static> PruneHook<DB> {
                     self.pruner_state = PrunerState::Running(rx);
 
                     Some((
-                        HookEvent::Started,
+                        EngineHookEvent::Started,
                         // Engine can't process any FCU/payload messages from CL while we're
                         // pruning, as pruner needs an exclusive write access to the database. To
                         // prevent CL from sending us unneeded updates, we need to respond `true`
                         // on `eth_syncing` request.
-                        Some(HookAction::UpdateSyncState(SyncState::Syncing)),
+                        Some(EngineHookAction::UpdateSyncState(SyncState::Syncing)),
                     ))
                 } else {
                     self.pruner_state = PrunerState::Idle(Some(pruner));
-                    Some((HookEvent::NotReady, None))
+                    Some((EngineHookEvent::NotReady, None))
                 }
             }
             PrunerState::Running(_) => None,
@@ -123,7 +128,7 @@ impl<DB: Database + 'static> PruneHook<DB> {
     }
 }
 
-impl<DB: Database + 'static> Hook for PruneHook<DB> {
+impl<DB: Database + 'static> EngineHook for PruneHook<DB> {
     fn name(&self) -> &'static str {
         "Prune"
     }
@@ -131,11 +136,11 @@ impl<DB: Database + 'static> Hook for PruneHook<DB> {
     fn poll(
         &mut self,
         cx: &mut Context<'_>,
-        args: HookArguments,
-    ) -> Poll<(HookEvent, Option<HookAction>)> {
+        ctx: EngineContext,
+    ) -> Poll<(EngineHookEvent, Option<EngineHookAction>)> {
         // Try to spawn a pruner
-        match self.try_spawn_pruner(args.tip_block_number) {
-            Some((HookEvent::NotReady, _)) => return Poll::Pending,
+        match self.try_spawn_pruner(ctx.tip_block_number) {
+            Some((EngineHookEvent::NotReady, _)) => return Poll::Pending,
             Some((event, action)) => return Poll::Ready((event, action)),
             None => (),
         }
@@ -144,8 +149,8 @@ impl<DB: Database + 'static> Hook for PruneHook<DB> {
         self.poll_pruner(cx)
     }
 
-    fn db_access_level(&self) -> HookDBAccessLevel {
-        HookDBAccessLevel::ReadWrite
+    fn db_access_level(&self) -> EngineHookDBAccessLevel {
+        EngineHookDBAccessLevel::ReadWrite
     }
 }
 

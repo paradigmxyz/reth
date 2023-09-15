@@ -4,7 +4,7 @@ use crate::{
         message::OnForkChoiceUpdated,
         metrics::EngineMetrics,
     },
-    hooks::{HookAction, HookArguments, HooksController},
+    hooks::{EngineContext, EngineHookAction, EngineHooksController},
     sync::{EngineSyncController, EngineSyncEvent},
 };
 use futures::{Future, StreamExt};
@@ -68,7 +68,7 @@ mod handle;
 pub use handle::BeaconConsensusEngineHandle;
 
 mod forkchoice;
-use crate::hooks::Hooks;
+use crate::hooks::EngineHooks;
 pub use forkchoice::ForkchoiceStatus;
 
 mod metrics;
@@ -202,7 +202,7 @@ where
     /// blocks using the pipeline. Otherwise, the engine, sync controller, and blockchain tree will
     /// be used to download and execute the missing blocks.
     pipeline_run_threshold: u64,
-    hooks: HooksController,
+    hooks: EngineHooksController,
 }
 
 impl<DB, BT, Client> BeaconConsensusEngine<DB, BT, Client>
@@ -230,7 +230,7 @@ where
         payload_builder: PayloadBuilderHandle,
         target: Option<H256>,
         pipeline_run_threshold: u64,
-        hooks: Hooks,
+        hooks: EngineHooks,
     ) -> Result<(Self, BeaconConsensusEngineHandle), Error> {
         let (to_engine, rx) = mpsc::unbounded_channel();
         Self::with_channel(
@@ -276,7 +276,7 @@ where
         pipeline_run_threshold: u64,
         to_engine: UnboundedSender<BeaconEngineMessage>,
         rx: UnboundedReceiver<BeaconEngineMessage>,
-        hooks: Hooks,
+        hooks: EngineHooks,
     ) -> Result<(Self, BeaconConsensusEngineHandle), Error> {
         let handle = BeaconConsensusEngineHandle { to_engine };
         let sync = EngineSyncController::new(
@@ -299,7 +299,7 @@ where
             invalid_headers: InvalidHeaderCache::new(MAX_INVALID_HEADERS),
             metrics: EngineMetrics::default(),
             pipeline_run_threshold,
-            hooks: HooksController::new(hooks),
+            hooks: EngineHooksController::new(hooks),
         };
 
         let maybe_pipeline_target = match target {
@@ -1681,10 +1681,12 @@ where
         None
     }
 
-    fn on_hook_action(&self, action: HookAction) -> Result<(), BeaconConsensusEngineError> {
+    fn on_hook_action(&self, action: EngineHookAction) -> Result<(), BeaconConsensusEngineError> {
         match action {
-            HookAction::UpdateSyncState(state) => self.sync_state_updater.update_sync_state(state),
-            HookAction::RestoreCanonicalHashes => {
+            EngineHookAction::UpdateSyncState(state) => {
+                self.sync_state_updater.update_sync_state(state)
+            }
+            EngineHookAction::RestoreCanonicalHashes => {
                 if let Err(error) = self.blockchain.restore_canonical_hashes() {
                     error!(target: "consensus::engine", ?error, "Error restoring blockchain tree state");
                     return Err(error.into())
@@ -1728,7 +1730,7 @@ where
             // any engine messages until it's finished.
             if let Poll::Ready(result) = this.hooks.poll_running_hook_with_db_write(
                 cx,
-                HookArguments { tip_block_number: this.blockchain.canonical_tip().number },
+                EngineContext { tip_block_number: this.blockchain.canonical_tip().number },
             ) {
                 if let Err(err) = this.on_hook_action(result?) {
                     return Poll::Ready(Err(err))
@@ -1797,7 +1799,7 @@ where
             if is_pending && !this.forkchoice_state_tracker.is_latest_invalid() {
                 if let Poll::Ready(result) = this.hooks.poll_next_hook(
                     cx,
-                    HookArguments { tip_block_number: this.blockchain.canonical_tip().number },
+                    EngineContext { tip_block_number: this.blockchain.canonical_tip().number },
                     this.sync.is_pipeline_active(),
                 ) {
                     if let Err(err) = this.on_hook_action(result?) {
