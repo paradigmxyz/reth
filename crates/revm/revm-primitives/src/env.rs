@@ -123,16 +123,24 @@ pub fn tx_env_with_recovered(transaction: &TransactionSignedEcRecovered) -> TxEn
 ///  part of the call
 ///  * if no code exists at `BEACON_ROOTS_ADDRESS`, the call must fail silently
 pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_block_root: H256) {
-    env.tx.caller = SYSTEM_ADDRESS;
-    env.tx.transact_to = TransactTo::Call(BEACON_ROOTS_ADDRESS);
-    // Explicitly set nonce to None so revm does not do any nonce checks
-    env.tx.nonce = None;
-    env.tx.gas_limit = 30_000_000;
-    env.tx.value = U256::ZERO;
-    env.tx.data = parent_beacon_block_root.to_fixed_bytes().to_vec().into();
-    // Setting the gas price to zero enforces that no value is transferred as part of the call, and
-    // that the call will not count against the block's gas limit
-    env.tx.gas_price = U256::ZERO;
+    env.tx = TxEnv {
+        caller: SYSTEM_ADDRESS,
+        transact_to: TransactTo::Call(BEACON_ROOTS_ADDRESS),
+        // Explicitly set nonce to None so revm does not do any nonce checks
+        nonce: None,
+        gas_limit: 30_000_000,
+        value: U256::ZERO,
+        data: parent_beacon_block_root.to_fixed_bytes().to_vec().into(),
+        // Setting the gas price to zero enforces that no value is transferred as part of the call,
+        // and that the call will not count against the block's gas limit
+        gas_price: U256::ZERO,
+        // The chain ID check is not relevant here and is disabled if set to None
+        chain_id: None,
+        // Setting the gas priority fee to None ensures the effective gas price is derived from the
+        // `gas_price` field, which we need to be zero
+        gas_priority_fee: None,
+        access_list: Vec::new(),
+    };
 
     // ensure the block gas limit is >= the tx
     env.block.gas_limit = U256::from(env.tx.gas_limit);
