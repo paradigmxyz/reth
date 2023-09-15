@@ -32,7 +32,11 @@ pub use reth_revm_primitives::db::states::OriginalValuesKnown;
 pub struct BundleStateWithReceipts {
     /// Bundle state with reverts.
     bundle: BundleState,
-    /// Receipts.
+    /// The collection of receipts.
+    /// Outer vector stores receipts for each block sequentially.
+    /// The inner vector stores receipts ordered by transaction number.
+    ///
+    /// If receipt is None it means it is pruned.  
     receipts: Vec<Vec<Option<Receipt>>>,
     /// First block of bundle state.
     first_block: BlockNumber,

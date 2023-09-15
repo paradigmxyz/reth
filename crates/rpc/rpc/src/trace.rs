@@ -278,8 +278,8 @@ where
     /// 2. configures the EVM evn
     /// 3. loops over all transactions and executes them
     /// 4. calls the callback with the transaction info, the execution result, the changed state
-    /// _after_ the transaction [State] and the database that points to the state right _before_ the
-    /// transaction.
+    /// _after_ the transaction [StateProviderDatabase] and the database that points to the state
+    /// right _before_ the transaction.
     async fn trace_block_with<F, R>(
         &self,
         block_id: BlockId,

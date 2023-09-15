@@ -138,8 +138,7 @@ pub fn insert_genesis_state<DB: Database>(
             ),
         );
     }
-    let mut all_reverts_init: RevertsInit = HashMap::new();
-    all_reverts_init.insert(0, reverts_init);
+    let all_reverts_init: RevertsInit = HashMap::from([(0, reverts_init)]);
 
     let bundle = BundleStateWithReceipts::new_init(
         state_init,
