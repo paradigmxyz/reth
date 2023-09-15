@@ -1341,10 +1341,10 @@ where
 
     /// Attempt to restore the tree.
     ///
-    /// This is invoked after a pruner run to update the tree with the most recent canonical
-    /// hashes.
+    /// This is invoked after a pruner run to update the tree with the buffered blocks according
+    /// to the most recent canonical hashes.
     fn update_tree_on_finished_pruner(&mut self) -> Result<(), Error> {
-        self.blockchain.restore_canonical_hashes()
+        self.blockchain.connect_buffered_blocks_to_canonical_hashes()
     }
 
     /// Invoked if we successfully downloaded a new block from the network.

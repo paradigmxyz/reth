@@ -77,10 +77,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
         res
     }
 
-    fn restore_canonical_hashes(&self) -> Result<(), Error> {
-        trace!(target: "blockchain_tree", "Restoring canonical hashes");
+    fn connect_buffered_blocks_to_canonical_hashes(&self) -> Result<(), Error> {
+        trace!(target: "blockchain_tree", "Connecting buffered blocks to canonical hashes");
         let mut tree = self.tree.write();
-        let res = tree.restore_canonical_hashes();
+        let res = tree.connect_buffered_blocks_to_canonical_hashes();
         tree.update_chains_metrics();
         res
     }

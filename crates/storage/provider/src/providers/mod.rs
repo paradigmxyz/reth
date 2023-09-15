@@ -556,8 +556,8 @@ where
         self.tree.restore_canonical_hashes_and_finalize(last_finalized_block)
     }
 
-    fn restore_canonical_hashes(&self) -> Result<()> {
-        self.tree.restore_canonical_hashes()
+    fn connect_buffered_blocks_to_canonical_hashes(&self) -> Result<()> {
+        self.tree.connect_buffered_blocks_to_canonical_hashes()
     }
 
     fn make_canonical(&self, block_hash: &BlockHash) -> Result<CanonicalOutcome> {
