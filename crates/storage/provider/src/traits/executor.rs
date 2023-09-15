@@ -25,8 +25,7 @@ pub trait ExecutorFactory: Send + Sync + 'static {
 pub struct BlockExecutorStats {
     /// How long execution took
     pub execution_duration: Duration,
-    /// How long did output of EVM execution take
-    /// to apply to cache state
+    /// The amount of time it took to apply state changes to cached state
     pub apply_state_duration: Duration,
     /// Apply Post state execution changes duration.
     pub apply_post_execution_changes_duration: Duration,
