@@ -33,17 +33,6 @@ pub fn into_reth_acc(revm_acc: AccountInfo) -> Account {
     }
 }
 
-/// Create reth primitive [Account] from [revm::primitives::AccountInfo].
-/// Check if revm bytecode hash is [KECCAK_EMPTY] and put None to reth [Account]
-pub fn to_reth_acc(revm_acc: &AccountInfo) -> Account {
-    let code_hash = revm_acc.code_hash;
-    Account {
-        balance: revm_acc.balance,
-        nonce: revm_acc.nonce,
-        bytecode_hash: (code_hash != KECCAK_EMPTY).then_some(code_hash),
-    }
-}
-
 /// Create revm primitive [AccountInfo] from [reth_primitives::Account].
 pub fn into_revm_acc(reth_acc: Account) -> AccountInfo {
     AccountInfo {

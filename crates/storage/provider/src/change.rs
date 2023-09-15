@@ -18,7 +18,6 @@ use reth_revm_primitives::{
     },
     into_reth_acc, into_revm_acc,
     primitives::AccountInfo,
-    to_reth_acc,
 };
 use reth_trie::{
     hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
@@ -114,7 +113,7 @@ impl BundleStateWithReceipts {
 
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.bundle.account(address).map(|a| a.info.as_ref().map(to_reth_acc))
+        self.bundle.account(address).map(|a| a.info.clone().map(into_reth_acc))
     }
 
     /// Get storage if value is known.
@@ -141,7 +140,7 @@ impl BundleStateWithReceipts {
         for (address, account) in self.bundle.state() {
             let hashed_address = keccak256(address);
             if let Some(account) = &account.info {
-                hashed_state.insert_account(hashed_address, to_reth_acc(account))
+                hashed_state.insert_account(hashed_address, into_reth_acc(account.clone()))
             } else {
                 hashed_state.insert_cleared_account(hashed_address);
             }
@@ -984,7 +983,7 @@ mod tests {
         let provider = factory.provider_rw().unwrap();
 
         let address1 = Address::random();
-        let mut account_info = RevmAccountInfo { nonce: 1, ..Default::default() };
+        let account_info = RevmAccountInfo { nonce: 1, ..Default::default() };
 
         // Block #0: initial state.
         let mut cache_state = CacheState::new(true);

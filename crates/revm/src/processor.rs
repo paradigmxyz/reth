@@ -35,9 +35,11 @@ pub struct EVMProcessor<'a> {
     stack: InspectorStack,
     /// The collection of receipts.
     /// Outer vector stores receipts for each block sequentially.
-    /// The inner vector stores receipts that were not pruned.
+    /// The inner vector stores receipts ordered by transaction number.
+    ///
+    /// If receipt is None it means it is pruned.   
     receipts: Vec<Vec<Option<Receipt>>>,
-    /// First block will be initialized to ZERO
+    /// First block will be initialized to `None`
     /// and be set to the block number of first block executed.
     first_block: Option<BlockNumber>,
     /// The maximum known block.
@@ -136,7 +138,7 @@ impl<'a> EVMProcessor<'a> {
 
     /// Initializes the config and block env.
     fn init_env(&mut self, header: &Header, total_difficulty: U256) {
-        //set state clear flag
+        // Set state clear flag.
         self.evm.db.as_mut().unwrap().set_state_clear_flag(
             self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(header.number),
         );
@@ -304,7 +306,7 @@ impl<'a> EVMProcessor<'a> {
             return Err(BlockValidationError::BlockGasUsed {
                 got: cumulative_gas_used,
                 expected: block.gas_used,
-                receipts: self
+                gas_spent_by_tx: self
                     .receipts
                     .last()
                     .map(|block_r| {

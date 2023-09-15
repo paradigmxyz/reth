@@ -68,7 +68,7 @@ impl<DB: StateProvider> Database for StateProviderDatabase<DB> {
     }
 
     fn block_hash(&mut self, number: U256) -> Result<H256, Self::Error> {
-        // Note: this unwrap is potentially unsafe
+        // The `number` represents the block number, so it is safe to cast it to u64.
         Ok(self.0.block_hash(number.try_into().unwrap())?.unwrap_or_default())
     }
 }

@@ -79,7 +79,7 @@ pub trait BlockExecutor {
         senders: Option<Vec<Address>>,
     ) -> Result<(), BlockExecutionError>;
 
-    /// Return bundle state. This is output of the execution.
+    /// Return bundle state. This is output of executed blocks.
     fn take_output_state(&mut self) -> BundleStateWithReceipts;
 
     /// Internal statistics of execution.
