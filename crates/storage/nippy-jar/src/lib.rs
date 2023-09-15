@@ -20,7 +20,7 @@ pub mod compression;
 use compression::{Compression, Compressors};
 
 pub mod phf;
-use phf::{Fmph, Functions, GoFmph, KeySet};
+use phf::{Fmph, Functions, GoFmph, PerfectHashingFunction};
 
 mod error;
 pub use error::NippyJarError;
@@ -132,26 +132,28 @@ impl NippyJar {
         Ok(())
     }
 
-    /// If required, prepares any compression algorithm to an early pass of the data.
-    pub fn prepare_index<T: AsRef<[u8]> + Sync + Clone + Hash + std::fmt::Debug>(
+    /// Prepares beforehand the offsets index for querying rows based on `values` (eg. transaction
+    /// hash). Expects `values` to be sorted in the same way as the data that is going to be
+    /// later on inserted.
+    pub fn prepare_index<T: AsRef<[u8]> + Sync + Clone + Hash>(
         &mut self,
         values: &[T],
     ) -> Result<(), NippyJarError> {
         let mut offsets_index = vec![0; values.len()];
 
+        // Builds perfect hashing function from the values
         if let Some(phf) = self.phf.as_mut() {
             phf.set_keys(values)?;
         }
 
         if self.filter.is_some() || self.phf.is_some() {
             for (row_num, v) in values.iter().enumerate() {
-                // Point to the first column value of the row
-
                 if let Some(filter) = self.filter.as_mut() {
                     filter.add(v.as_ref())?;
                 }
 
                 if let Some(phf) = self.phf.as_mut() {
+                    // Points to the first column value offset of the row.
                     let index = phf.get_index(v.as_ref())?.expect("initialized") as usize;
                     let _ = std::mem::replace(&mut offsets_index[index], row_num as u64);
                 }
@@ -169,7 +171,6 @@ impl NippyJar {
         total_rows: u64,
     ) -> Result<(), NippyJarError> {
         let mut file = self.freeze_check(&columns)?;
-
         self.freeze_config(&mut file)?;
 
         // Special case for zstd that might use custom dictionaries/compressors per column
@@ -240,13 +241,13 @@ impl NippyJar {
         // Drop mut borrow
         drop(maybe_zstd_compressors);
 
-        // Write offset index to file
+        // Write offsets and offset index to file
         self.freeze_offsets(offsets)?;
 
         Ok(())
     }
 
-    // Freezes both
+    /// Freezes offsets and its own index.
     fn freeze_offsets(&mut self, offsets: Vec<usize>) -> Result<(), NippyJarError> {
         if !offsets.is_empty() {
             let mut builder =
@@ -257,9 +258,9 @@ impl NippyJar {
             }
             self.offsets = builder.build().enable_rank();
         }
-        let mut f = File::create(self.index_path())?;
-        self.offsets.serialize_into(&mut f).unwrap();
-        self.offsets_index.serialize_into(f).unwrap();
+        let mut file = File::create(self.index_path())?;
+        self.offsets.serialize_into(&mut file).unwrap();
+        self.offsets_index.serialize_into(file).unwrap();
         Ok(())
     }
 
@@ -304,7 +305,7 @@ impl Filter for NippyJar {
     }
 }
 
-impl KeySet for NippyJar {
+impl PerfectHashingFunction for NippyJar {
     fn set_keys<T: AsRef<[u8]> + Sync + Clone + Hash>(
         &mut self,
         keys: &[T],

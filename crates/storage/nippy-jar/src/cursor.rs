@@ -1,4 +1,4 @@
-use crate::{compression::Compression, Filter, KeySet, NippyJar, NippyJarError};
+use crate::{compression::Compression, Filter, NippyJar, NippyJarError, PerfectHashingFunction};
 use std::{
     clone::Clone,
     fs::File,
@@ -8,18 +8,26 @@ use std::{
 use sucds::int_vectors::Access;
 use zstd::bulk::Decompressor;
 
+/// Simple cursor implementation to retrieve data from [`NippyJar`].
 pub struct NippyJarCursor<'a> {
-    config: &'a NippyJar,
+    /// [`NippyJar`] which holds most of the required configuration to read from the file.
+    jar: &'a NippyJar,
+    /// Optional dictionary decompressors.
     zstd_decompressors: Option<Mutex<Vec<Decompressor<'a>>>>,
+    /// Data file.
     data_handle: File,
+    /// Temporary buffer to unload data to (if necessary), without reallocating memory on each
+    /// retrieval.
     tmp_buf: Vec<u8>,
+    /// Cursor row position.
     row: u64,
+    /// Cursor column position.
     col: u64,
 }
 
 impl<'a> std::fmt::Debug for NippyJarCursor<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "NippyJarCursor {{ config: {:?} }}", self.config)
+        write!(f, "NippyJarCursor {{ config: {:?} }}", self.jar)
     }
 }
 
@@ -29,7 +37,7 @@ impl<'a> NippyJarCursor<'a> {
         zstd_decompressors: Option<Mutex<Vec<Decompressor<'a>>>>,
     ) -> Result<Self, NippyJarError> {
         Ok(NippyJarCursor {
-            config,
+            jar: config,
             zstd_decompressors,
             data_handle: File::open(config.data_path())?,
             tmp_buf: vec![],
@@ -38,57 +46,61 @@ impl<'a> NippyJarCursor<'a> {
         })
     }
 
+    /// Resets cursor to the beginning.
     pub fn reset(&mut self) {
         self.row = 0;
         self.col = 0;
     }
 
-    // eg. transaction_by_hash
-    // may have false positives
+    /// Returns a row, searching it by an entry used during [`NippyJar::prepare_index`].
+    ///
+    /// **May return false positives.**
+    ///
+    /// Example usage would be querying a transactions file with a transaction hash which is **NOT**
+    /// stored in file.
     pub fn row_by_filter(&mut self, value: &[u8]) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
-        if let (Some(filter), Some(phf)) = (&self.config.filter, &self.config.phf) {
+        if let (Some(filter), Some(phf)) = (&self.jar.filter, &self.jar.phf) {
             // May have false positives
             if filter.contains(value)? {
                 // May have false positives
                 let row_index = phf.get_index(value)?.unwrap();
 
-                self.row = self.config.offsets_index.access(row_index as usize).unwrap() as u64;
+                self.row = self.jar.offsets_index.access(row_index as usize).unwrap() as u64;
                 return self.next_row()
             }
-        } else {
-            panic!("requires it");
         }
 
-        panic!("didnt find it");
+        Ok(None)
     }
 
-    // eg. transaction_by_nnumber
+    /// Returns a row by its number.
     pub fn row_by_number(&mut self, row: usize) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
         self.row = row as u64;
         self.next_row()
     }
 
+    /// Advances cursor to next row and returns it.
     pub fn next_row(&mut self) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
-        if self.row as usize * self.config.columns == self.config.offsets.len() {
+        if self.row as usize * self.jar.columns == self.jar.offsets.len() {
             // Has reached the end
             return Ok(None)
         }
 
-        let mut row = Vec::with_capacity(self.config.columns);
+        let mut row = Vec::with_capacity(self.jar.columns);
         let mut column_value = Vec::with_capacity(32);
 
-        for column in 0..self.config.columns {
-            let index_offset = self.row as usize * self.config.columns + column;
-            let value_offset = self.config.offsets.select(index_offset).unwrap();
+        for column in 0..self.jar.columns {
+            let index_offset = self.row as usize * self.jar.columns + column;
+            let value_offset = self.jar.offsets.select(index_offset).unwrap();
 
             self.data_handle.seek(SeekFrom::Start(value_offset as u64))?;
 
             // It's the last column of the last row
-            if self.config.offsets.len() == (index_offset + 1) {
+            if self.jar.offsets.len() == (index_offset + 1) {
                 column_value.clear();
                 self.data_handle.read_to_end(&mut column_value)?;
             } else {
-                let len = self.config.offsets.select(index_offset + 1).unwrap() - value_offset;
+                let len = self.jar.offsets.select(index_offset + 1).unwrap() - value_offset;
                 column_value.resize(len, 0);
                 self.data_handle.read_exact(&mut column_value[..len])?;
             }
@@ -108,7 +120,7 @@ impl<'a> NippyJarCursor<'a> {
                     .decompress_to_buffer(&column_value, &mut self.tmp_buf)?;
 
                 row.push(self.tmp_buf.clone());
-            } else if let Some(compression) = &self.config.compressor {
+            } else if let Some(compression) = &self.jar.compressor {
                 // Decompress using the vanilla
                 row.push(compression.decompress(&column_value)?);
             } else {

@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+/// Errors associated with [`crate::NippyJar`].
 #[derive(Debug, Error)]
 pub enum NippyJarError {
     #[error(transparent)]

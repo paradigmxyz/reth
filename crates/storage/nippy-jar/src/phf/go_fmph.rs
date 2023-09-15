@@ -1,4 +1,4 @@
-use crate::{KeySet, NippyJarError};
+use crate::{NippyJarError, PerfectHashingFunction};
 use ph::fmph::{GOBuildConf, GOFunction};
 use serde::{
     de::Error as DeSerdeError, ser::Error as SerdeError, Deserialize, Deserializer, Serialize,
@@ -18,7 +18,7 @@ impl GoFmph {
     }
 }
 
-impl KeySet for GoFmph {
+impl PerfectHashingFunction for GoFmph {
     fn set_keys<T: AsRef<[u8]> + Sync + Clone + Hash>(
         &mut self,
         keys: &[T],
