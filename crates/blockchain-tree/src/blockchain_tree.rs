@@ -120,7 +120,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             .tx()?
             .cursor_read::<tables::CanonicalHeaders>()?
             .walk_back(None)?
-            .take((max_reorg_depth + config.num_of_additional_canonical_block_hashes()) as usize)
+            .take(config.num_of_canonical_hashes() as usize)
             .collect::<Result<Vec<(BlockNumber, BlockHash)>, _>>()?;
 
         // TODO(rakita) save last finalized block inside database but for now just take
@@ -768,16 +768,13 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// `N` is the `max_reorg_depth` plus the number of block hashes needed to satisfy the
     /// `BLOCKHASH` opcode in the EVM.
     pub fn restore_canonical_hashes(&mut self) -> Result<(), Error> {
-        let num_of_canonical_hashes =
-            self.config.max_reorg_depth() + self.config.num_of_additional_canonical_block_hashes();
-
         let last_canonical_hashes = self
             .externals
             .db
             .tx()?
             .cursor_read::<tables::CanonicalHeaders>()?
             .walk_back(None)?
-            .take(num_of_canonical_hashes as usize)
+            .take(self.config.num_of_canonical_hashes())
             .collect::<Result<BTreeMap<BlockNumber, BlockHash>, _>>()?;
 
         let (mut remove_chains, _) =
