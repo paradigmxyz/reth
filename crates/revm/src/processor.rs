@@ -87,7 +87,7 @@ impl<'a> EVMProcessor<'a> {
         EVMProcessor::new_with_state(chain_spec, state)
     }
 
-    /// Create new EVM processor with a given revm state.
+    /// Create a new EVM processor with the given revm state.
     pub fn new_with_state(chain_spec: Arc<ChainSpec>, revm_state: StateDBBox<'a, Error>) -> Self {
         let mut evm = EVM::new();
         evm.database(revm_state);
