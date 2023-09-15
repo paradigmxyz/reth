@@ -4,7 +4,7 @@ use reth_primitives::{
     constants::SYSTEM_ADDRESS, Address, ChainSpec, Hardfork, Header, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::{env::fill_tx_env_with_beacon_root_contract_call, Database};
-use revm::{db::State, primitives::ResultAndState, DatabaseCommit, EVM};
+use revm::{primitives::ResultAndState, DatabaseCommit, EVM};
 use std::{collections::HashMap, fmt::Debug};
 
 /// Collect all balance changes at the end of the block.
@@ -57,12 +57,12 @@ pub fn post_block_balance_increments(
 /// If cancun is not activated or the block is the genesis block, then this is a no-op, and no
 /// state changes are made.
 #[inline]
-pub fn apply_beacon_root_contract_call<DB: Database>(
+pub fn apply_beacon_root_contract_call<DB: Database + DatabaseCommit>(
     chain_spec: &ChainSpec,
     block_timestamp: u64,
     block_number: u64,
     block_parent_beacon_block_root: Option<H256>,
-    evm: &mut EVM<State<DB>>,
+    evm: &mut EVM<DB>,
 ) -> Result<(), BlockExecutionError>
 where
     <DB as Database>::Error: Debug,

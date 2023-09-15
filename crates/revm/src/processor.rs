@@ -176,7 +176,10 @@ impl<'a> EVMProcessor<'a> {
     ///
     /// If cancun is not activated or the block is the genesis block, then this is a no-op, and no
     /// state changes are made.
-    pub fn apply_beacon_root_contract_call(&mut self, block: &Block) -> Result<(), BlockExecutionError> {
+    pub fn apply_beacon_root_contract_call(
+        &mut self,
+        block: &Block,
+    ) -> Result<(), BlockExecutionError> {
         apply_beacon_root_contract_call(
             &self.chain_spec,
             block.timestamp,
