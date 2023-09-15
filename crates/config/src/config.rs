@@ -210,7 +210,7 @@ pub struct ExecutionConfig {
     pub max_blocks: Option<u64>,
     /// The maximum amount of state changes to keep in memory before the execution stage commits.
     pub max_changes: Option<u64>,
-    /// The maximum gas to spend before the execution stage commits.
+    /// The maximum gas to process before the execution stage commits.
     pub max_cumulative_gas: Option<u64>,
 }
 

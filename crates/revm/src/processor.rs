@@ -60,7 +60,7 @@ impl<'a> EVMProcessor<'a> {
         &self.chain_spec
     }
 
-    /// Create new Processor wit given chain spec.
+    /// Create a new pocessor with the given chain spec.
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         let evm = EVM::new();
         EVMProcessor {
@@ -89,7 +89,7 @@ impl<'a> EVMProcessor<'a> {
         EVMProcessor::new_with_state(chain_spec, state)
     }
 
-    /// Create new EVM processor with a given revm state.
+    /// Create a new EVM processor with the given revm state.
     pub fn new_with_state(chain_spec: Arc<ChainSpec>, revm_state: StateDBBox<'a, Error>) -> Self {
         let mut evm = EVM::new();
         evm.database(revm_state);
@@ -111,7 +111,7 @@ impl<'a> EVMProcessor<'a> {
         self.stack = stack;
     }
 
-    /// Gives a reference to the database
+    /// Returns a reference to the database
     pub fn db(&mut self) -> &mut StateDBBox<'a, Error> {
         self.evm.db().expect("db to not be moved")
     }
@@ -152,7 +152,7 @@ impl<'a> EVMProcessor<'a> {
         );
     }
 
-    /// Post execution state change that include block reward, withdrawals and iregular DAO hardfork
+    /// Apply post execution state changes, including block rewards, withdrawals, and irregular DAO hardfork
     /// state change.
     pub fn post_execution_state_change(
         &mut self,
