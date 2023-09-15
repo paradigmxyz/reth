@@ -2,10 +2,13 @@ use reth_interfaces::Error;
 use reth_primitives::{H160, H256, KECCAK_EMPTY, U256};
 use reth_provider::StateProvider;
 use revm::{
-    db::DatabaseRef,
+    db::{CacheDB, DatabaseRef},
     primitives::{AccountInfo, Bytecode},
     Database, StateDBBox,
 };
+
+/// SubState of database. Uses revm internal cache with binding to reth StateProvider trait.
+pub type SubState<DB> = CacheDB<StateProviderDatabase<DB>>;
 
 /// State boxed database with reth Error.
 pub type RethStateDBBox<'a> = StateDBBox<'a, Error>;

@@ -26,7 +26,7 @@ use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_revm::{
-    database::{RethStateDBBox, StateProviderDatabase},
+    database::{StateProviderDatabase, SubState},
     env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     tracing::{TracingInspector, TracingInspectorConfig},
 };
@@ -36,10 +36,14 @@ use reth_rpc_types::{
 };
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::{
+    db::CacheDB,
     primitives::{BlockEnv, CfgEnv},
-    Inspector, State,
+    Inspector,
 };
 use revm_primitives::{utilities::create_address, Env, ResultAndState, SpecId};
+
+/// Helper alias type for the state's [CacheDB]
+pub(crate) type StateCacheDB<'r> = CacheDB<StateProviderDatabase<StateProviderBox<'r>>>;
 
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace.
 ///
@@ -140,7 +144,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<R>
     where
-        F: for<'r> FnOnce(RethStateDBBox<'r>, Env) -> EthResult<R> + Send + 'static,
+        F: for<'r> FnOnce(StateCacheDB<'r>, Env) -> EthResult<R> + Send + 'static,
         R: Send + 'static;
 
     /// Executes the call request at the given [BlockId].
@@ -161,7 +165,7 @@ pub trait EthTransactions: Send + Sync {
         inspector: I,
     ) -> EthResult<(ResultAndState, Env)>
     where
-        I: for<'r> Inspector<RethStateDBBox<'r>> + Send + 'static;
+        I: for<'r> Inspector<StateCacheDB<'r>> + Send + 'static;
 
     /// Executes the transaction on top of the given [BlockId] with a tracer configured by the
     /// config.
@@ -195,7 +199,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<R>
     where
-        F: for<'a> FnOnce(TracingInspector, ResultAndState, RethStateDBBox<'a>) -> EthResult<R>
+        F: for<'a> FnOnce(TracingInspector, ResultAndState, StateCacheDB<'a>) -> EthResult<R>
             + Send
             + 'static,
         R: Send + 'static;
@@ -226,7 +230,7 @@ pub trait EthTransactions: Send + Sync {
                 TransactionInfo,
                 TracingInspector,
                 ResultAndState,
-                RethStateDBBox<'a>,
+                StateCacheDB<'a>,
             ) -> EthResult<R>
             + Send
             + 'static,
@@ -517,7 +521,7 @@ where
         f: F,
     ) -> EthResult<R>
     where
-        F: for<'r> FnOnce(RethStateDBBox<'r>, Env) -> EthResult<R> + Send + 'static,
+        F: for<'r> FnOnce(StateCacheDB<'r>, Env) -> EthResult<R> + Send + 'static,
         R: Send + 'static,
     {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
@@ -526,9 +530,7 @@ where
             .tracing_call_pool
             .spawn(move || {
                 let state = this.state_at(at)?;
-                let mut db = State::builder()
-                    .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
-                    .build();
+                let mut db = SubState::new(StateProviderDatabase::new(state));
 
                 let env = prepare_call_env(
                     cfg,
@@ -562,7 +564,7 @@ where
         inspector: I,
     ) -> EthResult<(ResultAndState, Env)>
     where
-        I: for<'r> Inspector<RethStateDBBox<'r>> + Send + 'static,
+        I: for<'r> Inspector<StateCacheDB<'r>> + Send + 'static,
     {
         self.spawn_with_call_at(request, at, overrides, move |db, env| inspect(db, env, inspector))
             .await
@@ -579,12 +581,10 @@ where
         F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>,
     {
         self.with_state_at_block(at, |state| {
-            let mut db = State::builder()
-                .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
-                .build();
+            let db = SubState::new(StateProviderDatabase::new(state));
 
             let mut inspector = TracingInspector::new(config);
-            let (res, _) = inspect(&mut db, env, &mut inspector)?;
+            let (res, _) = inspect(db, env, &mut inspector)?;
 
             f(inspector, res)
         })
@@ -598,17 +598,15 @@ where
         f: F,
     ) -> EthResult<R>
     where
-        F: for<'a> FnOnce(TracingInspector, ResultAndState, RethStateDBBox<'a>) -> EthResult<R>
+        F: for<'a> FnOnce(TracingInspector, ResultAndState, StateCacheDB<'a>) -> EthResult<R>
             + Send
             + 'static,
         R: Send + 'static,
     {
         self.spawn_with_state_at_block(at, move |state| {
-            let mut db = State::builder()
-                .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
-                .build();
+            let db = SubState::new(StateProviderDatabase::new(state));
             let mut inspector = TracingInspector::new(config);
-            let (res, _) = inspect_and_return_db(&mut db, env, &mut inspector)?;
+            let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
 
             f(inspector, res, db)
         })
@@ -644,7 +642,7 @@ where
                 TransactionInfo,
                 TracingInspector,
                 ResultAndState,
-                RethStateDBBox<'a>,
+                StateCacheDB<'a>,
             ) -> EthResult<R>
             + Send
             + 'static,
@@ -664,9 +662,7 @@ where
         let block_txs = block.body;
 
         self.spawn_with_state_at_block(parent_block.into(), move |state| {
-            let mut db = State::builder()
-                .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
-                .build();
+            let mut db = SubState::new(StateProviderDatabase::new(state));
 
             // replay all transactions prior to the targeted transaction
             replay_transactions_until(&mut db, cfg.clone(), block_env.clone(), block_txs, tx.hash)?;
@@ -674,7 +670,7 @@ where
             let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
 
             let mut inspector = TracingInspector::new(config);
-            let (res, _) = inspect_and_return_db(&mut db, env, &mut inspector)?;
+            let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
             f(tx_info, inspector, res, db)
         })
         .await
