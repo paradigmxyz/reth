@@ -58,7 +58,7 @@ impl<'a> EVMProcessor<'a> {
         &self.chain_spec
     }
 
-    /// Create new Processor wit given chain spec.
+    /// Create a new pocessor with the given chain spec.
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         let evm = EVM::new();
         EVMProcessor {
