@@ -340,6 +340,7 @@ pub struct NippyJarCursor<'a> {
     config: &'a NippyJar,
     zstd_decompressors: Option<Mutex<Vec<Decompressor<'a>>>>,
     data_handle: File,
+    tmp_buf: Vec<u8>,
     row: u64,
     col: u64,
 }
@@ -359,6 +360,7 @@ impl<'a> NippyJarCursor<'a> {
             config,
             zstd_decompressors,
             data_handle: File::open(config.data_path())?,
+            tmp_buf: vec![],
             row: 0,
             col: 0,
         })
@@ -370,6 +372,7 @@ impl<'a> NippyJarCursor<'a> {
     }
 
     // eg. transaction_by_hash
+    // may have false positives
     pub fn row_by_filter(&mut self, value: &[u8]) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
         if let (Some(filter), Some(phf)) = (&self.config.filter, &self.config.phf) {
             // May have false positives
@@ -387,13 +390,18 @@ impl<'a> NippyJarCursor<'a> {
         panic!("didnt find it");
     }
 
+    // eg. transaction_by_nnumber
+    pub fn row_by_number(&mut self, row: usize) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
+        self.row = row as u64;
+        self.next_row()
+    }
+
     pub fn next_row(&mut self) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
         if self.row as usize * self.config.columns == self.config.offsets.len() {
             // Has reached the end
             return Ok(None)
         }
 
-        let mut decompressed = Vec::with_capacity(32);
         let mut row = Vec::with_capacity(self.config.columns);
         let mut column_value = Vec::with_capacity(32);
 
@@ -415,17 +423,19 @@ impl<'a> NippyJarCursor<'a> {
 
             if let Some(zstd_dict_decompressors) = &self.zstd_decompressors {
                 // Decompress using zstd dictionaries
-                decompressed.clear();
-                decompressed.reserve(column_value.len());
+                let extra_capacity =
+                    (column_value.len() * 2).saturating_sub(self.tmp_buf.capacity());
+                self.tmp_buf.clear();
+                self.tmp_buf.reserve(extra_capacity);
 
                 zstd_dict_decompressors
                     .lock()
                     .unwrap()
                     .get_mut(column)
                     .unwrap()
-                    .decompress_to_buffer(&column_value, &mut decompressed)?;
+                    .decompress_to_buffer(&column_value, &mut self.tmp_buf)?;
 
-                row.push(decompressed.clone());
+                row.push(self.tmp_buf.clone());
             } else if let Some(compression) = &self.config.compressor {
                 // Decompress using the vanilla
                 row.push(compression.decompress(&column_value)?);
@@ -624,13 +634,19 @@ mod tests {
                 row_index += 1;
             }
 
-            // Simulates `by_hash` queries by iterating col1 values, which were used to create the
-            // inner index. Shuffled for chaos.
-            let mut data = col1.iter().zip(col2.iter()).collect::<Vec<_>>();
+            // Shuffled for chaos.
+            let mut data = col1.iter().zip(col2.iter()).enumerate().collect::<Vec<_>>();
             data.shuffle(&mut rand::thread_rng());
-            for (v0, v1) in data {
-                let row = cursor.row_by_filter(v0).unwrap().unwrap();
-                assert_eq!((&row[0], &row[1]), (v0, v1));
+
+            for (row_num, (v0, v1)) in data {
+                // Simulates `by_hash` queries by iterating col1 values, which were used to create
+                // the inner index.
+                let row_by_value = cursor.row_by_filter(v0).unwrap().unwrap();
+                assert_eq!((&row_by_value[0], &row_by_value[1]), (v0, v1));
+
+                // Simulates `by_number` queries
+                let row_by_num = cursor.row_by_number(row_num).unwrap().unwrap();
+                assert_eq!(row_by_value, row_by_num);
             }
         }
     }
