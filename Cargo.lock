@@ -4145,6 +4145,7 @@ dependencies = [
 name = "nippy-jar"
 version = "0.1.0-alpha.8"
 dependencies = [
+ "anyhow",
  "bincode",
  "bloomfilter",
  "bytes",

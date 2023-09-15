@@ -60,13 +60,17 @@ impl<'a> NippyJarCursor<'a> {
     /// stored in file.
     pub fn row_by_filter(&mut self, value: &[u8]) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
         if let (Some(filter), Some(phf)) = (&self.jar.filter, &self.jar.phf) {
+            // TODO: is it worth to parallize both?
+
             // May have false positives
             if filter.contains(value)? {
                 // May have false positives
-                let row_index = phf.get_index(value)?.unwrap();
-
-                self.row = self.jar.offsets_index.access(row_index as usize).unwrap() as u64;
-                return self.next_row()
+                if let Some(row_index) = phf.get_index(value)? {
+                    self.row =
+                        self.jar.offsets_index.access(row_index as usize).expect("built from same")
+                            as u64;
+                    return self.next_row()
+                }
             }
         }
 
@@ -89,24 +93,30 @@ impl<'a> NippyJarCursor<'a> {
         let mut row = Vec::with_capacity(self.jar.columns);
         let mut column_value = Vec::with_capacity(32);
 
+        // Retrieve all column values from the row
         for column in 0..self.jar.columns {
-            let index_offset = self.row as usize * self.jar.columns + column;
-            let value_offset = self.jar.offsets.select(index_offset).unwrap();
+            // Find out the offset of the column value
+            let offset_pos = self.row as usize * self.jar.columns + column;
+            let value_offset = self.jar.offsets.select(offset_pos).expect("should exist");
 
+            // Seek to the offset
             self.data_handle.seek(SeekFrom::Start(value_offset as u64))?;
 
-            // It's the last column of the last row
-            if self.jar.offsets.len() == (index_offset + 1) {
+            // Copy value from offset. TODO: replace with mmap, no need to copy
+            if self.jar.offsets.len() == (offset_pos + 1) {
+                // It's the last column of the last row
                 column_value.clear();
                 self.data_handle.read_to_end(&mut column_value)?;
             } else {
-                let len = self.jar.offsets.select(index_offset + 1).unwrap() - value_offset;
+                let len =
+                    self.jar.offsets.select(offset_pos + 1).expect("should exist") - value_offset;
                 column_value.resize(len, 0);
                 self.data_handle.read_exact(&mut column_value[..len])?;
             }
 
+            // Decompression
             if let Some(zstd_dict_decompressors) = &self.zstd_decompressors {
-                // Decompress using zstd dictionaries
+                // Uses zstd dictionaries
                 let extra_capacity =
                     (column_value.len() * 2).saturating_sub(self.tmp_buf.capacity());
                 self.tmp_buf.clear();
@@ -121,10 +131,10 @@ impl<'a> NippyJarCursor<'a> {
 
                 row.push(self.tmp_buf.clone());
             } else if let Some(compression) = &self.jar.compressor {
-                // Decompress using the vanilla
+                // Uses the chosen default decompressor
                 row.push(compression.decompress(&column_value)?);
             } else {
-                // It's not compressed
+                // Not compressed
                 row.push(column_value.clone())
             }
         }

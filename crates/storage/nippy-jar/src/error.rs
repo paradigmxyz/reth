@@ -7,6 +7,8 @@ pub enum NippyJarError {
     Disconnect(#[from] std::io::Error),
     #[error(transparent)]
     Bincode(#[from] Box<bincode::ErrorKind>),
+    #[error(transparent)]
+    EliasFano(#[from] anyhow::Error),
     #[error("Compression was enabled, but it's not ready yet.")]
     CompressorNotReady,
     #[error("Decompression was enabled, but it's not ready yet.")]

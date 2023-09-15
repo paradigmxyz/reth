@@ -100,8 +100,8 @@ impl NippyJar {
         obj.path = Some(path.to_path_buf());
 
         let mut offsets_file = File::open(obj.index_path())?;
-        obj.offsets = EliasFano::deserialize_from(&mut offsets_file).unwrap();
-        obj.offsets_index = PrefixSummedEliasFano::deserialize_from(offsets_file).unwrap();
+        obj.offsets = EliasFano::deserialize_from(&mut offsets_file)?;
+        obj.offsets_index = PrefixSummedEliasFano::deserialize_from(offsets_file)?;
 
         Ok(obj)
     }
@@ -160,7 +160,7 @@ impl NippyJar {
             }
         }
 
-        self.offsets_index = PrefixSummedEliasFano::from_slice(&offsets_index).unwrap();
+        self.offsets_index = PrefixSummedEliasFano::from_slice(&offsets_index)?;
         Ok(())
     }
 
@@ -251,16 +251,16 @@ impl NippyJar {
     fn freeze_offsets(&mut self, offsets: Vec<usize>) -> Result<(), NippyJarError> {
         if !offsets.is_empty() {
             let mut builder =
-                EliasFanoBuilder::new(*offsets.last().expect("qed") + 1, offsets.len()).unwrap();
+                EliasFanoBuilder::new(*offsets.last().expect("qed") + 1, offsets.len())?;
 
             for offset in offsets {
-                builder.push(offset).unwrap();
+                builder.push(offset)?;
             }
             self.offsets = builder.build().enable_rank();
         }
         let mut file = File::create(self.index_path())?;
-        self.offsets.serialize_into(&mut file).unwrap();
-        self.offsets_index.serialize_into(file).unwrap();
+        self.offsets.serialize_into(&mut file)?;
+        self.offsets_index.serialize_into(file)?;
         Ok(())
     }
 
