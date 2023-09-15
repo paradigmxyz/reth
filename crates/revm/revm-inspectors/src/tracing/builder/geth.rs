@@ -180,7 +180,7 @@ impl GethTraceBuilder {
         &self,
         ResultAndState { state, .. }: &ResultAndState,
         prestate_config: PreStateConfig,
-        db: &DB,
+        db: DB,
     ) -> Result<PreStateFrame, DB::Error>
     where
         DB: DatabaseRef,

@@ -192,7 +192,7 @@ impl ParityTraceBuilder {
         self,
         res: ResultAndState,
         trace_types: &HashSet<TraceType>,
-        db: &DB,
+        db: DB,
     ) -> Result<TraceResults, DB::Error>
     where
         DB: DatabaseRef,
@@ -535,7 +535,7 @@ where
 ///
 /// iteratively fill the [VmTrace] code fields
 pub(crate) fn populate_vm_trace_bytecodes<DB, I>(
-    db: &DB,
+    db: DB,
     trace: &mut VmTrace,
     breadth_first_addresses: I,
 ) -> Result<(), DB::Error>
@@ -575,7 +575,7 @@ where
 /// contains all the accounts that are in the state map and never has to fetch them from disk.
 pub fn populate_account_balance_nonce_diffs<DB, I>(
     state_diff: &mut StateDiff,
-    db: &DB,
+    db: DB,
     account_diffs: I,
 ) -> Result<(), DB::Error>
 where

@@ -691,7 +691,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     /// NOTE: The download is attempted with infinite retries.
     async fn lookup_or_fetch_tip<DB, Client>(
         &self,
-        db: &DB,
+        db: DB,
         client: Client,
         tip: H256,
     ) -> Result<u64, reth_interfaces::Error>
@@ -707,7 +707,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     /// NOTE: The download is attempted with infinite retries.
     async fn fetch_tip<DB, Client>(
         &self,
-        db: &DB,
+        db: DB,
         client: Client,
         tip: BlockHashOrNumber,
     ) -> Result<SealedHeader, reth_interfaces::Error>
