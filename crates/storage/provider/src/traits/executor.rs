@@ -23,7 +23,7 @@ pub trait ExecutorFactory: Send + Sync + 'static {
 /// Statistic data of bock execution
 #[derive(Clone, Debug, Default)]
 pub struct BlockExecutorStats {
-    /// How long did duration take
+    /// How long execution took
     pub execution_duration: Duration,
     /// How long did output of EVM execution take
     /// to apply to cache state
