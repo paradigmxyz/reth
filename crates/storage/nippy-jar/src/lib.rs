@@ -34,8 +34,14 @@ pub struct NippyJar {
     filter: Option<Filters>,
     /// Perfect Hashing Function
     phf: Option<Functions>,
+    /// Indexes PHF output to the value offset at `self.offsets`
+    offsets_index: Vec<u64>,
+    /// Values offsets eg. `[row0_col0_offset, row0_col1_offset, row1_col1_offset, row1,
+    /// col2_offset ... ]` TODO: currently on a different file, but might be unnecessary
     #[serde(skip)]
+    offsets: Vec<usize>,
     /// Data path for file. Index file will be `{path}.idx`
+    #[serde(skip)]
     path: Option<PathBuf>,
 }
 
@@ -48,6 +54,8 @@ impl NippyJar {
             compressor: None,
             filter: None,
             phf: None,
+            offsets: vec![],
+            offsets_index: vec![],
             path: Some(path.to_path_buf()),
         }
     }
@@ -83,6 +91,7 @@ impl NippyJar {
         let mut obj: Self = bincode::deserialize_from(&mut file)?;
 
         obj.path = Some(path.to_path_buf());
+        obj.offsets = bincode::deserialize_from(File::open(obj.index_path())?)?;
 
         Ok(obj)
     }
@@ -102,7 +111,7 @@ impl NippyJar {
     }
 
     /// If required, prepares any compression algorithm to an early pass of the data.
-    pub fn prepare(
+    pub fn prepare_compression(
         &mut self,
         columns: Vec<impl IntoIterator<Item = Vec<u8>>>,
     ) -> Result<(), NippyJarError> {
@@ -110,6 +119,37 @@ impl NippyJar {
         if let Some(compression) = &mut self.compressor {
             compression.prepare_compression(columns)?;
         }
+        Ok(())
+    }
+
+    /// If required, prepares any compression algorithm to an early pass of the data.
+    pub fn prepare_index<T: AsRef<[u8]> + Sync + Clone + Hash>(
+        &mut self,
+        values: &[T],
+    ) -> Result<(), NippyJarError> {
+        if let Some(phf) = self.phf.as_mut() {
+            phf.set_keys(values)?;
+
+            self.offsets_index.reserve_exact(values.len());
+        }
+
+        if self.filter.is_some() || self.phf.is_some() {
+            for (mut num, v) in values.iter().enumerate() {
+                // Point to the first column value of the row
+                num *= self.columns;
+
+                if let Some(filter) = self.filter.as_mut() {
+                    filter.add(v.as_ref())?;
+                }
+                if let Some(phf) = self.phf.as_mut() {
+                    self.offsets_index.insert(
+                        phf.get_index(v.as_ref())?.expect("initialized") as usize,
+                        num as u64,
+                    )
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -137,7 +177,7 @@ impl NippyJar {
 
         // Write all rows while taking all row start offsets
         let mut row_number = 0u64;
-        let mut values_offsets = Vec::with_capacity(total_rows as usize * self.columns);
+        self.offsets = Vec::with_capacity(total_rows as usize * self.columns);
         let mut column_iterators =
             columns.into_iter().map(|v| v.into_iter()).collect::<Vec<_>>().into_iter();
 
@@ -147,7 +187,7 @@ impl NippyJar {
             // Write the column value of each row
             // TODO: iter_mut if we remove the IntoIterator interface.
             for (column_number, mut column_iter) in column_iterators.enumerate() {
-                values_offsets.push(file.stream_position()? as usize);
+                self.offsets.push(file.stream_position()? as usize);
 
                 match column_iter.next() {
                     Some(value) => {
@@ -189,7 +229,7 @@ impl NippyJar {
         }
 
         // Write offset index to file
-        bincode::serialize_into(File::create(self.index_path())?, &values_offsets)?;
+        bincode::serialize_into(File::create(self.index_path())?, &self.offsets)?;
 
         Ok(())
     }
@@ -207,6 +247,11 @@ impl NippyJar {
             if !compression.is_ready() {
                 return Err(NippyJarError::CompressorNotReady)
             }
+        }
+
+        // Check `prepare_index` was called.
+        if let Some(phf) = &self.phf {
+            let _ = phf.get_index(&[])?;
         }
 
         Ok(File::create(self.data_path())?)
@@ -245,11 +290,9 @@ impl KeySet for NippyJar {
 
 #[derive(Debug, Error)]
 pub enum NippyJarError {
-    #[error("err")]
-    Err,
-    #[error("err")]
+    #[error(transparent)]
     Disconnect(#[from] std::io::Error),
-    #[error("err")]
+    #[error(transparent)]
     Bincode(#[from] Box<bincode::ErrorKind>),
     #[error("Compression was enabled, but it's not ready yet.")]
     CompressorNotReady,
@@ -259,7 +302,7 @@ pub enum NippyJarError {
     ColumnLenMismatch(usize, usize),
     #[error("UnexpectedMissingValue row: {0} col:{1}")]
     UnexpectedMissingValue(u64, u64),
-    #[error("err")]
+    #[error(transparent)]
     FilterError(#[from] cuckoofilter::CuckooError),
     #[error("NippyJar initialized without filter.")]
     FilterMissing,
@@ -513,7 +556,7 @@ mod tests {
             Err(NippyJarError::CompressorNotReady)
         ));
 
-        nippy.prepare(data.clone()).unwrap();
+        nippy.prepare_compression(data.clone()).unwrap();
 
         if let Some(Compressors::Zstd(zstd)) = &nippy.compressor {
             assert!(matches!(
