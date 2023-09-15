@@ -753,6 +753,61 @@ mod tests {
 
         // ensure that the env has not changed
         assert_eq!(executor.evm.env, previous_env);
+    }
+
+    #[test]
+    fn eip_4788_empty_account_call() {
+        // This test ensures that we do not increment the nonce of an empty SYSTEM_ADDRESS account
+        // during the pre-block call
+        let mut db = StateProviderTest::default();
+
+        let beacon_root_contract_code = beacon_root_contract_code();
+
+        let beacon_root_contract_account = Account {
+            balance: U256::ZERO,
+            bytecode_hash: Some(keccak256(beacon_root_contract_code.clone())),
+            nonce: 1,
+        };
+
+        db.insert_account(
+            BEACON_ROOTS_ADDRESS,
+            beacon_root_contract_account,
+            Some(beacon_root_contract_code),
+            HashMap::new(),
+        );
+
+        // insert an empty SYSTEM_ADDRESS
+        db.insert_account(SYSTEM_ADDRESS, Account::default(), None, HashMap::new());
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+                .build(),
+        );
+
+        let mut executor = EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
+
+        // construct the header for block one
+        let header = Header {
+            timestamp: 1,
+            number: 1,
+            parent_beacon_block_root: Some(H256::from_low_u64_be(0x1337)),
+            ..Header::default()
+        };
+
+        executor.init_env(&header, U256::ZERO);
+
+        // attempt to execute an empty block with parent beacon block root, this should not fail
+        executor
+            .execute_and_verify_receipt(
+                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                U256::ZERO,
+                None,
+            )
+            .expect(
+                "Executing a block with no transactions while cancun is active should not fail",
+            );
 
         // ensure that the nonce of the system address account has not changed
         let nonce = executor.db().basic(SYSTEM_ADDRESS).unwrap().unwrap().nonce;
@@ -770,6 +825,7 @@ mod tests {
             bytecode_hash: Some(keccak256(beacon_root_contract_code.clone())),
             nonce: 1,
         };
+
         db.insert_account(
             BEACON_ROOTS_ADDRESS,
             beacon_root_contract_account,
