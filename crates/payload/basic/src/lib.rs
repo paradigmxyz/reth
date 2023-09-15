@@ -990,7 +990,16 @@ fn commit_withdrawals<DB: Database<Error = Error>>(
     })
 }
 
-/// TODO: docs
+/// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
+///
+/// This constructs a new [EVM](revm::EVM) with the given DB, and environment ([CfgEnv] and
+/// [BlockEnv]) to execute the pre block contract call.
+///
+/// The parent beacon block root used for the call is gathered from the given
+/// [PayloadBuilderAttributes].
+///
+/// This uses [apply_beacon_root_contract_call] to ultimately apply the beacon root contract state
+/// change.
 fn pre_block_beacon_root_contract_call<DB>(
     db: &mut DB,
     chain_spec: &ChainSpec,
