@@ -15,14 +15,10 @@ use jsonrpsee::core::RpcResult;
 use reth_primitives::{
     Account, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H160, H256,
 };
-use reth_provider::{BlockReaderIdExt, HeaderProvider};
+use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderBox};
 use reth_revm::{
-    database::{RethStateDBBox, StateProviderDatabase},
+    database::{StateProviderDatabase, SubState},
     env::tx_env_with_recovered,
-    revm::{
-        primitives::{db::DatabaseCommit, BlockEnv, CfgEnv, Env},
-        State,
-    },
     tracing::{
         js::{JsDbRequest, JsInspector},
         FourByteInspector, TracingInspector, TracingInspectorConfig,
@@ -38,7 +34,14 @@ use reth_rpc_types::{
     BlockError, Bundle, CallRequest, RichBlock, StateContext,
 };
 use reth_tasks::TaskSpawner;
-use revm::Database;
+use revm::{
+    db::{CacheDB, EmptyDB},
+    primitives::Env,
+};
+use revm_primitives::{
+    db::{DatabaseCommit, DatabaseRef},
+    BlockEnv, CfgEnv,
+};
 use std::sync::Arc;
 use tokio::sync::{mpsc, AcquireError, OwnedSemaphorePermit};
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
@@ -93,10 +96,7 @@ where
             .eth_api
             .spawn_with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(transactions.len());
-
-                let mut db = State::builder()
-                    .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
-                    .build();
+                let mut db = SubState::new(StateProviderDatabase::new(state));
 
                 let mut transactions = transactions.into_iter().peekable();
                 while let Some(tx) = transactions.next() {
@@ -190,9 +190,7 @@ where
                 // configure env for the target transaction
                 let tx = transaction.into_recovered();
 
-                let mut db = State::builder()
-                    .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
-                    .build();
+                let mut db = SubState::new(StateProviderDatabase::new(state));
                 // replay all transactions prior to the targeted transaction
                 replay_transactions_until(
                     &mut db,
@@ -230,8 +228,8 @@ where
                         let inspector = self
                             .inner
                             .eth_api
-                            .spawn_with_call_at(call, at, overrides, move |mut db, env| {
-                                inspect(&mut db, env, &mut inspector)?;
+                            .spawn_with_call_at(call, at, overrides, move |db, env| {
+                                inspect(db, env, &mut inspector)?;
                                 Ok(inspector)
                             })
                             .await?;
@@ -271,12 +269,12 @@ where
                         let frame =
                             self.inner
                                 .eth_api
-                                .spawn_with_call_at(call, at, overrides, move |mut db, env| {
-                                    let (res, _) =
-                                        inspect_and_return_db(&mut db, env, &mut inspector)?;
+                                .spawn_with_call_at(call, at, overrides, move |db, env| {
+                                    let (res, _, db) =
+                                        inspect_and_return_db(db, env, &mut inspector)?;
                                     let frame = inspector
                                         .into_geth_builder()
-                                        .geth_prestate_traces(&res, prestate_config, &mut db)?;
+                                        .geth_prestate_traces(&res, prestate_config, &db)?;
                                     Ok(frame)
                                 })
                                 .await?;
@@ -291,9 +289,7 @@ where
                     // because JSTracer and all JS types are not Send
                     let (_, _, at) = self.inner.eth_api.evm_env_at(at).await?;
                     let state = self.inner.eth_api.state_at(at)?;
-                    let db = State::builder()
-                        .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
-                        .build();
+                    let db = SubState::new(StateProviderDatabase::new(state));
                     let has_state_overrides = overrides.has_state();
 
                     // If the caller provided state overrides we need to clone the DB so the js
@@ -308,9 +304,9 @@ where
                     let res = self
                         .inner
                         .eth_api
-                        .spawn_with_call_at(call, at, overrides, move |mut db, env| {
+                        .spawn_with_call_at(call, at, overrides, move |db, env| {
                             let mut inspector = JsInspector::new(code, config, to_db_service)?;
-                            let (res, _) = inspect(&mut db, env.clone(), &mut inspector)?;
+                            let (res, _) = inspect(db, env.clone(), &mut inspector)?;
                             Ok(inspector.json_result(res, &env)?)
                         })
                         .await?;
@@ -328,8 +324,8 @@ where
         let (res, inspector) = self
             .inner
             .eth_api
-            .spawn_with_call_at(call, at, overrides, move |mut db, env| {
-                let (res, _) = inspect(&mut db, env, &mut inspector)?;
+            .spawn_with_call_at(call, at, overrides, move |db, env| {
+                let (res, _) = inspect(db, env, &mut inspector)?;
                 Ok((res, inspector))
             })
             .await?;
@@ -383,10 +379,7 @@ where
             .eth_api
             .spawn_with_state_at_block(at.into(), move |state| {
                 let mut results = Vec::with_capacity(bundles.len());
-
-                let mut db = State::builder()
-                    .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
-                    .build();
+                let mut db = SubState::new(StateProviderDatabase::new(state));
 
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
@@ -458,7 +451,7 @@ where
         opts: GethDebugTracingOptions,
         env: Env,
         at: BlockId,
-        mut db: &mut RethStateDBBox<'_>,
+        db: &mut SubState<StateProviderBox<'_>>,
     ) -> EthResult<(GethTrace, revm_primitives::State)> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
@@ -496,12 +489,12 @@ where
                         let mut inspector = TracingInspector::new(
                             TracingInspectorConfig::from_geth_config(&config),
                         );
-                        let (res, _) = inspect(&mut db, env, &mut inspector)?;
+                        let (res, _) = inspect(&mut *db, env, &mut inspector)?;
 
                         let frame = inspector.into_geth_builder().geth_prestate_traces(
                             &res,
                             prestate_config,
-                            db,
+                            &*db,
                         )?;
 
                         return Ok((frame.into(), res.state))
@@ -550,7 +543,7 @@ where
     fn spawn_js_trace_service(
         &self,
         at: BlockId,
-        db: Option<RethStateDBBox<'static>>,
+        db: Option<CacheDB<EmptyDB>>,
     ) -> EthResult<mpsc::Sender<JsDbRequest>> {
         let (to_db_service, rx) = mpsc::channel(1);
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
@@ -570,14 +563,14 @@ where
     /// A services that handles database requests issued from inside the JavaScript tracing engine.
     ///
     /// If this traces with modified state, this takes a `db` parameter that contains the modified
-    /// in memory state. This is required because [reth_provider::StateProviderBox] can not be
-    /// cloned or shared across threads.
+    /// in memory state. This is required because [StateProviderBox] can not be cloned or shared
+    /// across threads.
     async fn js_trace_db_service_task(
         self,
         at: BlockId,
         rx: mpsc::Receiver<JsDbRequest>,
         on_ready: std::sync::mpsc::Sender<EthResult<()>>,
-        db: Option<RethStateDBBox<'_>>,
+        db: Option<CacheDB<EmptyDB>>,
     ) {
         let state = match self.inner.eth_api.state_at(at) {
             Ok(state) => {
@@ -590,27 +583,17 @@ where
             }
         };
 
-        let database = Box::new(StateProviderDatabase::new(state));
-
-        let mut db = if let Some(db) = db {
-            let State {
-                cache,
+        let db = if let Some(db) = db {
+            let CacheDB { accounts, contracts, logs, block_hashes, .. } = db;
+            CacheDB {
+                accounts,
+                contracts,
+                logs,
                 block_hashes,
-                use_preloaded_bundle,
-                transition_state,
-                bundle_state,
-                ..
-            } = db;
-            State {
-                cache,
-                transition_state,
-                bundle_state,
-                database,
-                use_preloaded_bundle,
-                block_hashes,
+                db: StateProviderDatabase::new(state),
             }
         } else {
-            State::builder().with_database(database).build()
+            CacheDB::new(StateProviderDatabase::new(state))
         };
 
         let mut stream = ReceiverStream::new(rx);
@@ -618,7 +601,6 @@ where
             match req {
                 JsDbRequest::Basic { address, resp } => {
                     let acc = db
-                        .database
                         .basic(address)
                         .map(|maybe_acc| {
                             maybe_acc.map(|acc| Account {
@@ -632,14 +614,13 @@ where
                 }
                 JsDbRequest::Code { code_hash, resp } => {
                     let code = db
-                        .database
                         .code_by_hash(code_hash)
                         .map(|code| code.bytecode)
                         .map_err(|err| err.to_string());
                     let _ = resp.send(code);
                 }
                 JsDbRequest::StorageAt { address, index, resp } => {
-                    let value = db.database.storage(address, index).map_err(|err| err.to_string());
+                    let value = db.storage(address, index).map_err(|err| err.to_string());
                     let _ = resp.send(value);
                 }
             }

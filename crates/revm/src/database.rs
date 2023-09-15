@@ -2,10 +2,13 @@ use reth_interfaces::Error;
 use reth_primitives::{H160, H256, KECCAK_EMPTY, U256};
 use reth_provider::StateProvider;
 use revm::{
-    db::DatabaseRef,
+    db::{CacheDB, DatabaseRef},
     primitives::{AccountInfo, Bytecode},
     Database, StateDBBox,
 };
+
+/// SubState of database. Uses revm internal cache with binding to reth StateProvider trait.
+pub type SubState<DB> = CacheDB<StateProviderDatabase<DB>>;
 
 /// State boxed database with reth Error.
 pub type RethStateDBBox<'a> = StateDBBox<'a, Error>;
@@ -51,11 +54,7 @@ impl<DB: StateProvider> Database for StateProviderDatabase<DB> {
     fn code_by_hash(&mut self, code_hash: H256) -> Result<Bytecode, Self::Error> {
         let bytecode = self.0.bytecode_by_hash(code_hash)?;
 
-        if let Some(bytecode) = bytecode {
-            Ok(bytecode.0)
-        } else {
-            Ok(Bytecode::new())
-        }
+        Ok(bytecode.map(|b| b.0).unwrap_or_else(Bytecode::new))
     }
 
     fn storage(&mut self, address: H160, index: U256) -> Result<U256, Self::Error> {
@@ -65,7 +64,7 @@ impl<DB: StateProvider> Database for StateProviderDatabase<DB> {
     }
 
     fn block_hash(&mut self, number: U256) -> Result<H256, Self::Error> {
-        // Note: this unwrap is potentially unsafe
+        // The `number` represents the block number, so it is safe to cast it to u64.
         Ok(self.0.block_hash(number.try_into().unwrap())?.unwrap_or_default())
     }
 }

@@ -9,7 +9,7 @@ pub enum BlockValidationError {
     EVM { hash: H256, message: String },
     #[error("Failed to recover sender for transaction")]
     SenderRecoveryError,
-    #[error("Incrementing balance failed")]
+    #[error("Incrementing balance in post execution failed")]
     IncrementBalanceFailed,
     #[error("Receipt root {got:?} is different than expected {expected:?}.")]
     ReceiptRootDiff { got: H256, expected: H256 },
@@ -20,8 +20,8 @@ pub enum BlockValidationError {
         transaction_gas_limit: u64,
         block_available_gas: u64,
     },
-    #[error("Block gas used {got} is different from expected gas used {expected}.\nTransaction gas spend: {receipts:?}\n")]
-    BlockGasUsed { got: u64, expected: u64, receipts: Vec<(u64, u64)> },
+    #[error("Block gas used {got} is different from expected gas used {expected}.\nGas spent by each transaction: {gas_spent_by_tx:?}\n")]
+    BlockGasUsed { got: u64, expected: u64, gas_spent_by_tx: Vec<(u64, u64)> },
     #[error("Block {hash:?} is pre merge")]
     BlockPreMerge { hash: H256 },
     #[error("Missing total difficulty")]

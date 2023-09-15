@@ -12,9 +12,11 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_consensus_common::calc::{base_block_reward, block_reward};
 use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, SealedHeader, H256, U256};
-use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{
+    BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
+};
 use reth_revm::{
-    database::{RethStateDBBox, StateProviderDatabase},
+    database::{StateProviderDatabase, SubState},
     env::tx_env_with_recovered,
     tracing::{
         parity::populate_account_balance_nonce_diffs, TracingInspector, TracingInspectorConfig,
@@ -26,8 +28,8 @@ use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*},
     BlockError, BlockOverrides, CallRequest, Index, TransactionInfo,
 };
-use revm::{primitives::Env, DatabaseCommit, State};
-use revm_primitives::{ExecutionResult, ResultAndState};
+use revm::{db::CacheDB, primitives::Env};
+use revm_primitives::{db::DatabaseCommit, ExecutionResult, ResultAndState};
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -82,12 +84,12 @@ where
         let mut inspector = TracingInspector::new(config);
         self.inner
             .eth_api
-            .spawn_with_call_at(call, at, overrides, move |mut db, env| {
-                let (res, _) = inspect_and_return_db(&mut db, env, &mut inspector)?;
+            .spawn_with_call_at(call, at, overrides, move |db, env| {
+                let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
                 let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
                     res,
                     &trace_types,
-                    &mut db,
+                    &db,
                 )?;
                 Ok(trace_res)
             })
@@ -115,11 +117,11 @@ where
 
         self.inner
             .eth_api
-            .spawn_trace_at_with_state(env, config, at, move |inspector, res, mut db| {
+            .spawn_trace_at_with_state(env, config, at, move |inspector, res, db| {
                 Ok(inspector.into_parity_builder().into_trace_results_with_state(
                     res,
                     &trace_types,
-                    &mut db,
+                    &db,
                 )?)
             })
             .await
@@ -143,9 +145,7 @@ where
             .eth_api
             .spawn_with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(calls.len());
-                let mut revm_state = State::builder()
-                    .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
-                    .build();
+                let mut db = SubState::new(StateProviderDatabase::new(state));
 
                 let mut calls = calls.into_iter().peekable();
 
@@ -155,12 +155,12 @@ where
                         block_env.clone(),
                         call,
                         gas_limit,
-                        &mut revm_state,
+                        &mut db,
                         Default::default(),
                     )?;
                     let config = tracing_config(&trace_types);
                     let mut inspector = TracingInspector::new(config);
-                    let (res, _) = inspect(&mut revm_state, env, &mut inspector)?;
+                    let (res, _) = inspect(&mut db, env, &mut inspector)?;
                     let ResultAndState { result, state } = res;
 
                     let mut trace_res =
@@ -171,7 +171,7 @@ where
                     if let Some(ref mut state_diff) = trace_res.state_diff {
                         populate_account_balance_nonce_diffs(
                             state_diff,
-                            &mut revm_state,
+                            &db,
                             state.iter().map(|(addr, acc)| (*addr, acc.info.clone())),
                         )?;
                     }
@@ -183,7 +183,7 @@ where
                     if calls.peek().is_some() {
                         // need to apply the state changes of this call before executing
                         // the next call
-                        revm_state.commit(state)
+                        db.commit(state)
                     }
                 }
 
@@ -201,11 +201,11 @@ where
         let config = tracing_config(&trace_types);
         self.inner
             .eth_api
-            .spawn_trace_transaction_in_block(hash, config, move |_, inspector, res, mut db| {
+            .spawn_trace_transaction_in_block(hash, config, move |_, inspector, res, db| {
                 let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
                     res,
                     &trace_types,
-                    &mut db,
+                    &db,
                 )?;
                 Ok(trace_res)
             })
@@ -293,7 +293,7 @@ where
                 TracingInspector,
                 ExecutionResult,
                 &'a revm_primitives::State,
-                &'a mut RethStateDBBox<'_>,
+                &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
             ) -> EthResult<R>
             + Send
             + 'static,
@@ -321,9 +321,7 @@ where
             .eth_api
             .spawn_with_state_at_block(state_at.into(), move |state| {
                 let mut results = Vec::with_capacity(transactions.len());
-                let mut db = State::builder()
-                    .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
-                    .build();
+                let mut db = SubState::new(StateProviderDatabase::new(state));
 
                 let mut transactions = transactions.into_iter().enumerate().peekable();
 
@@ -343,7 +341,7 @@ where
                     let mut inspector = TracingInspector::new(config);
                     let (res, _) = inspect(&mut db, env, &mut inspector)?;
                     let ResultAndState { result, state } = res;
-                    results.push(f(tx_info, inspector, result, &state, &mut db)?);
+                    results.push(f(tx_info, inspector, result, &state, &db)?);
 
                     // need to apply the state changes of this transaction before executing the
                     // next transaction

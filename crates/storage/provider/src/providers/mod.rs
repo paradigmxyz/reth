@@ -32,13 +32,13 @@ use std::{
 };
 use tracing::trace;
 
+mod bundle_state_provider;
 mod chain_info;
 mod database;
-mod post_state_provider;
 mod state;
 use crate::{providers::chain_info::ChainInfoTracker, traits::BlockSource};
+pub use bundle_state_provider::BundleStateProvider;
 pub use database::*;
-pub use post_state_provider::BundleStateProvider;
 use reth_db::models::AccountBeforeTx;
 use reth_interfaces::blockchain_tree::{
     error::InsertBlockError, CanonicalOutcome, InsertPayloadOk,

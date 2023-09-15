@@ -20,13 +20,12 @@ pub trait ExecutorFactory: Send + Sync + 'static {
     fn chain_spec(&self) -> &ChainSpec;
 }
 
-/// Statistic data of bock execution
+/// Block execution statistics
 #[derive(Clone, Debug, Default)]
 pub struct BlockExecutorStats {
-    /// How long did duration take
+    /// How long execution took
     pub execution_duration: Duration,
-    /// How long did output of EVM execution take
-    /// to apply to cache state
+    /// The amount of time it took to apply state changes to cached state
     pub apply_state_duration: Duration,
     /// Apply Post state execution changes duration.
     pub apply_post_execution_changes_duration: Duration,
@@ -79,7 +78,7 @@ pub trait BlockExecutor {
         senders: Option<Vec<Address>>,
     ) -> Result<(), BlockExecutionError>;
 
-    /// Return bundle state. This is output of the execution.
+    /// Return bundle state. This is output of executed blocks.
     fn take_output_state(&mut self) -> BundleStateWithReceipts;
 
     /// Internal statistics of execution.

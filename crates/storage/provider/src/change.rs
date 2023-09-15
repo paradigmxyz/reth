@@ -18,13 +18,12 @@ use reth_revm_primitives::{
     },
     into_reth_acc, into_revm_acc,
     primitives::AccountInfo,
-    to_reth_acc,
 };
 use reth_trie::{
     hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
     StateRoot, StateRootError,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, iter::Peekable};
 
 pub use reth_revm_primitives::db::states::OriginalValuesKnown;
 
@@ -114,7 +113,7 @@ impl BundleStateWithReceipts {
 
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.bundle.account(address).map(|a| a.info.as_ref().map(to_reth_acc))
+        self.bundle.account(address).map(|a| a.info.clone().map(into_reth_acc))
     }
 
     /// Get storage if value is known.
@@ -141,7 +140,7 @@ impl BundleStateWithReceipts {
         for (address, account) in self.bundle.state() {
             let hashed_address = keccak256(address);
             if let Some(account) = &account.info {
-                hashed_state.insert_account(hashed_address, to_reth_acc(account))
+                hashed_state.insert_account(hashed_address, into_reth_acc(account.clone()))
             } else {
                 hashed_state.insert_cleared_account(hashed_address);
             }
@@ -410,7 +409,7 @@ impl StateReverts {
         for (block_index, mut storage_changes) in self.0.storage.into_iter().enumerate() {
             let block_number = first_block + block_index as BlockNumber;
 
-            tracing::trace!(target: "provider::reverts", block_number=block_number,"Writing block change");
+            tracing::trace!(target: "provider::reverts", block_number, "Writing block change");
             // sort changes by address.
             storage_changes.par_sort_unstable_by_key(|a| a.address);
             for PlainStorageRevert { address, wiped, storage_revert } in storage_changes.into_iter()
@@ -423,13 +422,13 @@ impl StateReverts {
                     .collect::<Vec<_>>();
                 // sort storage slots by key.
                 storage.par_sort_unstable_by_key(|a| a.0);
-                tracing::trace!(target: "provider::reverts","Writting revert for {:?}", address);
+
                 // If we are writing the primary storage wipe transition, the pre-existing plain
                 // storage state has to be taken from the database and written to storage history.
                 // See [StorageWipe::Primary] for more details.
                 let mut wiped_storage = Vec::new();
                 if wiped {
-                    tracing::trace!(target: "provider::reverts", "wipe storage storage changes");
+                    tracing::trace!(target: "provider::reverts", ?address, "Wiping storage");
                     if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
                         wiped_storage.push((entry.key, entry.value));
                         while let Some(entry) = storages_cursor.next_dup_val()? {
@@ -437,73 +436,10 @@ impl StateReverts {
                         }
                     }
                 }
-                tracing::trace!(target: "provider::reverts", "storage changes: {:?}",storage);
-                // if empty just write storage reverts.
-                if wiped_storage.is_empty() {
-                    for (key, old_value) in storage {
-                        storage_changeset_cursor.append_dup(
-                            storage_id,
-                            StorageEntry { key, value: old_value.to_previous_value() },
-                        )?;
-                    }
-                } else {
-                    // if there is some of wiped storage, they are both sorted, intersect both of
-                    // them and in conflict use change from revert (discard values from wiped
-                    // storage).
-                    let mut wiped_iter = wiped_storage.into_iter();
-                    let mut revert_iter = storage.into_iter();
 
-                    // items to apply. both iterators are sorted.
-                    let mut wiped_item = wiped_iter.next();
-                    let mut revert_item = revert_iter.next();
-                    loop {
-                        let apply = match (wiped_item, revert_item) {
-                            (None, None) => break,
-                            (Some(w), None) => {
-                                wiped_item = wiped_iter.next();
-                                w
-                            }
-                            (None, Some(r)) => {
-                                revert_item = revert_iter.next();
-                                (r.0, r.1.to_previous_value())
-                            }
-                            (Some(w), Some(r)) => {
-                                match w.0.cmp(&r.0) {
-                                    std::cmp::Ordering::Less => {
-                                        // next key is from revert storage
-                                        wiped_item = wiped_iter.next();
-                                        w
-                                    }
-                                    std::cmp::Ordering::Greater => {
-                                        // next key is from wiped storage
-                                        revert_item = revert_iter.next();
-                                        (r.0, r.1.to_previous_value())
-                                    }
-                                    std::cmp::Ordering::Equal => {
-                                        // priority goes for storage if key is same.
-                                        wiped_item = wiped_iter.next();
-                                        revert_item = revert_iter.next();
-
-                                        // If storage slot is RevertToSlot::Some, the storage
-                                        // used should be from Revert.
-                                        if let RevertToSlot::Some(revert_value) = r.1 {
-                                            (r.0, revert_value)
-                                        } else {
-                                            // If storage slot is RevertToSlot::Destroyed, the
-                                            // storage
-                                            // that we use should be on the storage from database.
-                                            w
-                                        }
-                                    }
-                                }
-                            }
-                        };
-
-                        storage_changeset_cursor.append_dup(
-                            storage_id,
-                            StorageEntry { key: apply.0, value: apply.1 },
-                        )?;
-                    }
+                tracing::trace!(target: "provider::reverts", ?address, ?storage, "Writing storage reverts");
+                for (key, value) in StorageRevertsIter::new(storage, wiped_storage) {
+                    storage_changeset_cursor.append_dup(storage_id, StorageEntry { key, value })?;
                 }
             }
         }
@@ -513,7 +449,7 @@ impl StateReverts {
         let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
         for (block_index, mut account_block_reverts) in self.0.accounts.into_iter().enumerate() {
             let block_number = first_block + block_index as BlockNumber;
-            // sort accounts by address.
+            // Sort accounts by address.
             account_block_reverts.par_sort_by_key(|a| a.0);
             for (address, info) in account_block_reverts {
                 account_changeset_cursor.append_dup(
@@ -524,6 +460,79 @@ impl StateReverts {
         }
 
         Ok(())
+    }
+}
+
+/// Iterator over storage reverts.
+/// See [StorageRevertsIter::next] for more details.
+struct StorageRevertsIter<R: Iterator, W: Iterator> {
+    reverts: Peekable<R>,
+    wiped: Peekable<W>,
+}
+
+impl<R: Iterator, W: Iterator> StorageRevertsIter<R, W>
+where
+    R: Iterator<Item = (H256, RevertToSlot)>,
+    W: Iterator<Item = (H256, U256)>,
+{
+    fn new(
+        reverts: impl IntoIterator<IntoIter = R>,
+        wiped: impl IntoIterator<IntoIter = W>,
+    ) -> Self {
+        Self { reverts: reverts.into_iter().peekable(), wiped: wiped.into_iter().peekable() }
+    }
+
+    /// Consume next revert and return it.
+    fn next_revert(&mut self) -> Option<(H256, U256)> {
+        self.reverts.next().map(|(key, revert)| (key, revert.to_previous_value()))
+    }
+
+    /// Consume next wiped storage and return it.
+    fn next_wiped(&mut self) -> Option<(H256, U256)> {
+        self.wiped.next()
+    }
+}
+
+impl<R, W> Iterator for StorageRevertsIter<R, W>
+where
+    R: Iterator<Item = (H256, RevertToSlot)>,
+    W: Iterator<Item = (H256, U256)>,
+{
+    type Item = (H256, U256);
+
+    /// Iterate over storage reverts and wiped entries and return items in the sorted order.
+    /// NOTE: The implementation assumes that inner iterators are already sorted.
+    fn next(&mut self) -> Option<Self::Item> {
+        match (self.reverts.peek(), self.wiped.peek()) {
+            (Some(revert), Some(wiped)) => {
+                // Compare the keys and return the lesser.
+                use std::cmp::Ordering;
+                match revert.0.cmp(&wiped.0) {
+                    Ordering::Less => self.next_revert(),
+                    Ordering::Greater => self.next_wiped(),
+                    Ordering::Equal => {
+                        // Keys are the same, decide which one to return.
+                        let (key, revert_to) = *revert;
+
+                        let value = match revert_to {
+                            // If the slot is some, prefer the revert value.
+                            RevertToSlot::Some(value) => value,
+                            // If the slot was destroyed, prefer the database value.
+                            RevertToSlot::Destroyed => wiped.1,
+                        };
+
+                        // Consume both values from inner iterators.
+                        self.next_revert();
+                        self.next_wiped();
+
+                        Some((key, value))
+                    }
+                }
+            }
+            (Some(_revert), None) => self.next_revert(),
+            (None, Some(_wiped)) => self.next_wiped(),
+            (None, None) => None,
+        }
     }
 }
 
@@ -974,8 +983,7 @@ mod tests {
         let provider = factory.provider_rw().unwrap();
 
         let address1 = Address::random();
-        let mut account_info = RevmAccountInfo::default();
-        account_info.nonce = 1;
+        let account_info = RevmAccountInfo { nonce: 1, ..Default::default() };
 
         // Block #0: initial state.
         let mut cache_state = CacheState::new(true);

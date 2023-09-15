@@ -6,7 +6,7 @@ use crate::tracing::{
 use reth_primitives::{Address, U64};
 use reth_rpc_types::{trace::parity::*, TransactionInfo};
 use revm::{
-    db::Database,
+    db::DatabaseRef,
     interpreter::opcode::{self, spec_opcode_gas},
     primitives::{AccountInfo, ExecutionResult, ResultAndState, SpecId, KECCAK_EMPTY},
 };
@@ -150,7 +150,7 @@ impl ParityTraceBuilder {
     /// contain accounts with changed state, not including their balance changes because this is not
     /// tracked during inspection and requires the State map returned after inspection. Use
     /// [ParityTraceBuilder::into_trace_results_with_state] to populate the balance and nonce
-    /// changes for the [StateDiff] using the [Database].
+    /// changes for the [StateDiff] using the [DatabaseRef].
     pub fn into_trace_results(
         self,
         res: ExecutionResult,
@@ -182,7 +182,7 @@ impl ParityTraceBuilder {
     /// Consumes the inspector and returns the trace results according to the configured trace
     /// types.
     ///
-    /// This also takes the [Database] to populate the balance and nonce changes for the
+    /// This also takes the [DatabaseRef] to populate the balance and nonce changes for the
     /// [StateDiff].
     ///
     /// Note: this is considered a convenience method that takes the state map of
@@ -192,10 +192,10 @@ impl ParityTraceBuilder {
         self,
         res: ResultAndState,
         trace_types: &HashSet<TraceType>,
-        db: &mut DB,
+        db: &DB,
     ) -> Result<TraceResults, DB::Error>
     where
-        DB: Database,
+        DB: DatabaseRef,
     {
         let ResultAndState { result, state } = res;
 
@@ -213,14 +213,14 @@ impl ParityTraceBuilder {
         if let Some(ref mut state_diff) = trace_res.state_diff {
             populate_account_balance_nonce_diffs(
                 state_diff,
-                db,
+                &db,
                 state.into_iter().map(|(addr, acc)| (addr, acc.info)),
             )?;
         }
 
         // check the vm trace case
         if let Some(ref mut vm_trace) = trace_res.vm_trace {
-            populate_vm_trace_bytecodes(db, vm_trace, breadth_first_addresses)?;
+            populate_vm_trace_bytecodes(&db, vm_trace, breadth_first_addresses)?;
         }
 
         Ok(trace_res)
@@ -535,12 +535,12 @@ where
 ///
 /// iteratively fill the [VmTrace] code fields
 pub(crate) fn populate_vm_trace_bytecodes<DB, I>(
-    db: &mut DB,
+    db: &DB,
     trace: &mut VmTrace,
     breadth_first_addresses: I,
 ) -> Result<(), DB::Error>
 where
-    DB: Database,
+    DB: DatabaseRef,
     I: IntoIterator<Item = Address>,
 {
     let mut stack: VecDeque<&mut VmTrace> = VecDeque::new();
@@ -575,12 +575,12 @@ where
 /// contains all the accounts that are in the state map and never has to fetch them from disk.
 pub fn populate_account_balance_nonce_diffs<DB, I>(
     state_diff: &mut StateDiff,
-    db: &mut DB,
+    db: &DB,
     account_diffs: I,
 ) -> Result<(), DB::Error>
 where
     I: IntoIterator<Item = (Address, AccountInfo)>,
-    DB: Database,
+    DB: DatabaseRef,
 {
     for (addr, changed_acc) in account_diffs.into_iter() {
         let entry = state_diff.entry(addr).or_default();

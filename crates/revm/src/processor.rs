@@ -35,9 +35,11 @@ pub struct EVMProcessor<'a> {
     stack: InspectorStack,
     /// The collection of receipts.
     /// Outer vector stores receipts for each block sequentially.
-    /// The inner vector stores receipts that were not pruned.
+    /// The inner vector stores receipts ordered by transaction number.
+    ///
+    /// If receipt is None it means it is pruned.
     receipts: Vec<Vec<Option<Receipt>>>,
-    /// First block will be initialized to ZERO
+    /// First block will be initialized to `None`
     /// and be set to the block number of first block executed.
     first_block: Option<BlockNumber>,
     /// The maximum known block.
@@ -58,7 +60,7 @@ impl<'a> EVMProcessor<'a> {
         &self.chain_spec
     }
 
-    /// Create new Processor wit given chain spec.
+    /// Create a new pocessor with the given chain spec.
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         let evm = EVM::new();
         EVMProcessor {
@@ -87,7 +89,7 @@ impl<'a> EVMProcessor<'a> {
         EVMProcessor::new_with_state(chain_spec, state)
     }
 
-    /// Create new EVM processor with a given revm state.
+    /// Create a new EVM processor with the given revm state.
     pub fn new_with_state(chain_spec: Arc<ChainSpec>, revm_state: StateDBBox<'a, Error>) -> Self {
         let mut evm = EVM::new();
         evm.database(revm_state);
@@ -109,7 +111,7 @@ impl<'a> EVMProcessor<'a> {
         self.stack = stack;
     }
 
-    /// Gives a reference to the database
+    /// Returns a reference to the database
     pub fn db(&mut self) -> &mut StateDBBox<'a, Error> {
         self.evm.db().expect("db to not be moved")
     }
@@ -136,7 +138,7 @@ impl<'a> EVMProcessor<'a> {
 
     /// Initializes the config and block env.
     fn init_env(&mut self, header: &Header, total_difficulty: U256) {
-        //set state clear flag
+        // Set state clear flag.
         self.evm.db.as_mut().unwrap().set_state_clear_flag(
             self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(header.number),
         );
@@ -168,7 +170,7 @@ impl<'a> EVMProcessor<'a> {
         Ok(())
     }
 
-    /// Post execution state change that include block reward, withdrawals and iregular DAO hardfork
+    /// Apply post execution state changes, including block rewards, withdrawals, and irregular DAO hardfork
     /// state change.
     pub fn post_execution_state_change(
         &mut self,
@@ -323,7 +325,7 @@ impl<'a> EVMProcessor<'a> {
             return Err(BlockValidationError::BlockGasUsed {
                 got: cumulative_gas_used,
                 expected: block.gas_used,
-                receipts: self
+                gas_spent_by_tx: self
                     .receipts
                     .last()
                     .map(|block_r| {

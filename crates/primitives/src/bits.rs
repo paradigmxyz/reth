@@ -1,5 +1,5 @@
 //! Fixed hash types
-#![allow(clippy::incorrect_clone_impl_on_copy_type)]
+#![allow(clippy::non_canonical_clone_impl)]
 
 use bytes::Buf;
 use derive_more::{AsRef, Deref};

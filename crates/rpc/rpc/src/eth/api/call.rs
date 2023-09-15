@@ -13,25 +13,24 @@ use crate::{
 };
 use ethers_core::utils::get_contract_address;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{AccessList, BlockId, BlockNumberOrTag, Bytes, KECCAK_EMPTY, U256};
+use reth_primitives::{AccessList, BlockId, BlockNumberOrTag, Bytes, U256};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
 use reth_revm::{
     access_list::AccessListInspector,
-    database::{RethStateDBBox, StateProviderDatabase},
+    database::{StateProviderDatabase, SubState},
     env::tx_env_with_recovered,
-    revm::State,
 };
 use reth_rpc_types::{
     state::StateOverride, BlockError, Bundle, CallRequest, EthCallResponse, StateContext,
 };
 use reth_transaction_pool::TransactionPool;
 use revm::{
-    primitives::{BlockEnv, CfgEnv, Env, ExecutionResult, Halt},
-    Database, DatabaseCommit,
+    db::{CacheDB, DatabaseRef},
+    primitives::{BlockEnv, CfgEnv, Env, ExecutionResult, Halt, TransactTo},
+    DatabaseCommit,
 };
-use revm_primitives::TransactTo;
 use tracing::trace;
 
 // Gas per transaction not creating a contract.
@@ -111,10 +110,7 @@ where
 
         self.spawn_with_state_at_block(at.into(), move |state| {
             let mut results = Vec::with_capacity(transactions.len());
-
-            let mut db = State::builder()
-                .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
-                .build();
+            let mut db = SubState::new(StateProviderDatabase::new(state));
 
             if replay_block_txs {
                 // only need to replay the transactions in the block if not all transactions are
@@ -203,16 +199,13 @@ where
 
         // Configure the evm env
         let mut env = build_call_evm_env(cfg, block, request)?;
-        let mut db = State::builder()
-            .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
-            .build();
+        let mut db = SubState::new(StateProviderDatabase::new(state));
 
         // if the request is a simple transfer we can optimize
         if env.tx.data.is_empty() {
             if let TransactTo::Call(to) = env.tx.transact_to {
-                if let Ok(code) = db.basic(to) {
-                    let no_code_callee =
-                        code.map(|code| code.code_hash == KECCAK_EMPTY).unwrap_or(true);
+                if let Ok(code) = db.db.state().account_code(to) {
+                    let no_code_callee = code.map(|code| code.is_empty()).unwrap_or(true);
                     if no_code_callee {
                         // simple transfer, check if caller has sufficient funds
                         let available_funds =
@@ -365,9 +358,7 @@ where
         // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
         env.cfg.disable_base_fee = true;
 
-        let mut db = State::builder()
-            .with_database_boxed(Box::new(StateProviderDatabase::new(state)))
-            .build();
+        let mut db = SubState::new(StateProviderDatabase::new(state));
 
         if request.gas.is_none() && env.tx.gas_price > U256::ZERO {
             // no gas limit was provided in the request, so we need to cap the request's gas limit
@@ -406,11 +397,14 @@ where
 /// Executes the requests again after an out of gas error to check if the error is gas related or
 /// not
 #[inline]
-fn map_out_of_gas_err(
+fn map_out_of_gas_err<S>(
     env_gas_limit: U256,
     mut env: Env,
-    mut db: &mut RethStateDBBox<'_>,
-) -> EthApiError {
+    mut db: &mut CacheDB<StateProviderDatabase<S>>,
+) -> EthApiError
+where
+    S: StateProvider,
+{
     let req_gas_limit = env.tx.gas_limit;
     env.tx.gas_limit = env_gas_limit.try_into().unwrap_or(u64::MAX);
     let (res, _) = match transact(&mut db, env) {

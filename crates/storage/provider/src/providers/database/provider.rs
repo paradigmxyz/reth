@@ -197,12 +197,30 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
     // TODO(joshie) TEMPORARY should be moved to trait providers
 
-    /// Unwind or peek at last N blocks of state
+    /// Unwind or peek at last N blocks of state recreating the [`BundleStateWithReceipts`].
     ///
     /// If UNWIND it set to true tip and latest state will be unwind
     /// and returned back with all the blocks
     ///
     /// If UNWIND is false we will just read the state/blocks and return them.
+    ///
+    /// 1. Iterate over the [BlockBodyIndices][tables::BlockBodyIndices] table to get all
+    /// the transaction ids.
+    /// 2. Iterate over the [StorageChangeSet][tables::StorageChangeSet] table
+    /// and the [AccountChangeSet][tables::AccountChangeSet] tables in reverse order to reconstruct
+    /// the changesets.
+    ///     - In order to have both the old and new values in the changesets, we also access the
+    ///       plain state tables.
+    /// 3. While iterating over the changeset tables, if we encounter a new account or storage slot,
+    /// we:
+    ///     1. Take the old value from the changeset
+    ///     2. Take the new value from the plain state
+    ///     3. Save the old value to the local state
+    /// 4. While iterating over the changeset tables, if we encounter an account/storage slot we
+    /// have seen before we:
+    ///     1. Take the old value from the changeset
+    ///     2. Take the new value from the local state
+    ///     3. Set the local state to the value in the changeset
     fn unwind_or_peek_state<const UNWIND: bool>(
         &self,
         range: RangeInclusive<BlockNumber>,

@@ -15,7 +15,7 @@ pub struct StorageEntry {
 }
 
 impl StorageEntry {
-    /// Create new StorageEntry with given key and value.
+    /// Create a new StorageEntry with given key and value.
     pub fn new(key: H256, value: U256) -> Self {
         Self { key, value }
     }
