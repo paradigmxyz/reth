@@ -314,10 +314,10 @@ impl StorageInner {
 
         // add post execution state change
         // Withdrawals, rewards etc.
-        executor.post_execution_state_change(block, U256::ZERO)?;
+        executor.apply_post_execution_state_change(block, U256::ZERO)?;
 
         // merge transitions
-        executor.db().merge_transitions(BundleRetention::Reverts);
+        executor.db_mut().merge_transitions(BundleRetention::Reverts);
 
         // apply post block changes
         Ok((executor.take_output_state(), gas_used))
@@ -325,11 +325,11 @@ impl StorageInner {
 
     /// Fills in the post-execution header fields based on the given BundleState and gas used.
     /// In doing this, the state root is calculated and the final header is returned.
-    pub(crate) fn complete_header(
+    pub(crate) fn complete_header<S: StateProviderFactory>(
         &self,
         mut header: Header,
         bundle_state: &BundleStateWithReceipts,
-        client: &impl StateProviderFactory,
+        client: &S,
         gas_used: u64,
     ) -> Result<Header, BlockExecutionError> {
         let receipts = bundle_state.receipts_by_block(header.number);

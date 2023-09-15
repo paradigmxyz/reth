@@ -377,7 +377,7 @@ impl BundleStateWithReceipts {
             }
         }
 
-        StateChange(plain_state).write_to_db(tx)?;
+        StateChanges(plain_state).write_to_db(tx)?;
 
         Ok(())
     }
@@ -538,15 +538,15 @@ where
 
 /// A change to the state of the world.
 #[derive(Default)]
-pub struct StateChange(pub StateChangeset);
+pub struct StateChanges(pub StateChangeset);
 
-impl From<StateChangeset> for StateChange {
+impl From<StateChangeset> for StateChanges {
     fn from(revm: StateChangeset) -> Self {
         Self(revm)
     }
 }
 
-impl StateChange {
+impl StateChanges {
     /// Write the post state to the database.
     pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         mut self,
@@ -614,7 +614,7 @@ impl StateChange {
 
 #[cfg(test)]
 mod tests {
-    use super::{StateChange, StateReverts};
+    use super::{StateChanges, StateReverts};
     use crate::{AccountReader, BundleStateWithReceipts, ProviderFactory};
     use reth_db::{
         cursor::{DbCursorRO, DbDupCursorRO},
@@ -688,7 +688,7 @@ mod tests {
         let plain_state = revm_bundle_state.into_plain_state(OriginalValuesKnown::Yes);
         assert!(plain_state.storage.is_empty());
         assert!(plain_state.contracts.is_empty());
-        StateChange(plain_state)
+        StateChanges(plain_state)
             .write_to_db(provider.tx_ref())
             .expect("Could not write plain state to DB");
 
@@ -756,7 +756,7 @@ mod tests {
             [PlainStorageChangeset { address: address_b, wipe_storage: true, storage: vec![] }]
         );
         assert!(plain_state.contracts.is_empty());
-        StateChange(plain_state)
+        StateChanges(plain_state)
             .write_to_db(provider.tx_ref())
             .expect("Could not write plain state to DB");
 

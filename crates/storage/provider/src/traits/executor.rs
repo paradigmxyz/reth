@@ -20,39 +20,6 @@ pub trait ExecutorFactory: Send + Sync + 'static {
     fn chain_spec(&self) -> &ChainSpec;
 }
 
-/// Block execution statistics
-#[derive(Clone, Debug, Default)]
-pub struct BlockExecutorStats {
-    /// How long execution took
-    pub execution_duration: Duration,
-    /// The amount of time it took to apply state changes to cached state
-    pub apply_state_duration: Duration,
-    /// Apply Post state execution changes duration.
-    pub apply_post_execution_changes_duration: Duration,
-    /// How long did it take to merge transitions and create
-    /// reverts. This applies data to evm bundle state.
-    pub merge_transitions_duration: Duration,
-    /// How long did it take to calculate receipt root.
-    pub receipt_root_duration: Duration,
-    /// If no senders are send how long did it
-    /// take to recover them
-    pub sender_recovery_duration: Duration,
-}
-
-impl BlockExecutorStats {
-    /// Log duration to info level log.
-    pub fn log_info(&self) {
-        info!(target: "evm",
-            evm_transact = ?self.execution_duration,
-            apply_state = ?self.apply_state_duration,
-            apply_post_state = ?self.apply_post_execution_changes_duration,
-            merge_transitions = ?self.merge_transitions_duration,
-            receipt_root = ?self.receipt_root_duration,
-            sender_recovery = ?self.sender_recovery_duration,
-            "Execution time");
-    }
-}
-
 /// An executor capable of executing a block.
 pub trait BlockExecutor {
     /// Execute a block.
@@ -95,4 +62,36 @@ pub trait PrunableBlockExecutor: BlockExecutor {
 
     /// Set prune modes.
     fn set_prune_modes(&mut self, prune_modes: PruneModes);
+}
+
+/// Block execution statistics. Contains duration of each step of block execution.
+#[derive(Clone, Debug, Default)]
+pub struct BlockExecutorStats {
+    /// Execution duration.
+    pub execution_duration: Duration,
+    /// Time needed to apply output of revm execution to revm cached state.
+    pub apply_state_duration: Duration,
+    /// Time needed to apply post execution state changes.
+    pub apply_post_execution_state_changes_duration: Duration,
+    /// Time needed to merge transitions and create reverts.
+    /// It this time transitions are applies to revm bundle state.
+    pub merge_transitions_duration: Duration,
+    /// Time needed to caclulate receipt roots.
+    pub receipt_root_duration: Duration,
+    /// Time needed to recovere senders.
+    pub sender_recovery_duration: Duration,
+}
+
+impl BlockExecutorStats {
+    /// Log duration to info level log.
+    pub fn log_info(&self) {
+        info!(target: "evm",
+            evm_transact = ?self.execution_duration,
+            apply_state = ?self.apply_state_duration,
+            apply_post_state = ?self.apply_post_execution_state_changes_duration,
+            merge_transitions = ?self.merge_transitions_duration,
+            receipt_root = ?self.receipt_root_duration,
+            sender_recovery = ?self.sender_recovery_duration,
+            "Execution time");
+    }
 }

@@ -771,7 +771,7 @@ where
     let WithdrawalsOutcome { withdrawals_root, withdrawals } =
         commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
 
-    // merge made transitions into bundle state.
+    // merge all transitions into bundle state.
     db.merge_transitions(BundleRetention::PlainState);
 
     let bundle = BundleStateWithReceipts::new(db.take_bundle(), vec![receipts], block_number);

@@ -27,11 +27,27 @@ use revm::{
 use std::{sync::Arc, time::Instant};
 use tracing::{debug, trace};
 
-/// Main block executor
+/// EVMProcessor is a block executor that uses revm to execute blocks or multiple blocks.
+///
+/// Output is obtained by calling `take_output_state` function.
+///
+/// It is capable of pruning the data that will be written to the database
+/// and implemented [PrunableBlockExecutor] traits.
+///
+/// It implemented the [BlockExecutor] that give it the ability to take block
+/// apply pre state (Cancun system contract call), execute transaction and apply
+/// state change and then apply post execution changes (block reward, withdrawals, irregular DAO
+/// hardfork state change). And if `execute_and_verify_receipt` is called it will verify the
+/// receipt.
+///
+/// InspectorStack are used for optional inspecting execution. And it contains
+/// various duration of parts of execution.
 pub struct EVMProcessor<'a> {
     /// The configured chain-spec
     chain_spec: Arc<ChainSpec>,
+    /// revm instance that contains database and env environment.
     evm: EVM<StateDBBox<'a, Error>>,
+    /// Hook and inspector stack that we want to invoke on that hook.
     stack: InspectorStack,
     /// The collection of receipts.
     /// Outer vector stores receipts for each block sequentially.
@@ -112,8 +128,11 @@ impl<'a> EVMProcessor<'a> {
     }
 
     /// Returns a reference to the database
-    pub fn db(&mut self) -> &mut StateDBBox<'a, Error> {
-        self.evm.db().expect("db to not be moved")
+    pub fn db_mut(&mut self) -> &mut StateDBBox<'a, Error> {
+        // Option will be removed from EVM in the future.
+        // as it is always some.
+        // https://github.com/bluealloy/revm/issues/697
+        self.evm.db().expect("Database inside EVM is always set")
     }
 
     fn recover_senders(
@@ -139,9 +158,10 @@ impl<'a> EVMProcessor<'a> {
     /// Initializes the config and block env.
     fn init_env(&mut self, header: &Header, total_difficulty: U256) {
         // Set state clear flag.
-        self.evm.db.as_mut().unwrap().set_state_clear_flag(
-            self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(header.number),
-        );
+        let state_clear_flag =
+            self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(header.number);
+
+        self.db_mut().set_state_clear_flag(state_clear_flag);
 
         fill_cfg_and_block_env(
             &mut self.evm.env.cfg,
@@ -154,7 +174,7 @@ impl<'a> EVMProcessor<'a> {
 
     /// Apply post execution state changes, including block rewards, withdrawals, and irregular DAO
     /// hardfork state change.
-    pub fn post_execution_state_change(
+    pub fn apply_post_execution_state_change(
         &mut self,
         block: &Block,
         total_difficulty: U256,
@@ -174,7 +194,7 @@ impl<'a> EVMProcessor<'a> {
         if self.chain_spec.fork(Hardfork::Dao).transitions_at_block(block.number) {
             // drain balances from hardcoded addresses.
             let drained_balance: u128 = self
-                .db()
+                .db_mut()
                 .drain_balances(DAO_HARDKFORK_ACCOUNTS)
                 .map_err(|_| BlockValidationError::IncrementBalanceFailed)?
                 .into_iter()
@@ -184,7 +204,7 @@ impl<'a> EVMProcessor<'a> {
             *balance_increments.entry(DAO_HARDFORK_BENEFICIARY).or_default() += drained_balance;
         }
         // increment balances
-        self.db()
+        self.db_mut()
             .increment_balances(balance_increments.into_iter().map(|(k, v)| (k, v)))
             .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
 
@@ -269,7 +289,7 @@ impl<'a> EVMProcessor<'a> {
             self.stats.execution_duration += time.elapsed();
             let time = Instant::now();
 
-            self.db().commit(state);
+            self.db_mut().commit(state);
 
             self.stats.apply_state_duration += time.elapsed();
 
@@ -328,8 +348,8 @@ impl<'a> EVMProcessor<'a> {
             .into())
         }
         let time = Instant::now();
-        self.post_execution_state_change(block, total_difficulty)?;
-        self.stats.apply_post_execution_changes_duration += time.elapsed();
+        self.apply_post_execution_state_change(block, total_difficulty)?;
+        self.stats.apply_post_execution_state_changes_duration += time.elapsed();
 
         let time = Instant::now();
         let retention = if self.tip.map_or(true, |tip| {
@@ -340,7 +360,7 @@ impl<'a> EVMProcessor<'a> {
         } else {
             BundleRetention::PlainState
         };
-        self.db().merge_transitions(retention);
+        self.db_mut().merge_transitions(retention);
         self.stats.merge_transitions_duration += time.elapsed();
 
         if self.first_block.is_none() {

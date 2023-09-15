@@ -958,14 +958,14 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // Merge all chain into one chain.
         let mut new_canon_chain = chains_to_promote.pop().expect("There is at least one block");
         trace!(target: "blockchain_tree", ?new_canon_chain, "Merging chains");
-        let mut have_append = false;
+        let mut chain_appended = false;
         for chain in chains_to_promote.into_iter().rev() {
-            have_append = true;
+            chain_appended = true;
             trace!(target: "blockchain_tree", ?chain, "Appending chain");
             new_canon_chain.append_chain(chain).expect("We have just build the chain.");
         }
 
-        if have_append {
+        if chain_appended {
             trace!(target: "blockchain_tree", ?new_canon_chain, "Canonical appended chain");
         }
         // update canonical index
