@@ -9,7 +9,7 @@ pub enum BlockValidationError {
     EVM { hash: H256, message: String },
     #[error("Failed to recover sender for transaction")]
     SenderRecoveryError,
-    #[error("Incrementing balance failed")]
+    #[error("Incrementing balance in post execution failed")]
     IncrementBalanceFailed,
     #[error("Receipt root {got:?} is different than expected {expected:?}.")]
     ReceiptRootDiff { got: H256, expected: H256 },

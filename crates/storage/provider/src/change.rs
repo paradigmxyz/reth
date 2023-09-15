@@ -984,8 +984,7 @@ mod tests {
         let provider = factory.provider_rw().unwrap();
 
         let address1 = Address::random();
-        let mut account_info = RevmAccountInfo::default();
-        account_info.nonce = 1;
+        let mut account_info = RevmAccountInfo { nonce: 1, ..Default::default() };
 
         // Block #0: initial state.
         let mut cache_state = CacheState::new(true);
