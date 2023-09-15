@@ -110,6 +110,7 @@ pub use listener::{AllTransactionsEvents, TransactionEvents};
 use reth_rlp::Encodable;
 
 mod best;
+mod blob;
 mod parked;
 pub(crate) mod pending;
 pub(crate) mod size;
