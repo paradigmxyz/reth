@@ -57,7 +57,7 @@ pub fn post_block_balance_increments(
 /// If cancun is not activated or the block is the genesis block, then this is a no-op, and no
 /// state changes are made.
 #[inline]
-pub fn apply_pre_block_call<DB: Database>(
+pub fn apply_beacon_root_contract_call<DB: Database>(
     chain_spec: &ChainSpec,
     block_timestamp: u64,
     block_number: u64,
