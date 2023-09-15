@@ -150,7 +150,7 @@ impl<'a> EVMProcessor<'a> {
         );
     }
 
-    /// Post execution state change that include block reward, withdrawals and iregular DAO hardfork
+    /// Apply post execution state changes, including block rewards, withdrawals, and irregular DAO hardfork
     /// state change.
     pub fn post_execution_state_change(
         &mut self,
