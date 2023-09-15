@@ -772,10 +772,10 @@ mod tests {
 
             let expected = blocks
                 .iter()
-                .cloned()
                 // filter anything after the second missing range to ensure we don't expect trailing
                 // `None`s
                 .filter(|b| !second_missing_range.contains(&b.number))
+                .cloned()
                 .map(|b| {
                     if first_missing_range.contains(&b.number) {
                         None

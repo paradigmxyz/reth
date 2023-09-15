@@ -961,6 +961,16 @@ pub struct PoolSize {
     pub total: usize,
 }
 
+// === impl PoolSize ===
+
+impl PoolSize {
+    /// Asserts that the invariants of the pool size are met.
+    #[cfg(test)]
+    pub(crate) fn assert_invariants(&self) {
+        assert_eq!(self.total, self.pending + self.basefee + self.queued);
+    }
+}
+
 /// Represents the current status of the pool.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct BlockInfo {

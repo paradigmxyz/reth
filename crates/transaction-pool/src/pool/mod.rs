@@ -912,6 +912,24 @@ impl<T: PoolTransaction> AddedTransaction<T> {
             }
         }
     }
+
+    /// Returns the subpool this transaction was added to
+    #[cfg(test)]
+    pub(crate) fn subpool(&self) -> SubPool {
+        match self {
+            AddedTransaction::Pending(_) => SubPool::Pending,
+            AddedTransaction::Parked { subpool, .. } => *subpool,
+        }
+    }
+
+    /// Returns the [TransactionId] of the added transaction
+    #[cfg(test)]
+    pub(crate) fn id(&self) -> &TransactionId {
+        match self {
+            AddedTransaction::Pending(added) => added.transaction.id(),
+            AddedTransaction::Parked { transaction, .. } => transaction.id(),
+        }
+    }
 }
 
 /// Contains all state changes after a [`CanonicalStateUpdate`] was processed
