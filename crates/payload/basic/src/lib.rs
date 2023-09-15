@@ -668,7 +668,7 @@ where
     let block_number = initialized_block_env.number.to::<u64>();
 
     // apply eip-4788 pre block contract call
-    let mut db = pre_block_contract_call(
+    let mut db = pre_block_beacon_root_contract_call(
         db,
         &chain_spec,
         block_number,
@@ -890,7 +890,7 @@ where
     let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
 
     // apply eip-4788 pre block contract call
-    let mut db = pre_block_contract_call(
+    let mut db = pre_block_beacon_root_contract_call(
         db,
         &chain_spec,
         block_number,
@@ -991,7 +991,7 @@ fn commit_withdrawals<DB: Database<Error = Error>>(
 }
 
 /// TODO: docs
-fn pre_block_contract_call<DB>(
+fn pre_block_beacon_root_contract_call<DB>(
     db: State<DB>,
     chain_spec: &ChainSpec,
     block_number: u64,
