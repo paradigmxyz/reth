@@ -109,7 +109,7 @@ impl<'a> EVMProcessor<'a> {
         self.stack = stack;
     }
 
-    /// Gives a reference to the database
+    /// Returns a reference to the database
     pub fn db(&mut self) -> &mut StateDBBox<'a, Error> {
         self.evm.db().expect("db to not be moved")
     }
