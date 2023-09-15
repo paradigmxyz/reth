@@ -774,7 +774,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             .tx()?
             .cursor_read::<tables::CanonicalHeaders>()?
             .walk_back(None)?
-            .take(self.config.num_of_canonical_hashes())
+            .take(self.config.num_of_canonical_hashes() as usize)
             .collect::<Result<BTreeMap<BlockNumber, BlockHash>, _>>()?;
 
         let (mut remove_chains, _) =
