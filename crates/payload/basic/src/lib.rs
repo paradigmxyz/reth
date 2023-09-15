@@ -33,8 +33,10 @@ use reth_primitives::{
 };
 use reth_provider::{BlockReaderIdExt, BlockSource, BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::{
-    database::StateProviderDatabase, env::tx_env_with_recovered, into_reth_log,
-    state_change::{apply_pre_block_call, post_block_withdrawals_balance_increments},
+    database::StateProviderDatabase,
+    env::tx_env_with_recovered,
+    into_reth_log,
+    state_change::{apply_beacon_root_contract_call, post_block_withdrawals_balance_increments},
 };
 use reth_rlp::Encodable;
 use reth_tasks::TaskSpawner;
@@ -1015,7 +1017,7 @@ where
     evm_pre_block.database(db);
 
     // initialize a block from the env, because the pre block call needs the block itself
-    match apply_pre_block_call(
+    match apply_beacon_root_contract_call(
         chain_spec,
         attributes.timestamp,
         block_number,

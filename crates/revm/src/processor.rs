@@ -4,7 +4,7 @@ use crate::{
     eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     into_reth_log,
     stack::{InspectorStack, InspectorStackConfig},
-    state_change::{apply_pre_block_call, post_block_balance_increments},
+    state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
 };
 use reth_interfaces::{
     executor::{BlockExecutionError, BlockValidationError},
@@ -176,8 +176,8 @@ impl<'a> EVMProcessor<'a> {
     ///
     /// If cancun is not activated or the block is the genesis block, then this is a no-op, and no
     /// state changes are made.
-    pub fn apply_pre_block_call(&mut self, block: &Block) -> Result<(), BlockExecutionError> {
-        apply_pre_block_call(
+    pub fn apply_beacon_root_contract_call(&mut self, block: &Block) -> Result<(), BlockExecutionError> {
+        apply_beacon_root_contract_call(
             &self.chain_spec,
             block.timestamp,
             block.number,
@@ -334,7 +334,7 @@ impl<'a> EVMProcessor<'a> {
         senders: Option<Vec<Address>>,
     ) -> Result<Vec<Receipt>, BlockExecutionError> {
         self.init_env(&block.header, total_difficulty);
-        self.apply_pre_block_call(block)?;
+        self.apply_beacon_root_contract_call(block)?;
         let (receipts, cumulative_gas_used) =
             self.execute_transactions(block, total_difficulty, senders)?;
 
@@ -752,7 +752,8 @@ mod tests {
                 .build(),
         );
 
-        let mut executor = EVMProcessor::new_with_db(chain_spec, RevmDatabase::new(db));
+        let mut executor = EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
+        executor.init_env(&header, U256::ZERO);
 
         // get the env
         let previous_env = executor.evm.env.clone();
@@ -804,7 +805,8 @@ mod tests {
 
         let mut header = chain_spec.genesis_header();
 
-        let mut executor = EVMProcessor::new_with_db(chain_spec, RevmDatabase::new(db));
+        let mut executor = EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
+        executor.init_env(&header, U256::ZERO);
 
         // attempt to execute the genesis block with non-zero parent beacon block root, expect err
         header.parent_beacon_block_root = Some(H256::from_low_u64_be(0x1337));
