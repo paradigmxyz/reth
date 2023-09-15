@@ -1,4 +1,4 @@
-use crate::hooks::{Hook, HookAction, HookArguments, HookDependencies, HookError, Hooks};
+use crate::hooks::{Hook, HookAction, HookArguments, HookError, Hooks};
 use std::{
     collections::VecDeque,
     task::{Context, Poll},
@@ -7,8 +7,8 @@ use tracing::debug;
 
 /// Manages hooks under the control of the engine.
 ///
-/// This type polls the initialized hooks one by one, respecting the dependencies (such as DB write
-/// access that enforces running at most one such hook).
+/// This type polls the initialized hooks one by one, respecting the DB access level
+/// (i.e. [crate::hooks::HookDBAccessLevel::ReadWrite] that enforces running at most one such hook).
 pub(crate) struct HooksController {
     /// Collection of hooks.
     ///
@@ -79,22 +79,21 @@ impl HooksController {
     /// 1. Next hook is [`Option::None`], i.e. taken, meaning it's currently running and has a DB
     ///    write access.
     /// 2. Next hook needs a DB write access, but either there's another hook with DB write access
-    ///    running, or [active_dependencies][`HookDependencies`] passed into arguments has `db_write
-    ///    = true`.
+    ///    running, or `db_write_active` passed into arguments is `true`.
     /// 3. Next hook returned [`Poll::Pending`] on polling.
     /// 4. Next hook returned [`Poll::Ready`] on polling, but no action to act upon.
     pub(crate) fn poll_next_hook(
         &mut self,
         cx: &mut Context<'_>,
         args: HookArguments,
-        active_dependencies: HookDependencies,
+        db_write_active: bool,
     ) -> Poll<Result<HookAction, HookError>> {
         let Some(mut hook) = self.hooks.pop_front() else { return Poll::Pending };
 
-        // Hook with DB write dependency is not allowed to run due to already
-        // running hook with DB write dependency or active DB write according to passed dependencies
-        if hook.dependencies().db_write &&
-            (self.running_hook_with_db_write.is_some() || active_dependencies.db_write)
+        // Hook with DB write access level is not allowed to run due to already running hook with DB
+        // write access level or active DB write according to passed argument
+        if hook.db_access_level().is_read_write() &&
+            (self.running_hook_with_db_write.is_some() || db_write_active)
         {
             return Poll::Pending
         }
@@ -108,7 +107,7 @@ impl HooksController {
                 "Polled next hook"
             );
 
-            if event.is_started() && hook.dependencies().db_write {
+            if event.is_started() && hook.db_access_level().is_read_write() {
                 self.running_hook_with_db_write = Some(hook);
             } else {
                 self.hooks.push_back(hook);

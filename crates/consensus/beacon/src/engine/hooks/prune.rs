@@ -1,7 +1,8 @@
 //! Prune hook for the engine implementation.
 
-use crate::engine::hooks::{
-    Hook, HookAction, HookArguments, HookDependencies, HookError, HookEvent,
+use crate::{
+    engine::hooks::{Hook, HookAction, HookArguments, HookError, HookEvent},
+    hooks::HookDBAccessLevel,
 };
 use futures::FutureExt;
 use metrics::Counter;
@@ -143,8 +144,8 @@ impl<DB: Database + 'static> Hook for PruneHook<DB> {
         self.poll_pruner(cx)
     }
 
-    fn dependencies(&self) -> HookDependencies {
-        HookDependencies { db_write: true }
+    fn db_access_level(&self) -> HookDBAccessLevel {
+        HookDBAccessLevel::ReadWrite
     }
 }
 

@@ -43,8 +43,8 @@ pub trait Hook: Send + Sync + 'static {
         args: HookArguments,
     ) -> Poll<(HookEvent, Option<HookAction>)>;
 
-    /// Returns [dependencies][`HookDependencies`] for running this hook.
-    fn dependencies(&self) -> HookDependencies;
+    /// Returns [db access level][`HookDBAccessLevel`] the hook needs.
+    fn db_access_level(&self) -> HookDBAccessLevel;
 }
 
 /// Arguments passed to the [hook polling function][`Hook::poll`].
@@ -107,9 +107,22 @@ pub enum HookError {
     Internal(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Dependencies that [hook][`Hook`] require for execution.
-pub struct HookDependencies {
-    /// Hook needs DB write access. If `true`, then only one hook with DB write access can be run
-    /// at a time.
-    pub db_write: bool,
+/// Level of database access the hook needs for execution.
+pub enum HookDBAccessLevel {
+    /// Read-only database access.
+    ReadOnly,
+    /// Read-write database access.
+    ReadWrite,
+}
+
+impl HookDBAccessLevel {
+    /// Returns `true` if the hook needs read-only access to the database.
+    pub fn is_read_only(&self) -> bool {
+        matches!(self, Self::ReadOnly)
+    }
+
+    /// Returns `true` if the hook needs read-write access to the database.
+    pub fn is_read_write(&self) -> bool {
+        matches!(self, Self::ReadWrite)
+    }
 }

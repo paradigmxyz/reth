@@ -68,7 +68,7 @@ mod handle;
 pub use handle::BeaconConsensusEngineHandle;
 
 mod forkchoice;
-use crate::hooks::{HookDependencies, Hooks};
+use crate::hooks::Hooks;
 pub use forkchoice::ForkchoiceStatus;
 
 mod metrics;
@@ -1685,12 +1685,9 @@ where
         match action {
             HookAction::UpdateSyncState(state) => self.sync_state_updater.update_sync_state(state),
             HookAction::RestoreCanonicalHashes => {
-                match self.blockchain.restore_canonical_hashes() {
-                    Ok(()) => {}
-                    Err(error) => {
-                        error!(target: "consensus::engine", ?error, "Error restoring blockchain tree state");
-                        return Err(error.into())
-                    }
+                if let Err(error) = self.blockchain.restore_canonical_hashes() {
+                    error!(target: "consensus::engine", ?error, "Error restoring blockchain tree state");
+                    return Err(error.into())
                 }
             }
         }
@@ -1801,7 +1798,7 @@ where
                 if let Poll::Ready(result) = this.hooks.poll_next_hook(
                     cx,
                     HookArguments { tip_block_number: this.blockchain.canonical_tip().number },
-                    HookDependencies { db_write: this.sync.is_pipeline_active() },
+                    this.sync.is_pipeline_active(),
                 ) {
                     if let Err(err) = this.on_hook_action(result?) {
                         return Poll::Ready(Err(err))
