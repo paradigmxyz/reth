@@ -31,6 +31,5 @@ default = ["jsonrpsee-types"]
 # misc
 rand.workspace = true
 similar-asserts = "1.4"
-test-fuzz = "4"
 
 
