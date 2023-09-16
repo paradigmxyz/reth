@@ -16,7 +16,7 @@ use reth_provider::{
     BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_revm::{
-    database::{State, SubState},
+    database::{StateProviderDatabase, SubState},
     env::tx_env_with_recovered,
     tracing::{
         parity::populate_account_balance_nonce_diffs, TracingInspector, TracingInspectorConfig,
@@ -145,7 +145,7 @@ where
             .eth_api
             .spawn_with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(calls.len());
-                let mut db = SubState::new(State::new(state));
+                let mut db = SubState::new(StateProviderDatabase::new(state));
 
                 let mut calls = calls.into_iter().peekable();
 
@@ -278,8 +278,8 @@ where
     /// 2. configures the EVM evn
     /// 3. loops over all transactions and executes them
     /// 4. calls the callback with the transaction info, the execution result, the changed state
-    /// _after_ the transaction [State] and the database that points to the state right _before_ the
-    /// transaction.
+    /// _after_ the transaction [StateProviderDatabase] and the database that points to the state
+    /// right _before_ the transaction.
     async fn trace_block_with<F, R>(
         &self,
         block_id: BlockId,
@@ -293,7 +293,7 @@ where
                 TracingInspector,
                 ExecutionResult,
                 &'a revm_primitives::State,
-                &'a CacheDB<State<StateProviderBox<'a>>>,
+                &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
             ) -> EthResult<R>
             + Send
             + 'static,
@@ -321,7 +321,7 @@ where
             .eth_api
             .spawn_with_state_at_block(state_at.into(), move |state| {
                 let mut results = Vec::with_capacity(transactions.len());
-                let mut db = SubState::new(State::new(state));
+                let mut db = SubState::new(StateProviderDatabase::new(state));
 
                 let mut transactions = transactions.into_iter().enumerate().peekable();
 
@@ -404,8 +404,10 @@ where
                             RewardAction {
                                 author: block.header.beneficiary,
                                 reward_type: RewardType::Uncle,
-                                value: block_reward(base_block_reward, block.ommers.len()) -
-                                    U256::from(base_block_reward),
+                                value: U256::from(
+                                    block_reward(base_block_reward, block.ommers.len()) -
+                                        base_block_reward,
+                                ),
                             },
                         ));
                     }

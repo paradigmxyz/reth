@@ -66,7 +66,6 @@ where
         &mut self,
         interpreter: &mut Interpreter,
         _data: &mut EVMData<'_, DB>,
-        _is_static: bool,
     ) -> InstructionResult {
         match interpreter.current_opcode() {
             opcode::SLOAD | opcode::SSTORE => {

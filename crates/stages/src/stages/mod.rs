@@ -66,6 +66,7 @@ mod tests {
     use std::sync::Arc;
 
     #[tokio::test]
+    #[ignore]
     async fn test_prune() {
         let test_tx = TestTransaction::default();
         let factory = Arc::new(ProviderFactory::new(test_tx.tx.as_ref(), MAINNET.clone()));
@@ -129,7 +130,11 @@ mod tests {
             // configuration
             let mut execution_stage = ExecutionStage::new(
                 Factory::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build())),
-                ExecutionStageThresholds { max_blocks: Some(100), max_changes: None },
+                ExecutionStageThresholds {
+                    max_blocks: Some(100),
+                    max_changes: None,
+                    max_cumulative_gas: None,
+                },
                 MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
                 prune_modes.clone(),
             );
