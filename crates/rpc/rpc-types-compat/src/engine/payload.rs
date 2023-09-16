@@ -1,3 +1,4 @@
+//! Standalone functions for payload
 use reth_primitives::{
     constants::{MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
     proofs::{self, EMPTY_LIST_HASH},
