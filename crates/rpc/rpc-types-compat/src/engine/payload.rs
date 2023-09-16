@@ -1,4 +1,4 @@
-//! Standalone functions for payload
+//! Standalone functions for engine specific
 use reth_primitives::{
     constants::{MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
     proofs::{self, EMPTY_LIST_HASH},
@@ -155,9 +155,9 @@ pub fn try_convert_from_sealed_block_to_execution_payload_v2(
     let standalone_withdrawals: Vec<StandaloneWithdraw> = value
         .withdrawals
         .clone()
-        .unwrap_or_else(Vec::new)
+        .unwrap_or_default()
         .into_iter()
-        .map(|withdrawal| convert_withdrawal_to_standalonewithdraw(withdrawal))
+        .map(convert_withdrawal_to_standalonewithdraw)
         .collect();
 
     ExecutionPayloadV2 {
@@ -198,9 +198,9 @@ pub fn try_convert_from_sealed_block_to_execution_payload_v3(
     let withdrawals: Vec<StandaloneWithdraw> = value
         .withdrawals
         .clone()
-        .unwrap_or_else(Vec::new)
+        .unwrap_or_default()
         .into_iter()
-        .map(|withdrawal| convert_withdrawal_to_standalonewithdraw(withdrawal))
+        .map(convert_withdrawal_to_standalonewithdraw)
         .collect();
 
     ExecutionPayloadV3 {
@@ -298,10 +298,7 @@ pub fn convert_to_execution_payload_body_v1(value: Block) -> ExecutionPayloadBod
         out.into()
     });
     let withdraw = value.withdrawals.map(|withdrawals| {
-        withdrawals
-            .into_iter()
-            .map(|withdrawal| convert_withdrawal_to_standalonewithdraw(withdrawal))
-            .collect::<Vec<_>>()
+        withdrawals.into_iter().map(convert_withdrawal_to_standalonewithdraw).collect::<Vec<_>>()
     });
     ExecutionPayloadBodyV1 { transactions: transactions.collect(), withdrawals: withdraw }
 }
