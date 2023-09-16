@@ -1,12 +1,8 @@
 pub use crate::Withdrawal as StandaloneWithdraw;
 use reth_primitives::{
-    constants::{MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
     kzg::{Blob, Bytes48},
-    proofs::{self, EMPTY_LIST_HASH},
-    Address, BlobTransactionSidecar, Block, Bloom, Bytes, Header, SealedBlock, TransactionSigned,
-    UintTryTo, H256, H64, U256, U64,
+    Address, BlobTransactionSidecar, Bloom, Bytes, SealedBlock, H256, H64, U256, U64,
 };
-use reth_rlp::Decodable;
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 
 /// The execution payload body response that allows for `null` values.
