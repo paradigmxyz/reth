@@ -149,7 +149,7 @@ impl PayloadBuilderAttributes {
         let withdraw = attributes.withdrawals.map(|withdrawals| {
             withdrawals
                 .into_iter()
-                .map(|withdrawal| convert_standalonewithdraw_to_withdrawal(withdrawal)) // Removed the parentheses here
+                .map(convert_standalonewithdraw_to_withdrawal) // Removed the parentheses here
                 .collect::<Vec<_>>()
         });
 

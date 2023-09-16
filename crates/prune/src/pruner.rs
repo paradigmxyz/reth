@@ -1282,7 +1282,7 @@ mod tests {
                 .iter()
                 .enumerate()
                 .flat_map(|(block_number, changeset)| {
-                    changeset.into_iter().map(move |change| (block_number, change))
+                    changeset.iter().map(move |change| (block_number, change))
                 })
                 .collect::<Vec<_>>();
 
@@ -1410,7 +1410,7 @@ mod tests {
                 .enumerate()
                 .flat_map(|(block_number, changeset)| {
                     changeset.into_iter().flat_map(move |(address, _, entries)| {
-                        entries.into_iter().map(move |entry| (block_number, address, entry))
+                        entries.iter().map(move |entry| (block_number, address, entry))
                     })
                 })
                 .collect::<Vec<_>>();
