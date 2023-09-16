@@ -16,16 +16,17 @@ use reth_primitives::{
     hex, Address, FromRecoveredPooledTransaction, FromRecoveredTransaction,
     IntoRecoveredTransaction, PooledTransactionsElementEcRecovered, Signature, Transaction,
     TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930,
-    TxEip4844, TxHash, TxLegacy, TxType, H256, U128, U256,
+    TxEip4844, TxHash, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, H256,
+    LEGACY_TX_TYPE_ID, U128, U256,
 };
 use std::{ops::Range, sync::Arc, time::Instant};
 
-pub(crate) type MockTxPool = TxPool<MockOrdering>;
+pub type MockTxPool = TxPool<MockOrdering>;
 
 pub type MockValidTx = ValidPoolTransaction<MockTransaction>;
 
 /// Create an empty `TxPool`
-pub(crate) fn mock_tx_pool() -> MockTxPool {
+pub fn mock_tx_pool() -> MockTxPool {
     MockTxPool::new(Default::default(), Default::default())
 }
 
@@ -349,6 +350,14 @@ impl MockTransaction {
         let mut next = self.clone();
         let gas = self.get_gas_limit() + 1;
         next.with_gas_limit(gas)
+    }
+
+    pub fn tx_type(&self) -> u8 {
+        match self {
+            Self::Legacy { .. } => LEGACY_TX_TYPE_ID,
+            Self::Eip1559 { .. } => EIP1559_TX_TYPE_ID,
+            Self::Eip4844 { .. } => EIP4844_TX_TYPE_ID,
+        }
     }
 
     pub fn is_legacy(&self) -> bool {
@@ -714,6 +723,10 @@ impl MockTransactionFactory {
 
     pub fn create_eip1559(&mut self) -> MockValidTx {
         self.validated(MockTransaction::eip1559())
+    }
+
+    pub fn create_eip4844(&mut self) -> MockValidTx {
+        self.validated(MockTransaction::eip4844())
     }
 }
 
