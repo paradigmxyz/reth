@@ -118,10 +118,8 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
-        if let Some(ref attrs) = payload_attrs {
-            self.validate_version_specific_fields(EngineApiMessageVersion::V1, &attrs.into())?;
-        }
-        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V1, state, payload_attrs)
+            .await
     }
 
     /// Sends a message to the beacon consensus engine to update the fork choice _with_ withdrawals,
@@ -133,10 +131,8 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
-        if let Some(ref attrs) = payload_attrs {
-            self.validate_version_specific_fields(EngineApiMessageVersion::V2, &attrs.into())?;
-        }
-        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V2, state, payload_attrs)
+            .await
     }
 
     /// Sends a message to the beacon consensus engine to update the fork choice _with_ withdrawals,
@@ -148,11 +144,8 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
-        if let Some(ref attrs) = payload_attrs {
-            self.validate_version_specific_fields(EngineApiMessageVersion::V3, &attrs.into())?;
-        }
-
-        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V3, state, payload_attrs)
+            .await
     }
 
     /// Returns the most recent version of the payload that is available in the corresponding
@@ -533,6 +526,55 @@ where
             payload_or_attrs.timestamp(),
             payload_or_attrs.parent_beacon_block_root().is_some(),
         )
+    }
+
+    /// Validates the `engine_forkchoiceUpdated` payload attributes and executes the forkchoice
+    /// update.
+    ///
+    /// The payload attributes will be validated according to the engine API rules for the given
+    /// message version:
+    /// * If the version is [EngineApiMessageVersion::V1], then the payload attributes will be
+    ///   validated according to the Paris rules.
+    /// * If the version is [EngineApiMessageVersion::V2], then the payload attributes will be
+    ///   validated according to the Shanghai rules, as well as the validity changes from cancun:
+    ///   <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/cancun.md#update-the-methods-of-previous-forks>
+    ///
+    /// * If the version is [EngineApiMessageVersion::V3], then the payload attributes will be
+    ///   validated according to the Cancun rules.
+    async fn validate_and_execute_forkchoice(
+        &self,
+        version: EngineApiMessageVersion,
+        state: ForkchoiceState,
+        payload_attrs: Option<PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        if let Some(ref attrs) = payload_attrs {
+            let attr_validation_res = self.validate_version_specific_fields(version, &attrs.into());
+
+            // From the engine API spec:
+            //
+            // Client software MUST ensure that payloadAttributes.timestamp is greater than
+            // timestamp of a block referenced by forkchoiceState.headBlockHash. If this condition
+            // isn't held client software MUST respond with -38003: Invalid payload attributes and
+            // MUST NOT begin a payload build process. In such an event, the forkchoiceState
+            // update MUST NOT be rolled back.
+            //
+            // NOTE: This will also apply to the validation result for the cancun or
+            // shanghai-specific fields provided in the payload attributes.
+            //
+            // To do this, we set the payload attrs to `None` if attribute validation failed, but
+            // we still apply the forkchoice update.
+            if let Err(err) = attr_validation_res {
+                let fcu_res = self.inner.beacon_consensus.fork_choice_updated(state, None).await?;
+                // TODO: decide if we want this branch - the FCU INVALID response might be more
+                // useful than the payload attributes INVALID response
+                if fcu_res.is_invalid() {
+                    return Ok(fcu_res)
+                }
+                return Err(err)
+            }
+        }
+
+        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
     }
 }
 
