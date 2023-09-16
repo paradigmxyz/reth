@@ -396,7 +396,7 @@ mod tests {
         transaction::DbTx,
         DatabaseEnv,
     };
-    use reth_primitives::{Address, Receipt, StorageEntry, H256, MAINNET, U256};
+    use reth_primitives::{Address, Receipt, Receipts, StorageEntry, H256, MAINNET, U256};
     use reth_revm_primitives::{into_reth_acc, primitives::HashMap};
     use revm::{
         db::{
@@ -615,7 +615,7 @@ mod tests {
 
         state.merge_transitions(BundleRetention::Reverts);
 
-        BundleStateWithReceipts::new(state.take_bundle(), Vec::new(), 1)
+        BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 1)
             .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
@@ -715,7 +715,7 @@ mod tests {
         )]));
 
         state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(state.take_bundle(), Vec::new(), 2)
+        BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 2)
             .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
@@ -782,7 +782,7 @@ mod tests {
             },
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(init_state.take_bundle(), Vec::new(), 0)
+        BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::new(), 0)
             .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
@@ -929,7 +929,7 @@ mod tests {
 
         let bundle = state.take_bundle();
 
-        BundleStateWithReceipts::new(bundle, Vec::new(), 1)
+        BundleStateWithReceipts::new(bundle, Receipts::new(), 1)
             .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
@@ -1095,7 +1095,7 @@ mod tests {
             },
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(init_state.take_bundle(), Vec::new(), 0)
+        BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::new(), 0)
             .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
@@ -1142,7 +1142,7 @@ mod tests {
 
         // Commit block #1 changes to the database.
         state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(state.take_bundle(), Vec::new(), 1)
+        BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 1)
             .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
@@ -1174,7 +1174,7 @@ mod tests {
     fn revert_to_indices() {
         let base = BundleStateWithReceipts {
             bundle: BundleState::default(),
-            receipts: vec![vec![Some(Receipt::default()); 2]; 7],
+            receipts: Receipts::from_vec(vec![vec![Some(Receipt::default()); 2]; 7]),
             first_block: 10,
         };
 
