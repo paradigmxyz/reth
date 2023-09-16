@@ -163,7 +163,7 @@ impl BundleStateWithReceipts {
     /// # Example
     ///
     /// ```
-    /// use reth_primitives::{Account, U256};
+    /// use reth_primitives::{Account, U256, Receipts};
     /// use reth_provider::BundleStateWithReceipts;
     /// use reth_db::{test_utils::create_test_rw_db, database::Database};
     /// use std::collections::HashMap;
@@ -183,7 +183,7 @@ impl BundleStateWithReceipts {
     ///     )]),
     ///     HashMap::from([]),
     ///     vec![],
-    ///     vec![],
+    ///     Receipts::new(),
     ///     0,
     /// );
     ///
