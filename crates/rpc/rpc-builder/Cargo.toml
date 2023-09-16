@@ -21,7 +21,6 @@ reth-rpc-engine-api = { path = "../rpc-engine-api" }
 reth-rpc-types.workspace = true
 reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
-reth-metrics = { workspace = true, features = ["common"] }
 reth-rpc-types-compat.workspace = true
 
 # rpc/net

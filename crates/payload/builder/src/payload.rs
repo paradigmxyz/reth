@@ -9,8 +9,13 @@ use reth_rpc_types::engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, PayloadAttributes,
     PayloadId,
 };
+use reth_rpc_types_compat::engine::payload::{
+    convert_from_sealed_block_to_execution_payload_field_v2,
+    convert_standalonewithdraw_to_withdrawal,
+    try_convert_from_sealed_block_to_execution_payload_v1,
+    try_convert_from_sealed_block_to_execution_payload_v3,
+};
 use revm_primitives::{BlockEnv, CfgEnv};
-use reth_rpc_types_compat::engine::payload::{convert_standalonewithdraw_to_withdrawal,convert_to_execution_payload};
 /// Contains the built payload.
 ///
 /// According to the [engine API specification](https://github.com/ethereum/execution-apis/blob/main/src/engine/README.md) the execution layer should build the initial version of the payload with an empty transaction set and then keep update it in order to maximize the revenue.
@@ -76,7 +81,7 @@ impl BuiltPayload {
 // V1 engine_getPayloadV1 response
 impl From<BuiltPayload> for ExecutionPayloadV1 {
     fn from(value: BuiltPayload) -> Self {
-        convert_to_execution_payload(value.block)
+        try_convert_from_sealed_block_to_execution_payload_v1(value.block)
     }
 }
 
@@ -85,8 +90,10 @@ impl From<BuiltPayload> for ExecutionPayloadEnvelopeV2 {
     fn from(value: BuiltPayload) -> Self {
         let BuiltPayload { block, fees, .. } = value;
 
-
-        ExecutionPayloadEnvelopeV2 { block_value: fees, execution_payload: block.into() }
+        ExecutionPayloadEnvelopeV2 {
+            block_value: fees,
+            execution_payload: convert_from_sealed_block_to_execution_payload_field_v2(block),
+        }
     }
 }
 
@@ -95,7 +102,7 @@ impl From<BuiltPayload> for ExecutionPayloadEnvelopeV3 {
         let BuiltPayload { block, fees, sidecars, .. } = value;
 
         ExecutionPayloadEnvelopeV3 {
-            execution_payload: block.into(),
+            execution_payload: try_convert_from_sealed_block_to_execution_payload_v3(block),
             block_value: fees,
             // From the engine API spec:
             //
@@ -138,7 +145,7 @@ impl PayloadBuilderAttributes {
     /// Derives the unique [PayloadId] for the given parent and attributes
     pub fn new(parent: H256, attributes: PayloadAttributes) -> Self {
         let id = payload_id(&parent, &attributes);
-        
+
         let withdraw = attributes.withdrawals.map(|withdrawals| {
             withdrawals
                 .into_iter()

@@ -15,7 +15,7 @@ use reth_rpc_types::engine::{
     ForkchoiceUpdated, PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration,
     CAPABILITIES,
 };
-use reth_rpc_types_compat::engine::payload::{convert_to_execution_payloadv1,convert_to_execution_payload};
+use reth_rpc_types_compat::engine::payload::convert_to_execution_payload_body_v1;
 use reth_tasks::TaskSpawner;
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -189,6 +189,18 @@ where
         &self,
         payload_id: PayloadId,
     ) -> EngineApiResult<ExecutionPayloadEnvelopeV2> {
+        // First we fetch the payload attributes to check the timestamp
+        let attributes = self
+            .inner
+            .payload_store
+            .payload_attributes(payload_id)
+            .await
+            .ok_or(EngineApiError::UnknownPayload)??;
+
+        // validate timestamp according to engine rules
+        self.validate_payload_timestamp(EngineApiMessageVersion::V2, attributes.timestamp)?;
+
+        // Now resolve the payload
         Ok(self
             .inner
             .payload_store
@@ -217,14 +229,8 @@ where
             .await
             .ok_or(EngineApiError::UnknownPayload)??;
 
-        // From the Engine API spec:
-        // <https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/cancun.md#specification-2>
-        //
-        // 1. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
-        //    the built payload does not fall within the time frame of the Cancun fork.
-        if !self.inner.chain_spec.is_cancun_activated_at_timestamp(attributes.timestamp) {
-            return Err(EngineApiError::UnsupportedFork)
-        }
+        // validate timestamp according to engine rules
+        self.validate_payload_timestamp(EngineApiMessageVersion::V3, attributes.timestamp)?;
 
         // Now resolve the payload
         Ok(self
@@ -282,7 +288,7 @@ where
                 let block_result = inner.provider.block(BlockHashOrNumber::Number(num));
                 match block_result {
                     Ok(block) => {
-                        result.push(block.map(convert_to_execution_payloadv1));
+                        result.push(block.map(convert_to_execution_payload_body_v1));
                     }
                     Err(err) => {
                         tx.send(Err(EngineApiError::Internal(Box::new(err)))).ok();
@@ -313,7 +319,7 @@ where
                 .provider
                 .block(BlockHashOrNumber::Hash(hash))
                 .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
-            result.push(block.map(convert_to_execution_payloadv1));
+            result.push(block.map(convert_to_execution_payload_body_v1));
         }
 
         Ok(result)
@@ -377,6 +383,52 @@ where
         }
     }
 
+    /// Validates the timestamp depending on the version called:
+    ///
+    /// * If V2, this ensure that the payload timestamp is pre-Cancun.
+    /// * If V3, this ensures that the payload timestamp is within the Cancun timestamp.
+    ///
+    /// Otherwise, this will return [EngineApiError::UnsupportedFork].
+    fn validate_payload_timestamp(
+        &self,
+        version: EngineApiMessageVersion,
+        timestamp: u64,
+    ) -> EngineApiResult<()> {
+        let is_cancun = self.inner.chain_spec.is_cancun_activated_at_timestamp(timestamp);
+        if version == EngineApiMessageVersion::V2 && is_cancun {
+            // From the Engine API spec:
+            //
+            // ### Update the methods of previous forks
+            //
+            // This document defines how Cancun payload should be handled by the [`Shanghai
+            // API`](https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/shanghai.md).
+            //
+            // For the following methods:
+            //
+            // - [`engine_forkchoiceUpdatedV2`](https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/shanghai.md#engine_forkchoiceupdatedv2)
+            // - [`engine_newPayloadV2`](https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/shanghai.md#engine_newpayloadV2)
+            // - [`engine_getPayloadV2`](https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/shanghai.md#engine_getpayloadv2)
+            //
+            // a validation **MUST** be added:
+            //
+            // 1. Client software **MUST** return `-38005: Unsupported fork` error if the
+            //    `timestamp` of payload or payloadAttributes greater or equal to the Cancun
+            //    activation timestamp.
+            return Err(EngineApiError::UnsupportedFork)
+        }
+
+        if version == EngineApiMessageVersion::V3 && !is_cancun {
+            // From the Engine API spec:
+            // <https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/cancun.md#specification-2>
+            //
+            // 1. Client software **MUST** return `-38005: Unsupported fork` error if the
+            //    `timestamp` of the built payload does not fall within the time frame of the Cancun
+            //    fork.
+            return Err(EngineApiError::UnsupportedFork)
+        }
+        Ok(())
+    }
+
     /// Validates the presence of the `withdrawals` field according to the payload timestamp.
     /// After Shanghai, withdrawals field must be [Some].
     /// Before Shanghai, withdrawals field must be [None];
@@ -418,13 +470,13 @@ where
     /// Before Cancun, `parentBeaconBlockRoot` field must be [None].
     ///
     /// If the engine API message version is V1 or V2, and the payload attribute's timestamp is
-    /// post-Cancun, then this will return [EngineApiError::NoParentBeaconBlockRootPostCancun].
-    ///
-    /// If the engine API message version is V3, but the `parentBeaconBlockRoot` is [None], then
-    /// this will return [EngineApiError::NoParentBeaconBlockRootPostCancun].
+    /// post-Cancun, then this will return [EngineApiError::UnsupportedFork].
     ///
     /// If the payload attribute's timestamp is before the Cancun fork and the engine API message
     /// version is V3, then this will return [EngineApiError::UnsupportedFork].
+    ///
+    /// If the engine API message version is V3, but the `parentBeaconBlockRoot` is [None], then
+    /// this will return [EngineApiError::NoParentBeaconBlockRootPostCancun].
     ///
     /// This implements the following Engine API spec rules:
     ///
@@ -441,25 +493,26 @@ where
         timestamp: u64,
         has_parent_beacon_block_root: bool,
     ) -> EngineApiResult<()> {
-        let is_cancun = self.inner.chain_spec.fork(Hardfork::Cancun).active_at_timestamp(timestamp);
-
+        // 1. Client software **MUST** check that provided set of parameters and their fields
+        //    strictly matches the expected one and return `-32602: Invalid params` error if this
+        //    check fails. Any field having `null` value **MUST** be considered as not provided.
         match version {
             EngineApiMessageVersion::V1 | EngineApiMessageVersion::V2 => {
                 if has_parent_beacon_block_root {
                     return Err(EngineApiError::ParentBeaconBlockRootNotSupportedBeforeV3)
                 }
-                if is_cancun {
-                    return Err(EngineApiError::NoParentBeaconBlockRootPostCancun)
-                }
             }
             EngineApiMessageVersion::V3 => {
                 if !has_parent_beacon_block_root {
                     return Err(EngineApiError::NoParentBeaconBlockRootPostCancun)
-                } else if !is_cancun {
-                    return Err(EngineApiError::UnsupportedFork)
                 }
             }
         };
+
+        // 2. Client software **MUST** return `-38005: Unsupported fork` error if the
+        //    `payloadAttributes` is set and the `payloadAttributes.timestamp` does not fall within
+        //    the time frame of the Cancun fork.
+        self.validate_payload_timestamp(version, timestamp)?;
 
         Ok(())
     }
@@ -695,7 +748,7 @@ mod tests {
         let (mut handle, api) = setup_engine_api();
 
         tokio::spawn(async move {
-            api.new_payload_v1(convert_to_execution_payload(SealedBlock::default())).await.unwrap();
+            api.new_payload_v1(SealedBlock::default().into()).await.unwrap();
         });
         assert_matches!(handle.from_api.recv().await, Some(BeaconEngineMessage::NewPayload { .. }));
     }
@@ -742,8 +795,11 @@ mod tests {
                 random_block_range(&mut rng, start..=start + count - 1, H256::default(), 0..2);
             handle.provider.extend_blocks(blocks.iter().cloned().map(|b| (b.hash(), b.unseal())));
 
-            let expected =
-                blocks.iter().cloned().map(|b| Some(convert_to_execution_payloadv1(b.unseal()))).collect::<Vec<_>>();
+            let expected = blocks
+                .iter()
+                .cloned()
+                .map(|b| Some(convert_to_execution_payload_body_v1(b.unseal())))
+                .collect::<Vec<_>>();
 
             let res = api.get_payload_bodies_by_range(start, count).await.unwrap();
             assert_eq!(res, expected);
@@ -773,15 +829,15 @@ mod tests {
 
             let expected = blocks
                 .iter()
-                .cloned()
                 // filter anything after the second missing range to ensure we don't expect trailing
                 // `None`s
                 .filter(|b| !second_missing_range.contains(&b.number))
+                .cloned()
                 .map(|b| {
                     if first_missing_range.contains(&b.number) {
                         None
                     } else {
-                        Some(b.unseal().into())
+                        Some(convert_to_execution_payload_body_v1(b.unseal()))
                     }
                 })
                 .collect::<Vec<_>>();
@@ -800,7 +856,7 @@ mod tests {
                     {
                         None
                     } else {
-                        Some(convert_to_execution_payloadv1(b.unseal()))
+                        Some(convert_to_execution_payload_body_v1(b.unseal()))
                     }
                 })
                 .collect::<Vec<_>>();

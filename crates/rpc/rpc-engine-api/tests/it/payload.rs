@@ -7,14 +7,18 @@ use reth_interfaces::test_utils::generators::{
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
     proofs::{self},
-    Block, SealedBlock, TransactionSigned, Withdrawal, H256, U256,
+    Block, SealedBlock, TransactionSigned, H256, U256,
 };
-use reth_rpc_types_compat::engine::payload::{convert_to_execution_payload,convert_to_execution_payloadv1,try_convert_from_execution_payload_to_sealed_block};
 use reth_rlp::{Decodable, DecodeError};
 use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadBodyV1, PayloadError, StandaloneWithdraw,
+    ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadV1, PayloadError,
 };
-use reth_rpc_types_compat::engine::payload::convert_standalonewithdraw_to_withdrawal;
+use reth_rpc_types_compat::engine::payload::{
+    convert_standalonewithdraw_to_withdrawal, convert_to_execution_payload_body_v1,
+    try_convert_from_execution_payload_v1_to_block,
+    try_convert_from_sealed_block_to_execution_payload,
+    try_convert_from_sealed_block_to_execution_payload_v1, try_into_sealed_block,
+};
 
 fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> ExecutionPayload {
     let unsealed = src.unseal();
@@ -22,13 +26,12 @@ fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> Executi
     // Recalculate roots
     transformed.header.transactions_root = proofs::calculate_transaction_root(&transformed.body);
     transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.ommers);
-    convert_to_execution_payload(SealedBlock {
+    try_convert_from_sealed_block_to_execution_payload(SealedBlock {
         header: transformed.header.seal_slow(),
         body: transformed.body,
         ommers: transformed.ommers,
         withdrawals: transformed.withdrawals,
     })
-    
 }
 
 #[test]
@@ -36,7 +39,7 @@ fn payload_body_roundtrip() {
     let mut rng = generators::rng();
     for block in random_block_range(&mut rng, 0..=99, H256::default(), 0..2) {
         let unsealed = block.clone().unseal();
-        let payload_body: ExecutionPayloadBodyV1 = convert_to_execution_payloadv1(unsealed);
+        let payload_body: ExecutionPayloadBodyV1 = convert_to_execution_payload_body_v1(unsealed);
 
         assert_eq!(
             Ok(block.body),
@@ -67,7 +70,7 @@ fn payload_validation() {
         b
     });
 
-    assert_matches!(block_with_valid_extra_data.try_into_sealed_block(None), Ok(_));
+    assert_matches!(try_into_sealed_block(block_with_valid_extra_data, None), Ok(_));
 
     // Invalid extra data
     let block_with_invalid_extra_data: Bytes = BytesMut::zeroed(33).freeze();
@@ -77,7 +80,7 @@ fn payload_validation() {
     });
     assert_matches!(
 
-        invalid_extra_data_block.try_into_sealed_block(None),
+        try_into_sealed_block(invalid_extra_data_block,None),
         Err(PayloadError::ExtraData(data)) if data == block_with_invalid_extra_data
     );
 
@@ -88,19 +91,21 @@ fn payload_validation() {
     });
     assert_matches!(
 
-        block_with_zero_base_fee.try_into_sealed_block(None),
+        try_into_sealed_block(block_with_zero_base_fee,None),
         Err(PayloadError::BaseFee(val)) if val == U256::ZERO
     );
 
     // Invalid encoded transactions
-    let mut payload_with_invalid_txs: ExecutionPayload = convert_to_execution_payload(block.clone());
+    let mut payload_with_invalid_txs: ExecutionPayloadV1 =
+        try_convert_from_sealed_block_to_execution_payload_v1(block.clone());
 
     payload_with_invalid_txs.transactions.iter_mut().for_each(|tx| {
         *tx = Bytes::new().into();
     });
-    let payload_with_invalid_txs = Block::try_from(payload_with_invalid_txs);
+    let payload_with_invalid_txs =
+        try_convert_from_execution_payload_v1_to_block(payload_with_invalid_txs);
     assert_matches!(
-       try_convert_from_execution_payload_to_sealed_block(payload_with_invalid_txs),
+        payload_with_invalid_txs,
         Err(PayloadError::Decode(DecodeError::InputTooShort))
     );
 
@@ -110,7 +115,7 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-       try_convert_from_execution_payload_to_sealed_block(block_with_ommers.clone()),
+        try_into_sealed_block(block_with_ommers.clone(),None),
 
         Err(PayloadError::BlockHash { consensus, .. })
             if consensus == block_with_ommers.block_hash()
@@ -122,8 +127,8 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-       try_convert_from_execution_payload_to_sealed_block(block_with_difficulty.clone()),
-        Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_difficulty.block_hash
+        try_into_sealed_block(block_with_difficulty.clone(),None),
+        Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_difficulty.block_hash()
 
     );
 
@@ -133,8 +138,8 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-       try_convert_from_execution_payload_to_sealed_block(block_with_nonce.clone()),
-        Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_nonce.block_hash
+        try_into_sealed_block(block_with_nonce.clone(),None),
+        Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_nonce.block_hash()
 
     );
 
