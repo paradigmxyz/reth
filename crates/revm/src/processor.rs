@@ -16,7 +16,7 @@ use reth_primitives::{
     U256,
 };
 use reth_provider::{
-    change::BundleStateWithReceipts, BlockExecutor, BlockExecutorStats, PrunableBlockExecutor,
+    BlockExecutor, BlockExecutorStats, BundleStateWithReceipts, PrunableBlockExecutor,
     StateProvider,
 };
 use revm::{

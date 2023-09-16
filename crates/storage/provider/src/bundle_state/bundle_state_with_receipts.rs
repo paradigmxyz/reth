@@ -1,8 +1,5 @@
-//! Wrapper around revms state.
-use rayon::slice::ParallelSliceMut;
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    models::{AccountBeforeTx, BlockNumberAddress},
+    cursor::{DbCursorRO, DbCursorRW},
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -12,20 +9,17 @@ use reth_primitives::{
     BlockNumber, Bloom, Bytecode, Log, Receipt, StorageEntry, H256, U256,
 };
 use reth_revm_primitives::{
-    db::states::{
-        BundleState, PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, RevertToSlot,
-        StateChangeset,
-    },
-    into_reth_acc, into_revm_acc,
-    primitives::AccountInfo,
+    db::states::BundleState, into_reth_acc, into_revm_acc, primitives::AccountInfo,
 };
 use reth_trie::{
     hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
     StateRoot, StateRootError,
 };
-use std::{collections::HashMap, iter::Peekable};
+use std::collections::HashMap;
 
 pub use reth_revm_primitives::db::states::OriginalValuesKnown;
+
+use crate::{StateChanges, StateReverts};
 
 /// Bundle state of post execution changes and reverts
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -383,235 +377,6 @@ impl BundleStateWithReceipts {
 
         StateChanges(plain_state).write_to_db(tx)?;
 
-        Ok(())
-    }
-}
-
-/// Revert of the state.
-#[derive(Default)]
-pub struct StateReverts(pub PlainStateReverts);
-
-impl From<PlainStateReverts> for StateReverts {
-    fn from(revm: PlainStateReverts) -> Self {
-        Self(revm)
-    }
-}
-
-impl StateReverts {
-    /// Write reverts to database.
-    ///
-    /// Note:: Reverts will delete all wiped storage from plain state.
-    pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
-        self,
-        tx: &TX,
-        first_block: BlockNumber,
-    ) -> Result<(), DatabaseError> {
-        // Write storage changes
-        tracing::trace!(target: "provider::reverts", "Writing storage changes");
-        let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
-        let mut storage_changeset_cursor = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
-        for (block_index, mut storage_changes) in self.0.storage.into_iter().enumerate() {
-            let block_number = first_block + block_index as BlockNumber;
-
-            tracing::trace!(target: "provider::reverts", block_number, "Writing block change");
-            // sort changes by address.
-            storage_changes.par_sort_unstable_by_key(|a| a.address);
-            for PlainStorageRevert { address, wiped, storage_revert } in storage_changes.into_iter()
-            {
-                let storage_id = BlockNumberAddress((block_number, address));
-
-                let mut storage = storage_revert
-                    .into_iter()
-                    .map(|(k, v)| (H256(k.to_be_bytes()), v))
-                    .collect::<Vec<_>>();
-                // sort storage slots by key.
-                storage.par_sort_unstable_by_key(|a| a.0);
-
-                // If we are writing the primary storage wipe transition, the pre-existing plain
-                // storage state has to be taken from the database and written to storage history.
-                // See [StorageWipe::Primary] for more details.
-                let mut wiped_storage = Vec::new();
-                if wiped {
-                    tracing::trace!(target: "provider::reverts", ?address, "Wiping storage");
-                    if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
-                        wiped_storage.push((entry.key, entry.value));
-                        while let Some(entry) = storages_cursor.next_dup_val()? {
-                            wiped_storage.push((entry.key, entry.value))
-                        }
-                    }
-                }
-
-                tracing::trace!(target: "provider::reverts", ?address, ?storage, "Writing storage reverts");
-                for (key, value) in StorageRevertsIter::new(storage, wiped_storage) {
-                    storage_changeset_cursor.append_dup(storage_id, StorageEntry { key, value })?;
-                }
-            }
-        }
-
-        // Write account changes
-        tracing::trace!(target: "provider::reverts", "Writing account changes");
-        let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
-        for (block_index, mut account_block_reverts) in self.0.accounts.into_iter().enumerate() {
-            let block_number = first_block + block_index as BlockNumber;
-            // Sort accounts by address.
-            account_block_reverts.par_sort_by_key(|a| a.0);
-            for (address, info) in account_block_reverts {
-                account_changeset_cursor.append_dup(
-                    block_number,
-                    AccountBeforeTx { address, info: info.map(into_reth_acc) },
-                )?;
-            }
-        }
-
-        Ok(())
-    }
-}
-
-/// Iterator over storage reverts.
-/// See [StorageRevertsIter::next] for more details.
-struct StorageRevertsIter<R: Iterator, W: Iterator> {
-    reverts: Peekable<R>,
-    wiped: Peekable<W>,
-}
-
-impl<R: Iterator, W: Iterator> StorageRevertsIter<R, W>
-where
-    R: Iterator<Item = (H256, RevertToSlot)>,
-    W: Iterator<Item = (H256, U256)>,
-{
-    fn new(
-        reverts: impl IntoIterator<IntoIter = R>,
-        wiped: impl IntoIterator<IntoIter = W>,
-    ) -> Self {
-        Self { reverts: reverts.into_iter().peekable(), wiped: wiped.into_iter().peekable() }
-    }
-
-    /// Consume next revert and return it.
-    fn next_revert(&mut self) -> Option<(H256, U256)> {
-        self.reverts.next().map(|(key, revert)| (key, revert.to_previous_value()))
-    }
-
-    /// Consume next wiped storage and return it.
-    fn next_wiped(&mut self) -> Option<(H256, U256)> {
-        self.wiped.next()
-    }
-}
-
-impl<R, W> Iterator for StorageRevertsIter<R, W>
-where
-    R: Iterator<Item = (H256, RevertToSlot)>,
-    W: Iterator<Item = (H256, U256)>,
-{
-    type Item = (H256, U256);
-
-    /// Iterate over storage reverts and wiped entries and return items in the sorted order.
-    /// NOTE: The implementation assumes that inner iterators are already sorted.
-    fn next(&mut self) -> Option<Self::Item> {
-        match (self.reverts.peek(), self.wiped.peek()) {
-            (Some(revert), Some(wiped)) => {
-                // Compare the keys and return the lesser.
-                use std::cmp::Ordering;
-                match revert.0.cmp(&wiped.0) {
-                    Ordering::Less => self.next_revert(),
-                    Ordering::Greater => self.next_wiped(),
-                    Ordering::Equal => {
-                        // Keys are the same, decide which one to return.
-                        let (key, revert_to) = *revert;
-
-                        let value = match revert_to {
-                            // If the slot is some, prefer the revert value.
-                            RevertToSlot::Some(value) => value,
-                            // If the slot was destroyed, prefer the database value.
-                            RevertToSlot::Destroyed => wiped.1,
-                        };
-
-                        // Consume both values from inner iterators.
-                        self.next_revert();
-                        self.next_wiped();
-
-                        Some((key, value))
-                    }
-                }
-            }
-            (Some(_revert), None) => self.next_revert(),
-            (None, Some(_wiped)) => self.next_wiped(),
-            (None, None) => None,
-        }
-    }
-}
-
-/// A change to the state of the world.
-#[derive(Default)]
-pub struct StateChanges(pub StateChangeset);
-
-impl From<StateChangeset> for StateChanges {
-    fn from(revm: StateChangeset) -> Self {
-        Self(revm)
-    }
-}
-
-impl StateChanges {
-    /// Write the post state to the database.
-    pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
-        mut self,
-        tx: &TX,
-    ) -> Result<(), DatabaseError> {
-        // sort all entries so they can be written to database in more performant way.
-        // and take smaller memory footprint.
-        self.0.accounts.par_sort_by_key(|a| a.0);
-        self.0.storage.par_sort_by_key(|a| a.address);
-        self.0.contracts.par_sort_by_key(|a| a.0);
-
-        // Write new account state
-        tracing::trace!(target: "provider::post_state", len = self.0.accounts.len(), "Writing new account state");
-        let mut accounts_cursor = tx.cursor_write::<tables::PlainAccountState>()?;
-        // write account to database.
-        for (address, account) in self.0.accounts.into_iter() {
-            if let Some(account) = account {
-                tracing::trace!(target: "provider::post_state", ?address, "Updating plain state account");
-                accounts_cursor.upsert(address, into_reth_acc(account))?;
-            } else if accounts_cursor.seek_exact(address)?.is_some() {
-                tracing::trace!(target: "provider::post_state", ?address, "Deleting plain state account");
-                accounts_cursor.delete_current()?;
-            }
-        }
-
-        // Write bytecode
-        tracing::trace!(target: "provider::post_state", len = self.0.contracts.len(), "Writing bytecodes");
-        let mut bytecodes_cursor = tx.cursor_write::<tables::Bytecodes>()?;
-        for (hash, bytecode) in self.0.contracts.into_iter() {
-            bytecodes_cursor.upsert(hash, Bytecode(bytecode))?;
-        }
-
-        // Write new storage state and wipe storage if needed.
-        tracing::trace!(target: "provider::post_state", len = self.0.storage.len(), "Writing new storage state");
-        let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
-        for PlainStorageChangeset { address, wipe_storage, storage } in self.0.storage.into_iter() {
-            // Wiping of storage.
-            if wipe_storage && storages_cursor.seek_exact(address)?.is_some() {
-                storages_cursor.delete_current_duplicates()?;
-            }
-            // cast storages to H256.
-            let mut storage = storage
-                .into_iter()
-                .map(|(k, value)| StorageEntry { key: k.into(), value })
-                .collect::<Vec<_>>();
-            // sort storage slots by key.
-            storage.par_sort_unstable_by_key(|a| a.key);
-
-            for entry in storage.into_iter() {
-                tracing::trace!(target: "provider::post_state", ?address, ?entry.key, "Updating plain state storage");
-                if let Some(db_entry) = storages_cursor.seek_by_key_subkey(address, entry.key)? {
-                    if db_entry.key == entry.key {
-                        storages_cursor.delete_current()?;
-                    }
-                }
-
-                if entry.value != U256::ZERO {
-                    storages_cursor.upsert(address, entry)?;
-                }
-            }
-        }
         Ok(())
     }
 }

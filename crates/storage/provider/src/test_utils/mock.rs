@@ -1,5 +1,5 @@
 use crate::{
-    change::BundleStateWithReceipts,
+    bundle_state::BundleStateWithReceipts,
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BundleStateDataProvider, ChainSpecProvider, EvmEnvProvider, HeaderProvider,

@@ -7,7 +7,7 @@ use reth_db::{
 };
 use reth_primitives::{stage::StageId, Account, Bytecode, ChainSpec, StorageEntry, H256, U256};
 use reth_provider::{
-    change::{BundleStateInit, RevertsInit},
+    bundle_state::{BundleStateInit, RevertsInit},
     BundleStateWithReceipts, DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown,
     ProviderFactory,
 };

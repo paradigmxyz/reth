@@ -1,5 +1,5 @@
 use crate::{
-    change::BundleStateWithReceipts, AccountReader, BlockHashReader, BundleStateDataProvider,
+    bundle_state::BundleStateWithReceipts, AccountReader, BlockHashReader, BundleStateDataProvider,
     StateProvider, StateRootProvider,
 };
 use reth_interfaces::{provider::ProviderError, Result};

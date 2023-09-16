@@ -1,5 +1,5 @@
 use crate::{
-    change::{BundleStateInit, BundleStateWithReceipts, RevertsInit},
+    bundle_state::{BundleStateInit, BundleStateWithReceipts, RevertsInit},
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },

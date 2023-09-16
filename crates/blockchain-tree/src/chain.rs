@@ -14,8 +14,8 @@ use reth_primitives::{
     BlockHash, BlockNumber, ForkBlock, SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
-    change::BundleStateWithReceipts, providers::BundleStateProvider, BundleStateDataProvider,
-    Chain, ExecutorFactory, StateRootProvider,
+    providers::BundleStateProvider, BundleStateDataProvider, BundleStateWithReceipts, Chain,
+    ExecutorFactory, StateRootProvider,
 };
 use std::{
     collections::BTreeMap,

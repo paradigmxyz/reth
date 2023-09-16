@@ -49,5 +49,5 @@ pub use reth_interfaces::provider::ProviderError;
 pub mod chain;
 pub use chain::{Chain, DisplayBlocksChain};
 
-pub mod change;
-pub use change::{BundleStateWithReceipts, OriginalValuesKnown, StateChanges, StateReverts};
+pub mod bundle_state;
+pub use bundle_state::{BundleStateWithReceipts, OriginalValuesKnown, StateChanges, StateReverts};
