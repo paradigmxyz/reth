@@ -16,6 +16,7 @@
 use crate::metrics::PayloadBuilderMetrics;
 use futures_core::ready;
 use futures_util::FutureExt;
+use reth_interfaces::Error;
 use reth_payload_builder::{
     database::CachedReads, error::PayloadBuilderError, BuiltPayload, KeepPayloadJobAlive,
     PayloadBuilderAttributes, PayloadJob, PayloadJobGenerator,
@@ -30,21 +31,18 @@ use reth_primitives::{
     proofs, Block, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
     SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
 };
-use reth_provider::{BlockReaderIdExt, BlockSource, PostState, StateProviderFactory};
+use reth_provider::{BlockReaderIdExt, BlockSource, BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::{
-    database::{State, SubState},
-    env::tx_env_with_recovered,
-    executor::{
-        commit_state_changes, increment_account_balance, post_block_withdrawals_balance_increments,
-    },
-    into_reth_log,
+    database::StateProviderDatabase, env::tx_env_with_recovered, into_reth_log,
+    state_change::post_block_withdrawals_balance_increments,
 };
 use reth_rlp::Encodable;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::{
-    db::{CacheDB, DatabaseRef},
+    db::states::bundle_state::BundleRetention,
     primitives::{BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState},
+    Database, DatabaseCommit, State,
 };
 use std::{
     future::Future,
@@ -640,6 +638,10 @@ where
 {
     let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
 
+    let state_provider = client.state_by_block_hash(config.parent_block.hash)?;
+    let state = StateProviderDatabase::new(&state_provider);
+    let mut db =
+        State::builder().with_database_ref(cached_reads.as_db(&state)).with_bundle_update().build();
     let PayloadConfig {
         initialized_block_env,
         initialized_cfg,
@@ -650,11 +652,6 @@ where
     } = config;
 
     debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number, "building new payload");
-
-    let state = State::new(client.state_by_block_hash(parent_block.hash)?);
-    let mut db = CacheDB::new(cached_reads.as_db(&state));
-    let mut post_state = PostState::default();
-
     let mut cumulative_gas_used = 0;
     let mut sum_blob_gas_used = 0;
     let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
@@ -667,6 +664,7 @@ where
 
     let block_number = initialized_block_env.number.to::<u64>();
 
+    let mut receipts = Vec::new();
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
         if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
@@ -741,23 +739,19 @@ where
         };
 
         let gas_used = result.gas_used();
-
         // commit changes
-        commit_state_changes(&mut db, &mut post_state, block_number, state, true);
+        db.commit(state);
 
         // add gas used by the transaction to cumulative gas used, before creating the receipt
         cumulative_gas_used += gas_used;
 
         // Push transaction changeset and calculate header bloom filter for receipt.
-        post_state.add_receipt(
-            block_number,
-            Receipt {
-                tx_type: tx.tx_type(),
-                success: result.is_success(),
-                cumulative_gas_used,
-                logs: result.logs().into_iter().map(into_reth_log).collect(),
-            },
-        );
+        receipts.push(Some(Receipt {
+            tx_type: tx.tx_type(),
+            success: result.is_success(),
+            cumulative_gas_used,
+            logs: result.logs().into_iter().map(into_reth_log).collect(),
+        }));
 
         // update add to total fees
         let miner_fee =
@@ -774,20 +768,18 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
-        &mut db,
-        &mut post_state,
-        &chain_spec,
-        block_number,
-        attributes.timestamp,
-        attributes.withdrawals,
-    )?;
+    let WithdrawalsOutcome { withdrawals_root, withdrawals } =
+        commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
 
-    let receipts_root = post_state.receipts_root(block_number);
-    let logs_bloom = post_state.logs_bloom(block_number);
+    // merge all transitions into bundle state.
+    db.merge_transitions(BundleRetention::PlainState);
+
+    let bundle = BundleStateWithReceipts::new(db.take_bundle(), vec![receipts], block_number);
+    let receipts_root = bundle.receipts_root_slow(block_number).expect("Number is in range");
+    let logs_bloom = bundle.block_logs_bloom(block_number).expect("Number is in range");
 
     // calculate the state root
-    let state_root = state.state().state_root(post_state)?;
+    let state_root = state_provider.state_root(bundle)?;
 
     // create the block header
     let transactions_root = proofs::calculate_transaction_root(&executed_txs);
@@ -844,6 +836,7 @@ where
     let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
 
     let sealed_block = block.seal_slow();
+
     let mut payload = BuiltPayload::new(attributes.id, sealed_block, total_fees);
 
     if !blob_sidecars.is_empty() {
@@ -874,24 +867,24 @@ where
     debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number,  "building empty payload");
 
     let state = client.state_by_block_hash(parent_block.hash)?;
-    let mut db = SubState::new(State::new(state));
-    let mut post_state = PostState::default();
+    let mut db = State::builder()
+        .with_database_boxed(Box::new(StateProviderDatabase::new(&state)))
+        .with_bundle_update()
+        .build();
 
     let base_fee = initialized_block_env.basefee.to::<u64>();
     let block_number = initialized_block_env.number.to::<u64>();
     let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
 
-    let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
-        &mut db,
-        &mut post_state,
-        &chain_spec,
-        block_number,
-        attributes.timestamp,
-        attributes.withdrawals,
-    )?;
+    let WithdrawalsOutcome { withdrawals_root, withdrawals } =
+        commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
+
+    // merge transition, this will apply the withdrawal balance changes.
+    db.merge_transitions(BundleRetention::PlainState);
 
     // calculate the state root
-    let state_root = db.db.0.state_root(post_state)?;
+    let bundle_state = BundleStateWithReceipts::new(db.take_bundle(), vec![], block_number);
+    let state_root = state.state_root(bundle_state)?;
 
     let header = Header {
         parent_hash: parent_block.hash,
@@ -924,6 +917,7 @@ where
 
 /// Represents the outcome of committing withdrawals to the runtime database and post state.
 /// Pre-shanghai these are `None` values.
+#[derive(Default)]
 struct WithdrawalsOutcome {
     withdrawals: Option<Vec<Withdrawal>>,
     withdrawals_root: Option<H256>,
@@ -940,23 +934,17 @@ impl WithdrawalsOutcome {
     }
 }
 
-/// Executes the withdrawals and commits them to the _runtime_ Database and PostState.
+/// Executes the withdrawals and commits them to the _runtime_ Database and BundleState.
 ///
 /// Returns the withdrawals root.
 ///
 /// Returns `None` values pre shanghai
-#[allow(clippy::too_many_arguments)]
-fn commit_withdrawals<DB>(
-    db: &mut CacheDB<DB>,
-    post_state: &mut PostState,
+fn commit_withdrawals<DB: Database<Error = Error>>(
+    db: &mut State<DB>,
     chain_spec: &ChainSpec,
-    block_number: u64,
     timestamp: u64,
     withdrawals: Vec<Withdrawal>,
-) -> Result<WithdrawalsOutcome, <DB as DatabaseRef>::Error>
-where
-    DB: DatabaseRef,
-{
+) -> Result<WithdrawalsOutcome, Error> {
     if !chain_spec.is_shanghai_activated_at_timestamp(timestamp) {
         return Ok(WithdrawalsOutcome::pre_shanghai())
     }
@@ -968,9 +956,7 @@ where
     let balance_increments =
         post_block_withdrawals_balance_increments(chain_spec, timestamp, &withdrawals);
 
-    for (address, increment) in balance_increments {
-        increment_account_balance(db, post_state, block_number, address, increment)?;
-    }
+    db.increment_balances(balance_increments)?;
 
     let withdrawals_root = proofs::calculate_withdrawals_root(&withdrawals);
 

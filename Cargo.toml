@@ -97,10 +97,9 @@ reth-network = { path = "./crates/net/network" }
 reth-network-api = { path = "./crates/net/network-api" }
 reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat" }
 
-revm = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
-revm-precompile = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
+# revm
+revm = { git = "https://github.com/bluealloy/revm" }
+revm-primitives = { git = "https://github.com/bluealloy/revm" }
 
 ## eth
 ethers-core = { version = "2.0", default-features = false }
@@ -117,7 +116,7 @@ boa_gc = "0.17"
 
 ## misc
 aquamarine = "0.3"
-bytes = "1.4"
+bytes = "1.5"
 bitflags = "2.3"
 tracing = "0.1.0"
 tracing-appender = "0.2"
@@ -129,7 +128,7 @@ strum = "0.25"
 rayon = "1.7"
 itertools = "0.11"
 parking_lot = "0.12"
-metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
+metrics = "0.21.1"                                    # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
 hex-literal = "0.4"
 
 ### proc-macros
@@ -173,9 +172,3 @@ assert_matches = "1.5.0"
 proptest = "1.0"
 proptest-derive = "0.4"
 serial_test = "2"
-
-[patch.crates-io]
-revm = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
-revm-precompile = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "release/v25" }

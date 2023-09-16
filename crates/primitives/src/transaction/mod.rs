@@ -1083,7 +1083,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
 }
 
 /// Signed transaction with recovered signer.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq, AsRef, Deref, Default)]
 pub struct TransactionSignedEcRecovered {
     /// Signer of the transaction
     signer: Address,

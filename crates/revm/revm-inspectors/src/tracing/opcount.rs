@@ -29,7 +29,6 @@ where
         &mut self,
         _interp: &mut Interpreter,
         _data: &mut EVMData<'_, DB>,
-        _is_static: bool,
     ) -> InstructionResult {
         self.count += 1;
         InstructionResult::Continue
