@@ -3,7 +3,7 @@
 use crate::{BundleStateWithReceipts, DatabaseProviderRW};
 use reth_db::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_primitives::{
-    hex_literal::hex, Account, BlockNumber, Bytes, Header, Log, Receipt, SealedBlock,
+    hex_literal::hex, Account, BlockNumber, Bytes, Header, Log, Receipt, Receipts, SealedBlock,
     SealedBlockWithSenders, StorageEntry, TxType, Withdrawal, H160, H256, U256,
 };
 use reth_rlp::Decodable;
@@ -128,16 +128,18 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
             ]),
         )]),
         vec![],
-        vec![vec![Some(Receipt {
-            tx_type: TxType::EIP2930,
-            success: true,
-            cumulative_gas_used: 300,
-            logs: vec![Log {
-                address: H160([0x60; 20]),
-                topics: vec![H256::from_low_u64_be(1), H256::from_low_u64_be(2)],
-                data: Bytes::default(),
-            }],
-        })]],
+        Receipts {
+            receipt_vec: vec![vec![Some(Receipt {
+                tx_type: TxType::EIP2930,
+                success: true,
+                cumulative_gas_used: 300,
+                logs: vec![Log {
+                    address: H160([0x60; 20]),
+                    topics: vec![H256::from_low_u64_be(1), H256::from_low_u64_be(2)],
+                    data: Bytes::default(),
+                }],
+            })]],
+        },
         number,
     );
 
@@ -184,16 +186,18 @@ fn block2(
             )]),
         )]),
         vec![],
-        vec![vec![Some(Receipt {
-            tx_type: TxType::EIP1559,
-            success: false,
-            cumulative_gas_used: 400,
-            logs: vec![Log {
-                address: H160([0x61; 20]),
-                topics: vec![H256::from_low_u64_be(3), H256::from_low_u64_be(4)],
-                data: Bytes::default(),
-            }],
-        })]],
+        Receipts {
+            receipt_vec: vec![vec![Some(Receipt {
+                tx_type: TxType::EIP1559,
+                success: false,
+                cumulative_gas_used: 400,
+                logs: vec![Log {
+                    address: H160([0x61; 20]),
+                    topics: vec![H256::from_low_u64_be(3), H256::from_low_u64_be(4)],
+                    data: Bytes::default(),
+                }],
+            })]],
+        },
         number,
     );
     (SealedBlockWithSenders { block, senders: vec![H160([0x31; 20])] }, bundle)

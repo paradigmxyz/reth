@@ -29,7 +29,7 @@ use reth_primitives::{
         EMPTY_WITHDRAWALS, ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
     },
     proofs, Block, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
-    SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
+    Receipts, SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
 };
 use reth_provider::{BlockReaderIdExt, BlockSource, BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::{
@@ -774,7 +774,11 @@ where
     // merge all transitions into bundle state.
     db.merge_transitions(BundleRetention::PlainState);
 
-    let bundle = BundleStateWithReceipts::new(db.take_bundle(), vec![receipts], block_number);
+    let bundle = BundleStateWithReceipts::new(
+        db.take_bundle(),
+        Receipts::from_vec(vec![receipts]),
+        block_number,
+    );
     let receipts_root = bundle.receipts_root_slow(block_number).expect("Number is in range");
     let logs_bloom = bundle.block_logs_bloom(block_number).expect("Number is in range");
 
@@ -883,7 +887,8 @@ where
     db.merge_transitions(BundleRetention::PlainState);
 
     // calculate the state root
-    let bundle_state = BundleStateWithReceipts::new(db.take_bundle(), vec![], block_number);
+    let bundle_state =
+        BundleStateWithReceipts::new(db.take_bundle(), Receipts::new(), block_number);
     let state_root = state.state_root(bundle_state)?;
 
     let header = Header {

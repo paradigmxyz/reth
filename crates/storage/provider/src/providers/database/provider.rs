@@ -368,7 +368,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             state,
             reverts,
             Vec::new(),
-            receipts,
+            reth_primitives::Receipts::from_vec(receipts),
             start_block_number,
         ))
     }

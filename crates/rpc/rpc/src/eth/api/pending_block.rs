@@ -3,7 +3,7 @@
 use crate::eth::error::EthResult;
 use reth_primitives::{
     constants::{BEACON_NONCE, EMPTY_WITHDRAWALS},
-    proofs, Block, Header, IntoRecoveredTransaction, Receipt, SealedBlock, SealedHeader,
+    proofs, Block, Header, IntoRecoveredTransaction, Receipt, Receipts, SealedBlock, SealedHeader,
     EMPTY_OMMER_ROOT, H256, U256,
 };
 use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
@@ -115,7 +115,11 @@ impl PendingBlockEnv {
         // merge all transitions into bundle state.
         db.merge_transitions(BundleRetention::PlainState);
 
-        let bundle = BundleStateWithReceipts::new(db.take_bundle(), vec![receipts], block_number);
+        let bundle = BundleStateWithReceipts::new(
+            db.take_bundle(),
+            Receipts::from_vec(vec![receipts]),
+            block_number,
+        );
 
         let receipts_root = bundle.receipts_root_slow(block_number).expect("Block is present");
         let logs_bloom = bundle.block_logs_bloom(block_number).expect("Block is present");

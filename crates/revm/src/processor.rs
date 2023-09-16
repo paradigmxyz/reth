@@ -12,8 +12,8 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     Address, Block, BlockNumber, Bloom, ChainSpec, Hardfork, Header, PruneMode, PruneModes,
-    PrunePartError, Receipt, ReceiptWithBloom, TransactionSigned, H256, MINIMUM_PRUNING_DISTANCE,
-    U256,
+    PrunePartError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, H256,
+    MINIMUM_PRUNING_DISTANCE, U256,
 };
 use reth_provider::{
     BlockExecutor, BlockExecutorStats, BundleStateWithReceipts, PrunableBlockExecutor,
@@ -53,8 +53,8 @@ pub struct EVMProcessor<'a> {
     /// Outer vector stores receipts for each block sequentially.
     /// The inner vector stores receipts ordered by transaction number.
     ///
-    /// If receipt is None it means it is pruned.   
-    receipts: Vec<Vec<Option<Receipt>>>,
+    /// If receipt is None it means it is pruned.
+    receipts: Receipts,
     /// First block will be initialized to `None`
     /// and be set to the block number of first block executed.
     first_block: Option<BlockNumber>,
@@ -83,7 +83,7 @@ impl<'a> EVMProcessor<'a> {
             chain_spec,
             evm,
             stack: InspectorStack::new(InspectorStackConfig::default()),
-            receipts: Vec::new(),
+            receipts: Receipts::new(),
             first_block: None,
             tip: None,
             prune_modes: PruneModes::none(),
@@ -113,7 +113,7 @@ impl<'a> EVMProcessor<'a> {
             chain_spec,
             evm,
             stack: InspectorStack::new(InspectorStackConfig::default()),
-            receipts: Vec::new(),
+            receipts: Receipts::new(),
             first_block: None,
             tip: None,
             prune_modes: PruneModes::none(),
@@ -328,6 +328,7 @@ impl<'a> EVMProcessor<'a> {
                 expected: block.gas_used,
                 gas_spent_by_tx: self
                     .receipts
+                    .receipt_vec
                     .last()
                     .map(|block_r| {
                         block_r
@@ -376,7 +377,7 @@ impl<'a> EVMProcessor<'a> {
         // Prune receipts if necessary.
         self.prune_receipts(&mut receipts)?;
         // Save receipts.
-        self.receipts.push(receipts);
+        self.receipts.receipt_vec.push(receipts);
         Ok(())
     }
 

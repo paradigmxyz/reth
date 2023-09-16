@@ -44,6 +44,30 @@ impl Receipt {
     }
 }
 
+/// A collection of receipts organized as a two-dimensional vector.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct Receipts {
+    /// A two-dimensional vector of optional `Receipt` instances.
+    pub receipt_vec: Vec<Vec<Option<Receipt>>>,
+}
+
+impl Receipts {
+    /// Create a new `Receipts` instance with an empty vector.
+    pub fn new() -> Self {
+        Self { receipt_vec: vec![] }
+    }
+
+    /// Create a new `Receipts` instance from an existing vector.
+    pub fn from_vec(vec: Vec<Vec<Option<Receipt>>>) -> Self {
+        Self { receipt_vec: vec }
+    }
+
+    /// Returns the length of the `Receipts` vector.
+    pub fn len(&self) -> usize {
+        self.receipt_vec.len()
+    }
+}
+
 impl From<Receipt> for ReceiptWithBloom {
     fn from(receipt: Receipt) -> Self {
         let bloom = receipt.bloom_slow();
