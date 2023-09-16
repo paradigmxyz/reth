@@ -9,6 +9,7 @@ use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PayloadError,
 };
 
+/// Converts [ExecutionPayloadV1] to [Block]
 pub fn try_convert_from_execution_payload_v1_to_block(
     payload: ExecutionPayloadV1,
 ) -> Result<Block, PayloadError> {
@@ -59,6 +60,7 @@ pub fn try_convert_from_execution_payload_v1_to_block(
     Ok(Block { header, body: transactions, withdrawals: None, ommers: Default::default() })
 }
 
+/// Converts [ExecutionPayloadV2] to [Block]
 pub fn try_convert_from_execution_payload_v2_to_block(
     payload: ExecutionPayloadV2,
 ) -> Result<Block, PayloadError> {
@@ -77,6 +79,7 @@ pub fn try_convert_from_execution_payload_v2_to_block(
     Ok(base_sealed_block)
 }
 
+/// Converts [ExecutionPayloadV3] to [Block]
 pub fn try_convert_from_execution_payload_v3_to_block(
     payload: ExecutionPayloadV3,
 ) -> Result<Block, PayloadError> {
@@ -90,6 +93,7 @@ pub fn try_convert_from_execution_payload_v3_to_block(
     Ok(base_block)
 }
 
+/// Converts [SealedBlock] to [ExecutionPayload]
 pub fn try_convert_from_sealed_block_to_execution_payload(value: SealedBlock) -> ExecutionPayload {
     if value.header.parent_beacon_block_root.is_some() {
         // block with parent beacon block root: V3
@@ -103,6 +107,7 @@ pub fn try_convert_from_sealed_block_to_execution_payload(value: SealedBlock) ->
     }
 }
 
+/// Converts [SealedBlock] to [ExecutionPayloadV1]
 pub fn try_convert_from_sealed_block_to_execution_payload_v1(
     value: SealedBlock,
 ) -> ExecutionPayloadV1 {
@@ -133,6 +138,7 @@ pub fn try_convert_from_sealed_block_to_execution_payload_v1(
     }
 }
 
+/// Converts [SealedBlock] to [ExecutionPayloadV2]
 pub fn try_convert_from_sealed_block_to_execution_payload_v2(
     value: SealedBlock,
 ) -> ExecutionPayloadV2 {
@@ -174,6 +180,7 @@ pub fn try_convert_from_sealed_block_to_execution_payload_v2(
     }
 }
 
+/// Converts [SealedBlock] to [ExecutionPayloadV3]
 pub fn try_convert_from_sealed_block_to_execution_payload_v3(
     value: SealedBlock,
 ) -> ExecutionPayloadV3 {
@@ -221,6 +228,7 @@ pub fn try_convert_from_sealed_block_to_execution_payload_v3(
     }
 }
 
+/// Converts [SealedBlock] to [ExecutionPayloadFieldV2]
 pub fn convert_from_sealed_block_to_execution_payload_field_v2(
     value: SealedBlock,
 ) -> ExecutionPayloadFieldV2 {
@@ -261,6 +269,7 @@ pub fn try_into_sealed_block(
     Ok(payload)
 }
 
+/// Converts [Withdrawal] to [StandaloneWithdraw]
 pub fn convert_withdrawal_to_standalonewithdraw(withdrawal: Withdrawal) -> StandaloneWithdraw {
     StandaloneWithdraw {
         index: withdrawal.index,
@@ -270,6 +279,7 @@ pub fn convert_withdrawal_to_standalonewithdraw(withdrawal: Withdrawal) -> Stand
     }
 }
 
+/// Converts [StandaloneWithdraw] to [Withdrawal]
 pub fn convert_standalonewithdraw_to_withdrawal(standalone: StandaloneWithdraw) -> Withdrawal {
     Withdrawal {
         index: standalone.index,
@@ -279,6 +289,7 @@ pub fn convert_standalonewithdraw_to_withdrawal(standalone: StandaloneWithdraw) 
     }
 }
 
+/// Converts [Block] to [ExecutionPayloadBodyV1]
 pub fn convert_to_execution_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
     let transactions = value.body.into_iter().map(|tx| {
         let mut out = Vec::new();
