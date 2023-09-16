@@ -424,7 +424,7 @@ where
                             .max(1);
                         Ok(ControlFlow::Unwind { target: unwind_to, bad_block: local_head })
                     } else if let StageError::Validation { block, error } = err {
-                        warn!(
+                        error!(
                             target: "sync::pipeline",
                             stage = %stage_id,
                             bad_block = %block.number,
@@ -456,7 +456,7 @@ where
                         error: BlockExecutionError::Validation(error),
                     } = err
                     {
-                        warn!(
+                        error!(
                             target: "sync::pipeline",
                             stage = %stage_id,
                             bad_block = %block.number,

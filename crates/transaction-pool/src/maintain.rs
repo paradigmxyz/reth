@@ -14,7 +14,8 @@ use reth_primitives::{
     Address, BlockHash, BlockNumber, BlockNumberOrTag, FromRecoveredTransaction,
 };
 use reth_provider::{
-    BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, PostState, StateProviderFactory,
+    BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotification, ChainSpecProvider,
+    StateProviderFactory,
 };
 use reth_tasks::TaskSpawner;
 use std::{
@@ -247,9 +248,8 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
 
                 // find all accounts that were changed in the old chain but _not_ in the new chain
                 let missing_changed_acc = old_state
-                    .accounts()
-                    .keys()
-                    .copied()
+                    .accounts_iter()
+                    .map(|(a, _)| a)
                     .filter(|addr| !new_changed_accounts.contains(addr));
 
                 // for these we need to fetch the nonce+balance from the db at the new tip
@@ -353,7 +353,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     continue
                 }
 
-                let mut changed_accounts = Vec::with_capacity(state.accounts().len());
+                let mut changed_accounts = Vec::with_capacity(state.state().len());
                 for acc in changed_accounts_iter(state) {
                     // we can always clear the dirty flag for this account
                     dirty_addresses.remove(&acc.address);
@@ -497,15 +497,14 @@ where
     Ok(res)
 }
 
-/// Extracts all changed accounts from the PostState
-fn changed_accounts_iter(state: &PostState) -> impl Iterator<Item = ChangedAccount> + '_ {
-    state.accounts().iter().filter_map(|(addr, acc)| acc.map(|acc| (addr, acc))).map(
-        |(address, acc)| ChangedAccount {
-            address: *address,
-            nonce: acc.nonce,
-            balance: acc.balance,
-        },
-    )
+/// Extracts all changed accounts from the BundleState
+fn changed_accounts_iter(
+    state: &BundleStateWithReceipts,
+) -> impl Iterator<Item = ChangedAccount> + '_ {
+    state
+        .accounts_iter()
+        .filter_map(|(addr, acc)| acc.map(|acc| (addr, acc)))
+        .map(|(address, acc)| ChangedAccount { address, nonce: acc.nonce, balance: acc.balance })
 }
 
 #[cfg(test)]

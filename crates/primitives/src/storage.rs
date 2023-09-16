@@ -14,6 +14,13 @@ pub struct StorageEntry {
     pub value: U256,
 }
 
+impl StorageEntry {
+    /// Create a new StorageEntry with given key and value.
+    pub fn new(key: H256, value: U256) -> Self {
+        Self { key, value }
+    }
+}
+
 impl From<(H256, U256)> for StorageEntry {
     fn from((key, value): (H256, U256)) -> Self {
         StorageEntry { key, value }

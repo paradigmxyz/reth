@@ -32,7 +32,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: check
-          args: --all --all-features
+          args: --all --all-features --benches --tests
 
       - name: cargo fmt
         uses: actions-rs/cargo@v1
@@ -44,7 +44,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: --all --all-features
+          args: --all --all-features --benches --tests
 
   doc-lint:
     name: doc lint

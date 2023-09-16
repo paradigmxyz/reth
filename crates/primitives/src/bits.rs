@@ -1,4 +1,6 @@
 //! Fixed hash types
+#![allow(clippy::non_canonical_clone_impl)]
+
 use bytes::Buf;
 use derive_more::{AsRef, Deref};
 use fixed_hash::construct_fixed_hash;

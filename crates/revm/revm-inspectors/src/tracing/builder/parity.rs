@@ -424,7 +424,7 @@ impl ParityTraceBuilder {
                     opcode::ADD |
                     opcode::EXP |
                     opcode::CALLER |
-                    opcode::SHA3 |
+                    opcode::KECCAK256 |
                     opcode::SUB |
                     opcode::ADDRESS |
                     opcode::GAS |
@@ -535,7 +535,7 @@ where
 ///
 /// iteratively fill the [VmTrace] code fields
 pub(crate) fn populate_vm_trace_bytecodes<DB, I>(
-    db: &DB,
+    db: DB,
     trace: &mut VmTrace,
     breadth_first_addresses: I,
 ) -> Result<(), DB::Error>
@@ -571,8 +571,8 @@ where
 /// in the [ExecutionResult] state map and compares the balance and nonce against what's in the
 /// `db`, which should point to the beginning of the transaction.
 ///
-/// It's expected that `DB` is a [CacheDB](revm::db::CacheDB) which at this point already contains
-/// all the accounts that are in the state map and never has to fetch them from disk.
+/// It's expected that `DB` is a revm [Database](revm::db::Database) which at this point already
+/// contains all the accounts that are in the state map and never has to fetch them from disk.
 pub fn populate_account_balance_nonce_diffs<DB, I>(
     state_diff: &mut StateDiff,
     db: DB,
