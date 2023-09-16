@@ -52,7 +52,7 @@ fn payload_body_roundtrip() {
         let withdraw = payload_body.withdrawals.map(|withdrawals| {
             withdrawals
                 .into_iter()
-                .map(|withdrawal| convert_standalonewithdraw_to_withdrawal(withdrawal))
+                .map(convert_standalonewithdraw_to_withdrawal)
                 .collect::<Vec<_>>()
         });
         assert_eq!(block.withdrawals, withdraw);
