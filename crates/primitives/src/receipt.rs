@@ -66,6 +66,11 @@ impl Receipts {
     pub fn len(&self) -> usize {
         self.receipt_vec.len()
     }
+
+    /// Returns `true` if the `Receipts` vector is empty.
+    pub fn is_empty(&self) -> bool {
+        self.receipt_vec.is_empty()
+    }
 }
 
 impl From<Receipt> for ReceiptWithBloom {
