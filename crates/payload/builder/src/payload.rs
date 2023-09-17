@@ -175,6 +175,8 @@ impl PayloadBuilderAttributes {
             basefee: U256::from(
                 parent.next_block_base_fee(chain_spec.base_fee_params).unwrap_or_default(),
             ),
+            // calculate excess gas based on parent block's blob gas usage
+            excess_blob_gas: parent.next_block_blob_fee().map(|fee| fee.saturating_to()),
         };
 
         (cfg, block_env)
