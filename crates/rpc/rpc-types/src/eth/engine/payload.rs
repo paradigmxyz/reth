@@ -71,6 +71,15 @@ impl From<SealedBlock> for ExecutionPayloadFieldV2 {
     }
 }
 
+impl From<ExecutionPayloadFieldV2> for ExecutionPayload {
+    fn from(value: ExecutionPayloadFieldV2) -> Self {
+        match value {
+            ExecutionPayloadFieldV2::V1(payload) => ExecutionPayload::V1(payload),
+            ExecutionPayloadFieldV2::V2(payload) => ExecutionPayload::V2(payload),
+        }
+    }
+}
+
 /// This structure maps for the return value of `engine_getPayload` of the beacon chain spec, for
 /// V2.
 ///
