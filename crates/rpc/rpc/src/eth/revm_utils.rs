@@ -287,6 +287,7 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         access_list,
         chain_id,
         blob_versioned_hashes,
+        max_fee_per_blob_gas,
         ..
     } = request;
 
@@ -314,7 +315,7 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         access_list: access_list.map(AccessList::flattened).unwrap_or_default(),
         // EIP-4844 fields
         blob_hashes: blob_versioned_hashes,
-        max_fee_per_blob_gas: None,
+        max_fee_per_blob_gas,
     };
 
     Ok(env)
