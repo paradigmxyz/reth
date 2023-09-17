@@ -311,6 +311,10 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         data: input.try_into_unique_input()?.map(|data| data.0).unwrap_or_default(),
         chain_id: chain_id.map(|c| c.as_u64()),
         access_list: access_list.map(AccessList::flattened).unwrap_or_default(),
+
+        // EIP-4844 fields
+        blob_hashes: Default::default(),
+        max_fee_per_blob_gas: None,
     };
 
     Ok(env)
