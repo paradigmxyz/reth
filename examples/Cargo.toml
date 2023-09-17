@@ -21,6 +21,7 @@ reth-network-api.workspace = true
 reth-network.workspace = true
 reth-transaction-pool.workspace = true
 reth-tasks.workspace = true
+reth-discv4.workspace = true
 
 
 eyre = "0.6.8"
@@ -39,3 +40,7 @@ path = "network.rs"
 [[example]]
 name = "network-txpool"
 path = "network-txpool.rs"
+
+[[example]]
+name = "manual-p2p"
+path = "manual-p2p.rs"
