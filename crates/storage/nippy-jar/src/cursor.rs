@@ -20,8 +20,6 @@ pub struct NippyJarCursor<'a> {
     tmp_buf: Vec<u8>,
     /// Cursor row position.
     row: u64,
-    /// Cursor column position.
-    col: u64,
 }
 
 impl<'a> std::fmt::Debug for NippyJarCursor<'a> {
@@ -44,14 +42,12 @@ impl<'a> NippyJarCursor<'a> {
             mmap_handle: mmap,
             tmp_buf: vec![],
             row: 0,
-            col: 0,
         })
     }
 
     /// Resets cursor to the beginning.
     pub fn reset(&mut self) {
         self.row = 0;
-        self.col = 0;
     }
 
     /// Returns a row, searching it by an entry used during [`NippyJar::prepare_index`].
