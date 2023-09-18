@@ -86,23 +86,22 @@ impl Receipts {
     }
 
     /// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
-    pub fn gas_spent_by_tx(&self) -> Vec<(u64, u64)> {
+    pub fn gas_spent_by_tx(&self) -> Result<Vec<(u64, u64)>, &'static str> {
         self.last()
             .map(|block_r| {
                 block_r
                     .iter()
                     .enumerate()
                     .map(|(id, tx_r)| {
-                        (
-                            id as u64,
-                            tx_r.as_ref()
-                                .expect("receipts have not been pruned")
-                                .cumulative_gas_used,
-                        )
+                        if let Some(receipt) = tx_r.as_ref() {
+                            Ok((id as u64, receipt.cumulative_gas_used))
+                        } else {
+                            return Err("Receipts have not been pruned")
+                        }
                     })
-                    .collect()
+                    .collect::<Result<Vec<_>, &'static str>>()
             })
-            .unwrap_or_default()
+            .unwrap_or(Ok(vec![]))
     }
 }
 

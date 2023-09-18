@@ -21,7 +21,7 @@ pub enum BlockValidationError {
         block_available_gas: u64,
     },
     #[error("Block gas used {got} is different from expected gas used {expected}.\nGas spent by each transaction: {gas_spent_by_tx:?}\n")]
-    BlockGasUsed { got: u64, expected: u64, gas_spent_by_tx: Vec<(u64, u64)> },
+    BlockGasUsed { got: u64, expected: u64, gas_spent_by_tx: Result<Vec<(u64, u64)>, &'static str> },
     #[error("Block {hash:?} is pre merge")]
     BlockPreMerge { hash: H256 },
     #[error("Missing total difficulty")]
