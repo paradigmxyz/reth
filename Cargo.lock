@@ -2435,6 +2435,8 @@ dependencies = [
  "reth-blockchain-tree",
  "reth-db",
  "reth-discv4",
+ "reth-ecies",
+ "reth-eth-wire",
  "reth-network",
  "reth-network-api",
  "reth-primitives",
@@ -2444,6 +2446,7 @@ dependencies = [
  "reth-rpc-types",
  "reth-tasks",
  "reth-transaction-pool",
+ "secp256k1",
  "tokio",
 ]
 

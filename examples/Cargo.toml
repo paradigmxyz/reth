@@ -22,7 +22,9 @@ reth-network.workspace = true
 reth-transaction-pool.workspace = true
 reth-tasks.workspace = true
 reth-discv4.workspace = true
-
+reth-eth-wire.workspace = true
+reth-ecies.workspace = true
+secp256k1.workspace = true
 
 eyre = "0.6.8"
 futures.workspace = true
