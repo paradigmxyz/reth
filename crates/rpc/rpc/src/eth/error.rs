@@ -190,9 +190,6 @@ where
             EVMError::PrevrandaoNotSet => EthApiError::PrevrandaoNotSet,
             EVMError::ExcessBlobGasNotSet => EthApiError::ExcessBlobGasNotSet,
             EVMError::Database(err) => err.into(),
-            _ => {
-                unreachable!()
-            }
         }
     }
 }

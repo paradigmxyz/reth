@@ -643,8 +643,7 @@ where
         self.into_task_with(&TokioTaskExecutor::default())
     }
 
-    /// Convert the downloader into a [`TaskDownloader`](super::task::TaskDownloader) by spawning
-    /// it via the given `spawner`.
+    /// Convert the downloader into a [`TaskDownloader`] by spawning it via the given `spawner`.
     pub fn into_task_with<S>(self, spawner: &S) -> TaskDownloader
     where
         S: TaskSpawner,

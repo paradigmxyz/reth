@@ -26,7 +26,7 @@ pub(crate) struct BlobTransactions<T: PoolTransaction> {
     all: BTreeSet<BlobTransaction<T>>,
     /// Keeps track of the size of this pool.
     ///
-    /// See also [`PoolTransaction::size`](crate::traits::PoolTransaction::size).
+    /// See also [`PoolTransaction::size`].
     size_of: SizeTracker,
 }
 
@@ -97,6 +97,12 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     #[allow(unused)]
     pub(crate) fn contains(&self, id: &TransactionId) -> bool {
         self.by_id.contains_key(id)
+    }
+
+    /// Asserts that the bijection between `by_id` and `all` is valid.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn assert_invariants(&self) {
+        assert_eq!(self.by_id.len(), self.all.len(), "by_id.len() != all.len()");
     }
 }
 
