@@ -1,6 +1,6 @@
 //! [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#parameters) protocol constants and utils for shard Blob Transactions.
 
-use crate::{kzg::KzgSettings, U128};
+use crate::kzg::KzgSettings;
 use once_cell::sync::Lazy;
 use std::{io::Write, sync::Arc};
 
@@ -66,7 +66,6 @@ pub enum LoadKzgSettingsError {
     KzgError(c_kzg::Error),
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,5 +74,4 @@ mod tests {
     fn ensure_load_kzg_settings() {
         let _settings = Arc::clone(&MAINNET_KZG_TRUSTED_SETUP);
     }
-
 }
