@@ -96,7 +96,7 @@ impl Receipts {
                         if let Some(receipt) = tx_r.as_ref() {
                             Ok((id as u64, receipt.cumulative_gas_used))
                         } else {
-                            return Err("Receipts have not been pruned")
+                            Err("Receipts have not been pruned")
                         }
                     })
                     .collect::<Result<Vec<_>, &'static str>>()
