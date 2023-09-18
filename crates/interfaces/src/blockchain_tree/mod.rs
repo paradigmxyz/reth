@@ -55,7 +55,7 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
     /// tree.
     ///
-    /// `N` is the `max_reorg_depth` plus the number of block hashes needed to satisfy the
+    /// `N` is the maximum of `max_reorg_depth` and the number of block hashes needed to satisfy the
     /// `BLOCKHASH` opcode in the EVM.
     ///
     /// # Note
@@ -70,7 +70,7 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
     /// tree.
     ///
-    /// `N` is the `max_reorg_depth` plus the number of block hashes needed to satisfy the
+    /// `N` is the maximum of `max_reorg_depth` and the number of block hashes needed to satisfy the
     /// `BLOCKHASH` opcode in the EVM.
     fn restore_canonical_hashes(&self) -> Result<(), Error>;
 
