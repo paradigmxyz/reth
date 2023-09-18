@@ -135,7 +135,11 @@ impl Command {
                 })
                 .set(ExecutionStage::new(
                     factory,
-                    ExecutionStageThresholds { max_blocks: None, max_changes: None },
+                    ExecutionStageThresholds {
+                        max_blocks: None,
+                        max_changes: None,
+                        max_cumulative_gas: None,
+                    },
                     stage_conf
                         .merkle
                         .clean_threshold

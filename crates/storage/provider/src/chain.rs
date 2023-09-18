@@ -1,6 +1,6 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
-use crate::PostState;
+use crate::bundle_state::BundleStateWithReceipts;
 use reth_interfaces::{executor::BlockExecutionError, Error};
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock, SealedBlockWithSenders,
@@ -20,7 +20,7 @@ pub struct Chain {
     /// [Chain::first] to [Chain::tip], inclusive.
     ///
     /// This state also contains the individual changes that lead to the current state.
-    pub state: PostState,
+    pub state: BundleStateWithReceipts,
     /// All blocks in this chain.
     pub blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
 }
@@ -42,7 +42,7 @@ impl Chain {
     }
 
     /// Get post state of this chain
-    pub fn state(&self) -> &PostState {
+    pub fn state(&self) -> &BundleStateWithReceipts {
         &self.state
     }
 
@@ -64,7 +64,7 @@ impl Chain {
     }
 
     /// Return post state of the block at the `block_number` or None if block is not known
-    pub fn state_at_block(&self, block_number: BlockNumber) -> Option<PostState> {
+    pub fn state_at_block(&self, block_number: BlockNumber) -> Option<BundleStateWithReceipts> {
         if self.tip().number == block_number {
             return Some(self.state.clone())
         }
@@ -79,13 +79,13 @@ impl Chain {
 
     /// Destructure the chain into its inner components, the blocks and the state at the tip of the
     /// chain.
-    pub fn into_inner(self) -> (ChainBlocks<'static>, PostState) {
+    pub fn into_inner(self) -> (ChainBlocks<'static>, BundleStateWithReceipts) {
         (ChainBlocks { blocks: Cow::Owned(self.blocks) }, self.state)
     }
 
     /// Destructure the chain into its inner components, the blocks and the state at the tip of the
     /// chain.
-    pub fn inner(&self) -> (ChainBlocks<'_>, &PostState) {
+    pub fn inner(&self) -> (ChainBlocks<'_>, &BundleStateWithReceipts) {
         (ChainBlocks { blocks: Cow::Borrowed(&self.blocks) }, &self.state)
     }
 
@@ -125,15 +125,8 @@ impl Chain {
     }
 
     /// Create new chain with given blocks and post state.
-    pub fn new(blocks: Vec<(SealedBlockWithSenders, PostState)>) -> Self {
-        let mut state = PostState::default();
-        let mut block_num_hash = BTreeMap::new();
-        for (block, block_state) in blocks.into_iter() {
-            state.extend(block_state);
-            block_num_hash.insert(block.number, block);
-        }
-
-        Self { state, blocks: block_num_hash }
+    pub fn new(blocks: Vec<SealedBlockWithSenders>, state: BundleStateWithReceipts) -> Self {
+        Self { state, blocks: blocks.into_iter().map(|b| (b.number, b)).collect() }
     }
 
     /// Returns length of the chain.
@@ -142,9 +135,9 @@ impl Chain {
     }
 
     /// Get all receipts for the given block.
-    pub fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<&[Receipt]> {
+    pub fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<&Receipt>> {
         let num = self.block_number(block_hash)?;
-        Some(self.state.receipts(num))
+        self.state.receipts_by_block(num).iter().map(Option::as_ref).collect()
     }
 
     /// Get all receipts with attachment.
@@ -152,13 +145,14 @@ impl Chain {
     /// Attachment includes block number, block hash, transaction hash and transaction index.
     pub fn receipts_with_attachment(&self) -> Vec<BlockReceipts> {
         let mut receipt_attch = Vec::new();
-        for (block_num, block) in self.blocks().iter() {
-            let mut receipts = self.state.receipts(*block_num).iter();
+        for ((block_num, block), receipts) in self.blocks().iter().zip(self.state.receipts().iter())
+        {
             let mut tx_receipts = Vec::new();
-            for tx in block.body.iter() {
-                if let Some(receipt) = receipts.next() {
-                    tx_receipts.push((tx.hash(), receipt.clone()));
-                }
+            for (tx, receipt) in block.body.iter().zip(receipts.iter()) {
+                tx_receipts.push((
+                    tx.hash(),
+                    receipt.as_ref().expect("receipts have not been pruned").clone(),
+                ));
             }
             let block_num_hash = BlockNumHash::new(*block_num, block.hash());
             receipt_attch.push(BlockReceipts { block: block_num_hash, tx_receipts });
@@ -188,7 +182,7 @@ impl Chain {
 
     /// Split this chain at the given block.
     ///
-    /// The given block will be the first block in the first returned chain.
+    /// The given block will be the last block in the first returned chain.
     ///
     /// If the given block is not found, [`ChainSplit::NoSplitPending`] is returned.
     /// Split chain at the number or hash, block with given number will be included at first chain.
@@ -196,7 +190,7 @@ impl Chain {
     ///
     /// # Note
     ///
-    /// The block number to transition ID mapping is only found in the second chain, making it
+    /// The plain state is only found in the second chain, making it
     /// impossible to perform any state reverts on the first chain.
     ///
     /// The second chain only contains the changes that were reverted on the first chain; however,
@@ -229,13 +223,13 @@ impl Chain {
 
         let higher_number_blocks = self.blocks.split_off(&(block_number + 1));
 
-        let mut canonical_state = std::mem::take(&mut self.state);
-        let new_state = canonical_state.split_at(block_number);
-        self.state = new_state;
+        let mut state = std::mem::take(&mut self.state);
+        let canonical_state =
+            state.split_at(block_number).expect("Detach block number to be in range");
 
         ChainSplit::Split {
             canonical: Chain { state: canonical_state, blocks: self.blocks },
-            pending: Chain { state: self.state, blocks: higher_number_blocks },
+            pending: Chain { state, blocks: higher_number_blocks },
         }
     }
 }
@@ -365,7 +359,11 @@ pub enum ChainSplit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{Account, H160, H256};
+    use reth_primitives::{H160, H256};
+    use reth_revm_primitives::{
+        db::BundleState,
+        primitives::{AccountInfo, HashMap},
+    };
 
     #[test]
     fn chain_append() {
@@ -401,15 +399,25 @@ mod tests {
 
     #[test]
     fn test_number_split() {
-        let mut base_state = PostState::default();
-        let account = Account { nonce: 10, ..Default::default() };
-        base_state.create_account(1, H160([1; 20]), account);
+        let block_state1 = BundleStateWithReceipts::new(
+            BundleState::new(
+                vec![(H160([2; 20]), None, Some(AccountInfo::default()), HashMap::default())],
+                vec![vec![(H160([2; 20]), None, vec![])]],
+                vec![],
+            ),
+            vec![vec![]],
+            1,
+        );
 
-        let mut block_state1 = PostState::default();
-        block_state1.create_account(2, H160([2; 20]), Account::default());
-
-        let mut block_state2 = PostState::default();
-        block_state2.create_account(3, H160([3; 20]), Account::default());
+        let block_state2 = BundleStateWithReceipts::new(
+            BundleState::new(
+                vec![(H160([3; 20]), None, Some(AccountInfo::default()), HashMap::default())],
+                vec![vec![(H160([3; 20]), None, vec![])]],
+                vec![],
+            ),
+            vec![vec![]],
+            2,
+        );
 
         let mut block1 = SealedBlockWithSenders::default();
         let block1_hash = H256([15; 32]);
@@ -423,13 +431,13 @@ mod tests {
         block2.hash = block2_hash;
         block2.senders.push(H160([4; 20]));
 
-        let chain = Chain::new(vec![
-            (block1.clone(), block_state1.clone()),
-            (block2.clone(), block_state2.clone()),
-        ]);
+        let mut block_state_extended = block_state1.clone();
+        block_state_extended.extend(block_state2.clone());
 
-        let mut split1_state = chain.state.clone();
-        let split2_state = split1_state.split_at(1);
+        let chain = Chain::new(vec![block1.clone(), block2.clone()], block_state_extended);
+
+        let mut split2_state = chain.state.clone();
+        let split1_state = split2_state.split_at(1).unwrap();
 
         let chain_split1 =
             Chain { state: split1_state, blocks: BTreeMap::from([(1, block1.clone())]) };

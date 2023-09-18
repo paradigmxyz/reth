@@ -159,12 +159,10 @@ impl PayloadBuilderAttributes {
     /// NOTE: This is only intended for beacon consensus (after merge).
     pub fn cfg_and_block_env(&self, chain_spec: &ChainSpec, parent: &Header) -> (CfgEnv, BlockEnv) {
         // configure evm env based on parent block
-        let cfg = CfgEnv {
-            chain_id: U256::from(chain_spec.chain().id()),
-            // ensure we're not missing any timestamp based hardforks
-            spec_id: revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp),
-            ..Default::default()
-        };
+        let mut cfg = CfgEnv::default();
+        cfg.chain_id = chain_spec.chain().id();
+        // ensure we're not missing any timestamp based hardforks
+        cfg.spec_id = revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp);
 
         let block_env = BlockEnv {
             number: U256::from(parent.number + 1),
@@ -177,6 +175,8 @@ impl PayloadBuilderAttributes {
             basefee: U256::from(
                 parent.next_block_base_fee(chain_spec.base_fee_params).unwrap_or_default(),
             ),
+            // calculate excess gas based on parent block's blob gas usage
+            excess_blob_gas: parent.next_block_blob_fee().map(|fee| fee.saturating_to()),
         };
 
         (cfg, block_env)

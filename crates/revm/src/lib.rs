@@ -17,8 +17,13 @@
 pub mod database;
 
 /// revm implementation of reth block and transaction executors.
-pub mod executor;
 mod factory;
+
+/// new revm account state executor
+pub mod processor;
+
+/// State changes that are not related to transactions.
+pub mod state_change;
 
 /// revm executor factory.
 pub use factory::Factory;

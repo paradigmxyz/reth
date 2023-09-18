@@ -4,8 +4,7 @@ use crate::{
     MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
 use reth_blockchain_tree::{
-    config::BlockchainTreeConfig, externals::TreeExternals, post_state::PostState, BlockchainTree,
-    ShareableBlockchainTree,
+    config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
 use reth_db::{test_utils::create_test_rw_db, DatabaseEnv};
 use reth_downloaders::{
@@ -22,8 +21,8 @@ use reth_interfaces::{
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, ChainSpec, PruneBatchSizes, PruneModes, H256, U256};
 use reth_provider::{
-    providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockExecutor, ExecutorFactory,
-    ProviderFactory, StateProvider,
+    providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockExecutor,
+    BundleStateWithReceipts, ExecutorFactory, ProviderFactory, PrunableBlockExecutor,
 };
 use reth_prune::Pruner;
 use reth_revm::Factory;
@@ -143,7 +142,7 @@ impl Default for TestPipelineConfig {
 /// Represents either test executor results, or real executor configuration.
 enum TestExecutorConfig {
     /// Test executor results.
-    Test(Vec<PostState>),
+    Test(Vec<BundleStateWithReceipts>),
     /// Real executor configuration.
     Real,
 }
@@ -172,18 +171,17 @@ pub enum EitherBlockExecutor<A, B> {
     Right(B),
 }
 
-impl<A, B, SP> BlockExecutor<SP> for EitherBlockExecutor<A, B>
+impl<A, B> BlockExecutor for EitherBlockExecutor<A, B>
 where
-    A: BlockExecutor<SP>,
-    B: BlockExecutor<SP>,
-    SP: StateProvider,
+    A: BlockExecutor,
+    B: BlockExecutor,
 {
     fn execute(
         &mut self,
         block: &reth_primitives::Block,
         total_difficulty: U256,
         senders: Option<Vec<reth_primitives::Address>>,
-    ) -> Result<PostState, BlockExecutionError> {
+    ) -> Result<(), BlockExecutionError> {
         match self {
             EitherBlockExecutor::Left(a) => a.execute(block, total_difficulty, senders),
             EitherBlockExecutor::Right(b) => b.execute(block, total_difficulty, senders),
@@ -195,7 +193,7 @@ where
         block: &reth_primitives::Block,
         total_difficulty: U256,
         senders: Option<Vec<reth_primitives::Address>>,
-    ) -> Result<PostState, BlockExecutionError> {
+    ) -> Result<(), BlockExecutionError> {
         match self {
             EitherBlockExecutor::Left(a) => {
                 a.execute_and_verify_receipt(block, total_difficulty, senders)
@@ -205,6 +203,47 @@ where
             }
         }
     }
+
+    fn take_output_state(&mut self) -> BundleStateWithReceipts {
+        match self {
+            EitherBlockExecutor::Left(a) => a.take_output_state(),
+            EitherBlockExecutor::Right(b) => b.take_output_state(),
+        }
+    }
+
+    fn stats(&self) -> reth_provider::BlockExecutorStats {
+        match self {
+            EitherBlockExecutor::Left(a) => a.stats(),
+            EitherBlockExecutor::Right(b) => b.stats(),
+        }
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        match self {
+            EitherBlockExecutor::Left(a) => a.size_hint(),
+            EitherBlockExecutor::Right(b) => b.size_hint(),
+        }
+    }
+}
+
+impl<A, B> PrunableBlockExecutor for EitherBlockExecutor<A, B>
+where
+    B: PrunableBlockExecutor,
+    A: PrunableBlockExecutor,
+{
+    fn set_prune_modes(&mut self, prune_modes: PruneModes) {
+        match self {
+            EitherBlockExecutor::Left(a) => a.set_prune_modes(prune_modes),
+            EitherBlockExecutor::Right(b) => b.set_prune_modes(prune_modes),
+        }
+    }
+
+    fn set_tip(&mut self, tip: BlockNumber) {
+        match self {
+            EitherBlockExecutor::Left(a) => a.set_tip(tip),
+            EitherBlockExecutor::Right(b) => b.set_tip(tip),
+        }
+    }
 }
 
 impl<A, B> ExecutorFactory for EitherExecutorFactory<A, B>
@@ -212,8 +251,6 @@ where
     A: ExecutorFactory,
     B: ExecutorFactory,
 {
-    type Executor<T: StateProvider> = EitherBlockExecutor<A::Executor<T>, B::Executor<T>>;
-
     fn chain_spec(&self) -> &ChainSpec {
         match self {
             EitherExecutorFactory::Left(a) => a.chain_spec(),
@@ -221,10 +258,13 @@ where
         }
     }
 
-    fn with_sp<SP: reth_provider::StateProvider>(&self, sp: SP) -> Self::Executor<SP> {
+    fn with_state<'a, SP: reth_provider::StateProvider + 'a>(
+        &'a self,
+        sp: SP,
+    ) -> Box<dyn PrunableBlockExecutor + 'a> {
         match self {
-            EitherExecutorFactory::Left(a) => EitherBlockExecutor::Left(a.with_sp(sp)),
-            EitherExecutorFactory::Right(b) => EitherBlockExecutor::Right(b.with_sp(sp)),
+            EitherExecutorFactory::Left(a) => a.with_state::<'a, SP>(sp),
+            EitherExecutorFactory::Right(b) => b.with_state::<'a, SP>(sp),
         }
     }
 }
@@ -263,7 +303,7 @@ impl TestConsensusEngineBuilder {
     }
 
     /// Set the executor results to use for the test consensus engine.
-    pub fn with_executor_results(mut self, executor_results: Vec<PostState>) -> Self {
+    pub fn with_executor_results(mut self, executor_results: Vec<BundleStateWithReceipts>) -> Self {
         self.executor_config = TestExecutorConfig::Test(executor_results);
         self
     }
@@ -343,7 +383,7 @@ where
 
     /// Set the executor results to use for the test consensus engine.
     #[allow(dead_code)]
-    pub fn with_executor_results(mut self, executor_results: Vec<PostState>) -> Self {
+    pub fn with_executor_results(mut self, executor_results: Vec<BundleStateWithReceipts>) -> Self {
         self.base_config.executor_config = TestExecutorConfig::Test(executor_results);
         self
     }

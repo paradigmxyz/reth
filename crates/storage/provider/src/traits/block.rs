@@ -1,5 +1,5 @@
 use crate::{
-    BlockIdReader, BlockNumReader, HeaderProvider, PostState, ReceiptProvider,
+    BlockIdReader, BlockNumReader, BundleStateWithReceipts, Chain, HeaderProvider, ReceiptProvider,
     ReceiptProviderIdExt, TransactionsProvider, WithdrawalsProvider,
 };
 use auto_impl::auto_impl;
@@ -210,7 +210,7 @@ pub trait BlockExecutionWriter: BlockWriter + BlockReader + Send + Sync {
         &self,
         chain_spec: &ChainSpec,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>> {
+    ) -> Result<Chain> {
         self.get_or_take_block_and_execution_range::<false>(chain_spec, range)
     }
 
@@ -219,7 +219,7 @@ pub trait BlockExecutionWriter: BlockWriter + BlockReader + Send + Sync {
         &self,
         chain_spec: &ChainSpec,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>> {
+    ) -> Result<Chain> {
         self.get_or_take_block_and_execution_range::<true>(chain_spec, range)
     }
 
@@ -228,7 +228,7 @@ pub trait BlockExecutionWriter: BlockWriter + BlockReader + Send + Sync {
         &self,
         chain_spec: &ChainSpec,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>>;
+    ) -> Result<Chain>;
 }
 
 /// Block Writer
@@ -250,7 +250,7 @@ pub trait BlockWriter: Send + Sync {
     /// updates the post-state.
     ///
     /// Inserts the blocks into the database and updates the state with
-    /// provided `PostState`.
+    /// provided `BundleState`.
     ///
     /// # Parameters
     ///
@@ -261,11 +261,10 @@ pub trait BlockWriter: Send + Sync {
     /// # Returns
     ///
     /// Returns `Ok(())` on success, or an error if any operation fails.
-
-    fn append_blocks_with_post_state(
+    fn append_blocks_with_bundle_state(
         &self,
         blocks: Vec<SealedBlockWithSenders>,
-        state: PostState,
+        state: BundleStateWithReceipts,
         prune_modes: Option<&PruneModes>,
     ) -> Result<()>;
 }

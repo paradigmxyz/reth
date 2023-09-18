@@ -21,12 +21,12 @@ use reth_primitives::{
 };
 use std::{ops::Range, sync::Arc, time::Instant};
 
-pub(crate) type MockTxPool = TxPool<MockOrdering>;
+pub type MockTxPool = TxPool<MockOrdering>;
 
 pub type MockValidTx = ValidPoolTransaction<MockTransaction>;
 
 /// Create an empty `TxPool`
-pub(crate) fn mock_tx_pool() -> MockTxPool {
+pub fn mock_tx_pool() -> MockTxPool {
     MockTxPool::new(Default::default(), Default::default())
 }
 

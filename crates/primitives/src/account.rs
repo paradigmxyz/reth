@@ -48,9 +48,6 @@ impl Account {
 /// Bytecode for an account.
 ///
 /// A wrapper around [`revm::primitives::Bytecode`][RevmBytecode] with encoding/decoding support.
-///
-/// Note: Upon decoding bytecode from the database, you *should* set the code hash using
-/// [`Self::with_code_hash`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Bytecode(pub RevmBytecode);
 
@@ -60,18 +57,6 @@ impl Bytecode {
     /// No analysis will be performed.
     pub fn new_raw(bytes: Bytes) -> Self {
         Self(RevmBytecode::new_raw(bytes))
-    }
-
-    /// Create new bytecode from raw bytes and its hash.
-    pub fn new_raw_with_hash(bytes: Bytes, code_hash: H256) -> Self {
-        let revm_bytecode = unsafe { RevmBytecode::new_raw_with_hash(bytes, code_hash) };
-        Self(revm_bytecode)
-    }
-
-    /// Set the hash of the inner bytecode.
-    pub fn with_code_hash(mut self, code_hash: H256) -> Self {
-        self.0.hash = code_hash;
-        self
     }
 }
 
@@ -121,15 +106,10 @@ impl Compact for Bytecode {
         let decoded = match variant {
             0 => Bytecode(RevmBytecode::new_raw(bytes)),
             1 => Bytecode(unsafe {
-                RevmBytecode::new_checked(
-                    bytes,
-                    buf.read_u64::<BigEndian>().unwrap() as usize,
-                    None,
-                )
+                RevmBytecode::new_checked(bytes, buf.read_u64::<BigEndian>().unwrap() as usize)
             }),
             2 => Bytecode(RevmBytecode {
                 bytecode: bytes,
-                hash: KECCAK_EMPTY,
                 state: BytecodeState::Analysed {
                     len: buf.read_u64::<BigEndian>().unwrap() as usize,
                     jump_map: JumpMap::from_slice(buf),

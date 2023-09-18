@@ -38,7 +38,7 @@ impl TxState {
     ///   - enough fee cap
     #[inline]
     pub(crate) fn is_pending(&self) -> bool {
-        *self >= TxState::PENDING_POOL_BITS
+        self.bits() >= TxState::PENDING_POOL_BITS.bits()
     }
 
     /// Returns `true` if the transaction has a nonce gap.
@@ -95,7 +95,7 @@ impl From<TxState> for SubPool {
         if value.is_pending() {
             return SubPool::Pending
         }
-        if value < TxState::BASE_FEE_POOL_BITS {
+        if value.bits() < TxState::BASE_FEE_POOL_BITS.bits() {
             return SubPool::Queued
         }
         SubPool::BaseFee
