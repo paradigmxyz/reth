@@ -3,8 +3,8 @@ use crate::{
         forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker},
         message::OnForkChoiceUpdated,
         metrics::EngineMetrics,
-        prune::{EnginePruneController, EnginePruneEvent},
     },
+    hooks::{EngineContext, EngineHookAction, EngineHooksController},
     sync::{EngineSyncController, EngineSyncEvent},
 };
 use futures::{Future, StreamExt};
@@ -29,7 +29,6 @@ use reth_provider::{
     BlockIdReader, BlockReader, BlockSource, CanonChainTracker, ChainSpecProvider, ProviderError,
     StageCheckpointReader,
 };
-use reth_prune::Pruner;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, PayloadAttributes, PayloadError, PayloadStatus,
     PayloadStatusEnum, PayloadValidationError,
@@ -69,10 +68,16 @@ mod handle;
 pub use handle::BeaconConsensusEngineHandle;
 
 mod forkchoice;
+use crate::hooks::EngineHooks;
 pub use forkchoice::ForkchoiceStatus;
+
 mod metrics;
-pub(crate) mod prune;
+
 pub(crate) mod sync;
+
+/// Hooks for running during the main loop of
+/// [consensus engine][`crate::engine::BeaconConsensusEngine`].
+pub mod hooks;
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
@@ -197,8 +202,7 @@ where
     /// blocks using the pipeline. Otherwise, the engine, sync controller, and blockchain tree will
     /// be used to download and execute the missing blocks.
     pipeline_run_threshold: u64,
-    /// Controls pruning triggered by engine updates.
-    prune: Option<EnginePruneController<DB>>,
+    hooks: EngineHooksController,
 }
 
 impl<DB, BT, Client> BeaconConsensusEngine<DB, BT, Client>
@@ -226,7 +230,7 @@ where
         payload_builder: PayloadBuilderHandle,
         target: Option<H256>,
         pipeline_run_threshold: u64,
-        pruner: Option<Pruner<DB>>,
+        hooks: EngineHooks,
     ) -> Result<(Self, BeaconConsensusEngineHandle), Error> {
         let (to_engine, rx) = mpsc::unbounded_channel();
         Self::with_channel(
@@ -242,7 +246,7 @@ where
             pipeline_run_threshold,
             to_engine,
             rx,
-            pruner,
+            hooks,
         )
     }
 
@@ -272,7 +276,7 @@ where
         pipeline_run_threshold: u64,
         to_engine: UnboundedSender<BeaconEngineMessage>,
         rx: UnboundedReceiver<BeaconEngineMessage>,
-        pruner: Option<Pruner<DB>>,
+        hooks: EngineHooks,
     ) -> Result<(Self, BeaconConsensusEngineHandle), Error> {
         let handle = BeaconConsensusEngineHandle { to_engine };
         let sync = EngineSyncController::new(
@@ -283,7 +287,6 @@ where
             max_block,
             blockchain.chain_spec(),
         );
-        let prune = pruner.map(|pruner| EnginePruneController::new(pruner, task_spawner));
         let mut this = Self {
             sync,
             blockchain,
@@ -296,7 +299,7 @@ where
             invalid_headers: InvalidHeaderCache::new(MAX_INVALID_HEADERS),
             metrics: EngineMetrics::default(),
             pipeline_run_threshold,
-            prune,
+            hooks: EngineHooksController::new(hooks),
         };
 
         let maybe_pipeline_target = match target {
@@ -638,12 +641,12 @@ where
             return Ok(OnForkChoiceUpdated::syncing())
         }
 
-        if self.is_prune_active() {
-            // We can only process new forkchoice updates if the pruner is idle, since it requires
-            // exclusive access to the database
+        if self.hooks.is_hook_with_db_write_running() {
+            // We can only process new forkchoice updates if no hook with db write is running,
+            // since it requires exclusive access to the database
             warn!(
                 target: "consensus::engine",
-                "Pruning is in progress, skipping forkchoice update. \
+                "Hook is in progress, skipping forkchoice update. \
                 This may affect the performance of your node as a validator."
             );
             return Ok(OnForkChoiceUpdated::syncing())
@@ -1083,13 +1086,13 @@ where
             return Ok(status)
         }
 
-        let res = if self.sync.is_pipeline_idle() && self.is_prune_idle() {
-            // we can only insert new payloads if the pipeline and the pruner are _not_ running,
-            // because they hold exclusive access to the database
+        let res = if self.sync.is_pipeline_idle() && !self.hooks.is_hook_with_db_write_running() {
+            // we can only insert new payloads if the pipeline and any hook with db write
+            // are _not_ running, because they hold exclusive access to the database
             self.try_insert_new_payload(block)
         } else {
-            if self.is_prune_active() {
-                debug!(target: "consensus::engine", "Pruning is in progress, buffering new payload.");
+            if self.hooks.is_hook_with_db_write_running() {
+                debug!(target: "consensus::engine", "Hook is in progress, buffering new payload.");
             }
             self.try_buffer_payload(block)
         };
@@ -1226,12 +1229,12 @@ where
         Ok(())
     }
 
-    /// When the pipeline or the pruner is active, the tree is unable to commit any additional
-    /// blocks since the pipeline holds exclusive access to the database.
+    /// When the pipeline or a hook with DB write access is active, the tree is unable to commit
+    /// any additional blocks since the pipeline holds exclusive access to the database.
     ///
     /// In this scenario we buffer the payload in the tree if the payload is valid, once the
-    /// pipeline or pruner is finished, the tree is then able to also use the buffered payloads to
-    /// commit to a (newer) canonical chain.
+    /// pipeline or a hook with DB write access is finished, the tree is then able to also use the
+    /// buffered payloads to commit to a (newer) canonical chain.
     ///
     /// This will return `SYNCING` if the block was buffered successfully, and an error if an error
     /// occurred while buffering the block.
@@ -1246,7 +1249,7 @@ where
 
     /// Attempts to insert a new payload into the tree.
     ///
-    /// Caution: This expects that the pipeline and the pruner are idle.
+    /// Caution: This expects that the pipeline and a hook with DB write access are idle.
     #[instrument(level = "trace", skip_all, target = "consensus::engine", ret)]
     fn try_insert_new_payload(
         &mut self,
@@ -1337,14 +1340,6 @@ where
             None => false,
         };
         Ok(synced_to_finalized)
-    }
-
-    /// Attempt to restore the tree.
-    ///
-    /// This is invoked after a pruner run to update the tree with the most recent canonical
-    /// hashes.
-    fn update_tree_on_finished_pruner(&mut self) -> Result<(), Error> {
-        self.blockchain.restore_canonical_hashes()
     }
 
     /// Invoked if we successfully downloaded a new block from the network.
@@ -1686,72 +1681,20 @@ where
         None
     }
 
-    /// Event handler for events emitted by the [EnginePruneController].
-    ///
-    /// This returns a result to indicate whether the engine future should resolve (fatal error).
-    fn on_prune_event(
-        &mut self,
-        event: EnginePruneEvent,
-    ) -> Option<Result<(), BeaconConsensusEngineError>> {
-        match event {
-            EnginePruneEvent::NotReady => {}
-            EnginePruneEvent::Started(tip_block_number) => {
-                trace!(target: "consensus::engine", %tip_block_number, "Pruner started");
-                self.metrics.pruner_runs.increment(1);
-                // Engine can't process any FCU/payload messages from CL while we're pruning, as
-                // pruner needs an exclusive write access to the database. To prevent CL from
-                // sending us unneeded updates, we need to respond `true` on `eth_syncing` request.
-                self.sync_state_updater.update_sync_state(SyncState::Syncing);
+    fn on_hook_action(&self, action: EngineHookAction) -> Result<(), BeaconConsensusEngineError> {
+        match action {
+            EngineHookAction::UpdateSyncState(state) => {
+                self.sync_state_updater.update_sync_state(state)
             }
-            EnginePruneEvent::TaskDropped => {
-                error!(target: "consensus::engine", "Failed to receive spawned pruner");
-                return Some(Err(BeaconConsensusEngineError::PrunerChannelClosed))
+            EngineHookAction::RestoreCanonicalHashes => {
+                if let Err(error) = self.blockchain.restore_canonical_hashes() {
+                    error!(target: "consensus::engine", ?error, "Error restoring blockchain tree state");
+                    return Err(error.into())
+                }
             }
-            EnginePruneEvent::Finished { result } => {
-                trace!(target: "consensus::engine", ?result, "Pruner finished");
-                match result {
-                    Ok(_) => {
-                        // Update the state and hashes of the blockchain tree if possible.
-                        match self.update_tree_on_finished_pruner() {
-                            Ok(()) => {}
-                            Err(error) => {
-                                error!(target: "consensus::engine", ?error, "Error restoring blockchain tree state");
-                                return Some(Err(error.into()))
-                            }
-                        };
-                    }
-                    // Any pruner error at this point is fatal.
-                    Err(error) => return Some(Err(error.into())),
-                };
-            }
-        };
-
-        None
-    }
-
-    /// Returns `true` if the prune controller's pruner is idle.
-    fn is_prune_idle(&self) -> bool {
-        self.prune.as_ref().map(|prune| prune.is_pruner_idle()).unwrap_or(true)
-    }
-
-    /// Returns `true` if the prune controller's pruner is active.
-    fn is_prune_active(&self) -> bool {
-        !self.is_prune_idle()
-    }
-
-    /// Polls the prune controller, if it exists, and processes the event [`EnginePruneEvent`]
-    /// emitted by it.
-    ///
-    /// Returns [`Option::Some`] if prune controller emitted an event which resulted in the error
-    /// (see [`Self::on_prune_event`] for error handling)
-    fn poll_prune(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Option<Result<(), BeaconConsensusEngineError>> {
-        match self.prune.as_mut()?.poll(cx, self.blockchain.canonical_tip().number) {
-            Poll::Ready(prune_event) => self.on_prune_event(prune_event),
-            Poll::Pending => None,
         }
+
+        Ok(())
     }
 }
 
@@ -1783,11 +1726,14 @@ where
         // Process all incoming messages from the CL, these can affect the state of the
         // SyncController, hence they are polled first, and they're also time sensitive.
         loop {
-            // Poll prune controller first if it's active, as we will not be able to process any
-            // engine messages until it's finished.
-            if this.is_prune_active() {
-                if let Some(res) = this.poll_prune(cx) {
-                    return Poll::Ready(res)
+            // Poll a running hook with db write access first, as we will not be able to process
+            // any engine messages until it's finished.
+            if let Poll::Ready(result) = this.hooks.poll_running_hook_with_db_write(
+                cx,
+                EngineContext { tip_block_number: this.blockchain.canonical_tip().number },
+            ) {
+                if let Err(err) = this.on_hook_action(result?) {
+                    return Poll::Ready(Err(err))
                 }
             }
 
@@ -1847,16 +1793,18 @@ where
             // we're pending if both engine messages and sync events are pending (fully drained)
             let is_pending = engine_messages_pending && sync_pending;
 
-            // Poll prune controller if all conditions are met:
-            // 1. Pipeline is idle
-            // 2. No engine and sync messages are pending
-            // 3. Latest FCU status is not INVALID
-            if this.sync.is_pipeline_idle() &&
-                is_pending &&
-                !this.forkchoice_state_tracker.is_latest_invalid()
-            {
-                if let Some(res) = this.poll_prune(cx) {
-                    return Poll::Ready(res)
+            // Poll next hook if all conditions are met:
+            // 1. No engine and sync messages are pending
+            // 2. Latest FCU status is not INVALID
+            if is_pending && !this.forkchoice_state_tracker.is_latest_invalid() {
+                if let Poll::Ready(result) = this.hooks.poll_next_hook(
+                    cx,
+                    EngineContext { tip_block_number: this.blockchain.canonical_tip().number },
+                    this.sync.is_pipeline_active(),
+                ) {
+                    if let Err(err) = this.on_hook_action(result?) {
+                        return Poll::Ready(Err(err))
+                    }
                 }
             }
 
