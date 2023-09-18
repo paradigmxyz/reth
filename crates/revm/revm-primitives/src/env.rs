@@ -220,8 +220,8 @@ where
             to,
             value,
             access_list,
-            blob_versioned_hashes: _,
-            max_fee_per_blob_gas: _,
+            blob_versioned_hashes,
+            max_fee_per_blob_gas,
             input,
         }) => {
             tx_env.gas_limit = *gas_limit;
@@ -248,6 +248,8 @@ where
                     )
                 })
                 .collect();
+            tx_env.blob_hashes = blob_versioned_hashes.clone();
+            tx_env.max_fee_per_blob_gas = Some(U256::from(*max_fee_per_blob_gas));
         }
     }
 }
