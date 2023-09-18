@@ -6,6 +6,9 @@ use crate::{
 };
 use sha2::{Digest, Sha256};
 
+// re-exports from revm for calculating blob fee
+pub use revm_primitives::calc_blob_fee;
+
 /// Calculates the versioned hash for a KzgCommitment
 ///
 /// Specified in [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#header-extension)
