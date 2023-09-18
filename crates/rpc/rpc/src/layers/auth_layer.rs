@@ -66,8 +66,8 @@ where
     }
 }
 
-/// This type is the actual implementation of the middleware. It follows the [`Service`] specification to correctly proxy Http requests
-/// to its inner service after headers validation.
+/// This type is the actual implementation of the middleware. It follows the [`Service`]
+/// specification to correctly proxy Http requests to its inner service after headers validation.
 #[allow(missing_debug_implementations)]
 pub struct AuthService<S, V> {
     /// Performs auth validation logics
