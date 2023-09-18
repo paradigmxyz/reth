@@ -19,7 +19,7 @@ use reth_provider::{
     BlockReader, DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
     TransactionsProvider,
 };
-use std::{ops::RangeInclusive, sync::Arc, time::Instant};
+use std::{collections::HashMap, ops::RangeInclusive, sync::Arc, time::Instant};
 use tracing::{debug, error, info, instrument, trace};
 
 /// Result of [Pruner::run] execution.
@@ -81,7 +81,7 @@ impl<DB: Database> Pruner<DB> {
 
         let mut done = true;
 
-        let mut total_pruned_entries = 0;
+        let mut parts_done = HashMap::new();
 
         if let Some((to_block, prune_mode)) =
             self.modes.prune_target_block_receipts(tip_block_number)?
@@ -97,7 +97,7 @@ impl<DB: Database> Pruner<DB> {
             let part_start = Instant::now();
             let part_done = self.prune_receipts(&provider, to_block, prune_mode)?;
             done = done && part_done;
-            total_pruned_entries += 1;
+            parts_done.insert(PrunePart::Receipts, part_done);
             self.metrics
                 .get_prune_part_metrics(PrunePart::Receipts)
                 .duration_seconds
@@ -110,7 +110,7 @@ impl<DB: Database> Pruner<DB> {
             let part_start = Instant::now();
             let part_done = self.prune_receipts_by_logs(&provider, tip_block_number)?;
             done = done && part_done;
-            total_pruned_entries += 1;
+            parts_done.insert(PrunePart::ContractLogs, part_done);
             self.metrics
                 .get_prune_part_metrics(PrunePart::ContractLogs)
                 .duration_seconds
@@ -133,7 +133,7 @@ impl<DB: Database> Pruner<DB> {
             let part_start = Instant::now();
             let part_done = self.prune_transaction_lookup(&provider, to_block, prune_mode)?;
             done = done && part_done;
-            total_pruned_entries += 1;
+            parts_done.insert(PrunePart::TransactionLookup, part_done);
             self.metrics
                 .get_prune_part_metrics(PrunePart::TransactionLookup)
                 .duration_seconds
@@ -160,7 +160,7 @@ impl<DB: Database> Pruner<DB> {
             let part_start = Instant::now();
             let part_done = self.prune_transaction_senders(&provider, to_block, prune_mode)?;
             done = done && part_done;
-            total_pruned_entries += 1;
+            parts_done.insert(PrunePart::SenderRecovery, part_done);
             self.metrics
                 .get_prune_part_metrics(PrunePart::SenderRecovery)
                 .duration_seconds
@@ -187,7 +187,7 @@ impl<DB: Database> Pruner<DB> {
             let part_start = Instant::now();
             let part_done = self.prune_account_history(&provider, to_block, prune_mode)?;
             done = done && part_done;
-            total_pruned_entries += 1;
+            parts_done.insert(PrunePart::AccountHistory, part_done);
             self.metrics
                 .get_prune_part_metrics(PrunePart::AccountHistory)
                 .duration_seconds
@@ -214,7 +214,7 @@ impl<DB: Database> Pruner<DB> {
             let part_start = Instant::now();
             let part_done = self.prune_storage_history(&provider, to_block, prune_mode)?;
             done = done && part_done;
-            total_pruned_entries += 1;
+            parts_done.insert(PrunePart::StorageHistory, part_done);
             self.metrics
                 .get_prune_part_metrics(PrunePart::StorageHistory)
                 .duration_seconds
@@ -236,9 +236,9 @@ impl<DB: Database> Pruner<DB> {
         info!(
             target: "pruner",
             %tip_block_number,
-            %done,
             ?elapsed,
-            %total_pruned_entries,
+            %done,
+            ?parts_done,
             "Pruner finished"
         );
         Ok(done)
