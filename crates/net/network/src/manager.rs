@@ -683,6 +683,7 @@ where
                                 ?peer_id,
                                 ?total_active,
                                 kind=%direction,
+                                peer_enode=%NodeRecord::new(remote_addr, peer_id),
                                 "Session established"
                             );
 
