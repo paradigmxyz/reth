@@ -1,3 +1,4 @@
+use crate::constants::{DEFAULT_MAX_LOGS_PER_RESPONSE, DEFAULT_MAX_TRACING_REQUESTS};
 use reth_rpc::{
     eth::{
         cache::{EthStateCache, EthStateCacheConfig},
@@ -7,12 +8,6 @@ use reth_rpc::{
     EthApi, EthFilter, EthPubSub, TracingCallPool,
 };
 use serde::{Deserialize, Serialize};
-
-/// The default maximum of logs in a single response.
-pub(crate) const DEFAULT_MAX_LOGS_PER_RESPONSE: usize = 20_000;
-
-/// The default maximum number of concurrently executed tracing calls
-pub(crate) const DEFAULT_MAX_TRACING_REQUESTS: u32 = 25;
 
 /// All handlers for the `eth` namespace
 #[derive(Debug, Clone)]
