@@ -48,8 +48,8 @@ There are many tables within the node, all used to store different types of data
 - PlainAccountState
 - PlainStorageState
 - Bytecodes
-- AccountHistories
-- StorageHistories
+- AccountsHistory
+- StoragesHistory
 - AccountChangeSets
 - StorageChangeSets
 - HashedAccounts

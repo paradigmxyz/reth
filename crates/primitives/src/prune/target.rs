@@ -102,7 +102,7 @@ impl PruneModes {
         (sender_recovery, SenderRecovery, None),
         (transaction_lookup, TransactionLookup, None),
         (receipts, Receipts, Some(64)),
-        (account_history, AccountHistories, Some(64)),
-        (storage_history, StorageHistories, Some(64))
+        (account_history, AccountsHistory, Some(64)),
+        (storage_history, StoragesHistory, Some(64))
     );
 }

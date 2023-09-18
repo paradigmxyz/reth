@@ -103,9 +103,9 @@ impl<DB: Database> ProviderFactory<DB> {
         block_number += 1;
 
         let account_history_prune_checkpoint =
-            provider.get_prune_checkpoint(PrunePart::AccountHistories)?;
+            provider.get_prune_checkpoint(PrunePart::AccountsHistory)?;
         let storage_history_prune_checkpoint =
-            provider.get_prune_checkpoint(PrunePart::StorageHistories)?;
+            provider.get_prune_checkpoint(PrunePart::StoragesHistory)?;
 
         let mut state_provider = HistoricalStateProvider::new(provider.into_tx(), block_number);
 

@@ -16,10 +16,10 @@ use clap::Parser;
 
 use reth_db::{
     cursor::DbCursorRO, database::Database, open_db_read_only, table::Table, transaction::DbTx,
-    AccountChangeSets, AccountHistories, AccountsTrie, BlockBodyIndices, BlockOmmers,
+    AccountChangeSets, AccountsHistory, AccountsTrie, BlockBodyIndices, BlockOmmers,
     BlockWithdrawals, Bytecodes, CanonicalHeaders, DatabaseEnvRO, HashedAccounts, HashedStorages,
     HeaderNumbers, HeaderTerminalDifficulties, Headers, PlainAccountState, PlainStorageState,
-    PruneCheckpoints, Receipts, StorageChangeSets, StorageHistories, StoragesTrie, SyncStages,
+    PruneCheckpoints, Receipts, StorageChangeSets, StoragesHistory, StoragesTrie, SyncStages,
     SyncStagesProgresses, Tables, TransactionBlocks, TransactionHashNumbers, TransactionSenders,
     Transactions,
 };
@@ -111,11 +111,11 @@ impl Command {
                     find_diffs::<PlainStorageState>(primary_tx, secondary_tx, output_dir)?
                 }
                 Tables::Bytecodes => find_diffs::<Bytecodes>(primary_tx, secondary_tx, output_dir)?,
-                Tables::AccountHistories => {
-                    find_diffs::<AccountHistories>(primary_tx, secondary_tx, output_dir)?
+                Tables::AccountsHistory => {
+                    find_diffs::<AccountsHistory>(primary_tx, secondary_tx, output_dir)?
                 }
-                Tables::StorageHistories => {
-                    find_diffs::<StorageHistories>(primary_tx, secondary_tx, output_dir)?
+                Tables::StoragesHistory => {
+                    find_diffs::<StoragesHistory>(primary_tx, secondary_tx, output_dir)?
                 }
                 Tables::AccountChangeSets => {
                     find_diffs::<AccountChangeSets>(primary_tx, secondary_tx, output_dir)?

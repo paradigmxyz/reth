@@ -36,8 +36,8 @@ pub fn assert_genesis_block<DB: Database>(provider: &DatabaseProviderRW<'_, DB>,
     assert_eq!(tx.table::<tables::Receipts>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::PlainAccountState>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::PlainStorageState>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::AccountHistories>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::StorageHistories>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::AccountsHistory>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::StoragesHistory>().unwrap(), vec![]);
     // TODO check after this gets done: https://github.com/paradigmxyz/reth/issues/1588
     // Bytecodes are not reverted assert_eq!(tx.table::<tables::Bytecodes>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::AccountChangeSets>().unwrap(), vec![]);

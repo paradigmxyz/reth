@@ -45,14 +45,14 @@ mod test {
         provider.append_blocks_with_post_state(vec![block1.clone()], exec_res1.clone()).unwrap();
 
         assert_eq!(
-            provider.table::<tables::AccountHistories>().unwrap(),
+            provider.table::<tables::AccountsHistory>().unwrap(),
             vec![
                 (acc1_shard_key.clone(), IntegerList::new(vec![1]).unwrap()),
                 (acc2_shard_key.clone(), IntegerList::new(vec![1]).unwrap())
             ]
         );
         assert_eq!(
-            provider.table::<tables::StorageHistories>().unwrap(),
+            provider.table::<tables::StoragesHistory>().unwrap(),
             vec![(storage1_shard_key.clone(), IntegerList::new(vec![1]).unwrap())]
         );
 
@@ -69,22 +69,22 @@ mod test {
         assert_genesis_block(&provider, genesis.clone());
 
         // check if history is empty.
-        assert_eq!(provider.table::<tables::AccountHistories>().unwrap(), vec![]);
-        assert_eq!(provider.table::<tables::StorageHistories>().unwrap(), vec![]);
+        assert_eq!(provider.table::<tables::AccountsHistory>().unwrap(), vec![]);
+        assert_eq!(provider.table::<tables::StoragesHistory>().unwrap(), vec![]);
 
         provider.append_blocks_with_post_state(vec![block1.clone()], exec_res1.clone()).unwrap();
         provider.append_blocks_with_post_state(vec![block2.clone()], exec_res2.clone()).unwrap();
 
         // check history of two blocks
         assert_eq!(
-            provider.table::<tables::AccountHistories>().unwrap(),
+            provider.table::<tables::AccountsHistory>().unwrap(),
             vec![
                 (acc1_shard_key, IntegerList::new(vec![1, 2]).unwrap()),
                 (acc2_shard_key, IntegerList::new(vec![1]).unwrap())
             ]
         );
         assert_eq!(
-            provider.table::<tables::StorageHistories>().unwrap(),
+            provider.table::<tables::StoragesHistory>().unwrap(),
             vec![(storage1_shard_key, IntegerList::new(vec![1, 2]).unwrap())]
         );
         provider.commit().unwrap();

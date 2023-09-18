@@ -1720,7 +1720,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
         &self,
         storage_transitions: BTreeMap<(Address, H256), Vec<u64>>,
     ) -> Result<()> {
-        self.append_history_index::<_, tables::StorageHistories>(
+        self.append_history_index::<_, tables::StoragesHistory>(
             storage_transitions,
             |(address, storage_key), highest_block_number| {
                 StorageShardedKey::new(address, storage_key, highest_block_number)
@@ -1732,7 +1732,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
         &self,
         account_transitions: BTreeMap<Address, Vec<u64>>,
     ) -> Result<()> {
-        self.append_history_index::<_, tables::AccountHistories>(
+        self.append_history_index::<_, tables::AccountsHistory>(
             account_transitions,
             ShardedKey::new,
         )
@@ -1760,9 +1760,9 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
                 },
             );
 
-        let mut cursor = self.tx.cursor_write::<tables::StorageHistories>()?;
+        let mut cursor = self.tx.cursor_write::<tables::StoragesHistory>()?;
         for ((address, storage_key), rem_index) in last_indices {
-            let partial_shard = unwind_history_shards::<_, tables::StorageHistories, _>(
+            let partial_shard = unwind_history_shards::<_, tables::StoragesHistory, _>(
                 &mut cursor,
                 StorageShardedKey::last(address, storage_key),
                 rem_index,
@@ -1805,9 +1805,9 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
             });
 
         // Unwind the account history index.
-        let mut cursor = self.tx.cursor_write::<tables::AccountHistories>()?;
+        let mut cursor = self.tx.cursor_write::<tables::AccountsHistory>()?;
         for (address, rem_index) in last_indices {
-            let partial_shard = unwind_history_shards::<_, tables::AccountHistories, _>(
+            let partial_shard = unwind_history_shards::<_, tables::AccountsHistory, _>(
                 &mut cursor,
                 ShardedKey::last(address),
                 rem_index,

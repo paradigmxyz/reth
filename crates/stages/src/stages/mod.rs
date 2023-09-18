@@ -41,7 +41,7 @@ mod tests {
     use super::*;
     use crate::{
         stage::Stage,
-        stages::{ExecutionStage, IndexAccountHistoriesStage, IndexStorageHistoriesStage},
+        stages::{ExecutionStage, IndexAccountsHistoryStage, IndexStoragesHistoryStage},
         test_utils::TestTransaction,
         ExecInput,
     };
@@ -50,7 +50,7 @@ mod tests {
         mdbx::{cursor::Cursor, RW},
         tables,
         transaction::{DbTx, DbTxMut},
-        AccountHistories, DatabaseEnv,
+        AccountsHistory, DatabaseEnv,
     };
     use reth_interfaces::test_utils::generators::{self, random_block};
     use reth_primitives::{
@@ -154,8 +154,8 @@ mod tests {
                 expect_num_acc_changesets
             );
 
-            // Check AccountHistories
-            let mut acc_indexing_stage = IndexAccountHistoriesStage {
+            // Check AccountsHistory
+            let mut acc_indexing_stage = IndexAccountsHistoryStage {
                 prune_modes: prune_modes.clone(),
                 ..Default::default()
             };
@@ -165,13 +165,13 @@ mod tests {
                 assert!(acc_indexing_stage.execute(&provider, input).await.is_err());
             } else {
                 acc_indexing_stage.execute(&provider, input).await.unwrap();
-                let mut account_history: Cursor<'_, RW, AccountHistories> =
-                    provider.tx_ref().cursor_read::<tables::AccountHistories>().unwrap();
+                let mut account_history: Cursor<'_, RW, AccountsHistory> =
+                    provider.tx_ref().cursor_read::<tables::AccountsHistory>().unwrap();
                 assert_eq!(account_history.walk(None).unwrap().count(), expect_num_acc_changesets);
             }
 
-            // Check StorageHistories
-            let mut storage_indexing_stage = IndexStorageHistoriesStage {
+            // Check StoragesHistory
+            let mut storage_indexing_stage = IndexStoragesHistoryStage {
                 prune_modes: prune_modes.clone(),
                 ..Default::default()
             };
@@ -183,7 +183,7 @@ mod tests {
                 storage_indexing_stage.execute(&provider, input).await.unwrap();
 
                 let mut storage_history =
-                    provider.tx_ref().cursor_read::<tables::StorageHistories>().unwrap();
+                    provider.tx_ref().cursor_read::<tables::StoragesHistory>().unwrap();
                 assert_eq!(
                     storage_history.walk(None).unwrap().count(),
                     expect_num_storage_changesets

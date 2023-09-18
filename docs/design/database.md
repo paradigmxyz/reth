@@ -83,11 +83,11 @@ PlainStorageState {
     H256 StorageKey "PK"
     U256 StorageValue
 }
-AccountHistories {
+AccountsHistory {
     H256 Account "PK"
     BlockNumberList BlockNumberList "List of transitions where account was changed"
 }
-StorageHistories {
+StoragesHistory {
     H256 Account "PK"
     H256 StorageKey "PK"
     BlockNumberList BlockNumberList "List of transitions where account storage entry was changed"
@@ -130,8 +130,8 @@ TransactionBlocks ||--|{ Transactions : "tx id -> block number"
 BlockBodyIndices ||--o{ Transactions : "block number -> tx ids"
 Headers ||--o{ AccountChangeSets : "each block has zero or more changesets"
 Headers ||--o{ StorageChangeSets : "each block has zero or more changesets"
-AccountHistories }|--|{ AccountChangeSets : index
-StorageHistories }|--|{ StorageChangeSets : index
+AccountsHistory }|--|{ AccountChangeSets : index
+StoragesHistory }|--|{ StorageChangeSets : index
 Headers ||--o| BlockOmmers : "each block has 0 or more ommers"
 BlockBodyIndices ||--|| Headers : "index"
 HeaderNumbers |o--|| Headers : "block hash -> block number"

@@ -14,10 +14,10 @@ pub enum PrunePart {
     Receipts,
     /// Prune part responsible for some `Receipts` filtered by logs.
     ContractLogs,
-    /// Prune part responsible for the `AccountChangeSets` and `AccountHistories` tables.
-    AccountHistories,
-    /// Prune part responsible for the `StorageChangeSets` and `StorageHistories` tables.
-    StorageHistories,
+    /// Prune part responsible for the `AccountChangeSets` and `AccountsHistory` tables.
+    AccountsHistory,
+    /// Prune part responsible for the `StorageChangeSets` and `StoragesHistory` tables.
+    StoragesHistory,
 }
 
 /// PrunePart error type.

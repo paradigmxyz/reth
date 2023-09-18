@@ -173,8 +173,8 @@ tables!([
     (PlainAccountState, TableType::Table),
     (PlainStorageState, TableType::DupSort),
     (Bytecodes, TableType::Table),
-    (AccountHistories, TableType::Table),
-    (StorageHistories, TableType::Table),
+    (AccountsHistory, TableType::Table),
+    (StoragesHistory, TableType::Table),
     (AccountChangeSets, TableType::DupSort),
     (StorageChangeSets, TableType::DupSort),
     (HashedAccounts, TableType::Table),
@@ -334,7 +334,7 @@ table!(
     /// * If there were no shard we would get `None` entry or entry of different storage key.
     ///
     /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
-    ( AccountHistories ) ShardedKey<Address> | BlockNumberList
+    ( AccountsHistory ) ShardedKey<Address> | BlockNumberList
 );
 
 table!(
@@ -356,7 +356,7 @@ table!(
     /// * If there were no shard we would get `None` entry or entry of different storage key.
     ///
     /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
-    ( StorageHistories ) StorageShardedKey | BlockNumberList
+    ( StoragesHistory ) StorageShardedKey | BlockNumberList
 );
 
 dupsort!(
@@ -449,8 +449,8 @@ mod tests {
         (TableType::Table, PlainAccountState::const_name()),
         (TableType::DupSort, PlainStorageState::const_name()),
         (TableType::Table, Bytecodes::const_name()),
-        (TableType::Table, AccountHistories::const_name()),
-        (TableType::Table, StorageHistories::const_name()),
+        (TableType::Table, AccountsHistory::const_name()),
+        (TableType::Table, StoragesHistory::const_name()),
         (TableType::DupSort, AccountChangeSets::const_name()),
         (TableType::DupSort, StorageChangeSets::const_name()),
         (TableType::Table, HashedAccounts::const_name()),

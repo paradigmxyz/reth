@@ -135,15 +135,15 @@ impl Command {
                         None,
                     )?;
                 }
-                StageEnum::AccountHistories | StageEnum::StorageHistories => {
-                    tx.clear::<tables::AccountHistories>()?;
-                    tx.clear::<tables::StorageHistories>()?;
+                StageEnum::AccountsHistory | StageEnum::StoragesHistory => {
+                    tx.clear::<tables::AccountsHistory>()?;
+                    tx.clear::<tables::StoragesHistory>()?;
                     tx.put::<tables::SyncStages>(
-                        StageId::IndexAccountHistories.to_string(),
+                        StageId::IndexAccountsHistory.to_string(),
                         Default::default(),
                     )?;
                     tx.put::<tables::SyncStages>(
-                        StageId::IndexStorageHistories.to_string(),
+                        StageId::IndexStoragesHistory.to_string(),
                         Default::default(),
                     )?;
                 }

@@ -172,7 +172,7 @@ impl<DB: Database> Pruner<DB> {
         {
             trace!(
                 target: "pruner",
-                prune_part = ?PrunePart::AccountHistories,
+                prune_part = ?PrunePart::AccountsHistory,
                 %to_block,
                 ?prune_mode,
                 "Got target block to prune"
@@ -182,13 +182,13 @@ impl<DB: Database> Pruner<DB> {
             let part_done = self.prune_account_history(&provider, to_block, prune_mode)?;
             done = done && part_done;
             self.metrics
-                .get_prune_part_metrics(PrunePart::AccountHistories)
+                .get_prune_part_metrics(PrunePart::AccountsHistory)
                 .duration_seconds
                 .record(part_start.elapsed())
         } else {
             trace!(
                 target: "pruner",
-                prune_part = ?PrunePart::AccountHistories,
+                prune_part = ?PrunePart::AccountsHistory,
                 "No target block to prune"
             );
         }
@@ -198,7 +198,7 @@ impl<DB: Database> Pruner<DB> {
         {
             trace!(
                 target: "pruner",
-                prune_part = ?PrunePart::StorageHistories,
+                prune_part = ?PrunePart::StoragesHistory,
                 %to_block,
                 ?prune_mode,
                 "Got target block to prune"
@@ -208,13 +208,13 @@ impl<DB: Database> Pruner<DB> {
             let part_done = self.prune_storage_history(&provider, to_block, prune_mode)?;
             done = done && part_done;
             self.metrics
-                .get_prune_part_metrics(PrunePart::StorageHistories)
+                .get_prune_part_metrics(PrunePart::StoragesHistory)
                 .duration_seconds
                 .record(part_start.elapsed())
         } else {
             trace!(
                 target: "pruner",
-                prune_part = ?PrunePart::StorageHistories,
+                prune_part = ?PrunePart::StoragesHistory,
                 "No target block to prune"
             );
         }
@@ -686,7 +686,7 @@ impl<DB: Database> Pruner<DB> {
     ) -> PrunerResult {
         let range = match self.get_next_block_range_from_checkpoint(
             provider,
-            PrunePart::AccountHistories,
+            PrunePart::AccountsHistory,
             to_block,
         )? {
             Some(range) => range,
@@ -712,7 +712,7 @@ impl<DB: Database> Pruner<DB> {
             .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
             .unwrap_or(range_end);
 
-        let (processed, deleted) = self.prune_history_indices::<tables::AccountHistories, _>(
+        let (processed, deleted) = self.prune_history_indices::<tables::AccountsHistory, _>(
             provider,
             last_changeset_pruned_block,
             |a, b| a.key == b.key,
@@ -721,7 +721,7 @@ impl<DB: Database> Pruner<DB> {
         trace!(target: "pruner", %processed, %deleted, %done, "Pruned account history (history)" );
 
         provider.save_prune_checkpoint(
-            PrunePart::AccountHistories,
+            PrunePart::AccountsHistory,
             PruneCheckpoint {
                 block_number: Some(last_changeset_pruned_block),
                 tx_number: None,
@@ -742,7 +742,7 @@ impl<DB: Database> Pruner<DB> {
     ) -> PrunerResult {
         let range = match self.get_next_block_range_from_checkpoint(
             provider,
-            PrunePart::StorageHistories,
+            PrunePart::StoragesHistory,
             to_block,
         )? {
             Some(range) => range,
@@ -768,7 +768,7 @@ impl<DB: Database> Pruner<DB> {
             .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
             .unwrap_or(range_end);
 
-        let (processed, deleted) = self.prune_history_indices::<tables::StorageHistories, _>(
+        let (processed, deleted) = self.prune_history_indices::<tables::StoragesHistory, _>(
             provider,
             last_changeset_pruned_block,
             |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
@@ -777,7 +777,7 @@ impl<DB: Database> Pruner<DB> {
         trace!(target: "pruner", %processed, %deleted, %done, "Pruned storage history (history)" );
 
         provider.save_prune_checkpoint(
-            PrunePart::StorageHistories,
+            PrunePart::StoragesHistory,
             PruneCheckpoint {
                 block_number: Some(last_changeset_pruned_block),
                 tx_number: None,
@@ -1245,7 +1245,7 @@ mod tests {
         tx.insert_changesets(changesets.clone(), None).expect("insert changesets");
         tx.insert_history(changesets.clone(), None).expect("insert history");
 
-        let account_occurrences = tx.table::<tables::AccountHistories>().unwrap().into_iter().fold(
+        let account_occurrences = tx.table::<tables::AccountsHistory>().unwrap().into_iter().fold(
             BTreeMap::<_, usize>::new(),
             |mut map, (key, _)| {
                 map.entry(key.key).or_default().add_assign(1);
@@ -1259,7 +1259,7 @@ mod tests {
             changesets.iter().flatten().count()
         );
 
-        let original_shards = tx.table::<tables::AccountHistories>().unwrap();
+        let original_shards = tx.table::<tables::AccountsHistory>().unwrap();
 
         let test_prune = |to_block: BlockNumber, run: usize, expect_done: bool| {
             let prune_mode = PruneMode::Before(to_block);
@@ -1320,7 +1320,7 @@ mod tests {
                 pruned_changesets.values().flatten().count()
             );
 
-            let actual_shards = tx.table::<tables::AccountHistories>().unwrap();
+            let actual_shards = tx.table::<tables::AccountsHistory>().unwrap();
 
             let expected_shards = original_shards
                 .iter()
@@ -1337,7 +1337,7 @@ mod tests {
             assert_eq!(actual_shards, expected_shards);
 
             assert_eq!(
-                tx.inner().get_prune_checkpoint(PrunePart::AccountHistories).unwrap(),
+                tx.inner().get_prune_checkpoint(PrunePart::AccountsHistory).unwrap(),
                 Some(PruneCheckpoint {
                     block_number: Some(last_pruned_block_number),
                     tx_number: None,
@@ -1372,7 +1372,7 @@ mod tests {
         tx.insert_changesets(changesets.clone(), None).expect("insert changesets");
         tx.insert_history(changesets.clone(), None).expect("insert history");
 
-        let storage_occurences = tx.table::<tables::StorageHistories>().unwrap().into_iter().fold(
+        let storage_occurences = tx.table::<tables::StoragesHistory>().unwrap().into_iter().fold(
             BTreeMap::<_, usize>::new(),
             |mut map, (key, _)| {
                 map.entry((key.address, key.sharded_key.key)).or_default().add_assign(1);
@@ -1386,7 +1386,7 @@ mod tests {
             changesets.iter().flatten().flat_map(|(_, _, entries)| entries).count()
         );
 
-        let original_shards = tx.table::<tables::StorageHistories>().unwrap();
+        let original_shards = tx.table::<tables::StoragesHistory>().unwrap();
 
         let test_prune = |to_block: BlockNumber, run: usize, expect_done: bool| {
             let prune_mode = PruneMode::Before(to_block);
@@ -1451,7 +1451,7 @@ mod tests {
                 pruned_changesets.values().flatten().count()
             );
 
-            let actual_shards = tx.table::<tables::StorageHistories>().unwrap();
+            let actual_shards = tx.table::<tables::StoragesHistory>().unwrap();
 
             let expected_shards = original_shards
                 .iter()
@@ -1468,7 +1468,7 @@ mod tests {
             assert_eq!(actual_shards, expected_shards);
 
             assert_eq!(
-                tx.inner().get_prune_checkpoint(PrunePart::StorageHistories).unwrap(),
+                tx.inner().get_prune_checkpoint(PrunePart::StoragesHistory).unwrap(),
                 Some(PruneCheckpoint {
                     block_number: Some(last_pruned_block_number),
                     tx_number: None,

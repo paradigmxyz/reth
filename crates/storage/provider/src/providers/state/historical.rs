@@ -22,9 +22,9 @@ use std::marker::PhantomData;
 /// It means that all changes made in the provided block number are not included.
 ///
 /// Historical state provider reads the following tables:
-/// - [tables::AccountHistories]
+/// - [tables::AccountsHistory]
 /// - [tables::Bytecodes]
-/// - [tables::StorageHistories]
+/// - [tables::StoragesHistory]
 /// - [tables::AccountChangeSets]
 /// - [tables::StorageChangeSets]
 pub struct HistoricalStateProviderRef<'a, 'b, TX: DbTx<'a>> {
@@ -67,7 +67,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
         Self { tx, block_number, lowest_available_blocks, _phantom: PhantomData {} }
     }
 
-    /// Lookup an account in the AccountHistories table
+    /// Lookup an account in the AccountsHistory table
     pub fn account_history_lookup(&self, address: Address) -> Result<HistoryInfo> {
         if !self.lowest_available_blocks.is_account_history_available(self.block_number) {
             return Err(ProviderError::StateAtBlockPruned(self.block_number).into())
@@ -75,14 +75,14 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
 
         // history key to search IntegerList of block number changesets.
         let history_key = ShardedKey::new(address, self.block_number);
-        self.history_info::<tables::AccountHistories, _>(
+        self.history_info::<tables::AccountsHistory, _>(
             history_key,
             |key| key.key == address,
             self.lowest_available_blocks.account_history_block_number,
         )
     }
 
-    /// Lookup a storage key in the StorageHistories table
+    /// Lookup a storage key in the StoragesHistory table
     pub fn storage_history_lookup(
         &self,
         address: Address,
@@ -94,7 +94,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
 
         // history key to search IntegerList of block number changesets.
         let history_key = StorageShardedKey::new(address, storage_key, self.block_number);
-        self.history_info::<tables::StorageHistories, _>(
+        self.history_info::<tables::StoragesHistory, _>(
             history_key,
             |key| key.address == address && key.sharded_key.key == storage_key,
             self.lowest_available_blocks.storage_history_block_number,
@@ -309,11 +309,11 @@ delegate_provider_impls!(HistoricalStateProvider<'a, TX> where [TX: DbTx<'a>]);
 #[derive(Default, Copy, Clone)]
 pub struct LowestAvailableBlocks {
     /// Lowest block number at which the account history is available. It may not be available if
-    /// [reth_primitives::PrunePart::AccountHistories] was pruned.
+    /// [reth_primitives::PrunePart::AccountsHistory] was pruned.
     /// [Option::None] means all history is available.
     pub account_history_block_number: Option<BlockNumber>,
     /// Lowest block number at which the storage history is available. It may not be available if
-    /// [reth_primitives::PrunePart::StorageHistories] was pruned.
+    /// [reth_primitives::PrunePart::StoragesHistory] was pruned.
     /// [Option::None] means all history is available.
     pub storage_history_block_number: Option<BlockNumber>,
 }
@@ -365,17 +365,17 @@ mod tests {
         let db = create_test_rw_db();
         let tx = db.tx_mut().unwrap();
 
-        tx.put::<tables::AccountHistories>(
+        tx.put::<tables::AccountsHistory>(
             ShardedKey { key: ADDRESS, highest_block_number: 7 },
             BlockNumberList::new([1, 3, 7]).unwrap(),
         )
         .unwrap();
-        tx.put::<tables::AccountHistories>(
+        tx.put::<tables::AccountsHistory>(
             ShardedKey { key: ADDRESS, highest_block_number: u64::MAX },
             BlockNumberList::new([10, 15]).unwrap(),
         )
         .unwrap();
-        tx.put::<tables::AccountHistories>(
+        tx.put::<tables::AccountsHistory>(
             ShardedKey { key: HIGHER_ADDRESS, highest_block_number: u64::MAX },
             BlockNumberList::new([4]).unwrap(),
         )
@@ -472,7 +472,7 @@ mod tests {
         let db = create_test_rw_db();
         let tx = db.tx_mut().unwrap();
 
-        tx.put::<tables::StorageHistories>(
+        tx.put::<tables::StoragesHistory>(
             StorageShardedKey {
                 address: ADDRESS,
                 sharded_key: ShardedKey { key: STORAGE, highest_block_number: 7 },
@@ -480,7 +480,7 @@ mod tests {
             BlockNumberList::new([3, 7]).unwrap(),
         )
         .unwrap();
-        tx.put::<tables::StorageHistories>(
+        tx.put::<tables::StoragesHistory>(
             StorageShardedKey {
                 address: ADDRESS,
                 sharded_key: ShardedKey { key: STORAGE, highest_block_number: u64::MAX },
@@ -488,7 +488,7 @@ mod tests {
             BlockNumberList::new([10, 15]).unwrap(),
         )
         .unwrap();
-        tx.put::<tables::StorageHistories>(
+        tx.put::<tables::StoragesHistory>(
             StorageShardedKey {
                 address: HIGHER_ADDRESS,
                 sharded_key: ShardedKey { key: STORAGE, highest_block_number: u64::MAX },

@@ -163,7 +163,7 @@ mod tests {
         database::Database,
         models::{AccountBeforeTx, ShardedKey},
         tables::{
-            AccountHistories, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState,
+            AccountsHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState,
         },
         test_utils::*,
         transaction::{DbTx, DbTxMut},
@@ -957,14 +957,14 @@ mod tests {
             let key = ShardedKey::new(real_key, i * 100);
             let list: IntegerList = vec![i * 100u64].into();
 
-            db.update(|tx| tx.put::<AccountHistories>(key.clone(), list.clone()).expect(""))
+            db.update(|tx| tx.put::<AccountsHistory>(key.clone(), list.clone()).expect(""))
                 .unwrap();
         }
 
         // Seek value with non existing key.
         {
             let tx = db.tx().expect(ERROR_INIT_TX);
-            let mut cursor = tx.cursor_read::<AccountHistories>().unwrap();
+            let mut cursor = tx.cursor_read::<AccountsHistory>().unwrap();
 
             // It will seek the one greater or equal to the query. Since we have `Address | 100`,
             // `Address | 200` in the database and we're querying `Address | 150` it will return us
@@ -982,7 +982,7 @@ mod tests {
         // Seek greatest index
         {
             let tx = db.tx().expect(ERROR_INIT_TX);
-            let mut cursor = tx.cursor_read::<AccountHistories>().unwrap();
+            let mut cursor = tx.cursor_read::<AccountsHistory>().unwrap();
 
             // It will seek the MAX value of transition index and try to use prev to get first
             // biggers.
