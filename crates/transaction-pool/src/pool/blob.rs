@@ -26,7 +26,7 @@ pub(crate) struct BlobTransactions<T: PoolTransaction> {
     all: BTreeSet<BlobTransaction<T>>,
     /// Keeps track of the size of this pool.
     ///
-    /// See also [`PoolTransaction::size`](crate::traits::PoolTransaction::size).
+    /// See also [`PoolTransaction::size`].
     size_of: SizeTracker,
 }
 

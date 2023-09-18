@@ -810,7 +810,7 @@ pub struct BlockBody {
 }
 
 impl BlockBody {
-    /// Create a [`Block`](Block) from the body and its header.
+    /// Create a [`Block`] from the body and its header.
     pub fn create_block(&self, header: Header) -> Block {
         Block {
             header,

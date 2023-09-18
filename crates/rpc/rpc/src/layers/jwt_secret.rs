@@ -9,7 +9,7 @@ use std::{
 };
 use thiserror::Error;
 
-/// Errors returned by the [`JwtSecret`][crate::layers::JwtSecret]
+/// Errors returned by the [`JwtSecret`]
 #[derive(Error, Debug)]
 #[allow(missing_docs)]
 pub enum JwtError {
@@ -56,7 +56,7 @@ const JWT_SIGNATURE_ALGO: Algorithm = Algorithm::HS256;
 pub struct JwtSecret([u8; 32]);
 
 impl JwtSecret {
-    /// Creates an instance of [`JwtSecret`][crate::layers::JwtSecret].
+    /// Creates an instance of [`JwtSecret`].
     ///
     /// Returns an error if one of the following applies:
     /// - `hex` is not a valid hexadecimal string
@@ -138,8 +138,7 @@ impl JwtSecret {
         Ok(())
     }
 
-    /// Generates a random [`JwtSecret`][crate::layers::JwtSecret]
-    /// containing a hex-encoded 256 bit secret key.
+    /// Generates a random [`JwtSecret`] containing a hex-encoded 256 bit secret key.
     pub fn random() -> Self {
         let random_bytes: [u8; 32] = rand::thread_rng().gen();
         let secret = hex_encode(random_bytes);

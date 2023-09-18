@@ -79,12 +79,11 @@
 //!
 //! The lowest layer is the actual pool implementations that manages (validated) transactions:
 //! [`TxPool`](crate::pool::txpool::TxPool). This is contained in a higher level pool type that
-//! guards the low level pool and handles additional listeners or metrics:
-//! [`PoolInner`](crate::pool::PoolInner)
+//! guards the low level pool and handles additional listeners or metrics: [`PoolInner`].
 //!
 //! The transaction pool will be used by separate consumers (RPC, P2P), to make sharing easier, the
-//! [`Pool`](crate::Pool) type is just an `Arc` wrapper around `PoolInner`. This is the usable type
-//! that provides the `TransactionPool` interface.
+//! [`Pool`] type is just an `Arc` wrapper around `PoolInner`. This is the usable type that provides
+//! the `TransactionPool` interface.
 //!
 //!
 //! ## Blob Transactions

@@ -236,7 +236,7 @@ where
     /// Propagate the transactions to all connected peers either as full objects or hashes
     ///
     /// The message for new pooled hashes depends on the negotiated version of the stream.
-    /// See [NewPooledTransactionHashes](NewPooledTransactionHashes)
+    /// See [NewPooledTransactionHashes]
     ///
     /// Note: EIP-4844 are disallowed from being broadcast in full and are only ever sent as hashes, see also <https://eips.ethereum.org/EIPS/eip-4844#networking>.
     fn propagate_transactions(
@@ -827,7 +827,7 @@ struct Peer {
     client_version: Arc<String>,
 }
 
-/// Commands to send to the [`TransactionsManager`](crate::transactions::TransactionsManager)
+/// Commands to send to the [`TransactionsManager`]
 enum TransactionsCommand {
     PropagateHash(H256),
 }
