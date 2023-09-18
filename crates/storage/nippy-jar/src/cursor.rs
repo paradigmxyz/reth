@@ -87,7 +87,7 @@ impl<'a> NippyJarCursor<'a> {
 
     /// Advances cursor to next row and returns it.
     pub fn next_row(&mut self) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
-        if self.row as usize * self.jar.columns == self.jar.offsets.len() {
+        if self.row as usize * self.jar.columns >= self.jar.offsets.len() {
             // Has reached the end
             return Ok(None)
         }
@@ -96,51 +96,113 @@ impl<'a> NippyJarCursor<'a> {
 
         // Retrieve all column values from the row
         for column in 0..self.jar.columns {
-            // Find out the offset of the column value
-            let offset_pos = self.row as usize * self.jar.columns + column;
-            let value_offset = self.jar.offsets.select(offset_pos).expect("should exist");
-
-            let column_value = if self.jar.offsets.len() == (offset_pos + 1) {
-                // It's the last column of the last row
-                &self.mmap_handle[value_offset..]
-            } else {
-                let next_value_offset =
-                    self.jar.offsets.select(offset_pos + 1).expect("should exist");
-                &self.mmap_handle[value_offset..next_value_offset]
-            };
-
-            // Decompression
-            if let Some(zstd_dict_decompressors) = &self.zstd_decompressors {
-                // Uses zstd dictionaries
-                let extra_capacity =
-                    (column_value.len() * 2).saturating_sub(self.tmp_buf.capacity());
-                self.tmp_buf.clear();
-                self.tmp_buf.reserve(extra_capacity);
-
-                zstd_dict_decompressors
-                    .lock()
-                    .unwrap()
-                    .get_mut(column)
-                    .unwrap()
-                    .decompress_to_buffer(column_value, &mut self.tmp_buf)?;
-
-                row.push(self.tmp_buf.clone());
-            } else if let Some(compression) = &self.jar.compressor {
-                // Uses the chosen default decompressor
-                row.push(compression.decompress(column_value)?);
-            } else {
-                // Not compressed
-                // TODO: return Cow<&> instead of copying if there's no compression
-                row.push(column_value.to_vec())
-            }
-        }
-
-        if row.is_empty() {
-            return Ok(None)
+            self.read_value(column, &mut row)?;
         }
 
         self.row += 1;
 
         Ok(Some(row))
+    }
+
+    /// Returns a row, searching it by an entry used during [`NippyJar::prepare_index`]  by using a
+    /// `MASK` to only read certain columns from the row.
+    ///
+    /// **May return false positives.**
+    ///
+    /// Example usage would be querying a transactions file with a transaction hash which is **NOT**
+    /// stored in file.
+    pub fn row_by_filter_with_cols<const MASK: usize, const COLUMNS: usize>(
+        &mut self,
+        value: &[u8],
+    ) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
+        if let (Some(filter), Some(phf)) = (&self.jar.filter, &self.jar.phf) {
+            // TODO: is it worth to parallize both?
+
+            // May have false positives
+            if filter.contains(value)? {
+                // May have false positives
+                if let Some(row_index) = phf.get_index(value)? {
+                    self.row =
+                        self.jar.offsets_index.access(row_index as usize).expect("built from same")
+                            as u64;
+                    return self.next_row_with_cols::<MASK, COLUMNS>()
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Returns a row by its number by using a `MASK` to only read certain columns from the row.
+    pub fn row_by_number_with_cols<const MASK: usize, const COLUMNS: usize>(
+        &mut self,
+        row: usize,
+    ) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
+        self.row = row as u64;
+        self.next_row_with_cols::<MASK, COLUMNS>()
+    }
+
+    /// Uses a `MASK` to only read certain columns from the row.
+    pub fn next_row_with_cols<const MASK: usize, const COLUMNS: usize>(
+        &mut self,
+    ) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
+        debug_assert!(COLUMNS == self.jar.columns);
+
+        if self.row as usize * self.jar.columns >= self.jar.offsets.len() {
+            // Has reached the end
+            return Ok(None)
+        }
+
+        let mut row = Vec::with_capacity(COLUMNS);
+
+        for column in 0..COLUMNS {
+            if MASK & (1 << column) != 0 {
+                self.read_value(column, &mut row)?
+            }
+        }
+
+        self.row += 1;
+
+        Ok(Some(row))
+    }
+
+    /// Takes the column index and reads the value for the corresponding column.
+    fn read_value(&mut self, column: usize, row: &mut Vec<Vec<u8>>) -> Result<(), NippyJarError> {
+        // Find out the offset of the column value
+        let offset_pos = self.row as usize * self.jar.columns + column;
+        let value_offset = self.jar.offsets.select(offset_pos).expect("should exist");
+
+        let column_value = if self.jar.offsets.len() == (offset_pos + 1) {
+            // It's the last column of the last row
+            &self.mmap_handle[value_offset..]
+        } else {
+            let next_value_offset = self.jar.offsets.select(offset_pos + 1).expect("should exist");
+            &self.mmap_handle[value_offset..next_value_offset]
+        };
+
+        if let Some(zstd_dict_decompressors) = &self.zstd_decompressors {
+            // Uses zstd dictionaries
+            let extra_capacity = (column_value.len() * 2).saturating_sub(self.tmp_buf.capacity());
+            self.tmp_buf.clear();
+            self.tmp_buf.reserve(extra_capacity);
+
+            zstd_dict_decompressors
+                .lock()
+                .unwrap()
+                .get_mut(column)
+                .unwrap()
+                .decompress_to_buffer(column_value, &mut self.tmp_buf)?;
+
+            row.push(self.tmp_buf.clone());
+        } else if let Some(compression) = &self.jar.compressor {
+            // Uses the chosen default decompressor
+            row.push(compression.decompress(column_value)?);
+        } else {
+            // Not compressed
+            // TODO: return Cow<&> instead of copying if there's no compression
+            row.push(column_value.to_vec())
+        }
+
+        Ok(())
     }
 }

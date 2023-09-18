@@ -558,4 +558,125 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_selectable_column_values() {
+        let (col1, col2) = test_data(None);
+        let num_rows = col1.len() as u64;
+        let _num_columns = 2;
+        let file_path = tempfile::NamedTempFile::new().unwrap();
+        let data = vec![col1.clone(), col2.clone()];
+
+        // Create file
+        {
+            let mut nippy = NippyJar::new(_num_columns, file_path.path())
+                .with_zstd(true, 5000)
+                .with_cuckoo_filter(col1.len())
+                .with_mphf();
+
+            nippy.prepare_compression(data.clone()).unwrap();
+            nippy.prepare_index(&col1).unwrap();
+            nippy.freeze(data.clone(), num_rows).unwrap();
+        }
+
+        // Read file
+        {
+            let loaded_nippy = NippyJar::load(file_path.path()).unwrap();
+
+            if let Some(Compressors::Zstd(zstd)) = &loaded_nippy.compressor {
+                let mut cursor = NippyJarCursor::new(
+                    &loaded_nippy,
+                    Some(Mutex::new(zstd.generate_decompressors().unwrap())),
+                )
+                .unwrap();
+
+                // Shuffled for chaos.
+                let mut data = col1.iter().zip(col2.iter()).enumerate().collect::<Vec<_>>();
+                data.shuffle(&mut rand::thread_rng());
+
+                // Imagine `Blocks` snapshot file has two columns: `Block | StoredWithdrawals`
+                const BLOCKS_FULL_MASK: usize = 0b11;
+                const BLOCKS_COLUMNS: usize = 2;
+
+                // Read both columns
+                for (row_num, (v0, v1)) in &data {
+                    // Simulates `by_hash` queries by iterating col1 values, which were used to
+                    // create the inner index.
+                    let row_by_value = cursor
+                        .row_by_filter_with_cols::<BLOCKS_FULL_MASK, BLOCKS_COLUMNS>(v0)
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!((&row_by_value[0], &row_by_value[1]), (*v0, *v1));
+
+                    // Simulates `by_number` queries
+                    let row_by_num = cursor
+                        .row_by_number_with_cols::<BLOCKS_FULL_MASK, BLOCKS_COLUMNS>(*row_num)
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(row_by_value, row_by_num);
+                }
+
+                // Read first column only: `Block`
+                const BLOCKS_BLOCK_MASK: usize = 0b01;
+                for (row_num, (v0, _)) in &data {
+                    // Simulates `by_hash` queries by iterating col1 values, which were used to
+                    // create the inner index.
+                    let row_by_value = cursor
+                        .row_by_filter_with_cols::<BLOCKS_BLOCK_MASK, BLOCKS_COLUMNS>(v0)
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(row_by_value.len(), 1);
+                    assert_eq!(&row_by_value[0], *v0);
+
+                    // Simulates `by_number` queries
+                    let row_by_num = cursor
+                        .row_by_number_with_cols::<BLOCKS_BLOCK_MASK, BLOCKS_COLUMNS>(*row_num)
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(row_by_num.len(), 1);
+                    assert_eq!(row_by_value, row_by_num);
+                }
+
+                // Read second column only: `Block`
+                const BLOCKS_WITHDRAWAL_MASK: usize = 0b10;
+                for (row_num, (v0, v1)) in &data {
+                    // Simulates `by_hash` queries by iterating col1 values, which were used to
+                    // create the inner index.
+                    let row_by_value = cursor
+                        .row_by_filter_with_cols::<BLOCKS_WITHDRAWAL_MASK, BLOCKS_COLUMNS>(v0)
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(row_by_value.len(), 1);
+                    assert_eq!(&row_by_value[0], *v1);
+
+                    // Simulates `by_number` queries
+                    let row_by_num = cursor
+                        .row_by_number_with_cols::<BLOCKS_WITHDRAWAL_MASK, BLOCKS_COLUMNS>(*row_num)
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(row_by_num.len(), 1);
+                    assert_eq!(row_by_value, row_by_num);
+                }
+
+                // Read nothing
+                const BLOCKS_EMPTY_MASK: usize = 0b00;
+                for (row_num, (v0, _)) in &data {
+                    // Simulates `by_hash` queries by iterating col1 values, which were used to
+                    // create the inner index.
+                    assert!(cursor
+                        .row_by_filter_with_cols::<BLOCKS_EMPTY_MASK, BLOCKS_COLUMNS>(v0)
+                        .unwrap()
+                        .unwrap()
+                        .is_empty());
+
+                    // Simulates `by_number` queries
+                    assert!(cursor
+                        .row_by_number_with_cols::<BLOCKS_EMPTY_MASK, BLOCKS_COLUMNS>(*row_num)
+                        .unwrap()
+                        .unwrap()
+                        .is_empty());
+                }
+            }
+        }
+    }
 }
