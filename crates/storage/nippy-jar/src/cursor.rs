@@ -1,10 +1,6 @@
 use crate::{compression::Compression, Filter, NippyJar, NippyJarError, PerfectHashingFunction};
-use std::{
-    clone::Clone,
-    fs::File,
-    io::{Read, Seek, SeekFrom},
-    sync::Mutex,
-};
+use memmap2::Mmap;
+use std::{clone::Clone, fs::File, sync::Mutex};
 use sucds::int_vectors::Access;
 use zstd::bulk::Decompressor;
 
@@ -15,7 +11,10 @@ pub struct NippyJarCursor<'a> {
     /// Optional dictionary decompressors.
     zstd_decompressors: Option<Mutex<Vec<Decompressor<'a>>>>,
     /// Data file.
-    data_handle: File,
+    #[allow(unused)]
+    file_handle: File,
+    /// Data file.
+    mmap_handle: Mmap,
     /// Temporary buffer to unload data to (if necessary), without reallocating memory on each
     /// retrieval.
     tmp_buf: Vec<u8>,
@@ -36,10 +35,13 @@ impl<'a> NippyJarCursor<'a> {
         config: &'a NippyJar,
         zstd_decompressors: Option<Mutex<Vec<Decompressor<'a>>>>,
     ) -> Result<Self, NippyJarError> {
+        let file = File::open(config.data_path())?;
+        let mmap = unsafe { Mmap::map(&file)? };
         Ok(NippyJarCursor {
             jar: config,
             zstd_decompressors,
-            data_handle: File::open(config.data_path())?,
+            file_handle: file,
+            mmap_handle: mmap,
             tmp_buf: vec![],
             row: 0,
             col: 0,
@@ -91,7 +93,6 @@ impl<'a> NippyJarCursor<'a> {
         }
 
         let mut row = Vec::with_capacity(self.jar.columns);
-        let mut column_value = Vec::with_capacity(32);
 
         // Retrieve all column values from the row
         for column in 0..self.jar.columns {
@@ -99,20 +100,14 @@ impl<'a> NippyJarCursor<'a> {
             let offset_pos = self.row as usize * self.jar.columns + column;
             let value_offset = self.jar.offsets.select(offset_pos).expect("should exist");
 
-            // Seek to the offset
-            self.data_handle.seek(SeekFrom::Start(value_offset as u64))?;
-
-            // Copy value from offset. TODO: replace with mmap, no need to copy
-            if self.jar.offsets.len() == (offset_pos + 1) {
+            let column_value = if self.jar.offsets.len() == (offset_pos + 1) {
                 // It's the last column of the last row
-                column_value.clear();
-                self.data_handle.read_to_end(&mut column_value)?;
+                &self.mmap_handle[value_offset..]
             } else {
-                let len =
-                    self.jar.offsets.select(offset_pos + 1).expect("should exist") - value_offset;
-                column_value.resize(len, 0);
-                self.data_handle.read_exact(&mut column_value[..len])?;
-            }
+                let next_value_offset =
+                    self.jar.offsets.select(offset_pos + 1).expect("should exist");
+                &self.mmap_handle[value_offset..next_value_offset]
+            };
 
             // Decompression
             if let Some(zstd_dict_decompressors) = &self.zstd_decompressors {
@@ -127,15 +122,16 @@ impl<'a> NippyJarCursor<'a> {
                     .unwrap()
                     .get_mut(column)
                     .unwrap()
-                    .decompress_to_buffer(&column_value, &mut self.tmp_buf)?;
+                    .decompress_to_buffer(column_value, &mut self.tmp_buf)?;
 
                 row.push(self.tmp_buf.clone());
             } else if let Some(compression) = &self.jar.compressor {
                 // Uses the chosen default decompressor
-                row.push(compression.decompress(&column_value)?);
+                row.push(compression.decompress(column_value)?);
             } else {
                 // Not compressed
-                row.push(column_value.clone())
+                // TODO: return Cow<&> instead of copying if there's no compression
+                row.push(column_value.to_vec())
             }
         }
 
