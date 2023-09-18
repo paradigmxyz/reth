@@ -140,6 +140,9 @@ pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_b
         // `gas_price` field, which we need to be zero
         gas_priority_fee: None,
         access_list: Vec::new(),
+        // blob fields can be None for this tx
+        blob_hashes: Vec::new(),
+        max_fee_per_blob_gas: None,
     };
 
     // ensure the block gas limit is >= the tx
