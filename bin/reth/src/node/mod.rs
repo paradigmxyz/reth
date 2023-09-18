@@ -447,7 +447,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         };
 
         let pruner = prune_config.map(|prune_config| {
-            info!(target: "reth::cli", "Pruner initialized");
+            info!(target: "reth::cli", ?prune_config, "Pruner initialized");
             reth_prune::Pruner::new(
                 db.clone(),
                 self.chain.clone(),
