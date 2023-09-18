@@ -1,7 +1,7 @@
 use crate::{
     constants,
+    constants::DEFAULT_MAX_LOGS_PER_RESPONSE,
     error::{RpcError, ServerKind},
-    eth::DEFAULT_MAX_LOGS_PER_RESPONSE,
     EthConfig,
 };
 use hyper::header::AUTHORIZATION;
