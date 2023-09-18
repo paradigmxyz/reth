@@ -14,6 +14,7 @@ use std::{
     hash::Hasher,
     ops::{Range, RangeInclusive, Sub},
 };
+use reth_primitives::arbitrary::{Arbitrary, Unstructured};
 
 // TODO(onbjerg): Maybe we should split this off to its own crate, or move the helpers to the
 // relevant crates?
@@ -37,18 +38,14 @@ pub fn rng() -> StdRng {
 /// in the result will be equal to `head`.
 ///
 /// The headers are assumed to not be correct if validated.
-pub fn random_header_range<R: Rng>(
-    rng: &mut R,
+pub fn random_header_range<'a>(
+    u: &mut Unstructured<'a>,
     range: std::ops::Range<u64>,
     head: H256,
 ) -> Vec<SealedHeader> {
     let mut headers = Vec::with_capacity(range.end.saturating_sub(range.start) as usize);
     for idx in range {
-        headers.push(random_header(
-            rng,
-            idx,
-            Some(headers.last().map(|h: &SealedHeader| h.hash()).unwrap_or(head)),
-        ));
+        headers.push(random_header(u));
     }
     headers
 }
@@ -56,14 +53,8 @@ pub fn random_header_range<R: Rng>(
 /// Generate a random [SealedHeader].
 ///
 /// The header is assumed to not be correct if validated.
-pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<H256>) -> SealedHeader {
-    let header = reth_primitives::Header {
-        number,
-        nonce: rng.gen(),
-        difficulty: U256::from(rng.gen::<u32>()),
-        parent_hash: parent.unwrap_or_default(),
-        ..Default::default()
-    };
+pub fn random_header<'a>(u: &mut Unstructured<'a>) -> SealedHeader {
+    let header = reth_primitives::Header::arbitrary(u).expect("failed to gen random");
     header.seal_slow()
 }
 
@@ -124,44 +115,11 @@ pub fn generate_keys<R: Rng>(rng: &mut R, count: usize) -> Vec<KeyPair> {
 /// transactions in the block.
 ///
 /// The ommer headers are not assumed to be valid.
-pub fn random_block<R: Rng>(
-    rng: &mut R,
-    number: u64,
-    parent: Option<H256>,
-    tx_count: Option<u8>,
-    ommers_count: Option<u8>,
+pub fn random_block<'a>(
+    u: &mut Unstructured<'a>,
 ) -> SealedBlock {
     // Generate transactions
-    let tx_count = tx_count.unwrap_or_else(|| rng.gen::<u8>());
-    let transactions: Vec<TransactionSigned> =
-        (0..tx_count).map(|_| random_signed_tx(rng)).collect();
-    let total_gas = transactions.iter().fold(0, |sum, tx| sum + tx.transaction.gas_limit());
-
-    // Generate ommers
-    let ommers_count = ommers_count.unwrap_or_else(|| rng.gen_range(0..2));
-    let ommers =
-        (0..ommers_count).map(|_| random_header(rng, number, parent).unseal()).collect::<Vec<_>>();
-
-    // Calculate roots
-    let transactions_root = proofs::calculate_transaction_root(&transactions);
-    let ommers_hash = proofs::calculate_ommers_root(&ommers);
-
-    SealedBlock {
-        header: Header {
-            parent_hash: parent.unwrap_or_default(),
-            number,
-            gas_used: total_gas,
-            gas_limit: total_gas,
-            transactions_root,
-            ommers_hash,
-            base_fee_per_gas: Some(rng.gen()),
-            ..Default::default()
-        }
-        .seal_slow(),
-        body: transactions,
-        ommers,
-        withdrawals: None,
-    }
+    SealedBlock::arbitrary(u).unwrap()
 }
 
 /// Generate a range of random blocks.
@@ -170,23 +128,14 @@ pub fn random_block<R: Rng>(
 /// in the result will be equal to `head`.
 ///
 /// See [random_block] for considerations when validating the generated blocks.
-pub fn random_block_range<R: Rng>(
-    rng: &mut R,
+pub fn random_block_range<'a>(
+    u: &mut Unstructured<'a>,
     block_numbers: RangeInclusive<BlockNumber>,
-    head: H256,
-    tx_count: Range<u8>,
 ) -> Vec<SealedBlock> {
     let mut blocks =
         Vec::with_capacity(block_numbers.end().saturating_sub(*block_numbers.start()) as usize);
     for idx in block_numbers {
-        let tx_count = tx_count.clone().sample_single(rng);
-        blocks.push(random_block(
-            rng,
-            idx,
-            Some(blocks.last().map(|block: &SealedBlock| block.header.hash()).unwrap_or(head)),
-            Some(tx_count),
-            None,
-        ));
+        blocks.push(random_block(u));
     }
     blocks
 }
