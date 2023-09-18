@@ -5,7 +5,7 @@ use parking_lot::RwLock;
 use std::collections::HashMap;
 use tracing::trace;
 pub use trust_dns_resolver::{error::ResolveError, TokioAsyncResolver};
-use trust_dns_resolver::{proto::DnsHandle, AsyncResolver, ConnectionProvider};
+use trust_dns_resolver::{name_server::ConnectionProvider, AsyncResolver};
 
 /// A type that can lookup DNS entries
 #[async_trait]
@@ -15,11 +15,7 @@ pub trait Resolver: Send + Sync + Unpin + 'static {
 }
 
 #[async_trait]
-impl<C, P> Resolver for AsyncResolver<C, P>
-where
-    C: DnsHandle<Error = ResolveError>,
-    P: ConnectionProvider<Conn = C>,
-{
+impl<P: ConnectionProvider> Resolver for AsyncResolver<P> {
     async fn lookup_txt(&self, query: &str) -> Option<String> {
         // See: [AsyncResolver::txt_lookup]
         // > *hint* queries that end with a '.' are fully qualified names and are cheaper lookups

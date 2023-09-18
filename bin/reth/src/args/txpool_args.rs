@@ -2,8 +2,9 @@
 
 use clap::Args;
 use reth_transaction_pool::{
-    PoolConfig, SubPoolLimit, DEFAULT_PRICE_BUMP, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
-    TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
+    PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP, REPLACE_BLOB_PRICE_BUMP,
+    TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER, TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
+    TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
 };
 
 /// Parameters for debugging purposes
@@ -35,8 +36,12 @@ pub struct TxPoolArgs {
     pub max_account_slots: usize,
 
     /// Price bump (in %) for the transaction pool underpriced check.
-    #[arg(long = "txpool.price_bump", help_heading = "TxPool", default_value_t = DEFAULT_PRICE_BUMP)]
+    #[arg(long = "txpool.pricebump", help_heading = "TxPool", default_value_t = DEFAULT_PRICE_BUMP)]
     pub price_bump: u128,
+
+    /// Price bump percentage to replace an already existing blob transaction
+    #[arg(long = "blobpool.pricebump", help_heading = "TxPool", default_value_t = REPLACE_BLOB_PRICE_BUMP)]
+    pub blob_transaction_price_bump: u128,
 }
 
 impl TxPoolArgs {
@@ -56,7 +61,10 @@ impl TxPoolArgs {
                 max_size: self.queued_max_size * 1024 * 1024,
             },
             max_account_slots: self.max_account_slots,
-            price_bump: self.price_bump,
+            price_bumps: PriceBumpConfig {
+                default_price_bump: self.price_bump,
+                replace_blob_tx_price_bump: self.blob_transaction_price_bump,
+            },
         }
     }
 }

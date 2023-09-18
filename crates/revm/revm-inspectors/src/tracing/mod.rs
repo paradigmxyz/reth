@@ -82,12 +82,35 @@ impl TracingInspector {
         }
     }
 
+    /// Manually the gas used of the root trace.
+    ///
+    /// This is useful if the root trace's gasUsed should mirror the actual gas used by the
+    /// transaction.
+    ///
+    /// This allows setting it manually by consuming the execution result's gas for example.
+    #[inline]
+    pub fn set_transaction_gas_used(&mut self, gas_used: u64) {
+        if let Some(node) = self.traces.arena.first_mut() {
+            node.trace.gas_used = gas_used;
+        }
+    }
+
+    /// Convenience function for [ParityTraceBuilder::set_transaction_gas_used] that consumes the
+    /// type.
+    #[inline]
+    pub fn with_transaction_gas_used(mut self, gas_used: u64) -> Self {
+        self.set_transaction_gas_used(gas_used);
+        self
+    }
+
     /// Consumes the Inspector and returns a [ParityTraceBuilder].
+    #[inline]
     pub fn into_parity_builder(self) -> ParityTraceBuilder {
         ParityTraceBuilder::new(self.traces.arena, self.spec_id, self.config)
     }
 
     /// Consumes the Inspector and returns a [GethTraceBuilder].
+    #[inline]
     pub fn into_geth_builder(self) -> GethTraceBuilder {
         GethTraceBuilder::new(self.traces.arena, self.config)
     }
@@ -175,6 +198,8 @@ impl TracingInspector {
         if self.trace_stack.is_empty() {
             // this is the root call which should get the original gas limit of the transaction,
             // because initialization costs are already subtracted from gas_limit
+            // For the root call this value should use the transaction's gas limit
+            // See <https://github.com/paradigmxyz/reth/issues/3678> and <https://github.com/ethereum/go-ethereum/pull/27029>
             gas_limit = data.env.tx.gas_limit;
 
             // we set the spec id here because we only need to do this once and this condition is
@@ -252,14 +277,12 @@ impl TracingInspector {
 
         self.step_stack.push(StackStep { trace_idx, step_idx: trace.trace.steps.len() });
 
-        let pc = interp.program_counter();
-
         let memory =
             self.config.record_memory_snapshots.then(|| interp.memory.clone()).unwrap_or_default();
         let stack =
             self.config.record_stack_snapshots.then(|| interp.stack.clone()).unwrap_or_default();
 
-        let op = OpCode::try_from_u8(interp.contract.bytecode.bytecode()[pc])
+        let op = OpCode::try_from_u8(interp.current_opcode())
             .or_else(|| {
                 // if the opcode is invalid, we'll use the invalid opcode to represent it because
                 // this is invoked before the opcode is executed, the evm will eventually return a
@@ -271,7 +294,7 @@ impl TracingInspector {
 
         trace.trace.steps.push(CallTraceStep {
             depth: data.journaled_state.depth(),
-            pc,
+            pc: interp.program_counter(),
             op,
             contract: interp.contract.address,
             stack,
@@ -313,38 +336,35 @@ impl TracingInspector {
             }
         }
 
-        if let Some(pc) = interp.program_counter().checked_sub(1) {
-            if self.config.record_state_diff {
-                let op = interp.contract.bytecode.bytecode()[pc];
+        if self.config.record_state_diff {
+            let op = interp.current_opcode();
 
-                let journal_entry = data
-                    .journaled_state
-                    .journal
-                    .last()
-                    // This should always work because revm initializes it as `vec![vec![]]`
-                    // See [JournaledState::new](revm::JournaledState)
-                    .expect("exists; initialized with vec")
-                    .last();
+            let journal_entry = data
+                .journaled_state
+                .journal
+                .last()
+                // This should always work because revm initializes it as `vec![vec![]]`
+                // See [JournaledState::new](revm::JournaledState)
+                .expect("exists; initialized with vec")
+                .last();
 
-                step.storage_change = match (op, journal_entry) {
-                    (
-                        opcode::SLOAD | opcode::SSTORE,
-                        Some(JournalEntry::StorageChange { address, key, had_value }),
-                    ) => {
-                        // SAFETY: (Address,key) exists if part if StorageChange
-                        let value =
-                            data.journaled_state.state[address].storage[key].present_value();
-                        let change = StorageChange { key: *key, value, had_value: *had_value };
-                        Some(change)
-                    }
-                    _ => None,
-                };
-            }
-
-            // The gas cost is the difference between the recorded gas remaining at the start of the
-            // step the remaining gas here, at the end of the step.
-            step.gas_cost = step.gas_remaining - self.gas_inspector.gas_remaining();
+            step.storage_change = match (op, journal_entry) {
+                (
+                    opcode::SLOAD | opcode::SSTORE,
+                    Some(JournalEntry::StorageChange { address, key, had_value }),
+                ) => {
+                    // SAFETY: (Address,key) exists if part if StorageChange
+                    let value = data.journaled_state.state[address].storage[key].present_value();
+                    let change = StorageChange { key: *key, value, had_value: *had_value };
+                    Some(change)
+                }
+                _ => None,
+            };
         }
+
+        // The gas cost is the difference between the recorded gas remaining at the start of the
+        // step the remaining gas here, at the end of the step.
+        step.gas_cost = step.gas_remaining - self.gas_inspector.gas_remaining();
 
         // set the status
         step.status = status;
@@ -359,19 +379,13 @@ where
         &mut self,
         interp: &mut Interpreter,
         data: &mut EVMData<'_, DB>,
-        is_static: bool,
     ) -> InstructionResult {
-        self.gas_inspector.initialize_interp(interp, data, is_static)
+        self.gas_inspector.initialize_interp(interp, data)
     }
 
-    fn step(
-        &mut self,
-        interp: &mut Interpreter,
-        data: &mut EVMData<'_, DB>,
-        is_static: bool,
-    ) -> InstructionResult {
+    fn step(&mut self, interp: &mut Interpreter, data: &mut EVMData<'_, DB>) -> InstructionResult {
         if self.config.record_steps {
-            self.gas_inspector.step(interp, data, is_static);
+            self.gas_inspector.step(interp, data);
             self.start_step(interp, data);
         }
 
@@ -400,11 +414,10 @@ where
         &mut self,
         interp: &mut Interpreter,
         data: &mut EVMData<'_, DB>,
-        is_static: bool,
         eval: InstructionResult,
     ) -> InstructionResult {
         if self.config.record_steps {
-            self.gas_inspector.step_end(interp, data, is_static, eval);
+            self.gas_inspector.step_end(interp, data, eval);
             self.fill_step_on_step_end(interp, data, eval);
         }
         InstructionResult::Continue
@@ -414,9 +427,8 @@ where
         &mut self,
         data: &mut EVMData<'_, DB>,
         inputs: &mut CallInputs,
-        is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
-        self.gas_inspector.call(data, inputs, is_static);
+        self.gas_inspector.call(data, inputs);
 
         // determine correct `from` and `to` based on the call scheme
         let (from, to) = match inputs.context.scheme {
@@ -462,9 +474,8 @@ where
         gas: Gas,
         ret: InstructionResult,
         out: Bytes,
-        is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
-        self.gas_inspector.call_end(data, inputs, gas, ret, out.clone(), is_static);
+        self.gas_inspector.call_end(data, inputs, gas, ret, out.clone());
 
         self.fill_trace_on_call_end(data, ret, &gas, out.clone(), None);
 
@@ -526,7 +537,7 @@ where
         (status, address, gas, retdata)
     }
 
-    fn selfdestruct(&mut self, _contract: Address, target: Address) {
+    fn selfdestruct(&mut self, _contract: Address, target: Address, _value: U256) {
         let trace_idx = self.last_trace_idx();
         let trace = &mut self.traces.arena[trace_idx].trace;
         trace.selfdestruct_refund_target = Some(target)

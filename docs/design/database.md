@@ -14,16 +14,14 @@
 * We implemented that trait for the following encoding formats:
     * [Ethereum-specific Compact Encoding](https://github.com/paradigmxyz/reth/blob/0d9b9a392d4196793736522f3fc2ac804991b45d/crates/codecs/derive/src/compact/mod.rs): A lot of Ethereum datatypes have unnecessary zeros when serialized, or optional (e.g. on empty hashes) which would be nice not to pay in storage costs.
         * [Erigon](https://github.com/ledgerwatch/erigon/blob/12ee33a492f5d240458822d052820d9998653a63/docs/programmers_guide/db_walkthrough.MD) achieves that by having a `bitfield` set on  Table "PlainState which adds a bitfield to Accounts.
-        * Akula expanded it for other tables and datatypes manually. It also saved some more space by storing the length of certain types (U256, u64) using the modular_bitfield crate, which compacts this information.
+        * Akula expanded it for other tables and datatypes manually. It also saved some more space by storing the length of certain types (U256, u64) using the [`modular_bitfield`](https://docs.rs/modular-bitfield/latest/modular_bitfield/) crate, which compacts this information.
         * We generalized it for all types, by writing a derive macro that autogenerates code for implementing the trait. It, also generates the interfaces required for fuzzing using ToB/test-fuzz:
     * [Scale Encoding](https://github.com/paritytech/parity-scale-codec)
     * [Postcard Encoding](https://github.com/jamesmunns/postcard)
     * Passthrough (called `no_codec` in the codebase)
 * We made implementation of these traits easy via a derive macro called [`main_codec`](https://github.com/paradigmxyz/reth/blob/0d9b9a392d4196793736522f3fc2ac804991b45d/crates/codecs/derive/src/lib.rs#L15) that delegates to one of Compact (default), Scale, Postcard or Passthrough encoding. This is [derived on every struct we need](https://github.com/search?q=repo%3Aparadigmxyz%2Freth%20%22%23%5Bmain_codec%5D%22&type=code), and lets us experiment with different encoding formats without having to modify the entire codebase each time.
 
-
-
-# Table design
+### Table layout
 
 Historical state changes are indexed by `BlockNumber`. This means that `reth` stores the state for every account after every block that touched it, and it provides indexes for accessing that data quickly. While this may make the database size bigger (needs benchmark once `reth` is closer to prod).
 
@@ -48,21 +46,42 @@ BlockBodyIndices {
     u64 first_tx_num
     u64 tx_count
 }
-Receipts {
-    u64 TxNumber "PK"
-    Receipt Data
+BlockOmmers {
+    u64 BlockNumber "PK"
+    Header[] Ommers
+}
+BlockWithdrawals {
+    u64 BlockNumber "PK"
+    Withdrawal[] Withdrawals
 }
 Transactions {
     u64 TxNumber "PK"
     TransactionSignedNoHash Data
 }
-TransactionHash {
+TxHashNumber {
     H256 TxHash "PK"
     u64 TxNumber
 }
 TransactionBlock {
-    u64 TxNumber "PK"
+    u64 MaxTxNumber "PK"
     u64 BlockNumber
+}
+Receipts {
+    u64 TxNumber "PK"
+    Receipt Data
+}
+Bytecodes {
+    H256 CodeHash "PK"
+    Bytes Code
+}
+PlainAccountState {
+    Address Account "PK"
+    Account Data
+}
+PlainStorageState {
+    Address Account "PK"
+    H256 StorageKey "PK"
+    U256 StorageValue
 }
 AccountHistory {
     H256 Account "PK"
@@ -84,18 +103,44 @@ StorageChangeSet {
     H256 StorageKey "PK"
     ChangeSet StorageChangeSet "Storage entry before transition"
 }
-EVM ||--o{ AccountHistory: "Load Account by first greater BlockNumber"
-EVM ||--o{ StorageHistory: "Load Storage Entry by first greater BlockNumber"
-TransactionHash ||--o{ Transactions : index
-Transactions ||--o{ TransactionBlock : index
-BlockBodyIndices ||--o{ TransactionBlock : "index"
-TransactionBlock ||--o{ BlockBodyIndices : "index"
-Headers ||--o{ AccountChangeSet : "unique index"
-AccountHistory ||--o{ AccountChangeSet : index
-StorageHistory ||--o{ StorageChangeSet : index
-Headers ||--o{ StorageChangeSet : "unique index"
-BlockBodyIndices ||--o{ Headers : "index"
-Headers ||--o{ HeaderNumbers : "Calculate hash from header"
-CanonicalHeaders ||--o{ Headers : "index"
-Transactions ||--o{ Receipts : index
+HashedAccount {
+    H256 HashedAddress "PK"
+    Account Data
+}
+HashedStorage {
+    H256 HashedAddress "PK"
+    H256 HashedStorageKey "PK"
+    U256 StorageValue
+}
+AccountsTrie {
+    StoredNibbles Nibbles "PK"
+    BranchNodeCompact Node
+}
+StoragesTrie {
+    H256 HashedAddress "PK"
+    StoredNibblesSubKey NibblesSubKey "PK"
+    StorageTrieEntry Node
+}
+TxSenders {
+    u64 TxNumber "PK"
+    Address Sender
+}
+TxHashNumber ||--|| Transactions : "hash -> tx id"
+TransactionBlock ||--|{ Transactions : "tx id -> block number"
+BlockBodyIndices ||--o{ Transactions : "block number -> tx ids"
+Headers ||--o{ AccountChangeSet : "each block has zero or more changesets"
+Headers ||--o{ StorageChangeSet : "each block has zero or more changesets"
+AccountHistory }|--|{ AccountChangeSet : index
+StorageHistory }|--|{ StorageChangeSet : index
+Headers ||--o| BlockOmmers : "each block has 0 or more ommers"
+BlockBodyIndices ||--|| Headers : "index"
+HeaderNumbers |o--|| Headers : "block hash -> block number"
+CanonicalHeaders |o--|| Headers : "canonical chain block number -> block hash"
+Transactions ||--|| Receipts : "each tx has a receipt"
+PlainAccountState }o--o| Bytecodes : "an account can have a bytecode"
+PlainAccountState ||--o{ PlainStorageState : "an account has 0 or more storage slots"
+Transactions ||--|| TxSenders : "a tx has exactly 1 sender"
+
+PlainAccountState ||--|| HashedAccount : "hashed representation"
+PlainStorageState ||--|| HashedStorage : "hashed representation"
 ```

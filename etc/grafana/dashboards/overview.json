@@ -27,7 +27,13 @@
       "type": "grafana",
       "id": "grafana",
       "name": "Grafana",
-      "version": "10.0.2"
+      "version": "10.1.0"
+    },
+    {
+      "type": "panel",
+      "id": "graph",
+      "name": "Graph (old)",
+      "version": ""
     },
     {
       "type": "panel",
@@ -90,6 +96,7 @@
   "liveNow": false,
   "panels": [
     {
+      "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -159,7 +166,7 @@
         "showThresholdLabels": false,
         "showThresholdMarkers": true
       },
-      "pluginVersion": "10.0.1",
+      "pluginVersion": "10.1.0",
       "targets": [
         {
           "datasource": {
@@ -226,7 +233,7 @@
         "showUnfilled": true,
         "valueMode": "color"
       },
-      "pluginVersion": "10.0.1",
+      "pluginVersion": "10.1.0",
       "targets": [
         {
           "datasource": {
@@ -270,6 +277,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -361,6 +369,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -470,6 +479,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -609,7 +619,7 @@
           "unit": "percentunit"
         }
       },
-      "pluginVersion": "10.0.1",
+      "pluginVersion": "10.1.0",
       "targets": [
         {
           "datasource": {
@@ -727,6 +737,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -1006,7 +1017,7 @@
         },
         "showHeader": true
       },
-      "pluginVersion": "10.0.1",
+      "pluginVersion": "10.1.0",
       "targets": [
         {
           "datasource": {
@@ -1027,12 +1038,107 @@
       "type": "table"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "The number of pages on the MDBX freelist",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 42
+      },
+      "id": 113,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(reth_db_freelist{instance=~\"$instance\"}) by (job)",
+          "legendFormat": "Pages ({{job}})",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Freelist",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 42
+        "y": 50
       },
       "id": 46,
       "panels": [],
@@ -1066,6 +1172,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -1100,7 +1207,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 43
+        "y": 51
       },
       "id": 56,
       "options": {
@@ -1173,7 +1280,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 51
+        "y": 59
       },
       "id": 6,
       "panels": [],
@@ -1207,6 +1314,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -1244,7 +1352,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 52
+        "y": 60
       },
       "id": 18,
       "options": {
@@ -1300,6 +1408,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -1337,7 +1446,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 52
+        "y": 60
       },
       "id": 16,
       "options": {
@@ -1418,6 +1527,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -1456,7 +1566,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 52
+        "y": 60
       },
       "id": 8,
       "options": {
@@ -1515,6 +1625,10 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1535,7 +1649,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 60
+        "y": 68
       },
       "id": 54,
       "options": {
@@ -1718,6 +1832,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -1755,7 +1870,7 @@
         "h": 8,
         "w": 14,
         "x": 8,
-        "y": 60
+        "y": 68
       },
       "id": 103,
       "options": {
@@ -1792,7 +1907,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 68
+        "y": 76
       },
       "id": 24,
       "panels": [],
@@ -1825,6 +1940,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -1887,7 +2003,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 69
+        "y": 77
       },
       "id": 26,
       "options": {
@@ -1980,6 +2096,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -2018,7 +2135,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 69
+        "y": 77
       },
       "id": 33,
       "options": {
@@ -2098,6 +2215,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -2135,7 +2253,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 77
+        "y": 85
       },
       "id": 36,
       "options": {
@@ -2184,7 +2302,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 85
+        "y": 93
       },
       "id": 32,
       "panels": [],
@@ -2218,6 +2336,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -2239,8 +2358,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2289,7 +2407,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 86
+        "y": 94
       },
       "id": 30,
       "options": {
@@ -2417,6 +2535,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -2439,8 +2558,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               }
             ]
           },
@@ -2452,7 +2570,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 86
+        "y": 94
       },
       "id": 28,
       "options": {
@@ -2532,6 +2650,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -2553,8 +2672,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2569,7 +2687,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 94
+        "y": 102
       },
       "id": 35,
       "options": {
@@ -2637,6 +2755,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -2658,8 +2777,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2692,7 +2810,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 94
+        "y": 102
       },
       "id": 73,
       "options": {
@@ -2742,7 +2860,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 102
+        "y": 110
       },
       "id": 89,
       "panels": [],
@@ -2776,6 +2894,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -2797,8 +2916,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2814,7 +2932,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 103
+        "y": 111
       },
       "id": 91,
       "options": {
@@ -2894,6 +3012,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -2915,8 +3034,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2931,7 +3049,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 103
+        "y": 111
       },
       "id": 92,
       "options": {
@@ -3011,6 +3129,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -3032,8 +3151,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3066,7 +3184,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 111
+        "y": 119
       },
       "id": 102,
       "options": {
@@ -3148,6 +3266,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -3169,8 +3288,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3185,7 +3303,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 111
+        "y": 119
       },
       "id": 94,
       "options": {
@@ -3222,14 +3340,14 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Tracks the number of transactions inserted and removed from the transaction pool, as well as the number of invalid transactions",
+      "description": "Currently active outgoing GetPooledTransactions requests.",
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
           "custom": {
-            "axisCenteredZero": true,
+            "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
             "axisPlacement": "auto",
@@ -3242,6 +3360,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -3263,8 +3382,101 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 127
+      },
+      "id": 104,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_network_inflight_transaction_requests{instance=~\"$instance\"}",
+          "hide": false,
+          "legendFormat": "Inflight Transaction Requests",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Inflight Transaction Requests",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Tracks the number of transactions inserted and removed from the transaction pool, as well as the number of invalid transactions",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": true,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3308,8 +3520,8 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 0,
-        "y": 119
+        "x": 12,
+        "y": 127
       },
       "id": 93,
       "options": {
@@ -3389,6 +3601,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -3410,8 +3623,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3451,8 +3663,8 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 12,
-        "y": 119
+        "x": 0,
+        "y": 135
       },
       "id": 95,
       "options": {
@@ -3510,12 +3722,161 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Tracks the entries, byte size, failed inserts and file deletes of the blob store",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 135
+      },
+      "id": 115,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_blobstore_entries{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Entries",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_blobstore_byte_size{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Bytesize",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_blobstore_failed_inserts{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Failed Inserts",
+          "range": true,
+          "refId": "C",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_blobstore_failed_deletes{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Failed Deletes",
+          "range": true,
+          "refId": "D",
+          "useBackend": false
+        }
+      ],
+      "title": "Blob store",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 127
+        "y": 143
       },
       "id": 79,
       "panels": [],
@@ -3549,6 +3910,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -3570,8 +3932,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3586,7 +3947,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 128
+        "y": 144
       },
       "id": 74,
       "options": {
@@ -3643,6 +4004,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -3664,8 +4026,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3680,7 +4041,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 128
+        "y": 144
       },
       "id": 80,
       "options": {
@@ -3737,6 +4098,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -3758,8 +4120,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3774,7 +4135,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 136
+        "y": 152
       },
       "id": 81,
       "options": {
@@ -3807,12 +4168,106 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 152
+      },
+      "id": 114,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "rate(reth_consensus_engine_beacon_make_canonical_committed_latency_sum{instance=~\"$instance\"}[$__rate_interval]) / rate(reth_consensus_engine_beacon_make_canonical_committed_latency_count{instance=~\"$instance\"}[$__rate_interval])",
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Canonical Commit Latency time",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 144
+        "y": 160
       },
       "id": 87,
       "panels": [],
@@ -3846,6 +4301,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -3867,8 +4323,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3883,7 +4338,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 145
+        "y": 161
       },
       "id": 83,
       "options": {
@@ -3939,6 +4394,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -3960,8 +4416,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3976,7 +4431,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 145
+        "y": 161
       },
       "id": 84,
       "options": {
@@ -4044,6 +4499,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -4065,8 +4521,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4081,7 +4536,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 153
+        "y": 169
       },
       "id": 85,
       "options": {
@@ -4118,7 +4573,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 161
+        "y": 177
       },
       "id": 68,
       "panels": [],
@@ -4152,6 +4607,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 3,
             "pointSize": 5,
@@ -4173,8 +4629,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4189,7 +4644,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 162
+        "y": 178
       },
       "id": 60,
       "options": {
@@ -4245,6 +4700,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 3,
             "pointSize": 5,
@@ -4266,8 +4722,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4282,7 +4737,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 162
+        "y": 178
       },
       "id": 62,
       "options": {
@@ -4338,6 +4793,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 3,
             "pointSize": 5,
@@ -4359,8 +4815,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4375,7 +4830,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 170
+        "y": 186
       },
       "id": 64,
       "options": {
@@ -4412,7 +4867,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 178
+        "y": 194
       },
       "id": 97,
       "panels": [],
@@ -4443,6 +4898,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -4464,8 +4920,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4481,7 +4936,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 179
+        "y": 195
       },
       "id": 98,
       "options": {
@@ -4503,7 +4958,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_jemalloc_active",
+          "expr": "reth_jemalloc_active{instance=~\"$instance\"}",
           "instant": false,
           "legendFormat": "Active",
           "range": true,
@@ -4515,7 +4970,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_jemalloc_allocated",
+          "expr": "reth_jemalloc_allocated{instance=~\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Allocated",
@@ -4528,7 +4983,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_jemalloc_mapped",
+          "expr": "reth_jemalloc_mapped{instance=~\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Mapped",
@@ -4541,7 +4996,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_jemalloc_metadata",
+          "expr": "reth_jemalloc_metadata{instance=~\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Metadata",
@@ -4554,7 +5009,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_jemalloc_resident",
+          "expr": "reth_jemalloc_resident{instance=~\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Resident",
@@ -4567,7 +5022,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_jemalloc_retained",
+          "expr": "reth_jemalloc_retained{instance=~\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Retained",
@@ -4603,6 +5058,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -4624,8 +5080,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4641,7 +5096,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 179
+        "y": 195
       },
       "id": 101,
       "options": {
@@ -4663,7 +5118,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_process_resident_memory_bytes",
+          "expr": "reth_process_resident_memory_bytes{instance=~\"$instance\"}",
           "instant": false,
           "legendFormat": "Resident",
           "range": true,
@@ -4698,6 +5153,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -4719,8 +5175,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4736,7 +5191,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 187
+        "y": 203
       },
       "id": 99,
       "options": {
@@ -4757,8 +5212,8 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "editorMode": "code",
-          "expr": "avg(rate(reth_process_cpu_seconds_total[1m]))",
+          "editorMode": "builder",
+          "expr": "avg(rate(reth_process_cpu_seconds_total{instance=~\"$instance\"}[1m]))",
           "instant": false,
           "legendFormat": "Process",
           "range": true,
@@ -4793,6 +5248,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -4814,8 +5270,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4831,7 +5286,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 187
+        "y": 203
       },
       "id": 100,
       "options": {
@@ -4852,8 +5307,8 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "editorMode": "code",
-          "expr": "reth_process_open_fds",
+          "editorMode": "builder",
+          "expr": "reth_process_open_fds{instance=~\"$instance\"}",
           "instant": false,
           "legendFormat": "Open",
           "range": true,
@@ -4869,7 +5324,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 195
+        "y": 211
       },
       "id": 105,
       "panels": [],
@@ -4900,6 +5355,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -4922,8 +5378,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4939,7 +5394,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 196
+        "y": 212
       },
       "id": 106,
       "options": {
@@ -4995,6 +5450,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -5017,8 +5473,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5034,7 +5489,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 196
+        "y": 212
       },
       "id": 107,
       "options": {
@@ -5072,62 +5527,190 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 204
+        "y": 220
       },
-      "id": 97,
+      "id": 108,
       "panels": [],
       "title": "RPC server",
       "type": "row"
     },
     {
-      "title": "Active Requests",
-      "description": "The number of active requests.", 
-      "type": "graph",
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
+      "description": "The number of active requests.",
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 221
+      },
+      "hiddenSeries": false,
+      "id": 109,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "10.1.0",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
       "targets": [
         {
-          "expr": "reth_rpc_server_requests_started - reth_rpc_server_requests_finished",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_rpc_server_requests_started{instance=~\"$instance\"} - reth_rpc_server_requests_finished{instance=~\"$instance\"}",
           "format": "time_series",
           "legendFormat": "Active Requests",
+          "range": true,
           "refId": "A"
         }
       ],
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 205
+      "thresholds": [],
+      "timeRegions": [],
+      "title": "Active Requests",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "mode": "time",
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "logBase": 1,
+          "show": true
+        },
+        {
+          "format": "short",
+          "logBase": 1,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false
       }
     },
     {
-      "title": "Active Websocket Connections",
-      "description": "The number of active websocket connections.", 
-      "type": "graph",
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
+      "description": "The number of active websocket connections.",
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 221
+      },
+      "hiddenSeries": false,
+      "id": 110,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "10.1.0",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
       "targets": [
         {
-          "expr": "reth_rpc_server_ws_session_opened - reth_rpc_server_ws_session_closed",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_rpc_server_ws_session_opened{instance=~\"$instance\"} - reth_rpc_server_ws_session_closed{instance=~\"$instance\"}",
           "format": "time_series",
           "legendFormat": "Active Websocket Connections",
+          "range": true,
           "refId": "A"
         }
       ],
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 205
+      "thresholds": [],
+      "timeRegions": [],
+      "title": "Active Websocket Connections",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "mode": "time",
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "logBase": 1,
+          "show": true
+        },
+        {
+          "format": "short",
+          "logBase": 1,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false
       }
     },
     {
-      "title": "Request Latency time",
-      "type": "heatmap",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -5152,9 +5735,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 213
+        "y": 229
       },
-      "id": 42,
+      "id": 111,
       "maxDataPoints": 25,
       "options": {
         "calculate": false,
@@ -5196,7 +5779,7 @@
           "unit": "percentunit"
         }
       },
-      "pluginVersion": "10.0.2",
+      "pluginVersion": "10.1.0",
       "targets": [
         {
           "datasource": {
@@ -5205,18 +5788,18 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(increase(reth_rpc_server_request_latency{instance=~\"$instance\"}[$__interval])) by (quantile)",
+          "expr": "sum(increase(reth_rpc_server_request_latency{instance=~\"$instance\"}[$__rate_interval])) by (quantile)",
           "format": "time_series",
           "instant": false,
           "legendFormat": "{{quantile}}",
           "range": true,
           "refId": "A"
         }
-      ]
+      ],
+      "title": "Request Latency time",
+      "type": "heatmap"
     },
     {
-      "title": "Call Latency time",
-      "type": "heatmap",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -5241,9 +5824,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 213
+        "y": 229
       },
-      "id": 42,
+      "id": 112,
       "maxDataPoints": 25,
       "options": {
         "calculate": false,
@@ -5285,7 +5868,7 @@
           "unit": "percentunit"
         }
       },
-      "pluginVersion": "10.0.2",
+      "pluginVersion": "10.1.0",
       "targets": [
         {
           "datasource": {
@@ -5294,14 +5877,16 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(increase(reth_rpc_server_call_latency{instance=~\"$instance\"}[$__interval])) by (quantile)",
+          "expr": "sum(increase(reth_rpc_server_call_latency{instance=~\"$instance\"}[$__rate_interval])) by (quantile)",
           "format": "time_series",
           "instant": false,
           "legendFormat": "{{quantile}}",
           "range": true,
           "refId": "A"
         }
-      ]
+      ],
+      "title": "Call Latency time",
+      "type": "heatmap"
     }
   ],
   "refresh": "30s",
@@ -5343,6 +5928,6 @@
   "timezone": "",
   "title": "reth",
   "uid": "2k8BXz24x",
-  "version": 4,
+  "version": 10,
   "weekStart": ""
 }

@@ -31,7 +31,8 @@ use reth_provider::{
 };
 use reth_prune::Pruner;
 use reth_rpc_types::engine::{
-    ExecutionPayload, PayloadAttributes, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
+    CancunPayloadFields, ExecutionPayload, PayloadAttributes, PayloadError, PayloadStatus,
+    PayloadStatusEnum, PayloadValidationError,
 };
 use reth_stages::{ControlFlow, Pipeline, PipelineError};
 use reth_tasks::TaskSpawner;
@@ -551,43 +552,60 @@ where
         state: ForkchoiceState,
         attrs: Option<PayloadAttributes>,
         tx: oneshot::Sender<Result<OnForkChoiceUpdated, Error>>,
-    ) -> bool {
+    ) -> OnForkchoiceUpdateOutcome {
         self.metrics.forkchoice_updated_messages.increment(1);
         self.blockchain.on_forkchoice_update_received(&state);
 
         let on_updated = match self.forkchoice_updated(state, attrs) {
             Ok(response) => response,
             Err(error) => {
+                if let Error::Execution(ref err) = error {
+                    if err.is_fatal() {
+                        // FCU resulted in a fatal error from which we can't recover
+                        let err = err.clone();
+                        let _ = tx.send(Err(error));
+                        return OnForkchoiceUpdateOutcome::Fatal(err)
+                    }
+                }
                 let _ = tx.send(Err(error));
-                return false
+                return OnForkchoiceUpdateOutcome::Processed
             }
         };
 
-        let status = on_updated.forkchoice_status();
+        let fcu_status = on_updated.forkchoice_status();
 
         // update the forkchoice state tracker
-        self.forkchoice_state_tracker.set_latest(state, status);
+        self.forkchoice_state_tracker.set_latest(state, fcu_status);
 
-        let is_valid_response = on_updated.is_valid_update();
+        // send the response to the CL ASAP
         let _ = tx.send(Ok(on_updated));
 
-        // notify listeners about new processed FCU
-        self.listeners.notify(BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status));
+        match fcu_status {
+            ForkchoiceStatus::Invalid => {}
+            ForkchoiceStatus::Valid => {
+                // FCU head is valid, we're no longer syncing
+                self.sync_state_updater.update_sync_state(SyncState::Idle);
+                // node's fully synced, clear active download requests
+                self.sync.clear_block_download_requests();
 
-        // Terminate the sync early if it's reached the maximum user
-        // configured block.
-        if is_valid_response {
-            // node's fully synced, clear active download requests
-            self.sync.clear_block_download_requests();
-
-            // check if we reached the maximum configured block
-            let tip_number = self.blockchain.canonical_tip().number;
-            if self.sync.has_reached_max_block(tip_number) {
-                return true
+                // check if we reached the maximum configured block
+                let tip_number = self.blockchain.canonical_tip().number;
+                if self.sync.has_reached_max_block(tip_number) {
+                    // Terminate the sync early if it's reached the maximum user
+                    // configured block.
+                    return OnForkchoiceUpdateOutcome::ReachedMaxBlock
+                }
+            }
+            ForkchoiceStatus::Syncing => {
+                // we're syncing
+                self.sync_state_updater.update_sync_state(SyncState::Syncing);
             }
         }
 
-        false
+        // notify listeners about new processed FCU
+        self.listeners.notify(BeaconConsensusEngineEvent::ForkchoiceUpdated(state, fcu_status));
+
+        OnForkchoiceUpdateOutcome::Processed
     }
 
     /// Called to resolve chain forks and ensure that the Execution layer is working with the latest
@@ -896,11 +914,11 @@ where
         error: Error,
     ) -> PayloadStatus {
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
-        warn!(target: "consensus::engine", ?error, ?state, "Failed to canonicalize the head hash");
 
         // check if the new head was previously invalidated, if so then we deem this FCU
         // as invalid
         if let Some(invalid_ancestor) = self.check_invalid_ancestor(state.head_block_hash) {
+            warn!(target: "consensus::engine", ?error, ?state, ?invalid_ancestor, head=?state.head_block_hash, "Failed to canonicalize the head hash, head is also considered invalid");
             debug!(target: "consensus::engine", head=?state.head_block_hash, current_error=?error, "Head was previously marked as invalid");
             return invalid_ancestor
         }
@@ -912,12 +930,19 @@ where
                     ..
                 }),
             ) => {
+                warn!(target: "consensus::engine", ?error, ?state, "Failed to canonicalize the head hash");
                 return PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                     validation_error: error.to_string(),
                 })
                 .with_latest_valid_hash(H256::zero())
             }
+            Error::Execution(BlockExecutionError::BlockHashNotFoundInChain { .. }) => {
+                // This just means we couldn't find the block when attempting to make it canonical,
+                // so we should not warn the user, since this will result in us attempting to sync
+                // to a new target and is considered normal operation during sync
+            }
             _ => {
+                warn!(target: "consensus::engine", ?error, ?state, "Failed to canonicalize the head hash");
                 // TODO(mattsse) better error handling before attempting to sync (FCU could be
                 // invalid): only trigger sync if we can't determine whether the FCU is invalid
             }
@@ -958,6 +983,7 @@ where
             self.sync.download_full_block(target);
         }
 
+        debug!(target: "consensus::engine", ?target, "Syncing to new target");
         PayloadStatus::from_status(PayloadStatusEnum::Syncing)
     }
 
@@ -1032,12 +1058,13 @@ where
     ///
     /// This returns a [`PayloadStatus`] that represents the outcome of a processed new payload and
     /// returns an error if an internal error occurred.
-    #[instrument(level = "trace", skip(self, payload), fields(block_hash= ?payload.block_hash, block_number = %payload.block_number.as_u64(), is_pipeline_idle = %self.sync.is_pipeline_idle()), target = "consensus::engine")]
+    #[instrument(level = "trace", skip(self, payload, cancun_fields), fields(block_hash= ?payload.block_hash(), block_number = %payload.block_number(), is_pipeline_idle = %self.sync.is_pipeline_idle()), target = "consensus::engine")]
     fn on_new_payload(
         &mut self,
         payload: ExecutionPayload,
+        cancun_fields: Option<CancunPayloadFields>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
-        let block = match self.ensure_well_formed_payload(payload) {
+        let block = match self.ensure_well_formed_payload(payload, cancun_fields) {
             Ok(block) => block,
             Err(status) => return Ok(status),
         };
@@ -1098,12 +1125,18 @@ where
     ///    - missing or invalid base fee
     ///    - invalid extra data
     ///    - invalid transactions
+    ///    - incorrect hash
+    ///    - the versioned hashes passed with the payload do not exactly match transaction
+    ///    versioned hashes
     fn ensure_well_formed_payload(
         &self,
         payload: ExecutionPayload,
+        cancun_fields: Option<CancunPayloadFields>,
     ) -> Result<SealedBlock, PayloadStatus> {
-        let parent_hash = payload.parent_hash;
-        let block = match SealedBlock::try_from(payload) {
+        let parent_hash = payload.parent_hash();
+        let block = match payload.try_into_sealed_block(
+            cancun_fields.as_ref().map(|fields| fields.parent_beacon_block_root),
+        ) {
             Ok(block) => block,
             Err(error) => {
                 error!(target: "consensus::engine", ?error, "Invalid payload");
@@ -1121,7 +1154,76 @@ where
             }
         };
 
+        let block_versioned_hashes = block
+            .blob_transactions()
+            .iter()
+            .filter_map(|tx| tx.as_eip4844().map(|blob_tx| &blob_tx.blob_versioned_hashes))
+            .flatten()
+            .collect::<Vec<_>>();
+
+        self.validate_versioned_hashes(parent_hash, block_versioned_hashes, cancun_fields)?;
+
         Ok(block)
+    }
+
+    /// Validates that the versioned hashes in the block match the versioned hashes passed in the
+    /// [CancunPayloadFields], if the cancun payload fields are provided. If the payload fields are
+    /// not provided, but versioned hashes exist in the block, this returns a [PayloadStatus] with
+    /// the [PayloadError::InvalidVersionedHashes] error.
+    ///
+    /// This validates versioned hashes according to the Engine API Cancun spec:
+    /// <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification>
+    fn validate_versioned_hashes(
+        &self,
+        parent_hash: H256,
+        block_versioned_hashes: Vec<&H256>,
+        cancun_fields: Option<CancunPayloadFields>,
+    ) -> Result<(), PayloadStatus> {
+        // This validates the following engine API rule:
+        //
+        // 3. Given the expected array of blob versioned hashes client software **MUST** run its
+        //    validation by taking the following steps:
+        //
+        //   1. Obtain the actual array by concatenating blob versioned hashes lists
+        //      (`tx.blob_versioned_hashes`) of each [blob
+        //      transaction](https://eips.ethereum.org/EIPS/eip-4844#new-transaction-type) included
+        //      in the payload, respecting the order of inclusion. If the payload has no blob
+        //      transactions the expected array **MUST** be `[]`.
+        //
+        //   2. Return `{status: INVALID, latestValidHash: null, validationError: errorMessage |
+        //      null}` if the expected and the actual arrays don't match.
+        //
+        // This validation **MUST** be instantly run in all cases even during active sync process.
+        if let Some(fields) = cancun_fields {
+            if block_versioned_hashes.len() != fields.versioned_hashes.len() {
+                // if the lengths don't match then we know that the payload is invalid
+                let latest_valid_hash =
+                    self.latest_valid_hash_for_invalid_payload(parent_hash, None);
+                let status = PayloadStatusEnum::from(PayloadError::InvalidVersionedHashes);
+                return Err(PayloadStatus::new(status, latest_valid_hash))
+            }
+
+            // we can use `zip` safely here because we already compared their length
+            let zipped_versioned_hashes =
+                fields.versioned_hashes.iter().zip(block_versioned_hashes);
+            for (payload_versioned_hash, block_versioned_hash) in zipped_versioned_hashes {
+                if payload_versioned_hash != block_versioned_hash {
+                    // One of the hashes does not match - return invalid
+                    let latest_valid_hash =
+                        self.latest_valid_hash_for_invalid_payload(parent_hash, None);
+                    let status = PayloadStatusEnum::from(PayloadError::InvalidVersionedHashes);
+                    return Err(PayloadStatus::new(status, latest_valid_hash))
+                }
+            }
+        } else if !block_versioned_hashes.is_empty() {
+            // there are versioned hashes in the block but no expected versioned hashes were
+            // provided in the new payload call, so the payload is invalid
+            let latest_valid_hash = self.latest_valid_hash_for_invalid_payload(parent_hash, None);
+            let status = PayloadStatusEnum::from(PayloadError::InvalidVersionedHashes);
+            return Err(PayloadStatus::new(status, latest_valid_hash))
+        }
+
+        Ok(())
     }
 
     /// When the pipeline or the pruner is active, the tree is unable to commit any additional
@@ -1367,8 +1469,8 @@ where
 
     /// Attempt to form a new canonical chain based on the current sync target.
     ///
-    /// This is invoked when we successfully downloaded a new block from the network which resulted
-    /// in either [BlockStatus::Accepted] or [BlockStatus::Valid].
+    /// This is invoked when we successfully __downloaded__ a new block from the network which
+    /// resulted in either [BlockStatus::Accepted] or [BlockStatus::Valid].
     ///
     /// Note: This will not succeed if the sync target has changed since the block download request
     /// was issued and the new target is still disconnected and additional missing blocks are
@@ -1561,10 +1663,7 @@ where
                             sync_target_state.finalized_block_hash,
                         ) {
                             Ok(synced) => {
-                                if synced {
-                                    // we're consider this synced and transition to live sync
-                                    self.sync_state_updater.update_sync_state(SyncState::Idle);
-                                } else {
+                                if !synced {
                                     // We don't have the finalized block in the database, so
                                     // we need to run another pipeline.
                                     self.sync.set_pipeline_sync_target(
@@ -1610,7 +1709,6 @@ where
             }
             EnginePruneEvent::Finished { result } => {
                 trace!(target: "consensus::engine", ?result, "Pruner finished");
-                self.sync_state_updater.update_sync_state(SyncState::Idle);
                 match result {
                     Ok(_) => {
                         // Update the state and hashes of the blockchain tree if possible.
@@ -1700,13 +1798,21 @@ where
             match this.engine_message_rx.poll_next_unpin(cx) {
                 Poll::Ready(Some(msg)) => match msg {
                     BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
-                        if this.on_forkchoice_updated(state, payload_attrs, tx) {
-                            return Poll::Ready(Ok(()))
+                        match this.on_forkchoice_updated(state, payload_attrs, tx) {
+                            OnForkchoiceUpdateOutcome::Processed => {}
+                            OnForkchoiceUpdateOutcome::ReachedMaxBlock => {
+                                // reached the max block, we can terminate the future
+                                return Poll::Ready(Ok(()))
+                            }
+                            OnForkchoiceUpdateOutcome::Fatal(err) => {
+                                // fatal error, we can terminate the future
+                                return Poll::Ready(Err(Error::Execution(err).into()))
+                            }
                         }
                     }
-                    BeaconEngineMessage::NewPayload { payload, tx } => {
+                    BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {
                         this.metrics.new_payload_messages.increment(1);
-                        let res = this.on_new_payload(payload);
+                        let res = this.on_new_payload(payload, cancun_fields);
                         let _ = tx.send(res);
                     }
                     BeaconEngineMessage::TransitionConfigurationExchanged => {
@@ -1763,6 +1869,17 @@ where
     }
 }
 
+/// Represents all outcomes of an applied fork choice update.
+#[derive(Debug)]
+enum OnForkchoiceUpdateOutcome {
+    /// FCU was processed successfully.
+    Processed,
+    /// FCU was processed successfully and reached max block.
+    ReachedMaxBlock,
+    /// FCU resulted in a __fatal__ block execution error from which we can't recover.
+    Fatal(BlockExecutionError),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1773,7 +1890,9 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_primitives::{stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, H256, MAINNET};
     use reth_provider::{BlockWriter, ProviderFactory};
-    use reth_rpc_types::engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
+    use reth_rpc_types::engine::{
+        ExecutionPayloadV1, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
+    };
     use reth_stages::{ExecOutput, PipelineError, StageError};
     use std::{collections::VecDeque, sync::Arc, time::Duration};
     use tokio::sync::oneshot::error::TryRecvError;
@@ -1833,7 +1952,7 @@ mod tests {
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
         // consensus engine is still idle because no FCUs were received
-        let _ = env.send_new_payload(SealedBlock::default().into()).await;
+        let _ = env.send_new_payload(ExecutionPayloadV1::from(SealedBlock::default()), None).await;
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
         // consensus engine is still idle because pruning is running
@@ -1938,14 +2057,14 @@ mod tests {
     }
 
     fn insert_blocks<'a, DB: Database>(
-        db: &DB,
+        db: DB,
         chain: Arc<ChainSpec>,
         mut blocks: impl Iterator<Item = &'a SealedBlock>,
     ) {
         let factory = ProviderFactory::new(db, chain);
         let provider = factory.provider_rw().unwrap();
         blocks
-            .try_for_each(|b| provider.insert_block(b.clone(), None).map(|_| ()))
+            .try_for_each(|b| provider.insert_block(b.clone(), None, None).map(|_| ()))
             .expect("failed to insert");
         provider.commit().unwrap();
     }
@@ -2247,14 +2366,22 @@ mod tests {
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
             // Send new payload
-            let res =
-                env.send_new_payload(random_block(&mut rng, 0, None, None, Some(0)).into()).await;
+            let res = env
+                .send_new_payload(
+                    ExecutionPayloadV1::from(random_block(&mut rng, 0, None, None, Some(0))),
+                    None,
+                )
+                .await;
             // Invalid, because this is a genesis block
             assert_matches!(res, Ok(result) => assert_matches!(result.status, PayloadStatusEnum::Invalid { .. }));
 
             // Send new payload
-            let res =
-                env.send_new_payload(random_block(&mut rng, 1, None, None, Some(0)).into()).await;
+            let res = env
+                .send_new_payload(
+                    ExecutionPayloadV1::from(random_block(&mut rng, 1, None, None, Some(0))),
+                    None,
+                )
+                .await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
 
@@ -2303,8 +2430,10 @@ mod tests {
             assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
 
             // Send new payload
-            let result =
-                env.send_new_payload_retry_on_syncing(block2.clone().into()).await.unwrap();
+            let result = env
+                .send_new_payload_retry_on_syncing(ExecutionPayloadV1::from(block2.clone()), None)
+                .await
+                .unwrap();
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Valid)
                 .with_latest_valid_hash(block2.hash);
             assert_eq!(result, expected_result);
@@ -2402,7 +2531,7 @@ mod tests {
 
             // Send new payload
             let block = random_block(&mut rng, 2, Some(H256::random()), None, Some(0));
-            let res = env.send_new_payload(block.into()).await;
+            let res = env.send_new_payload(ExecutionPayloadV1::from(block), None).await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
 
@@ -2464,8 +2593,10 @@ mod tests {
             assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
 
             // Send new payload
-            let result =
-                env.send_new_payload_retry_on_syncing(block2.clone().into()).await.unwrap();
+            let result = env
+                .send_new_payload_retry_on_syncing(ExecutionPayloadV1::from(block2.clone()), None)
+                .await
+                .unwrap();
 
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                 validation_error: BlockValidationError::BlockPreMerge { hash: block2.hash }

@@ -1,6 +1,6 @@
 use crate::{
-    providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader, PostState,
-    StateProvider, StateRootProvider,
+    providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
+    BundleStateWithReceipts, StateProvider, StateRootProvider,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -56,8 +56,8 @@ impl<'a, 'b, TX: DbTx<'a>> BlockHashReader for LatestStateProviderRef<'a, 'b, TX
 }
 
 impl<'a, 'b, TX: DbTx<'a>> StateRootProvider for LatestStateProviderRef<'a, 'b, TX> {
-    fn state_root(&self, post_state: PostState) -> Result<H256> {
-        post_state
+    fn state_root(&self, bundle_state: BundleStateWithReceipts) -> Result<H256> {
+        bundle_state
             .state_root_slow(self.db)
             .map_err(|err| reth_interfaces::Error::Database(err.into()))
     }

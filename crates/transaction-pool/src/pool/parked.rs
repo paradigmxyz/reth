@@ -17,7 +17,7 @@ use std::{cmp::Ordering, collections::BTreeSet, ops::Deref, sync::Arc};
 pub(crate) struct ParkedPool<T: ParkedOrd> {
     /// Keeps track of transactions inserted in the pool.
     ///
-    /// This way we can determine when transactions where submitted to the pool.
+    /// This way we can determine when transactions were submitted to the pool.
     submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
     by_id: FnvHashMap<TransactionId, ParkedPoolTransaction<T>>,
@@ -106,6 +106,12 @@ impl<T: ParkedOrd> ParkedPool<T> {
     #[allow(unused)]
     pub(crate) fn is_empty(&self) -> bool {
         self.by_id.is_empty()
+    }
+
+    /// Returns `true` if the transaction with the given id is already included in this pool.
+    #[cfg(test)]
+    pub(crate) fn contains(&self, id: &TransactionId) -> bool {
+        self.by_id.contains_key(id)
     }
 }
 

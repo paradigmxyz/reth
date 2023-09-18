@@ -1,5 +1,6 @@
 use crate::{capability::Capability, EthVersion, ProtocolVersion};
 use reth_codecs::derive_arbitrary;
+use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_primitives::{constants::RETH_CLIENT_VERSION, PeerId};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 
@@ -99,7 +100,7 @@ impl HelloMessageBuilder {
             capabilities: capabilities.unwrap_or_else(|| {
                 vec![EthVersion::Eth68.into(), EthVersion::Eth67.into(), EthVersion::Eth66.into()]
             }),
-            port: port.unwrap_or(30303),
+            port: port.unwrap_or(DEFAULT_DISCOVERY_PORT),
             id,
         }
     }
@@ -107,6 +108,7 @@ impl HelloMessageBuilder {
 
 #[cfg(test)]
 mod tests {
+    use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use reth_ecies::util::pk2id;
     use reth_rlp::{Decodable, Encodable, EMPTY_STRING_CODE};
     use secp256k1::{SecretKey, SECP256K1};
@@ -123,7 +125,7 @@ mod tests {
             protocol_version: ProtocolVersion::V5,
             client_version: "reth/0.1.0".to_string(),
             capabilities: vec![Capability::new("eth".into(), EthVersion::Eth67 as usize)],
-            port: 30303,
+            port: DEFAULT_DISCOVERY_PORT,
             id,
         });
 
@@ -143,7 +145,7 @@ mod tests {
             protocol_version: ProtocolVersion::V5,
             client_version: "reth/0.1.0".to_string(),
             capabilities: vec![Capability::new("eth".into(), EthVersion::Eth67 as usize)],
-            port: 30303,
+            port: DEFAULT_DISCOVERY_PORT,
             id,
         });
 
@@ -162,7 +164,7 @@ mod tests {
             protocol_version: ProtocolVersion::V5,
             client_version: "reth/0.1.0".to_string(),
             capabilities: vec![Capability::new("eth".into(), EthVersion::Eth67 as usize)],
-            port: 30303,
+            port: DEFAULT_DISCOVERY_PORT,
             id,
         });
 

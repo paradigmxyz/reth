@@ -37,7 +37,7 @@ secp256k1 = { workspace = true, default-features = false, features = [
     "rand",
 ], optional = true }
 modular-bitfield = "0.11.2"
-parking_lot = "0.12.1"
+parking_lot.workspace = true
 clap = { version = "4", features = ["derive"], optional = true }
 
 [dev-dependencies]
@@ -45,12 +45,8 @@ reth-db = { path = "../storage/db", features = ["test-utils"] }
 tokio = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true, features = ["sync"] }
 arbitrary = { workspace = true, features = ["derive"] }
-hex-literal = "0.3"
-secp256k1 = { workspace = true, features = [
-    "alloc",
-    "recovery",
-    "rand",
-] }
+hex-literal.workspace = true
+secp256k1 = { workspace = true, features = ["alloc", "recovery", "rand"] }
 
 [features]
 test-utils = ["tokio-stream/sync", "secp256k1", "rand/std_rng"]

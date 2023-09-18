@@ -110,7 +110,10 @@ impl GethTraceBuilder {
     /// Generate a geth-style traces for the call tracer.
     ///
     /// This decodes all call frames from the recorded traces.
-    pub fn geth_call_traces(&self, opts: CallConfig) -> CallFrame {
+    ///
+    /// This expects the gas used and return value for the
+    /// [ExecutionResult](revm::primitives::ExecutionResult) of the executed transaction.
+    pub fn geth_call_traces(&self, opts: CallConfig, gas_used: u64) -> CallFrame {
         if self.nodes.is_empty() {
             return Default::default()
         }
@@ -118,7 +121,14 @@ impl GethTraceBuilder {
         let include_logs = opts.with_log.unwrap_or_default();
         // first fill up the root
         let main_trace_node = &self.nodes[0];
-        let root_call_frame = main_trace_node.geth_empty_call_frame(include_logs);
+        let mut root_call_frame = main_trace_node.geth_empty_call_frame(include_logs);
+        root_call_frame.gas_used = U256::from(gas_used);
+
+        // selfdestructs are not recorded as individual call traces but are derived from
+        // the call trace and are added as additional `CallFrame` objects to the parent call
+        if let Some(selfdestruct) = main_trace_node.geth_selfdestruct_call_trace() {
+            root_call_frame.calls.push(selfdestruct);
+        }
 
         if opts.only_top_call.unwrap_or_default() {
             return root_call_frame
@@ -129,7 +139,13 @@ impl GethTraceBuilder {
         // so we can populate the call frame tree by walking up the call tree
         let mut call_frames = Vec::with_capacity(self.nodes.len());
         call_frames.push((0, root_call_frame));
+
         for (idx, trace) in self.nodes.iter().enumerate().skip(1) {
+            // selfdestructs are not recorded as individual call traces but are derived from
+            // the call trace and are added as additional `CallFrame` objects to the parent call
+            if let Some(selfdestruct) = trace.geth_selfdestruct_call_trace() {
+                call_frames.last_mut().expect("not empty").1.calls.push(selfdestruct);
+            }
             call_frames.push((idx, trace.geth_empty_call_frame(include_logs)));
         }
 

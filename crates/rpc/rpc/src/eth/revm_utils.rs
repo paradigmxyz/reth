@@ -286,6 +286,8 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         nonce,
         access_list,
         chain_id,
+        blob_versioned_hashes,
+        max_fee_per_blob_gas,
         ..
     } = request;
 
@@ -311,6 +313,9 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         data: input.try_into_unique_input()?.map(|data| data.0).unwrap_or_default(),
         chain_id: chain_id.map(|c| c.as_u64()),
         access_list: access_list.map(AccessList::flattened).unwrap_or_default(),
+        // EIP-4844 fields
+        blob_hashes: blob_versioned_hashes,
+        max_fee_per_blob_gas,
     };
 
     Ok(env)
@@ -488,19 +493,13 @@ where
                 account,
                 new_account_state
                     .into_iter()
-                    .map(|(slot, value)| {
-                        (U256::from_be_bytes(slot.0), U256::from_be_bytes(value.0))
-                    })
+                    .map(|(slot, value)| (U256::from_be_bytes(slot.0), value))
                     .collect(),
             )?;
         }
         (None, Some(account_state_diff)) => {
             for (slot, value) in account_state_diff {
-                db.insert_account_storage(
-                    account,
-                    U256::from_be_bytes(slot.0),
-                    U256::from_be_bytes(value.0),
-                )?;
+                db.insert_account_storage(account, U256::from_be_bytes(slot.0), value)?;
             }
         }
     };

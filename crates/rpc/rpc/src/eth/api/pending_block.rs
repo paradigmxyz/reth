@@ -6,12 +6,10 @@ use reth_primitives::{
     proofs, Block, Header, IntoRecoveredTransaction, Receipt, SealedBlock, SealedHeader,
     EMPTY_OMMER_ROOT, H256, U256,
 };
-use reth_provider::{PostState, StateProviderFactory};
-use reth_revm::{
-    database::State, env::tx_env_with_recovered, executor::commit_state_changes, into_reth_log,
-};
+use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
+use reth_revm::{database::StateProviderDatabase, env::tx_env_with_recovered, into_reth_log};
 use reth_transaction_pool::TransactionPool;
-use revm::db::CacheDB;
+use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
 use revm_primitives::{BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState};
 use std::time::Instant;
 
@@ -40,9 +38,9 @@ impl PendingBlockEnv {
         let Self { cfg, block_env, origin } = self;
 
         let parent_hash = origin.build_target_hash();
-        let state = State::new(client.history_by_block_hash(parent_hash)?);
-        let mut db = CacheDB::new(state);
-        let mut post_state = PostState::default();
+        let state_provider = client.history_by_block_hash(parent_hash)?;
+        let state = StateProviderDatabase::new(&state_provider);
+        let mut db = State::builder().with_database(Box::new(state)).with_bundle_update().build();
 
         let mut cumulative_gas_used = 0;
         let block_gas_limit: u64 = block_env.gas_limit.try_into().unwrap_or(u64::MAX);
@@ -51,6 +49,8 @@ impl PendingBlockEnv {
 
         let mut executed_txs = Vec::new();
         let mut best_txs = pool.best_transactions_with_base_fee(base_fee);
+
+        let mut receipts = Vec::new();
 
         while let Some(pool_tx) = best_txs.next() {
             // ensure we still have capacity for this transaction
@@ -93,34 +93,35 @@ impl PendingBlockEnv {
                     }
                 }
             };
+            // commit changes
+            db.commit(state);
 
             let gas_used = result.gas_used();
-
-            // commit changes
-            commit_state_changes(&mut db, &mut post_state, block_number, state, true);
 
             // add gas used by the transaction to cumulative gas used, before creating the receipt
             cumulative_gas_used += gas_used;
 
             // Push transaction changeset and calculate header bloom filter for receipt.
-            post_state.add_receipt(
-                block_number,
-                Receipt {
-                    tx_type: tx.tx_type(),
-                    success: result.is_success(),
-                    cumulative_gas_used,
-                    logs: result.logs().into_iter().map(into_reth_log).collect(),
-                },
-            );
+            receipts.push(Some(Receipt {
+                tx_type: tx.tx_type(),
+                success: result.is_success(),
+                cumulative_gas_used,
+                logs: result.logs().into_iter().map(into_reth_log).collect(),
+            }));
+
             // append transaction to the list of executed transactions
             executed_txs.push(tx.into_signed());
         }
+        // merge all transitions into bundle state.
+        db.merge_transitions(BundleRetention::PlainState);
 
-        let receipts_root = post_state.receipts_root(block_number);
-        let logs_bloom = post_state.logs_bloom(block_number);
+        let bundle = BundleStateWithReceipts::new(db.take_bundle(), vec![receipts], block_number);
+
+        let receipts_root = bundle.receipts_root_slow(block_number).expect("Block is present");
+        let logs_bloom = bundle.block_logs_bloom(block_number).expect("Block is present");
 
         // calculate the state root
-        let state_root = db.db.state().state_root(post_state)?;
+        let state_root = state_provider.state_root(bundle)?;
 
         // create the block header
         let transactions_root = proofs::calculate_transaction_root(&executed_txs);
@@ -145,6 +146,7 @@ impl PendingBlockEnv {
             blob_gas_used: None,
             excess_blob_gas: None,
             extra_data: Default::default(),
+            parent_beacon_block_root: None,
         };
 
         // seal the block

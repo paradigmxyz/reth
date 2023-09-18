@@ -1,5 +1,5 @@
 use super::AccountReader;
-use crate::{post_state::PostState, BlockHashReader, BlockIdReader};
+use crate::{BlockHashReader, BlockIdReader, BundleStateWithReceipts};
 use auto_impl::auto_impl;
 use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{
@@ -99,6 +99,8 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     fn latest(&self) -> Result<StateProviderBox<'_>>;
 
     /// Returns a [StateProvider] indexed by the given [BlockId].
+    ///
+    /// Note: if a number or hash is provided this will only look at historical(canonical) state.
     fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox<'_>> {
         match block_id {
             BlockId::Number(block_number) => self.state_by_block_number_or_tag(block_number),
@@ -107,6 +109,8 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     }
 
     /// Returns a [StateProvider] indexed by the given block number or tag.
+    ///
+    /// Note: if a number is provided this will only look at historical(canonical) state.
     fn state_by_block_number_or_tag(
         &self,
         number_or_tag: BlockNumberOrTag,
@@ -119,8 +123,8 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
                     Some(hash) => hash,
                     None => return Err(ProviderError::FinalizedBlockNotFound.into()),
                 };
-
-                self.state_by_block_hash(hash)
+                // only look at historical state
+                self.history_by_block_hash(hash)
             }
             BlockNumberOrTag::Safe => {
                 // we can only get the safe state by hash, not by num
@@ -129,11 +133,14 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
                     None => return Err(ProviderError::SafeBlockNotFound.into()),
                 };
 
-                self.state_by_block_hash(hash)
+                self.history_by_block_hash(hash)
             }
             BlockNumberOrTag::Earliest => self.history_by_block_number(0),
             BlockNumberOrTag::Pending => self.pending(),
-            BlockNumberOrTag::Number(num) => self.history_by_block_number(num),
+            BlockNumberOrTag::Number(num) => {
+                // Note: The `BlockchainProvider` could also lookup the tree for the given block number, if for example the block number is `latest + 1`, however this should only support canonical state: <https://github.com/paradigmxyz/reth/issues/4515>
+                self.history_by_block_number(num)
+            }
         }
     }
 
@@ -170,7 +177,7 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     /// Used to inspect or execute transaction on the pending state.
     fn pending_with_provider(
         &self,
-        post_state_data: Box<dyn PostStateDataProvider>,
+        post_state_data: Box<dyn BundleStateDataProvider>,
     ) -> Result<StateProviderBox<'_>>;
 }
 
@@ -184,7 +191,7 @@ pub trait BlockchainTreePendingStateProvider: Send + Sync {
     fn pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> Result<Box<dyn PostStateDataProvider>> {
+    ) -> Result<Box<dyn BundleStateDataProvider>> {
         Ok(self
             .find_pending_state_provider(block_hash)
             .ok_or(ProviderError::StateForHashNotFound(block_hash))?)
@@ -194,20 +201,20 @@ pub trait BlockchainTreePendingStateProvider: Send + Sync {
     fn find_pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> Option<Box<dyn PostStateDataProvider>>;
+    ) -> Option<Box<dyn BundleStateDataProvider>>;
 }
 
 /// Post state data needs for execution on it.
 /// This trait is used to create a state provider over pending state.
 ///
 /// Pending state contains:
-/// * [`PostState`] contains all changed of accounts and storage of pending chain
+/// * [`BundleStateWithReceipts`] contains all changed of accounts and storage of pending chain
 /// * block hashes of pending chain and canonical blocks.
 /// * canonical fork, the block on what pending chain was forked from.
 #[auto_impl[Box,&]]
-pub trait PostStateDataProvider: Send + Sync {
+pub trait BundleStateDataProvider: Send + Sync {
     /// Return post state
-    fn state(&self) -> &PostState;
+    fn state(&self) -> &BundleStateWithReceipts;
     /// Return block hash by block number of pending or canonical chain.
     fn block_hash(&self, block_number: BlockNumber) -> Option<BlockHash>;
     /// return canonical fork, the block on what post state was forked from.
@@ -219,7 +226,6 @@ pub trait PostStateDataProvider: Send + Sync {
 /// A type that can compute the state root of a given post state.
 #[auto_impl[Box,&, Arc]]
 pub trait StateRootProvider: Send + Sync {
-    /// Returns the state root of the PostState on top of the current state.
-    /// See [PostState::state_root_slow] for more info.
-    fn state_root(&self, post_state: PostState) -> Result<H256>;
+    /// Returns the state root of the BundleState on top of the current state.
+    fn state_root(&self, post_state: BundleStateWithReceipts) -> Result<H256>;
 }

@@ -31,7 +31,7 @@ macro_rules! delegate_provider_impls {
         $crate::providers::state::macros::delegate_impls_to_as_ref!(
             for $target =>
             StateRootProvider $(where [$($generics)*])? {
-                fn state_root(&self, state: crate::PostState) -> reth_interfaces::Result<reth_primitives::H256>;
+                fn state_root(&self, state: crate::BundleStateWithReceipts) -> reth_interfaces::Result<reth_primitives::H256>;
             }
             AccountReader $(where [$($generics)*])? {
                 fn basic_account(&self, address: reth_primitives::Address) -> reth_interfaces::Result<Option<reth_primitives::Account>>;

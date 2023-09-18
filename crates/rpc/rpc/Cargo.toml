@@ -22,9 +22,9 @@ reth-network-api.workspace = true
 reth-rpc-engine-api = { path = "../rpc-engine-api" }
 reth-revm = { path = "../../revm" }
 reth-tasks.workspace = true
-reth-metrics.workspace = true
 reth-consensus-common = { path = "../../consensus/common" }
 reth-rpc-types-compat.workspace = true
+lazy_static = "*"
 
 # eth
 revm = { workspace = true, features = [
@@ -51,6 +51,11 @@ tokio-util = "0.7"
 pin-project.workspace = true
 rayon.workspace = true
 
+# metrics
+reth-metrics.workspace = true
+metrics.workspace = true
+
+# misc
 bytes.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 serde = { workspace = true, features = ["derive"] }
@@ -65,6 +70,6 @@ futures.workspace = true
 
 [dev-dependencies]
 jsonrpsee = { workspace = true, features = ["client"] }
-assert_matches = "1.5.0"
+assert_matches.workspace = true
 tempfile = "3.5.0"
 reth-interfaces = { workspace = true, features = ["test-utils"] }

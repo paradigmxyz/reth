@@ -6,8 +6,8 @@ use futures::{future::Either, FutureExt};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_rpc_types::engine::{
-    ExecutionPayload, ForkChoiceUpdateResult, ForkchoiceUpdateError, ForkchoiceUpdated,
-    PayloadAttributes, PayloadId, PayloadStatus, PayloadStatusEnum,
+    CancunPayloadFields, ExecutionPayload, ForkChoiceUpdateResult, ForkchoiceUpdateError,
+    ForkchoiceUpdated, PayloadAttributes, PayloadId, PayloadStatus, PayloadStatusEnum,
 };
 use std::{
     future::Future,
@@ -34,11 +34,6 @@ pub struct OnForkChoiceUpdated {
 // === impl OnForkChoiceUpdated ===
 
 impl OnForkChoiceUpdated {
-    /// Returns true if this update is valid
-    pub(crate) fn is_valid_update(&self) -> bool {
-        self.forkchoice_status.is_valid()
-    }
-
     /// Returns the determined status of the received ForkchoiceState.
     pub fn forkchoice_status(&self) -> ForkchoiceStatus {
         self.forkchoice_status
@@ -151,6 +146,8 @@ pub enum BeaconEngineMessage {
     NewPayload {
         /// The execution payload received by Engine API.
         payload: ExecutionPayload,
+        /// The cancun-related newPayload fields, if any.
+        cancun_fields: Option<CancunPayloadFields>,
         /// The sender for returning payload status result.
         tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
     },

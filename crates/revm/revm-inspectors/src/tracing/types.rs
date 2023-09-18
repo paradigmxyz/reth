@@ -310,31 +310,51 @@ impl CallTraceNode {
         // iterate over all storage diffs
         for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
             let StorageChange { key, value, had_value } = change;
-            let value = H256::from(value);
+            let h256_value = H256::from(value);
             match acc.storage.entry(key.into()) {
                 Entry::Vacant(entry) => {
                     if let Some(had_value) = had_value {
-                        entry.insert(Delta::Changed(ChangedType {
-                            from: had_value.into(),
-                            to: value,
-                        }));
+                        if value != had_value {
+                            entry.insert(Delta::Changed(ChangedType {
+                                from: had_value.into(),
+                                to: h256_value,
+                            }));
+                        }
                     } else {
-                        entry.insert(Delta::Added(value));
+                        entry.insert(Delta::Added(h256_value));
                     }
                 }
                 Entry::Occupied(mut entry) => {
                     let value = match entry.get() {
-                        Delta::Unchanged => Delta::Added(value),
-                        Delta::Added(added) => {
-                            if added == &value {
-                                Delta::Added(*added)
+                        Delta::Unchanged => {
+                            if let Some(had_value) = had_value {
+                                if value != had_value {
+                                    Delta::Changed(ChangedType {
+                                        from: had_value.into(),
+                                        to: h256_value,
+                                    })
+                                } else {
+                                    Delta::Unchanged
+                                }
                             } else {
-                                Delta::Changed(ChangedType { from: *added, to: value })
+                                Delta::Added(h256_value)
                             }
                         }
-                        Delta::Removed(_) => Delta::Added(value),
+                        Delta::Added(added) => {
+                            if added == &h256_value {
+                                Delta::Added(*added)
+                            } else {
+                                Delta::Changed(ChangedType { from: *added, to: h256_value })
+                            }
+                        }
+                        Delta::Removed(_) => Delta::Added(h256_value),
                         Delta::Changed(c) => {
-                            Delta::Changed(ChangedType { from: c.from, to: value })
+                            if c.from == h256_value {
+                                // remains unchanged if the value is the same
+                                Delta::Unchanged
+                            } else {
+                                Delta::Changed(ChangedType { from: c.from, to: h256_value })
+                            }
                         }
                     };
                     entry.insert(value);
@@ -381,6 +401,21 @@ impl CallTraceNode {
                 refund_address: self.trace.selfdestruct_refund_target.unwrap_or_default(),
                 balance: self.trace.value,
             }))
+        } else {
+            None
+        }
+    }
+
+    /// If the trace is a selfdestruct, returns the `CallFrame` for a geth call trace
+    pub(crate) fn geth_selfdestruct_call_trace(&self) -> Option<CallFrame> {
+        if self.is_selfdestruct() {
+            Some(CallFrame {
+                typ: "SELFDESTRUCT".to_string(),
+                from: self.trace.caller,
+                to: self.trace.selfdestruct_refund_target,
+                value: Some(self.trace.value),
+                ..Default::default()
+            })
         } else {
             None
         }

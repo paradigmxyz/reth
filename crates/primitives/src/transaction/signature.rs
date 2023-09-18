@@ -93,19 +93,19 @@ impl Signature {
     }
 
     /// Output the length of the signature without the length of the RLP header
-    pub(crate) fn payload_len(&self) -> usize {
+    pub fn payload_len(&self) -> usize {
         self.odd_y_parity.length() + self.r.length() + self.s.length()
     }
 
     /// Encode the `odd_y_parity`, `r`, `s` values without a RLP header.
-    pub(crate) fn encode(&self, out: &mut dyn reth_rlp::BufMut) {
+    pub fn encode(&self, out: &mut dyn reth_rlp::BufMut) {
         self.odd_y_parity.encode(out);
         self.r.encode(out);
         self.s.encode(out);
     }
 
     /// Decodes the `odd_y_parity`, `r`, `s` values without a RLP header.
-    pub(crate) fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    pub fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
         Ok(Signature {
             odd_y_parity: Decodable::decode(buf)?,
             r: Decodable::decode(buf)?,

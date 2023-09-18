@@ -185,7 +185,7 @@ impl Command {
                     continue
                 }
             };
-            provider_rw.insert_block(sealed_block.block, Some(sealed_block.senders))?;
+            provider_rw.insert_block(sealed_block.block, Some(sealed_block.senders), None)?;
         }
 
         // Check if any of hashing or merkle stages aren't on the same block number as
@@ -205,7 +205,11 @@ impl Command {
         let factory = reth_revm::Factory::new(self.chain.clone());
         let mut execution_stage = ExecutionStage::new(
             factory,
-            ExecutionStageThresholds { max_blocks: Some(1), max_changes: None },
+            ExecutionStageThresholds {
+                max_blocks: Some(1),
+                max_changes: None,
+                max_cumulative_gas: None,
+            },
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::all(),
         );
