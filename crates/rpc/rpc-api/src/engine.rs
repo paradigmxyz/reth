@@ -3,7 +3,7 @@ use reth_primitives::{Address, BlockHash, BlockId, BlockNumberOrTag, Bytes, H256
 use reth_rpc_types::{
     engine::{
         ExecutionPayloadBodiesV1, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
-        ExecutionPayloadFieldV2, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState,
+        ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState,
         ForkchoiceUpdated, PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration,
     },
     state::StateOverride,
@@ -20,7 +20,7 @@ pub trait EngineApi {
 
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
     #[method(name = "newPayloadV2")]
-    async fn new_payload_v2(&self, payload: ExecutionPayloadFieldV2) -> RpcResult<PayloadStatus>;
+    async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus>;
 
     /// Post Cancun payload handler
     ///
