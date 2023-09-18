@@ -682,7 +682,7 @@ mod tests {
         );
 
         // execute invalid header (no parent beacon block root)
-        let mut executor = EVMProcessor::new_with_db(chain_spec, RevmDatabase::new(db));
+        let mut executor = EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
 
         // attempt to execute a block without parent beacon block root, expect err
         let err = executor
@@ -723,14 +723,14 @@ mod tests {
 
         // get timestamp storage and compare
         let timestamp_storage =
-            executor.db().storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index)).unwrap();
+            executor.db_mut().storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index)).unwrap();
         assert_eq!(timestamp_storage, U256::from(header.timestamp));
 
         // get parent beacon block root storage and compare
         let parent_beacon_block_root_storage = executor
-            .db()
+            .db_mut()
             .storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index))
-            .unwrap();
+            .expect("storage value should exist");
         assert_eq!(parent_beacon_block_root_storage, U256::from(0x1337));
     }
 
@@ -831,7 +831,7 @@ mod tests {
             );
 
         // ensure that the nonce of the system address account has not changed
-        let nonce = executor.db().basic(SYSTEM_ADDRESS).unwrap().unwrap().nonce;
+        let nonce = executor.db_mut().basic(SYSTEM_ADDRESS).unwrap().unwrap().nonce;
         assert_eq!(nonce, 0);
     }
 
@@ -941,7 +941,7 @@ mod tests {
         );
 
         // execute header
-        let mut executor = EVMProcessor::new_with_db(chain_spec, RevmDatabase::new(db));
+        let mut executor = EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
         executor.init_env(&header, U256::ZERO);
 
         // ensure that the env is configured with a base fee
@@ -968,12 +968,12 @@ mod tests {
 
         // get timestamp storage and compare
         let timestamp_storage =
-            executor.db().storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index)).unwrap();
+            executor.db_mut().storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index)).unwrap();
         assert_eq!(timestamp_storage, U256::from(header.timestamp));
 
         // get parent beacon block root storage and compare
         let parent_beacon_block_root_storage = executor
-            .db()
+            .db_mut()
             .storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index))
             .unwrap();
         assert_eq!(parent_beacon_block_root_storage, U256::from(0x1337));
