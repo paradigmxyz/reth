@@ -71,6 +71,11 @@ impl Receipts {
     pub fn is_empty(&self) -> bool {
         self.receipt_vec.is_empty()
     }
+
+    /// Push a new vector of receipts into the `Receipts` collection.
+    pub fn push(&mut self, receipts: Vec<Option<Receipt>>) {
+        self.receipt_vec.push(receipts);
+    }
 }
 
 impl From<Receipt> for ReceiptWithBloom {

@@ -377,7 +377,7 @@ impl<'a> EVMProcessor<'a> {
         // Prune receipts if necessary.
         self.prune_receipts(&mut receipts)?;
         // Save receipts.
-        self.receipts.receipt_vec.push(receipts);
+        self.receipts.push(receipts);
         Ok(())
     }
 
