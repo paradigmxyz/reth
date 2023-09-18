@@ -54,16 +54,16 @@ impl Stream for ConsensusLayerHealthEvents {
                 }
                 // Otherwise, continue with health checks based on Transition Configuration exchange
                 // and Fork Choice update.
-                (None, _) => Poll::Ready(Some(ConsensusLayerHealthEvent::NeverSeen)),
+                (None, None) => Poll::Ready(Some(ConsensusLayerHealthEvent::NeverSeen)),
+                (Some(_), None) => {
+                    Poll::Ready(Some(ConsensusLayerHealthEvent::NeverReceivedUpdates))
+                }
                 (Some(transition_config), _)
                     if transition_config.elapsed() > NO_TRANSITION_CONFIG_EXCHANGED_PERIOD =>
                 {
                     Poll::Ready(Some(ConsensusLayerHealthEvent::HasNotBeenSeenForAWhile(
                         transition_config.elapsed(),
                     )))
-                }
-                (Some(_), None) => {
-                    Poll::Ready(Some(ConsensusLayerHealthEvent::NeverReceivedUpdates))
                 }
                 (Some(_), Some(fork_choice))
                     if fork_choice.elapsed() > NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD =>
