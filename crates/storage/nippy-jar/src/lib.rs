@@ -96,12 +96,18 @@ impl NippyJar {
 
     /// Loads the file configuration and returns [`Self`].
     pub fn load(path: &Path) -> Result<Self, NippyJarError> {
-        let mut obj: Self = bincode::deserialize_from(&mut File::open(path)?)?;
+        // Read [`Self`] located at the data file.
+        let data_file = File::open(path)?;
+        let data_reader = unsafe { memmap2::Mmap::map(&data_file)? };
+        let mut obj: Self = bincode::deserialize_from(data_reader.as_ref())?;
         obj.path = Some(path.to_path_buf());
 
-        let mut offsets_file = File::open(obj.index_path())?;
-        obj.offsets = EliasFano::deserialize_from(&mut offsets_file)?;
-        obj.offsets_index = PrefixSummedEliasFano::deserialize_from(offsets_file)?;
+        // Read the offsets lists located at the index file.
+        let offsets_file = File::open(obj.index_path())?;
+        let mmap = unsafe { memmap2::Mmap::map(&offsets_file)? };
+        let mut offsets_reader = mmap.as_ref();
+        obj.offsets = EliasFano::deserialize_from(&mut offsets_reader)?;
+        obj.offsets_index = PrefixSummedEliasFano::deserialize_from(offsets_reader)?;
 
         Ok(obj)
     }
