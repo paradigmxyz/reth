@@ -806,7 +806,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
     pub fn connect_buffered_blocks_to_hashes(
         &mut self,
-        hashes: impl IntoIterator<Item = BlockNumHash>,
+        hashes: impl IntoIterator<Item = impl Into<BlockNumHash>>,
     ) -> Result<(), Error> {
         // check unconnected block buffer for childs of the canonical hashes
         for added_block in hashes.into_iter() {
