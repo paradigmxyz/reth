@@ -13,7 +13,7 @@
 
 //! revm utils and implementations specific to reth.
 
-/// Contains glue code for integrating reth database into revm's [Database](revm::Database).
+/// Contains glue code for integrating reth database into revm's [Database].
 pub mod database;
 
 /// revm implementation of reth block and transaction executors.

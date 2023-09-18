@@ -1217,7 +1217,7 @@ impl PeersConfig {
 
 /// The durations to use when a backoff should be applied to a peer.
 ///
-/// See also [`BackoffKind`](BackoffKind).
+/// See also [`BackoffKind`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PeerBackoffDurations {

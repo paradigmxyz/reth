@@ -48,7 +48,7 @@ where
     V: AuthValidator,
     V::ResponseBody: Body,
 {
-    /// Creates an instance of [`AuthLayer`][crate::layers::AuthLayer].
+    /// Creates an instance of [`AuthLayer`].
     /// `validator` is a generic trait able to validate requests (see [`AuthValidator`]).
     pub fn new(validator: V) -> Self {
         Self { validator }
@@ -66,10 +66,8 @@ where
     }
 }
 
-/// This type is the actual implementation of
-/// the middleware. It follows the [`Service`](tower::Service)
-/// specification to correctly proxy Http requests
-/// to its inner service after headers validation.
+/// This type is the actual implementation of the middleware. It follows the [`Service`]
+/// specification to correctly proxy Http requests to its inner service after headers validation.
 #[allow(missing_debug_implementations)]
 pub struct AuthService<S, V> {
     /// Performs auth validation logics

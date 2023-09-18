@@ -256,8 +256,8 @@ where
     /// case the environment must be configured to allow named databases through
     /// [EnvironmentBuilder::set_max_dbs()](crate::EnvironmentBuilder::set_max_dbs).
     ///
-    /// This function will fail with [Error::BadRslot](crate::error::Error::BadRslot) if called by a
-    /// thread with an open transaction.
+    /// This function will fail with [Error::BadRslot] if called by a thread with an open
+    /// transaction.
     pub fn create_db<'txn>(
         &'txn self,
         name: Option<&str>,
