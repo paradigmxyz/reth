@@ -96,10 +96,6 @@ where
                 }
             };
 
-            // TODO: re-evaluate this after 4788 implementers call, this is to prevent EIP161 state
-            // clearing of the system address, since it is touched during transact. The pyspec
-            // tests currently require the state to remain empty if it started empty, which
-            // somewhat contradicts EIP161, and clients still need consensus on what to do here.
             state.remove(&SYSTEM_ADDRESS);
             state.remove(&evm.env.block.coinbase);
 
