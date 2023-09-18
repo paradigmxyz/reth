@@ -6,7 +6,10 @@ use crate::{
 use bytes::{Buf, BufMut, BytesMut};
 use reth_codecs::{main_codec, Compact, CompactZstd};
 use reth_rlp::{length_of_length, Decodable, Encodable};
-use std::cmp::Ordering;
+use std::{
+    cmp::Ordering,
+    ops::{Deref, DerefMut},
+};
 
 /// Receipt containing result of transaction execution.
 #[main_codec(zstd)]
@@ -75,6 +78,20 @@ impl Receipts {
     /// Push a new vector of receipts into the `Receipts` collection.
     pub fn push(&mut self, receipts: Vec<Option<Receipt>>) {
         self.receipt_vec.push(receipts);
+    }
+}
+
+impl Deref for Receipts {
+    type Target = Vec<Vec<Option<Receipt>>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.receipt_vec
+    }
+}
+
+impl DerefMut for Receipts {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.receipt_vec
     }
 }
 

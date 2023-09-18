@@ -328,7 +328,6 @@ impl<'a> EVMProcessor<'a> {
                 expected: block.gas_used,
                 gas_spent_by_tx: self
                     .receipts
-                    .receipt_vec
                     .last()
                     .map(|block_r| {
                         block_r

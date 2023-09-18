@@ -224,12 +224,7 @@ impl BundleStateWithReceipts {
     /// Returns an iterator over all block logs.
     pub fn logs(&self, block_number: BlockNumber) -> Option<impl Iterator<Item = &Log>> {
         let index = self.block_number_to_index(block_number)?;
-        Some(
-            self.receipts.receipt_vec[index]
-                .iter()
-                .filter_map(|r| Some(r.as_ref()?.logs.iter()))
-                .flatten(),
-        )
+        Some(self.receipts[index].iter().filter_map(|r| Some(r.as_ref()?.logs.iter())).flatten())
     }
 
     /// Return blocks logs bloom
@@ -242,10 +237,8 @@ impl BundleStateWithReceipts {
     /// of receipt. This is a expensive operation.
     pub fn receipts_root_slow(&self, block_number: BlockNumber) -> Option<H256> {
         let index = self.block_number_to_index(block_number)?;
-        let block_receipts = self.receipts.receipt_vec[index]
-            .iter()
-            .map(Option::as_ref)
-            .collect::<Option<Vec<_>>>()?;
+        let block_receipts =
+            self.receipts[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?;
         Some(calculate_receipt_root_ref(&block_receipts))
     }
 
@@ -257,7 +250,7 @@ impl BundleStateWithReceipts {
     /// Return all block receipts
     pub fn receipts_by_block(&self, block_number: BlockNumber) -> &[Option<Receipt>] {
         let Some(index) = self.block_number_to_index(block_number) else { return &[] };
-        &self.receipts.receipt_vec[index]
+        &self.receipts[index]
     }
 
     /// Is bundle state empty of blocks.
@@ -293,7 +286,7 @@ impl BundleStateWithReceipts {
         let rm_trx: usize = self.len() - new_len;
 
         // remove receipts
-        self.receipts.receipt_vec.truncate(new_len);
+        self.receipts.truncate(new_len);
         // Revert last n reverts.
         self.bundle.revert(rm_trx);
 
@@ -326,7 +319,7 @@ impl BundleStateWithReceipts {
         detached_bundle_state.revert_to(block_number);
 
         // split is done as [0, num) and [num, len]
-        let (_, this) = self.receipts.receipt_vec.split_at(num_of_detached_block as usize);
+        let (_, this) = self.receipts.split_at(num_of_detached_block as usize);
 
         self.receipts = Receipts::from_vec(this.to_vec().clone());
         self.bundle.take_n_reverts(num_of_detached_block as usize);
@@ -343,7 +336,7 @@ impl BundleStateWithReceipts {
     /// In most cases this would be true.
     pub fn extend(&mut self, other: Self) {
         self.bundle.extend(other.bundle);
-        self.receipts.receipt_vec.extend(other.receipts.receipt_vec);
+        self.receipts.extend(other.receipts.receipt_vec);
     }
 
     /// Write bundle state to database.
