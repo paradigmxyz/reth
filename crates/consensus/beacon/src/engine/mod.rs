@@ -1331,7 +1331,7 @@ where
         let synced_to_finalized = match self.blockchain.block_number(block_hash)? {
             Some(number) => {
                 // Attempt to restore the tree.
-                self.blockchain.restore_canonical_hashes_and_finalize(number)?;
+                self.blockchain.connect_buffered_blocks_to_canonical_hashes_and_finalize(number)?;
                 true
             }
             None => false,
