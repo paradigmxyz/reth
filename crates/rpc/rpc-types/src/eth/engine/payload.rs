@@ -542,4 +542,11 @@ mod tests {
         let payload: ExecutionPayload = serde_json::from_str(s).unwrap();
         assert_eq!(serde_json::to_string(&payload).unwrap(), s);
     }
+
+    const EXECUTION_PAYLOAD: &str = include_str!("../../../test_data/validation/execution_payload.json");
+
+    #[test]
+    fn test_deserialize_validation_execution_payload() {
+        let _execution_payload: ExecutionPayload = serde_json::from_str(EXECUTION_PAYLOAD).unwrap();
+    }
 }
