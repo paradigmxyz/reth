@@ -4,7 +4,7 @@ use reth_db::DatabaseEnv;
 use reth_interfaces::db::DatabaseError;
 use reth_primitives::MAINNET;
 use reth_provider::{ProviderError, ProviderFactory};
-use std::{borrow::Borrow, sync::Arc};
+use std::{borrow::Borrow, future::poll_fn, sync::Arc};
 use tokio::sync::oneshot;
 
 #[derive(thiserror::Error, Debug)]
@@ -50,7 +50,9 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
             let factory = ProviderFactory::new(db.db(), MAINNET.clone());
             let provider = factory.provider_rw().unwrap();
 
-            let result = stage.execute(&provider, input).await;
+            let result = poll_fn(|cx| stage.poll_ready(cx, input))
+                .await
+                .and_then(|_| stage.execute(&provider, input));
             provider.commit().expect("failed to commit");
             tx.send(result).expect("failed to send message")
         });
@@ -76,7 +78,7 @@ pub(crate) trait UnwindStageTestRunner: StageTestRunner {
             let factory = ProviderFactory::new(db.db(), MAINNET.clone());
             let provider = factory.provider_rw().unwrap();
 
-            let result = stage.unwind(&provider, input).await;
+            let result = stage.unwind(&provider, input);
             provider.commit().expect("failed to commit");
             tx.send(result).expect("failed to send result");
         });

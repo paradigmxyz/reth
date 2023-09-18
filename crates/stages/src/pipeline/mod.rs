@@ -9,7 +9,7 @@ use reth_primitives::{
 };
 use reth_provider::{ProviderFactory, StageCheckpointReader, StageCheckpointWriter};
 use reth_tokio_util::EventListeners;
-use std::{pin::Pin, sync::Arc};
+use std::{future::poll_fn, pin::Pin, sync::Arc};
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
@@ -168,7 +168,7 @@ where
             if let Some(tip) = tip {
                 self.set_tip(tip);
             }
-            let result = self.run_loop();
+            let result = self.run_loop().await;
             trace!(target: "sync::pipeline", ?tip, ?result, "Pipeline finished");
             (self, result)
         })
@@ -176,11 +176,11 @@ where
 
     /// Run the pipeline in an infinite loop. Will terminate early if the user has specified
     /// a `max_block` in the pipeline.
-    pub fn run(&mut self) -> Result<(), PipelineError> {
+    pub async fn run(&mut self) -> Result<(), PipelineError> {
         let _ = self.register_metrics(); // ignore error
 
         loop {
-            let next_action = self.run_loop()?;
+            let next_action = self.run_loop().await?;
 
             // Terminate the loop early if it's reached the maximum user
             // configured block.
@@ -213,15 +213,14 @@ where
     /// This will be [ControlFlow::Continue] or [ControlFlow::NoProgress] of the _last_ stage in the
     /// pipeline (for example the `Finish` stage). Or [ControlFlow::Unwind] of the stage that caused
     /// the unwind.
-    pub fn run_loop(&mut self) -> Result<ControlFlow, PipelineError> {
+    pub async fn run_loop(&mut self) -> Result<ControlFlow, PipelineError> {
         let mut previous_stage = None;
         for stage_index in 0..self.stages.len() {
             let stage = &self.stages[stage_index];
             let stage_id = stage.id();
 
             trace!(target: "sync::pipeline", stage = %stage_id, "Executing stage");
-            let next = self.execute_stage_to_completion(previous_stage, stage_index)?;
-            //.instrument(info_span!("execute", stage = %stage_id))?;
+            let next = self.execute_stage_to_completion(previous_stage, stage_index).await?;
 
             trace!(target: "sync::pipeline", stage = %stage_id, ?next, "Completed stage");
 
@@ -334,7 +333,7 @@ where
         Ok(())
     }
 
-    fn execute_stage_to_completion(
+    async fn execute_stage_to_completion(
         &mut self,
         previous_stage: Option<BlockNumber>,
         stage_index: usize,
@@ -370,6 +369,9 @@ where
                     block_number: prev_checkpoint.map(|progress| progress.block_number),
                 })
             }
+
+            poll_fn(|cx| stage.poll_ready(cx, ExecInput { target, checkpoint: prev_checkpoint }))
+                .await?;
 
             self.listeners.notify(PipelineEvent::Running {
                 pipeline_stages_progress: event::PipelineStagesProgress {
@@ -658,7 +660,7 @@ mod tests {
             pipeline.run().await.expect("Could not run pipeline");
 
             // Unwind
-            pipeline.unwind(1, None).await.expect("Could not unwind pipeline");
+            pipeline.unwind(1, None).expect("Could not unwind pipeline");
         });
 
         // Check that the stages were unwound in reverse order
@@ -762,7 +764,7 @@ mod tests {
             pipeline.run().await.expect("Could not run pipeline");
 
             // Unwind
-            pipeline.unwind(50, None).await.expect("Could not unwind pipeline");
+            pipeline.unwind(50, None).expect("Could not unwind pipeline");
         });
 
         // Check that the stages were unwound in reverse order

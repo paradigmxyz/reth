@@ -175,8 +175,8 @@ impl Command {
                         .await?;
                     let fetch_client = Arc::new(network.fetch_client().await?);
 
-                    let stage = BodyStage {
-                        downloader: BodiesDownloaderBuilder::default()
+                    let stage = BodyStage::new(
+                        BodiesDownloaderBuilder::default()
                             .with_stream_batch_size(batch_size as usize)
                             .with_request_limit(config.stages.bodies.downloader_request_limit)
                             .with_max_buffered_blocks_size_bytes(
@@ -187,8 +187,8 @@ impl Command {
                                     config.stages.bodies.downloader_max_concurrent_requests,
                             )
                             .build(fetch_client, consensus.clone(), db.clone()),
-                        consensus: consensus.clone(),
-                    };
+                        consensus.clone(),
+                    );
 
                     (Box::new(stage), None)
                 }

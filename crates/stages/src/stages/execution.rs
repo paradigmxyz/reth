@@ -501,7 +501,7 @@ mod tests {
     };
     use reth_provider::{AccountReader, BlockWriter, ProviderFactory, ReceiptProvider};
     use reth_revm::Factory;
-    use std::sync::Arc;
+    use std::{future::poll_fn, sync::Arc};
 
     fn stage() -> ExecutionStage<Factory> {
         let factory =
@@ -685,7 +685,10 @@ mod tests {
 
         let provider = factory.provider_rw().unwrap();
         let mut execution_stage = stage();
-        let output = execution_stage.execute(&provider, input).await.unwrap();
+        let output = poll_fn(|cx| stage.poll_ready(cx, input))
+            .await
+            .and_then(|_| stage.execute(&provider, input))
+            .unwrap();
         provider.commit().unwrap();
         assert_matches!(output, ExecOutput {
             checkpoint: StageCheckpoint {

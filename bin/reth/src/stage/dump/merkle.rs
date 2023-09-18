@@ -3,15 +3,15 @@ use crate::utils::DbTool;
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables, DatabaseEnv};
 use reth_primitives::{stage::StageCheckpoint, BlockNumber, ChainSpec, PruneModes};
-use reth_provider::ProviderFactory;
+use reth_provider::{DatabaseProviderRW, ProviderFactory};
 use reth_stages::{
     stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
         StorageHashingStage, MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
     },
-    Stage, UnwindInput,
+    ExecInput, ExecOutput, Stage, StageError, UnwindInput,
 };
-use std::{path::PathBuf, sync::Arc};
+use std::{future::poll_fn, path::PathBuf, sync::Arc};
 use tracing::info;
 
 pub(crate) async fn dump_merkle_stage<DB: Database>(
@@ -61,10 +61,10 @@ async fn unwind_and_copy<DB: Database>(
 
     // Unwind hashes all the way to FROM
 
-    StorageHashingStage::default().unwind(&provider, unwind).await.unwrap();
-    AccountHashingStage::default().unwind(&provider, unwind).await.unwrap();
+    StorageHashingStage::default().unwind(&provider, unwind).unwrap();
+    AccountHashingStage::default().unwind(&provider, unwind).unwrap();
 
-    MerkleStage::default_unwind().unwind(&provider, unwind).await?;
+    MerkleStage::default_unwind().unwind(&provider, unwind)?;
 
     // Bring Plainstate to TO (hashing stage execution requires it)
     let mut exec_stage = ExecutionStage::new(
@@ -78,27 +78,31 @@ async fn unwind_and_copy<DB: Database>(
         PruneModes::all(),
     );
 
-    exec_stage
-        .unwind(
-            &provider,
-            UnwindInput {
-                unwind_to: to,
-                checkpoint: StageCheckpoint::new(tip_block_number),
-                bad_block: None,
-            },
-        )
-        .await?;
+    exec_stage.unwind(
+        &provider,
+        UnwindInput {
+            unwind_to: to,
+            checkpoint: StageCheckpoint::new(tip_block_number),
+            bad_block: None,
+        },
+    )?;
 
     // Bring hashes to TO
 
-    AccountHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX }
-        .execute(&provider, execute_input)
-        .await
-        .unwrap();
-    StorageHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX }
-        .execute(&provider, execute_input)
-        .await
-        .unwrap();
+    poll_and_execute(
+        &mut AccountHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX },
+        &provider,
+        execute_input,
+    )
+    .await
+    .unwrap();
+    poll_and_execute(
+        &mut StorageHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX },
+        &provider,
+        execute_input,
+    )
+    .await
+    .unwrap();
 
     let unwind_inner_tx = provider.into_tx();
 
@@ -113,6 +117,15 @@ async fn unwind_and_copy<DB: Database>(
     Ok(())
 }
 
+// todo: move to test_utils in reth_stages and use it where we currently manually poll
+async fn poll_and_execute<DB: Database, S: Stage<DB>>(
+    stage: &mut S,
+    provider: &DatabaseProviderRW<'_, &DB>,
+    input: ExecInput,
+) -> Result<ExecOutput, StageError> {
+    poll_fn(|cx| stage.poll_ready(cx, input)).await.and_then(|_| stage.execute(&provider, input))
+}
+
 /// Try to re-execute the stage straightaway
 async fn dry_run<DB: Database>(
     chain: Arc<ChainSpec>,
@@ -125,11 +138,11 @@ async fn dry_run<DB: Database>(
     let provider = factory.provider_rw()?;
     let mut exec_output = false;
     while !exec_output {
-        exec_output = MerkleStage::Execution {
-            // Forces updating the root instead of calculating from scratch
-            clean_threshold: u64::MAX,
-        }
-        .execute(
+        exec_output = poll_and_execute(
+            &mut MerkleStage::Execution {
+                // Forces updating the root instead of calculating from scratch
+                clean_threshold: u64::MAX,
+            },
             &provider,
             reth_stages::ExecInput {
                 target: Some(to),

@@ -74,11 +74,18 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         cx: &mut std::task::Context<'_>,
         input: ExecInput,
     ) -> std::task::Poll<Result<(), StageError>> {
+        // todo: short circuit if target is reached?
         // todo: check if this is bad async code
-        if !self.buffer.is_empty() {
+        // todo: prob should have some other condition (i.e. more than 1 body surely)
+        if input.target_reached() || !self.buffer.is_empty() {
             return Poll::Ready(Ok(()))
         }
 
+        // Update the header range on the downloader
+        self.downloader.set_download_range(input.next_block_range())?;
+
+        // Task downloader can return `None` only if the response relaying channel was closed. This
+        // is a fatal error to prevent the pipeline from running forever.
         match self.downloader.try_poll_next_unpin(cx) {
             Poll::Ready(Some(res)) => match res {
                 Ok(downloaded) => {
@@ -102,11 +109,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
-
-        let range = input.next_block_range();
-        // Update the header range on the downloader
-        self.downloader.set_download_range(range.clone())?;
-        let (from_block, to_block) = range.into_inner();
+        let (from_block, to_block) = input.next_block_range().into_inner();
 
         // Cursors used to write bodies, ommers and transactions
         let tx = provider.tx_ref();
@@ -120,13 +123,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut next_tx_num = tx_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
 
         debug!(target: "sync::stages::bodies", stage_progress = from_block, target = to_block, start_tx_id = next_tx_num, "Commencing sync");
-
-        // Task downloader can return `None` only if the response relaying channel was closed. This
-        // is a fatal error to prevent the pipeline from running forever.
-
-        // todo: should be in a dedicated poll rdy fn
         trace!(target: "sync::stages::bodies", bodies_len = self.buffer.len(), "Writing blocks");
-
         let mut highest_block = from_block;
         for response in self.buffer.drain(..) {
             // Write block

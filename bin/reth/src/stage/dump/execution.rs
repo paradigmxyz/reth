@@ -9,7 +9,7 @@ use reth_primitives::{stage::StageCheckpoint, ChainSpec};
 use reth_provider::ProviderFactory;
 use reth_revm::Factory;
 use reth_stages::{stages::ExecutionStage, Stage, UnwindInput};
-use std::{path::PathBuf, sync::Arc};
+use std::{future::poll_fn, path::PathBuf, sync::Arc};
 use tracing::info;
 
 pub(crate) async fn dump_execution_stage<DB: Database>(
@@ -134,15 +134,11 @@ async fn dry_run<DB: Database>(
     let provider = factory.provider_rw()?;
     let mut exec_stage = ExecutionStage::new_with_factory(Factory::new(chain.clone()));
 
-    exec_stage
-        .execute(
-            &provider,
-            reth_stages::ExecInput {
-                target: Some(to),
-                checkpoint: Some(StageCheckpoint::new(from)),
-            },
-        )
-        .await?;
+    let input =
+        reth_stages::ExecInput { target: Some(to), checkpoint: Some(StageCheckpoint::new(from)) };
+    poll_fn(|cx| exec_stage.poll_ready(cx, input))
+        .await
+        .and_then(|_| exec_stage.execute(&provider, input))?;
 
     info!(target: "reth::cli", "Success.");
 

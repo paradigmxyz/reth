@@ -1,5 +1,4 @@
 use crate::error::StageError;
-use async_trait::async_trait;
 use reth_db::database::Database;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
@@ -234,7 +233,11 @@ pub trait Stage<DB: Database>: Send + Sync {
     /// unbounded growth on repeated calls to `poll_ready`.
     ///
     /// Unwinds may happen without consulting `poll_ready` first.
-    fn poll_ready(&mut self, cx: &mut Context<'_>, _: ExecInput) -> Poll<Result<(), StageError>> {
+    fn poll_ready(
+        &mut self,
+        _cx: &mut Context<'_>,
+        _input: ExecInput,
+    ) -> Poll<Result<(), StageError>> {
         Poll::Ready(Ok(()))
     }
 }

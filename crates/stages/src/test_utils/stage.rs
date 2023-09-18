@@ -46,7 +46,7 @@ impl<DB: Database> Stage<DB> for TestStage {
         self.id
     }
 
-    async fn execute(
+    fn execute(
         &mut self,
         _: &DatabaseProviderRW<'_, &DB>,
         _input: ExecInput,
@@ -56,7 +56,7 @@ impl<DB: Database> Stage<DB> for TestStage {
             .unwrap_or_else(|| panic!("Test stage {} executed too many times.", self.id))
     }
 
-    async fn unwind(
+    fn unwind(
         &mut self,
         _: &DatabaseProviderRW<'_, &DB>,
         _input: UnwindInput,

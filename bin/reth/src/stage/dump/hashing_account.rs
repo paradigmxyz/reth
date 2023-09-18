@@ -5,7 +5,7 @@ use reth_db::{database::Database, table::TableImporter, tables, DatabaseEnv};
 use reth_primitives::{stage::StageCheckpoint, BlockNumber, ChainSpec};
 use reth_provider::ProviderFactory;
 use reth_stages::{stages::AccountHashingStage, Stage, UnwindInput};
-use std::{path::PathBuf, sync::Arc};
+use std::{future::poll_fn, path::PathBuf, sync::Arc};
 use tracing::info;
 
 pub(crate) async fn dump_hashing_account_stage<DB: Database>(
@@ -22,7 +22,7 @@ pub(crate) async fn dump_hashing_account_stage<DB: Database>(
         tx.import_table_with_range::<tables::AccountChangeSet, _>(&db_tool.db.tx()?, Some(from), to)
     })??;
 
-    unwind_and_copy(db_tool, from, tip_block_number, &output_db).await?;
+    unwind_and_copy(db_tool, from, tip_block_number, &output_db)?;
 
     if should_run {
         dry_run(db_tool.chain.clone(), output_db, to, from).await?;
@@ -32,7 +32,7 @@ pub(crate) async fn dump_hashing_account_stage<DB: Database>(
 }
 
 /// Dry-run an unwind to FROM block and copy the necessary table data to the new database.
-async fn unwind_and_copy<DB: Database>(
+fn unwind_and_copy<DB: Database>(
     db_tool: &DbTool<'_, DB>,
     from: u64,
     tip_block_number: u64,
@@ -42,16 +42,14 @@ async fn unwind_and_copy<DB: Database>(
     let provider = factory.provider_rw()?;
     let mut exec_stage = AccountHashingStage::default();
 
-    exec_stage
-        .unwind(
-            &provider,
-            UnwindInput {
-                unwind_to: from,
-                checkpoint: StageCheckpoint::new(tip_block_number),
-                bad_block: None,
-            },
-        )
-        .await?;
+    exec_stage.unwind(
+        &provider,
+        UnwindInput {
+            unwind_to: from,
+            checkpoint: StageCheckpoint::new(tip_block_number),
+            bad_block: None,
+        },
+    )?;
     let unwind_inner_tx = provider.into_tx();
 
     output_db.update(|tx| tx.import_table::<tables::PlainAccountState, _>(&unwind_inner_tx))??;
@@ -75,17 +73,15 @@ async fn dry_run<DB: Database>(
         ..Default::default()
     };
 
-    let mut exec_output = false;
-    while !exec_output {
-        exec_output = exec_stage
-            .execute(
-                &provider,
-                reth_stages::ExecInput {
-                    target: Some(to),
-                    checkpoint: Some(StageCheckpoint::new(from)),
-                },
-            )
-            .await?
+    let mut done = false;
+    while !done {
+        let input = reth_stages::ExecInput {
+            target: Some(to),
+            checkpoint: Some(StageCheckpoint::new(from)),
+        };
+        done = poll_fn(|cx| exec_stage.poll_ready(cx, input))
+            .await
+            .and_then(|_| exec_stage.execute(&provider, input))?
             .done;
     }
 
