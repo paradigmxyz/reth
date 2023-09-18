@@ -168,7 +168,7 @@ impl<'a, 'b, TX: DbTx<'a>> AccountReader for HistoricalStateProviderRef<'a, 'b, 
                 .cursor_dup_read::<tables::AccountChangeSets>()?
                 .seek_by_key_subkey(changeset_block_number, address)?
                 .filter(|acc| acc.address == address)
-                .ok_or(ProviderError::AccountChangeSetsNotFound {
+                .ok_or(ProviderError::AccountChangeSetNotFound {
                     block_number: changeset_block_number,
                     address,
                 })?
