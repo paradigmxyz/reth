@@ -22,7 +22,6 @@ use reth_primitives::{
     FromRecoveredPooledTransaction, IntoRecoveredTransaction, PeerId, PooledTransactionsElement,
     TransactionSigned, TxHash, H256,
 };
-use reth_rlp::Encodable;
 use reth_transaction_pool::{
     error::PoolResult, GetPooledTransactionLimit, PoolTransaction, PropagateKind,
     PropagatedTransactions, TransactionPool, ValidPoolTransaction,
@@ -205,7 +204,7 @@ where
         }
     }
 
-    /// Invoked when a new transaction is pending.
+    /// Invoked when a new transaction is pending in the local pool.
     ///
     /// When new transactions appear in the pool, we propagate them to the network using the
     /// `Transactions` and `NewPooledTransactionHashes` messages. The Transactions message relays
@@ -224,15 +223,10 @@ where
 
         trace!(target: "net::tx", "Start propagating transactions");
 
+        // This fetches all transaction from the pool, including the blob transactions, which are
+        // only ever sent as hashes.
         let propagated = self.propagate_transactions(
-            self.pool
-                .get_all(hashes)
-                .into_iter()
-                .map(|tx| {
-                    let tx = Arc::new(tx.transaction.to_recovered_transaction().into_signed());
-                    PropagateTransaction::new(tx)
-                })
-                .collect(),
+            self.pool.get_all(hashes).into_iter().map(PropagateTransaction::new).collect(),
         );
 
         // notify pool so events get fired
@@ -242,7 +236,7 @@ where
     /// Propagate the transactions to all connected peers either as full objects or hashes
     ///
     /// The message for new pooled hashes depends on the negotiated version of the stream.
-    /// See [NewPooledTransactionHashes](NewPooledTransactionHashes)
+    /// See [NewPooledTransactionHashes]
     ///
     /// Note: EIP-4844 are disallowed from being broadcast in full and are only ever sent as hashes, see also <https://eips.ethereum.org/EIPS/eip-4844#networking>.
     fn propagate_transactions(
@@ -672,8 +666,11 @@ impl PropagateTransaction {
         self.transaction.hash()
     }
 
-    fn new(transaction: Arc<TransactionSigned>) -> Self {
-        Self { size: transaction.length(), transaction }
+    /// Create a new instance from a pooled transaction
+    fn new<T: PoolTransaction>(tx: Arc<ValidPoolTransaction<T>>) -> Self {
+        let size = tx.encoded_length;
+        let transaction = Arc::new(tx.transaction.to_recovered_transaction().into_signed());
+        Self { size, transaction }
     }
 }
 
@@ -830,7 +827,7 @@ struct Peer {
     client_version: Arc<String>,
 }
 
-/// Commands to send to the [`TransactionsManager`](crate::transactions::TransactionsManager)
+/// Commands to send to the [`TransactionsManager`]
 enum TransactionsCommand {
     PropagateHash(H256),
 }

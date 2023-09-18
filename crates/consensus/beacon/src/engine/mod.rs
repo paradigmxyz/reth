@@ -2005,7 +2005,7 @@ mod tests {
     }
 
     fn insert_blocks<'a, DB: Database>(
-        db: &DB,
+        db: DB,
         chain: Arc<ChainSpec>,
         mut blocks: impl Iterator<Item = &'a SealedBlock>,
     ) {

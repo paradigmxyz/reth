@@ -14,7 +14,7 @@ use crate::{
 use async_trait::async_trait;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    constants::eip4844::blob_fee,
+    eip4844::calc_blob_fee,
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
     IntoRecoveredTransaction, Receipt, SealedBlock,
     TransactionKind::{Call, Create},
@@ -26,7 +26,7 @@ use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_revm::{
-    database::{State, SubState},
+    database::{StateProviderDatabase, SubState},
     env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     tracing::{TracingInspector, TracingInspectorConfig},
 };
@@ -43,7 +43,7 @@ use revm::{
 use revm_primitives::{utilities::create_address, Env, ResultAndState, SpecId};
 
 /// Helper alias type for the state's [CacheDB]
-pub(crate) type StateCacheDB<'r> = CacheDB<State<StateProviderBox<'r>>>;
+pub(crate) type StateCacheDB<'r> = CacheDB<StateProviderDatabase<StateProviderBox<'r>>>;
 
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace.
 ///
@@ -469,6 +469,8 @@ where
                     access_list: request.access_list.clone(),
                     max_priority_fee_per_gas: Some(U256::from(max_fee_per_gas)),
                     transaction_type: None,
+                    blob_versioned_hashes: Vec::new(),
+                    max_fee_per_blob_gas: None,
                 },
                 BlockId::Number(BlockNumberOrTag::Pending),
             )
@@ -530,7 +532,7 @@ where
             .tracing_call_pool
             .spawn(move || {
                 let state = this.state_at(at)?;
-                let mut db = SubState::new(State::new(state));
+                let mut db = SubState::new(StateProviderDatabase::new(state));
 
                 let env = prepare_call_env(
                     cfg,
@@ -581,7 +583,7 @@ where
         F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>,
     {
         self.with_state_at_block(at, |state| {
-            let db = SubState::new(State::new(state));
+            let db = SubState::new(StateProviderDatabase::new(state));
 
             let mut inspector = TracingInspector::new(config);
             let (res, _) = inspect(db, env, &mut inspector)?;
@@ -604,7 +606,7 @@ where
         R: Send + 'static,
     {
         self.spawn_with_state_at_block(at, move |state| {
-            let db = SubState::new(State::new(state));
+            let db = SubState::new(StateProviderDatabase::new(state));
             let mut inspector = TracingInspector::new(config);
             let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
 
@@ -662,7 +664,7 @@ where
         let block_txs = block.body;
 
         self.spawn_with_state_at_block(parent_block.into(), move |state| {
-            let mut db = SubState::new(State::new(state));
+            let mut db = SubState::new(StateProviderDatabase::new(state));
 
             // replay all transactions prior to the targeted transaction
             replay_transactions_until(&mut db, cfg.clone(), block_env.clone(), block_txs, tx.hash)?;
@@ -885,7 +887,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         status_code: if receipt.success { Some(U64::from(1)) } else { Some(U64::from(0)) },
 
         // EIP-4844 fields
-        blob_gas_price: meta.excess_blob_gas.map(blob_fee),
+        blob_gas_price: meta.excess_blob_gas.map(calc_blob_fee).map(U128::from),
         blob_gas_used: transaction.transaction.blob_gas_used().map(U128::from),
     };
 

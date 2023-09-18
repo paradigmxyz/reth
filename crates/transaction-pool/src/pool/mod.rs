@@ -110,6 +110,7 @@ pub use listener::{AllTransactionsEvents, TransactionEvents};
 use reth_rlp::Encodable;
 
 mod best;
+mod blob;
 mod parked;
 pub(crate) mod pending;
 pub(crate) mod size;
@@ -910,6 +911,24 @@ impl<T: PoolTransaction> AddedTransaction<T> {
             AddedTransaction::Parked { transaction, subpool, .. } => {
                 NewTransactionEvent { transaction, subpool }
             }
+        }
+    }
+
+    /// Returns the subpool this transaction was added to
+    #[cfg(test)]
+    pub(crate) fn subpool(&self) -> SubPool {
+        match self {
+            AddedTransaction::Pending(_) => SubPool::Pending,
+            AddedTransaction::Parked { subpool, .. } => *subpool,
+        }
+    }
+
+    /// Returns the [TransactionId] of the added transaction
+    #[cfg(test)]
+    pub(crate) fn id(&self) -> &TransactionId {
+        match self {
+            AddedTransaction::Pending(added) => added.transaction.id(),
+            AddedTransaction::Parked { transaction, .. } => transaction.id(),
         }
     }
 }
