@@ -237,8 +237,7 @@ impl BundleStateWithReceipts {
     /// of receipt. This is a expensive operation.
     pub fn receipts_root_slow(&self, block_number: BlockNumber) -> Option<H256> {
         let index = self.block_number_to_index(block_number)?;
-        let block_receipts =
-            self.receipts[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?;
+        let block_receipts = self.receipts.root_slow(index)?;
         Some(calculate_receipt_root_ref(&block_receipts))
     }
 

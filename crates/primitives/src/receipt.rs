@@ -79,6 +79,11 @@ impl Receipts {
     pub fn push(&mut self, receipts: Vec<Option<Receipt>>) {
         self.receipt_vec.push(receipts);
     }
+
+    /// Retrieves a vector of references to receipts for the specified index.
+    pub fn root_slow(&self, index: usize) -> Option<Vec<&Receipt>> {
+        Some(self.receipt_vec[index].iter().map(Option::as_ref).collect())?
+    }
 }
 
 impl Deref for Receipts {
