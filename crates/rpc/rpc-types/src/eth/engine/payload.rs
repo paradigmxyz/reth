@@ -165,7 +165,7 @@ pub struct ExecutionPayloadV2 {
     #[serde(flatten)]
     pub payload_inner: ExecutionPayloadV1,
 
-    /// Array of [`Withdrawal`] enabled with V2
+    /// Array of [`StandaloneWithdraw`] enabled with V2
     /// See <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#executionpayloadv2>
     pub withdrawals: Vec<StandaloneWithdraw>,
 }
@@ -371,7 +371,7 @@ pub struct PayloadAttributes {
     pub prev_randao: H256,
     /// Suggested value for the `feeRecipient` field of the new payload
     pub suggested_fee_recipient: Address,
-    /// Array of [`Withdrawal`] enabled with V2
+    /// Array of [`StandaloneWithdraw`] enabled with V2
     /// See <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#payloadattributesv2>
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub withdrawals: Option<Vec<StandaloneWithdraw>>,
