@@ -326,24 +326,7 @@ impl<'a> EVMProcessor<'a> {
             return Err(BlockValidationError::BlockGasUsed {
                 got: cumulative_gas_used,
                 expected: block.gas_used,
-                gas_spent_by_tx: self
-                    .receipts
-                    .last()
-                    .map(|block_r| {
-                        block_r
-                            .iter()
-                            .enumerate()
-                            .map(|(id, tx_r)| {
-                                (
-                                    id as u64,
-                                    tx_r.as_ref()
-                                        .expect("receipts have not been pruned")
-                                        .cumulative_gas_used,
-                                )
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default(),
+                gas_spent_by_tx: self.receipts.gas_spent_by_tx(),
             }
             .into())
         }
