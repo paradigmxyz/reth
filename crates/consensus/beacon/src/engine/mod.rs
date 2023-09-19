@@ -1693,6 +1693,8 @@ where
         }
 
         if result.event.is_finished() && result.db_access_level.is_read_write() {
+            // If the hook had read-write access to the database,
+            // it means that the engine may have accumulated some buffered blocks.
             if let Err(error) = self.blockchain.connect_buffered_blocks_to_canonical_hashes() {
                 error!(target: "consensus::engine", ?error, "Error connecting buffered blocks to canonical hashes on hook result");
                 return Err(error.into())
