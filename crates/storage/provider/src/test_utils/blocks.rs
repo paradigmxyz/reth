@@ -105,23 +105,23 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
 
     // add account1
     bundle_builder = bundle_builder.state_present_account_info(
-        account1.clone(),
+        account1,
         into_revm_acc(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
     );
     bundle_builder = bundle_builder.state_storage(
-        account1.clone(),
+        account1,
         HashMap::from([(U256::from_be_bytes(slot.0), (U256::from(0), U256::from(10)))]),
     );
 
     // add account2
     bundle_builder = bundle_builder.state_present_account_info(
-        account2.clone(),
+        account2,
         into_revm_acc(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
     );
-    bundle_builder = bundle_builder.state_storage(account2.clone(), HashMap::from([]));
+    bundle_builder = bundle_builder.state_storage(account2, HashMap::from([]));
 
     // add reverts for account1
-    bundle_builder = bundle_builder.revert_account_info(number, account1.clone(), Some(None));
+    bundle_builder = bundle_builder.revert_account_info(number, account1, Some(None));
     bundle_builder = bundle_builder.revert_storage(
         number,
         account1,
@@ -129,7 +129,7 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
     );
 
     // add reverts for account2
-    bundle_builder = bundle_builder.revert_account_info(number, account2.clone(), Some(None));
+    bundle_builder = bundle_builder.revert_account_info(number, account2, Some(None));
     bundle_builder = bundle_builder.revert_storage(number, account2, vec![]);
 
     let bundle = BundleStateWithReceipts::new(
@@ -173,18 +173,18 @@ fn block2(
 
     // add account
     bundle_builder = bundle_builder.state_present_account_info(
-        account.clone(),
+        account,
         into_revm_acc(Account { nonce: 3, balance: U256::from(20), bytecode_hash: None }),
     );
     bundle_builder = bundle_builder.state_storage(
-        account.clone(),
+        account,
         HashMap::from([(U256::from_be_bytes(slot.0), (U256::from(0), U256::from(15)))]),
     );
 
     // add reverts for account1
     bundle_builder = bundle_builder.revert_account_info(
         number,
-        account.clone(),
+        account,
         Some(Some(into_revm_acc(Account {
             nonce: 1,
             balance: U256::from(10),
