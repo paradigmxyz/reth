@@ -554,19 +554,18 @@ pub fn verify_receipt<'a>(
 mod tests {
     use reth_primitives::{
         constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
+        hex_literal::hex,
         keccak256, Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, MAINNET,
     };
     use reth_provider::{AccountReader, BlockHashReader, StateRootProvider};
     use reth_revm_primitives::TransitionState;
     use revm::Database;
-    use std::{collections::HashMap, str::FromStr};
+    use std::collections::HashMap;
 
     use super::*;
 
-    /// Returns the beacon root contract code
-    fn beacon_root_contract_code() -> Bytes {
-        Bytes::from_str("0x3373fffffffffffffffffffffffffffffffffffffffe14604457602036146024575f5ffd5b620180005f350680545f35146037575f5ffd5b6201800001545f5260205ff35b6201800042064281555f359062018000015500").unwrap()
-    }
+    const BEACON_ROOT_CONTRACT_CODE: [u8; 97] =
+        hex!("3373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f35801560495762001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500");
 
     #[derive(Debug, Default, Clone, Eq, PartialEq)]
     struct StateProviderTest {
@@ -659,7 +658,7 @@ mod tests {
 
         let mut db = StateProviderTest::default();
 
-        let beacon_root_contract_code = beacon_root_contract_code();
+        let beacon_root_contract_code = Bytes::from(BEACON_ROOT_CONTRACT_CODE);
 
         let beacon_root_contract_account = Account {
             balance: U256::ZERO,
@@ -782,7 +781,7 @@ mod tests {
         // during the pre-block call
         let mut db = StateProviderTest::default();
 
-        let beacon_root_contract_code = beacon_root_contract_code();
+        let beacon_root_contract_code = Bytes::from(BEACON_ROOT_CONTRACT_CODE);
 
         let beacon_root_contract_account = Account {
             balance: U256::ZERO,
@@ -839,7 +838,7 @@ mod tests {
     fn eip_4788_genesis_call() {
         let mut db = StateProviderTest::default();
 
-        let beacon_root_contract_code = beacon_root_contract_code();
+        let beacon_root_contract_code = Bytes::from(BEACON_ROOT_CONTRACT_CODE);
 
         let beacon_root_contract_account = Account {
             balance: U256::ZERO,
@@ -918,7 +917,7 @@ mod tests {
 
         let mut db = StateProviderTest::default();
 
-        let beacon_root_contract_code = beacon_root_contract_code();
+        let beacon_root_contract_code = Bytes::from(BEACON_ROOT_CONTRACT_CODE);
 
         let beacon_root_contract_account = Account {
             balance: U256::ZERO,
