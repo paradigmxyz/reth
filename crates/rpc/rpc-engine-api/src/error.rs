@@ -53,6 +53,14 @@ pub enum EngineApiError {
     /// beacon block root after Cancun
     #[error("no parent beacon block root post-cancun")]
     NoParentBeaconBlockRootPostCancun,
+    /// Thrown if the `ExecutionPayload` provided in engine_newPayload contains blob fields before
+    /// cancun
+    #[error("blob fields not supported before cancun")]
+    BlobFieldsNotSupportedBeforeCancun,
+    /// Thrown if the `ExecutionPayload` provided in engine_newPayload does not contain blob fields
+    /// after cancun
+    #[error("no blob fields post-cancun")]
+    NoBlobFieldsPostCancun,
     /// Thrown if `PayloadAttributes` were provided with a timestamp, but the version of the engine
     /// method called is meant for a fork that occurs after the provided timestamp.
     #[error("unsupported fork")]
@@ -99,6 +107,8 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EngineApiError::ParentBeaconBlockRootNotSupportedBeforeV3 |
             EngineApiError::NoParentBeaconBlockRootPostCancun |
             EngineApiError::NoWithdrawalsPostShanghai |
+            EngineApiError::NoBlobFieldsPostCancun |
+            EngineApiError::BlobFieldsNotSupportedBeforeCancun |
             EngineApiError::HasWithdrawalsPreShanghai => INVALID_PARAMS_CODE,
             EngineApiError::UnknownPayload => UNKNOWN_PAYLOAD_CODE,
             EngineApiError::PayloadRequestTooLarge { .. } => REQUEST_TOO_LARGE_CODE,

@@ -509,6 +509,36 @@ where
         Ok(())
     }
 
+    /// Validates the presence of blob fields in the execution payload.
+    ///
+    /// If the payload is pre-cancun and has blob fields then this will return
+    /// [EngineApiError::BlobFieldsNotSupportedBeforeCancun].
+    ///
+    /// If the payload is post-cancun and does not have blob fields then this will return
+    /// [EngineApiError::NoBlobFieldsPostCancun].
+    ///
+    /// This does not return [EngineApiError::UnsupportedFork] errors for an invalid cancun
+    /// timestamp, `validate_payload_timestamp` and `validate_parent_beacon_block_root_presence`
+    /// are responsible for that.
+    fn validate_blob_field_presence(
+        &self,
+        version: EngineApiMessageVersion,
+        timestamp: u64,
+        payload: &ExecutionPayload,
+    ) -> EngineApiResult<()> {
+        if self.inner.chain_spec.is_cancun_activated_at_timestamp(timestamp) {
+            if payload.blob_gas_used().is_none() || payload.excess_blob_gas().is_none() {
+                return Err(EngineApiError::NoBlobFieldsPostCancun)
+            }
+        } else if version == EngineApiMessageVersion::V3 {
+            if payload.blob_gas_used().is_some() || payload.excess_blob_gas().is_some() {
+                return Err(EngineApiError::BlobFieldsNotSupportedBeforeCancun)
+            }
+        }
+
+        Ok(())
+    }
+
     /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
     /// and the message version.
     fn validate_version_specific_fields(
@@ -525,7 +555,11 @@ where
             version,
             payload_or_attrs.timestamp(),
             payload_or_attrs.parent_beacon_block_root().is_some(),
-        )
+        )?;
+        if let PayloadOrAttributes::ExecutionPayload { payload, .. } = payload_or_attrs {
+            self.validate_blob_field_presence(version, payload.timestamp(), payload)?;
+        }
+        Ok(())
     }
 
     /// Validates the `engine_forkchoiceUpdated` payload attributes and executes the forkchoice
