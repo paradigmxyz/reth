@@ -107,8 +107,8 @@ pub(crate) fn get_precompiles(spec_id: &SpecId) -> Vec<reth_primitives::H160> {
         SpecId::ARROW_GLACIER |
         SpecId::GRAY_GLACIER |
         SpecId::MERGE |
-        SpecId::SHANGHAI |
-        SpecId::CANCUN => PrecompilesSpecId::BERLIN,
+        SpecId::SHANGHAI => PrecompilesSpecId::BERLIN,
+        SpecId::CANCUN => PrecompilesSpecId::CANCUN,
         SpecId::LATEST => PrecompilesSpecId::LATEST,
     };
     Precompiles::new(spec).addresses().into_iter().map(Address::from).collect()
