@@ -169,7 +169,7 @@ impl BlockIndices {
 
         loop {
             let Some(old_block_value) = old_hash else {
-                // end of old_hashes canonical chain. New chain has more block than old chain.
+                // end of old_hashes canonical chain. New chain has more blocks than old chain.
                 while let Some(new) = new_hash {
                     // add new blocks to added list.
                     added.push(new.into());
