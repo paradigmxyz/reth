@@ -33,7 +33,8 @@ const NIPPY_JAR_VERSION: usize = 1;
 /// A [`Row`] is a list of its selected column values.
 type Row = Vec<Vec<u8>>;
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct NippyJar {
     /// Version
     version: usize,
