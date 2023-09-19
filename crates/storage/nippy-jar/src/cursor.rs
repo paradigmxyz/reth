@@ -24,7 +24,7 @@ pub struct NippyJarCursor<'a> {
 
 impl<'a> std::fmt::Debug for NippyJarCursor<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "NippyJarCursor {{ config: {:?} }}", self.jar)
+        f.debug_struct("NippyJarCursor").field("config", &self.jar).finish_non_exhaustive()
     }
 }
 
