@@ -6,15 +6,17 @@ use reth_primitives::Block;
 use reth_rpc::JwtSecret;
 use reth_rpc_api::clients::EngineApiClient;
 use reth_rpc_types::engine::{ForkchoiceState, PayloadId, TransitionConfiguration};
-
+use reth_rpc_types_compat::engine::payload::{
+    convert_block_to_payload_input_v2, try_block_to_payload_v1,
+};
 #[allow(unused_must_use)]
 async fn test_basic_engine_calls<C>(client: &C)
 where
     C: ClientT + SubscriptionClientT + Sync,
 {
     let block = Block::default().seal_slow();
-    EngineApiClient::new_payload_v1(client, block.clone().into()).await;
-    EngineApiClient::new_payload_v2(client, block.into()).await;
+    EngineApiClient::new_payload_v1(client, try_block_to_payload_v1(block.clone())).await;
+    EngineApiClient::new_payload_v2(client, convert_block_to_payload_input_v2(block)).await;
     EngineApiClient::fork_choice_updated_v1(client, ForkchoiceState::default(), None).await;
     EngineApiClient::get_payload_v1(client, PayloadId::new([0, 0, 0, 0, 0, 0, 0, 0])).await;
     EngineApiClient::get_payload_v2(client, PayloadId::new([0, 0, 0, 0, 0, 0, 0, 0])).await;
