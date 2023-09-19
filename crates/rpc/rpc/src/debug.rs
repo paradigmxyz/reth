@@ -17,7 +17,7 @@ use reth_primitives::{
 };
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderBox};
 use reth_revm::{
-    database::{State, SubState},
+    database::{StateProviderDatabase, SubState},
     env::tx_env_with_recovered,
     tracing::{
         js::{JsDbRequest, JsInspector},
@@ -96,7 +96,7 @@ where
             .eth_api
             .spawn_with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(transactions.len());
-                let mut db = SubState::new(State::new(state));
+                let mut db = SubState::new(StateProviderDatabase::new(state));
 
                 let mut transactions = transactions.into_iter().peekable();
                 while let Some(tx) = transactions.next() {
@@ -190,7 +190,7 @@ where
                 // configure env for the target transaction
                 let tx = transaction.into_recovered();
 
-                let mut db = SubState::new(State::new(state));
+                let mut db = SubState::new(StateProviderDatabase::new(state));
                 // replay all transactions prior to the targeted transaction
                 replay_transactions_until(
                     &mut db,
@@ -289,7 +289,7 @@ where
                     // because JSTracer and all JS types are not Send
                     let (_, _, at) = self.inner.eth_api.evm_env_at(at).await?;
                     let state = self.inner.eth_api.state_at(at)?;
-                    let db = SubState::new(State::new(state));
+                    let db = SubState::new(StateProviderDatabase::new(state));
                     let has_state_overrides = overrides.has_state();
 
                     // If the caller provided state overrides we need to clone the DB so the js
@@ -379,7 +379,7 @@ where
             .eth_api
             .spawn_with_state_at_block(at.into(), move |state| {
                 let mut results = Vec::with_capacity(bundles.len());
-                let mut db = SubState::new(State::new(state));
+                let mut db = SubState::new(StateProviderDatabase::new(state));
 
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
@@ -585,9 +585,15 @@ where
 
         let db = if let Some(db) = db {
             let CacheDB { accounts, contracts, logs, block_hashes, .. } = db;
-            CacheDB { accounts, contracts, logs, block_hashes, db: State::new(state) }
+            CacheDB {
+                accounts,
+                contracts,
+                logs,
+                block_hashes,
+                db: StateProviderDatabase::new(state),
+            }
         } else {
-            CacheDB::new(State::new(state))
+            CacheDB::new(StateProviderDatabase::new(state))
         };
 
         let mut stream = ReceiverStream::new(rx);

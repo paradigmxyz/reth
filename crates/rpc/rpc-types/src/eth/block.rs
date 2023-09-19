@@ -131,6 +131,9 @@ pub struct Header {
     /// Excess blob gas
     #[serde(rename = "excessBlobGas", skip_serializing_if = "Option::is_none")]
     pub excess_blob_gas: Option<U64>,
+    /// Parent beacon block root
+    #[serde(rename = "parentBeaconBlockRoot", skip_serializing_if = "Option::is_none")]
+    pub parent_beacon_block_root: Option<H256>,
 }
 
 // === impl Header ===
@@ -162,6 +165,7 @@ impl Header {
                     withdrawals_root,
                     blob_gas_used,
                     excess_blob_gas,
+                    parent_beacon_block_root,
                 },
             hash,
         } = primitive_header;
@@ -187,6 +191,7 @@ impl Header {
             base_fee_per_gas: base_fee_per_gas.map(U256::from),
             blob_gas_used: blob_gas_used.map(U64::from),
             excess_blob_gas: excess_blob_gas.map(U64::from),
+            parent_beacon_block_root,
         }
     }
 }
@@ -318,6 +323,7 @@ mod tests {
                 base_fee_per_gas: Some(U256::from(20)),
                 blob_gas_used: None,
                 excess_blob_gas: None,
+                parent_beacon_block_root: None,
             },
             total_difficulty: Some(U256::from(100000)),
             uncles: vec![H256::from_low_u64_be(17)],
@@ -358,6 +364,7 @@ mod tests {
                 base_fee_per_gas: Some(U256::from(20)),
                 blob_gas_used: None,
                 excess_blob_gas: None,
+                parent_beacon_block_root: None,
             },
             total_difficulty: Some(U256::from(100000)),
             uncles: vec![H256::from_low_u64_be(17)],

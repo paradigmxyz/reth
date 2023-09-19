@@ -4,10 +4,6 @@ use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{Block, ChainSpec, IntoRecoveredTransaction, SealedBlockWithSenders};
 use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
-use reth_revm::{
-    database::{State, SubState},
-    executor::Executor,
-};
 use reth_stages::PipelineEvent;
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
 use std::{
@@ -127,13 +123,8 @@ where
                         })
                         .unzip();
 
-                    // execute the new block
-                    let substate = SubState::new(State::new(client.latest().unwrap()));
-                    let mut executor = Executor::new(Arc::clone(&chain_spec), substate);
-
-                    match storage.build_and_execute(transactions.clone(), &mut executor, chain_spec)
-                    {
-                        Ok((new_header, post_state)) => {
+                    match storage.build_and_execute(transactions.clone(), &client, chain_spec) {
+                        Ok((new_header, bundle_state)) => {
                             // clear all transactions from pool
                             pool.remove_transactions(
                                 transactions.iter().map(|tx| tx.hash()).collect(),
@@ -202,7 +193,7 @@ where
                             debug!(target: "consensus::auto", header=?sealed_block_with_senders.hash(), "sending block notification");
 
                             let chain =
-                                Arc::new(Chain::new(vec![(sealed_block_with_senders, post_state)]));
+                                Arc::new(Chain::new(vec![sealed_block_with_senders], bundle_state));
 
                             // send block notification
                             let _ = canon_state_notification

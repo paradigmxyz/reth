@@ -36,9 +36,8 @@ pub fn fill_cfg_env(
         },
     );
 
-    cfg_env.chain_id = U256::from(chain_spec.chain().id());
+    cfg_env.chain_id = chain_spec.chain().id();
     cfg_env.spec_id = spec_id;
-    cfg_env.perf_all_precompiles_have_balance = false;
     cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
 }
 
@@ -221,8 +220,8 @@ where
             to,
             value,
             access_list,
-            blob_versioned_hashes: _,
-            max_fee_per_blob_gas: _,
+            blob_versioned_hashes,
+            max_fee_per_blob_gas,
             input,
         }) => {
             tx_env.gas_limit = *gas_limit;
@@ -249,6 +248,8 @@ where
                     )
                 })
                 .collect();
+            tx_env.blob_hashes = blob_versioned_hashes.clone();
+            tx_env.max_fee_per_blob_gas = Some(U256::from(*max_fee_per_blob_gas));
         }
     }
 }

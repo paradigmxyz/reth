@@ -1,7 +1,8 @@
 use crate::{
+    bundle_state::BundleStateWithReceipts,
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider, PostState,LogIndexProvider,
+    ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider, LogIndexProvider,
     PruneCheckpointReader, ReceiptProviderIdExt, StageCheckpointReader, StateProvider,
     StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
     WithdrawalsProvider,
@@ -11,12 +12,15 @@ use reth_interfaces::Result;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, Bytecode, Bytes,
-    ChainInfo, ChainSpec,IntegerList, Header, PruneCheckpoint, PrunePart, Receipt, SealedBlock, SealedHeader,
-    StorageKey, StorageValue, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash,
-    TxNumber, H256, KECCAK_EMPTY, MAINNET, U256,
+    ChainInfo, ChainSpec, Header, IntegerList, PruneCheckpoint, PrunePart, Receipt, SealedBlock,
+    SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
+    TransactionSignedNoHash, TxHash, TxNumber, H256, KECCAK_EMPTY, MAINNET, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
-use std::{ops::{RangeBounds, RangeInclusive}, sync::Arc};
+use std::{
+    ops::{RangeBounds, RangeInclusive},
+    sync::Arc,
+};
 
 /// Supports various api interfaces for testing purposes.
 #[derive(Debug, Clone, Default, Copy)]
@@ -269,7 +273,7 @@ impl ChangeSetReader for NoopProvider {
 }
 
 impl StateRootProvider for NoopProvider {
-    fn state_root(&self, _post_state: PostState) -> Result<H256> {
+    fn state_root(&self, _state: BundleStateWithReceipts) -> Result<H256> {
         todo!()
     }
 }
@@ -359,7 +363,7 @@ impl StateProviderFactory for NoopProvider {
 
     fn pending_with_provider<'a>(
         &'a self,
-        _post_state_data: Box<dyn crate::PostStateDataProvider + 'a>,
+        _post_state_data: Box<dyn crate::BundleStateDataProvider + 'a>,
     ) -> Result<StateProviderBox<'a>> {
         Ok(Box::new(*self))
     }

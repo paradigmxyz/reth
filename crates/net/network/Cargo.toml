@@ -51,7 +51,7 @@ metrics.workspace = true
 
 # misc
 auto_impl = "1"
-aquamarine = "0.3.0"
+aquamarine.workspace = true
 tracing.workspace = true
 fnv = "1.0"
 thiserror.workspace = true
@@ -88,8 +88,8 @@ enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
 
 # misc
 hex = "0.4"
+serial_test.workspace = true
 tempfile = "3.3"
-serial_test = "2.0"
 
 [features]
 default = ["serde"]

@@ -1,12 +1,12 @@
 use crate::{
-    post_state::StorageChangeset,
+    bundle_state::{BundleStateInit, BundleStateWithReceipts, RevertsInit},
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
-    EvmEnvProvider, HashingWriter, HeaderProvider, HistoryWriter, LogIndexProvider, PostState, ProviderError,
-    PruneCheckpointReader, PruneCheckpointWriter, StageCheckpointReader, StorageReader,
-    TransactionsProvider, WithdrawalsProvider,
+    Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HistoryWriter, LogIndexProvider,
+    OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter,
+    StageCheckpointReader, StorageReader, TransactionsProvider, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -31,10 +31,10 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainInfo, ChainSpec, Hardfork, Head, Header, IntegerList, LogAddressIndices, LogTopicIndices,PruneCheckpoint, PrunePart, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta, TransactionSigned,
-    TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256,
-    U256,
+    ChainInfo, ChainSpec, Hardfork, Head, Header, IntegerList, LogAddressIndices, LogTopicIndices,
+    PruneCheckpoint, PruneModes, PrunePart, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
@@ -43,7 +43,7 @@ use reth_revm_primitives::{
 };
 use reth_trie::{prefix_set::PrefixSetMut, StateRoot};
 use std::{
-    collections::{btree_map::Entry, BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::Arc,
@@ -351,8 +351,12 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         Ok(())
     }
 
-    /// Traverse over changesets and plain state and recreate the [`PostState`]s for the given range
-    /// of blocks.
+    /// Unwind or peek at last N blocks of state recreating the [`BundleStateWithReceipts`].
+    ///
+    /// If UNWIND it set to true tip and latest state will be unwind
+    /// and returned back with all the blocks
+    ///
+    /// If UNWIND is false we will just read the state/blocks and return them.
     ///
     /// 1. Iterate over the [BlockBodyIndices][tables::BlockBodyIndices] table to get all
     /// the transaction ids.
@@ -371,16 +375,14 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     ///     1. Take the old value from the changeset
     ///     2. Take the new value from the local state
     ///     3. Set the local state to the value in the changeset
-    ///
-    /// If `TAKE` is `true`, the local state will be written to the plain state tables.
-    /// 5. Get all receipts from table
-    fn get_take_block_execution_result_range<const TAKE: bool>(
+    fn unwind_or_peek_state<const UNWIND: bool>(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<Vec<PostState>> {
+    ) -> Result<BundleStateWithReceipts> {
         if range.is_empty() {
-            return Ok(Vec::new())
+            return Ok(BundleStateWithReceipts::default())
         }
+        let start_block_number = *range.start();
 
         // We are not removing block meta as it is used to get block changesets.
         let block_bodies = self.get_or_take::<tables::BlockBodyIndices, false>(range.clone())?;
@@ -390,146 +392,139 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             block_bodies.first().expect("already checked if there are blocks").1.first_tx_num();
         let to_transaction_num =
             block_bodies.last().expect("already checked if there are blocks").1.last_tx_num();
-        let receipts =
-            self.get_or_take::<tables::Receipts, TAKE>(from_transaction_num..=to_transaction_num)?;
 
         let storage_range = BlockNumberAddress::range(range.clone());
 
         let storage_changeset =
-            self.get_or_take::<tables::StorageChangeSet, TAKE>(storage_range)?;
-        let account_changeset = self.get_or_take::<tables::AccountChangeSet, TAKE>(range)?;
+            self.get_or_take::<tables::StorageChangeSet, UNWIND>(storage_range)?;
+        let account_changeset = self.get_or_take::<tables::AccountChangeSet, UNWIND>(range)?;
 
         // iterate previous value and get plain state value to create changeset
         // Double option around Account represent if Account state is know (first option) and
         // account is removed (Second Option)
-        type LocalPlainState = BTreeMap<Address, (Option<Option<Account>>, BTreeMap<H256, U256>)>;
 
-        let mut local_plain_state: LocalPlainState = BTreeMap::new();
+        let mut state: BundleStateInit = HashMap::new();
 
-        // iterate in reverse and get plain state.
-
-        // Bundle execution changeset to its particular transaction and block
-        let mut block_states =
-            BTreeMap::from_iter(block_bodies.iter().map(|(num, _)| (*num, PostState::default())));
-
+        // This is not working for blocks that are not at tip. as plain state is not the last
+        // state of end range. We should rename the functions or add support to access
+        // History state. Accessing history state can be tricky but we are not gaining
+        // anything.
         let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
         let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
+
+        let mut reverts: RevertsInit = HashMap::new();
 
         // add account changeset changes
         for (block_number, account_before) in account_changeset.into_iter().rev() {
             let AccountBeforeTx { info: old_info, address } = account_before;
-            let new_info = match local_plain_state.entry(address) {
-                Entry::Vacant(entry) => {
-                    let new_account = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
-                    entry.insert((Some(old_info), BTreeMap::new()));
-                    new_account
+            match state.entry(address) {
+                hash_map::Entry::Vacant(entry) => {
+                    let new_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
+                    entry.insert((old_info, new_info, HashMap::new()));
                 }
-                Entry::Occupied(mut entry) => {
-                    let new_account = std::mem::replace(&mut entry.get_mut().0, Some(old_info));
-                    new_account.expect("As we are stacking account first, account would always be Some(Some) or Some(None)")
+                hash_map::Entry::Occupied(mut entry) => {
+                    // overwrite old account state.
+                    entry.get_mut().0 = old_info;
                 }
-            };
-
-            let post_state = block_states.entry(block_number).or_default();
-            match (old_info, new_info) {
-                (Some(old), Some(new)) => {
-                    if new != old {
-                        post_state.change_account(block_number, address, old, new);
-                    } else {
-                        unreachable!("Junk data in database: an account changeset did not represent any change");
-                    }
-                }
-                (None, Some(account)) =>  post_state.create_account(block_number, address, account),
-                (Some(old), None) =>
-                    post_state.destroy_account(block_number, address, old),
-                (None, None) => unreachable!("Junk data in database: an account changeset transitioned from no account to no account"),
-            };
+            }
+            // insert old info into reverts.
+            reverts.entry(block_number).or_default().entry(address).or_default().0 = Some(old_info);
         }
 
         // add storage changeset changes
-        let mut storage_changes: BTreeMap<BlockNumberAddress, StorageChangeset> = BTreeMap::new();
-        for (block_and_address, storage_entry) in storage_changeset.into_iter().rev() {
-            let BlockNumberAddress((_, address)) = block_and_address;
-            let new_storage =
-                match local_plain_state.entry(address).or_default().1.entry(storage_entry.key) {
-                    Entry::Vacant(entry) => {
-                        let new_storage = plain_storage_cursor
-                            .seek_by_key_subkey(address, storage_entry.key)?
-                            .filter(|storage| storage.key == storage_entry.key)
-                            .unwrap_or_default();
-                        entry.insert(storage_entry.value);
-                        new_storage.value
-                    }
-                    Entry::Occupied(mut entry) => {
-                        std::mem::replace(entry.get_mut(), storage_entry.value)
-                    }
-                };
-            storage_changes.entry(block_and_address).or_default().insert(
-                U256::from_be_bytes(storage_entry.key.0),
-                (storage_entry.value, new_storage),
-            );
+        for (block_and_address, old_storage) in storage_changeset.into_iter().rev() {
+            let BlockNumberAddress((block_number, address)) = block_and_address;
+            // get account state or insert from plain state.
+            let account_state = match state.entry(address) {
+                hash_map::Entry::Vacant(entry) => {
+                    let present_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
+                    entry.insert((present_info, present_info, HashMap::new()))
+                }
+                hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            };
+
+            // match storage.
+            match account_state.2.entry(old_storage.key) {
+                hash_map::Entry::Vacant(entry) => {
+                    let new_storage = plain_storage_cursor
+                        .seek_by_key_subkey(address, old_storage.key)?
+                        .filter(|storage| storage.key == old_storage.key)
+                        .unwrap_or_default();
+                    entry.insert((old_storage.value, new_storage.value));
+                }
+                hash_map::Entry::Occupied(mut entry) => {
+                    entry.get_mut().0 = old_storage.value;
+                }
+            };
+
+            reverts
+                .entry(block_number)
+                .or_default()
+                .entry(address)
+                .or_default()
+                .1
+                .push(old_storage);
         }
 
-        for (BlockNumberAddress((block_number, address)), storage_changeset) in
-            storage_changes.into_iter()
-        {
-            block_states.entry(block_number).or_default().change_storage(
-                block_number,
-                address,
-                storage_changeset,
-            );
-        }
-
-        if TAKE {
+        if UNWIND {
             // iterate over local plain state remove all account and all storages.
-            for (address, (account, storage)) in local_plain_state.into_iter() {
-                // revert account
-                if let Some(account) = account {
-                    let existing_entry = plain_accounts_cursor.seek_exact(address)?;
-                    if let Some(account) = account {
-                        plain_accounts_cursor.upsert(address, account)?;
+            for (address, (old_account, new_account, storage)) in state.iter() {
+                // revert account if needed.
+                if old_account != new_account {
+                    let existing_entry = plain_accounts_cursor.seek_exact(*address)?;
+                    if let Some(account) = old_account {
+                        plain_accounts_cursor.upsert(*address, *account)?;
                     } else if existing_entry.is_some() {
                         plain_accounts_cursor.delete_current()?;
                     }
                 }
 
                 // revert storages
-                for (storage_key, storage_value) in storage.into_iter() {
-                    let storage_entry = StorageEntry { key: storage_key, value: storage_value };
+                for (storage_key, (old_storage_value, _new_storage_value)) in storage {
+                    let storage_entry =
+                        StorageEntry { key: *storage_key, value: *old_storage_value };
                     // delete previous value
                     // TODO: This does not use dupsort features
                     if plain_storage_cursor
-                        .seek_by_key_subkey(address, storage_key)?
-                        .filter(|s| s.key == storage_key)
+                        .seek_by_key_subkey(*address, *storage_key)?
+                        .filter(|s| s.key == *storage_key)
                         .is_some()
                     {
                         plain_storage_cursor.delete_current()?
                     }
 
-                    // TODO: This does not use dupsort features
                     // insert value if needed
-                    if storage_value != U256::ZERO {
-                        plain_storage_cursor.upsert(address, storage_entry)?;
+                    if *old_storage_value != U256::ZERO {
+                        plain_storage_cursor.upsert(*address, storage_entry)?;
                     }
                 }
             }
         }
 
         // iterate over block body and create ExecutionResult
-        let mut receipt_iter = receipts.into_iter();
+        let mut receipt_iter = self
+            .get_or_take::<tables::Receipts, UNWIND>(from_transaction_num..=to_transaction_num)?
+            .into_iter();
 
+        let mut receipts = Vec::new();
         // loop break if we are at the end of the blocks.
-        for (block_number, block_body) in block_bodies.into_iter() {
+        for (_, block_body) in block_bodies.into_iter() {
+            let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
             for _ in block_body.tx_num_range() {
                 if let Some((_, receipt)) = receipt_iter.next() {
-                    block_states
-                        .entry(block_number)
-                        .or_default()
-                        .add_receipt(block_number, receipt);
+                    block_receipts.push(Some(receipt));
                 }
             }
+            receipts.push(block_receipts);
         }
-        Ok(block_states.into_values().collect())
+
+        Ok(BundleStateWithReceipts::new_init(
+            state,
+            reverts,
+            Vec::new(),
+            receipts,
+            start_block_number,
+        ))
     }
 
     /// Return list of entries from table
@@ -558,7 +553,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     }
 
     /// Get requested blocks transaction with signer
-    fn get_take_block_transaction_range<const TAKE: bool>(
+    pub(crate) fn get_take_block_transaction_range<const TAKE: bool>(
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> Result<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>> {
@@ -585,8 +580,67 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             .map(|(id, tx)| (id, tx.into()))
             .collect::<Vec<(u64, TransactionSigned)>>();
 
-        let senders =
+        let mut senders =
             self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)?;
+
+        // Recover senders manually if not found in db
+        // SAFETY: Transactions are always guaranteed to be in the database whereas
+        // senders might be pruned.
+        if senders.len() != transactions.len() {
+            senders.reserve(transactions.len() - senders.len());
+            // Find all missing senders, their corresponding tx numbers and indexes to the original
+            // `senders` vector at which the recovered senders will be inserted.
+            let mut missing_senders = Vec::with_capacity(transactions.len() - senders.len());
+            {
+                let mut senders = senders.iter().peekable();
+
+                // `transactions` contain all entries. `senders` contain _some_ of the senders for
+                // these transactions. Both are sorted and indexed by `TxNumber`.
+                //
+                // The general idea is to iterate on both `transactions` and `senders`, and advance
+                // the `senders` iteration only if it matches the current `transactions` entry's
+                // `TxNumber`. Otherwise, add the transaction to the list of missing senders.
+                for (i, (tx_number, transaction)) in transactions.iter().enumerate() {
+                    if let Some((sender_tx_number, _)) = senders.peek() {
+                        if sender_tx_number == tx_number {
+                            // If current sender's `TxNumber` matches current transaction's
+                            // `TxNumber`, advance the senders iterator.
+                            senders.next();
+                        } else {
+                            // If current sender's `TxNumber` doesn't match current transaction's
+                            // `TxNumber`, add it to missing senders.
+                            missing_senders.push((i, tx_number, transaction));
+                        }
+                    } else {
+                        // If there's no more senders left, but we're still iterating over
+                        // transactions, add them to missing senders
+                        missing_senders.push((i, tx_number, transaction));
+                    }
+                }
+            }
+
+            // Recover senders
+            let recovered_senders = TransactionSigned::recover_signers(
+                missing_senders.iter().map(|(_, _, tx)| *tx).collect::<Vec<_>>(),
+                missing_senders.len(),
+            )
+            .ok_or(BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError))?;
+
+            // Insert recovered senders along with tx numbers at the corresponding indexes to the
+            // original `senders` vector
+            for ((i, tx_number, _), sender) in missing_senders.into_iter().zip(recovered_senders) {
+                // Insert will put recovered senders at necessary positions and shift the rest
+                senders.insert(i, (*tx_number, sender));
+            }
+
+            // Debug assertions which are triggered during the test to ensure that all senders are
+            // present and sorted
+            debug_assert_eq!(senders.len(), transactions.len(), "missing one or more senders");
+            debug_assert!(
+                senders.iter().tuple_windows().all(|(a, b)| a.0 < b.0),
+                "senders not sorted"
+            );
+        }
 
         if TAKE {
             // Remove TxHashNumber
@@ -839,7 +893,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         mut delete_callback: impl FnMut(TableRow<T>),
     ) -> std::result::Result<(usize, bool), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
-        let mut walker = cursor.walk_range(keys.clone())?;
+        let mut walker = cursor.walk_range(keys)?;
         let mut deleted = 0;
 
         while let Some(row) = walker.next().transpose()? {
@@ -1335,6 +1389,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
                                 block_hash,
                                 block_number,
                                 base_fee: header.base_fee_per_gas,
+                                excess_blob_gas: header.excess_blob_gas,
                             };
 
                             return Ok(Some((transaction, meta)))
@@ -2039,11 +2094,12 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
 }
 
 impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockExecutionWriter for DatabaseProvider<'this, TX> {
+    /// Return range of blocks and its execution result
     fn get_or_take_block_and_execution_range<const TAKE: bool>(
         &self,
         chain_spec: &ChainSpec,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>> {
+    ) -> Result<Chain> {
         if TAKE {
             let storage_range = BlockNumberAddress::range(range.clone());
 
@@ -2118,9 +2174,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockExecutionWriter for DatabaseP
         let blocks = self.get_take_block_range::<TAKE>(chain_spec, range.clone())?;
         let unwind_to = blocks.first().map(|b| b.number.saturating_sub(1));
         // get execution res
-        let execution_res = self.get_take_block_execution_result_range::<TAKE>(range.clone())?;
-        // combine them
-        let blocks_with_exec_result: Vec<_> = blocks.into_iter().zip(execution_res).collect();
+        let execution_state = self.unwind_or_peek_state::<TAKE>(range.clone())?;
 
         // remove block bodies it is needed for both get block range and get block execution results
         // that is why it is deleted afterwards.
@@ -2134,8 +2188,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockExecutionWriter for DatabaseP
             }
         }
 
-        // return them
-        Ok(blocks_with_exec_result)
+        Ok(Chain::new(blocks, execution_state))
     }
 }
 
@@ -2144,6 +2197,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
         &self,
         block: SealedBlock,
         senders: Option<Vec<Address>>,
+        prune_modes: Option<&PruneModes>,
     ) -> Result<StoredBlockBodyIndices> {
         let block_number = block.number;
         self.tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
@@ -2193,9 +2247,24 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
 
         for (transaction, sender) in tx_iter {
             let hash = transaction.hash();
-            self.tx.put::<tables::TxSenders>(next_tx_num, sender)?;
+
+            if prune_modes
+                .and_then(|modes| modes.sender_recovery)
+                .filter(|prune_mode| prune_mode.is_full())
+                .is_none()
+            {
+                self.tx.put::<tables::TxSenders>(next_tx_num, sender)?;
+            }
+
             self.tx.put::<tables::Transactions>(next_tx_num, transaction.into())?;
-            self.tx.put::<tables::TxHashNumber>(hash, next_tx_num)?;
+
+            if prune_modes
+                .and_then(|modes| modes.transaction_lookup)
+                .filter(|prune_mode| prune_mode.is_full())
+                .is_none()
+            {
+                self.tx.put::<tables::TxHashNumber>(hash, next_tx_num)?;
+            }
             next_tx_num += 1;
         }
 
@@ -2218,10 +2287,11 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
         Ok(block_indices)
     }
 
-    fn append_blocks_with_post_state(
+    fn append_blocks_with_bundle_state(
         &self,
         blocks: Vec<SealedBlockWithSenders>,
-        state: PostState,
+        state: BundleStateWithReceipts,
+        prune_modes: Option<&PruneModes>,
     ) -> Result<()> {
         if blocks.is_empty() {
             return Ok(())
@@ -2239,12 +2309,12 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
         // Insert the blocks
         for block in blocks {
             let (block, senders) = block.into_components();
-            self.insert_block(block, Some(senders))?;
+            self.insert_block(block, Some(senders), prune_modes)?;
         }
 
         // Write state and changesets to the database.
         // Must be written after blocks because of the receipt lookup.
-        state.write_to_db(self.tx_ref(), new_tip_number)?;
+        state.write_to_db(self.tx_ref(), OriginalValuesKnown::No)?;
 
         self.insert_hashes(first_number..=last_block_number, last_block_hash, expected_state_root)?;
 

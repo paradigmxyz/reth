@@ -12,7 +12,7 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_db::init_db;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
-use reth_primitives::ChainSpec;
+use reth_primitives::{ChainSpec, PruneModes};
 use reth_provider::{ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     stages::{
@@ -201,6 +201,7 @@ impl Command {
                             ExecutionStageThresholds {
                                 max_blocks: Some(batch_size),
                                 max_changes: None,
+                                max_cumulative_gas: None,
                             },
                             config.stages.merkle.clean_threshold,
                             config.prune.map(|prune| prune.parts).unwrap_or_default(),
@@ -208,7 +209,9 @@ impl Command {
                         None,
                     )
                 }
-                StageEnum::TxLookup => (Box::new(TransactionLookupStage::new(batch_size)), None),
+                StageEnum::TxLookup => {
+                    (Box::new(TransactionLookupStage::new(batch_size, PruneModes::none())), None)
+                }
                 StageEnum::AccountHashing => {
                     (Box::new(AccountHashingStage::new(1, batch_size)), None)
                 }

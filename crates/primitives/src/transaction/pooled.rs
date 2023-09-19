@@ -394,7 +394,7 @@ impl PooledTransactionsElementEcRecovered {
         self.transaction
     }
 
-    /// Transform back to [`PooledTransactionsElement`]
+    /// Transform back to [`TransactionSignedEcRecovered`]
     pub fn into_ecrecovered_transaction(self) -> TransactionSignedEcRecovered {
         let (tx, signer) = self.into_components();
         tx.into_ecrecovered_transaction(signer)
@@ -411,6 +411,14 @@ impl PooledTransactionsElementEcRecovered {
         transaction: PooledTransactionsElement,
         signer: Address,
     ) -> Self {
+        Self { transaction, signer }
+    }
+}
+
+impl From<TransactionSignedEcRecovered> for PooledTransactionsElementEcRecovered {
+    fn from(tx: TransactionSignedEcRecovered) -> Self {
+        let signer = tx.signer;
+        let transaction = tx.signed_transaction.into();
         Self { transaction, signer }
     }
 }

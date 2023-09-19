@@ -47,9 +47,17 @@ pub const fn const_add(a: usize, b: usize) -> usize {
     a + b
 }
 
+/// A trait for types that have a maximum encoded length.
+///
+/// # Safety
+/// Invalid value can cause the encoder to crash.
 #[doc(hidden)]
 pub unsafe trait MaxEncodedLen<const LEN: usize>: Encodable {}
 
+/// A trait for types that have a maximum encoded length.
+///
+/// # Safety
+/// Invalid value can cause the encoder to crash.
 #[doc(hidden)]
 pub unsafe trait MaxEncodedLenAssoc: Encodable {
     const LEN: usize;

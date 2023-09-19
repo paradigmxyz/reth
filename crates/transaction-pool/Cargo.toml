@@ -36,7 +36,7 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
-aquamarine = "0.3.0"
+aquamarine.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 serde = { workspace = true, features = ["derive", "rc"], optional = true }
@@ -55,7 +55,7 @@ paste = "1.0"
 rand = "0.8"
 proptest.workspace = true
 criterion = "0.5"
-assert_matches = "1.5"
+assert_matches.workspace = true
 
 [features]
 default = ["serde"]

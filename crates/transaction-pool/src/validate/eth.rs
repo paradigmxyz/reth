@@ -2,14 +2,17 @@
 
 use crate::{
     blobstore::BlobStore,
-    error::InvalidPoolTransactionError,
+    error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
     traits::TransactionOrigin,
     validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_SIZE, TX_MAX_SIZE},
     EthBlobTransactionSidecar, EthPoolTransaction, TransactionValidationOutcome,
     TransactionValidationTaskExecutor, TransactionValidator,
 };
 use reth_primitives::{
-    constants::{eip4844::KZG_TRUSTED_SETUP, ETHEREUM_BLOCK_GAS_LIMIT},
+    constants::{
+        eip4844::{MAINNET_KZG_TRUSTED_SETUP, MAX_BLOBS_PER_BLOCK},
+        ETHEREUM_BLOCK_GAS_LIMIT,
+    },
     kzg::KzgSettings,
     ChainSpec, InvalidTransactionError, SealedBlock, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
     EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
@@ -74,7 +77,6 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     /// Toggle to determine if a local transaction should be propagated
     propagate_local_transactions: bool,
     /// Stores the setup and parameters needed for validating KZG proofs.
-    #[allow(unused)]
     kzg_settings: Arc<KzgSettings>,
     /// Marker for the transaction type
     _marker: PhantomData<T>,
@@ -198,7 +200,7 @@ where
             }
         }
 
-        let mut blob_sidecar = None;
+        let mut maybe_blob_sidecar = None;
 
         // blob tx checks
         if transaction.is_eip4844() {
@@ -207,6 +209,30 @@ where
                 return TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidTransactionError::TxTypeNotSupported.into(),
+                )
+            }
+
+            let blob_count = transaction.blob_count();
+            if blob_count == 0 {
+                // no blobs
+                return TransactionValidationOutcome::Invalid(
+                    transaction,
+                    InvalidPoolTransactionError::Eip4844(
+                        Eip4844PoolTransactionError::NoEip4844Blobs,
+                    ),
+                )
+            }
+
+            if blob_count > MAX_BLOBS_PER_BLOCK {
+                // too many blobs
+                return TransactionValidationOutcome::Invalid(
+                    transaction,
+                    InvalidPoolTransactionError::Eip4844(
+                        Eip4844PoolTransactionError::TooManyEip4844Blobs {
+                            have: blob_count,
+                            permitted: MAX_BLOBS_PER_BLOCK,
+                        },
+                    ),
                 )
             }
 
@@ -225,13 +251,32 @@ where
                     } else {
                         return TransactionValidationOutcome::Invalid(
                             transaction,
-                            InvalidPoolTransactionError::MissingEip4844Blob,
+                            InvalidPoolTransactionError::Eip4844(
+                                Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
+                            ),
                         )
                     }
                 }
                 EthBlobTransactionSidecar::Present(blob) => {
-                    //TODO(mattsse): verify the blob
-                    blob_sidecar = Some(blob);
+                    if let Some(eip4844) = transaction.as_eip4844() {
+                        // validate the blob
+                        if let Err(err) = eip4844.validate_blob(&blob, &self.kzg_settings) {
+                            return TransactionValidationOutcome::Invalid(
+                                transaction,
+                                InvalidPoolTransactionError::Eip4844(
+                                    Eip4844PoolTransactionError::InvalidEip4844Blob(err),
+                                ),
+                            )
+                        }
+                        // store the extracted blob
+                        maybe_blob_sidecar = Some(blob);
+                    } else {
+                        // this should not happen
+                        return TransactionValidationOutcome::Invalid(
+                            transaction,
+                            InvalidTransactionError::TxTypeNotSupported.into(),
+                        )
+                    }
                 }
             }
         }
@@ -281,7 +326,7 @@ where
         TransactionValidationOutcome::Valid {
             balance: account.balance,
             state_nonce: account.nonce,
-            transaction: ValidTransaction::new(transaction, blob_sidecar),
+            transaction: ValidTransaction::new(transaction, maybe_blob_sidecar),
             // by this point assume all external transactions should be propagated
             propagate: match origin {
                 TransactionOrigin::External => true,
@@ -335,6 +380,9 @@ pub struct EthTransactionValidatorBuilder {
 impl EthTransactionValidatorBuilder {
     /// Creates a new builder for the given [ChainSpec]
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        // If cancun is enabled at genesis, enable it
+        let cancun = chain_spec.is_cancun_activated_at_timestamp(chain_spec.genesis_timestamp());
+
         Self {
             chain_spec,
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
@@ -342,7 +390,7 @@ impl EthTransactionValidatorBuilder {
             additional_tasks: 1,
             // default to true, can potentially take this as a param in the future
             propagate_local_transactions: true,
-            kzg_settings: Arc::clone(&KZG_TRUSTED_SETUP),
+            kzg_settings: Arc::clone(&MAINNET_KZG_TRUSTED_SETUP),
 
             // by default all transaction types are allowed
             eip2718: true,
@@ -353,7 +401,7 @@ impl EthTransactionValidatorBuilder {
             shanghai: true,
 
             // TODO: can hard enable by default once mainnet transitioned
-            cancun: false,
+            cancun,
         }
     }
 

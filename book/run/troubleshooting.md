@@ -33,6 +33,6 @@ Caused by:
     git clone https://github.com/paradigmxyz/reth
     cd reth
     make db-tools
-    db-tools/mdbx_chk $(reth db path)/mdbx.dat
+    db-tools/mdbx_chk $(reth db path)/mdbx.dat | tee mdbx_chk.log
     ```
-    If `mdbx_chk` has detected any errors, please [open an issue](https://github.com/paradigmxyz/reth/issues) and post the output.
+    If `mdbx_chk` has detected any errors, please [open an issue](https://github.com/paradigmxyz/reth/issues) and post the output from the `mdbx_chk.log` file.

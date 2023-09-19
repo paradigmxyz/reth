@@ -2,21 +2,25 @@
 
 #![allow(missing_docs)]
 
+mod cancun;
 mod forkchoice;
 mod payload;
 mod transition;
 
-pub use self::{forkchoice::*, payload::*, transition::*};
+pub use self::{cancun::*, forkchoice::*, payload::*, transition::*};
 
-/// The list of supported Engine capabilities
-pub const CAPABILITIES: [&str; 9] = [
+/// The list of all supported Engine capabilities available over the engine endpoint.
+pub const CAPABILITIES: [&str; 12] = [
     "engine_forkchoiceUpdatedV1",
     "engine_forkchoiceUpdatedV2",
+    "engine_forkchoiceUpdatedV3",
     "engine_exchangeTransitionConfigurationV1",
     "engine_getPayloadV1",
     "engine_getPayloadV2",
+    "engine_getPayloadV3",
     "engine_newPayloadV1",
     "engine_newPayloadV2",
+    "engine_newPayloadV3",
     "engine_getPayloadBodiesByHashV1",
     "engine_getPayloadBodiesByRangeV1",
 ];

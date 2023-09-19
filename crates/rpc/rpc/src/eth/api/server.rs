@@ -236,14 +236,7 @@ where
     ) -> Result<Bytes> {
         trace!(target: "rpc::eth", ?request, ?block_number, ?state_overrides, ?block_overrides, "Serving eth_call");
         Ok(self
-            .on_blocking_task(|this| async move {
-                this.call(
-                    request,
-                    block_number,
-                    EvmOverrides::new(state_overrides, block_overrides),
-                )
-                .await
-            })
+            .call(request, block_number, EvmOverrides::new(state_overrides, block_overrides))
             .await?)
     }
 
@@ -265,15 +258,11 @@ where
         block_number: Option<BlockId>,
     ) -> Result<AccessListWithGasUsed> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_createAccessList");
-        Ok(self
-            .on_blocking_task(|this| async move {
-                let block_id = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
-                let access_list = this.create_access_list_at(request.clone(), block_number).await?;
-                request.access_list = Some(access_list.clone());
-                let gas_used = this.estimate_gas_at(request, block_id).await?;
-                Ok(AccessListWithGasUsed { access_list, gas_used })
-            })
-            .await?)
+        let block_id = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let access_list = self.create_access_list_at(request.clone(), block_number).await?;
+        request.access_list = Some(access_list.clone());
+        let gas_used = self.estimate_gas_at(request, block_id).await?;
+        Ok(AccessListWithGasUsed { access_list, gas_used })
     }
 
     /// Handler for: `eth_estimateGas`
@@ -284,13 +273,10 @@ where
     ) -> Result<U256> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_estimateGas");
         Ok(self
-            .on_blocking_task(|this| async move {
-                this.estimate_gas_at(
-                    request,
-                    block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
-                )
-                .await
-            })
+            .estimate_gas_at(
+                request,
+                block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
+            )
             .await?)
     }
 
@@ -421,6 +407,7 @@ mod tests {
     use reth_rpc_api::EthApiServer;
     use reth_rpc_types::FeeHistory;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use revm_primitives::B256;
 
     fn build_test_eth_api<
         P: BlockReaderIdExt
@@ -446,36 +433,19 @@ mod tests {
         )
     }
 
-    /// Invalid block range
-    #[tokio::test]
-    async fn test_fee_history_empty() {
-        let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
-            &build_test_eth_api(NoopProvider::default()),
-            1.into(),
-            BlockNumberOrTag::Latest,
-            None,
-        )
-        .await;
-        assert!(response.is_err());
-        let error_object = response.unwrap_err();
-        assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
-    }
-
-    /// Handler for: `eth_test_fee_history`
-    // TODO: Split this into multiple tests, and add tests for percentiles.
-    #[tokio::test]
-    async fn test_fee_history() {
+    // Function to prepare the EthApi with mock data
+    fn prepare_eth_api(
+        newest_block: u64,
+        mut oldest_block: Option<B256>,
+        block_count: u64,
+        mock_provider: MockEthProvider,
+    ) -> (EthApi<MockEthProvider, TestPool, NoopNetwork>, Vec<U256>, Vec<f64>) {
         let mut rng = generators::rng();
 
-        let block_count = 10;
-        let newest_block = 1337;
-
         // Build mock data
-        let mut oldest_block = None;
         let mut gas_used_ratios = Vec::new();
         let mut base_fees_per_gas = Vec::new();
         let mut last_header = None;
-        let mock_provider = MockEthProvider::default();
 
         for i in (0..block_count).rev() {
             let hash = H256::random();
@@ -545,7 +515,34 @@ mod tests {
 
         let eth_api = build_test_eth_api(mock_provider);
 
-        // Invalid block range (request is before genesis)
+        (eth_api, base_fees_per_gas, gas_used_ratios)
+    }
+
+    /// Invalid block range
+    #[tokio::test]
+    async fn test_fee_history_empty() {
+        let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
+            &build_test_eth_api(NoopProvider::default()),
+            1.into(),
+            BlockNumberOrTag::Latest,
+            None,
+        )
+        .await;
+        assert!(response.is_err());
+        let error_object = response.unwrap_err();
+        assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
+    }
+
+    #[tokio::test]
+    /// Invalid block range (request is before genesis)
+    async fn test_fee_history_invalid_block_range_before_genesis() {
+        let block_count = 10;
+        let newest_block = 1337;
+        let oldest_block = None;
+
+        let (eth_api, _, _) =
+            prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
+
         let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
             &eth_api,
             (newest_block + 1).into(),
@@ -553,11 +550,22 @@ mod tests {
             Some(vec![10.0]),
         )
         .await;
+
         assert!(response.is_err());
         let error_object = response.unwrap_err();
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
+    }
 
-        // Invalid block range (request is in in the future)
+    #[tokio::test]
+    /// Invalid block range (request is in in the future)
+    async fn test_fee_history_invalid_block_range_in_future() {
+        let block_count = 10;
+        let newest_block = 1337;
+        let oldest_block = None;
+
+        let (eth_api, _, _) =
+            prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
+
         let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
             &eth_api,
             (1).into(),
@@ -565,11 +573,22 @@ mod tests {
             Some(vec![10.0]),
         )
         .await;
+
         assert!(response.is_err());
         let error_object = response.unwrap_err();
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
+    }
 
-        // Requesting no block should result in a default response
+    #[tokio::test]
+    /// Requesting no block should result in a default response
+    async fn test_fee_history_no_block_requested() {
+        let block_count = 10;
+        let newest_block = 1337;
+        let oldest_block = None;
+
+        let (eth_api, _, _) =
+            prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
+
         let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
             &eth_api,
             (0).into(),
@@ -583,8 +602,18 @@ mod tests {
             FeeHistory::default(),
             "none: requesting no block should yield a default response"
         );
+    }
 
-        // Requesting a single block should return 1 block (+ base fee for the next block over)
+    #[tokio::test]
+    /// Requesting a single block should return 1 block (+ base fee for the next block over)
+    async fn test_fee_history_single_block() {
+        let block_count = 10;
+        let newest_block = 1337;
+        let oldest_block = None;
+
+        let (eth_api, base_fees_per_gas, gas_used_ratios) =
+            prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
+
         let fee_history = eth_api.fee_history(1, (newest_block).into(), None).await.unwrap();
         assert_eq!(
             &fee_history.base_fee_per_gas,
@@ -610,8 +639,18 @@ mod tests {
             fee_history.reward.is_none(),
             "one: no percentiles were requested, so there should be no rewards result"
         );
+    }
 
-        // Requesting all blocks should be ok
+    #[tokio::test]
+    /// Requesting all blocks should be ok
+    async fn test_fee_history_all_blocks() {
+        let block_count = 10;
+        let newest_block = 1337;
+        let oldest_block = None;
+
+        let (eth_api, base_fees_per_gas, gas_used_ratios) =
+            prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
+
         let fee_history =
             eth_api.fee_history(block_count, (newest_block).into(), None).await.unwrap();
 

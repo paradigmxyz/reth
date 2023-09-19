@@ -1,12 +1,12 @@
-//! Builder structs for [`Status`](crate::types::Status) and
-//! [`HelloMessage`](crate::HelloMessage) messages.
+//! Builder structs for [`Status`] and [`HelloMessage`] messages.
 
 use crate::{
     capability::Capability, hello::HelloMessage, p2pstream::ProtocolVersion, EthVersion, Status,
 };
+use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_primitives::{Chain, ForkId, PeerId, H256, U256};
 
-/// Builder for [`Status`](crate::types::Status) messages.
+/// Builder for [`Status`] messages.
 ///
 /// # Example
 /// ```
@@ -42,7 +42,7 @@ pub struct StatusBuilder {
 }
 
 impl StatusBuilder {
-    /// Consumes the type and creates the actual [`Status`](crate::types::Status) message.
+    /// Consumes the type and creates the actual [`Status`] message.
     pub fn build(self) -> Status {
         self.status
     }
@@ -84,14 +84,14 @@ impl StatusBuilder {
     }
 }
 
-/// Builder for [`HelloMessage`](crate::HelloMessage) messages.
+/// Builder for [`HelloMessage`] messages.
 pub struct HelloBuilder {
     hello: HelloMessage,
 }
 
 impl HelloBuilder {
-    /// Creates a new [`HelloBuilder`](crate::builder::HelloBuilder) with default [`HelloMessage`]
-    /// values, and a `PeerId` corresponding to the given pubkey.
+    /// Creates a new [`HelloBuilder`] with default [`HelloMessage`] values, and a `PeerId`
+    /// corresponding to the given pubkey.
     pub fn new(pubkey: PeerId) -> Self {
         Self {
             hello: HelloMessage {
@@ -99,8 +99,7 @@ impl HelloBuilder {
                 // TODO: proper client versioning
                 client_version: "Ethereum/1.0.0".to_string(),
                 capabilities: vec![EthVersion::Eth68.into()],
-                // TODO: default port config
-                port: 30303,
+                port: DEFAULT_DISCOVERY_PORT,
                 id: pubkey,
             },
         }

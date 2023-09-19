@@ -533,6 +533,7 @@ where
 }
 
 #[cfg(test)]
+#[allow(clippy::mutable_key_type)]
 mod tests {
     use super::*;
     use crate::test_utils::{

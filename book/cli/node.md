@@ -57,7 +57,7 @@ Networking:
           The UDP port to use for P2P discovery/networking. default: 30303
 
       --trusted-peers <TRUSTED_PEERS>
-          Target trusted peer enodes --trusted-peers enode://abcd@192.168.0.1:30303
+          Target trusted peer enodes --trusted-peers enode://abcd@192.168.0.1:30303,enode://cdef@192.168.0.2:30303
 
       --trusted-only
           Connect only to trusted peers
@@ -153,7 +153,7 @@ RPC:
           [default: 100]
 
       --rpc-max-subscriptions-per-connection <RPC_MAX_SUBSCRIPTIONS_PER_CONNECTION>
-          Set the the maximum concurrent subscriptions per connection
+          Set the maximum concurrent subscriptions per connection
           
           [default: 1024]
 

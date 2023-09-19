@@ -10,7 +10,7 @@ use crate::{
     stage, test_vectors,
     version::{LONG_VERSION, SHORT_VERSION},
 };
-use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
+use clap::{value_parser, ArgAction, Args, Parser, Subcommand, ValueEnum};
 use reth_primitives::ChainSpec;
 use reth_tracing::{
     tracing::{metadata::LevelFilter, Level, Subscriber},
@@ -43,13 +43,28 @@ pub struct Cli<Ext: RethCliExt = ()> {
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        global = true,
         verbatim_doc_comment,
         default_value = "mainnet",
         value_parser = genesis_value_parser,
         global = true,
     )]
     chain: Arc<ChainSpec>,
+
+    /// Add a new instance of a node.
+    ///
+    /// Configures the ports of the node to avoid conflicts with the defaults.
+    /// This is useful for running multiple nodes on the same machine.
+    ///
+    /// Max number of instances is 200. It is chosen in a way so that it's not possible to have
+    /// port numbers that conflict with each other.
+    ///
+    /// Changes to the following port numbers:
+    /// - DISCOVERY_PORT: default + `instance` - 1
+    /// - AUTH_PORT: default + `instance` * 100 - 100
+    /// - HTTP_RPC_PORT: default - `instance` + 1
+    /// - WS_RPC_PORT: default + `instance` * 2 - 2
+    #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
+    instance: u16,
 
     #[clap(flatten)]
     logs: Logs,
@@ -143,10 +158,6 @@ pub enum Commands<Ext: RethCliExt = ()> {
 #[derive(Debug, Args)]
 #[command(next_help_heading = "Logging")]
 pub struct Logs {
-    /// The flag to enable persistent logs.
-    #[arg(long = "log.persistent", global = true, conflicts_with = "journald")]
-    persistent: bool,
-
     /// The path to put log files in.
     #[arg(
         long = "log.directory",
@@ -156,6 +167,15 @@ pub struct Logs {
         conflicts_with = "journald"
     )]
     log_directory: PlatformPath<LogsDir>,
+
+    /// The maximum size (in MB) of log files.
+    #[arg(long = "log.max-size", value_name = "SIZE", global = true, default_value_t = 200)]
+    log_max_size: u64,
+
+    /// The maximum amount of log files that will be stored. If set to 0, background file logging
+    /// is disabled.
+    #[arg(long = "log.max-files", value_name = "COUNT", global = true, default_value_t = 5)]
+    log_max_files: usize,
 
     /// Log events to journald.
     #[arg(long = "log.journald", global = true, conflicts_with = "log_directory")]
@@ -176,6 +196,9 @@ pub struct Logs {
     color: ColorMode,
 }
 
+/// Constant to convert megabytes to bytes
+const MB_TO_BYTES: u64 = 1024 * 1024;
+
 impl Logs {
     /// Builds a tracing layer from the current log options.
     pub fn layer<S>(&self) -> eyre::Result<Option<(BoxedLayer<S>, Option<FileWorkerGuard>)>>
@@ -187,8 +210,14 @@ impl Logs {
 
         if self.journald {
             Ok(Some((reth_tracing::journald(filter).expect("Could not connect to journald"), None)))
-        } else if self.persistent {
-            let (layer, guard) = reth_tracing::file(filter, &self.log_directory, "reth.log");
+        } else if self.log_max_files > 0 {
+            let (layer, guard) = reth_tracing::file(
+                filter,
+                &self.log_directory,
+                "reth.log",
+                self.log_max_size * MB_TO_BYTES,
+                self.log_max_files,
+            );
             Ok(Some((layer, Some(guard))))
         } else {
             Ok(None)
@@ -290,16 +319,23 @@ mod tests {
     /// name
     #[test]
     fn parse_logs_path() {
-        let mut reth = Cli::<()>::try_parse_from(["reth", "node", "--log.persistent"]).unwrap();
+        let mut reth = Cli::<()>::try_parse_from(["reth", "node"]).unwrap();
         reth.logs.log_directory = reth.logs.log_directory.join(reth.chain.chain.to_string());
         let log_dir = reth.logs.log_directory;
         assert!(log_dir.as_ref().ends_with("reth/logs/mainnet"), "{:?}", log_dir);
 
-        let mut reth =
-            Cli::<()>::try_parse_from(["reth", "node", "--chain", "sepolia", "--log.persistent"])
-                .unwrap();
+        let mut reth = Cli::<()>::try_parse_from(["reth", "node", "--chain", "sepolia"]).unwrap();
         reth.logs.log_directory = reth.logs.log_directory.join(reth.chain.chain.to_string());
         let log_dir = reth.logs.log_directory;
         assert!(log_dir.as_ref().ends_with("reth/logs/sepolia"), "{:?}", log_dir);
+    }
+
+    #[test]
+    fn override_trusted_setup_file() {
+        // We already have a test that asserts that this has been initialized,
+        // so we cheat a little bit and check that loading a random file errors.
+        let reth = Cli::<()>::try_parse_from(["reth", "node", "--trusted-setup-file", "README.md"])
+            .unwrap();
+        assert!(reth.run().is_err());
     }
 }

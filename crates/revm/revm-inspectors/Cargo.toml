@@ -15,17 +15,17 @@ reth-rpc-types.workspace = true
 
 revm.workspace = true
 # remove from reth and reexport from revm
-hashbrown = "0.13"
+hashbrown = "0.14"
 
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 
 # js-tracing-inspector
-boa_engine = { git = "https://github.com/boa-dev/boa", optional = true }
-boa_gc = { git = "https://github.com/boa-dev/boa", optional = true }
+boa_engine = { workspace = true, optional = true }
+boa_gc = { workspace = true, optional = true }
 tokio = { version = "1", features = ["sync"], optional = true }
 
 [features]
 default = ["js-tracer"]
-js-tracer = ["boa_engine", "boa_gc", "tokio","thiserror", "serde_json"]
+js-tracer = ["boa_engine", "boa_gc", "tokio", "thiserror", "serde_json"]
