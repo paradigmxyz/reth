@@ -15,7 +15,7 @@ use reth_interfaces::{
         BlockStatus, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
     },
     consensus::ForkchoiceState,
-    executor::BlockValidationError,
+    executor::{BlockExecutionError, BlockValidationError},
     p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
     sync::{NetworkSyncUpdater, SyncState},
     Error,
