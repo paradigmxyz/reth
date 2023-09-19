@@ -586,7 +586,7 @@ mod tests {
         let db = create_test_rw_db();
         let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
         let tx = factory.provider_rw().unwrap();
-        let hashed_address = H256::from_low_u64_be(1);
+        let hashed_address = H256::with_last_byte(1);
 
         let mut hashed_storage_cursor =
             tx.tx_ref().cursor_dup_write::<tables::HashedStorage>().unwrap();
@@ -677,7 +677,7 @@ mod tests {
                 Address::random(),
                 (
                     Account { nonce: 0, balance: U256::from(0), bytecode_hash: None },
-                    BTreeMap::from([(H256::from_low_u64_be(0x4), U256::from(12))]),
+                    BTreeMap::from([(H256::with_last_byte(0x4), U256::from(12))]),
                 ),
             ),
             (
@@ -696,8 +696,8 @@ mod tests {
                         bytecode_hash: Some(keccak256("test")),
                     },
                     BTreeMap::from([
-                        (H256::zero(), U256::from(3)),
-                        (H256::from_low_u64_be(2), U256::from(1)),
+                        (H256::ZERO, U256::from(3)),
+                        (H256::with_last_byte(2), U256::from(1)),
                     ]),
                 ),
             ),
@@ -735,10 +735,8 @@ mod tests {
         let tx = factory.provider_rw().unwrap();
 
         let address = Address::random();
-        let storage = BTreeMap::from([
-            (H256::zero(), U256::from(3)),
-            (H256::from_low_u64_be(2), U256::from(1)),
-        ]);
+        let storage =
+            BTreeMap::from([(H256::ZERO, U256::from(3)), (H256::with_last_byte(2), U256::from(1))]);
 
         let code = "el buen fla";
         let account = Account {
@@ -1325,7 +1323,9 @@ mod tests {
             hex!("30af8f0000000000000000000000000000000000000000000000000000000000"),
             hex!("3100000000000000000000000000000000000000000000000000000000000000"),
         ] {
-            hashed_storage.upsert(hashed_address, StorageEntry { key: H256(key), value }).unwrap();
+            hashed_storage
+                .upsert(hashed_address, StorageEntry { key: H256::new(key), value })
+                .unwrap();
             hb.add_leaf(Nibbles::unpack(key), &reth_rlp::encode_fixed_size(&value));
         }
 
@@ -1350,7 +1350,7 @@ mod tests {
             hex!("30af8f0000000000000000000000000000000000000000000000000000000000"),
             hex!("3100000000000000000000000000000000000000000000000000000000000000"),
         ] {
-            hashed_accounts.upsert(H256(key), a).unwrap();
+            hashed_accounts.upsert(H256::new(key), a).unwrap();
             hb.add_leaf(Nibbles::unpack(key), &val);
         }
 

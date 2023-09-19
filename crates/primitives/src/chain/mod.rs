@@ -144,7 +144,7 @@ impl From<Chain> for u64 {
 
 impl From<Chain> for U64 {
     fn from(c: Chain) -> Self {
-        u64::from(c).into()
+        U64::from(u64::from(c))
     }
 }
 

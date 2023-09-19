@@ -6,7 +6,6 @@ use crate::{
     Account, Address, Bytes, H256, KECCAK_EMPTY, U256,
 };
 use reth_rlp::{encode_fixed_size, length_of_length, Encodable, Header as RlpHeader};
-use revm_primitives::B160;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use triehash::sec_trie_root;
@@ -215,7 +214,7 @@ impl Encodable for GenesisAccount {
                     return EMPTY_ROOT
                 }
                 let storage_values =
-                    storage.iter().filter(|(_k, &v)| v != H256::zero()).map(|(&k, v)| {
+                    storage.iter().filter(|(_k, &v)| v != H256::ZERO).map(|(&k, v)| {
                         let value = U256::from_be_bytes(**v);
                         (k, encode_fixed_size(&value))
                     });
@@ -444,7 +443,7 @@ mod ethers_compat {
                 .alloc
                 .iter()
                 .map(|(addr, account)| (addr.0.into(), account.clone().into()))
-                .collect::<HashMap<B160, GenesisAccount>>();
+                .collect::<HashMap<Address, GenesisAccount>>();
 
             Genesis {
                 config: genesis.config.into(),
@@ -512,7 +511,7 @@ mod ethers_compat {
                 dao_fork_block,
                 dao_fork_support,
                 eip150_block,
-                eip150_hash: eip150_hash.map(Into::into),
+                eip150_hash: eip150_hash.map(|x| x.0.into()),
                 eip155_block,
                 eip158_block,
                 byzantium_block,

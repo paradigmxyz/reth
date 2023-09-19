@@ -16,6 +16,7 @@ reth-codecs = { path = "../storage/codecs" }
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # ethereum
+alloy-primitives = { workspace = true, features = ["std", "getrandom"] }
 ethers-core = { workspace = true, default-features = false }
 tiny-keccak = { version = "2.0", features = ["keccak"] }
 crunchy = { version = "0.2.2", default-features = false, features = ["limit_256"] }

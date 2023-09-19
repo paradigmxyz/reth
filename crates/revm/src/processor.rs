@@ -700,7 +700,7 @@ mod tests {
         );
 
         // fix header, set a gas limit
-        header.parent_beacon_block_root = Some(H256::from_low_u64_be(0x1337));
+        header.parent_beacon_block_root = Some(H256::with_last_byte(0x69));
 
         // Now execute a block with the fixed header, ensure that it does not fail
         executor
@@ -741,7 +741,7 @@ mod tests {
         let header = Header {
             timestamp: 1,
             number: 1,
-            parent_beacon_block_root: Some(H256::from_low_u64_be(0x1337)),
+            parent_beacon_block_root: Some(H256::with_last_byte(0x69)),
             ..Header::default()
         };
 
@@ -813,7 +813,7 @@ mod tests {
         let header = Header {
             timestamp: 1,
             number: 1,
-            parent_beacon_block_root: Some(H256::from_low_u64_be(0x1337)),
+            parent_beacon_block_root: Some(H256::with_last_byte(0x69)),
             ..Header::default()
         };
 
@@ -868,7 +868,7 @@ mod tests {
         executor.init_env(&header, U256::ZERO);
 
         // attempt to execute the genesis block with non-zero parent beacon block root, expect err
-        header.parent_beacon_block_root = Some(H256::from_low_u64_be(0x1337));
+        header.parent_beacon_block_root = Some(H256::with_last_byte(0x69));
         let _err = executor
             .execute_and_verify_receipt(
                 &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
@@ -880,7 +880,7 @@ mod tests {
             );
 
         // fix header
-        header.parent_beacon_block_root = Some(H256::zero());
+        header.parent_beacon_block_root = Some(H256::ZERO);
 
         // now try to process the genesis block again, this time ensuring that a system contract
         // call does not occur
@@ -911,7 +911,7 @@ mod tests {
         let header = Header {
             timestamp: 1,
             number: 1,
-            parent_beacon_block_root: Some(H256::from_low_u64_be(0x1337)),
+            parent_beacon_block_root: Some(H256::with_last_byte(0x69)),
             base_fee_per_gas: Some(u64::MAX),
             ..Header::default()
         };

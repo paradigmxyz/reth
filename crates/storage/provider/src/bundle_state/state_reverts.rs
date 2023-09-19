@@ -48,7 +48,7 @@ impl StateReverts {
 
                 let mut storage = storage_revert
                     .into_iter()
-                    .map(|(k, v)| (H256(k.to_be_bytes()), v))
+                    .map(|(k, v)| (H256::new(k.to_be_bytes()), v))
                     .collect::<Vec<_>>();
                 // sort storage slots by key.
                 storage.par_sort_unstable_by_key(|a| a.0);

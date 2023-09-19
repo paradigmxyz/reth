@@ -469,7 +469,7 @@ where
     ) -> Option<H256> {
         // check pre merge block error
         if insert_err.map(|err| err.is_block_pre_merge()).unwrap_or_default() {
-            return Some(H256::zero())
+            return Some(H256::ZERO)
         }
 
         // If this is sent from new payload then the parent hash could be in a side chain, and is
@@ -484,7 +484,7 @@ where
             // we need to check if the parent block is the last POW block, if so then the payload is
             // the first POS. The engine API spec mandates a zero hash to be returned: <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_newpayloadv1>
             if parent_header.difficulty != U256::ZERO {
-                return Some(H256::zero())
+                return Some(H256::ZERO)
             }
 
             // parent is canonical POS block
@@ -500,7 +500,7 @@ where
         // PoW block, which we need to identify by looking at the parent's block difficulty
         if let Ok(Some(parent)) = self.blockchain.header_by_hash_or_number(parent_hash.into()) {
             if parent.difficulty != U256::ZERO {
-                parent_hash = H256::zero();
+                parent_hash = H256::ZERO;
             }
         }
 
@@ -938,7 +938,7 @@ where
                 return PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                     validation_error: error.to_string(),
                 })
-                .with_latest_valid_hash(H256::zero())
+                .with_latest_valid_hash(H256::ZERO)
             }
             Error::Execution(BlockExecutionError::BlockHashNotFoundInChain { .. }) => {
                 // This just means we couldn't find the block when attempting to make it canonical,
@@ -1019,7 +1019,7 @@ where
         //    client software MUST respond with -38003: `Invalid payload attributes` and MUST NOT
         //    begin a payload build process. In such an event, the forkchoiceState update MUST NOT
         //    be rolled back.
-        if attrs.timestamp <= head.timestamp.into() {
+        if attrs.timestamp.to::<u64>() <= head.timestamp {
             return OnForkChoiceUpdated::invalid_payload_attributes()
         }
 
@@ -2235,7 +2235,7 @@ mod tests {
             assert_matches!(res, Ok(result) => {
                 let ForkchoiceUpdated { payload_status, .. } = result;
                 assert_matches!(payload_status.status, PayloadStatusEnum::Invalid { .. });
-                assert_eq!(payload_status.latest_valid_hash, Some(H256::zero()));
+                assert_eq!(payload_status.latest_valid_hash, Some(H256::ZERO));
             });
         }
 
@@ -2275,7 +2275,7 @@ mod tests {
                 validation_error: BlockValidationError::BlockPreMerge { hash: block1.hash }
                     .to_string(),
             })
-            .with_latest_valid_hash(H256::zero());
+            .with_latest_valid_hash(H256::ZERO);
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
         }
     }
@@ -2536,7 +2536,7 @@ mod tests {
                 validation_error: BlockValidationError::BlockPreMerge { hash: block1.hash }
                     .to_string(),
             })
-            .with_latest_valid_hash(H256::zero());
+            .with_latest_valid_hash(H256::ZERO);
             assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
 
             // Send new payload
@@ -2549,7 +2549,7 @@ mod tests {
                 validation_error: BlockValidationError::BlockPreMerge { hash: block2.hash }
                     .to_string(),
             })
-            .with_latest_valid_hash(H256::zero());
+            .with_latest_valid_hash(H256::ZERO);
             assert_eq!(result, expected_result);
 
             assert_matches!(engine_rx.try_recv(), Err(TryRecvError::Empty));

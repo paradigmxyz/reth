@@ -1,4 +1,4 @@
-use reth_primitives::{Account, Log as RethLog, H160, H256, KECCAK_EMPTY};
+use reth_primitives::{Account, Address, Log as RethLog, H256, KECCAK_EMPTY};
 use revm::primitives::{AccountInfo, Log};
 
 /// Check equality between [`reth_primitives::Log`] and [`revm::primitives::Log`]
@@ -16,8 +16,8 @@ pub fn is_log_equal(revm_log: &Log, reth_log: &reth_primitives::Log) -> bool {
 /// Into reth primitive [Log] from [revm::primitives::Log].
 pub fn into_reth_log(log: Log) -> RethLog {
     RethLog {
-        address: H160(log.address.0),
-        topics: log.topics.into_iter().map(|h| H256(h.0)).collect(),
+        address: Address(log.address.0),
+        topics: log.topics.into_iter().map(|h| H256::new(h.0)).collect(),
         data: log.data.into(),
     }
 }

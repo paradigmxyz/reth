@@ -395,13 +395,13 @@ mod tests {
         let mut rng = rand::thread_rng();
         let checkpoint = MerkleCheckpoint {
             target_block: rng.gen(),
-            last_account_key: H256::from_low_u64_be(rng.gen()),
-            last_walker_key: H256::from_low_u64_be(rng.gen()).to_vec(),
-            walker_stack: Vec::from([StoredSubNode {
-                key: H256::from_low_u64_be(rng.gen()).to_vec(),
+            last_account_key: H256::random(),
+            last_walker_key: H256::random().to_vec(),
+            walker_stack: vec![StoredSubNode {
+                key: H256::random().to_vec(),
                 nibble: Some(rng.gen()),
                 node: None,
-            }]),
+            }],
             state: HashBuilderState::default(),
         };
 
@@ -416,7 +416,7 @@ mod tests {
         let mut rng = rand::thread_rng();
         let checkpoints = vec![
             StageUnitCheckpoint::Account(AccountHashingCheckpoint {
-                address: Some(Address::from_low_u64_be(rng.gen())),
+                address: Some(Address::random()),
                 block_range: CheckpointBlockRange { from: rng.gen(), to: rng.gen() },
                 progress: EntitiesCheckpoint {
                     processed: rng.gen::<u32>() as u64,
@@ -424,8 +424,8 @@ mod tests {
                 },
             }),
             StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
-                address: Some(Address::from_low_u64_be(rng.gen())),
-                storage: Some(H256::from_low_u64_be(rng.gen())),
+                address: Some(Address::random()),
+                storage: Some(H256::random()),
                 block_range: CheckpointBlockRange { from: rng.gen(), to: rng.gen() },
                 progress: EntitiesCheckpoint {
                     processed: rng.gen::<u32>() as u64,

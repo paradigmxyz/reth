@@ -424,7 +424,7 @@ mod tests {
 
         let chain_info = provider.chain_info().expect("should be ok");
         assert_eq!(chain_info.best_number, 0);
-        assert_eq!(chain_info.best_hash, H256::zero());
+        assert_eq!(chain_info.best_hash, H256::ZERO);
     }
 
     #[test]

@@ -1,3 +1,12 @@
+//! Commonly used types in reth.
+//!
+//! This crate contains Ethereum primitive types and helper functions.
+//!
+//! ## Feature Flags
+//!
+//! - `arbitrary`: Adds `proptest` and `arbitrary` support for primitive types.
+//! - `test-utils`: Export utilities for testing
+
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -12,14 +21,6 @@
 ))]
 #![allow(clippy::non_canonical_clone_impl)]
 
-//! Commonly used types in reth.
-//!
-//! This crate contains Ethereum primitive types and helper functions.
-//!
-//! ## Feature Flags
-//!
-//! - `arbitrary`: Adds `proptest` and `arbitrary` support for primitive types.
-//! - `test-utils`: Export utilities for testing
 pub mod abi;
 mod account;
 pub mod basefee;
@@ -36,7 +37,6 @@ pub mod fs;
 mod genesis;
 mod hardfork;
 mod header;
-mod hex_bytes;
 mod integer_list;
 pub mod listener;
 mod log;
@@ -60,6 +60,7 @@ pub use block::{
     BlockWithSenders, ForkBlock, SealedBlock, SealedBlockWithSenders,
 };
 pub use bloom::Bloom;
+pub use bytes::{Buf, BufMut, BytesMut};
 pub use chain::{
     AllGenesisFormats, BaseFeeParams, Chain, ChainInfo, ChainSpec, ChainSpecBuilder,
     DisplayHardforks, ForkCondition, ForkTimestamps, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
@@ -74,7 +75,6 @@ pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
 pub use genesis::{Genesis, GenesisAccount};
 pub use hardfork::Hardfork;
 pub use header::{Head, Header, HeadersDirection, SealedHeader};
-pub use hex_bytes::Bytes;
 pub use integer_list::IntegerList;
 pub use log::Log;
 pub use net::{
@@ -106,8 +106,6 @@ pub use withdrawal::Withdrawal;
 pub type BlockHash = H256;
 /// A block number.
 pub type BlockNumber = u64;
-/// An Ethereum address.
-pub type Address = H160;
 /// A transaction hash is a kecack hash of an RLP encoded signed transaction.
 pub type TxHash = H256;
 /// The sequence number of all existing transactions.
@@ -124,11 +122,10 @@ pub type StorageValue = U256;
 /// their signature
 pub type Selector = [u8; 4];
 
-pub use ethers_core::{
-    types::{BigEndianHash, H128, H64, U64},
-    utils as rpc_utils,
+pub use alloy_primitives::{
+    address, b256, Address, Bytes, B128 as H128, B256 as H256, B64 as H64, U256, U64,
 };
-pub use revm_primitives::{B160 as H160, B256 as H256, U256};
+pub use ethers_core::{types::BigEndianHash, utils as rpc_utils};
 pub use ruint::{
     aliases::{U128, U8},
     UintTryTo,
@@ -139,6 +136,7 @@ mod __reexport {
     pub use bytes;
     pub use hex;
     pub use hex_literal;
+    pub use revm_primitives::{self, alloy_primitives};
     pub use tiny_keccak;
 }
 

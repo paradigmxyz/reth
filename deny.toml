@@ -95,6 +95,9 @@ unknown-registry = "warn"
 # in the allow list is encountered
 unknown-git = "deny"
 allow-git = [
+    # TODO
+    "https://github.com/Evalir/revm",
+
     "https://github.com/bluealloy/revm",
     "https://github.com/boa-dev/boa",
     "https://github.com/ethereum/c-kzg-4844",

@@ -1,5 +1,5 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, H160, H256};
+use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, Address, H256};
 use reth_rpc_types::{
     trace::geth::{
         BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
@@ -330,7 +330,7 @@ pub trait DebugApi {
         &self,
         block_hash: H256,
         tx_idx: usize,
-        contract_address: H160,
+        contract_address: Address,
         key_start: H256,
         max_result: u64,
     ) -> RpcResult<()>;

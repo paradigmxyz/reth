@@ -588,7 +588,7 @@ mod tests {
     #[test]
     fn post_state_only_accounts() {
         let accounts =
-            Vec::from_iter((1..11).map(|key| (H256::from_low_u64_be(key), Account::default())));
+            Vec::from_iter((1..11).map(|key| (H256::with_last_byte(key), Account::default())));
 
         let mut hashed_post_state = HashedPostState::default();
         for (hashed_address, account) in &accounts {
@@ -606,7 +606,7 @@ mod tests {
     #[test]
     fn db_only_accounts() {
         let accounts =
-            Vec::from_iter((1..11).map(|key| (H256::from_low_u64_be(key), Account::default())));
+            Vec::from_iter((1..11).map(|key| (H256::with_last_byte(key), Account::default())));
 
         let db = create_test_rw_db();
         db.update(|tx| {
@@ -626,18 +626,18 @@ mod tests {
     fn account_cursor_correct_order() {
         // odd keys are in post state, even keys are in db
         let accounts =
-            Vec::from_iter((1..111).map(|key| (H256::from_low_u64_be(key), Account::default())));
+            Vec::from_iter((1..111).map(|key| (H256::with_last_byte(key), Account::default())));
 
         let db = create_test_rw_db();
         db.update(|tx| {
-            for (key, account) in accounts.iter().filter(|x| x.0.to_low_u64_be() % 2 == 0) {
+            for (key, account) in accounts.iter().filter(|x| x.0[0] % 2 == 0) {
                 tx.put::<tables::HashedAccount>(*key, *account).unwrap();
             }
         })
         .unwrap();
 
         let mut hashed_post_state = HashedPostState::default();
-        for (hashed_address, account) in accounts.iter().filter(|x| x.0.to_low_u64_be() % 2 != 0) {
+        for (hashed_address, account) in accounts.iter().filter(|x| x.0[0] % 2 != 0) {
             hashed_post_state.insert_account(*hashed_address, *account);
         }
         hashed_post_state.sort();
@@ -651,20 +651,20 @@ mod tests {
     fn removed_accounts_are_discarded() {
         // odd keys are in post state, even keys are in db
         let accounts =
-            Vec::from_iter((1..111).map(|key| (H256::from_low_u64_be(key), Account::default())));
+            Vec::from_iter((1..111).map(|key| (H256::with_last_byte(key), Account::default())));
         // accounts 5, 9, 11 should be considered removed from post state
-        let removed_keys = Vec::from_iter([5, 9, 11].into_iter().map(H256::from_low_u64_be));
+        let removed_keys = Vec::from_iter([5, 9, 11].into_iter().map(H256::with_last_byte));
 
         let db = create_test_rw_db();
         db.update(|tx| {
-            for (key, account) in accounts.iter().filter(|x| x.0.to_low_u64_be() % 2 == 0) {
+            for (key, account) in accounts.iter().filter(|x| x.0[0] % 2 == 0) {
                 tx.put::<tables::HashedAccount>(*key, *account).unwrap();
             }
         })
         .unwrap();
 
         let mut hashed_post_state = HashedPostState::default();
-        for (hashed_address, account) in accounts.iter().filter(|x| x.0.to_low_u64_be() % 2 != 0) {
+        for (hashed_address, account) in accounts.iter().filter(|x| x.0[0] % 2 != 0) {
             if removed_keys.contains(hashed_address) {
                 hashed_post_state.insert_cleared_account(*hashed_address);
             } else {
@@ -681,10 +681,9 @@ mod tests {
 
     #[test]
     fn post_state_accounts_take_precedence() {
-        let accounts =
-            Vec::from_iter((1..10).map(|key| {
-                (H256::from_low_u64_be(key), Account { nonce: key, ..Default::default() })
-            }));
+        let accounts = Vec::from_iter((1..10).map(|key| {
+            (H256::with_last_byte(key), Account { nonce: key as u64, ..Default::default() })
+        }));
 
         let db = create_test_rw_db();
         db.update(|tx| {
@@ -759,7 +758,7 @@ mod tests {
         }
 
         let db_storage =
-            BTreeMap::from_iter((0..10).map(|key| (H256::from_low_u64_be(key), U256::from(key))));
+            BTreeMap::from_iter((0..10).map(|key| (H256::with_last_byte(key), U256::from(key))));
         db.update(|tx| {
             for (slot, value) in db_storage.iter() {
                 // insert zero value accounts to the database
@@ -830,9 +829,9 @@ mod tests {
     fn storage_cursor_correct_order() {
         let address = H256::random();
         let db_storage =
-            BTreeMap::from_iter((1..11).map(|key| (H256::from_low_u64_be(key), U256::from(key))));
+            BTreeMap::from_iter((1..11).map(|key| (H256::with_last_byte(key), U256::from(key))));
         let post_state_storage =
-            BTreeMap::from_iter((11..21).map(|key| (H256::from_low_u64_be(key), U256::from(key))));
+            BTreeMap::from_iter((11..21).map(|key| (H256::with_last_byte(key), U256::from(key))));
 
         let db = create_test_rw_db();
         db.update(|tx| {
@@ -868,9 +867,9 @@ mod tests {
     fn zero_value_storage_entries_are_discarded() {
         let address = H256::random();
         let db_storage =
-            BTreeMap::from_iter((0..10).map(|key| (H256::from_low_u64_be(key), U256::from(key)))); // every even number is changed to zero value
+            BTreeMap::from_iter((0..10).map(|key| (H256::with_last_byte(key), U256::from(key)))); // every even number is changed to zero value
         let post_state_storage = BTreeMap::from_iter((0..10).map(|key| {
-            (H256::from_low_u64_be(key), if key % 2 == 0 { U256::ZERO } else { U256::from(key) })
+            (H256::with_last_byte(key), if key % 2 == 0 { U256::ZERO } else { U256::from(key) })
         }));
 
         let db = create_test_rw_db();
@@ -911,9 +910,9 @@ mod tests {
     fn wiped_storage_is_discarded() {
         let address = H256::random();
         let db_storage =
-            BTreeMap::from_iter((1..11).map(|key| (H256::from_low_u64_be(key), U256::from(key))));
+            BTreeMap::from_iter((1..11).map(|key| (H256::with_last_byte(key), U256::from(key))));
         let post_state_storage =
-            BTreeMap::from_iter((11..21).map(|key| (H256::from_low_u64_be(key), U256::from(key))));
+            BTreeMap::from_iter((11..21).map(|key| (H256::with_last_byte(key), U256::from(key))));
 
         let db = create_test_rw_db();
         db.update(|tx| {
@@ -945,7 +944,7 @@ mod tests {
     fn post_state_storages_take_precedence() {
         let address = H256::random();
         let storage =
-            BTreeMap::from_iter((1..10).map(|key| (H256::from_low_u64_be(key), U256::from(key))));
+            BTreeMap::from_iter((1..10).map(|key| (H256::with_last_byte(key), U256::from(key))));
 
         let db = create_test_rw_db();
         db.update(|tx| {

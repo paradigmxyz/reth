@@ -308,8 +308,9 @@ where
         reward_percentiles: Option<Vec<f64>>,
     ) -> Result<FeeHistory> {
         trace!(target: "rpc::eth", ?block_count, ?newest_block, ?reward_percentiles, "Serving eth_feeHistory");
-        return Ok(EthApi::fee_history(self, block_count.as_u64(), newest_block, reward_percentiles)
-            .await?)
+        return Ok(
+            EthApi::fee_history(self, block_count.to(), newest_block, reward_percentiles).await?
+        )
     }
 
     /// Handler for: `eth_mining`

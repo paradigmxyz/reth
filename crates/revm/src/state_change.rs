@@ -71,7 +71,7 @@ where
         // if the block number is zero (genesis block) then the parent beacon block root must
         // be 0x0 and no system transaction may occur as per EIP-4788
         if block_number == 0 {
-            if block_parent_beacon_block_root != Some(H256::zero()) {
+            if block_parent_beacon_block_root != Some(H256::ZERO) {
                 return Err(BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero.into())
             }
         } else {

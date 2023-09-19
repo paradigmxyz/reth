@@ -2,7 +2,7 @@ use crate::Log as RpcLog;
 use itertools::{EitherOrBoth::*, Itertools};
 use reth_primitives::{
     bloom::{Bloom, Input},
-    keccak256, Address, BlockNumberOrTag, Log, H160, H256, U256, U64,
+    keccak256, Address, BlockNumberOrTag, Log, H256, U256, U64,
 };
 use serde::{
     de::{DeserializeOwned, MapAccess, Visitor},
@@ -298,7 +298,7 @@ impl Filter {
     /// # use reth_primitives::H256;
     /// # use reth_rpc_types::Filter;
     /// # fn main() {
-    /// let filter = Filter::new().select(H256::zero());
+    /// let filter = Filter::new().select(H256::ZERO);
     /// # }
     /// ```
     /// This is the same as `at_block_hash`
@@ -627,14 +627,14 @@ pub enum ValueOrArray<T> {
     Array(Vec<T>),
 }
 
-impl From<H160> for ValueOrArray<H160> {
-    fn from(src: H160) -> Self {
+impl From<Address> for ValueOrArray<Address> {
+    fn from(src: Address) -> Self {
         ValueOrArray::Value(src)
     }
 }
 
-impl From<Vec<H160>> for ValueOrArray<H160> {
-    fn from(src: Vec<H160>) -> Self {
+impl From<Vec<Address>> for ValueOrArray<Address> {
+    fn from(src: Vec<Address>) -> Self {
         ValueOrArray::Array(src)
     }
 }

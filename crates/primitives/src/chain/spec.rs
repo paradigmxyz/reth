@@ -7,10 +7,10 @@ use crate::{
     header::Head,
     proofs::genesis_state_root,
     Address, BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, Hardfork, Header,
-    PruneBatchSizes, SealedHeader, EMPTY_OMMER_ROOT, H160, H256, U256,
+    PruneBatchSizes, SealedHeader, EMPTY_OMMER_ROOT, H256, U256,
 };
-use hex_literal::hex;
 use once_cell::sync::Lazy;
+use revm_primitives::{address, b256};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -24,9 +24,9 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         chain: Chain::mainnet(),
         genesis: serde_json::from_str(include_str!("../../res/genesis/mainnet.json"))
             .expect("Can't deserialize Mainnet genesis json"),
-        genesis_hash: Some(H256(hex!(
+        genesis_hash: Some(b256!(
             "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"
-        ))),
+        )),
         // <https://etherscan.io/block/15537394>
         paris_block_and_final_difficulty: Some((
             15537394,
@@ -59,9 +59,9 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         ]),
         // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
         deposit_contract: Some(DepositContract::new(
-            H160(hex!("00000000219ab540356cbb839cbe05303d7705fa")),
+            address!("00000000219ab540356cbb839cbe05303d7705fa"),
             11052984,
-            H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
+            b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
         base_fee_params: BaseFeeParams::ethereum(),
         prune_batch_sizes: PruneBatchSizes::mainnet(),
@@ -75,9 +75,9 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         chain: Chain::goerli(),
         genesis: serde_json::from_str(include_str!("../../res/genesis/goerli.json"))
             .expect("Can't deserialize Goerli genesis json"),
-        genesis_hash: Some(H256(hex!(
+        genesis_hash: Some(b256!(
             "bf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a"
-        ))),
+        )),
         // <https://goerli.etherscan.io/block/7382818>
         paris_block_and_final_difficulty: Some((7382818, U256::from(10_790_000))),
         fork_timestamps: ForkTimestamps::default().shanghai(1678832736),
@@ -101,9 +101,9 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         ]),
         // https://goerli.etherscan.io/tx/0xa3c07dc59bfdb1bfc2d50920fed2ef2c1c4e0a09fe2325dbc14e07702f965a78
         deposit_contract: Some(DepositContract::new(
-            H160(hex!("ff50ed3d0ec03ac01d4c79aad74928bff48a7b2b")),
+            address!("ff50ed3d0ec03ac01d4c79aad74928bff48a7b2b"),
             4367322,
-            H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
+            b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
         base_fee_params: BaseFeeParams::ethereum(),
         prune_batch_sizes: PruneBatchSizes::testnet(),
@@ -117,9 +117,9 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         chain: Chain::sepolia(),
         genesis: serde_json::from_str(include_str!("../../res/genesis/sepolia.json"))
             .expect("Can't deserialize Sepolia genesis json"),
-        genesis_hash: Some(H256(hex!(
+        genesis_hash: Some(b256!(
             "25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9"
-        ))),
+        )),
         // <https://sepolia.etherscan.io/block/1450409>
         paris_block_and_final_difficulty: Some((1450409, U256::from(17_000_018_015_853_232u128))),
         fork_timestamps: ForkTimestamps::default().shanghai(1677557088),
@@ -147,9 +147,9 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         ]),
         // https://sepolia.etherscan.io/tx/0x025ecbf81a2f1220da6285d1701dc89fb5a956b62562ee922e1a9efd73eb4b14
         deposit_contract: Some(DepositContract::new(
-            H160(hex!("7f02c3e3c98b133055b8b348b2ac625669ed295d")),
+            address!("7f02c3e3c98b133055b8b348b2ac625669ed295d"),
             1273020,
-            H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
+            b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
         base_fee_params: BaseFeeParams::ethereum(),
         prune_batch_sizes: PruneBatchSizes::testnet(),
@@ -163,9 +163,9 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         chain: Chain::holesky(),
         genesis: serde_json::from_str(include_str!("../../res/genesis/holesky.json"))
             .expect("Can't deserialize Holesky genesis json"),
-        genesis_hash: Some(H256(hex!(
+        genesis_hash: Some(b256!(
             "fd91bb7c01ae3f608b4d176078ca72bc7846791fdc02324481ca315ede4c9246"
-        ))),
+        )),
         paris_block_and_final_difficulty: Some((0, U256::from(1))),
         fork_timestamps: ForkTimestamps::default().shanghai(1694790240),
         hardforks: BTreeMap::from([
@@ -188,9 +188,9 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Shanghai, ForkCondition::Timestamp(1694790240)),
         ]),
         deposit_contract: Some(DepositContract::new(
-            H160(hex!("4242424242424242424242424242424242424242")),
+            address!("4242424242424242424242424242424242424242"),
             0,
-            H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
+            b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
         base_fee_params: BaseFeeParams::ethereum(),
         prune_batch_sizes: PruneBatchSizes::testnet(),
@@ -207,9 +207,9 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         chain: Chain::dev(),
         genesis: serde_json::from_str(include_str!("../../res/genesis/dev.json"))
             .expect("Can't deserialize Dev testnet genesis json"),
-        genesis_hash: Some(H256(hex!(
+        genesis_hash: Some(b256!(
             "2f980576711e3617a5e4d83dd539548ec0f7792007d505a3d2e9674833af2d7c"
-        ))),
+        )),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         fork_timestamps: ForkTimestamps::default().shanghai(0),
         hardforks: BTreeMap::from([
@@ -353,13 +353,13 @@ impl ChainSpec {
             if self.fork(Hardfork::Cancun).active_at_timestamp(self.genesis.timestamp) {
                 let blob_gas_used = self.genesis.blob_gas_used.unwrap_or(0);
                 let excess_blob_gas = self.genesis.excess_blob_gas.unwrap_or(0);
-                (Some(H256::zero()), Some(blob_gas_used), Some(excess_blob_gas))
+                (Some(H256::ZERO), Some(blob_gas_used), Some(excess_blob_gas))
             } else {
                 (None, None, None)
             };
 
         Header {
-            parent_hash: H256::zero(),
+            parent_hash: H256::ZERO,
             number: 0,
             transactions_root: EMPTY_TRANSACTIONS,
             ommers_hash: EMPTY_OMMER_ROOT,
@@ -1768,7 +1768,7 @@ Post-merge hard forks (timestamp based):
         ];
 
         for (key, expected_rlp) in key_rlp {
-            let account = chainspec.genesis.alloc.get(&key.into()).expect("account should exist");
+            let account = chainspec.genesis.alloc.get(&key).expect("account should exist");
             let mut account_rlp = BytesMut::new();
             account.encode(&mut account_rlp);
             assert_eq!(hex::encode(account_rlp), expected_rlp)
@@ -1923,7 +1923,7 @@ Post-merge hard forks (timestamp based):
 
         // cancun is activated so we should have a zero parent beacon block root, zero blob gas
         // used, and zero excess blob gas
-        assert_eq!(header.parent_beacon_block_root, Some(H256::zero()));
+        assert_eq!(header.parent_beacon_block_root, Some(H256::ZERO));
         assert_eq!(header.blob_gas_used, Some(0));
         assert_eq!(header.excess_blob_gas, Some(0));
         println!("header: {:?}", header);

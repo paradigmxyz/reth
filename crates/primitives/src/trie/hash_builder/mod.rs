@@ -557,8 +557,8 @@ mod tests {
     #[test]
     fn test_root_rlp_hashed_data() {
         let data = HashMap::from([
-            (H256::from_low_u64_le(1), U256::from(2)),
-            (H256::from_low_u64_be(3), U256::from(4)),
+            (H256::with_last_byte(1), U256::from(2)),
+            (H256::with_last_byte(3), U256::from(4)),
         ]);
         assert_hashed_trie_root(data.iter());
     }

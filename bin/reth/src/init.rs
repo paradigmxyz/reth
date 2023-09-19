@@ -98,7 +98,7 @@ pub fn insert_genesis_state<DB: Database>(
 
     for (address, account) in &genesis.alloc {
         let bytecode_hash = if let Some(code) = &account.code {
-            let bytecode = Bytecode::new_raw(code.0.clone());
+            let bytecode = Bytecode::new_raw(code.clone());
             let hash = bytecode.hash_slow();
             contracts.insert(hash, bytecode);
             Some(hash)
@@ -286,9 +286,9 @@ mod tests {
 
     #[test]
     fn init_genesis_history() {
-        let address_with_balance = Address::from_low_u64_be(1);
-        let address_with_storage = Address::from_low_u64_be(2);
-        let storage_key = H256::from_low_u64_be(1);
+        let address_with_balance = Address::with_last_byte(1);
+        let address_with_storage = Address::with_last_byte(2);
+        let storage_key = H256::with_last_byte(1);
         let chain_spec = Arc::new(ChainSpec {
             chain: Chain::Id(1),
             genesis: Genesis {

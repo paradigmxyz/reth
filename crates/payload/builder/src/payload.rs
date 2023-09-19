@@ -156,7 +156,7 @@ impl PayloadBuilderAttributes {
         Self {
             id,
             parent,
-            timestamp: attributes.timestamp.as_u64(),
+            timestamp: attributes.timestamp.to(),
             suggested_fee_recipient: attributes.suggested_fee_recipient,
             prev_randao: attributes.prev_randao,
             withdrawals: withdraw.unwrap_or_default(),
@@ -210,10 +210,10 @@ impl PayloadBuilderAttributes {
 pub(crate) fn payload_id(parent: &H256, attributes: &PayloadAttributes) -> PayloadId {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
-    hasher.update(parent.as_bytes());
-    hasher.update(&attributes.timestamp.as_u64().to_be_bytes()[..]);
-    hasher.update(attributes.prev_randao.as_bytes());
-    hasher.update(attributes.suggested_fee_recipient.as_bytes());
+    hasher.update(parent.as_slice());
+    hasher.update(&attributes.timestamp.to::<u64>().to_be_bytes()[..]);
+    hasher.update(attributes.prev_randao.as_slice());
+    hasher.update(attributes.suggested_fee_recipient.as_slice());
     if let Some(withdrawals) = &attributes.withdrawals {
         let mut buf = Vec::new();
         withdrawals.encode(&mut buf);

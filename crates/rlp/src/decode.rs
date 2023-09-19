@@ -252,7 +252,11 @@ decode_integer!(ethnum::U256);
 mod ethereum_types_support {
     use super::*;
     use ethereum_types::*;
-    use revm_primitives::{ruint::aliases::U128 as RU128, B160, B256, U256 as RU256};
+    use revm_primitives::{
+        alloy_primitives::aliases::{B160, B64},
+        ruint::aliases::U128 as RU128,
+        Address, B256, U256 as RU256,
+    };
 
     macro_rules! fixed_hash_impl {
         ($t:ty) => {
@@ -264,6 +268,8 @@ mod ethereum_types_support {
         };
     }
 
+    fixed_hash_impl!(Address);
+    fixed_hash_impl!(B64);
     fixed_hash_impl!(B160);
     fixed_hash_impl!(B256);
 
@@ -431,6 +437,12 @@ where
     }
 }
 
+impl Decodable for revm_primitives::Bytes {
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        bytes::Bytes::decode(buf).map(Self)
+    }
+}
+
 #[cfg(feature = "smol_str")]
 impl Decodable for smol_str::SmolStr {
     fn decode(from: &mut &[u8]) -> Result<Self, DecodeError> {
@@ -468,7 +480,7 @@ mod tests {
         for (expected, mut input) in fixtures {
             assert_eq!(T::decode(&mut input), expected);
             if expected.is_ok() {
-                assert_eq!(input, &[]);
+                assert!(input.is_empty());
             }
         }
     }
@@ -481,7 +493,7 @@ mod tests {
         for (expected, mut input) in fixtures {
             assert_eq!(vec::Vec::<T>::decode(&mut input), expected);
             if expected.is_ok() {
-                assert_eq!(input, &[]);
+                assert!(input.is_empty());
             }
         }
     }

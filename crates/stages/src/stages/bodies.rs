@@ -488,7 +488,7 @@ mod tests {
         };
 
         /// The block hash of the genesis block.
-        pub(crate) const GENESIS_HASH: H256 = H256::zero();
+        pub(crate) const GENESIS_HASH: H256 = H256::ZERO;
 
         /// A helper to create a collection of block bodies keyed by their hash.
         pub(crate) fn body_by_hash(block: &SealedBlock) -> (H256, BlockBody) {

@@ -208,7 +208,7 @@ where
 
         self.node_rlp_buf.clear();
         BranchNode::new(&branch_node_stack).rlp(node.state_mask, &mut self.node_rlp_buf);
-        Ok(Bytes::from(self.node_rlp_buf.as_slice()))
+        Ok(Bytes::copy_from_slice(self.node_rlp_buf.as_slice()))
     }
 
     /// Restore leaf node.
@@ -260,7 +260,7 @@ where
 
         self.node_rlp_buf.clear();
         leaf_node.rlp(&mut self.node_rlp_buf);
-        Ok(Some(Bytes::from(self.node_rlp_buf.as_slice())))
+        Ok(Some(Bytes::copy_from_slice(self.node_rlp_buf.as_slice())))
     }
 }
 

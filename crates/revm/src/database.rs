@@ -1,5 +1,5 @@
 use reth_interfaces::Error;
-use reth_primitives::{H160, H256, KECCAK_EMPTY, U256};
+use reth_primitives::{Address, H256, KECCAK_EMPTY, U256};
 use reth_provider::StateProvider;
 use revm::{
     db::{CacheDB, DatabaseRef},
@@ -42,7 +42,7 @@ impl<DB: StateProvider> StateProviderDatabase<DB> {
 impl<DB: StateProvider> Database for StateProviderDatabase<DB> {
     type Error = Error;
 
-    fn basic(&mut self, address: H160) -> Result<Option<AccountInfo>, Self::Error> {
+    fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         Ok(self.0.basic_account(address)?.map(|account| AccountInfo {
             balance: account.balance,
             nonce: account.nonce,
@@ -57,8 +57,8 @@ impl<DB: StateProvider> Database for StateProviderDatabase<DB> {
         Ok(bytecode.map(|b| b.0).unwrap_or_else(Bytecode::new))
     }
 
-    fn storage(&mut self, address: H160, index: U256) -> Result<U256, Self::Error> {
-        let index = H256(index.to_be_bytes());
+    fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
+        let index = H256::new(index.to_be_bytes());
         let ret = self.0.storage(address, index)?.unwrap_or_default();
         Ok(ret)
     }
@@ -72,7 +72,7 @@ impl<DB: StateProvider> Database for StateProviderDatabase<DB> {
 impl<DB: StateProvider> DatabaseRef for StateProviderDatabase<DB> {
     type Error = <Self as Database>::Error;
 
-    fn basic(&self, address: H160) -> Result<Option<AccountInfo>, Self::Error> {
+    fn basic(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         Ok(self.0.basic_account(address)?.map(|account| AccountInfo {
             balance: account.balance,
             nonce: account.nonce,
@@ -91,8 +91,8 @@ impl<DB: StateProvider> DatabaseRef for StateProviderDatabase<DB> {
         }
     }
 
-    fn storage(&self, address: H160, index: U256) -> Result<U256, Self::Error> {
-        let index = H256(index.to_be_bytes());
+    fn storage(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
+        let index = H256::new(index.to_be_bytes());
         let ret = self.0.storage(address, index)?.unwrap_or_default();
         Ok(ret)
     }

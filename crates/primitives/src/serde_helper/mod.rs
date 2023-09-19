@@ -23,7 +23,7 @@ pub mod u64_hex {
     where
         D: Deserializer<'de>,
     {
-        U64::deserialize(deserializer).map(|val| val.as_u64())
+        U64::deserialize(deserializer).map(|val| val.to())
     }
 
     /// Serializes u64 as hex string
@@ -32,7 +32,7 @@ pub mod u64_hex {
     }
 }
 
-/// serde functions for handling bytes as hex strings, such as [bytes::Bytes]
+/// serde functions for handling bytes as hex strings, such as [Bytes]
 pub mod hex_bytes {
     use serde::{Deserialize, Deserializer, Serializer};
 

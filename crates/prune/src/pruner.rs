@@ -957,7 +957,7 @@ mod tests {
         let tx = TestTransaction::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=100, H256::zero(), 0..10);
+        let blocks = random_block_range(&mut rng, 0..=100, H256::ZERO, 0..10);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let mut receipts = Vec::new();
@@ -1052,7 +1052,7 @@ mod tests {
         let tx = TestTransaction::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=100, H256::zero(), 0..10);
+        let blocks = random_block_range(&mut rng, 0..=100, H256::ZERO, 0..10);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let mut tx_hash_numbers = Vec::new();
@@ -1146,7 +1146,7 @@ mod tests {
         let tx = TestTransaction::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=100, H256::zero(), 0..10);
+        let blocks = random_block_range(&mut rng, 0..=100, H256::ZERO, 0..10);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let mut transaction_senders = Vec::new();
@@ -1243,7 +1243,7 @@ mod tests {
         let tx = TestTransaction::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=7000, H256::zero(), 0..1);
+        let blocks = random_block_range(&mut rng, 0..=7000, H256::ZERO, 0..1);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let accounts =
@@ -1373,7 +1373,7 @@ mod tests {
         let tx = TestTransaction::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=7000, H256::zero(), 0..1);
+        let blocks = random_block_range(&mut rng, 0..=7000, H256::ZERO, 0..1);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let accounts =
@@ -1506,7 +1506,7 @@ mod tests {
         let mut rng = generators::rng();
 
         let tip = 300;
-        let blocks = random_block_range(&mut rng, 0..=tip, H256::zero(), 1..5);
+        let blocks = random_block_range(&mut rng, 0..=tip, H256::ZERO, 1..5);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let mut receipts = Vec::new();

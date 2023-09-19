@@ -441,7 +441,7 @@ pub struct RevertError {
     /// The transaction output data
     ///
     /// Note: this is `None` if output was empty
-    output: Option<bytes::Bytes>,
+    output: Option<Bytes>,
 }
 
 // === impl RevertError ==
@@ -450,7 +450,7 @@ impl RevertError {
     /// Wraps the output bytes
     ///
     /// Note: this is intended to wrap an revm output
-    pub fn new(output: bytes::Bytes) -> Self {
+    pub fn new(output: Bytes) -> Self {
         if output.is_empty() {
             Self { output: None }
         } else {

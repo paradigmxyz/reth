@@ -1223,7 +1223,7 @@ mod tests {
         for i in 0..10 {
             provider
                 .tx_ref()
-                .put::<tables::CanonicalHeaders>(i, H256([100 + i as u8; 32]))
+                .put::<tables::CanonicalHeaders>(i, H256::new([100 + i as u8; 32]))
                 .unwrap();
         }
         provider
@@ -1326,10 +1326,10 @@ mod tests {
             BlockchainTree::new(externals, sender, config, None).expect("failed to create tree");
 
         // genesis block 10 is already canonical
-        tree.make_canonical(&H256::zero()).unwrap();
+        tree.make_canonical(&H256::ZERO).unwrap();
 
         // make sure is_block_hash_canonical returns true for genesis block
-        tree.is_block_hash_canonical(&H256::zero()).unwrap();
+        tree.is_block_hash_canonical(&H256::ZERO).unwrap();
 
         // make genesis block 10 as finalized
         tree.finalize_block(10);
@@ -1361,7 +1361,7 @@ mod tests {
         );
 
         // check if random block is known
-        let old_block = BlockNumHash::new(1, H256([32; 32]));
+        let old_block = BlockNumHash::new(1, H256::new([32; 32]));
         let err = BlockchainTreeError::PendingBlockIsFinalized { last_finalized: 10 };
 
         assert_eq!(tree.is_block_known(old_block).unwrap_err().as_tree_error(), Some(err));
@@ -1429,10 +1429,10 @@ mod tests {
         /**** INSERT SIDE BLOCKS *** */
 
         let mut block1a = block1.clone();
-        let block1a_hash = H256([0x33; 32]);
+        let block1a_hash = H256::new([0x33; 32]);
         block1a.hash = block1a_hash;
         let mut block2a = block2.clone();
-        let block2a_hash = H256([0x34; 32]);
+        let block2a_hash = H256::new([0x34; 32]);
         block2a.hash = block2a_hash;
 
         // reinsert two blocks that point to canonical chain
@@ -1632,8 +1632,8 @@ mod tests {
 
         // insert unconnected block2b
         let mut block2b = block2a.clone();
-        block2b.hash = H256([0x99; 32]);
-        block2b.parent_hash = H256([0x88; 32]);
+        block2b.hash = H256::new([0x99; 32]);
+        block2b.parent_hash = H256::new([0x88; 32]);
 
         assert_eq!(
             tree.insert_block(block2b.clone()).unwrap(),

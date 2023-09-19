@@ -71,7 +71,7 @@ impl BodiesClient for TestBodiesClient {
 
         Box::pin(async move {
             if should_delay {
-                tokio::time::sleep(Duration::from_millis(hashes[0].to_low_u64_be() % 100)).await;
+                tokio::time::sleep(Duration::from_millis((hashes[0][0] % 100) as u64)).await;
             }
 
             let bodies = &mut *bodies.lock().await;

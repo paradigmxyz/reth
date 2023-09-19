@@ -2,9 +2,16 @@ use crate::{
     compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR},
     keccak256, Address, Bytes, TxHash, H256,
 };
-pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
+use once_cell::sync::Lazy;
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
+use reth_rlp::{Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
+use serde::{Deserialize, Serialize};
+use std::mem;
+
+pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
 pub use eip1559::TxEip1559;
 pub use eip2930::TxEip2930;
 pub use eip4844::{
@@ -13,14 +20,8 @@ pub use eip4844::{
 pub use error::InvalidTransactionError;
 pub use legacy::TxLegacy;
 pub use meta::TransactionMeta;
-use once_cell::sync::Lazy;
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
-use reth_rlp::{Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
-use serde::{Deserialize, Serialize};
 pub use signature::Signature;
-use std::mem;
 pub use tx_type::{
     TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
@@ -836,10 +837,10 @@ impl TransactionSigned {
     /// Returns the enveloped encoded transactions.
     ///
     /// See also [TransactionSigned::encode_enveloped]
-    pub fn envelope_encoded(&self) -> bytes::Bytes {
+    pub fn envelope_encoded(&self) -> Bytes {
         let mut buf = BytesMut::new();
         self.encode_enveloped(&mut buf);
-        buf.freeze()
+        buf.freeze().into()
     }
 
     /// Encodes the transaction into the "raw" format (e.g. `eth_sendRawTransaction`).
@@ -1191,6 +1192,7 @@ mod tests {
         },
         Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered, H256, U256,
     };
+    use alloy_primitives::bytes;
     use bytes::BytesMut;
     use ethers_core::utils::hex;
     use reth_rlp::{Decodable, DecodeError, Encodable};
@@ -1394,8 +1396,8 @@ mod tests {
     #[test]
     fn test_envelop_decode() {
         // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
-        let input = &hex::decode("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76").unwrap()[..];
-        let decoded = TransactionSigned::decode_enveloped(input.into()).unwrap();
+        let input = bytes!("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76");
+        let decoded = TransactionSigned::decode_enveloped(input.clone()).unwrap();
 
         let encoded = decoded.envelope_encoded();
         assert_eq!(encoded, input);

@@ -54,8 +54,8 @@ mod tests {
     };
     use reth_interfaces::test_utils::generators::{self, random_block};
     use reth_primitives::{
-        hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, PruneMode, PruneModes,
-        SealedBlock, H160, MAINNET, U256,
+        address, hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, PruneMode,
+        PruneModes, SealedBlock, MAINNET, U256,
     };
     use reth_provider::{
         AccountExtReader, BlockWriter, DatabaseProviderRW, ProviderFactory, ReceiptProvider,
@@ -98,14 +98,14 @@ mod tests {
         provider
             .tx_ref()
             .put::<tables::PlainAccountState>(
-                H160(hex!("1000000000000000000000000000000000000000")),
+                address!("1000000000000000000000000000000000000000"),
                 Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) },
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::PlainAccountState>(
-                H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b")),
+                address!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
                 Account {
                     nonce: 0,
                     balance: U256::from(0x3635c9adc5dea00000u128),

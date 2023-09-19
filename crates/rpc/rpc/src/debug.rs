@@ -13,7 +13,7 @@ use crate::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
-    Account, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H160, H256,
+    Account, Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H256,
 };
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderBox};
 use reth_revm::{
@@ -833,7 +833,7 @@ where
         &self,
         _block_hash: H256,
         _tx_idx: usize,
-        _contract_address: H160,
+        _contract_address: Address,
         _key_start: H256,
         _max_result: u64,
     ) -> RpcResult<()> {

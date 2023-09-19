@@ -611,7 +611,7 @@ mod tests {
         let signature = Signature { odd_y_parity: true, r: U256::default(), s: U256::default() };
 
         let tx = TransactionSigned::from_transaction_and_signature(request, signature);
-        let signer = Address::zero();
+        let signer = Address::ZERO;
         TransactionSignedEcRecovered::from_signed_transaction(tx, signer)
     }
 

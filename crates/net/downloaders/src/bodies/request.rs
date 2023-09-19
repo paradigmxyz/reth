@@ -261,7 +261,7 @@ mod tests {
     #[tokio::test]
     async fn request_returns_empty_bodies() {
         let mut rng = generators::rng();
-        let headers = random_header_range(&mut rng, 0..20, H256::zero());
+        let headers = random_header_range(&mut rng, 0..20, H256::ZERO);
 
         let client = Arc::new(TestBodiesClient::default());
         let fut = BodiesRequestFuture::new(

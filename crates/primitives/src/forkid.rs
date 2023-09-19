@@ -380,8 +380,10 @@ impl Cache {
 mod tests {
     use super::*;
     use hex_literal::hex;
+    use revm_primitives::b256;
+
     const GENESIS_HASH: H256 =
-        H256(hex!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"));
+        b256!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3");
 
     // EIP test vectors.
     #[test]

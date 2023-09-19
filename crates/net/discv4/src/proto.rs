@@ -124,7 +124,7 @@ impl Message {
         sig_bytes.unsplit(payload);
 
         let hash = keccak256(&sig_bytes);
-        datagram.extend_from_slice(hash.as_bytes());
+        datagram.extend_from_slice(hash.as_slice());
 
         datagram.unsplit(sig_bytes);
         (datagram.freeze(), hash)
@@ -154,7 +154,7 @@ impl Message {
         let recoverable_sig = RecoverableSignature::from_compact(signature, recovery_id)?;
 
         // recover the public key
-        let msg = secp256k1::Message::from_slice(keccak256(&packet[97..]).as_bytes())?;
+        let msg = secp256k1::Message::from_slice(keccak256(&packet[97..]).as_slice())?;
 
         let pk = SECP256K1.recover_ecdsa(&msg, &recoverable_sig)?;
         let node_id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);

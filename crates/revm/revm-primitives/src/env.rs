@@ -94,10 +94,10 @@ pub fn recover_header_signer(header: &Header) -> Option<Address> {
     let signature: [u8; 65] = header.extra_data[signature_start_byte..].try_into().ok()?;
     let seal_hash = {
         let mut header_to_seal = header.clone();
-        header_to_seal.extra_data = Bytes::from(&header.extra_data[..signature_start_byte]);
+        header_to_seal.extra_data = Bytes::from(header.extra_data[..signature_start_byte].to_vec());
         header_to_seal.hash_slow()
     };
-    recover_signer(&signature, seal_hash.as_fixed_bytes()).ok()
+    recover_signer(&signature, &seal_hash.0).ok()
 }
 
 /// Returns a new [TxEnv] filled with the transaction's data.
@@ -130,7 +130,7 @@ pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_b
         nonce: None,
         gas_limit: 30_000_000,
         value: U256::ZERO,
-        data: parent_beacon_block_root.to_fixed_bytes().to_vec().into(),
+        data: parent_beacon_block_root.0.to_vec().into(),
         // Setting the gas price to zero enforces that no value is transferred as part of the call,
         // and that the call will not count against the block's gas limit
         gas_price: U256::ZERO,
@@ -181,7 +181,7 @@ where
                 TransactionKind::Create => TransactTo::create(),
             };
             tx_env.value = U256::from(*value);
-            tx_env.data = input.0.clone();
+            tx_env.data = input.clone();
             tx_env.chain_id = *chain_id;
             tx_env.nonce = Some(*nonce);
             tx_env.access_list.clear();
@@ -204,20 +204,14 @@ where
                 TransactionKind::Create => TransactTo::create(),
             };
             tx_env.value = U256::from(*value);
-            tx_env.data = input.0.clone();
+            tx_env.data = input.clone();
             tx_env.chain_id = Some(*chain_id);
             tx_env.nonce = Some(*nonce);
             tx_env.access_list = access_list
                 .0
                 .iter()
                 .map(|l| {
-                    (
-                        l.address,
-                        l.storage_keys
-                            .iter()
-                            .map(|k| U256::from_be_bytes(k.to_fixed_bytes()))
-                            .collect(),
-                    )
+                    (l.address, l.storage_keys.iter().map(|k| U256::from_be_bytes(k.0)).collect())
                 })
                 .collect();
         }
@@ -240,20 +234,14 @@ where
                 TransactionKind::Create => TransactTo::create(),
             };
             tx_env.value = U256::from(*value);
-            tx_env.data = input.0.clone();
+            tx_env.data = input.clone();
             tx_env.chain_id = Some(*chain_id);
             tx_env.nonce = Some(*nonce);
             tx_env.access_list = access_list
                 .0
                 .iter()
                 .map(|l| {
-                    (
-                        l.address,
-                        l.storage_keys
-                            .iter()
-                            .map(|k| U256::from_be_bytes(k.to_fixed_bytes()))
-                            .collect(),
-                    )
+                    (l.address, l.storage_keys.iter().map(|k| U256::from_be_bytes(k.0)).collect())
                 })
                 .collect();
         }
@@ -278,20 +266,14 @@ where
                 TransactionKind::Create => TransactTo::create(),
             };
             tx_env.value = U256::from(*value);
-            tx_env.data = input.0.clone();
+            tx_env.data = input.clone();
             tx_env.chain_id = Some(*chain_id);
             tx_env.nonce = Some(*nonce);
             tx_env.access_list = access_list
                 .0
                 .iter()
                 .map(|l| {
-                    (
-                        l.address,
-                        l.storage_keys
-                            .iter()
-                            .map(|k| U256::from_be_bytes(k.to_fixed_bytes()))
-                            .collect(),
-                    )
+                    (l.address, l.storage_keys.iter().map(|k| U256::from_be_bytes(k.0)).collect())
                 })
                 .collect();
             tx_env.blob_hashes = blob_versioned_hashes.clone();

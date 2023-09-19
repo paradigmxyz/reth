@@ -15,16 +15,16 @@ impl<Provider, Pool, Network> EthApi<Provider, Pool, Network> {
     pub(crate) async fn sign(&self, account: Address, message: Bytes) -> EthResult<Bytes> {
         let signer = self.find_signer(&account)?;
         let signature = signer.sign(account, &message).await?;
-        let bytes = hex::encode(signature.to_bytes()).as_bytes().into();
-        Ok(bytes)
+        let bytes = hex::encode(signature.to_bytes());
+        Ok(Bytes(bytes::Bytes::from(bytes)))
     }
 
     pub(crate) async fn sign_typed_data(&self, data: Value, account: Address) -> EthResult<Bytes> {
         let signer = self.find_signer(&account)?;
         let data = serde_json::from_value::<TypedData>(data).map_err(|_| SignError::TypedData)?;
         let signature = signer.sign_typed_data(account, &data)?;
-        let bytes = hex::encode(signature.to_bytes()).as_bytes().into();
-        Ok(bytes)
+        let bytes = hex::encode(signature.to_bytes());
+        Ok(Bytes(bytes::Bytes::from(bytes)))
     }
 
     pub(crate) fn find_signer(

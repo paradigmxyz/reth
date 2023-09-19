@@ -82,7 +82,7 @@ mod tests {
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
         AccountHistory, HashedAccount, Headers, StorageHistory, SyncStage,
     };
-    use reth_primitives::{H160, H256};
+    use reth_primitives::{Address, H256};
     use std::str::FromStr;
 
     /// A helper type to parse Args more easily
@@ -123,7 +123,7 @@ mod tests {
         assert_eq!(
             args.table_key::<StorageHistory>().unwrap(),
             StorageShardedKey::new(
-                H160::from_str("0x01957911244e546ce519fbac6f798958fafadb41").unwrap(),
+                Address::from_str("0x01957911244e546ce519fbac6f798958fafadb41").unwrap(),
                 H256::from_str(
                     "0x0000000000000000000000000000000000000000000000000000000000000003"
                 )
@@ -139,7 +139,7 @@ mod tests {
         assert_eq!(
             args.table_key::<AccountHistory>().unwrap(),
             ShardedKey::new(
-                H160::from_str("0x4448e1273fd5a8bfdb9ed111e96889c960eee145").unwrap(),
+                Address::from_str("0x4448e1273fd5a8bfdb9ed111e96889c960eee145").unwrap(),
                 18446744073709551615
             )
         );

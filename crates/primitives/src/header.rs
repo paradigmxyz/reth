@@ -3,8 +3,8 @@ use crate::{
     eip4844::{calc_blob_fee, calculate_excess_blob_gas},
     keccak256,
     proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
-    BaseFeeParams, BlockBodyRoots, BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes, H160, H256,
-    H64, U256,
+    Address, BaseFeeParams, BlockBodyRoots, BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes,
+    H256, H64, U256,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
@@ -48,7 +48,7 @@ pub struct Header {
     pub ommers_hash: H256,
     /// The 160-bit address to which all fees collected from the successful mining of this block
     /// be transferred; formally Hc.
-    pub beneficiary: H160,
+    pub beneficiary: Address,
     /// The Keccak 256-bit hash of the root node of the state trie, after all transactions are
     /// executed and finalisations applied; formally Hr.
     pub state_root: H256,
@@ -235,7 +235,7 @@ impl Header {
     pub fn size(&self) -> usize {
         mem::size_of::<H256>() + // parent hash
         mem::size_of::<H256>() + // ommers hash
-        mem::size_of::<H160>() + // beneficiary
+        mem::size_of::<Address>() + // beneficiary
         mem::size_of::<H256>() + // state root
         mem::size_of::<H256>() + // transactions root
         mem::size_of::<H256>() + // receipts root
@@ -271,7 +271,7 @@ impl Header {
         length += self.timestamp.length();
         length += self.extra_data.length();
         length += self.mix_hash.length();
-        length += H64::from_low_u64_be(self.nonce).length();
+        length += H64::new(self.nonce.to_be_bytes()).length();
 
         if let Some(base_fee) = self.base_fee_per_gas {
             length += U256::from(base_fee).length();
@@ -338,7 +338,7 @@ impl Encodable for Header {
         self.timestamp.encode(out);
         self.extra_data.encode(out);
         self.mix_hash.encode(out);
-        H64::from_low_u64_be(self.nonce).encode(out);
+        H64::new(self.nonce.to_be_bytes()).encode(out);
 
         // Encode base fee. Put empty list if base fee is missing,
         // but withdrawals root is present.
@@ -421,7 +421,7 @@ impl Decodable for Header {
             timestamp: Decodable::decode(buf)?,
             extra_data: Decodable::decode(buf)?,
             mix_hash: Decodable::decode(buf)?,
-            nonce: H64::decode(buf)?.to_low_u64_be(),
+            nonce: u64::from_be_bytes(H64::decode(buf)?.0),
             base_fee_per_gas: None,
             withdrawals_root: None,
             blob_gas_used: None,
@@ -732,10 +732,10 @@ mod tests {
             gas_used: 0x15b3_u64,
             timestamp: 0x1a0a_u64,
             extra_data: Bytes::from_str("7788").unwrap(),
-            ommers_hash: H256::zero(),
-            state_root: H256::zero(),
-            transactions_root: H256::zero(),
-            receipts_root: H256::zero(),
+            ommers_hash: H256::ZERO,
+            state_root: H256::ZERO,
+            transactions_root: H256::ZERO,
+            receipts_root: H256::ZERO,
             ..Default::default()
         };
         let mut data = vec![];
@@ -786,10 +786,10 @@ mod tests {
             gas_used: 0x15b3u64,
             timestamp: 0x1a0au64,
             extra_data: Bytes::from_str("7788").unwrap(),
-            ommers_hash: H256::zero(),
-            state_root: H256::zero(),
-            transactions_root: H256::zero(),
-            receipts_root: H256::zero(),
+            ommers_hash: H256::ZERO,
+            state_root: H256::ZERO,
+            transactions_root: H256::ZERO,
+            receipts_root: H256::ZERO,
             ..Default::default()
         };
         let header = <Header as Decodable>::decode(&mut data.as_slice()).unwrap();

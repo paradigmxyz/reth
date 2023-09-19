@@ -209,9 +209,9 @@ where
 {
     let mut bloom = Bloom::zero();
     for log in logs {
-        m3_2048(&mut bloom, log.address.as_bytes());
+        m3_2048(&mut bloom, log.address.as_slice());
         for topic in &log.topics {
-            m3_2048(&mut bloom, topic.as_bytes());
+            m3_2048(&mut bloom, topic.as_slice());
         }
     }
     bloom

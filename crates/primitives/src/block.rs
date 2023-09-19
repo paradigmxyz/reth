@@ -1,7 +1,6 @@
 use crate::{
     Address, BlockHash, BlockNumber, Header, SealedHeader, TransactionSigned, Withdrawal, H256, U64,
 };
-use fixed_hash::rustc_hex::FromHexError;
 use reth_codecs::derive_arbitrary;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{
@@ -338,7 +337,7 @@ impl Decodable for BlockHashOrNumber {
 pub struct ParseBlockHashOrNumberError {
     input: String,
     pares_int_error: ParseIntError,
-    hex_error: FromHexError,
+    hex_error: hex::FromHexError,
 }
 
 impl FromStr for BlockHashOrNumber {
@@ -602,7 +601,7 @@ impl From<u64> for BlockNumberOrTag {
 
 impl From<U64> for BlockNumberOrTag {
     fn from(num: U64) -> Self {
-        num.as_u64().into()
+        num.into_limbs()[0].into()
     }
 }
 

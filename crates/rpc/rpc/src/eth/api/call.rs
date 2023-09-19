@@ -11,7 +11,6 @@ use crate::{
     },
     EthApi,
 };
-use ethers_core::utils::get_contract_address;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{AccessList, BlockId, BlockNumberOrTag, Bytes, U256};
 use reth_provider::{
@@ -370,7 +369,7 @@ where
             to
         } else {
             let nonce = db.basic(from)?.unwrap_or_default().nonce;
-            get_contract_address(from, nonce).into()
+            from.create(nonce)
         };
 
         // can consume the list since we're not using the request anymore

@@ -347,12 +347,11 @@ mod tests {
         BlockNumberList,
     };
     use reth_interfaces::provider::ProviderError;
-    use reth_primitives::{hex_literal::hex, Account, StorageEntry, H160, H256, U256};
+    use reth_primitives::{address, b256, Account, Address, StorageEntry, H256, U256};
 
-    const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));
-    const HIGHER_ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000005"));
-    const STORAGE: H256 =
-        H256(hex!("0000000000000000000000000000000000000000000000000000000000000001"));
+    const ADDRESS: Address = address!("0000000000000000000000000000000000000001");
+    const HIGHER_ADDRESS: Address = address!("0000000000000000000000000000000000000005");
+    const STORAGE: H256 = b256!("0000000000000000000000000000000000000000000000000000000000000001");
 
     fn assert_state_provider<T: StateProvider>() {}
     #[allow(unused)]

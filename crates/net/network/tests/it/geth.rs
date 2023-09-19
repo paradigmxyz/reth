@@ -1,6 +1,6 @@
 use crate::clique::{CliqueGethInstance, CliqueMiddleware};
 use ethers_core::{
-    types::{transaction::eip2718::TypedTransaction, Eip1559TransactionRequest, H160, U64},
+    types::{transaction::eip2718::TypedTransaction, Address, Eip1559TransactionRequest, U64},
     utils::Geth,
 };
 use ethers_providers::Middleware;
@@ -113,7 +113,7 @@ async fn init_geth() -> (CliqueGethInstance, Arc<ChainSpec>) {
     let txs = nonces.map(|nonce| {
         // create a tx that just sends to the zero addr
         TypedTransaction::Eip1559(
-            Eip1559TransactionRequest::new().to(H160::zero()).value(1u64).nonce(nonce),
+            Eip1559TransactionRequest::new().to(Address::zero()).value(1u64).nonce(nonce),
         )
     });
     tracing::info!("generated transactions for blocks");
