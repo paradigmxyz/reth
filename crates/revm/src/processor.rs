@@ -4,7 +4,7 @@ use crate::{
     eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     into_reth_log,
     stack::{InspectorStack, InspectorStackConfig},
-    state_change::post_block_balance_increments,
+    state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
 };
 use reth_interfaces::{
     executor::{BlockExecutionError, BlockValidationError},
@@ -53,7 +53,7 @@ pub struct EVMProcessor<'a> {
     /// Outer vector stores receipts for each block sequentially.
     /// The inner vector stores receipts ordered by transaction number.
     ///
-    /// If receipt is None it means it is pruned.   
+    /// If receipt is None it means it is pruned.
     receipts: Vec<Vec<Option<Receipt>>>,
     /// First block will be initialized to `None`
     /// and be set to the block number of first block executed.
@@ -172,6 +172,24 @@ impl<'a> EVMProcessor<'a> {
         );
     }
 
+    /// Applies the pre-block call to the EIP-4788 beacon block root contract.
+    ///
+    /// If cancun is not activated or the block is the genesis block, then this is a no-op, and no
+    /// state changes are made.
+    pub fn apply_beacon_root_contract_call(
+        &mut self,
+        block: &Block,
+    ) -> Result<(), BlockExecutionError> {
+        apply_beacon_root_contract_call(
+            &self.chain_spec,
+            block.timestamp,
+            block.number,
+            block.parent_beacon_block_root,
+            &mut self.evm,
+        )?;
+        Ok(())
+    }
+
     /// Apply post execution state changes, including block rewards, withdrawals, and irregular DAO
     /// hardfork state change.
     pub fn apply_post_execution_state_change(
@@ -256,14 +274,14 @@ impl<'a> EVMProcessor<'a> {
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
+        self.init_env(&block.header, total_difficulty);
+
         // perf: do not execute empty blocks
         if block.body.is_empty() {
             return Ok((Vec::new(), 0))
         }
 
         let senders = self.recover_senders(&block.body, senders)?;
-
-        self.init_env(&block.header, total_difficulty);
 
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.len());
@@ -318,6 +336,8 @@ impl<'a> EVMProcessor<'a> {
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<Vec<Receipt>, BlockExecutionError> {
+        self.init_env(&block.header, total_difficulty);
+        self.apply_beacon_root_contract_call(block)?;
         let (receipts, cumulative_gas_used) =
             self.execute_transactions(block, total_difficulty, senders)?;
 
@@ -528,4 +548,434 @@ pub fn verify_receipt<'a>(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use reth_primitives::{
+        constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
+        keccak256, Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, MAINNET,
+    };
+    use reth_provider::{AccountReader, BlockHashReader, StateRootProvider};
+    use reth_revm_primitives::TransitionState;
+    use revm::Database;
+    use std::{collections::HashMap, str::FromStr};
+
+    use super::*;
+
+    /// Returns the beacon root contract code
+    fn beacon_root_contract_code() -> Bytes {
+        Bytes::from_str("0x3373fffffffffffffffffffffffffffffffffffffffe14604457602036146024575f5ffd5b620180005f350680545f35146037575f5ffd5b6201800001545f5260205ff35b6201800042064281555f359062018000015500").unwrap()
+    }
+
+    #[derive(Debug, Default, Clone, Eq, PartialEq)]
+    struct StateProviderTest {
+        accounts: HashMap<Address, (HashMap<StorageKey, U256>, Account)>,
+        contracts: HashMap<H256, Bytecode>,
+        block_hash: HashMap<u64, H256>,
+    }
+
+    impl StateProviderTest {
+        /// Insert account.
+        fn insert_account(
+            &mut self,
+            address: Address,
+            mut account: Account,
+            bytecode: Option<Bytes>,
+            storage: HashMap<StorageKey, U256>,
+        ) {
+            if let Some(bytecode) = bytecode {
+                let hash = keccak256(&bytecode);
+                account.bytecode_hash = Some(hash);
+                self.contracts.insert(hash, Bytecode::new_raw(bytecode.into()));
+            }
+            self.accounts.insert(address, (storage, account));
+        }
+    }
+
+    impl AccountReader for StateProviderTest {
+        fn basic_account(&self, address: Address) -> reth_interfaces::Result<Option<Account>> {
+            let ret = Ok(self.accounts.get(&address).map(|(_, acc)| *acc));
+            ret
+        }
+    }
+
+    impl BlockHashReader for StateProviderTest {
+        fn block_hash(&self, number: u64) -> reth_interfaces::Result<Option<H256>> {
+            Ok(self.block_hash.get(&number).cloned())
+        }
+
+        fn canonical_hashes_range(
+            &self,
+            start: BlockNumber,
+            end: BlockNumber,
+        ) -> reth_interfaces::Result<Vec<H256>> {
+            let range = start..end;
+            Ok(self
+                .block_hash
+                .iter()
+                .filter_map(|(block, hash)| range.contains(block).then_some(*hash))
+                .collect())
+        }
+    }
+
+    impl StateRootProvider for StateProviderTest {
+        fn state_root(
+            &self,
+            _bundle_state: BundleStateWithReceipts,
+        ) -> reth_interfaces::Result<H256> {
+            todo!()
+        }
+    }
+
+    impl StateProvider for StateProviderTest {
+        fn storage(
+            &self,
+            account: Address,
+            storage_key: reth_primitives::StorageKey,
+        ) -> reth_interfaces::Result<Option<reth_primitives::StorageValue>> {
+            Ok(self
+                .accounts
+                .get(&account)
+                .and_then(|(storage, _)| storage.get(&storage_key).cloned()))
+        }
+
+        fn bytecode_by_hash(&self, code_hash: H256) -> reth_interfaces::Result<Option<Bytecode>> {
+            Ok(self.contracts.get(&code_hash).cloned())
+        }
+
+        fn proof(
+            &self,
+            _address: Address,
+            _keys: &[H256],
+        ) -> reth_interfaces::Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
+            todo!()
+        }
+    }
+
+    #[test]
+    fn eip_4788_non_genesis_call() {
+        let mut header = Header { timestamp: 1, number: 1, ..Header::default() };
+
+        let mut db = StateProviderTest::default();
+
+        let beacon_root_contract_code = beacon_root_contract_code();
+
+        let beacon_root_contract_account = Account {
+            balance: U256::ZERO,
+            bytecode_hash: Some(keccak256(beacon_root_contract_code.clone())),
+            nonce: 1,
+        };
+
+        db.insert_account(
+            BEACON_ROOTS_ADDRESS,
+            beacon_root_contract_account,
+            Some(beacon_root_contract_code),
+            HashMap::new(),
+        );
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+                .build(),
+        );
+
+        // execute invalid header (no parent beacon block root)
+        let mut executor = EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
+
+        // attempt to execute a block without parent beacon block root, expect err
+        let err = executor
+            .execute_and_verify_receipt(
+                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                U256::ZERO,
+                None,
+            )
+            .expect_err(
+                "Executing cancun block without parent beacon block root field should fail",
+            );
+        assert_eq!(
+            err,
+            BlockExecutionError::Validation(BlockValidationError::MissingParentBeaconBlockRoot)
+        );
+
+        // fix header, set a gas limit
+        header.parent_beacon_block_root = Some(H256::from_low_u64_be(0x1337));
+
+        // Now execute a block with the fixed header, ensure that it does not fail
+        executor
+            .execute(
+                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                U256::ZERO,
+                None,
+            )
+            .unwrap();
+
+        // check the actual storage of the contract - it should be:
+        // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH should be
+        // header.timestamp
+        // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH + HISTORY_BUFFER_LENGTH
+        // should be parent_beacon_block_root
+        let history_buffer_length = 98304u64;
+        let timestamp_index = header.timestamp % history_buffer_length;
+        let parent_beacon_block_root_index =
+            timestamp_index % history_buffer_length + history_buffer_length;
+
+        // get timestamp storage and compare
+        let timestamp_storage =
+            executor.db_mut().storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index)).unwrap();
+        assert_eq!(timestamp_storage, U256::from(header.timestamp));
+
+        // get parent beacon block root storage and compare
+        let parent_beacon_block_root_storage = executor
+            .db_mut()
+            .storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index))
+            .expect("storage value should exist");
+        assert_eq!(parent_beacon_block_root_storage, U256::from(0x1337));
+    }
+
+    #[test]
+    fn eip_4788_no_code_cancun() {
+        // This test ensures that we "silently fail" when cancun is active and there is no code at
+        // BEACON_ROOTS_ADDRESS
+        let header = Header {
+            timestamp: 1,
+            number: 1,
+            parent_beacon_block_root: Some(H256::from_low_u64_be(0x1337)),
+            ..Header::default()
+        };
+
+        let db = StateProviderTest::default();
+
+        // DON'T deploy the contract at genesis
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+                .build(),
+        );
+
+        let mut executor = EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
+        executor.init_env(&header, U256::ZERO);
+
+        // get the env
+        let previous_env = executor.evm.env.clone();
+
+        // attempt to execute an empty block with parent beacon block root, this should not fail
+        executor
+            .execute_and_verify_receipt(
+                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                U256::ZERO,
+                None,
+            )
+            .expect(
+                "Executing a block with no transactions while cancun is active should not fail",
+            );
+
+        // ensure that the env has not changed
+        assert_eq!(executor.evm.env, previous_env);
+    }
+
+    #[test]
+    fn eip_4788_empty_account_call() {
+        // This test ensures that we do not increment the nonce of an empty SYSTEM_ADDRESS account
+        // during the pre-block call
+        let mut db = StateProviderTest::default();
+
+        let beacon_root_contract_code = beacon_root_contract_code();
+
+        let beacon_root_contract_account = Account {
+            balance: U256::ZERO,
+            bytecode_hash: Some(keccak256(beacon_root_contract_code.clone())),
+            nonce: 1,
+        };
+
+        db.insert_account(
+            BEACON_ROOTS_ADDRESS,
+            beacon_root_contract_account,
+            Some(beacon_root_contract_code),
+            HashMap::new(),
+        );
+
+        // insert an empty SYSTEM_ADDRESS
+        db.insert_account(SYSTEM_ADDRESS, Account::default(), None, HashMap::new());
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+                .build(),
+        );
+
+        let mut executor = EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
+
+        // construct the header for block one
+        let header = Header {
+            timestamp: 1,
+            number: 1,
+            parent_beacon_block_root: Some(H256::from_low_u64_be(0x1337)),
+            ..Header::default()
+        };
+
+        executor.init_env(&header, U256::ZERO);
+
+        // attempt to execute an empty block with parent beacon block root, this should not fail
+        executor
+            .execute_and_verify_receipt(
+                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                U256::ZERO,
+                None,
+            )
+            .expect(
+                "Executing a block with no transactions while cancun is active should not fail",
+            );
+
+        // ensure that the nonce of the system address account has not changed
+        let nonce = executor.db_mut().basic(SYSTEM_ADDRESS).unwrap().unwrap().nonce;
+        assert_eq!(nonce, 0);
+    }
+
+    #[test]
+    fn eip_4788_genesis_call() {
+        let mut db = StateProviderTest::default();
+
+        let beacon_root_contract_code = beacon_root_contract_code();
+
+        let beacon_root_contract_account = Account {
+            balance: U256::ZERO,
+            bytecode_hash: Some(keccak256(beacon_root_contract_code.clone())),
+            nonce: 1,
+        };
+
+        db.insert_account(
+            BEACON_ROOTS_ADDRESS,
+            beacon_root_contract_account,
+            Some(beacon_root_contract_code),
+            HashMap::new(),
+        );
+
+        // activate cancun at genesis
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(0))
+                .build(),
+        );
+
+        let mut header = chain_spec.genesis_header();
+
+        let mut executor = EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
+        executor.init_env(&header, U256::ZERO);
+
+        // attempt to execute the genesis block with non-zero parent beacon block root, expect err
+        header.parent_beacon_block_root = Some(H256::from_low_u64_be(0x1337));
+        let _err = executor
+            .execute_and_verify_receipt(
+                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                U256::ZERO,
+                None,
+            )
+            .expect_err(
+                "Executing genesis cancun block with non-zero parent beacon block root field should fail",
+            );
+
+        // fix header
+        header.parent_beacon_block_root = Some(H256::zero());
+
+        // now try to process the genesis block again, this time ensuring that a system contract
+        // call does not occur
+        executor
+            .execute(
+                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                U256::ZERO,
+                None,
+            )
+            .unwrap();
+
+        // there is no system contract call so there should be NO STORAGE CHANGES
+        // this means we'll check the transition state
+        let state = executor.evm.db().unwrap();
+        let transition_state = state
+            .transition_state
+            .clone()
+            .expect("the evm should be initialized with bundle updates");
+
+        // assert that it is the default (empty) transition state
+        assert_eq!(transition_state, TransitionState::default());
+    }
+
+    #[test]
+    fn eip_4788_high_base_fee() {
+        // This test ensures that if we have a base fee, then we don't return an error when the
+        // system contract is called, due to the gas price being less than the base fee.
+        let header = Header {
+            timestamp: 1,
+            number: 1,
+            parent_beacon_block_root: Some(H256::from_low_u64_be(0x1337)),
+            base_fee_per_gas: Some(u64::MAX),
+            ..Header::default()
+        };
+
+        let mut db = StateProviderTest::default();
+
+        let beacon_root_contract_code = beacon_root_contract_code();
+
+        let beacon_root_contract_account = Account {
+            balance: U256::ZERO,
+            bytecode_hash: Some(keccak256(beacon_root_contract_code.clone())),
+            nonce: 1,
+        };
+
+        db.insert_account(
+            BEACON_ROOTS_ADDRESS,
+            beacon_root_contract_account,
+            Some(beacon_root_contract_code),
+            HashMap::new(),
+        );
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+                .build(),
+        );
+
+        // execute header
+        let mut executor = EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
+        executor.init_env(&header, U256::ZERO);
+
+        // ensure that the env is configured with a base fee
+        assert_eq!(executor.evm.env.block.basefee, U256::from(u64::MAX));
+
+        // Now execute a block with the fixed header, ensure that it does not fail
+        executor
+            .execute(
+                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                U256::ZERO,
+                None,
+            )
+            .unwrap();
+
+        // check the actual storage of the contract - it should be:
+        // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH should be
+        // header.timestamp
+        // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH + HISTORY_BUFFER_LENGTH
+        // should be parent_beacon_block_root
+        let history_buffer_length = 98304u64;
+        let timestamp_index = header.timestamp % history_buffer_length;
+        let parent_beacon_block_root_index =
+            timestamp_index % history_buffer_length + history_buffer_length;
+
+        // get timestamp storage and compare
+        let timestamp_storage =
+            executor.db_mut().storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index)).unwrap();
+        assert_eq!(timestamp_storage, U256::from(header.timestamp));
+
+        // get parent beacon block root storage and compare
+        let parent_beacon_block_root_storage = executor
+            .db_mut()
+            .storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index))
+            .unwrap();
+        assert_eq!(parent_beacon_block_root_storage, U256::from(0x1337));
+    }
 }

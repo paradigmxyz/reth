@@ -26,6 +26,10 @@ pub enum BlockValidationError {
     BlockPreMerge { hash: H256 },
     #[error("Missing total difficulty")]
     MissingTotalDifficulty { hash: H256 },
+    #[error("EIP-4788 Parent beacon block root missing for active Cancun block")]
+    MissingParentBeaconBlockRoot,
+    #[error("The parent beacon block root is not zero for Cancun genesis block")]
+    CancunGenesisParentBeaconBlockRootNotZero,
 }
 
 /// BlockExecutor Errors
