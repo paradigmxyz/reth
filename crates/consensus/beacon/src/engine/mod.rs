@@ -68,7 +68,7 @@ mod handle;
 pub use handle::BeaconConsensusEngineHandle;
 
 mod forkchoice;
-use crate::hooks::EngineHooks;
+use crate::hooks::{EngineHooks, PolledHook};
 pub use forkchoice::ForkchoiceStatus;
 
 mod metrics;
@@ -1681,18 +1681,19 @@ where
         None
     }
 
-    fn on_hook_action(&self, action: EngineHookAction) -> Result<(), BeaconConsensusEngineError> {
-        match action {
-            EngineHookAction::UpdateSyncState(state) => {
-                self.sync_state_updater.update_sync_state(state)
-            }
-            // TODO(alexey): always connect buffered blocks if hook had the
-            //  `EngineHookDBAccessLevel::ReadWrite`
-            EngineHookAction::ConnectBufferedBlocks => {
-                if let Err(error) = self.blockchain.connect_buffered_blocks_to_canonical_hashes() {
-                    error!(target: "consensus::engine", ?error, "Error restoring blockchain tree state");
-                    return Err(error.into())
+    fn on_hook_result(&self, result: PolledHook) -> Result<(), BeaconConsensusEngineError> {
+        if let Some(action) = result.action {
+            match action {
+                EngineHookAction::UpdateSyncState(state) => {
+                    self.sync_state_updater.update_sync_state(state)
                 }
+            }
+        }
+
+        if result.event.is_finished() && result.db_access_level.is_read_write() {
+            if let Err(error) = self.blockchain.connect_buffered_blocks_to_canonical_hashes() {
+                error!(target: "consensus::engine", ?error, "Error connecting buffered blocks to canonical hashes on hook result");
+                return Err(error.into())
             }
         }
 
@@ -1733,10 +1734,8 @@ where
             if let Poll::Ready(result) = this.hooks.poll_running_hook_with_db_write(
                 cx,
                 EngineContext { tip_block_number: this.blockchain.canonical_tip().number },
-            ) {
-                if let Err(err) = this.on_hook_action(result?) {
-                    return Poll::Ready(Err(err))
-                }
+            )? {
+                this.on_hook_result(result)?;
             }
 
             let mut engine_messages_pending = false;
@@ -1803,10 +1802,8 @@ where
                     cx,
                     EngineContext { tip_block_number: this.blockchain.canonical_tip().number },
                     this.sync.is_pipeline_active(),
-                ) {
-                    if let Err(err) = this.on_hook_action(result?) {
-                        return Poll::Ready(Err(err))
-                    }
+                )? {
+                    this.on_hook_result(result)?;
                 }
             }
 
