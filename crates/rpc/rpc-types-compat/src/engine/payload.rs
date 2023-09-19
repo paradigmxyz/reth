@@ -6,7 +6,10 @@ use reth_primitives::{
 };
 use reth_rlp::Decodable;
 use reth_rpc_types::engine::{
-    payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, StandaloneWithdraw},
+    payload::{
+        ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2,
+        StandaloneWithdraw,
+    },
     ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PayloadError,
 };
 
@@ -238,6 +241,42 @@ pub fn convert_from_sealed_block_to_execution_payload_field_v2(
         ExecutionPayloadFieldV2::V2(try_convert_from_sealed_block_to_execution_payload_v2(value))
     } else {
         ExecutionPayloadFieldV2::V1(try_convert_from_sealed_block_to_execution_payload_v1(value))
+    }
+}
+
+/// Converts [ExecutionPayloadFieldV2] to [ExecutionPayload]
+pub fn convert_from_execution_payload_field_v2_to_execution_payload(
+    value: ExecutionPayloadFieldV2,
+) -> ExecutionPayload {
+    match value {
+        ExecutionPayloadFieldV2::V1(payload) => ExecutionPayload::V1(payload),
+        ExecutionPayloadFieldV2::V2(payload) => ExecutionPayload::V2(payload),
+    }
+}
+
+/// Converts [ExecutionPayloadInputV2] to [ExecutionPayload]
+pub fn convert_from_execution_payload_input_v2_to_execution_payload(
+    value: ExecutionPayloadInputV2,
+) -> ExecutionPayload {
+    match value.withdrawals {
+        Some(withdrawals) => ExecutionPayload::V2(ExecutionPayloadV2 {
+            payload_inner: value.execution_payload,
+            withdrawals,
+        }),
+        None => ExecutionPayload::V1(value.execution_payload),
+    }
+}
+
+/// Converts [SealedBlock] to [ExecutionPayloadInputV2]
+pub fn convert_from_sealed_block_to_execution_payload_input_v2(
+    value: SealedBlock,
+) -> ExecutionPayloadInputV2 {
+    let withdraw = value.withdrawals.clone().map(|withdrawals| {
+        withdrawals.into_iter().map(convert_withdrawal_to_standalonewithdraw).collect::<Vec<_>>()
+    });
+    ExecutionPayloadInputV2 {
+        withdrawals: withdraw,
+        execution_payload: try_convert_from_sealed_block_to_execution_payload_v1(value),
     }
 }
 

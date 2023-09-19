@@ -7,8 +7,8 @@ use reth_rpc::JwtSecret;
 use reth_rpc_api::clients::EngineApiClient;
 use reth_rpc_types::engine::{ForkchoiceState, PayloadId, TransitionConfiguration};
 use reth_rpc_types_compat::engine::payload::{
+    convert_from_sealed_block_to_execution_payload_input_v2,
     try_convert_from_sealed_block_to_execution_payload_v1,
-    try_convert_from_sealed_block_to_execution_payload_v2,
 };
 #[allow(unused_must_use)]
 async fn test_basic_engine_calls<C>(client: &C)
@@ -23,7 +23,7 @@ where
     .await;
     EngineApiClient::new_payload_v2(
         client,
-        try_convert_from_sealed_block_to_execution_payload_v2(block),
+        convert_from_sealed_block_to_execution_payload_input_v2(block),
     )
     .await;
     EngineApiClient::fork_choice_updated_v1(client, ForkchoiceState::default(), None).await;

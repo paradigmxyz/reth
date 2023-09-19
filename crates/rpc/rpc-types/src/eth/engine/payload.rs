@@ -57,27 +57,6 @@ impl ExecutionPayloadFieldV2 {
     }
 }
 
-
-impl From<SealedBlock> for ExecutionPayloadFieldV2 {
-    fn from(value: SealedBlock) -> Self {
-        // if there are withdrawals, return V2
-        if value.withdrawals.is_some() {
-            ExecutionPayloadFieldV2::V2(value.into())
-        } else {
-            ExecutionPayloadFieldV2::V1(value.into())
-        }
-    }
-}
-
-impl From<ExecutionPayloadFieldV2> for ExecutionPayload {
-    fn from(value: ExecutionPayloadFieldV2) -> Self {
-        match value {
-            ExecutionPayloadFieldV2::V1(payload) => ExecutionPayload::V1(payload),
-            ExecutionPayloadFieldV2::V2(payload) => ExecutionPayload::V2(payload),
-        }
-    }
-}
-
 /// This is the input to `engine_newPayloadV2`, which may or may not have a withdrawals field.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,28 +66,7 @@ pub struct ExecutionPayloadInputV2 {
     pub execution_payload: ExecutionPayloadV1,
     /// The payload withdrawals
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub withdrawals: Option<Vec<Withdrawal>>,
-}
-
-impl From<ExecutionPayloadInputV2> for ExecutionPayload {
-    fn from(value: ExecutionPayloadInputV2) -> Self {
-        match value.withdrawals {
-            Some(withdrawals) => ExecutionPayload::V2(ExecutionPayloadV2 {
-                payload_inner: value.execution_payload,
-                withdrawals,
-            }),
-            None => ExecutionPayload::V1(value.execution_payload),
-        }
-    }
-}
-
-impl From<SealedBlock> for ExecutionPayloadInputV2 {
-    fn from(value: SealedBlock) -> Self {
-        ExecutionPayloadInputV2 {
-            withdrawals: value.withdrawals.clone(),
-            execution_payload: value.into(),
-        }
-    }
+    pub withdrawals: Option<Vec<StandaloneWithdraw>>,
 }
 
 /// This structure maps for the return value of `engine_getPayload` of the beacon chain spec, for

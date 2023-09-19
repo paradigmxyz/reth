@@ -15,7 +15,10 @@ use reth_rpc_types::engine::{
     ForkchoiceUpdated, PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration,
     CAPABILITIES,
 };
-use reth_rpc_types_compat::engine::payload::convert_to_execution_payload_body_v1;
+use reth_rpc_types_compat::engine::payload::{
+    convert_from_execution_payload_input_v2_to_execution_payload,
+    convert_to_execution_payload_body_v1,
+};
 use reth_tasks::TaskSpawner;
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -85,7 +88,7 @@ where
         &self,
         payload: ExecutionPayloadInputV2,
     ) -> EngineApiResult<PayloadStatus> {
-        let payload = ExecutionPayload::from(payload);
+        let payload = convert_from_execution_payload_input_v2_to_execution_payload(payload);
         let payload_or_attrs = PayloadOrAttributes::from_execution_payload(&payload, None);
         self.validate_version_specific_fields(EngineApiMessageVersion::V2, &payload_or_attrs)?;
         Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
