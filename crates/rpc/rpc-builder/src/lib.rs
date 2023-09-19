@@ -504,7 +504,11 @@ impl RpcModuleSelection {
         Self::all_modules()
     }
 
-    /// Creates a new [RpcModuleSelection::Selection] from the given items.
+    /// Creates a new _unique_ [RpcModuleSelection::Selection] from the given items.
+    ///
+    /// # Note
+    ///
+    /// This will dedupe the selection and remove duplicates while preserving the order.
     ///
     /// # Example
     ///
@@ -516,14 +520,30 @@ impl RpcModuleSelection {
     /// let config = RpcModuleSelection::try_from_selection(selection).unwrap();
     /// assert_eq!(config, RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin]));
     /// ```
+    ///
+    /// Create a unique selection from the [RethRpcModule] string identifiers
+    ///
+    /// ```
+    ///  use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
+    /// let selection = vec!["eth", "admin", "eth", "admin"];
+    /// let config = RpcModuleSelection::try_from_selection(selection).unwrap();
+    /// assert_eq!(config, RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin]));
+    /// ```
     pub fn try_from_selection<I, T>(selection: I) -> Result<Self, T::Error>
     where
         I: IntoIterator<Item = T>,
         T: TryInto<RethRpcModule>,
     {
-        let selection =
-            selection.into_iter().map(TryInto::try_into).collect::<Result<Vec<_>, _>>()?;
-        Ok(RpcModuleSelection::Selection(selection))
+        let mut unique = HashSet::new();
+
+        let mut s = Vec::new();
+        for item in selection.into_iter() {
+            let item = item.try_into()?;
+            if unique.insert(item) {
+                s.push(item);
+            }
+        }
+        Ok(RpcModuleSelection::Selection(s))
     }
 
     /// Returns true if no selection is configured
@@ -1832,6 +1852,19 @@ mod tests {
     fn parse_rpc_module_selection() {
         let selection = "all".parse::<RpcModuleSelection>().unwrap();
         assert_eq!(selection, RpcModuleSelection::All);
+    }
+
+    #[test]
+    fn parse_rpc_unique_module_selection() {
+        let selection = "eth,admin,eth,net".parse::<RpcModuleSelection>().unwrap();
+        assert_eq!(
+            selection,
+            RpcModuleSelection::Selection(vec![
+                RethRpcModule::Eth,
+                RethRpcModule::Admin,
+                RethRpcModule::Net,
+            ])
+        );
     }
 
     #[test]
