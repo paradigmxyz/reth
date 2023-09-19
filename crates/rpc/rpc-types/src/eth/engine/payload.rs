@@ -59,7 +59,7 @@ impl ExecutionPayloadFieldV2 {
 
 /// This is the input to `engine_newPayloadV2`, which may or may not have a withdrawals field.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExecutionPayloadInputV2 {
     /// The V1 execution payload
     #[serde(flatten)]
@@ -119,7 +119,7 @@ pub struct ExecutionPayloadEnvelopeV3 {
 ///
 /// See also: <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#executionpayloadv1>
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExecutionPayloadV1 {
     pub parent_hash: H256,
     pub fee_recipient: Address,
@@ -171,7 +171,7 @@ impl From<SealedBlock> for ExecutionPayloadV1 {
 ///
 /// See also: <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#executionpayloadv2>
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExecutionPayloadV2 {
     /// Inner V1 payload
     #[serde(flatten)]
@@ -731,5 +731,118 @@ mod tests {
         "#;
         let payload: ExecutionPayloadInputV2 = serde_json::from_str(response).unwrap();
         assert_eq!(payload.withdrawals, None);
+    }
+
+    #[test]
+    fn serde_deserialize_v3_with_unknown_fields() {
+        let input = r#"
+{
+    "parentHash": "0xaaa4c5b574f37e1537c78931d1bca24a4d17d4f29f1ee97e1cd48b704909de1f",
+    "feeRecipient": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+    "stateRoot": "0x308ee9c5c6fab5e3d08763a3b5fe0be8ada891fa5010a49a3390e018dd436810",
+    "receiptsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+    "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "prevRandao": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "blockNumber": "0xf",
+    "gasLimit": "0x16345785d8a0000",
+    "gasUsed": "0x0",
+    "timestamp": "0x3a97",
+    "extraData": "0x",
+    "baseFeePerGas": "0x7",
+    "blockHash": "0x38bb6ba645c7e6bd970f9c7d492fafe1e04d85349054cb48d16c9d2c3e3cd0bf",
+    "transactions": [],
+    "withdrawals": [],
+    "excessBlobGas": "0x0",
+    "blobGasUsed": "0x0"
+}
+        "#;
+
+        // ensure that deserializing this succeeds
+        let _payload_res: ExecutionPayloadV3 = serde_json::from_str(input).unwrap();
+
+        // construct a payload with a random field in the middle
+        let input = r#"
+{
+    "parentHash": "0xaaa4c5b574f37e1537c78931d1bca24a4d17d4f29f1ee97e1cd48b704909de1f",
+    "feeRecipient": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+    "stateRoot": "0x308ee9c5c6fab5e3d08763a3b5fe0be8ada891fa5010a49a3390e018dd436810",
+    "receiptsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+    "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "prevRandao": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "blockNumber": "0xf",
+    "gasLimit": "0x16345785d8a0000",
+    "gasUsed": "0x0",
+    "timestamp": "0x3a97",
+    "extraData": "0x",
+    "baseFeePerGas": "0x7",
+    "blockHash": "0x38bb6ba645c7e6bd970f9c7d492fafe1e04d85349054cb48d16c9d2c3e3cd0bf",
+    "transactions": [],
+    "withdrawals": [],
+    "randomStuff": [],
+    "excessBlobGas": "0x0",
+    "blobGasUsed": "0x0"
+}
+        "#;
+
+        // ensure that deserializing this fails
+        let _payload_res = serde_json::from_str::<ExecutionPayloadV3>(input).unwrap_err();
+
+        // construct a payload with a random field at the end
+        let input = r#"
+{
+    "parentHash": "0xaaa4c5b574f37e1537c78931d1bca24a4d17d4f29f1ee97e1cd48b704909de1f",
+    "feeRecipient": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+    "stateRoot": "0x308ee9c5c6fab5e3d08763a3b5fe0be8ada891fa5010a49a3390e018dd436810",
+    "receiptsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+    "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "prevRandao": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "blockNumber": "0xf",
+    "gasLimit": "0x16345785d8a0000",
+    "gasUsed": "0x0",
+    "timestamp": "0x3a97",
+    "extraData": "0x",
+    "baseFeePerGas": "0x7",
+    "blockHash": "0x38bb6ba645c7e6bd970f9c7d492fafe1e04d85349054cb48d16c9d2c3e3cd0bf",
+    "transactions": [],
+    "withdrawals": [],
+    "randomStuff": [],
+    "excessBlobGas": "0x0",
+    "blobGasUsed": "0x0"
+    "moreRandomStuff": "0x0",
+}
+        "#;
+
+        // ensure that deserializing this fails
+        let _payload_res = serde_json::from_str::<ExecutionPayloadV3>(input).unwrap_err();
+    }
+
+    #[test]
+    fn serde_deserialize_v2_input_with_blob_fields() {
+        let input = r#"
+{
+    "parentHash": "0xaaa4c5b574f37e1537c78931d1bca24a4d17d4f29f1ee97e1cd48b704909de1f",
+    "feeRecipient": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+    "stateRoot": "0x308ee9c5c6fab5e3d08763a3b5fe0be8ada891fa5010a49a3390e018dd436810",
+    "receiptsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+    "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "prevRandao": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "blockNumber": "0xf",
+    "gasLimit": "0x16345785d8a0000",
+    "gasUsed": "0x0",
+    "timestamp": "0x3a97",
+    "extraData": "0x",
+    "baseFeePerGas": "0x7",
+    "blockHash": "0x38bb6ba645c7e6bd970f9c7d492fafe1e04d85349054cb48d16c9d2c3e3cd0bf",
+    "transactions": [],
+    "withdrawals": [],
+    "excessBlobGas": "0x0",
+    "blobGasUsed": "0x0"
+}
+        "#;
+
+        // ensure that deserializing this (it includes blob fields) fails
+        let payload_res: Result<ExecutionPayloadInputV2, serde_json::Error> =
+            serde_json::from_str(input);
+        assert!(payload_res.is_err());
     }
 }
