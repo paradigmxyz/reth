@@ -3,7 +3,7 @@ use crate::{
     Filter, NippyJar, NippyJarError, PerfectHashingFunction, Row,
 };
 use memmap2::Mmap;
-use std::{clone::Clone, fs::File, sync::Mutex};
+use std::{clone::Clone, fs::File};
 use sucds::int_vectors::Access;
 use zstd::bulk::Decompressor;
 
@@ -12,7 +12,7 @@ pub struct NippyJarCursor<'a> {
     /// [`NippyJar`] which holds most of the required configuration to read from the file.
     jar: &'a NippyJar,
     /// Optional dictionary decompressors.
-    zstd_decompressors: Option<Mutex<Vec<Decompressor<'a>>>>,
+    zstd_decompressors: Option<Vec<Decompressor<'a>>>,
     /// Data file.
     #[allow(unused)]
     file_handle: File,
@@ -34,7 +34,7 @@ impl<'a> std::fmt::Debug for NippyJarCursor<'a> {
 impl<'a> NippyJarCursor<'a> {
     pub fn new(
         config: &'a NippyJar,
-        zstd_decompressors: Option<Mutex<Vec<Decompressor<'a>>>>,
+        zstd_decompressors: Option<Vec<Decompressor<'a>>>,
     ) -> Result<Self, NippyJarError> {
         let file = File::open(config.data_path())?;
         let mmap = unsafe { Mmap::map(&file)? };
@@ -181,10 +181,10 @@ impl<'a> NippyJarCursor<'a> {
             &self.mmap_handle[value_offset..next_value_offset]
         };
 
-        if let Some(zstd_dict_decompressors) = &self.zstd_decompressors {
+        if let Some(zstd_dict_decompressors) = self.zstd_decompressors.as_mut() {
             self.tmp_buf.clear();
 
-            if let Some(decompressor) = zstd_dict_decompressors.lock().unwrap().get_mut(column) {
+            if let Some(decompressor) = zstd_dict_decompressors.get_mut(column) {
                 Zstd::decompress_with_dictionary(column_value, &mut self.tmp_buf, decompressor)?;
             }
 

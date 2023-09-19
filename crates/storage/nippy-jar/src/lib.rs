@@ -331,7 +331,7 @@ impl PerfectHashingFunction for NippyJar {
 mod tests {
     use super::*;
     use rand::{rngs::SmallRng, seq::SliceRandom, RngCore, SeedableRng};
-    use std::{collections::HashSet, sync::Mutex};
+    use std::collections::HashSet;
 
     type ColumnValues = Vec<Vec<u8>>;
 
@@ -484,13 +484,18 @@ mod tests {
 
         nippy.freeze(data.clone(), num_rows).unwrap();
 
-        let loaded_nippy = NippyJar::load(file_path.path()).unwrap();
+        let mut loaded_nippy = NippyJar::load(file_path.path()).unwrap();
         assert_eq!(nippy, loaded_nippy);
 
-        if let Some(Compressors::Zstd(zstd)) = &nippy.compressor {
+        let mut dicts = vec![];
+        if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor.as_mut() {
+            dicts = zstd.generate_decompress_dictionaries().unwrap()
+        }
+
+        if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor.as_ref() {
             let mut cursor = NippyJarCursor::new(
                 &loaded_nippy,
-                Some(Mutex::new(zstd.generate_decompressors().unwrap())),
+                Some(zstd.generate_decompressors(&dicts).unwrap()),
             )
             .unwrap();
 
@@ -526,16 +531,20 @@ mod tests {
 
         // Read file
         {
-            let loaded_nippy = NippyJar::load(file_path.path()).unwrap();
+            let mut loaded_nippy = NippyJar::load(file_path.path()).unwrap();
 
             assert!(loaded_nippy.compressor.is_some());
             assert!(loaded_nippy.filter.is_some());
             assert!(loaded_nippy.phf.is_some());
 
-            if let Some(Compressors::Zstd(zstd)) = &loaded_nippy.compressor {
+            let mut dicts = vec![];
+            if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor.as_mut() {
+                dicts = zstd.generate_decompress_dictionaries().unwrap()
+            }
+            if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor.as_ref() {
                 let mut cursor = NippyJarCursor::new(
                     &loaded_nippy,
-                    Some(Mutex::new(zstd.generate_decompressors().unwrap())),
+                    Some(zstd.generate_decompressors(&dicts).unwrap()),
                 )
                 .unwrap();
 
@@ -586,12 +595,16 @@ mod tests {
 
         // Read file
         {
-            let loaded_nippy = NippyJar::load(file_path.path()).unwrap();
+            let mut loaded_nippy = NippyJar::load(file_path.path()).unwrap();
 
-            if let Some(Compressors::Zstd(zstd)) = &loaded_nippy.compressor {
+            let mut dicts = vec![];
+            if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor.as_mut() {
+                dicts = zstd.generate_decompress_dictionaries().unwrap()
+            }
+            if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor.as_ref() {
                 let mut cursor = NippyJarCursor::new(
                     &loaded_nippy,
-                    Some(Mutex::new(zstd.generate_decompressors().unwrap())),
+                    Some(zstd.generate_decompressors(&dicts).unwrap()),
                 )
                 .unwrap();
 
