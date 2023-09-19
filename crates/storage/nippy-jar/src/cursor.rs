@@ -1,5 +1,6 @@
 use crate::{
-    compression::Compression, Filter, NippyJar, NippyJarError, PerfectHashingFunction, Row,
+    compression::{Compression, Zstd},
+    Filter, NippyJar, NippyJarError, PerfectHashingFunction, Row,
 };
 use memmap2::Mmap;
 use std::{clone::Clone, fs::File, sync::Mutex};
@@ -181,17 +182,13 @@ impl<'a> NippyJarCursor<'a> {
         };
 
         if let Some(zstd_dict_decompressors) = &self.zstd_decompressors {
-            // Uses zstd dictionaries
-            let extra_capacity = (column_value.len() * 2).saturating_sub(self.tmp_buf.capacity());
             self.tmp_buf.clear();
-            self.tmp_buf.reserve(extra_capacity);
 
-            zstd_dict_decompressors
-                .lock()
-                .unwrap()
-                .get_mut(column)
-                .unwrap()
-                .decompress_to_buffer(column_value, &mut self.tmp_buf)?;
+            if let Some(decompressor) = zstd_dict_decompressors.lock().unwrap().get_mut(column) {
+                Zstd::decompress_with_dictionary(column_value, &mut self.tmp_buf, decompressor)?;
+            }
+
+            debug_assert!(!self.tmp_buf.is_empty());
 
             row.push(self.tmp_buf.clone());
         } else if let Some(compression) = &self.jar.compressor {

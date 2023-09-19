@@ -78,7 +78,6 @@ impl Zstd {
 
     /// Compresses a value using a dictionary.
     pub fn compress_with_dictionary(
-        &self,
         value: &[u8],
         tmp_buf: &mut Vec<u8>,
         handle: &mut File,
@@ -102,6 +101,36 @@ impl Zstd {
             tmp_buf.clear();
         } else {
             handle.write_all(value)?;
+        }
+
+        Ok(())
+    }
+
+    /// Decompresses a value using a dictionary to a user provided buffer.
+    pub fn decompress_with_dictionary(
+        column_value: &[u8],
+        output: &mut Vec<u8>,
+        decompressor: &mut Decompressor<'_>,
+    ) -> Result<(), NippyJarError> {
+        let mut multiplier = 1;
+
+        // Just an estimation.
+        let required_capacity = column_value.len() * 2;
+
+        output.reserve(required_capacity.saturating_sub(output.capacity()));
+
+        // Decompressor requires the destination buffer to be big enough to write to, otherwise it
+        // fails. However, we don't know how big it will be. We keep retrying.
+        // If we eventually fail, it probably means it's another kind of error.
+        while let Err(err) = decompressor.decompress_to_buffer(column_value, output) {
+            output.reserve(
+                Decompressor::upper_bound(column_value).unwrap_or(required_capacity) * multiplier,
+            );
+
+            multiplier += 1;
+            if multiplier == 5 {
+                return Err(NippyJarError::Disconnect(err))
+            }
         }
 
         Ok(())

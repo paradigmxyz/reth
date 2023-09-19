@@ -212,10 +212,10 @@ impl NippyJar {
                     Some(value) => {
                         if let Some(compression) = &self.compressor {
                             // Special zstd case with dictionaries
-                            if let (Some(dict_compressors), Compressors::Zstd(zstd)) =
+                            if let (Some(dict_compressors), Compressors::Zstd(_)) =
                                 (maybe_zstd_compressors.as_mut(), compression)
                             {
-                                zstd.compress_with_dictionary(
+                                compression::Zstd::compress_with_dictionary(
                                     &value,
                                     &mut tmp_buf,
                                     &mut file,
