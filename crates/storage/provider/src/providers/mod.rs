@@ -1,8 +1,8 @@
 use crate::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
-    CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider,
-    PostStateDataProvider, ProviderError, PruneCheckpointReader, ReceiptProvider,
+    BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonChainTracker,
+    CanonStateNotifications, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
+    EvmEnvProvider, HeaderProvider, ProviderError, PruneCheckpointReader, ReceiptProvider,
     ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox, StateProviderFactory,
     TransactionsProvider, WithdrawalsProvider,
 };
@@ -32,13 +32,13 @@ use std::{
 };
 use tracing::trace;
 
+mod bundle_state_provider;
 mod chain_info;
 mod database;
-mod post_state_provider;
 mod state;
 use crate::{providers::chain_info::ChainInfoTracker, traits::BlockSource};
+pub use bundle_state_provider::BundleStateProvider;
 pub use database::*;
-pub use post_state_provider::PostStateProvider;
 use reth_db::models::AccountBeforeTx;
 use reth_interfaces::blockchain_tree::{
     error::InsertBlockError, CanonicalOutcome, InsertPayloadOk,
@@ -515,13 +515,13 @@ where
 
     fn pending_with_provider(
         &self,
-        post_state_data: Box<dyn PostStateDataProvider>,
+        post_state_data: Box<dyn BundleStateDataProvider>,
     ) -> Result<StateProviderBox<'_>> {
         let canonical_fork = post_state_data.canonical_fork();
         trace!(target: "providers::blockchain", ?canonical_fork, "Returning post state provider");
 
         let state_provider = self.history_by_block_hash(canonical_fork.hash)?;
-        let post_state_provider = PostStateProvider::new(state_provider, post_state_data);
+        let post_state_provider = BundleStateProvider::new(state_provider, post_state_data);
         Ok(Box::new(post_state_provider))
     }
 }
@@ -754,7 +754,7 @@ where
     fn find_pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> Option<Box<dyn PostStateDataProvider>> {
+    ) -> Option<Box<dyn BundleStateDataProvider>> {
         self.tree.find_pending_state_provider(block_hash)
     }
 }

@@ -21,12 +21,12 @@
 /// Various provider traits.
 mod traits;
 pub use traits::{
-    AccountExtReader, AccountReader, BlockExecutionWriter, BlockExecutor, BlockHashReader,
-    BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BlockWriter,
-    BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotification,
-    CanonStateNotificationSender, CanonStateNotifications, CanonStateSubscriptions,
-    ChainSpecProvider, ChangeSetReader, EvmEnvProvider, ExecutorFactory, HashingWriter,
-    HeaderProvider, HistoryWriter, PostStateDataProvider, PruneCheckpointReader,
+    AccountExtReader, AccountReader, BlockExecutionWriter, BlockExecutor, BlockExecutorStats,
+    BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
+    BlockWriter, BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonChainTracker,
+    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
+    CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider, ExecutorFactory,
+    HashingWriter, HeaderProvider, HistoryWriter, PrunableBlockExecutor, PruneCheckpointReader,
     PruneCheckpointWriter, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
     StageCheckpointWriter, StateProvider, StateProviderBox, StateProviderFactory,
     StateRootProvider, StorageReader, TransactionsProvider, WithdrawalsProvider,
@@ -39,10 +39,6 @@ pub use providers::{
     HistoricalStateProviderRef, LatestStateProvider, LatestStateProviderRef, ProviderFactory,
 };
 
-/// Execution result
-pub mod post_state;
-pub use post_state::PostState;
-
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking the Provider.
 pub mod test_utils;
@@ -52,3 +48,6 @@ pub use reth_interfaces::provider::ProviderError;
 
 pub mod chain;
 pub use chain::{Chain, DisplayBlocksChain};
+
+pub mod bundle_state;
+pub use bundle_state::{BundleStateWithReceipts, OriginalValuesKnown, StateChanges, StateReverts};

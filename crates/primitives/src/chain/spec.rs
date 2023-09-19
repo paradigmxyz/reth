@@ -164,7 +164,7 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         genesis: serde_json::from_str(include_str!("../../res/genesis/holesky.json"))
             .expect("Can't deserialize Holesky genesis json"),
         genesis_hash: Some(H256(hex!(
-            "ff9006519a8ce843ac9c28549d24211420b546e12ce2d170c77a8cca7964f23d"
+            "fd91bb7c01ae3f608b4d176078ca72bc7846791fdc02324481ca315ede4c9246"
         ))),
         paris_block_and_final_difficulty: Some((0, U256::from(1))),
         fork_timestamps: ForkTimestamps::default().shanghai(1694790240),
@@ -463,7 +463,7 @@ impl ChainSpec {
             .unwrap_or_else(|| self.is_fork_active_at_timestamp(Hardfork::Cancun, timestamp))
     }
 
-    /// Creates a [`ForkFilter`](crate::ForkFilter) for the block described by [Head].
+    /// Creates a [`ForkFilter`] for the block described by [Head].
     pub fn fork_filter(&self, head: Head) -> ForkFilter {
         let forks = self.forks_iter().filter_map(|(_, condition)| {
             // We filter out TTD-based forks w/o a pre-known block since those do not show up in the

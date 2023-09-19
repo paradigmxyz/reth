@@ -43,6 +43,9 @@ pub enum EthApiError {
     /// An internal error where prevrandao is not set in the evm's environment
     #[error("Prevrandao not in th EVM's environment after merge")]
     PrevrandaoNotSet,
+    /// Excess_blob_gas is not set for Cancun and above.
+    #[error("Excess blob gas missing th EVM's environment after Cancun")]
+    ExcessBlobGasNotSet,
     /// Thrown when a call or transaction request (`eth_call`, `eth_estimateGas`,
     /// `eth_sendTransaction`) contains conflicting fields (legacy, EIP-1559)
     #[error("both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")]
@@ -110,6 +113,7 @@ impl From<EthApiError> for ErrorObject<'static> {
             EthApiError::InvalidTransaction(err) => err.into(),
             EthApiError::PoolError(err) => err.into(),
             EthApiError::PrevrandaoNotSet |
+            EthApiError::ExcessBlobGasNotSet |
             EthApiError::InvalidBlockData(_) |
             EthApiError::Internal(_) |
             EthApiError::TransactionNotFound => internal_rpc_err(error.to_string()),
@@ -184,6 +188,7 @@ where
         match err {
             EVMError::Transaction(err) => RpcInvalidTransactionError::from(err).into(),
             EVMError::PrevrandaoNotSet => EthApiError::PrevrandaoNotSet,
+            EVMError::ExcessBlobGasNotSet => EthApiError::ExcessBlobGasNotSet,
             EVMError::Database(err) => err.into(),
         }
     }
@@ -278,6 +283,19 @@ pub enum RpcInvalidTransactionError {
     /// The transaction is before Spurious Dragon and has a chain ID
     #[error("Transactions before Spurious Dragon should not have a chain ID.")]
     OldLegacyChainId,
+    /// The transitions is before Berlin and has access list
+    #[error("Transactions before Berlin should not have access list")]
+    AccessListNotSupported,
+    /// `max_fee_per_blob_gas` is not supported for blocks before the Cancun hardfork.
+    #[error("max_fee_per_blob_gas is not supported for blocks before the Cancun hardfork.")]
+    MaxFeePerBlobGasNotSupported,
+    /// `blob_hashes`/`blob_versioned_hashes` is not supported for blocks before the Cancun
+    /// hardfork.
+    #[error("blob_versioned_hashes is not supported for blocks before the Cancun hardfork.")]
+    BlobVersionedHashesNotSupported,
+    /// Block `blob_gas_price` is greater than tx-specified `max_fee_per_blob_gas` after Cancun.
+    #[error("max fee per blob gas less than block blob gas fee")]
+    BlobFeeCapTooLow,
 }
 
 impl RpcInvalidTransactionError {
@@ -350,7 +368,7 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
                 RpcInvalidTransactionError::GasTooHigh
             }
             InvalidTransaction::RejectCallerWithCode => RpcInvalidTransactionError::SenderNoEOA,
-            InvalidTransaction::LackOfFundForGasLimit { .. } => {
+            InvalidTransaction::LackOfFundForMaxFee { .. } => {
                 RpcInvalidTransactionError::InsufficientFunds
             }
             InvalidTransaction::OverflowPaymentInTransaction => {
@@ -364,6 +382,18 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             }
             InvalidTransaction::NonceTooHigh { .. } => RpcInvalidTransactionError::NonceTooHigh,
             InvalidTransaction::NonceTooLow { .. } => RpcInvalidTransactionError::NonceTooLow,
+            InvalidTransaction::AccessListNotSupported => {
+                RpcInvalidTransactionError::AccessListNotSupported
+            }
+            InvalidTransaction::MaxFeePerBlobGasNotSupported => {
+                RpcInvalidTransactionError::MaxFeePerBlobGasNotSupported
+            }
+            InvalidTransaction::BlobVersionedHashesNotSupported => {
+                RpcInvalidTransactionError::BlobVersionedHashesNotSupported
+            }
+            InvalidTransaction::BlobGasPriceGreaterThanMax => {
+                RpcInvalidTransactionError::BlobFeeCapTooLow
+            }
         }
     }
 }

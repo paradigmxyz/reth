@@ -434,7 +434,9 @@ where
                             for block_receipts in receipts {
                                 this.on_new_receipts(
                                     block_receipts.block_hash,
-                                    Ok(Some(block_receipts.receipts)),
+                                    Ok(Some(
+                                        block_receipts.receipts.into_iter().flatten().collect(),
+                                    )),
                                 );
                             }
                         }
@@ -460,7 +462,7 @@ enum CacheAction {
 
 struct BlockReceipts {
     block_hash: H256,
-    receipts: Vec<Receipt>,
+    receipts: Vec<Option<Receipt>>,
 }
 
 /// Awaits for new chain events and directly inserts them into the cache so they're available
@@ -481,7 +483,7 @@ where
             for block in &blocks {
                 let block_receipts = BlockReceipts {
                     block_hash: block.hash,
-                    receipts: state.receipts(block.number).to_vec(),
+                    receipts: state.receipts_by_block(block.number).to_vec(),
                 };
                 receipts.push(block_receipts);
             }

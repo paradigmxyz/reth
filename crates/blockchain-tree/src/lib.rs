@@ -22,9 +22,6 @@
 //!
 //! - `test-utils`: Export utilities for testing
 
-/// Execution result types.
-pub use reth_provider::post_state;
-
 pub mod blockchain_tree;
 pub use blockchain_tree::{BlockHashes, BlockchainTree};
 
@@ -44,7 +41,7 @@ pub mod shareable;
 pub use shareable::ShareableBlockchainTree;
 
 pub mod post_state_data;
-pub use post_state_data::{PostStateData, PostStateDataRef};
+pub use post_state_data::{BundleStateData, BundleStateDataRef};
 
 /// Buffer of not executed blocks.
 pub mod block_buffer;
