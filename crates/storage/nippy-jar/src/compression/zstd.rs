@@ -6,6 +6,8 @@ use std::{
 };
 use zstd::bulk::{Compressor, Decompressor};
 
+type RawDictionary = Vec<u8>;
+
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum ZstdState {
     #[default]
@@ -23,7 +25,7 @@ pub struct Zstd {
     /// Max size of a dictionary
     pub(crate) max_dict_size: usize,
     /// List of column dictionaries.
-    pub(crate) raw_dictionaries: Option<Vec<Vec<u8>>>,
+    pub(crate) raw_dictionaries: Option<Vec<RawDictionary>>,
     /// Number of columns to compress.
     columns: usize,
 }

@@ -30,6 +30,9 @@ pub use cursor::NippyJarCursor;
 
 const NIPPY_JAR_VERSION: usize = 1;
 
+/// A [`Row`] is a list of its selected column values.
+type Row = Vec<Vec<u8>>;
+
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct NippyJar {
     /// Version
@@ -330,7 +333,9 @@ mod tests {
     use rand::{rngs::SmallRng, seq::SliceRandom, RngCore, SeedableRng};
     use std::{collections::HashSet, sync::Mutex};
 
-    fn test_data(seed: Option<u64>) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    type ColumnValues = Vec<Vec<u8>>;
+
+    fn test_data(seed: Option<u64>) -> (ColumnValues, ColumnValues) {
         let value_length = 32;
         let num_rows = 100;
 

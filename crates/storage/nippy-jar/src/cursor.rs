@@ -1,4 +1,6 @@
-use crate::{compression::Compression, Filter, NippyJar, NippyJarError, PerfectHashingFunction};
+use crate::{
+    compression::Compression, Filter, NippyJar, NippyJarError, PerfectHashingFunction, Row,
+};
 use memmap2::Mmap;
 use std::{clone::Clone, fs::File, sync::Mutex};
 use sucds::int_vectors::Access;
@@ -56,7 +58,7 @@ impl<'a> NippyJarCursor<'a> {
     ///
     /// Example usage would be querying a transactions file with a transaction hash which is **NOT**
     /// stored in file.
-    pub fn row_by_filter(&mut self, value: &[u8]) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
+    pub fn row_by_filter(&mut self, value: &[u8]) -> Result<Option<Row>, NippyJarError> {
         if let (Some(filter), Some(phf)) = (&self.jar.filter, &self.jar.phf) {
             // TODO: is it worth to parallize both?
 
@@ -76,13 +78,13 @@ impl<'a> NippyJarCursor<'a> {
     }
 
     /// Returns a row by its number.
-    pub fn row_by_number(&mut self, row: usize) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
+    pub fn row_by_number(&mut self, row: usize) -> Result<Option<Row>, NippyJarError> {
         self.row = row as u64;
         self.next_row()
     }
 
     /// Advances cursor to next row and returns it.
-    pub fn next_row(&mut self) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
+    pub fn next_row(&mut self) -> Result<Option<Row>, NippyJarError> {
         if self.row as usize * self.jar.columns >= self.jar.offsets.len() {
             // Has reached the end
             return Ok(None)
@@ -110,7 +112,7 @@ impl<'a> NippyJarCursor<'a> {
     pub fn row_by_filter_with_cols<const MASK: usize, const COLUMNS: usize>(
         &mut self,
         value: &[u8],
-    ) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
+    ) -> Result<Option<Row>, NippyJarError> {
         if let (Some(filter), Some(phf)) = (&self.jar.filter, &self.jar.phf) {
             // TODO: is it worth to parallize both?
 
@@ -133,7 +135,7 @@ impl<'a> NippyJarCursor<'a> {
     pub fn row_by_number_with_cols<const MASK: usize, const COLUMNS: usize>(
         &mut self,
         row: usize,
-    ) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
+    ) -> Result<Option<Row>, NippyJarError> {
         self.row = row as u64;
         self.next_row_with_cols::<MASK, COLUMNS>()
     }
@@ -141,7 +143,7 @@ impl<'a> NippyJarCursor<'a> {
     /// Uses a `MASK` to only read certain columns from the row.
     pub fn next_row_with_cols<const MASK: usize, const COLUMNS: usize>(
         &mut self,
-    ) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
+    ) -> Result<Option<Row>, NippyJarError> {
         debug_assert!(COLUMNS == self.jar.columns);
 
         if self.row as usize * self.jar.columns >= self.jar.offsets.len() {
@@ -163,7 +165,7 @@ impl<'a> NippyJarCursor<'a> {
     }
 
     /// Takes the column index and reads the value for the corresponding column.
-    fn read_value(&mut self, column: usize, row: &mut Vec<Vec<u8>>) -> Result<(), NippyJarError> {
+    fn read_value(&mut self, column: usize, row: &mut Row) -> Result<(), NippyJarError> {
         // Find out the offset of the column value
         let offset_pos = self.row as usize * self.jar.columns + column;
         let value_offset = self.jar.offsets.select(offset_pos).expect("should exist");
