@@ -1111,6 +1111,6 @@ mod tests {
         // ensure that deserializing this (it includes blob fields) fails
         let payload_res: Result<ExecutionPayloadInputV2, serde_json::Error> =
             serde_json::from_str(input);
-        assert_eq!(payload_res.is_err(), true);
+        assert!(payload_res.is_err());
     }
 }
