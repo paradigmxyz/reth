@@ -74,7 +74,7 @@ impl<'a> NippyJarCursor<'a> {
             }
         }
 
-        Ok(None)
+        Err(NippyJarError::UnsupportedFilterQuery)
     }
 
     /// Returns a row by its number.
@@ -128,7 +128,7 @@ impl<'a> NippyJarCursor<'a> {
             }
         }
 
-        Ok(None)
+        Err(NippyJarError::UnsupportedFilterQuery)
     }
 
     /// Returns a row by its number by using a `MASK` to only read certain columns from the row.
@@ -141,7 +141,7 @@ impl<'a> NippyJarCursor<'a> {
     }
 
     /// Returns the current value and advances the row.
-    /// 
+    ///
     /// Uses a `MASK` to only read certain columns from the row.
     pub fn next_row_with_cols<const MASK: usize, const COLUMNS: usize>(
         &mut self,

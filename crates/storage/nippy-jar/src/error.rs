@@ -29,4 +29,6 @@ pub enum NippyJarError {
     PHFMissingKeys,
     #[error("NippyJar initialized without perfect hashing function.")]
     PHFMissing,
+    #[error("NippyJar was built without an index.")]
+    UnsupportedFilterQuery,
 }
