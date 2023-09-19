@@ -153,7 +153,7 @@ RPC:
           [default: 100]
 
       --rpc-max-subscriptions-per-connection <RPC_MAX_SUBSCRIPTIONS_PER_CONNECTION>
-          Set the the maximum concurrent subscriptions per connection
+          Set the maximum concurrent subscriptions per connection
           
           [default: 1024]
 
