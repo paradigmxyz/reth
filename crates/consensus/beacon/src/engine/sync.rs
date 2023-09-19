@@ -100,10 +100,11 @@ where
         self.max_block = Some(block);
     }
 
-    /// Cancels all download requests that are in progress.
+    /// Cancels all download requests that are in progress and buffered blocks.
     pub(crate) fn clear_block_download_requests(&mut self) {
         self.inflight_full_block_requests.clear();
         self.inflight_block_range_requests.clear();
+        self.range_buffered_blocks.clear();
         self.update_block_download_metrics();
     }
 
