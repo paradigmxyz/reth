@@ -21,7 +21,7 @@ use tokio::time::Interval;
 use tracing::{info, warn};
 
 /// Interval of reporting node state.
-const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(30);
+const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
 
 /// The current high-level state of the node.
 struct NodeState {
@@ -199,7 +199,8 @@ pub async fn handle_events<E>(
 {
     let state = NodeState::new(network, latest_block_number);
 
-    let mut info_interval = tokio::time::interval(INFO_MESSAGE_INTERVAL);
+    let start = tokio::time::Instant::now() + Duration::from_secs(3);
+    let mut info_interval = tokio::time::interval_at(start, INFO_MESSAGE_INTERVAL);
     info_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     let handler = EventHandler { state, events, info_interval };
