@@ -15,7 +15,7 @@ use reth_interfaces::{
         BlockStatus, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
     },
     consensus::ForkchoiceState,
-    executor::{BlockExecutionError, BlockValidationError},
+    executor::BlockValidationError,
     p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
     sync::{NetworkSyncUpdater, SyncState},
     Error,
@@ -907,10 +907,8 @@ where
 
         #[allow(clippy::single_match)]
         match &error {
-            Error::Execution(
-                error @ BlockExecutionError::Validation(BlockValidationError::BlockPreMerge {
-                    ..
-                }),
+            Error::Canonical(
+                error @ CanonicalError::Validation(BlockValidationError::BlockPreMerge { .. }),
             ) => {
                 return PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                     validation_error: error.to_string(),

@@ -40,14 +40,16 @@ pub type CanonicalResult<T> = std::result::Result<T, CanonicalError>;
 #[allow(missing_docs)]
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 pub enum CanonicalError {
+    /// Error originating from validation operations.
     #[error(transparent)]
     Validation(#[from] BlockValidationError),
+    /// Error originating from blockchain tree operations.
     #[error(transparent)]
     BlockchainTree(#[from] BlockchainTreeError),
-
-    // === transaction errors ===
+    /// Error indicating a transaction reverted during execution.
     #[error("Transaction error on revert: {inner:?}")]
     CanonicalRevert { inner: String },
+    /// Error indicating a transaction failed to commit during execution.
     #[error("Transaction error on commit: {inner:?}")]
     CanonicalCommit { inner: String },
 }
