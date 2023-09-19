@@ -48,7 +48,7 @@ impl PartialEq for Fmph {
                     {
                         #[cfg(not(test))]
                         {
-                            unimplemented!("No way to figure it out without exporting ( potentially expensive), so only allow direct comparison on a test")
+                            unimplemented!("No way to figure it out without exporting (potentially expensive), so only allow direct comparison on a test")
                         }
                         #[cfg(test)]
                         {
