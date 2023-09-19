@@ -74,7 +74,7 @@ impl<DB: Database + 'static> PruneHook<DB> {
         };
 
         let action = if matches!(event, EngineHookEvent::Finished(Ok(_))) {
-            Some(EngineHookAction::RestoreCanonicalHashes)
+            Some(EngineHookAction::ConnectBufferedBlocks)
         } else {
             None
         };

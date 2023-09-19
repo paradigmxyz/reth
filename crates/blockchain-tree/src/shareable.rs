@@ -66,21 +66,22 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
         tree.update_chains_metrics();
     }
 
-    fn restore_canonical_hashes_and_finalize(
+    fn connect_buffered_blocks_to_canonical_hashes_and_finalize(
         &self,
         last_finalized_block: BlockNumber,
     ) -> Result<(), Error> {
-        trace!(target: "blockchain_tree", ?last_finalized_block, "Restoring canonical hashes for last finalized block");
+        trace!(target: "blockchain_tree", ?last_finalized_block, "Connecting buffered blocks to canonical hashes and finalizing the tree");
         let mut tree = self.tree.write();
-        let res = tree.restore_canonical_hashes_and_finalize(last_finalized_block);
+        let res =
+            tree.connect_buffered_blocks_to_canonical_hashes_and_finalize(last_finalized_block);
         tree.update_chains_metrics();
         res
     }
 
-    fn restore_canonical_hashes(&self) -> Result<(), Error> {
-        trace!(target: "blockchain_tree", "Restoring canonical hashes");
+    fn connect_buffered_blocks_to_canonical_hashes(&self) -> Result<(), Error> {
+        trace!(target: "blockchain_tree", "Connecting buffered blocks to canonical hashes");
         let mut tree = self.tree.write();
-        let res = tree.restore_canonical_hashes();
+        let res = tree.connect_buffered_blocks_to_canonical_hashes();
         tree.update_chains_metrics();
         res
     }
