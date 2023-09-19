@@ -46,7 +46,7 @@ impl BlockchainTreeConfig {
         max_unconnected_blocks: usize,
     ) -> Self {
         if max_reorg_depth > max_blocks_in_chain {
-            panic!("Side chain size should be more then finalization window");
+            panic!("Side chain size should be more than finalization window");
         }
         Self {
             max_blocks_in_chain,

@@ -19,7 +19,9 @@ pub fn revm_spec_by_timestamp_after_merge(
 
 /// return revm_spec from spec configuration.
 pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm::primitives::SpecId {
-    if chain_spec.fork(Hardfork::Shanghai).active_at_head(&block) {
+    if chain_spec.fork(Hardfork::Cancun).active_at_head(&block) {
+        revm::primitives::CANCUN
+    } else if chain_spec.fork(Hardfork::Shanghai).active_at_head(&block) {
         revm::primitives::SHANGHAI
     } else if chain_spec.fork(Hardfork::Paris).active_at_head(&block) {
         revm::primitives::MERGE

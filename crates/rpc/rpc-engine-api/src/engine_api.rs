@@ -11,9 +11,12 @@ use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFa
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadEnvelopeV2,
-    ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    ExecutionPayloadEnvelopeV3, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
     ForkchoiceUpdated, PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration,
     CAPABILITIES,
+};
+use reth_rpc_types_compat::engine::payload::{
+    convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
 };
 use reth_tasks::TaskSpawner;
 use std::sync::Arc;
@@ -79,12 +82,12 @@ where
         Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
     }
 
-    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_newpayloadv2>
+    /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
     pub async fn new_payload_v2(
         &self,
-        payload: ExecutionPayloadV2,
+        payload: ExecutionPayloadInputV2,
     ) -> EngineApiResult<PayloadStatus> {
-        let payload = ExecutionPayload::from(payload);
+        let payload = convert_payload_input_v2_to_payload(payload);
         let payload_or_attrs = PayloadOrAttributes::from_execution_payload(&payload, None);
         self.validate_version_specific_fields(EngineApiMessageVersion::V2, &payload_or_attrs)?;
         Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
@@ -280,7 +283,7 @@ where
                 let block_result = inner.provider.block(BlockHashOrNumber::Number(num));
                 match block_result {
                     Ok(block) => {
-                        result.push(block.map(Into::into));
+                        result.push(block.map(convert_to_payload_body_v1));
                     }
                     Err(err) => {
                         tx.send(Err(EngineApiError::Internal(Box::new(err)))).ok();
@@ -311,7 +314,7 @@ where
                 .provider
                 .block(BlockHashOrNumber::Hash(hash))
                 .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
-            result.push(block.map(Into::into));
+            result.push(block.map(convert_to_payload_body_v1));
         }
 
         Ok(result)
@@ -592,8 +595,8 @@ where
     }
 
     /// Handler for `engine_newPayloadV2`
-    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_newpayloadv2>
-    async fn new_payload_v2(&self, payload: ExecutionPayloadV2) -> RpcResult<PayloadStatus> {
+    /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
+    async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV2");
         Ok(EngineApi::new_payload_v2(self, payload).await?)
     }
@@ -836,8 +839,11 @@ mod tests {
                 random_block_range(&mut rng, start..=start + count - 1, H256::default(), 0..2);
             handle.provider.extend_blocks(blocks.iter().cloned().map(|b| (b.hash(), b.unseal())));
 
-            let expected =
-                blocks.iter().cloned().map(|b| Some(b.unseal().into())).collect::<Vec<_>>();
+            let expected = blocks
+                .iter()
+                .cloned()
+                .map(|b| Some(convert_to_payload_body_v1(b.unseal())))
+                .collect::<Vec<_>>();
 
             let res = api.get_payload_bodies_by_range(start, count).await.unwrap();
             assert_eq!(res, expected);
@@ -875,7 +881,7 @@ mod tests {
                     if first_missing_range.contains(&b.number) {
                         None
                     } else {
-                        Some(b.unseal().into())
+                        Some(convert_to_payload_body_v1(b.unseal()))
                     }
                 })
                 .collect::<Vec<_>>();
@@ -894,7 +900,7 @@ mod tests {
                     {
                         None
                     } else {
-                        Some(b.unseal().into())
+                        Some(convert_to_payload_body_v1(b.unseal()))
                     }
                 })
                 .collect::<Vec<_>>();

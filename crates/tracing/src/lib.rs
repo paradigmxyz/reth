@@ -19,6 +19,7 @@
 //! - [`journald()`]
 //!
 //! As well as a simple way to initialize a subscriber: [`init`].
+use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use std::path::Path;
 use tracing::Subscriber;
 use tracing_subscriber::{
@@ -74,13 +75,28 @@ pub fn file<S>(
     filter: EnvFilter,
     dir: impl AsRef<Path>,
     file_name: impl AsRef<Path>,
+    max_size_bytes: u64,
+    max_files: usize,
 ) -> (BoxedLayer<S>, tracing_appender::non_blocking::WorkerGuard)
 where
     S: Subscriber,
     for<'a> S: LookupSpan<'a>,
 {
-    let (writer, guard) =
-        tracing_appender::non_blocking(tracing_appender::rolling::never(dir, file_name));
+    // Create log dir if it doesn't exist (RFA doesn't do this for us)
+    let log_dir = dir.as_ref();
+    if !log_dir.exists() {
+        std::fs::create_dir_all(log_dir).expect("Could not create log directory");
+    }
+
+    // Create layer
+    let (writer, guard) = tracing_appender::non_blocking(
+        RollingFileAppender::new(
+            log_dir.join(file_name.as_ref()),
+            RollingConditionBasic::new().max_size(max_size_bytes),
+            max_files,
+        )
+        .expect("Could not initialize file logging"),
+    );
     let layer = tracing_subscriber::fmt::layer()
         .with_ansi(false)
         .with_writer(writer)
