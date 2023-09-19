@@ -1,11 +1,10 @@
 use crate::{
-    database::{State, SubState},
+    database::StateProviderDatabase,
+    processor::EVMProcessor,
     stack::{InspectorStack, InspectorStackConfig},
 };
 use reth_primitives::ChainSpec;
-use reth_provider::{ExecutorFactory, StateProvider};
-
-use crate::executor::Executor;
+use reth_provider::{ExecutorFactory, PrunableBlockExecutor, StateProvider};
 use std::sync::Arc;
 
 /// Factory that spawn Executor.
@@ -35,17 +34,16 @@ impl Factory {
 }
 
 impl ExecutorFactory for Factory {
-    type Executor<SP: StateProvider> = Executor<SP>;
-
-    /// Executor with [`StateProvider`]
-    fn with_sp<SP: StateProvider>(&self, sp: SP) -> Self::Executor<SP> {
-        let substate = SubState::new(State::new(sp));
-
-        let mut executor = Executor::new(self.chain_spec.clone(), substate);
+    fn with_state<'a, SP: StateProvider + 'a>(
+        &'a self,
+        sp: SP,
+    ) -> Box<dyn PrunableBlockExecutor + 'a> {
+        let database_state = StateProviderDatabase::new(sp);
+        let mut evm = Box::new(EVMProcessor::new_with_db(self.chain_spec.clone(), database_state));
         if let Some(ref stack) = self.stack {
-            executor = executor.with_stack(stack.clone());
+            evm.set_stack(stack.clone());
         }
-        executor
+        evm
     }
 
     /// Return internal chainspec

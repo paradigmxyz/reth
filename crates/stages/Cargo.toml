@@ -23,6 +23,9 @@ reth-codecs = { path = "../storage/codecs" }
 reth-provider.workspace = true
 reth-trie = { path = "../trie" }
 
+# revm
+revm.workspace = true
+
 # async
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true

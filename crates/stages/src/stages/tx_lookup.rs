@@ -120,7 +120,6 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
                 }
             });
         }
-
         let mut tx_list = Vec::with_capacity(transaction_count);
 
         // Iterate over channels and append the tx hashes to be sorted out later
@@ -147,7 +146,6 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             .unwrap_or_default();
         // if txhash_cursor.last() is None we will do insert. `zip` would return none if any item is
         // none. if it is some and if first is smaller than last, we will do append.
-
         for (tx_hash, id) in tx_list {
             if insert {
                 txhash_cursor.insert(tx_hash, id)?;

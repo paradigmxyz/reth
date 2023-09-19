@@ -210,11 +210,18 @@ pub struct ExecutionConfig {
     pub max_blocks: Option<u64>,
     /// The maximum amount of state changes to keep in memory before the execution stage commits.
     pub max_changes: Option<u64>,
+    /// The maximum gas to process before the execution stage commits.
+    pub max_cumulative_gas: Option<u64>,
 }
 
 impl Default for ExecutionConfig {
     fn default() -> Self {
-        Self { max_blocks: Some(500_000), max_changes: Some(5_000_000) }
+        Self {
+            max_blocks: Some(500_000),
+            max_changes: Some(5_000_000),
+            // 50k full blocks of 30M gas
+            max_cumulative_gas: Some(30_000_000 * 50_000),
+        }
     }
 }
 

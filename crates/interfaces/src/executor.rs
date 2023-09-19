@@ -1,4 +1,4 @@
-use reth_primitives::{BlockHash, BlockNumHash, Bloom, H256};
+use reth_primitives::{BlockHash, BlockNumHash, Bloom, PrunePartError, H256};
 use thiserror::Error;
 
 /// Transaction validation errors
@@ -9,6 +9,8 @@ pub enum BlockValidationError {
     EVM { hash: H256, message: String },
     #[error("Failed to recover sender for transaction")]
     SenderRecoveryError,
+    #[error("Incrementing balance in post execution failed")]
+    IncrementBalanceFailed,
     #[error("Receipt root {got:?} is different than expected {expected:?}.")]
     ReceiptRootDiff { got: H256, expected: H256 },
     #[error("Header bloom filter {got:?} is different than expected {expected:?}.")]
@@ -18,12 +20,16 @@ pub enum BlockValidationError {
         transaction_gas_limit: u64,
         block_available_gas: u64,
     },
-    #[error("Block gas used {got} is different from expected gas used {expected}.")]
-    BlockGasUsed { got: u64, expected: u64 },
+    #[error("Block gas used {got} is different from expected gas used {expected}.\nGas spent by each transaction: {gas_spent_by_tx:?}\n")]
+    BlockGasUsed { got: u64, expected: u64, gas_spent_by_tx: Vec<(u64, u64)> },
     #[error("Block {hash:?} is pre merge")]
     BlockPreMerge { hash: H256 },
     #[error("Missing total difficulty")]
     MissingTotalDifficulty { hash: H256 },
+    #[error("EIP-4788 Parent beacon block root missing for active Cancun block")]
+    MissingParentBeaconBlockRoot,
+    #[error("The parent beacon block root is not zero for Cancun genesis block")]
+    CancunGenesisParentBeaconBlockRootNotZero,
 }
 
 /// BlockExecutor Errors
@@ -32,6 +38,8 @@ pub enum BlockValidationError {
 pub enum BlockExecutionError {
     #[error(transparent)]
     Validation(#[from] BlockValidationError),
+    #[error(transparent)]
+    Pruning(#[from] PrunePartError),
 
     // === misc provider error ===
     #[error("Provider error")]

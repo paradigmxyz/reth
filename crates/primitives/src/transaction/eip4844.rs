@@ -108,7 +108,7 @@ impl TxEip4844 {
     /// Verifies that the given blob data, commitments, and proofs are all valid for this
     /// transaction.
     ///
-    /// Takes as input the [KzgSettings], which should contain the the parameters derived from the
+    /// Takes as input the [KzgSettings], which should contain the parameters derived from the
     /// KZG trusted setup.
     ///
     /// This ensures that the blob transaction payload has the same number of blob data elements,

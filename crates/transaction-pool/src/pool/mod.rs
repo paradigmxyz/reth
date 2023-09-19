@@ -110,6 +110,7 @@ pub use listener::{AllTransactionsEvents, TransactionEvents};
 use reth_rlp::Encodable;
 
 mod best;
+mod blob;
 mod parked;
 pub(crate) mod pending;
 pub(crate) mod size;
@@ -872,7 +873,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
         }
     }
 
-    /// Returns the the replaced transaction if there was one
+    /// Returns the replaced transaction if there was one
     pub(crate) fn replaced(&self) -> Option<&Arc<ValidPoolTransaction<T>>> {
         match self {
             AddedTransaction::Pending(tx) => tx.replaced.as_ref(),

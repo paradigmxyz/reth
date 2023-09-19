@@ -1,6 +1,6 @@
-use reth_primitives::{Withdrawal, H256};
-use reth_rpc_types::engine::{ExecutionPayload, PayloadAttributes};
+use reth_primitives::H256;
 
+use reth_rpc_types::engine::{ExecutionPayload, PayloadAttributes};
 /// Either an [ExecutionPayload] or a [PayloadAttributes].
 pub(crate) enum PayloadOrAttributes<'a> {
     /// An [ExecutionPayload] and optional parent beacon block root.
@@ -25,7 +25,7 @@ impl<'a> PayloadOrAttributes<'a> {
     }
 
     /// Return the withdrawals for the payload or attributes.
-    pub(crate) fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
+    pub(crate) fn withdrawals(&self) -> Option<&Vec<reth_rpc_types::engine::payload::Withdrawal>> {
         match self {
             Self::ExecutionPayload { payload, .. } => payload.withdrawals(),
             Self::PayloadAttributes(attributes) => attributes.withdrawals.as_ref(),

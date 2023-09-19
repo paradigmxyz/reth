@@ -8,7 +8,7 @@ use std::{
 };
 use thiserror::Error;
 
-/// Errors returned by loading a [`SecretKey`][secp256k1::SecretKey], including IO errors.
+/// Errors returned by loading a [`SecretKey`], including IO errors.
 #[derive(Error, Debug)]
 #[allow(missing_docs)]
 pub enum SecretKeyError {

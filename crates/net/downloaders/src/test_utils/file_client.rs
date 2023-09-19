@@ -56,7 +56,7 @@ pub struct FileClient {
     bodies: HashMap<BlockHash, BlockBody>,
 }
 
-/// An error that can occur when constructing and using a [`FileClient`](FileClient).
+/// An error that can occur when constructing and using a [`FileClient`].
 #[derive(Debug, Error)]
 pub enum FileClientError {
     /// An error occurred when opening or reading the file.
@@ -75,7 +75,7 @@ impl FileClient {
         FileClient::from_file(file).await
     }
 
-    /// Initialize the [`FileClient`](FileClient) with a file directly.
+    /// Initialize the [`FileClient`] with a file directly.
     pub(crate) async fn from_file(mut file: File) -> Result<Self, FileClientError> {
         // get file len from metadata before reading
         let metadata = file.metadata().await?;

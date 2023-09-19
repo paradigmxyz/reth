@@ -27,16 +27,19 @@ tracing.workspace = true
 auto_impl = "1.0"
 itertools.workspace = true
 pin-project.workspace = true
-derive_more = "0.99"
 parking_lot.workspace = true
 
 # test-utils
 reth-rlp = { workspace = true, optional = true }
 
+# parallel utils
+rayon = "1.7"
+
 [dev-dependencies]
 reth-db = { path = "../db", features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
 reth-rlp.workspace = true
+revm.workspace = true
 reth-trie = { path = "../../trie", features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 parking_lot.workspace = true

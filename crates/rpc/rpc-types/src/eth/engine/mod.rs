@@ -4,9 +4,8 @@
 
 mod cancun;
 mod forkchoice;
-mod payload;
+pub mod payload;
 mod transition;
-
 pub use self::{cancun::*, forkchoice::*, payload::*, transition::*};
 
 /// The list of all supported Engine capabilities available over the engine endpoint.

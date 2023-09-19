@@ -1,4 +1,4 @@
-use reth_primitives::{AccessList, Address, BlockId, Bytes, U256, U64, U8};
+use reth_primitives::{AccessList, Address, BlockId, Bytes, H256, U256, U64, U8};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::BlockOverrides;
@@ -88,7 +88,7 @@ impl<'de> Deserialize<'de> for TransactionIndex {
     }
 }
 
-/// Call request
+/// Call request for `eth_call` and adjacent methods.
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct CallRequest {
@@ -115,6 +115,11 @@ pub struct CallRequest {
     pub chain_id: Option<U64>,
     /// AccessList
     pub access_list: Option<AccessList>,
+    /// Max Fee per Blob gas for EIP-4844 transactions
+    pub max_fee_per_blob_gas: Option<U256>,
+    /// Blob Versioned Hashes for EIP-4844 transactions
+    #[serde(default)]
+    pub blob_versioned_hashes: Vec<H256>,
     /// EIP-2718 type
     #[serde(rename = "type")]
     pub transaction_type: Option<U8>,
