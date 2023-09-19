@@ -9,7 +9,7 @@ mod go_fmph;
 pub use go_fmph::GoFmph;
 
 /// Trait to build and query a perfect hashing function.
-pub trait KeySet {
+pub trait KeySet: Serialize + for<'a> Deserialize<'a> {
     /// Adds the key set and builds the perfect hashing function.
     fn set_keys<T: AsRef<[u8]> + Sync + Clone + Hash>(
         &mut self,
