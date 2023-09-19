@@ -15,4 +15,3 @@ reth-primitives.workspace = true
 reth-rpc-types.workspace = true
 reth-rlp.workspace = true
 
-

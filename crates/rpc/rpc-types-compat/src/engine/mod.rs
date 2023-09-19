@@ -1,4 +1,4 @@
-//! Standalone functions for engine specific
+//! Standalone functions for engine specific rpc type conversions
 pub mod payload;
 pub use payload::{
     convert_standalonewithdraw_to_withdrawal, convert_withdrawal_to_standalonewithdraw,
