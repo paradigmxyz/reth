@@ -477,21 +477,14 @@ impl TypedValueParser for RpcModuleSelectionValueParser {
     ) -> Result<Self::Value, clap::Error> {
         let val =
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
-        val.split(',')
-            .map(str::trim)
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>()
-            .join(", ")
-            .parse::<RpcModuleSelection>()
-            .map_err(|err| {
-                let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
-                let possible_values = RethRpcModule::all_variants().to_vec().join(",");
-                let msg = format!(
+        val.parse::<RpcModuleSelection>().map_err(|err| {
+            let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
+            let possible_values = RethRpcModule::all_variants().to_vec().join(",");
+            let msg = format!(
                 "Invalid value '{val}' for {arg}: {err}.\n    [possible values: {possible_values}]"
             );
-                clap::Error::raw(clap::error::ErrorKind::InvalidValue, msg)
-            })
+            clap::Error::raw(clap::error::ErrorKind::InvalidValue, msg)
+        })
     }
 
     fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
@@ -565,6 +558,25 @@ mod tests {
             "reth",
             "--http.api",
             " eth, admin, debug",
+            "--http",
+            "--ws",
+        ])
+        .args;
+        let config = args.transport_rpc_module_config();
+        let expected = vec![RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
+        assert_eq!(config.http().cloned().unwrap().into_selection(), expected);
+        assert_eq!(
+            config.ws().cloned().unwrap().into_selection(),
+            RpcModuleSelection::standard_modules()
+        );
+    }
+
+    #[test]
+    fn test_unique_rpc_modules() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http.api",
+            " eth, admin, debug, eth,admin",
             "--http",
             "--ws",
         ])
