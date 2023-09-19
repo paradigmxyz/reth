@@ -37,6 +37,7 @@ impl KeySet for Functions {
             Functions::GoFmph(f) => f.set_keys(keys),
         }
     }
+
     fn get_index(&self, key: &[u8]) -> Result<Option<u64>, NippyJarError> {
         match self {
             Functions::Fmph(f) => f.get_index(key),
