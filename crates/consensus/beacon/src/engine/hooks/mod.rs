@@ -88,9 +88,8 @@ impl EngineHookEvent {
 pub enum EngineHookAction {
     /// Notify about a [SyncState] update.
     UpdateSyncState(SyncState),
-    /// Read the last relevant canonical hashes from the database and update the block indices of
-    /// the blockchain tree.
-    RestoreCanonicalHashes,
+    /// Connect blocks buffered during the hook execution to canonical hashes.
+    ConnectBufferedBlocks,
 }
 
 /// An error returned by [hook][`EngineHook`].

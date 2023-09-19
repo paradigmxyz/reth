@@ -1686,7 +1686,9 @@ where
             EngineHookAction::UpdateSyncState(state) => {
                 self.sync_state_updater.update_sync_state(state)
             }
-            EngineHookAction::RestoreCanonicalHashes => {
+            // TODO(alexey): always connect buffered blocks if hook had the
+            //  `EngineHookDBAccessLevel::ReadWrite`
+            EngineHookAction::ConnectBufferedBlocks => {
                 if let Err(error) = self.blockchain.connect_buffered_blocks_to_canonical_hashes() {
                     error!(target: "consensus::engine", ?error, "Error restoring blockchain tree state");
                     return Err(error.into())
