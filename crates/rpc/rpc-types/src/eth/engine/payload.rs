@@ -473,24 +473,6 @@ impl ExecutionPayload {
         }
     }
 
-    /// Returns the excess blob gas for the payload, if it exists.
-    pub fn excess_blob_gas(&self) -> Option<u64> {
-        match self {
-            ExecutionPayload::V1(_) => None,
-            ExecutionPayload::V2(_) => None,
-            ExecutionPayload::V3(payload) => Some(payload.excess_blob_gas.as_u64()),
-        }
-    }
-
-    /// Returns the blob gas used for the payload, if it exists.
-    pub fn blob_gas_used(&self) -> Option<u64> {
-        match self {
-            ExecutionPayload::V1(_) => None,
-            ExecutionPayload::V2(_) => None,
-            ExecutionPayload::V3(payload) => Some(payload.blob_gas_used.as_u64()),
-        }
-    }
-
     /// Returns the timestamp for the payload.
     pub fn timestamp(&self) -> u64 {
         match self {
