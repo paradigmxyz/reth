@@ -36,5 +36,5 @@ pub use reth_revm_primitives::*;
 /// Re-export everything
 pub use revm;
 
-/// Etereum DAO hardfork state change data.
+/// Ethereum DAO hardfork state change data.
 pub mod eth_dao_fork;

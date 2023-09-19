@@ -32,7 +32,7 @@ pub struct ShareableBlockchainTree<DB: Database, C: Consensus, EF: ExecutorFacto
 }
 
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> ShareableBlockchainTree<DB, C, EF> {
-    /// Create a new sharable database.
+    /// Create a new shareable database.
     pub fn new(tree: BlockchainTree<DB, C, EF>) -> Self {
         Self { tree: Arc::new(RwLock::new(tree)) }
     }

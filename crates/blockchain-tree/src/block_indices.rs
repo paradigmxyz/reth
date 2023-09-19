@@ -169,7 +169,7 @@ impl BlockIndices {
 
         loop {
             let Some(old_block_value) = old_hash else {
-                // end of old_hashes canonical chain. New chain has more block then old chain.
+                // end of old_hashes canonical chain. New chain has more blocks than old chain.
                 while let Some(new) = new_hash {
                     // add new blocks to added list.
                     added.push(new.into());
@@ -204,7 +204,7 @@ impl BlockIndices {
                     old_hash = old_hashes.next();
                 }
                 std::cmp::Ordering::Greater => {
-                    // old chain has more past blocks that new chain
+                    // old chain has more past blocks than new chain
                     removed.push(old_block_value);
                     old_hash = old_hashes.next()
                 }
@@ -221,7 +221,7 @@ impl BlockIndices {
         )
     }
 
-    /// Remove chain from indices and return dependent chains that needs to be removed.
+    /// Remove chain from indices and return dependent chains that need to be removed.
     /// Does the cleaning of the tree and removing blocks from the chain.
     pub fn remove_chain(&mut self, chain: &Chain) -> BTreeSet<BlockChainId> {
         let mut lose_chains = BTreeSet::new();
@@ -316,7 +316,7 @@ impl BlockIndices {
     /// this is function that is going to remove N number of last canonical hashes.
     ///
     /// NOTE: This is not safe standalone, as it will not disconnect
-    /// blocks that depends on unwinded canonical chain. And should be
+    /// blocks that depend on unwinded canonical chain. And should be
     /// used when canonical chain is reinserted inside Tree.
     pub(crate) fn unwind_canonical_chain(&mut self, unwind_to: BlockNumber) {
         // this will remove all blocks numbers that are going to be replaced.
@@ -383,7 +383,7 @@ impl BlockIndices {
         self.canonical_chain.tip()
     }
 
-    /// Canonical chain needed for execution of EVM. It should contains last 256 block hashes.
+    /// Canonical chain needed for execution of EVM. It should contain last 256 block hashes.
     #[inline]
     pub(crate) fn canonical_chain(&self) -> &CanonicalChain {
         &self.canonical_chain

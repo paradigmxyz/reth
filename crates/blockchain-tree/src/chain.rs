@@ -47,7 +47,7 @@ impl DerefMut for AppendableChain {
 }
 
 impl AppendableChain {
-    /// Crate a new appendable chain from a given chain.
+    /// Create a new appendable chain from a given chain.
     pub fn new(chain: Chain) -> Self {
         Self { chain }
     }
