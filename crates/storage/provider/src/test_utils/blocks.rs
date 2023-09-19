@@ -101,34 +101,40 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
     let account2: Address = [0x61; 20].into();
     let slot: B256 = B256::with_last_byte(5);
 
-    let bundle = BundleStateWithReceipts::new_init(
-        HashMap::from([
-            (
-                account1,
-                (
-                    None,
-                    Some(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
-                    HashMap::from([(slot, (U256::from(0), U256::from(10)))]),
-                ),
-            ),
-            (
-                account2,
-                (
-                    None,
-                    Some(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
-                    HashMap::from([]),
-                ),
-            ),
-        ]),
-        HashMap::from([(
-            number,
-            HashMap::from([
-                (account1, (Some(None), vec![StorageEntry::new(slot, U256::from(0))])),
-                (account2, (Some(None), vec![])),
-            ]),
-        )]),
-        vec![],
-        Receipts::from_vec(vec![vec![Some(Receipt {
+    let mut bundle_builder = BundleBuilder::new(number..=number);
+
+    // add account1
+    bundle_builder = bundle_builder.state_present_account_info(
+        account1.clone(),
+        into_revm_acc(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
+    );
+    bundle_builder = bundle_builder.state_storage(
+        account1.clone(),
+        HashMap::from([(U256::from_be_bytes(slot.0), (U256::from(0), U256::from(10)))]),
+    );
+
+    // add account2
+    bundle_builder = bundle_builder.state_present_account_info(
+        account2.clone(),
+        into_revm_acc(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
+    );
+    bundle_builder = bundle_builder.state_storage(account2.clone(), HashMap::from([]));
+
+    // add reverts for account1
+    bundle_builder = bundle_builder.revert_account_info(number, account1.clone(), Some(None));
+    bundle_builder = bundle_builder.revert_storage(
+        number,
+        account1,
+        vec![(U256::from_be_bytes(slot.0), U256::from(0))],
+    );
+
+    // add reverts for account2
+    bundle_builder = bundle_builder.revert_account_info(number, account2.clone(), Some(None));
+    bundle_builder = bundle_builder.revert_storage(number, account2, vec![]);
+
+    let bundle = BundleStateWithReceipts::new(
+        bundle_builder.build(),
+        vec![vec![Some(Receipt {
             tx_type: TxType::EIP2930,
             success: true,
             cumulative_gas_used: 300,
@@ -163,27 +169,37 @@ fn block2(
     let account: Address = [0x60; 20].into();
     let slot: B256 = B256::with_last_byte(5);
 
-    let bundle = BundleStateWithReceipts::new_init(
-        HashMap::from([(
-            account,
-            (
-                None,
-                Some(Account { nonce: 3, balance: U256::from(20), bytecode_hash: None }),
-                HashMap::from([(slot, (U256::from(0), U256::from(15)))]),
-            ),
-        )]),
-        HashMap::from([(
-            number,
-            HashMap::from([(
-                account,
-                (
-                    Some(Some(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None })),
-                    vec![StorageEntry::new(slot, U256::from(10))],
-                ),
-            )]),
-        )]),
-        vec![],
-        Receipts::from_vec(vec![vec![Some(Receipt {
+    let mut bundle_builder = BundleBuilder::new(number..=number);
+
+    // add account
+    bundle_builder = bundle_builder.state_present_account_info(
+        account.clone(),
+        into_revm_acc(Account { nonce: 3, balance: U256::from(20), bytecode_hash: None }),
+    );
+    bundle_builder = bundle_builder.state_storage(
+        account.clone(),
+        HashMap::from([(U256::from_be_bytes(slot.0), (U256::from(0), U256::from(15)))]),
+    );
+
+    // add reverts for account1
+    bundle_builder = bundle_builder.revert_account_info(
+        number,
+        account.clone(),
+        Some(Some(into_revm_acc(Account {
+            nonce: 1,
+            balance: U256::from(10),
+            bytecode_hash: None,
+        }))),
+    );
+    bundle_builder = bundle_builder.revert_storage(
+        number,
+        account,
+        vec![(U256::from_be_bytes(slot.0), U256::from(10))],
+    );
+
+    let bundle = BundleStateWithReceipts::new(
+        bundle_builder.build(),
+        vec![vec![Some(Receipt {
             tx_type: TxType::EIP1559,
             success: false,
             cumulative_gas_used: 400,

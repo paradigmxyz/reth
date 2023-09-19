@@ -1,5 +1,5 @@
 use crate::{
-    bundle_state::{BundleStateInit, BundleStateWithReceipts, RevertsInit},
+    bundle_state::BundleStateWithReceipts,
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
@@ -38,7 +38,10 @@ use reth_primitives::{
 };
 use reth_revm_primitives::{
     config::revm_spec,
+    db::states::bundle_state::BundleBuilder,
     env::{fill_block_env, fill_cfg_and_block_env, fill_cfg_env},
+    into_revm_acc,
+    primitives::{BlockEnv, CfgEnv, HashMap as HashMapRevm, SpecId},
 };
 use reth_trie::{prefix_set::PrefixSetMut, StateRoot};
 use revm::primitives::{BlockEnv, CfgEnv, SpecId};
@@ -243,22 +246,21 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
         let storage_changeset =
             self.get_or_take::<tables::StorageChangeSet, UNWIND>(storage_range)?;
-        let account_changeset = self.get_or_take::<tables::AccountChangeSet, UNWIND>(range)?;
+        let account_changeset =
+            self.get_or_take::<tables::AccountChangeSet, UNWIND>(range.clone())?;
 
         // iterate previous value and get plain state value to create changeset
         // Double option around Account represent if Account state is know (first option) and
         // account is removed (Second Option)
 
-        let mut state: BundleStateInit = HashMap::new();
-
+        let mut state = HashMap::new();
+        let mut bundle_builder = BundleBuilder::new(range);
         // This is not working for blocks that are not at tip. as plain state is not the last
         // state of end range. We should rename the functions or add support to access
         // History state. Accessing history state can be tricky but we are not gaining
         // anything.
         let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
         let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
-
-        let mut reverts: RevertsInit = HashMap::new();
 
         // add account changeset changes
         for (block_number, account_before) in account_changeset.into_iter().rev() {
@@ -267,6 +269,14 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
                 hash_map::Entry::Vacant(entry) => {
                     let new_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
                     entry.insert((old_info, new_info, HashMap::new()));
+                    bundle_builder = bundle_builder.state_original_account_info(
+                        address,
+                        into_revm_acc(old_info.unwrap_or_default()),
+                    );
+                    bundle_builder = bundle_builder.state_present_account_info(
+                        address,
+                        into_revm_acc(new_info.unwrap_or_default()),
+                    );
                 }
                 hash_map::Entry::Occupied(mut entry) => {
                     // overwrite old account state.
@@ -274,7 +284,15 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
                 }
             }
             // insert old info into reverts.
-            reverts.entry(block_number).or_default().entry(address).or_default().0 = Some(old_info);
+            bundle_builder = bundle_builder.revert_account_info(
+                block_number,
+                address,
+                if let Some(old_info) = old_info {
+                    Some(Some(into_revm_acc(old_info)))
+                } else {
+                    Some(None)
+                },
+            );
         }
 
         // add storage changeset changes
@@ -284,6 +302,14 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             let account_state = match state.entry(address) {
                 hash_map::Entry::Vacant(entry) => {
                     let present_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
+                    bundle_builder = bundle_builder.state_original_account_info(
+                        address,
+                        into_revm_acc(present_info.unwrap_or_default()),
+                    );
+                    bundle_builder = bundle_builder.state_present_account_info(
+                        address,
+                        into_revm_acc(present_info.unwrap_or_default()),
+                    );
                     entry.insert((present_info, present_info, HashMap::new()))
                 }
                 hash_map::Entry::Occupied(entry) => entry.into_mut(),
@@ -297,19 +323,24 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
                         .filter(|storage| storage.key == old_storage.key)
                         .unwrap_or_default();
                     entry.insert((old_storage.value, new_storage.value));
+                    bundle_builder = bundle_builder.state_storage(
+                        address,
+                        HashMapRevm::from([(
+                            U256::from_be_bytes(new_storage.key.0),
+                            (old_storage.value, new_storage.value),
+                        )]),
+                    );
                 }
                 hash_map::Entry::Occupied(mut entry) => {
                     entry.get_mut().0 = old_storage.value;
                 }
             };
 
-            reverts
-                .entry(block_number)
-                .or_default()
-                .entry(address)
-                .or_default()
-                .1
-                .push(old_storage);
+            bundle_builder = bundle_builder.revert_storage(
+                block_number,
+                address,
+                vec![(U256::from_be_bytes(old_storage.key.0), old_storage.value)],
+            );
         }
 
         if UNWIND {
@@ -364,13 +395,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             receipts.push(block_receipts);
         }
 
-        Ok(BundleStateWithReceipts::new_init(
-            state,
-            reverts,
-            Vec::new(),
-            reth_primitives::Receipts::from_vec(receipts),
-            start_block_number,
-        ))
+        Ok(BundleStateWithReceipts::new(bundle_builder.build(), receipts, start_block_number))
     }
 
     /// Return list of entries from table

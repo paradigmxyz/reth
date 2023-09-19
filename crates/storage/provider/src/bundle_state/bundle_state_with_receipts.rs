@@ -34,57 +34,9 @@ pub struct BundleStateWithReceipts {
     first_block: BlockNumber,
 }
 
-/// Type used to initialize revms bundle state.
-pub type BundleStateInit =
-    HashMap<Address, (Option<Account>, Option<Account>, HashMap<B256, (U256, U256)>)>;
-
-/// Types used inside RevertsInit to initialize revms reverts.
-pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
-
-/// Type used to initialize revms reverts.
-pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>;
-
 impl BundleStateWithReceipts {
     /// Create Bundle State.
     pub fn new(bundle: BundleState, receipts: Receipts, first_block: BlockNumber) -> Self {
-        Self { bundle, receipts, first_block }
-    }
-
-    /// Create new bundle state with receipts.
-    pub fn new_init(
-        state_init: BundleStateInit,
-        revert_init: RevertsInit,
-        contracts_init: Vec<(B256, Bytecode)>,
-        receipts: Receipts,
-        first_block: BlockNumber,
-    ) -> Self {
-        // sort reverts by block number
-        let mut reverts = revert_init.into_iter().collect::<Vec<_>>();
-        reverts.sort_unstable_by_key(|a| a.0);
-
-        // initialize revm bundle
-        let bundle = BundleState::new(
-            state_init.into_iter().map(|(address, (original, present, storage))| {
-                (
-                    address,
-                    original.map(into_revm_acc),
-                    present.map(into_revm_acc),
-                    storage.into_iter().map(|(k, s)| (k.into(), s)).collect(),
-                )
-            }),
-            reverts.into_iter().map(|(_, reverts)| {
-                // does not needs to be sorted, it is done when taking reverts.
-                reverts.into_iter().map(|(address, (original, storage))| {
-                    (
-                        address,
-                        original.map(|i| i.map(into_revm_acc)),
-                        storage.into_iter().map(|entry| (entry.key.into(), entry.value)),
-                    )
-                })
-            }),
-            contracts_init.into_iter().map(|(code_hash, bytecode)| (code_hash, bytecode.0)),
-        );
-
         Self { bundle, receipts, first_block }
     }
 
