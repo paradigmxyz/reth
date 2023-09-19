@@ -75,6 +75,10 @@ impl TransactionsHandle {
     pub fn propagate(&self, hash: TxHash) {
         self.send(TransactionsCommand::PropagateHash(hash))
     }
+    // propagating a hash to a specific peer
+    pub fn propagate_hash_to_peer(&self, hash: TxHash,peer:  PeerId ) {
+        self.send(TransactionsCommand::PropagateHashTo(hash, peer ))
+    }
 }
 
 /// Manages transactions on top of the p2p network.
@@ -404,6 +408,7 @@ where
     fn on_command(&mut self, cmd: TransactionsCommand) {
         match cmd {
             TransactionsCommand::PropagateHash(hash) => self.on_new_transactions(vec![hash]),
+            TransactionsCommand::PropagateHashTo(hash, peer ) => self.on_new_transactions(vec![hash]),
         }
     }
 
@@ -830,6 +835,7 @@ struct Peer {
 /// Commands to send to the [`TransactionsManager`]
 enum TransactionsCommand {
     PropagateHash(H256),
+    PropagateHashTo(H256, PeerId),
 }
 
 /// All events related to transactions emitted by the network.
