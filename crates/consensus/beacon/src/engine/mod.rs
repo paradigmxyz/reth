@@ -1797,6 +1797,10 @@ where
                 if let Err(err) = this.on_hook_action(action) {
                     return Poll::Ready(Err(err))
                 }
+
+                // ensure we're polling until pending while also checking for new engine messages
+                // before polling the next hook
+                continue 'main
             }
 
             // incoming engine messages and sync events are drained, so we can yield back
