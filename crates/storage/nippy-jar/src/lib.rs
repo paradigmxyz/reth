@@ -247,9 +247,6 @@ impl NippyJar {
             column_iterators = iterators.into_iter();
         }
 
-        // Drop mut borrow
-        drop(maybe_zstd_compressors);
-
         // Write offsets and offset index to file
         self.freeze_offsets(offsets)?;
 

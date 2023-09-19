@@ -70,7 +70,7 @@ impl Zstd {
     }
 
     /// If using dictionaries, creates a list of [`Compressor`].
-    pub fn generate_compressors(&self) -> Result<Option<Vec<Compressor>>, NippyJarError> {
+    pub fn generate_compressors<'a>(&self) -> Result<Option<Vec<Compressor<'a>>>, NippyJarError> {
         match self.state {
             ZstdState::PendingDictionary => Err(NippyJarError::CompressorNotReady),
             ZstdState::Ready => {
