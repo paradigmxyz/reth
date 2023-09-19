@@ -33,8 +33,10 @@ use reth_primitives::{
 };
 use reth_provider::{BlockReaderIdExt, BlockSource, BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::{
-    database::StateProviderDatabase, env::tx_env_with_recovered, into_reth_log,
-    state_change::post_block_withdrawals_balance_increments,
+    database::StateProviderDatabase,
+    env::tx_env_with_recovered,
+    into_reth_log,
+    state_change::{apply_beacon_root_contract_call, post_block_withdrawals_balance_increments},
 };
 use reth_rlp::Encodable;
 use reth_tasks::TaskSpawner;
@@ -45,6 +47,7 @@ use revm::{
     Database, DatabaseCommit, State,
 };
 use std::{
+    fmt::Debug,
     future::Future,
     pin::Pin,
     sync::{atomic::AtomicBool, Arc},
@@ -664,6 +667,16 @@ where
 
     let block_number = initialized_block_env.number.to::<u64>();
 
+    // apply eip-4788 pre block contract call
+    pre_block_beacon_root_contract_call(
+        &mut db,
+        &chain_spec,
+        block_number,
+        &initialized_cfg,
+        &initialized_block_env,
+        &attributes,
+    )?;
+
     let mut receipts = Vec::new();
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
@@ -771,7 +784,8 @@ where
     let WithdrawalsOutcome { withdrawals_root, withdrawals } =
         commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
 
-    // merge all transitions into bundle state.
+    // merge all transitions into bundle state, this would apply the withdrawal balance changes and
+    // 4788 contract call
     db.merge_transitions(BundleRetention::PlainState);
 
     let bundle = BundleStateWithReceipts::new(db.take_bundle(), vec![receipts], block_number);
@@ -861,7 +875,7 @@ where
         extra_data,
         attributes,
         chain_spec,
-        ..
+        initialized_cfg,
     } = config;
 
     debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number,  "building empty payload");
@@ -876,10 +890,21 @@ where
     let block_number = initialized_block_env.number.to::<u64>();
     let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
 
+    // apply eip-4788 pre block contract call
+    pre_block_beacon_root_contract_call(
+        &mut db,
+        &chain_spec,
+        block_number,
+        &initialized_cfg,
+        &initialized_block_env,
+        &attributes,
+    )?;
+
     let WithdrawalsOutcome { withdrawals_root, withdrawals } =
         commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
 
-    // merge transition, this will apply the withdrawal balance changes.
+    // merge all transitions into bundle state, this would apply the withdrawal balance changes and
+    // 4788 contract call
     db.merge_transitions(BundleRetention::PlainState);
 
     // calculate the state root
@@ -965,6 +990,50 @@ fn commit_withdrawals<DB: Database<Error = Error>>(
         withdrawals: Some(withdrawals),
         withdrawals_root: Some(withdrawals_root),
     })
+}
+
+/// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
+///
+/// This constructs a new [EVM](revm::EVM) with the given DB, and environment ([CfgEnv] and
+/// [BlockEnv]) to execute the pre block contract call.
+///
+/// The parent beacon block root used for the call is gathered from the given
+/// [PayloadBuilderAttributes].
+///
+/// This uses [apply_beacon_root_contract_call] to ultimately apply the beacon root contract state
+/// change.
+fn pre_block_beacon_root_contract_call<DB>(
+    db: &mut DB,
+    chain_spec: &ChainSpec,
+    block_number: u64,
+    initialized_cfg: &CfgEnv,
+    initialized_block_env: &BlockEnv,
+    attributes: &PayloadBuilderAttributes,
+) -> Result<(), PayloadBuilderError>
+where
+    DB: Database + DatabaseCommit,
+    <DB as Database>::Error: Debug,
+{
+    // Configure the environment for the block.
+    let env = Env {
+        cfg: initialized_cfg.clone(),
+        block: initialized_block_env.clone(),
+        ..Default::default()
+    };
+
+    // apply pre-block EIP-4788 contract call
+    let mut evm_pre_block = revm::EVM::with_env(env);
+    evm_pre_block.database(db);
+
+    // initialize a block from the env, because the pre block call needs the block itself
+    apply_beacon_root_contract_call(
+        chain_spec,
+        attributes.timestamp,
+        block_number,
+        attributes.parent_beacon_block_root,
+        &mut evm_pre_block,
+    )
+    .map_err(|err| PayloadBuilderError::Internal(err.into()))
 }
 
 /// Checks if the new payload is better than the current best.
