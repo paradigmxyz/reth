@@ -119,7 +119,7 @@ pub struct CallRequest {
     pub max_fee_per_blob_gas: Option<U256>,
     /// Blob Versioned Hashes for EIP-4844 transactions
     #[serde(default)]
-    pub blob_versioned_hashes: Vec<H256>,
+    pub blob_versioned_hashes: Option<Vec<H256>>,
     /// EIP-2718 type
     #[serde(rename = "type")]
     pub transaction_type: Option<U8>,

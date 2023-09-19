@@ -291,11 +291,12 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         ..
     } = request;
 
-    let CallFees { max_priority_fee_per_gas, gas_price } = CallFees::ensure_fees(
+    let CallFees { max_priority_fee_per_gas, gas_price,max_fee_per_blob_gas } = CallFees::ensure_fees(
         gas_price,
         max_fee_per_gas,
         max_priority_fee_per_gas,
         block_env.basefee,
+        blob_versioned_hashes
     )?;
 
     let gas_limit = gas.unwrap_or(block_env.gas_limit.min(U256::from(u64::MAX)));
@@ -314,7 +315,7 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         chain_id: chain_id.map(|c| c.as_u64()),
         access_list: access_list.map(AccessList::flattened).unwrap_or_default(),
         // EIP-4844 fields
-        blob_hashes: blob_versioned_hashes,
+        blob_hashes: blob_versioned_hashes.unwrap_or_default(),
         max_fee_per_blob_gas,
     };
 
@@ -372,47 +373,58 @@ pub(crate) struct CallFees {
     /// `gasPrice` for legacy,
     /// `maxFeePerGas` for EIP-1559
     gas_price: U256,
+    /// Max Fee per Blob gas for EIP-4844 transactions
+    max_fee_per_blob_gas:Option<U256>
 }
 
 // === impl CallFees ===
 
-impl CallFees {
-    /// Ensures the fields of a [CallRequest] are not conflicting.
-    ///
-    /// If no `gasPrice` or `maxFeePerGas` is set, then the `gas_price` in the returned `gas_price`
-    /// will be `0`. See: <https://github.com/ethereum/go-ethereum/blob/2754b197c935ee63101cbbca2752338246384fec/internal/ethapi/transaction_args.go#L242-L255>
-    fn ensure_fees(
-        call_gas_price: Option<U256>,
-        call_max_fee: Option<U256>,
-        call_priority_fee: Option<U256>,
-        base_fee: U256,
-    ) -> EthResult<CallFees> {
-        match (call_gas_price, call_max_fee, call_priority_fee) {
-            (gas_price, None, None) => {
-                // either legacy transaction or no fee fields are specified
-                // when no fields are specified, set gas price to zero
-                let gas_price = gas_price.unwrap_or(U256::ZERO);
-                Ok(CallFees { gas_price, max_priority_fee_per_gas: None })
-            }
-            (None, max_fee_per_gas, max_priority_fee_per_gas) => {
-                // request for eip-1559 transaction
-                let max_fee = max_fee_per_gas.unwrap_or(base_fee);
+    impl CallFees {
+        /// Ensures the fields of a [CallRequest] are not conflicting.
+        ///
+        /// If no `gasPrice` or `maxFeePerGas` is set, then the `gas_price` in the returned `gas_price`
+        /// will be `0`. See: <https://github.com/ethereum/go-ethereum/blob/2754b197c935ee63101cbbca2752338246384fec/internal/ethapi/transaction_args.go#L242-L255>
+        fn ensure_fees(
+            call_gas_price: Option<U256>,
+            call_max_fee: Option<U256>,
+            call_priority_fee: Option<U256>,
+            base_fee: U256,
+            blob_versioned_hashes:Option<Vec<H256>>
+        ) -> EthResult<CallFees> {
 
-                if let Some(max_priority) = max_priority_fee_per_gas {
-                    if max_priority > max_fee {
-                        // Fail early
-                        return Err(
-                            // `max_priority_fee_per_gas` is greater than the `max_fee_per_gas`
-                            RpcInvalidTransactionError::TipAboveFeeCap.into(),
-                        )
-                    }
+            match (call_gas_price, call_max_fee, call_priority_fee,&blob_versioned_hashes) {
+                (gas_price, None, None,None) => {
+                    // either legacy transaction or no fee fields are specified
+                    // when no fields are specified, set gas price to zero
+                    let gas_price = gas_price.unwrap_or(U256::ZERO);
+                    Ok(CallFees { gas_price, max_priority_fee_per_gas: None,max_fee_per_blob_gas:None})
                 }
-                Ok(CallFees { gas_price: max_fee, max_priority_fee_per_gas })
+                (None, max_fee_per_gas, max_priority_fee_per_gas,max_fee_per_blob_gas) => {
+                    // request for eip-1559 transaction
+                    let max_fee = max_fee_per_gas.unwrap_or(base_fee);
+
+                    if let Some(max_priority) = max_priority_fee_per_gas {
+                        if max_priority > max_fee {
+                            // Fail early
+                            return Err(
+                                // `max_priority_fee_per_gas` is greater than the `max_fee_per_gas`
+                                RpcInvalidTransactionError::TipAboveFeeCap.into(),
+                            )
+                        }
+                    }
+                    let max_blob_fee = if blob_versioned_hashes.is_some() && max_fee_per_blob_gas.is_none(){
+                        None
+                    }
+                    else{
+                        max_fee_per_blob_gas.as_ref()
+                    };
+
+                    Ok(CallFees { gas_price: max_fee, max_priority_fee_per_gas,max_fee_per_blob_gas:max_blob_fee })
+                }
+                _ => Err(EthApiError::ConflictingFeeFieldsInRequest),
             }
-            _ => Err(EthApiError::ConflictingFeeFieldsInRequest),
         }
     }
-}
 
 /// Applies the given block overrides to the env
 fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
@@ -542,7 +554,7 @@ mod tests {
     #[test]
     fn test_ensure_0_fallback() {
         let CallFees { gas_price, .. } =
-            CallFees::ensure_fees(None, None, None, U256::from(99)).unwrap();
+            CallFees::ensure_fees(None, None, None, U256::from(99),None).unwrap();
         assert_eq!(gas_price, U256::ZERO);
     }
 }
