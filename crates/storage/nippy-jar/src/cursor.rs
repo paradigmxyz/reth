@@ -53,20 +53,20 @@ impl<'a> NippyJarCursor<'a> {
         self.row = 0;
     }
 
-    /// Returns a row, searching it by an entry used during [`NippyJar::prepare_index`].
+    /// Returns a row, searching it by a key used during [`NippyJar::prepare_index`].
     ///
     /// **May return false positives.**
     ///
     /// Example usage would be querying a transactions file with a transaction hash which is **NOT**
     /// stored in file.
-    pub fn row_by_filter(&mut self, value: &[u8]) -> Result<Option<Row>, NippyJarError> {
+    pub fn row_by_key(&mut self, key: &[u8]) -> Result<Option<Row>, NippyJarError> {
         if let (Some(filter), Some(phf)) = (&self.jar.filter, &self.jar.phf) {
             // TODO: is it worth to parallize both?
 
             // May have false positives
-            if filter.contains(value)? {
+            if filter.contains(key)? {
                 // May have false positives
-                if let Some(row_index) = phf.get_index(value)? {
+                if let Some(row_index) = phf.get_index(key)? {
                     self.row =
                         self.jar.offsets_index.access(row_index as usize).expect("built from same")
                             as u64;
@@ -103,24 +103,24 @@ impl<'a> NippyJarCursor<'a> {
         Ok(Some(row))
     }
 
-    /// Returns a row, searching it by an entry used during [`NippyJar::prepare_index`]  by using a
+    /// Returns a row, searching it by a key used during [`NippyJar::prepare_index`]  by using a
     /// `MASK` to only read certain columns from the row.
     ///
     /// **May return false positives.**
     ///
     /// Example usage would be querying a transactions file with a transaction hash which is **NOT**
     /// stored in file.
-    pub fn row_by_filter_with_cols<const MASK: usize, const COLUMNS: usize>(
+    pub fn row_by_key_with_cols<const MASK: usize, const COLUMNS: usize>(
         &mut self,
-        value: &[u8],
+        key: &[u8],
     ) -> Result<Option<Row>, NippyJarError> {
         if let (Some(filter), Some(phf)) = (&self.jar.filter, &self.jar.phf) {
             // TODO: is it worth to parallize both?
 
             // May have false positives
-            if filter.contains(value)? {
+            if filter.contains(key)? {
                 // May have false positives
-                if let Some(row_index) = phf.get_index(value)? {
+                if let Some(row_index) = phf.get_index(key)? {
                     self.row =
                         self.jar.offsets_index.access(row_index as usize).expect("built from same")
                             as u64;

@@ -553,7 +553,7 @@ mod tests {
                 for (row_num, (v0, v1)) in data {
                     // Simulates `by_hash` queries by iterating col1 values, which were used to
                     // create the inner index.
-                    let row_by_value = cursor.row_by_filter(v0).unwrap().unwrap();
+                    let row_by_value = cursor.row_by_key(v0).unwrap().unwrap();
                     assert_eq!((&row_by_value[0], &row_by_value[1]), (v0, v1));
 
                     // Simulates `by_number` queries
@@ -608,7 +608,7 @@ mod tests {
                     // Simulates `by_hash` queries by iterating col1 values, which were used to
                     // create the inner index.
                     let row_by_value = cursor
-                        .row_by_filter_with_cols::<BLOCKS_FULL_MASK, BLOCKS_COLUMNS>(v0)
+                        .row_by_key_with_cols::<BLOCKS_FULL_MASK, BLOCKS_COLUMNS>(v0)
                         .unwrap()
                         .unwrap();
                     assert_eq!((&row_by_value[0], &row_by_value[1]), (*v0, *v1));
@@ -627,7 +627,7 @@ mod tests {
                     // Simulates `by_hash` queries by iterating col1 values, which were used to
                     // create the inner index.
                     let row_by_value = cursor
-                        .row_by_filter_with_cols::<BLOCKS_BLOCK_MASK, BLOCKS_COLUMNS>(v0)
+                        .row_by_key_with_cols::<BLOCKS_BLOCK_MASK, BLOCKS_COLUMNS>(v0)
                         .unwrap()
                         .unwrap();
                     assert_eq!(row_by_value.len(), 1);
@@ -648,7 +648,7 @@ mod tests {
                     // Simulates `by_hash` queries by iterating col1 values, which were used to
                     // create the inner index.
                     let row_by_value = cursor
-                        .row_by_filter_with_cols::<BLOCKS_WITHDRAWAL_MASK, BLOCKS_COLUMNS>(v0)
+                        .row_by_key_with_cols::<BLOCKS_WITHDRAWAL_MASK, BLOCKS_COLUMNS>(v0)
                         .unwrap()
                         .unwrap();
                     assert_eq!(row_by_value.len(), 1);
@@ -669,7 +669,7 @@ mod tests {
                     // Simulates `by_hash` queries by iterating col1 values, which were used to
                     // create the inner index.
                     assert!(cursor
-                        .row_by_filter_with_cols::<BLOCKS_EMPTY_MASK, BLOCKS_COLUMNS>(v0)
+                        .row_by_key_with_cols::<BLOCKS_EMPTY_MASK, BLOCKS_COLUMNS>(v0)
                         .unwrap()
                         .unwrap()
                         .is_empty());
