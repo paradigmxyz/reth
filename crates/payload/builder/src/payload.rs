@@ -10,10 +10,8 @@ use reth_rpc_types::engine::{
     PayloadId,
 };
 use reth_rpc_types_compat::engine::payload::{
-    convert_from_sealed_block_to_execution_payload_field_v2,
-    convert_standalonewithdraw_to_withdrawal,
-    try_convert_from_sealed_block_to_execution_payload_v1,
-    try_convert_from_sealed_block_to_execution_payload_v3,
+    convert_block_to_payload_field_v2, convert_standalonewithdraw_to_withdrawal,
+    try_block_to_payload_v1, try_block_to_payload_v3,
 };
 use revm_primitives::{BlockEnv, CfgEnv};
 /// Contains the built payload.
@@ -81,7 +79,7 @@ impl BuiltPayload {
 // V1 engine_getPayloadV1 response
 impl From<BuiltPayload> for ExecutionPayloadV1 {
     fn from(value: BuiltPayload) -> Self {
-        try_convert_from_sealed_block_to_execution_payload_v1(value.block)
+        try_block_to_payload_v1(value.block)
     }
 }
 
@@ -92,7 +90,7 @@ impl From<BuiltPayload> for ExecutionPayloadEnvelopeV2 {
 
         ExecutionPayloadEnvelopeV2 {
             block_value: fees,
-            execution_payload: convert_from_sealed_block_to_execution_payload_field_v2(block),
+            execution_payload: convert_block_to_payload_field_v2(block),
         }
     }
 }
@@ -102,7 +100,7 @@ impl From<BuiltPayload> for ExecutionPayloadEnvelopeV3 {
         let BuiltPayload { block, fees, sidecars, .. } = value;
 
         ExecutionPayloadEnvelopeV3 {
-            execution_payload: try_convert_from_sealed_block_to_execution_payload_v3(block),
+            execution_payload: try_block_to_payload_v3(block),
             block_value: fees,
             // From the engine API spec:
             //
@@ -146,12 +144,14 @@ impl PayloadBuilderAttributes {
     pub fn new(parent: H256, attributes: PayloadAttributes) -> Self {
         let id = payload_id(&parent, &attributes);
 
-        let withdraw = attributes.withdrawals.map(|withdrawals| {
-            withdrawals
-                .into_iter()
-                .map(convert_standalonewithdraw_to_withdrawal) // Removed the parentheses here
-                .collect::<Vec<_>>()
-        });
+        let withdraw = attributes.withdrawals.map(
+            |withdrawals: Vec<reth_rpc_types::engine::payload::Withdrawal>| {
+                withdrawals
+                    .into_iter()
+                    .map(convert_standalonewithdraw_to_withdrawal) // Removed the parentheses here
+                    .collect::<Vec<_>>()
+            },
+        );
 
         Self {
             id,

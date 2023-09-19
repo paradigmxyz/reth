@@ -14,10 +14,8 @@ use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadV1, PayloadError,
 };
 use reth_rpc_types_compat::engine::payload::{
-    convert_standalonewithdraw_to_withdrawal, convert_to_execution_payload_body_v1,
-    try_convert_from_execution_payload_v1_to_block,
-    try_convert_from_sealed_block_to_execution_payload,
-    try_convert_from_sealed_block_to_execution_payload_v1, try_into_sealed_block,
+    convert_standalonewithdraw_to_withdrawal, convert_to_payload_body_v1, try_block_to_payload,
+    try_block_to_payload_v1, try_into_sealed_block, try_payload_v1_to_block,
 };
 
 fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> ExecutionPayload {
@@ -26,7 +24,7 @@ fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> Executi
     // Recalculate roots
     transformed.header.transactions_root = proofs::calculate_transaction_root(&transformed.body);
     transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.ommers);
-    try_convert_from_sealed_block_to_execution_payload(SealedBlock {
+    try_block_to_payload(SealedBlock {
         header: transformed.header.seal_slow(),
         body: transformed.body,
         ommers: transformed.ommers,
@@ -39,7 +37,7 @@ fn payload_body_roundtrip() {
     let mut rng = generators::rng();
     for block in random_block_range(&mut rng, 0..=99, H256::default(), 0..2) {
         let unsealed = block.clone().unseal();
-        let payload_body: ExecutionPayloadBodyV1 = convert_to_execution_payload_body_v1(unsealed);
+        let payload_body: ExecutionPayloadBodyV1 = convert_to_payload_body_v1(unsealed);
 
         assert_eq!(
             Ok(block.body),
@@ -96,14 +94,12 @@ fn payload_validation() {
     );
 
     // Invalid encoded transactions
-    let mut payload_with_invalid_txs: ExecutionPayloadV1 =
-        try_convert_from_sealed_block_to_execution_payload_v1(block.clone());
+    let mut payload_with_invalid_txs: ExecutionPayloadV1 = try_block_to_payload_v1(block.clone());
 
     payload_with_invalid_txs.transactions.iter_mut().for_each(|tx| {
         *tx = Bytes::new().into();
     });
-    let payload_with_invalid_txs =
-        try_convert_from_execution_payload_v1_to_block(payload_with_invalid_txs);
+    let payload_with_invalid_txs = try_payload_v1_to_block(payload_with_invalid_txs);
     assert_matches!(
         payload_with_invalid_txs,
         Err(PayloadError::Decode(DecodeError::InputTooShort))

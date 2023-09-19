@@ -1,4 +1,4 @@
-pub use crate::Withdrawal as StandaloneWithdraw;
+pub use crate::Withdrawal;
 use reth_primitives::{
     kzg::{Blob, Bytes48},
     Address, BlobTransactionSidecar, Bloom, Bytes, SealedBlock, H256, H64, U256, U64,
@@ -66,7 +66,7 @@ pub struct ExecutionPayloadInputV2 {
     pub execution_payload: ExecutionPayloadV1,
     /// The payload withdrawals
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub withdrawals: Option<Vec<StandaloneWithdraw>>,
+    pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
 /// This structure maps for the return value of `engine_getPayload` of the beacon chain spec, for
@@ -177,9 +177,9 @@ pub struct ExecutionPayloadV2 {
     #[serde(flatten)]
     pub payload_inner: ExecutionPayloadV1,
 
-    /// Array of [`StandaloneWithdraw`] enabled with V2
+    /// Array of [`Withdrawal`] enabled with V2
     /// See <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#executionpayloadv2>
-    pub withdrawals: Vec<StandaloneWithdraw>,
+    pub withdrawals: Vec<Withdrawal>,
 }
 
 impl ExecutionPayloadV2 {
@@ -209,7 +209,7 @@ pub struct ExecutionPayloadV3 {
 
 impl ExecutionPayloadV3 {
     /// Returns the withdrawals for the payload.
-    pub fn withdrawals(&self) -> &Vec<StandaloneWithdraw> {
+    pub fn withdrawals(&self) -> &Vec<Withdrawal> {
         &self.payload_inner.withdrawals
     }
 
@@ -256,7 +256,7 @@ pub enum ExecutionPayload {
 
 impl ExecutionPayload {
     /// Returns the withdrawals for the payload.
-    pub fn withdrawals(&self) -> Option<&Vec<StandaloneWithdraw>> {
+    pub fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
         match self {
             ExecutionPayload::V1(_) => None,
             ExecutionPayload::V2(payload) => Some(&payload.withdrawals),
@@ -369,7 +369,7 @@ pub struct ExecutionPayloadBodyV1 {
     /// All withdrawals in the block.
     ///
     /// Will always be `None` if pre shanghai.
-    pub withdrawals: Option<Vec<StandaloneWithdraw>>,
+    pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
 /// This structure contains the attributes required to initiate a payload build process in the
@@ -383,10 +383,10 @@ pub struct PayloadAttributes {
     pub prev_randao: H256,
     /// Suggested value for the `feeRecipient` field of the new payload
     pub suggested_fee_recipient: Address,
-    /// Array of [`StandaloneWithdraw`] enabled with V2
+    /// Array of [`Withdrawal`] enabled with V2
     /// See <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#payloadattributesv2>
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub withdrawals: Option<Vec<StandaloneWithdraw>>,
+    pub withdrawals: Option<Vec<Withdrawal>>,
     /// Root of the parent beacon block enabled with V3.
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#payloadattributesv3>

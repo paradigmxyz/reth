@@ -16,8 +16,7 @@ use reth_rpc_types::engine::{
     CAPABILITIES,
 };
 use reth_rpc_types_compat::engine::payload::{
-    convert_from_execution_payload_input_v2_to_execution_payload,
-    convert_to_execution_payload_body_v1,
+    convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
 };
 use reth_tasks::TaskSpawner;
 use std::sync::Arc;
@@ -88,7 +87,7 @@ where
         &self,
         payload: ExecutionPayloadInputV2,
     ) -> EngineApiResult<PayloadStatus> {
-        let payload = convert_from_execution_payload_input_v2_to_execution_payload(payload);
+        let payload = convert_payload_input_v2_to_payload(payload);
         let payload_or_attrs = PayloadOrAttributes::from_execution_payload(&payload, None);
         self.validate_version_specific_fields(EngineApiMessageVersion::V2, &payload_or_attrs)?;
         Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
@@ -284,7 +283,7 @@ where
                 let block_result = inner.provider.block(BlockHashOrNumber::Number(num));
                 match block_result {
                     Ok(block) => {
-                        result.push(block.map(convert_to_execution_payload_body_v1));
+                        result.push(block.map(convert_to_payload_body_v1));
                     }
                     Err(err) => {
                         tx.send(Err(EngineApiError::Internal(Box::new(err)))).ok();
@@ -315,7 +314,7 @@ where
                 .provider
                 .block(BlockHashOrNumber::Hash(hash))
                 .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
-            result.push(block.map(convert_to_execution_payload_body_v1));
+            result.push(block.map(convert_to_payload_body_v1));
         }
 
         Ok(result)
@@ -843,7 +842,7 @@ mod tests {
             let expected = blocks
                 .iter()
                 .cloned()
-                .map(|b| Some(convert_to_execution_payload_body_v1(b.unseal())))
+                .map(|b| Some(convert_to_payload_body_v1(b.unseal())))
                 .collect::<Vec<_>>();
 
             let res = api.get_payload_bodies_by_range(start, count).await.unwrap();
@@ -882,7 +881,7 @@ mod tests {
                     if first_missing_range.contains(&b.number) {
                         None
                     } else {
-                        Some(convert_to_execution_payload_body_v1(b.unseal()))
+                        Some(convert_to_payload_body_v1(b.unseal()))
                     }
                 })
                 .collect::<Vec<_>>();
@@ -901,7 +900,7 @@ mod tests {
                     {
                         None
                     } else {
-                        Some(convert_to_execution_payload_body_v1(b.unseal()))
+                        Some(convert_to_payload_body_v1(b.unseal()))
                     }
                 })
                 .collect::<Vec<_>>();

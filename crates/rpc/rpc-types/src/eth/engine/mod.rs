@@ -9,7 +9,7 @@ mod transition;
 pub use self::{cancun::*, forkchoice::*, payload::*, transition::*};
 pub use payload::{
     ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadV1,
-    ExecutionPayloadV2, ExecutionPayloadV3, PayloadError, StandaloneWithdraw,
+    ExecutionPayloadV2, ExecutionPayloadV3, PayloadError, Withdrawal,
 };
 
 /// The list of all supported Engine capabilities available over the engine endpoint.
