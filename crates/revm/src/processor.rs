@@ -814,6 +814,7 @@ mod tests {
             timestamp: 1,
             number: 1,
             parent_beacon_block_root: Some(H256::from_low_u64_be(0x1337)),
+            excess_blob_gas: Some(0),
             ..Header::default()
         };
 
