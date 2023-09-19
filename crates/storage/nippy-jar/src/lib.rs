@@ -595,16 +595,12 @@ mod tests {
 
         // Read file
         {
-            let mut loaded_nippy = NippyJar::load(file_path.path()).unwrap();
+            let loaded_nippy = NippyJar::load(file_path.path()).unwrap();
 
-            let mut dicts = vec![];
-            if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor.as_mut() {
-                dicts = zstd.generate_decompress_dictionaries().unwrap()
-            }
-            if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor.as_ref() {
+            if let Some(Compressors::Zstd(zstd)) = &loaded_nippy.compressor {
                 let mut cursor = NippyJarCursor::new(
                     &loaded_nippy,
-                    Some(zstd.generate_decompressors(&dicts).unwrap()),
+                    Some(Mutex::new(zstd.generate_decompressors().unwrap())),
                 )
                 .unwrap();
 
@@ -621,7 +617,7 @@ mod tests {
                     // Simulates `by_hash` queries by iterating col1 values, which were used to
                     // create the inner index.
                     let row_by_value = cursor
-                        .row_by_key_with_cols::<BLOCKS_FULL_MASK, BLOCKS_COLUMNS>(v0)
+                        .row_by_filter_with_cols::<BLOCKS_FULL_MASK, BLOCKS_COLUMNS>(v0)
                         .unwrap()
                         .unwrap();
                     assert_eq!((&row_by_value[0], &row_by_value[1]), (*v0, *v1));
@@ -640,7 +636,7 @@ mod tests {
                     // Simulates `by_hash` queries by iterating col1 values, which were used to
                     // create the inner index.
                     let row_by_value = cursor
-                        .row_by_key_with_cols::<BLOCKS_BLOCK_MASK, BLOCKS_COLUMNS>(v0)
+                        .row_by_filter_with_cols::<BLOCKS_BLOCK_MASK, BLOCKS_COLUMNS>(v0)
                         .unwrap()
                         .unwrap();
                     assert_eq!(row_by_value.len(), 1);
@@ -661,7 +657,7 @@ mod tests {
                     // Simulates `by_hash` queries by iterating col1 values, which were used to
                     // create the inner index.
                     let row_by_value = cursor
-                        .row_by_key_with_cols::<BLOCKS_WITHDRAWAL_MASK, BLOCKS_COLUMNS>(v0)
+                        .row_by_filter_with_cols::<BLOCKS_WITHDRAWAL_MASK, BLOCKS_COLUMNS>(v0)
                         .unwrap()
                         .unwrap();
                     assert_eq!(row_by_value.len(), 1);
@@ -682,7 +678,7 @@ mod tests {
                     // Simulates `by_hash` queries by iterating col1 values, which were used to
                     // create the inner index.
                     assert!(cursor
-                        .row_by_key_with_cols::<BLOCKS_EMPTY_MASK, BLOCKS_COLUMNS>(v0)
+                        .row_by_filter_with_cols::<BLOCKS_EMPTY_MASK, BLOCKS_COLUMNS>(v0)
                         .unwrap()
                         .unwrap()
                         .is_empty());
