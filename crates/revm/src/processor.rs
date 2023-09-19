@@ -587,7 +587,7 @@ mod tests {
             if let Some(bytecode) = bytecode {
                 let hash = keccak256(&bytecode);
                 account.bytecode_hash = Some(hash);
-                self.contracts.insert(hash, Bytecode::new_raw(bytecode.into()));
+                self.contracts.insert(hash, Bytecode::new_raw(bytecode));
             }
             self.accounts.insert(address, (storage, account));
         }

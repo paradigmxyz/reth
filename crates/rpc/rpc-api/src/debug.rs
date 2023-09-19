@@ -1,5 +1,5 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, Address, H256};
+use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, H256};
 use reth_rpc_types::{
     trace::geth::{
         BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,

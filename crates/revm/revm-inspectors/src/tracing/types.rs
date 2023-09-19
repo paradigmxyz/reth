@@ -303,7 +303,7 @@ impl CallTraceNode {
         if self.kind().is_any_create() {
             let code = self.trace.output.clone();
             if acc.code == Delta::Unchanged {
-                acc.code = Delta::Added(code.into())
+                acc.code = Delta::Added(code)
             }
         }
 
@@ -382,12 +382,12 @@ impl CallTraceNode {
             CallKind::Call | CallKind::StaticCall | CallKind::CallCode | CallKind::DelegateCall => {
                 TraceOutput::Call(CallOutput {
                     gas_used: U64::from(self.trace.gas_used),
-                    output: self.trace.output.clone().into(),
+                    output: self.trace.output.clone(),
                 })
             }
             CallKind::Create | CallKind::Create2 => TraceOutput::Create(CreateOutput {
                 gas_used: U64::from(self.trace.gas_used),
-                code: self.trace.output.clone().into(),
+                code: self.trace.output.clone(),
                 address: self.trace.address,
             }),
         }
@@ -448,7 +448,7 @@ impl CallTraceNode {
                     to: self.trace.address,
                     value: self.trace.value,
                     gas: U64::from(self.trace.gas_limit),
-                    input: self.trace.data.clone().into(),
+                    input: self.trace.data.clone(),
                     call_type: self.kind().into(),
                 })
             }
@@ -456,7 +456,7 @@ impl CallTraceNode {
                 from: self.trace.caller,
                 value: self.trace.value,
                 gas: U64::from(self.trace.gas_limit),
-                init: self.trace.data.clone().into(),
+                init: self.trace.data.clone(),
             }),
         }
     }
@@ -472,8 +472,8 @@ impl CallTraceNode {
             value: Some(self.trace.value),
             gas: U256::from(self.trace.gas_limit),
             gas_used: U256::from(self.trace.gas_used),
-            input: self.trace.data.clone().into(),
-            output: (!self.trace.output.is_empty()).then(|| self.trace.output.clone().into()),
+            input: self.trace.data.clone(),
+            output: (!self.trace.output.is_empty()).then(|| self.trace.output.clone()),
             error: None,
             revert_reason: None,
             calls: Default::default(),
@@ -494,7 +494,7 @@ impl CallTraceNode {
                 .map(|log| CallLogFrame {
                     address: Some(self.execution_address()),
                     topics: Some(log.topics.clone()),
-                    data: Some(log.data.clone().into()),
+                    data: Some(log.data.clone()),
                 })
                 .collect();
         }

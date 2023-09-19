@@ -25,7 +25,7 @@ where
     pub(crate) fn get_code(&self, address: Address, block_id: Option<BlockId>) -> EthResult<Bytes> {
         let state = self.state_at_block_id_or_latest(block_id)?;
         let code = state.account_code(address)?.unwrap_or_default();
-        Ok(code.original_bytes().into())
+        Ok(code.original_bytes())
     }
 
     pub(crate) fn balance(&self, address: Address, block_id: Option<BlockId>) -> EthResult<U256> {

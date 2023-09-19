@@ -587,7 +587,7 @@ pub enum SignError {
 /// [ExecutionResult::Success].
 pub(crate) fn ensure_success(result: ExecutionResult) -> EthResult<Bytes> {
     match result {
-        ExecutionResult::Success { output, .. } => Ok(output.into_data().into()),
+        ExecutionResult::Success { output, .. } => Ok(output.into_data()),
         ExecutionResult::Revert { output, .. } => {
             Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into())
         }

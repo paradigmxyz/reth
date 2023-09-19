@@ -330,7 +330,7 @@ where
             })
             .await?;
         let gas_used = res.result.gas_used();
-        let return_value = result_output(&res.result).unwrap_or_default().into();
+        let return_value = result_output(&res.result).unwrap_or_default();
         let frame = inspector.into_geth_builder().geth_traces(gas_used, return_value, config);
 
         Ok(frame.into())
@@ -530,7 +530,7 @@ where
 
         let (res, _) = inspect(db, env, &mut inspector)?;
         let gas_used = res.result.gas_used();
-        let return_value = result_output(&res.result).unwrap_or_default().into();
+        let return_value = result_output(&res.result).unwrap_or_default();
         let frame = inspector.into_geth_builder().geth_traces(gas_used, return_value, config);
 
         Ok((frame.into(), res.state))

@@ -18,7 +18,7 @@ pub fn into_reth_log(log: Log) -> RethLog {
     RethLog {
         address: Address(log.address.0),
         topics: log.topics.into_iter().map(|h| H256::new(h.0)).collect(),
-        data: log.data.into(),
+        data: log.data,
     }
 }
 
