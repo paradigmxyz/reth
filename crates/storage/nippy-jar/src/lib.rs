@@ -267,7 +267,7 @@ pub enum NippyJarError {
     FilterMaxCapacity,
     #[error("Cuckoo was not properly initialized after loaded.")]
     FilterCuckooNotLoaded,
-    #[error("Perfect hashing function wasn't added any keys.")]
+    #[error("Perfect hashing function doesn't have any keys added.")]
     PHFMissingKeys,
     #[error("NippyJar initialized without perfect hashing function.")]
     PHFMissing,
