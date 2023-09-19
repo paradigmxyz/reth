@@ -83,7 +83,7 @@ impl<'a> NippyJarCursor<'a> {
         self.next_row()
     }
 
-    /// Advances cursor to next row and returns it.
+    /// Returns the current value and advances the row.
     pub fn next_row(&mut self) -> Result<Option<Row>, NippyJarError> {
         if self.row as usize * self.jar.columns >= self.jar.offsets.len() {
             // Has reached the end
@@ -140,6 +140,8 @@ impl<'a> NippyJarCursor<'a> {
         self.next_row_with_cols::<MASK, COLUMNS>()
     }
 
+    /// Returns the current value and advances the row.
+    /// 
     /// Uses a `MASK` to only read certain columns from the row.
     pub fn next_row_with_cols<const MASK: usize, const COLUMNS: usize>(
         &mut self,
