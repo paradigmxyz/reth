@@ -49,9 +49,7 @@ impl Zstd {
     /// If using dictionaries, creates a list of [`DecoderDictionary`].
     ///
     /// Consumes `self.raw_dictionaries` in the process.
-    pub fn generate_decompress_dictionaries<'a, 'b>(
-        &'a mut self,
-    ) -> Option<Vec<DecoderDictionary<'b>>> {
+    pub fn generate_decompress_dictionaries<'a>(&mut self) -> Option<Vec<DecoderDictionary<'a>>> {
         self.raw_dictionaries.take().map(|dicts| {
             // TODO Can we use ::new instead, and avoid consuming?
             dicts.iter().map(|dict| DecoderDictionary::copy(dict)).collect()
@@ -162,6 +160,7 @@ impl Compression for Zstd {
         decoder.read_exact(&mut decompressed)?;
         Ok(decompressed)
     }
+
     fn compress_to<W: Write>(&self, src: &[u8], dest: &mut W) -> Result<(), NippyJarError> {
         let level = 0;
 

@@ -84,8 +84,8 @@ impl<'a> NippyJarCursor<'a> {
         self.next_row()
     }
 
-    /// Advances cursor to next row and returns it.
-    pub fn next_row(&mut self) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
+    /// Returns the current value and advances the row.
+    pub fn next_row(&mut self) -> Result<Option<Row>, NippyJarError> {
         if self.row as usize * self.jar.columns >= self.jar.offsets.len() {
             // Has reached the end
             return Ok(None)
@@ -103,24 +103,24 @@ impl<'a> NippyJarCursor<'a> {
         Ok(Some(row))
     }
 
-    /// Returns a row, searching it by an entry used during [`NippyJar::prepare_index`]  by using a
+    /// Returns a row, searching it by a key used during [`NippyJar::prepare_index`]  by using a
     /// `MASK` to only read certain columns from the row.
     ///
     /// **May return false positives.**
     ///
     /// Example usage would be querying a transactions file with a transaction hash which is **NOT**
     /// stored in file.
-    pub fn row_by_filter_with_cols<const MASK: usize, const COLUMNS: usize>(
+    pub fn row_by_key_with_cols<const MASK: usize, const COLUMNS: usize>(
         &mut self,
-        value: &[u8],
-    ) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
+        key: &[u8],
+    ) -> Result<Option<Row>, NippyJarError> {
         if let (Some(filter), Some(phf)) = (&self.jar.filter, &self.jar.phf) {
             // TODO: is it worth to parallize both?
 
             // May have false positives
-            if filter.contains(value)? {
+            if filter.contains(key)? {
                 // May have false positives
-                if let Some(row_index) = phf.get_index(value)? {
+                if let Some(row_index) = phf.get_index(key)? {
                     self.row =
                         self.jar.offsets_index.access(row_index as usize).expect("built from same")
                             as u64;
@@ -129,22 +129,24 @@ impl<'a> NippyJarCursor<'a> {
             }
         }
 
-        Ok(None)
+        Err(NippyJarError::UnsupportedFilterQuery)
     }
 
     /// Returns a row by its number by using a `MASK` to only read certain columns from the row.
     pub fn row_by_number_with_cols<const MASK: usize, const COLUMNS: usize>(
         &mut self,
         row: usize,
-    ) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
+    ) -> Result<Option<Row>, NippyJarError> {
         self.row = row as u64;
         self.next_row_with_cols::<MASK, COLUMNS>()
     }
 
+    /// Returns the current value and advances the row.
+    ///
     /// Uses a `MASK` to only read certain columns from the row.
     pub fn next_row_with_cols<const MASK: usize, const COLUMNS: usize>(
         &mut self,
-    ) -> Result<Option<Vec<Vec<u8>>>, NippyJarError> {
+    ) -> Result<Option<Row>, NippyJarError> {
         debug_assert!(COLUMNS == self.jar.columns);
 
         if self.row as usize * self.jar.columns >= self.jar.offsets.len() {
@@ -166,7 +168,7 @@ impl<'a> NippyJarCursor<'a> {
     }
 
     /// Takes the column index and reads the value for the corresponding column.
-    fn read_value(&mut self, column: usize, row: &mut Vec<Vec<u8>>) -> Result<(), NippyJarError> {
+    fn read_value(&mut self, column: usize, row: &mut Row) -> Result<(), NippyJarError> {
         // Find out the offset of the column value
         let offset_pos = self.row as usize * self.jar.columns + column;
         let value_offset = self.jar.offsets.select(offset_pos).expect("should exist");
@@ -179,18 +181,14 @@ impl<'a> NippyJarCursor<'a> {
             &self.mmap_handle[value_offset..next_value_offset]
         };
 
-        if let Some(zstd_dict_decompressors) = &self.zstd_decompressors {
-            // Uses zstd dictionaries
-            let extra_capacity = (column_value.len() * 2).saturating_sub(self.tmp_buf.capacity());
+        if let Some(zstd_dict_decompressors) = self.zstd_decompressors.as_mut() {
             self.tmp_buf.clear();
-            self.tmp_buf.reserve(extra_capacity);
 
-            zstd_dict_decompressors
-                .lock()
-                .unwrap()
-                .get_mut(column)
-                .unwrap()
-                .decompress_to_buffer(column_value, &mut self.tmp_buf)?;
+            if let Some(decompressor) = zstd_dict_decompressors.get_mut(column) {
+                Zstd::decompress_with_dictionary(column_value, &mut self.tmp_buf, decompressor)?;
+            }
+
+            debug_assert!(!self.tmp_buf.is_empty());
 
             row.push(self.tmp_buf.clone());
         } else if let Some(compression) = &self.jar.compressor {
