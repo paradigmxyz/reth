@@ -715,7 +715,7 @@ mod tests {
         // header.timestamp
         // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH + HISTORY_BUFFER_LENGTH
         // should be parent_beacon_block_root
-        let history_buffer_length = 98304u64;
+        let history_buffer_length = 8191u64;
         let timestamp_index = header.timestamp % history_buffer_length;
         let parent_beacon_block_root_index =
             timestamp_index % history_buffer_length + history_buffer_length;
@@ -960,7 +960,7 @@ mod tests {
         // header.timestamp
         // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH + HISTORY_BUFFER_LENGTH
         // should be parent_beacon_block_root
-        let history_buffer_length = 98304u64;
+        let history_buffer_length = 8191u64;
         let timestamp_index = header.timestamp % history_buffer_length;
         let parent_beacon_block_root_index =
             timestamp_index % history_buffer_length + history_buffer_length;
