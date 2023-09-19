@@ -1,6 +1,11 @@
 use reth_consensus_common::calc;
-use reth_primitives::{Address, ChainSpec, Hardfork, Header, Withdrawal, U256};
-use std::collections::HashMap;
+use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
+use reth_primitives::{
+    constants::SYSTEM_ADDRESS, Address, ChainSpec, Hardfork, Header, Withdrawal, H256, U256,
+};
+use reth_revm_primitives::{env::fill_tx_env_with_beacon_root_contract_call, Database};
+use revm::{primitives::ResultAndState, DatabaseCommit, EVM};
+use std::{collections::HashMap, fmt::Debug};
 
 /// Collect all balance changes at the end of the block.
 ///
@@ -44,6 +49,64 @@ pub fn post_block_balance_increments(
     );
 
     balance_increments
+}
+
+/// Applies the pre-block call to the EIP-4788 beacon block root contract, using the given block,
+/// [ChainSpec], EVM.
+///
+/// If cancun is not activated or the block is the genesis block, then this is a no-op, and no
+/// state changes are made.
+#[inline]
+pub fn apply_beacon_root_contract_call<DB: Database + DatabaseCommit>(
+    chain_spec: &ChainSpec,
+    block_timestamp: u64,
+    block_number: u64,
+    block_parent_beacon_block_root: Option<H256>,
+    evm: &mut EVM<DB>,
+) -> Result<(), BlockExecutionError>
+where
+    <DB as Database>::Error: Debug,
+{
+    if chain_spec.is_cancun_activated_at_timestamp(block_timestamp) {
+        // if the block number is zero (genesis block) then the parent beacon block root must
+        // be 0x0 and no system transaction may occur as per EIP-4788
+        if block_number == 0 {
+            if block_parent_beacon_block_root != Some(H256::zero()) {
+                return Err(BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero.into())
+            }
+        } else {
+            let parent_beacon_block_root = block_parent_beacon_block_root.ok_or(
+                BlockExecutionError::from(BlockValidationError::MissingParentBeaconBlockRoot),
+            )?;
+
+            // get previous env
+            let previous_env = evm.env.clone();
+
+            // modify env for pre block call
+            fill_tx_env_with_beacon_root_contract_call(&mut evm.env, parent_beacon_block_root);
+
+            let ResultAndState { mut state, .. } = match evm.transact() {
+                Ok(res) => res,
+                Err(e) => {
+                    evm.env = previous_env;
+                    return Err(BlockExecutionError::from(BlockValidationError::EVM {
+                        hash: Default::default(),
+                        message: format!("{e:?}"),
+                    }))
+                }
+            };
+
+            state.remove(&SYSTEM_ADDRESS);
+            state.remove(&evm.env.block.coinbase);
+
+            let db = evm.db().expect("db to not be moved");
+            db.commit(state);
+
+            // re-set the previous env
+            evm.env = previous_env;
+        }
+    }
+    Ok(())
 }
 
 /// Returns a map of addresses to their balance increments if shanghai is active at the given
