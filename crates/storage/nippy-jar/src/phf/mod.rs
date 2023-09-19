@@ -21,7 +21,8 @@ pub trait KeySet: Serialize + for<'a> Deserialize<'a> {
 }
 
 /// Enumerates all types of perfect hashing functions.
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
 pub enum Functions {
     Fmph(Fmph),
     GoFmph(GoFmph),

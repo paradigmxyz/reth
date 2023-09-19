@@ -22,7 +22,8 @@ use phf::{Fmph, Functions, GoFmph, KeySet};
 
 const NIPPY_JAR_VERSION: usize = 1;
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct NippyJar {
     /// Version
     version: usize,

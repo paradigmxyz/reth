@@ -39,6 +39,7 @@ impl KeySet for GoFmph {
     }
 }
 
+#[cfg(test)]
 impl PartialEq for GoFmph {
     fn eq(&self, other: &Self) -> bool {
         match (&self.function, &other.function) {
@@ -46,20 +47,13 @@ impl PartialEq for GoFmph {
                 func1.level_sizes() == func2.level_sizes() &&
                     func1.write_bytes() == func2.write_bytes() &&
                     {
-                        #[cfg(not(test))]
-                        {
-                            unimplemented!("No way to figure it out without exporting ( potentially expensive), so only allow direct comparison on a test")
-                        }
-                        #[cfg(test)]
-                        {
-                            let mut f1 = Vec::with_capacity(func1.write_bytes());
-                            func1.write(&mut f1).expect("enough capacity");
+                        let mut f1 = Vec::with_capacity(func1.write_bytes());
+                        func1.write(&mut f1).expect("enough capacity");
 
-                            let mut f2 = Vec::with_capacity(func2.write_bytes());
-                            func2.write(&mut f2).expect("enough capacity");
+                        let mut f2 = Vec::with_capacity(func2.write_bytes());
+                        func2.write(&mut f2).expect("enough capacity");
 
-                            return f1 == f2
-                        }
+                        f1 == f2
                     }
             }
             (None, None) => true,

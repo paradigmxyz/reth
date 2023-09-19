@@ -26,7 +26,8 @@ pub trait Compression: Serialize + for<'a> Deserialize<'a> {
     }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
 pub enum Compressors {
     Zstd(Zstd),
     // Avoids irrefutable let errors. Remove this after adding another one.
