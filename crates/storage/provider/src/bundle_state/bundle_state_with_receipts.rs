@@ -116,24 +116,26 @@ impl BundleStateWithReceipts {
     /// use reth_primitives::{Account, U256, Receipts};
     /// use reth_provider::BundleStateWithReceipts;
     /// use reth_db::{test_utils::create_test_rw_db, database::Database};
-    /// use std::collections::HashMap;
+    /// use reth_revm_primitives::{db::states::bundle_state::BundleBuilder, into_revm_acc, primitives::HashMap};
     ///
     /// // Initialize the database
     /// let db = create_test_rw_db();
     ///
     /// // Initialize the bundle state
-    /// let bundle = BundleStateWithReceipts::new_init(
-    ///     HashMap::from([(
-    ///         [0x11;20].into(),
-    ///         (
-    ///             None,
-    ///             Some(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
-    ///             HashMap::from([]),
-    ///         ),
-    ///     )]),
-    ///     HashMap::from([]),
+    /// let mut bundle_builder = BundleBuilder::new(0..=0);
+    ///
+    /// bundle_builder = bundle_builder.state_present_account_info(
+    ///     [0x11;20].into(),
+    ///     into_revm_acc(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
+    /// );
+    /// bundle_builder = bundle_builder.state_storage(
+    ///    [0x11;20].into(),
+    ///    HashMap::from([]),
+    /// );
+    ///
+    /// let bundle = BundleStateWithReceipts::new(
+    ///     bundle_builder.build(),
     ///     vec![],
-    ///     Receipts::new(),
     ///     0,
     /// );
     ///
