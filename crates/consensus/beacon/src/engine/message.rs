@@ -3,7 +3,7 @@ use crate::{
     BeaconConsensusEngineEvent,
 };
 use futures::{future::Either, FutureExt};
-use reth_interfaces::consensus::ForkchoiceState;
+use reth_interfaces::{consensus::ForkchoiceState, RethResult};
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkChoiceUpdateResult, ForkchoiceUpdateError,
@@ -158,7 +158,7 @@ pub enum BeaconEngineMessage {
         /// The payload attributes for block building.
         payload_attrs: Option<PayloadAttributes>,
         /// The sender for returning forkchoice updated result.
-        tx: oneshot::Sender<Result<OnForkChoiceUpdated, reth_interfaces::Error>>,
+        tx: oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
     },
     /// Message with exchanged transition configuration.
     TransitionConfigurationExchanged,

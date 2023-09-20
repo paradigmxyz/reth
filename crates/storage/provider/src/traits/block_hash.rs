@@ -1,5 +1,5 @@
 use auto_impl::auto_impl;
-use reth_interfaces::Result;
+use reth_interfaces::RethResult;
 use reth_primitives::{BlockHashOrNumber, BlockNumber, H256};
 
 /// Client trait for fetching block hashes by number.
@@ -7,11 +7,11 @@ use reth_primitives::{BlockHashOrNumber, BlockNumber, H256};
 pub trait BlockHashReader: Send + Sync {
     /// Get the hash of the block with the given number. Returns `None` if no block with this number
     /// exists.
-    fn block_hash(&self, number: BlockNumber) -> Result<Option<H256>>;
+    fn block_hash(&self, number: BlockNumber) -> RethResult<Option<H256>>;
 
     /// Get the hash of the block with the given number. Returns `None` if no block with this number
     /// exists.
-    fn convert_block_hash(&self, hash_or_number: BlockHashOrNumber) -> Result<Option<H256>> {
+    fn convert_block_hash(&self, hash_or_number: BlockHashOrNumber) -> RethResult<Option<H256>> {
         match hash_or_number {
             BlockHashOrNumber::Hash(hash) => Ok(Some(hash)),
             BlockHashOrNumber::Number(num) => self.block_hash(num),
@@ -23,5 +23,6 @@ pub trait BlockHashReader: Send + Sync {
     /// Returns the available hashes of that range.
     ///
     /// Note: The range is `start..end`, so the expected result is `[start..end)`
-    fn canonical_hashes_range(&self, start: BlockNumber, end: BlockNumber) -> Result<Vec<H256>>;
+    fn canonical_hashes_range(&self, start: BlockNumber, end: BlockNumber)
+        -> RethResult<Vec<H256>>;
 }
