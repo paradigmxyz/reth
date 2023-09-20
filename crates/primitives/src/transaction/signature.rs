@@ -1,4 +1,5 @@
 use crate::{transaction::util::secp256k1, Address, H256, U256};
+use alloy_primitives::Bytes;
 use bytes::Buf;
 use reth_codecs::{derive_arbitrary, Compact};
 use reth_rlp::{Decodable, DecodeError, Encodable};
@@ -135,6 +136,11 @@ impl Signature {
         let v = u8::from(self.odd_y_parity) + 27;
         sig[64] = v;
         sig
+    }
+
+    /// Turn this signature into its hex-encoded representation.
+    pub fn to_hex_bytes(&self) -> Bytes {
+        Bytes(hex::encode(self.to_bytes()).into())
     }
 
     /// Calculates a heuristic for the in-memory size of the [Signature].
