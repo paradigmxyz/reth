@@ -25,15 +25,23 @@ macro_rules! snapshots {
             $($name: $ty,)+
         }
 
+        /// Thresholds for snapshotting per data part, measured in part-specific unit (usually
+        /// [BlockNumber] or [TxNumber]).
+        ///
+        /// When the specified number of entities accumulated in database since last snapshot for
+        /// data part, [Snapshotter::get_snapshot_request] will return [Option::Some].
         pub struct SnapshotThresholds {
             $($name: u64,)+
         }
 
+        /// Snapshot request with targets per data part, measured in part-specific unit (usually
+        /// [BlockNumber] or [TxNumber]).
         pub struct SnapshotRequest {
             $($name: Option<$ty>,)+
         }
 
         impl SnapshotRequest {
+            /// Returns `true` if any of the data parts has targets, i.e. is [`Option::Some`].
             pub fn any(&self) -> bool {
                 $(self.$name.is_some())||+
             }
