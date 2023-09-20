@@ -1800,11 +1800,11 @@ where
                     this.sync.is_pipeline_active(),
                 )? {
                     this.on_hook_result(result)?;
-                }
 
-                // ensure we're polling until pending while also checking for new engine messages
-                // before polling the next hook
-                continue 'main
+                    // ensure we're polling until pending while also checking for new engine
+                    // messages before polling the next hook
+                    continue 'main
+                }
             }
 
             // incoming engine messages and sync events are drained, so we can yield back
