@@ -12,7 +12,8 @@ pub trait Filter {
     fn contains(&self, element: &[u8]) -> Result<bool, NippyJarError>;
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
 pub enum Filters {
     Cuckoo(Cuckoo),
     // Avoids irrefutable let errors. Remove this after adding another one.

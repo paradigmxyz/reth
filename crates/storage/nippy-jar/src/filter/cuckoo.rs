@@ -46,21 +46,14 @@ impl std::fmt::Debug for Cuckoo {
     }
 }
 
+#[cfg(test)]
 impl PartialEq for Cuckoo {
     fn eq(&self, _other: &Self) -> bool {
-        self.remaining == _other.remaining &&
-            {
-                #[cfg(not(test))]
-                {
-                    unimplemented!("No way to figure it out without exporting (expensive), so only allow direct comparison on a test")
-                }
-                #[cfg(test)]
-                {
-                    let f1 = self.filter.export();
-                    let f2 = _other.filter.export();
-                    return f1.length == f2.length && f1.values == f2.values
-                }
-            }
+        self.remaining == _other.remaining && {
+            let f1 = self.filter.export();
+            let f2 = _other.filter.export();
+            f1.length == f2.length && f1.values == f2.values
+        }
     }
 }
 

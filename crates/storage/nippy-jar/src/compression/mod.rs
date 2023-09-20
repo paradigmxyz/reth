@@ -5,7 +5,7 @@ use std::io::Write;
 mod zstd;
 pub use zstd::{Zstd, ZstdState};
 
-pub trait Compression {
+pub trait Compression: Serialize + for<'a> Deserialize<'a> {
     /// Returns decompressed data.
     fn decompress(&self, value: &[u8]) -> Result<Vec<u8>, NippyJarError>;
 
@@ -26,7 +26,8 @@ pub trait Compression {
     }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
 pub enum Compressors {
     Zstd(Zstd),
     // Avoids irrefutable let errors. Remove this after adding another one.
