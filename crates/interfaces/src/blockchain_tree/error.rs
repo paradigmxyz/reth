@@ -22,15 +22,30 @@ pub enum BlockchainTreeError {
         /// The internal identifier for the side chain.
         chain_id: u64,
     },
+    /// Thrown if a canonical chain header cannot be found.
     #[error("Canonical chain header #{block_hash} can't be found ")]
-    CanonicalChain { block_hash: BlockHash },
+    CanonicalChain {
+        /// The block hash of the missing canonical chain header.
+        block_hash: BlockHash,
+    },
+    /// Thrown if a block number cannot be found in the blockchain tree chain.
     #[error("Block number #{block_number} not found in blockchain tree chain")]
-    BlockNumberNotFoundInChain { block_number: BlockNumber },
+    BlockNumberNotFoundInChain {
+        /// The block number that could not be found.
+        block_number: BlockNumber,
+    },
+    /// Thrown if a block hash cannot be found in the blockchain tree chain.
     #[error("Block hash {block_hash} not found in blockchain tree chain")]
-    BlockHashNotFoundInChain { block_hash: BlockHash },
+    BlockHashNotFoundInChain {
+        /// The block hash that could not be found.
+        block_hash: BlockHash,
+    },
     // Thrown if the block failed to buffer
     #[error("Block with hash {block_hash:?} failed to buffer")]
-    BlockBufferingFailed { block_hash: BlockHash },
+    BlockBufferingFailed {
+        /// The block hash of the block that failed to buffer.
+        block_hash: BlockHash,
+    },
 }
 
 /// Result alias for `CanonicalError`
