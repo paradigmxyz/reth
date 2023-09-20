@@ -1694,8 +1694,7 @@ where
                 EngineHookEvent::Started => {
                     // If the hook has read-write access to the database, it means that the engine
                     // can't process any FCU/payload messages from CL. To prevent CL from sending us
-                    // unneeded updates, we need to respond `true` on
-                    // `eth_syncing` request.
+                    // unneeded updates, we need to respond `true` on `eth_syncing` request.
                     self.sync_state_updater.update_sync_state(SyncState::Syncing)
                 }
                 EngineHookEvent::Finished(_) => {
