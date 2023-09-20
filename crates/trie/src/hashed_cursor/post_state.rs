@@ -630,14 +630,14 @@ mod tests {
 
         let db = create_test_rw_db();
         db.update(|tx| {
-            for (key, account) in accounts.iter().filter(|x| x.0[0] % 2 == 0) {
+            for (key, account) in accounts.iter().filter(|x| x.0[31] % 2 == 0) {
                 tx.put::<tables::HashedAccount>(*key, *account).unwrap();
             }
         })
         .unwrap();
 
         let mut hashed_post_state = HashedPostState::default();
-        for (hashed_address, account) in accounts.iter().filter(|x| x.0[0] % 2 != 0) {
+        for (hashed_address, account) in accounts.iter().filter(|x| x.0[31] % 2 != 0) {
             hashed_post_state.insert_account(*hashed_address, *account);
         }
         hashed_post_state.sort();
@@ -657,14 +657,14 @@ mod tests {
 
         let db = create_test_rw_db();
         db.update(|tx| {
-            for (key, account) in accounts.iter().filter(|x| x.0[0] % 2 == 0) {
+            for (key, account) in accounts.iter().filter(|x| x.0[31] % 2 == 0) {
                 tx.put::<tables::HashedAccount>(*key, *account).unwrap();
             }
         })
         .unwrap();
 
         let mut hashed_post_state = HashedPostState::default();
-        for (hashed_address, account) in accounts.iter().filter(|x| x.0[0] % 2 != 0) {
+        for (hashed_address, account) in accounts.iter().filter(|x| x.0[31] % 2 != 0) {
             if removed_keys.contains(hashed_address) {
                 hashed_post_state.insert_cleared_account(*hashed_address);
             } else {

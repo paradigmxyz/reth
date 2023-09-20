@@ -552,6 +552,7 @@ pub fn verify_receipt<'a>(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use reth_primitives::{
         constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
         keccak256, Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, MAINNET,
@@ -560,8 +561,6 @@ mod tests {
     use reth_revm_primitives::TransitionState;
     use revm::Database;
     use std::{collections::HashMap, str::FromStr};
-
-    use super::*;
 
     /// Returns the beacon root contract code
     fn beacon_root_contract_code() -> Bytes {
@@ -731,7 +730,7 @@ mod tests {
             .db_mut()
             .storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index))
             .expect("storage value should exist");
-        assert_eq!(parent_beacon_block_root_storage, U256::from(0x1337));
+        assert_eq!(parent_beacon_block_root_storage, U256::from(0x69));
     }
 
     #[test]
@@ -976,6 +975,6 @@ mod tests {
             .db_mut()
             .storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index))
             .unwrap();
-        assert_eq!(parent_beacon_block_root_storage, U256::from(0x1337));
+        assert_eq!(parent_beacon_block_root_storage, U256::from(0x69));
     }
 }
