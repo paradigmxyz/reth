@@ -13,6 +13,7 @@ pub trait Filter {
     fn contains(&self, element: &[u8]) -> Result<bool, NippyJarError>;
 }
 
+/// Enum with different [`Filter`] types.
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub enum Filters {

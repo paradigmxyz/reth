@@ -27,6 +27,7 @@ pub trait Compression: Serialize + for<'a> Deserialize<'a> {
     }
 }
 
+/// Enum with different [`Compression`] types.
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub enum Compressors {
