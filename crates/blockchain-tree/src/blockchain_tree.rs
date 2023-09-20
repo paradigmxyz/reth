@@ -9,7 +9,7 @@ use crate::{
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
     blockchain_tree::{
-        error::{BlockchainTreeError, InsertBlockError, InsertBlockErrorKind},
+        error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
         BlockStatus, CanonicalOutcome, InsertPayloadOk,
     },
     consensus::{Consensus, ConsensusError},
@@ -937,12 +937,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         if let Some(header) = self.find_canonical_header(block_hash)? {
             info!(target: "blockchain_tree", ?block_hash, "Block is already canonical, ignoring.");
             let td = self.externals.database().provider()?.header_td(block_hash)?.ok_or(
-                BlockExecutionError::from(BlockValidationError::MissingTotalDifficulty {
+                CanonicalError::from(BlockValidationError::MissingTotalDifficulty {
                     hash: *block_hash,
                 }),
             )?;
             if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(td, U256::ZERO) {
-                return Err(BlockExecutionError::from(BlockValidationError::BlockPreMerge {
+                return Err(CanonicalError::from(BlockValidationError::BlockPreMerge {
                     hash: *block_hash,
                 })
                 .into())
@@ -952,10 +952,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         let Some(chain_id) = self.block_indices.get_blocks_chain_id(block_hash) else {
             warn!(target: "blockchain_tree", ?block_hash,  "Block hash not found in block indices");
-            // TODO: better error
-            return Err(
-                BlockExecutionError::BlockHashNotFoundInChain { block_hash: *block_hash }.into()
-            )
+            return Err(CanonicalError::from(BlockchainTreeError::BlockHashNotFoundInChain {
+                block_hash: *block_hash,
+            })
+            .into())
         };
         let chain = self.chains.remove(&chain_id).expect("To be present");
 

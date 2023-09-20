@@ -6,7 +6,7 @@ use std::{
 };
 
 mod controller;
-pub(crate) use controller::EngineHooksController;
+pub(crate) use controller::{EngineHooksController, PolledHook};
 
 mod prune;
 pub use prune::PruneHook;
@@ -88,8 +88,6 @@ impl EngineHookEvent {
 pub enum EngineHookAction {
     /// Notify about a [SyncState] update.
     UpdateSyncState(SyncState),
-    /// Connect blocks buffered during the hook execution to canonical hashes.
-    ConnectBufferedBlocks,
 }
 
 /// An error returned by [hook][`EngineHook`].
@@ -107,6 +105,7 @@ pub enum EngineHookError {
 }
 
 /// Level of database access the hook needs for execution.
+#[derive(Debug, Copy, Clone)]
 pub enum EngineHookDBAccessLevel {
     /// Read-only database access.
     ReadOnly,

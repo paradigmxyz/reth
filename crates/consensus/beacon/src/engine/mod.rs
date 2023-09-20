@@ -11,7 +11,7 @@ use futures::{Future, StreamExt};
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
-        error::{InsertBlockError, InsertBlockErrorKind},
+        error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
         BlockStatus, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
     },
     consensus::ForkchoiceState,
@@ -39,7 +39,7 @@ use reth_tasks::TaskSpawner;
 use std::{
     pin::Pin,
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll},
     time::Instant,
 };
 use tokio::sync::{
@@ -69,7 +69,7 @@ mod handle;
 pub use handle::BeaconConsensusEngineHandle;
 
 mod forkchoice;
-use crate::hooks::EngineHooks;
+use crate::hooks::{EngineHooks, PolledHook};
 pub use forkchoice::ForkchoiceStatus;
 
 mod metrics;
@@ -690,7 +690,7 @@ where
                 PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash))
             }
             Err(error) => {
-                if let Error::Execution(ref err) = error {
+                if let Error::Canonical(ref err) = error {
                     if err.is_fatal() {
                         tracing::error!(target: "consensus::engine", ?err, "Encountered fatal error");
                         return Err(error)
@@ -929,10 +929,8 @@ where
 
         #[allow(clippy::single_match)]
         match &error {
-            Error::Execution(
-                error @ BlockExecutionError::Validation(BlockValidationError::BlockPreMerge {
-                    ..
-                }),
+            Error::Canonical(
+                error @ CanonicalError::Validation(BlockValidationError::BlockPreMerge { .. }),
             ) => {
                 warn!(target: "consensus::engine", ?error, ?state, "Failed to canonicalize the head hash");
                 return PayloadStatus::from_status(PayloadStatusEnum::Invalid {
@@ -1497,7 +1495,9 @@ where
                     // it's part of the canonical chain: if it's the safe or the finalized block
                     if matches!(
                         err,
-                        Error::Execution(BlockExecutionError::BlockHashNotFoundInChain { .. })
+                        Error::Canonical(CanonicalError::BlockchainTree(
+                            BlockchainTreeError::BlockHashNotFoundInChain { .. }
+                        ))
                     ) {
                         // if the inserted block is the currently targeted `finalized` or `safe`
                         // block, we will attempt to make them canonical,
@@ -1683,18 +1683,21 @@ where
         None
     }
 
-    fn on_hook_action(&self, action: EngineHookAction) -> Result<(), BeaconConsensusEngineError> {
-        match action {
-            EngineHookAction::UpdateSyncState(state) => {
-                self.sync_state_updater.update_sync_state(state)
-            }
-            // TODO(alexey): always connect buffered blocks if hook had the
-            //  `EngineHookDBAccessLevel::ReadWrite`
-            EngineHookAction::ConnectBufferedBlocks => {
-                if let Err(error) = self.blockchain.connect_buffered_blocks_to_canonical_hashes() {
-                    error!(target: "consensus::engine", ?error, "Error restoring blockchain tree state");
-                    return Err(error.into())
+    fn on_hook_result(&self, result: PolledHook) -> Result<(), BeaconConsensusEngineError> {
+        if let Some(action) = result.action {
+            match action {
+                EngineHookAction::UpdateSyncState(state) => {
+                    self.sync_state_updater.update_sync_state(state)
                 }
+            }
+        }
+
+        if result.event.is_finished() && result.db_access_level.is_read_write() {
+            // If the hook had read-write access to the database,
+            // it means that the engine may have accumulated some buffered blocks.
+            if let Err(error) = self.blockchain.connect_buffered_blocks_to_canonical_hashes() {
+                error!(target: "consensus::engine", ?error, "Error connecting buffered blocks to canonical hashes on hook result");
+                return Err(error.into())
             }
         }
 
@@ -1734,10 +1737,8 @@ where
             if let Poll::Ready(result) = this.hooks.poll_running_hook_with_db_write(
                 cx,
                 EngineContext { tip_block_number: this.blockchain.canonical_tip().number },
-            ) {
-                if let Err(err) = this.on_hook_action(result?) {
-                    return Poll::Ready(Err(err))
-                }
+            )? {
+                this.on_hook_result(result)?;
             }
 
             // Process all incoming messages from the CL, these can affect the state of the
@@ -1793,18 +1794,17 @@ where
             // 1. Engine and sync messages are fully drained (both pending)
             // 2. Latest FCU status is not INVALID
             if !this.forkchoice_state_tracker.is_latest_invalid() {
-                let action = ready!(this.hooks.poll_next_hook(
+                if let Poll::Ready(result) = this.hooks.poll_next_hook(
                     cx,
                     EngineContext { tip_block_number: this.blockchain.canonical_tip().number },
                     this.sync.is_pipeline_active(),
-                ))?;
-                if let Err(err) = this.on_hook_action(action) {
-                    return Poll::Ready(Err(err))
-                }
+                )? {
+                    this.on_hook_result(result)?;
 
-                // ensure we're polling until pending while also checking for new engine messages
-                // before polling the next hook
-                continue 'main
+                    // ensure we're polling until pending while also checking for new engine
+                    // messages before polling the next hook
+                    continue 'main
+                }
             }
 
             // incoming engine messages and sync events are drained, so we can yield back

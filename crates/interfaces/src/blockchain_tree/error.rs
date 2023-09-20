@@ -33,6 +33,34 @@ pub enum BlockchainTreeError {
     BlockBufferingFailed { block_hash: BlockHash },
 }
 
+/// Result alias for `CanonicalError`
+pub type CanonicalResult<T> = std::result::Result<T, CanonicalError>;
+
+/// Canonical Errors
+#[allow(missing_docs)]
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+pub enum CanonicalError {
+    /// Error originating from validation operations.
+    #[error(transparent)]
+    Validation(#[from] BlockValidationError),
+    /// Error originating from blockchain tree operations.
+    #[error(transparent)]
+    BlockchainTree(#[from] BlockchainTreeError),
+    /// Error indicating a transaction reverted during execution.
+    #[error("Transaction error on revert: {inner:?}")]
+    CanonicalRevert { inner: String },
+    /// Error indicating a transaction failed to commit during execution.
+    #[error("Transaction error on commit: {inner:?}")]
+    CanonicalCommit { inner: String },
+}
+
+impl CanonicalError {
+    /// Returns `true` if the error is fatal.
+    pub fn is_fatal(&self) -> bool {
+        matches!(self, Self::CanonicalCommit { .. } | Self::CanonicalRevert { .. })
+    }
+}
+
 /// Error thrown when inserting a block failed because the block is considered invalid.
 #[derive(thiserror::Error)]
 #[error(transparent)]
@@ -161,6 +189,9 @@ pub enum InsertBlockErrorKind {
     /// An internal error occurred, like interacting with the database.
     #[error("Internal error")]
     Internal(Box<dyn std::error::Error + Send + Sync>),
+    /// Canonical error.
+    #[error(transparent)]
+    Canonical(CanonicalError),
 }
 
 impl InsertBlockErrorKind {
@@ -214,6 +245,12 @@ impl InsertBlockErrorKind {
                 // any other error, such as database errors, are considered internal errors
                 false
             }
+            InsertBlockErrorKind::Canonical(err) => match err {
+                CanonicalError::BlockchainTree(_) |
+                CanonicalError::CanonicalCommit { .. } |
+                CanonicalError::CanonicalRevert { .. } => false,
+                CanonicalError::Validation(_) => true,
+            },
         }
     }
 
@@ -274,6 +311,7 @@ impl From<crate::Error> for InsertBlockErrorKind {
             Error::Provider(err) => InsertBlockErrorKind::Internal(Box::new(err)),
             Error::Network(err) => InsertBlockErrorKind::Internal(Box::new(err)),
             Error::Custom(err) => InsertBlockErrorKind::Internal(err.into()),
+            Error::Canonical(err) => InsertBlockErrorKind::Canonical(err),
         }
     }
 }

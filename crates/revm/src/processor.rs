@@ -654,7 +654,8 @@ mod tests {
 
     #[test]
     fn eip_4788_non_genesis_call() {
-        let mut header = Header { timestamp: 1, number: 1, ..Header::default() };
+        let mut header =
+            Header { timestamp: 1, number: 1, excess_blob_gas: Some(0), ..Header::default() };
 
         let mut db = StateProviderTest::default();
 
@@ -741,6 +742,7 @@ mod tests {
             timestamp: 1,
             number: 1,
             parent_beacon_block_root: Some(H256::with_last_byte(0x69)),
+            excess_blob_gas: Some(0),
             ..Header::default()
         };
 
@@ -813,6 +815,7 @@ mod tests {
             timestamp: 1,
             number: 1,
             parent_beacon_block_root: Some(H256::with_last_byte(0x69)),
+            excess_blob_gas: Some(0),
             ..Header::default()
         };
 
@@ -912,6 +915,7 @@ mod tests {
             number: 1,
             parent_beacon_block_root: Some(H256::with_last_byte(0x69)),
             base_fee_per_gas: Some(u64::MAX),
+            excess_blob_gas: Some(0),
             ..Header::default()
         };
 

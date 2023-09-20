@@ -73,13 +73,7 @@ impl<DB: Database + 'static> PruneHook<DB> {
             }
         };
 
-        let action = if matches!(event, EngineHookEvent::Finished(Ok(_))) {
-            Some(EngineHookAction::ConnectBufferedBlocks)
-        } else {
-            None
-        };
-
-        Poll::Ready((event, action))
+        Poll::Ready((event, None))
     }
 
     /// This will try to spawn the pruner if it is idle:

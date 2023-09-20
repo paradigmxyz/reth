@@ -73,6 +73,9 @@ pub fn fill_block_env_with_coinbase(
     }
     block_env.basefee = U256::from(header.base_fee_per_gas.unwrap_or_default());
     block_env.gas_limit = U256::from(header.gas_limit);
+
+    // EIP-4844 excess blob gas of this block, introduced in Cancun
+    block_env.excess_blob_gas = header.excess_blob_gas;
 }
 
 /// Return the coinbase address for the given header and chain spec.
