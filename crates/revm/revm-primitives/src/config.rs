@@ -60,6 +60,14 @@ mod tests {
     #[test]
     fn test_to_revm_spec() {
         assert_eq!(
+            revm_spec(&ChainSpecBuilder::mainnet().cancun_activated().build(), Head::default()),
+            revm::primitives::CANCUN
+        );
+        assert_eq!(
+            revm_spec(&ChainSpecBuilder::mainnet().shanghai_activated().build(), Head::default()),
+            revm::primitives::SHANGHAI
+        );
+        assert_eq!(
             revm_spec(&ChainSpecBuilder::mainnet().paris_activated().build(), Head::default()),
             revm::primitives::MERGE
         );
