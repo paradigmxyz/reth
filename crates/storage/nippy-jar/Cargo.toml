@@ -1,12 +1,12 @@
 [package]
-name = "nippy-jar"
+name = "reth-nippy-jar"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license = "Apache-2.0"
-description = "Immutable data store format"
+license.workspace = true
 homepage.workspace = true
 repository.workspace = true
+description = "Immutable data store format"
 
 [lib]
 name = "reth_nippy_jar"

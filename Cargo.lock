@@ -4142,25 +4142,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nippy-jar"
-version = "0.1.0-alpha.8"
-dependencies = [
- "anyhow",
- "bincode",
- "bloomfilter",
- "bytes",
- "cuckoofilter",
- "memmap2 0.7.1",
- "ph",
- "rand 0.8.5",
- "serde",
- "sucds 0.8.0",
- "tempfile",
- "thiserror",
- "zstd",
-]
-
-[[package]]
 name = "nix"
 version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5876,6 +5857,25 @@ dependencies = [
  "serde",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "reth-nippy-jar"
+version = "0.1.0-alpha.8"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "bloomfilter",
+ "bytes",
+ "cuckoofilter",
+ "memmap2 0.7.1",
+ "ph",
+ "rand 0.8.5",
+ "serde",
+ "sucds 0.8.0",
+ "tempfile",
+ "thiserror",
+ "zstd",
 ]
 
 [[package]]
