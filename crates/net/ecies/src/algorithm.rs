@@ -133,9 +133,9 @@ impl ECIES {
 
     /// Create a new ECIES client with the given static secret key and remote peer ID.
     pub fn new_client(secret_key: SecretKey, remote_id: PeerId) -> Result<Self, ECIESError> {
-        let nonce = H256::random();
-        let ephemeral_secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
-
+        let mut rng = thread_rng();
+        let nonce = rng.gen();
+        let ephemeral_secret_key = SecretKey::new(&mut rng);
         Self::new_static_client(secret_key, remote_id, nonce, ephemeral_secret_key)
     }
 
@@ -175,9 +175,9 @@ impl ECIES {
 
     /// Create a new ECIES server with the given static secret key.
     pub fn new_server(secret_key: SecretKey) -> Result<Self, ECIESError> {
-        let nonce = H256::random();
-        let ephemeral_secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
-
+        let mut rng = thread_rng();
+        let nonce = rng.gen();
+        let ephemeral_secret_key = SecretKey::new(&mut rng);
         Self::new_static_server(secret_key, nonce, ephemeral_secret_key)
     }
 
@@ -187,9 +187,11 @@ impl ECIES {
     }
 
     fn encrypt_message(&self, data: &[u8], out: &mut BytesMut) {
+        let mut rng = thread_rng();
+
         out.reserve(secp256k1::constants::UNCOMPRESSED_PUBLIC_KEY_SIZE + 16 + data.len() + 32);
 
-        let secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
+        let secret_key = SecretKey::new(&mut rng);
         out.extend_from_slice(
             &PublicKey::from_secret_key(SECP256K1, &secret_key).serialize_uncompressed(),
         );
@@ -201,7 +203,7 @@ impl ECIES {
         let enc_key = H128::from_slice(&key[..16]);
         let mac_key = sha256(&key[16..32]);
 
-        let iv = H128::random();
+        let iv: H128 = rng.gen();
         let mut encryptor = Ctr64BE::<Aes128>::new((&enc_key.0).into(), (&iv.0).into());
 
         let mut encrypted = data.to_vec();
@@ -578,9 +580,10 @@ mod tests {
 
     #[test]
     fn communicate() {
-        let server_secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
+        let mut rng = thread_rng();
+        let server_secret_key = SecretKey::new(&mut rng);
         let server_public_key = PublicKey::from_secret_key(SECP256K1, &server_secret_key);
-        let client_secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
+        let client_secret_key = SecretKey::new(&mut rng);
 
         let mut server_ecies = ECIES::new_server(server_secret_key).unwrap();
         let mut client_ecies =

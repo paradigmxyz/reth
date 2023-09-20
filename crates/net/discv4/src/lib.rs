@@ -2193,8 +2193,8 @@ mod tests {
             enr_sq: Some(rng.gen()),
         };
 
-        let id = PeerId::random();
-        service.on_ping(ping, addr, id, H256::random());
+        let id = PeerId::random_with(&mut rng);
+        service.on_ping(ping, addr, id, rng.gen());
 
         let key = kad_key(id);
         match service.kbuckets.entry(&key) {
@@ -2225,8 +2225,8 @@ mod tests {
             enr_sq: Some(rng.gen()),
         };
 
-        let id = PeerId::random();
-        service.on_ping(ping, addr, id, H256::random());
+        let id = PeerId::random_with(&mut rng);
+        service.on_ping(ping, addr, id, rng.gen());
 
         let key = kad_key(id);
         match service.kbuckets.entry(&key) {

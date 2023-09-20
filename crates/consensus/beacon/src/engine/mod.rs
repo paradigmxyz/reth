@@ -1833,6 +1833,7 @@ mod tests {
         BeaconForkChoiceUpdateError,
     };
     use assert_matches::assert_matches;
+    use reth_interfaces::test_utils::generators::{self, Rng};
     use reth_primitives::{stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, H256, MAINNET};
     use reth_provider::{BlockWriter, ProviderFactory};
     use reth_rpc_types::engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
@@ -1844,6 +1845,7 @@ mod tests {
     // Pipeline error is propagated.
     #[tokio::test]
     async fn pipeline_error_is_propagated() {
+        let mut rng = generators::rng();
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
@@ -1862,7 +1864,7 @@ mod tests {
 
         let _ = env
             .send_forkchoice_updated(ForkchoiceState {
-                head_block_hash: H256::random(),
+                head_block_hash: rng.gen(),
                 ..Default::default()
             })
             .await;
@@ -1875,6 +1877,7 @@ mod tests {
     // Test that the consensus engine is idle until first forkchoice updated is received.
     #[tokio::test]
     async fn is_idle_until_forkchoice_is_set() {
+        let mut rng = generators::rng();
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
@@ -1903,7 +1906,7 @@ mod tests {
         // consensus engine is still idle because pruning is running
         let _ = env
             .send_forkchoice_updated(ForkchoiceState {
-                head_block_hash: H256::random(),
+                head_block_hash: rng.gen(),
                 ..Default::default()
             })
             .await;
@@ -1923,7 +1926,7 @@ mod tests {
                 Err(TryRecvError::Empty) => {
                     let _ = env
                         .send_forkchoice_updated(ForkchoiceState {
-                            head_block_hash: H256::random(),
+                            head_block_hash: rng.gen(),
                             ..Default::default()
                         })
                         .await;
@@ -1938,6 +1941,7 @@ mod tests {
     // for the second time.
     #[tokio::test]
     async fn runs_pipeline_again_if_tree_not_restored() {
+        let mut rng = generators::rng();
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
@@ -1959,7 +1963,7 @@ mod tests {
 
         let _ = env
             .send_forkchoice_updated(ForkchoiceState {
-                head_block_hash: H256::random(),
+                head_block_hash: rng.gen(),
                 ..Default::default()
             })
             .await;
@@ -1972,6 +1976,7 @@ mod tests {
 
     #[tokio::test]
     async fn terminates_upon_reaching_max_block() {
+        let mut rng = generators::rng();
         let max_block = 1000;
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
@@ -1994,7 +1999,7 @@ mod tests {
 
         let _ = env
             .send_forkchoice_updated(ForkchoiceState {
-                head_block_hash: H256::random(),
+                head_block_hash: rng.gen(),
                 ..Default::default()
             })
             .await;
@@ -2017,8 +2022,9 @@ mod tests {
     mod fork_choice_updated {
         use super::*;
         use reth_db::{tables, transaction::DbTxMut};
-        use reth_interfaces::test_utils::{generators, generators::random_block};
+        use reth_interfaces::test_utils::generators::random_block;
         use reth_rpc_types::engine::ForkchoiceUpdateError;
+
         #[tokio::test]
         async fn empty_head() {
             let chain_spec = Arc::new(
@@ -2175,7 +2181,7 @@ mod tests {
 
             let res = env
                 .send_forkchoice_updated(ForkchoiceState {
-                    head_block_hash: H256::random(),
+                    head_block_hash: rng.gen(),
                     finalized_block_hash: block1.hash,
                     ..Default::default()
                 })
@@ -2477,7 +2483,8 @@ mod tests {
             assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
 
             // Send new payload
-            let block = random_block(&mut rng, 2, Some(H256::random()), None, Some(0));
+            let parent = rng.gen();
+            let block = random_block(&mut rng, 2, Some(parent), None, Some(0));
             let res = env.send_new_payload(try_block_to_payload_v1(block), None).await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));

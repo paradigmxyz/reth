@@ -79,7 +79,7 @@ pub fn random_tx<R: Rng>(rng: &mut R) -> Transaction {
         nonce: rng.gen::<u16>().into(),
         gas_price: rng.gen::<u16>().into(),
         gas_limit: rng.gen::<u16>().into(),
-        to: TransactionKind::Call(Address::random()),
+        to: TransactionKind::Call(rng.gen()),
         value: rng.gen::<u16>().into(),
         input: Bytes::default(),
     })
@@ -343,7 +343,7 @@ pub fn random_contract_account_range<R: Rng>(
     let mut accounts = Vec::with_capacity(acc_range.end.saturating_sub(acc_range.start) as usize);
     for _ in acc_range {
         let (address, eoa_account) = random_eoa_account(rng);
-        let account = Account { bytecode_hash: Some(H256::random()), ..eoa_account };
+        let account = Account { bytecode_hash: Some(rng.gen()), ..eoa_account };
         accounts.push((address, account))
     }
     accounts

@@ -592,7 +592,7 @@ mod tests {
             rng.fill_bytes(&mut ip);
             let msg = Pong {
                 to: rng_endpoint(&mut rng),
-                echo: H256::random(),
+                echo: rng.gen(),
                 expire: rng.gen(),
                 enr_sq: None,
             };
@@ -613,7 +613,7 @@ mod tests {
             rng.fill_bytes(&mut ip);
             let msg = Pong {
                 to: rng_endpoint(&mut rng),
-                echo: H256::random(),
+                echo: rng.gen(),
                 expire: rng.gen(),
                 enr_sq: Some(rng.gen()),
             };
@@ -721,7 +721,8 @@ mod tests {
         use reth_rlp::Decodable;
         use std::net::Ipv4Addr;
 
-        let key = SecretKey::new(&mut rand::rngs::OsRng);
+        let mut rng = rand::rngs::OsRng;
+        let key = SecretKey::new(&mut rng);
         let ip = Ipv4Addr::new(127, 0, 0, 1);
         let tcp = 3000;
 
@@ -738,7 +739,7 @@ mod tests {
             EnrWrapper::new(builder.build(&key).unwrap())
         };
 
-        let enr_respone = EnrResponse { request_hash: H256::random(), enr };
+        let enr_respone = EnrResponse { request_hash: rng.gen(), enr };
 
         let mut buf = Vec::new();
         enr_respone.encode(&mut buf);

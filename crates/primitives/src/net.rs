@@ -247,7 +247,7 @@ mod tests {
             address: v6.into(),
             tcp_port: rng.gen(),
             udp_port: rng.gen(),
-            id: PeerId::random(),
+            id: rng.gen(),
         };
 
         assert!(record.clone().convert_ipv4_mapped());
@@ -263,7 +263,7 @@ mod tests {
             address: v4.into(),
             tcp_port: rng.gen(),
             udp_port: rng.gen(),
-            id: PeerId::random(),
+            id: rng.gen(),
         };
 
         assert!(!record.clone().convert_ipv4_mapped());
@@ -280,7 +280,7 @@ mod tests {
                 address: IpAddr::V4(ip.into()),
                 tcp_port: rng.gen(),
                 udp_port: rng.gen(),
-                id: PeerId::random(),
+                id: rng.gen(),
             };
 
             let mut buf = BytesMut::new();
@@ -301,7 +301,7 @@ mod tests {
                 address: IpAddr::V6(ip.into()),
                 tcp_port: rng.gen(),
                 udp_port: rng.gen(),
-                id: PeerId::random(),
+                id: rng.gen(),
             };
 
             let mut buf = BytesMut::new();

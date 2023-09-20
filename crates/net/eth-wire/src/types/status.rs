@@ -271,8 +271,8 @@ mod tests {
 
     #[test]
     fn init_custom_status_fields() {
-        let head_hash = H256::random();
         let mut rng = rand::thread_rng();
+        let head_hash = rng.gen();
         let total_difficulty = U256::from(rng.gen::<u64>());
 
         // create a genesis that has a random part, so we can check that the hash is preserved
