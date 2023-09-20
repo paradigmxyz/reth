@@ -10,7 +10,9 @@ pub fn revm_spec_by_timestamp_after_merge(
     chain_spec: &ChainSpec,
     timestamp: u64,
 ) -> revm::primitives::SpecId {
-    if chain_spec.is_fork_active_at_timestamp(Hardfork::Shanghai, timestamp) {
+    if chain_spec.is_cancun_activated_at_timestamp(timestamp) {
+        revm::primitives::CANCUN
+    } else if chain_spec.is_shanghai_activated_at_timestamp(timestamp) {
         revm::primitives::SHANGHAI
     } else {
         revm::primitives::MERGE
