@@ -6129,6 +6129,7 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
+ "reth-stages",
  "thiserror",
 ]
 
