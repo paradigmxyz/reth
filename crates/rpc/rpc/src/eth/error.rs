@@ -296,6 +296,9 @@ pub enum RpcInvalidTransactionError {
     /// Block `blob_gas_price` is greater than tx-specified `max_fee_per_blob_gas` after Cancun.
     #[error("max fee per blob gas less than block blob gas fee")]
     BlobFeeCapTooLow,
+    /// `blob_hashes`/`blob_versioned_hashees is mandatory to be included
+    #[error("blob_versioned_hashes is mandatory to be included ")]
+    BlobVersionedHashesNotIncluded,
 }
 
 impl RpcInvalidTransactionError {
