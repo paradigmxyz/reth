@@ -1,6 +1,6 @@
 use crate::clique::{CliqueGethInstance, CliqueMiddleware};
 use ethers_core::{
-    types::{transaction::eip2718::TypedTransaction, Address, Eip1559TransactionRequest, U64},
+    types::{transaction::eip2718::TypedTransaction, Address, Eip1559TransactionRequest},
     utils::Geth,
 };
 use ethers_providers::Middleware;
@@ -122,7 +122,7 @@ async fn init_geth() -> (CliqueGethInstance, Arc<ChainSpec>) {
     clique.provider.send_requests(txs).await.unwrap();
 
     let block = clique.provider.get_block_number().await.unwrap();
-    assert!(block > U64::zero());
+    assert!(block.as_u64() > 0);
 
     (clique, Arc::new(chainspec))
 }
