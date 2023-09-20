@@ -5,8 +5,8 @@ use reth_db::{
 };
 use reth_interfaces::db::DatabaseError;
 use reth_primitives::{
-    bloom::logs_bloom, keccak256, proofs::calculate_receipt_root_ref, Account, Address,
-    BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, StorageEntry, H256, U256,
+    bloom::logs_bloom, keccak256, Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt,
+    Receipts, StorageEntry, H256, U256,
 };
 use reth_revm_primitives::{
     db::states::BundleState, into_reth_acc, into_revm_acc, primitives::AccountInfo,
@@ -236,9 +236,7 @@ impl BundleStateWithReceipts {
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
     /// of receipt. This is a expensive operation.
     pub fn receipts_root_slow(&self, block_number: BlockNumber) -> Option<H256> {
-        let index = self.block_number_to_index(block_number)?;
-        let block_receipts = self.receipts.root_slow(index)?;
-        Some(calculate_receipt_root_ref(&block_receipts))
+        self.receipts.root_slow(self.block_number_to_index(block_number)?)
     }
 
     /// Return reference to receipts.

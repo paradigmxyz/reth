@@ -1,7 +1,8 @@
 use crate::{
     bloom::logs_bloom,
     compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR},
-    Bloom, Log, TxType,
+    proofs::calculate_receipt_root_ref,
+    Bloom, Log, TxType, H256,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use reth_codecs::{main_codec, Compact, CompactZstd};
@@ -80,9 +81,11 @@ impl Receipts {
         self.receipt_vec.push(receipts);
     }
 
-    /// Retrieves a vector of references to receipts for the specified index.
-    pub fn root_slow(&self, index: usize) -> Option<Vec<&Receipt>> {
-        Some(self.receipt_vec[index].iter().map(Option::as_ref).collect())?
+    /// Retrieves the receipt root for all recorded receipts from index.
+    pub fn root_slow(&self, index: usize) -> Option<H256> {
+        Some(calculate_receipt_root_ref(
+            &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
+        ))
     }
 
     /// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
