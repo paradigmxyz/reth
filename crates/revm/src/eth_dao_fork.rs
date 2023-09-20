@@ -5,7 +5,7 @@ use reth_primitives::{hex_literal::hex, H160};
 /// Dao hardfork beneficiary that received ether from accounts from DAO and DAO creator children.
 pub static DAO_HARDFORK_BENEFICIARY: H160 = H160(hex!("bf4ed7b27f1d666546e30d74d50d173d20bca754"));
 
-/// DAO hardfork account that ether was taken and added to beneficiry
+/// DAO hardfork account that ether was taken and added to beneficiary
 pub static DAO_HARDKFORK_ACCOUNTS: [H160; 116] = [
     H160(hex!("d4fe7bc31cedb7bfb8a345f31e668033056b2728")),
     H160(hex!("b3fb0e5aba0e20e5c49d252dfd30e102b171a425")),

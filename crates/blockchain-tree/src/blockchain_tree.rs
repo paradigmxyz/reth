@@ -744,7 +744,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     }
 
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
-    /// tree.
+    /// tree by attempting to connect the buffered blocks to canonical hashes.
+    ///
     ///
     /// `N` is the `max_reorg_depth` plus the number of block hashes needed to satisfy the
     /// `BLOCKHASH` opcode in the EVM.
@@ -753,21 +754,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     ///
     /// This finalizes `last_finalized_block` prior to reading the canonical hashes (using
     /// [`BlockchainTree::finalize_block`]).
-    pub fn restore_canonical_hashes_and_finalize(
+    pub fn connect_buffered_blocks_to_canonical_hashes_and_finalize(
         &mut self,
         last_finalized_block: BlockNumber,
     ) -> Result<(), Error> {
         self.finalize_block(last_finalized_block);
 
-        self.restore_canonical_hashes()
-    }
-
-    /// Reads the last `N` canonical hashes from the database and updates the block indices of the
-    /// tree.
-    ///
-    /// `N` is the `max_reorg_depth` plus the number of block hashes needed to satisfy the
-    /// `BLOCKHASH` opcode in the EVM.
-    pub fn restore_canonical_hashes(&mut self) -> Result<(), Error> {
         let num_of_canonical_hashes =
             self.config.max_reorg_depth() + self.config.num_of_additional_canonical_block_hashes();
 
@@ -790,12 +782,44 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             }
         }
 
-        // check unconnected block buffer for the childs of new added blocks,
-        for added_block in last_canonical_hashes.into_iter() {
+        self.connect_buffered_blocks_to_hashes(last_canonical_hashes)?;
+
+        Ok(())
+    }
+
+    /// Reads the last `N` canonical hashes from the database and updates the block indices of the
+    /// tree by attempting to connect the buffered blocks to canonical hashes.
+    ///
+    /// `N` is the `max_reorg_depth` plus the number of block hashes needed to satisfy the
+    /// `BLOCKHASH` opcode in the EVM.
+    pub fn connect_buffered_blocks_to_canonical_hashes(&mut self) -> Result<(), Error> {
+        let num_of_canonical_hashes =
+            self.config.max_reorg_depth() + self.config.num_of_additional_canonical_block_hashes();
+
+        let last_canonical_hashes = self
+            .externals
+            .db
+            .tx()?
+            .cursor_read::<tables::CanonicalHeaders>()?
+            .walk_back(None)?
+            .take(num_of_canonical_hashes as usize)
+            .collect::<Result<BTreeMap<BlockNumber, BlockHash>, _>>()?;
+
+        self.connect_buffered_blocks_to_hashes(last_canonical_hashes)?;
+
+        Ok(())
+    }
+
+    fn connect_buffered_blocks_to_hashes(
+        &mut self,
+        hashes: impl IntoIterator<Item = impl Into<BlockNumHash>>,
+    ) -> Result<(), Error> {
+        // check unconnected block buffer for childs of the canonical hashes
+        for added_block in hashes.into_iter() {
             self.try_connect_buffered_blocks(added_block.into())
         }
 
-        // check unconnected block buffer for childs of the chains.
+        // check unconnected block buffer for childs of the chains
         let mut all_chain_blocks = Vec::new();
         for (_, chain) in self.chains.iter() {
             for (&number, blocks) in chain.blocks.iter() {
@@ -1626,7 +1650,7 @@ mod tests {
             .assert(&tree);
 
         // update canonical block to b2, this would make b2a be removed
-        assert_eq!(tree.restore_canonical_hashes_and_finalize(12), Ok(()));
+        assert_eq!(tree.connect_buffered_blocks_to_canonical_hashes_and_finalize(12), Ok(()));
 
         assert_eq!(tree.is_block_known(block2.num_hash()).unwrap(), Some(BlockStatus::Valid));
 

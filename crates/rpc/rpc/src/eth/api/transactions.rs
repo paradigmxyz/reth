@@ -14,7 +14,7 @@ use crate::{
 use async_trait::async_trait;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    constants::eip4844::blob_fee,
+    eip4844::calc_blob_fee,
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
     IntoRecoveredTransaction, Receipt, SealedBlock,
     TransactionKind::{Call, Create},
@@ -469,6 +469,8 @@ where
                     access_list: request.access_list.clone(),
                     max_priority_fee_per_gas: Some(U256::from(max_fee_per_gas)),
                     transaction_type: None,
+                    blob_versioned_hashes: Vec::new(),
+                    max_fee_per_blob_gas: None,
                 },
                 BlockId::Number(BlockNumberOrTag::Pending),
             )
@@ -885,7 +887,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         status_code: if receipt.success { Some(U64::from(1)) } else { Some(U64::from(0)) },
 
         // EIP-4844 fields
-        blob_gas_price: meta.excess_blob_gas.map(blob_fee),
+        blob_gas_price: meta.excess_blob_gas.map(calc_blob_fee).map(U128::from),
         blob_gas_used: transaction.transaction.blob_gas_used().map(U128::from),
     };
 

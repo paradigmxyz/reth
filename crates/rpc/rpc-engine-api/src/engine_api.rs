@@ -11,9 +11,12 @@ use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFa
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadEnvelopeV2,
-    ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    ExecutionPayloadEnvelopeV3, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
     ForkchoiceUpdated, PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration,
     CAPABILITIES,
+};
+use reth_rpc_types_compat::engine::payload::{
+    convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
 };
 use reth_tasks::TaskSpawner;
 use std::sync::Arc;
@@ -79,12 +82,12 @@ where
         Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
     }
 
-    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_newpayloadv2>
+    /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
     pub async fn new_payload_v2(
         &self,
-        payload: ExecutionPayloadV2,
+        payload: ExecutionPayloadInputV2,
     ) -> EngineApiResult<PayloadStatus> {
-        let payload = ExecutionPayload::from(payload);
+        let payload = convert_payload_input_v2_to_payload(payload);
         let payload_or_attrs = PayloadOrAttributes::from_execution_payload(&payload, None);
         self.validate_version_specific_fields(EngineApiMessageVersion::V2, &payload_or_attrs)?;
         Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
@@ -118,10 +121,8 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
-        if let Some(ref attrs) = payload_attrs {
-            self.validate_version_specific_fields(EngineApiMessageVersion::V1, &attrs.into())?;
-        }
-        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V1, state, payload_attrs)
+            .await
     }
 
     /// Sends a message to the beacon consensus engine to update the fork choice _with_ withdrawals,
@@ -133,10 +134,8 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
-        if let Some(ref attrs) = payload_attrs {
-            self.validate_version_specific_fields(EngineApiMessageVersion::V2, &attrs.into())?;
-        }
-        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V2, state, payload_attrs)
+            .await
     }
 
     /// Sends a message to the beacon consensus engine to update the fork choice _with_ withdrawals,
@@ -148,11 +147,8 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
-        if let Some(ref attrs) = payload_attrs {
-            self.validate_version_specific_fields(EngineApiMessageVersion::V3, &attrs.into())?;
-        }
-
-        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V3, state, payload_attrs)
+            .await
     }
 
     /// Returns the most recent version of the payload that is available in the corresponding
@@ -287,7 +283,7 @@ where
                 let block_result = inner.provider.block(BlockHashOrNumber::Number(num));
                 match block_result {
                     Ok(block) => {
-                        result.push(block.map(Into::into));
+                        result.push(block.map(convert_to_payload_body_v1));
                     }
                     Err(err) => {
                         tx.send(Err(EngineApiError::Internal(Box::new(err)))).ok();
@@ -318,7 +314,7 @@ where
                 .provider
                 .block(BlockHashOrNumber::Hash(hash))
                 .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
-            result.push(block.map(Into::into));
+            result.push(block.map(convert_to_payload_body_v1));
         }
 
         Ok(result)
@@ -534,6 +530,55 @@ where
             payload_or_attrs.parent_beacon_block_root().is_some(),
         )
     }
+
+    /// Validates the `engine_forkchoiceUpdated` payload attributes and executes the forkchoice
+    /// update.
+    ///
+    /// The payload attributes will be validated according to the engine API rules for the given
+    /// message version:
+    /// * If the version is [EngineApiMessageVersion::V1], then the payload attributes will be
+    ///   validated according to the Paris rules.
+    /// * If the version is [EngineApiMessageVersion::V2], then the payload attributes will be
+    ///   validated according to the Shanghai rules, as well as the validity changes from cancun:
+    ///   <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/cancun.md#update-the-methods-of-previous-forks>
+    ///
+    /// * If the version is [EngineApiMessageVersion::V3], then the payload attributes will be
+    ///   validated according to the Cancun rules.
+    async fn validate_and_execute_forkchoice(
+        &self,
+        version: EngineApiMessageVersion,
+        state: ForkchoiceState,
+        payload_attrs: Option<PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        if let Some(ref attrs) = payload_attrs {
+            let attr_validation_res = self.validate_version_specific_fields(version, &attrs.into());
+
+            // From the engine API spec:
+            //
+            // Client software MUST ensure that payloadAttributes.timestamp is greater than
+            // timestamp of a block referenced by forkchoiceState.headBlockHash. If this condition
+            // isn't held client software MUST respond with -38003: Invalid payload attributes and
+            // MUST NOT begin a payload build process. In such an event, the forkchoiceState
+            // update MUST NOT be rolled back.
+            //
+            // NOTE: This will also apply to the validation result for the cancun or
+            // shanghai-specific fields provided in the payload attributes.
+            //
+            // To do this, we set the payload attrs to `None` if attribute validation failed, but
+            // we still apply the forkchoice update.
+            if let Err(err) = attr_validation_res {
+                let fcu_res = self.inner.beacon_consensus.fork_choice_updated(state, None).await?;
+                // TODO: decide if we want this branch - the FCU INVALID response might be more
+                // useful than the payload attributes INVALID response
+                if fcu_res.is_invalid() {
+                    return Ok(fcu_res)
+                }
+                return Err(err)
+            }
+        }
+
+        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
+    }
 }
 
 #[async_trait]
@@ -550,8 +595,8 @@ where
     }
 
     /// Handler for `engine_newPayloadV2`
-    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_newpayloadv2>
-    async fn new_payload_v2(&self, payload: ExecutionPayloadV2) -> RpcResult<PayloadStatus> {
+    /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
+    async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV2");
         Ok(EngineApi::new_payload_v2(self, payload).await?)
     }
@@ -794,8 +839,11 @@ mod tests {
                 random_block_range(&mut rng, start..=start + count - 1, H256::default(), 0..2);
             handle.provider.extend_blocks(blocks.iter().cloned().map(|b| (b.hash(), b.unseal())));
 
-            let expected =
-                blocks.iter().cloned().map(|b| Some(b.unseal().into())).collect::<Vec<_>>();
+            let expected = blocks
+                .iter()
+                .cloned()
+                .map(|b| Some(convert_to_payload_body_v1(b.unseal())))
+                .collect::<Vec<_>>();
 
             let res = api.get_payload_bodies_by_range(start, count).await.unwrap();
             assert_eq!(res, expected);
@@ -833,7 +881,7 @@ mod tests {
                     if first_missing_range.contains(&b.number) {
                         None
                     } else {
-                        Some(b.unseal().into())
+                        Some(convert_to_payload_body_v1(b.unseal()))
                     }
                 })
                 .collect::<Vec<_>>();
@@ -852,7 +900,7 @@ mod tests {
                     {
                         None
                     } else {
-                        Some(b.unseal().into())
+                        Some(convert_to_payload_body_v1(b.unseal()))
                     }
                 })
                 .collect::<Vec<_>>();

@@ -36,7 +36,7 @@ impl<P: ConnectionProvider> Resolver for AsyncResolver<P> {
 
 /// An asynchronous DNS resolver
 ///
-/// See also [TokioAsyncResolver](trust_dns_resolver::TokioAsyncResolver)
+/// See also [TokioAsyncResolver]
 ///
 /// ```
 /// # fn t() {

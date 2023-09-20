@@ -1,6 +1,6 @@
 //! Ethereum protocol-related constants
 
-use crate::{H256, U256};
+use crate::{H160, H256, U256};
 use hex_literal::hex;
 use std::time::Duration;
 
@@ -131,6 +131,13 @@ pub const BEACON_CONSENSUS_REORG_UNWIND_DEPTH: u64 = 3;
 /// See:
 /// <https://github.com/ethereum/go-ethereum/blob/a196f3e8a22b6ad22ced5c2e3baf32bc3ebd4ec9/consensus/ethash/consensus.go#L227-L229>
 pub const ALLOWED_FUTURE_BLOCK_TIME_SECONDS: u64 = 15;
+
+/// The address for the beacon roots contract defined in EIP-4788.
+pub const BEACON_ROOTS_ADDRESS: H160 = H160(hex!("bEac00dDB15f3B6d645C48263dC93862413A222D"));
+
+/// The caller to be used when calling the EIP-4788 beacon roots contract at the beginning of the
+/// block.
+pub const SYSTEM_ADDRESS: H160 = H160(hex!("fffffffffffffffffffffffffffffffffffffffe"));
 
 #[cfg(test)]
 mod tests {

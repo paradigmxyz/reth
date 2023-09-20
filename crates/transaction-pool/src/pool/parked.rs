@@ -113,6 +113,12 @@ impl<T: ParkedOrd> ParkedPool<T> {
     pub(crate) fn contains(&self, id: &TransactionId) -> bool {
         self.by_id.contains_key(id)
     }
+
+    /// Asserts that the bijection between `by_id` and `best` is valid.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn assert_invariants(&self) {
+        assert_eq!(self.by_id.len(), self.best.len(), "by_id.len() != best.len()");
+    }
 }
 
 impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
