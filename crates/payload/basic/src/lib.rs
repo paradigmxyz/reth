@@ -964,7 +964,7 @@ impl WithdrawalsOutcome {
 /// Returns the withdrawals root.
 ///
 /// Returns `None` values pre shanghai
-fn commit_withdrawals<DB: Database<Error = Error>>(
+pub fn commit_withdrawals<DB: Database<Error = Error>>(
     db: &mut State<DB>,
     chain_spec: &ChainSpec,
     timestamp: u64,
@@ -1002,7 +1002,7 @@ fn commit_withdrawals<DB: Database<Error = Error>>(
 ///
 /// This uses [apply_beacon_root_contract_call] to ultimately apply the beacon root contract state
 /// change.
-fn pre_block_beacon_root_contract_call<DB>(
+pub fn pre_block_beacon_root_contract_call<DB>(
     db: &mut DB,
     chain_spec: &ChainSpec,
     block_number: u64,

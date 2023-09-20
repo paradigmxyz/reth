@@ -1,9 +1,11 @@
 //! Support for building a pending block via local txpool.
 
 use crate::eth::error::EthResult;
+use reth_basic_payload_builder::{commit_withdrawals, pre_block_beacon_root_contract_call};
+use reth_payload_builder::PayloadBuilderAttributes;
 use reth_primitives::{
-    constants::{BEACON_NONCE, EMPTY_WITHDRAWALS},
-    proofs, Block, Header, IntoRecoveredTransaction, Receipt, SealedBlock, SealedHeader,
+    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_WITHDRAWALS},
+    proofs, Block, ChainSpec, Header, IntoRecoveredTransaction, Receipt, SealedBlock, SealedHeader,
     EMPTY_OMMER_ROOT, H256, U256,
 };
 use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
@@ -43,12 +45,46 @@ impl PendingBlockEnv {
         let mut db = State::builder().with_database(Box::new(state)).with_bundle_update().build();
 
         let mut cumulative_gas_used = 0;
+        let mut sum_blob_gas_used = 0;
         let block_gas_limit: u64 = block_env.gas_limit.try_into().unwrap_or(u64::MAX);
         let base_fee = block_env.basefee.to::<u64>();
         let block_number = block_env.number.to::<u64>();
 
         let mut executed_txs = Vec::new();
         let mut best_txs = pool.best_transactions_with_base_fee(base_fee);
+
+        let (withdrawals, withdrawals_root) = match origin {
+            PendingBlockEnvOrigin::ActualPending(block) => {
+                (block.withdrawals, block.withdrawals_root)
+            }
+            PendingBlockEnvOrigin::DerivedFromLatest(_) => (None, None),
+        };
+
+        let attributes = PayloadBuilderAttributes {
+            id: 0,               // not relevant here
+            parent: parent_hash, // not relevant here
+            timestamp: block_env.timestamp.into(),
+            suggested_fee_recipient: block_env.coinbase, // not relevant here
+            prev_randao: block_env.prevrandao.unwrap_or_default(), // not relevant here
+            withdrawals: withdrawals.unwrap_or_default(),
+            parent_beacon_block_root: if origin.is_actual_pending() {
+                origin.header().parent_beacon_block_root
+            } else {
+                None
+            },
+        };
+
+        let chain_spec = ChainSpec::default(); // mainnet
+
+        // apply eip-4788 pre block contract call
+        pre_block_beacon_root_contract_call(
+            &mut db,
+            &chain_spec,
+            block_number,
+            &cfg,
+            &block_env,
+            &attributes,
+        )?;
 
         let mut receipts = Vec::new();
 
@@ -64,6 +100,28 @@ impl PendingBlockEnv {
 
             // convert tx to a signed transaction
             let tx = pool_tx.to_recovered_transaction();
+
+            // There's only limited amount of blob space available per block, so we need to check if
+            // the EIP-4844 can still fit in the block
+            if let Some(blob_tx) = tx.transaction.as_eip4844() {
+                let tx_blob_gas = blob_tx.blob_gas();
+                if sum_blob_gas_used + tx_blob_gas > MAX_DATA_GAS_PER_BLOCK {
+                    // we can't fit this _blob_ transaction into the block, so we mark it as
+                    // invalid, which removes its dependent transactions from
+                    // the iterator. This is similar to the gas limit condition
+                    // for regular transactions above.
+                    best_txs.mark_invalid(&pool_tx);
+                    continue
+                } else {
+                    // add to the data gas if we're going to execute the transaction
+                    sum_blob_gas_used += tx_blob_gas;
+
+                    // if we've reached the max data gas per block, we can skip blob txs entirely
+                    if sum_blob_gas_used == MAX_DATA_GAS_PER_BLOCK {
+                        best_txs.skip_blobs();
+                    }
+                }
+            }
 
             // Configure the environment for the block.
             let env =
@@ -112,6 +170,9 @@ impl PendingBlockEnv {
             // append transaction to the list of executed transactions
             executed_txs.push(tx.into_signed());
         }
+
+        commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
+
         // merge all transitions into bundle state.
         db.merge_transitions(BundleRetention::PlainState);
 
@@ -133,7 +194,7 @@ impl PendingBlockEnv {
             state_root,
             transactions_root,
             receipts_root,
-            withdrawals_root: Some(EMPTY_WITHDRAWALS),
+            withdrawals_root,
             logs_bloom,
             timestamp: block_env.timestamp.to::<u64>(),
             mix_hash: block_env.prevrandao.unwrap_or_default(),
@@ -143,14 +204,14 @@ impl PendingBlockEnv {
             gas_limit: block_gas_limit,
             difficulty: U256::ZERO,
             gas_used: cumulative_gas_used,
-            blob_gas_used: None,
-            excess_blob_gas: None,
+            blob_gas_used: Some(sum_blob_gas_used),
+            excess_blob_gas: block_env.excess_blob_gas,
             extra_data: Default::default(),
-            parent_beacon_block_root: None,
+            parent_beacon_block_root: attributes.parent_beacon_block_root,
         };
 
         // seal the block
-        let block = Block { header, body: executed_txs, ommers: vec![], withdrawals: Some(vec![]) };
+        let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
         let sealed_block = block.seal_slow();
 
         Ok(sealed_block)

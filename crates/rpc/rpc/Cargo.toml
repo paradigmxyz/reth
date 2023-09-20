@@ -13,6 +13,8 @@ Reth RPC implementation
 # reth
 reth-interfaces.workspace = true
 reth-primitives.workspace = true
+reth-payload-builder.workspace = true
+reth-basic-payload-builder = { path = "../../payload/basic" }
 reth-rpc-api = { path = "../rpc-api" }
 reth-rlp.workspace = true
 reth-rpc-types.workspace = true
@@ -57,7 +59,11 @@ metrics.workspace = true
 
 # misc
 bytes.workspace = true
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { workspace = true, features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
