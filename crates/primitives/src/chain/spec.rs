@@ -463,7 +463,7 @@ impl ChainSpec {
             .unwrap_or_else(|| self.is_fork_active_at_timestamp(Hardfork::Cancun, timestamp))
     }
 
-    /// Creates a [`ForkFilter`](crate::ForkFilter) for the block described by [Head].
+    /// Creates a [`ForkFilter`] for the block described by [Head].
     pub fn fork_filter(&self, head: Head) -> ForkFilter {
         let forks = self.forks_iter().filter_map(|(_, condition)| {
             // We filter out TTD-based forks w/o a pre-known block since those do not show up in the

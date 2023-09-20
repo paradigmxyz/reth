@@ -1,14 +1,12 @@
 use crate::{
     basefee::calculate_next_block_base_fee,
-    eip4844::calculate_excess_blob_gas,
+    eip4844::{calc_blob_fee, calculate_excess_blob_gas},
     keccak256,
     proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
     BaseFeeParams, BlockBodyRoots, BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes, H160, H256,
-    H64, U128, U256,
+    H64, U256,
 };
 use bytes::{Buf, BufMut, BytesMut};
-
-use crate::constants::eip4844::blob_fee;
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, Encodable, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
 use serde::{Deserialize, Serialize};
@@ -187,8 +185,8 @@ impl Header {
     /// Returns the blob fee for _this_ block according to the EIP-4844 spec.
     ///
     /// Returns `None` if `excess_blob_gas` is None
-    pub fn blob_fee(&self) -> Option<U128> {
-        self.excess_blob_gas.map(blob_fee)
+    pub fn blob_fee(&self) -> Option<u64> {
+        self.excess_blob_gas.map(calc_blob_fee)
     }
 
     /// Returns the blob fee for the next block according to the EIP-4844 spec.
@@ -196,8 +194,8 @@ impl Header {
     /// Returns `None` if `excess_blob_gas` is None.
     ///
     /// See also [Self::next_block_excess_blob_gas]
-    pub fn next_block_blob_fee(&self) -> Option<U128> {
-        self.next_block_excess_blob_gas().map(blob_fee)
+    pub fn next_block_blob_fee(&self) -> Option<u64> {
+        self.next_block_excess_blob_gas().map(calc_blob_fee)
     }
 
     /// Calculate base fee for next block according to the EIP-1559 spec.

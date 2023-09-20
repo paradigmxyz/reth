@@ -19,5 +19,9 @@ pub trait BlockHashReader: Send + Sync {
     }
 
     /// Get headers in range of block hashes or numbers
+    ///
+    /// Returns the available hashes of that range.
+    ///
+    /// Note: The range is `start..end`, so the expected result is `[start..end)`
     fn canonical_hashes_range(&self, start: BlockNumber, end: BlockNumber) -> Result<Vec<H256>>;
 }

@@ -687,10 +687,10 @@ impl P2PMessage {
     }
 }
 
-/// The [`Encodable`](reth_rlp::Encodable) implementation for [`P2PMessage::Ping`] and
-/// [`P2PMessage::Pong`] encodes the message as RLP, and prepends a snappy header to the RLP bytes
-/// for all variants except the [`P2PMessage::Hello`] variant, because the hello message is never
-/// compressed in the `p2p` subprotocol.
+/// The [`Encodable`] implementation for [`P2PMessage::Ping`] and [`P2PMessage::Pong`] encodes the
+/// message as RLP, and prepends a snappy header to the RLP bytes for all variants except the
+/// [`P2PMessage::Hello`] variant, because the hello message is never compressed in the `p2p`
+/// subprotocol.
 impl Encodable for P2PMessage {
     fn encode(&self, out: &mut dyn BufMut) {
         (self.message_id() as u8).encode(out);
@@ -724,11 +724,12 @@ impl Encodable for P2PMessage {
     }
 }
 
-/// The [`Decodable`](reth_rlp::Decodable) implementation for [`P2PMessage`] assumes that each of
-/// the message variants are snappy compressed, except for the [`P2PMessage::Hello`] variant since
-/// the hello message is never compressed in the `p2p` subprotocol.
-/// The [`Decodable`] implementation for [`P2PMessage::Ping`] and
-/// [`P2PMessage::Pong`] expects a snappy encoded payload, see [`Encodable`] implementation.
+/// The [`Decodable`] implementation for [`P2PMessage`] assumes that each of the message variants
+/// are snappy compressed, except for the [`P2PMessage::Hello`] variant since the hello message is
+/// never compressed in the `p2p` subprotocol.
+///
+/// The [`Decodable`] implementation for [`P2PMessage::Ping`] and [`P2PMessage::Pong`] expects a
+/// snappy encoded payload, see [`Encodable`] implementation.
 impl Decodable for P2PMessage {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
         /// Removes the snappy prefix from the Ping/Pong buffer

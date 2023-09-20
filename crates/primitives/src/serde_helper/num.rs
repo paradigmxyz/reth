@@ -69,7 +69,7 @@ impl<'de> Deserialize<'de> for U64HexOrNumber {
     }
 }
 
-/// serde functions for handling primitive `u64` as [U64](crate::U64)
+/// serde functions for handling primitive `u64` as [U64]
 pub mod u64_hex_or_decimal {
     use crate::serde_helper::num::U64HexOrNumber;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -89,7 +89,7 @@ pub mod u64_hex_or_decimal {
     }
 }
 
-/// serde functions for handling primitive optional `u64` as [U64](crate::U64)
+/// serde functions for handling primitive optional `u64` as [U64]
 pub mod u64_hex_or_decimal_opt {
     use crate::serde_helper::num::U64HexOrNumber;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};

@@ -1,7 +1,7 @@
 use crate::{
-    BeaconConsensus, BeaconConsensusEngine, BeaconConsensusEngineError,
-    BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError, BeaconOnNewPayloadError,
-    MIN_BLOCKS_FOR_PIPELINE_RUN,
+    engine::hooks::PruneHook, hooks::EngineHooks, BeaconConsensus, BeaconConsensusEngine,
+    BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
+    BeaconOnNewPayloadError, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
@@ -518,6 +518,9 @@ where
             PruneBatchSizes::default(),
         );
 
+        let mut hooks = EngineHooks::new();
+        hooks.add(PruneHook::new(pruner, Box::<TokioTaskExecutor>::default()));
+
         let (mut engine, handle) = BeaconConsensusEngine::new(
             client,
             pipeline,
@@ -529,7 +532,7 @@ where
             payload_builder,
             None,
             self.base_config.pipeline_run_threshold.unwrap_or(MIN_BLOCKS_FOR_PIPELINE_RUN),
-            Some(pruner),
+            hooks,
         )
         .expect("failed to create consensus engine");
 
