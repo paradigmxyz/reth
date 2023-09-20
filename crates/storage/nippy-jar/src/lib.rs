@@ -36,26 +36,49 @@ type Row = Vec<Vec<u8>>;
 /// Placeholder type for when a jar has no user header.
 pub type NoJarHeader = bool;
 
+/// `NippyJar` is a specialized storage format designed for immutable data.
+///
+/// Data is organized into a columnar format, enabling column-based compression. Data retrieval
+/// entails consulting an offset list and fetching the data from file via `mmap`.
+///
+/// PHF & Filters:
+/// For data membership verification, the `filter` field can be configured with algorithms like
+/// Bloom or Cuckoo filters. While these filters enable rapid membership checks, it's important to
+/// note that **they may yield false positives but not false negatives**. Therefore, they serve as
+/// preliminary checks (eg. in `by_hash` queries) and should be followed by data verification on
+/// retrieval.
+///
+/// The `phf` (Perfect Hashing Function) and `offsets_index` fields facilitate the data retrieval
+/// process in for example `by_hash` queries. Specifically, the PHF converts a query, such as a
+/// block hash, into a unique integer. This integer is then used as an index in `offsets_index`,
+/// which maps to the actual data location in the `offsets` list. Similar to the `filter`, the PHF
+/// may also produce false positives but not false negatives, necessitating subsequent data
+/// verification.
+///
+/// Note: that the key (eg. BlockHash) passed to a filter and phf does not need to actually be
+/// stored.
+///
+/// Ultimately, the `freeze` function yields two files: a data file containing both the data and its
+/// configuration, and an index file that houses the offsets and offsets_index.
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct NippyJar<H> {
-    /// Version
+    /// The version of the NippyJar format.
     version: usize,
-    /// User header data
+    /// Optional user-defined header data.
     user_header: Option<H>,
-    /// Number of columns
+    /// Number of data columns in the jar.
     columns: usize,
-    /// Compressor if required
+    /// Optional compression algorithm applied to the data.
     compressor: Option<Compressors>,
-    /// Filter
+    /// Optional filter function for data membership checks.
     filter: Option<Filters>,
-    /// Perfect Hashing Function
+    /// Optional Perfect Hashing Function (PHF) for unique offset mapping.
     phf: Option<Functions>,
+    /// Index mapping PHF output to value offsets in `offsets`.
     #[serde(skip)]
-    /// Indexes PHF output to the value offset at `self.offsets`
     offsets_index: PrefixSummedEliasFano,
-    /// Values offsets eg. `[row0_col0_offset, row0_col1_offset, row1_col1_offset, row1,
-    /// col2_offset ... ]` TODO: currently on a different file, but might be unnecessary
+    /// Offsets within the file for each column value, arranged by row and column.
     #[serde(skip)]
     offsets: EliasFano,
     /// Data path for file. Index file will be `{path}.idx`
