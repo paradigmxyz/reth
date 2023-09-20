@@ -48,5 +48,8 @@ pub trait AccountExtReader: Send + Sync {
 #[auto_impl(&, Arc, Box)]
 pub trait ChangeSetReader: Send + Sync {
     /// Iterate over account changesets and return the account state from before this block.
-    fn account_block_changeset(&self, block_number: BlockNumber) -> RethResult<Vec<AccountBeforeTx>>;
+    fn account_block_changeset(
+        &self,
+        block_number: BlockNumber,
+    ) -> RethResult<Vec<AccountBeforeTx>>;
 }

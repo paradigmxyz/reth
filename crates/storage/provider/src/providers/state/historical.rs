@@ -186,7 +186,11 @@ impl<'a, 'b, TX: DbTx<'a>> BlockHashReader for HistoricalStateProviderRef<'a, 'b
         self.tx.get::<tables::CanonicalHeaders>(number).map_err(Into::into)
     }
 
-    fn canonical_hashes_range(&self, start: BlockNumber, end: BlockNumber) -> RethResult<Vec<H256>> {
+    fn canonical_hashes_range(
+        &self,
+        start: BlockNumber,
+        end: BlockNumber,
+    ) -> RethResult<Vec<H256>> {
         let range = start..end;
         self.tx
             .cursor_read::<tables::CanonicalHeaders>()
@@ -208,7 +212,11 @@ impl<'a, 'b, TX: DbTx<'a>> StateRootProvider for HistoricalStateProviderRef<'a, 
 
 impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, TX> {
     /// Get storage.
-    fn storage(&self, address: Address, storage_key: StorageKey) -> RethResult<Option<StorageValue>> {
+    fn storage(
+        &self,
+        address: Address,
+        storage_key: StorageKey,
+    ) -> RethResult<Option<StorageValue>> {
         match self.storage_history_lookup(address, storage_key)? {
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => Ok(Some(

@@ -1,5 +1,5 @@
 //! Collection of methods for block validation.
-use reth_interfaces::{consensus::ConsensusError, RethResult as RethResult};
+use reth_interfaces::{consensus::ConsensusError, RethResult};
 use reth_primitives::{
     constants::{
         self,

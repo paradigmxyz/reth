@@ -175,7 +175,10 @@ pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
     /// Returns the header with matching tag from the database
     ///
     /// Returns `None` if header is not found.
-    fn sealed_header_by_number_or_tag(&self, id: BlockNumberOrTag) -> RethResult<Option<SealedHeader>> {
+    fn sealed_header_by_number_or_tag(
+        &self,
+        id: BlockNumberOrTag,
+    ) -> RethResult<Option<SealedHeader>> {
         self.convert_block_number(id)?
             .map_or_else(|| Ok(None), |num| self.header_by_hash_or_number(num.into()))?
             .map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))

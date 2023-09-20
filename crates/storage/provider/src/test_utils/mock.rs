@@ -199,7 +199,10 @@ impl TransactionsProvider for MockEthProvider {
         Ok(transaction)
     }
 
-    fn transaction_by_id_no_hash(&self, id: TxNumber) -> RethResult<Option<TransactionSignedNoHash>> {
+    fn transaction_by_id_no_hash(
+        &self,
+        id: TxNumber,
+    ) -> RethResult<Option<TransactionSignedNoHash>> {
         let lock = self.blocks.lock();
         let transaction = lock
             .values()
@@ -343,7 +346,11 @@ impl BlockHashReader for MockEthProvider {
         Ok(hash)
     }
 
-    fn canonical_hashes_range(&self, start: BlockNumber, end: BlockNumber) -> RethResult<Vec<H256>> {
+    fn canonical_hashes_range(
+        &self,
+        start: BlockNumber,
+        end: BlockNumber,
+    ) -> RethResult<Vec<H256>> {
         let range = start..end;
         let lock = self.blocks.lock();
 
@@ -475,7 +482,11 @@ impl StateRootProvider for MockEthProvider {
 }
 
 impl StateProvider for MockEthProvider {
-    fn storage(&self, account: Address, storage_key: StorageKey) -> RethResult<Option<StorageValue>> {
+    fn storage(
+        &self,
+        account: Address,
+        storage_key: StorageKey,
+    ) -> RethResult<Option<StorageValue>> {
         let lock = self.accounts.lock();
         Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).cloned())
     }
@@ -520,7 +531,11 @@ impl EvmEnvProvider for MockEthProvider {
         unimplemented!()
     }
 
-    fn fill_block_env_at(&self, _block_env: &mut BlockEnv, _at: BlockHashOrNumber) -> RethResult<()> {
+    fn fill_block_env_at(
+        &self,
+        _block_env: &mut BlockEnv,
+        _at: BlockHashOrNumber,
+    ) -> RethResult<()> {
         unimplemented!()
     }
 

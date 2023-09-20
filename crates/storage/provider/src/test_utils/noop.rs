@@ -35,7 +35,11 @@ impl BlockHashReader for NoopProvider {
         Ok(None)
     }
 
-    fn canonical_hashes_range(&self, _start: BlockNumber, _end: BlockNumber) -> RethResult<Vec<H256>> {
+    fn canonical_hashes_range(
+        &self,
+        _start: BlockNumber,
+        _end: BlockNumber,
+    ) -> RethResult<Vec<H256>> {
         Ok(vec![])
     }
 }
@@ -132,7 +136,10 @@ impl TransactionsProvider for NoopProvider {
         Ok(None)
     }
 
-    fn transaction_by_id_no_hash(&self, _id: TxNumber) -> RethResult<Option<TransactionSignedNoHash>> {
+    fn transaction_by_id_no_hash(
+        &self,
+        _id: TxNumber,
+    ) -> RethResult<Option<TransactionSignedNoHash>> {
         Ok(None)
     }
 
@@ -237,7 +244,10 @@ impl AccountReader for NoopProvider {
 }
 
 impl ChangeSetReader for NoopProvider {
-    fn account_block_changeset(&self, _block_number: BlockNumber) -> RethResult<Vec<AccountBeforeTx>> {
+    fn account_block_changeset(
+        &self,
+        _block_number: BlockNumber,
+    ) -> RethResult<Vec<AccountBeforeTx>> {
         Ok(Vec::default())
     }
 }
@@ -249,7 +259,11 @@ impl StateRootProvider for NoopProvider {
 }
 
 impl StateProvider for NoopProvider {
-    fn storage(&self, _account: Address, _storage_key: StorageKey) -> RethResult<Option<StorageValue>> {
+    fn storage(
+        &self,
+        _account: Address,
+        _storage_key: StorageKey,
+    ) -> RethResult<Option<StorageValue>> {
         Ok(None)
     }
 
@@ -285,7 +299,11 @@ impl EvmEnvProvider for NoopProvider {
         Ok(())
     }
 
-    fn fill_block_env_at(&self, _block_env: &mut BlockEnv, _at: BlockHashOrNumber) -> RethResult<()> {
+    fn fill_block_env_at(
+        &self,
+        _block_env: &mut BlockEnv,
+        _at: BlockHashOrNumber,
+    ) -> RethResult<()> {
         Ok(())
     }
 

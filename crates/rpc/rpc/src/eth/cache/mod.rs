@@ -136,7 +136,10 @@ impl EthStateCache {
     /// Requests the [Block] for the block hash, sealed with the given block hash.
     ///
     /// Returns `None` if the block does not exist.
-    pub(crate) async fn get_sealed_block(&self, block_hash: H256) -> RethResult<Option<SealedBlock>> {
+    pub(crate) async fn get_sealed_block(
+        &self,
+        block_hash: H256,
+    ) -> RethResult<Option<SealedBlock>> {
         Ok(self.get_block(block_hash).await?.map(|block| block.seal(block_hash)))
     }
 

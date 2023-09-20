@@ -847,7 +847,10 @@ impl<'this, TX: DbTx<'this>> AccountExtReader for DatabaseProvider<'this, TX> {
 }
 
 impl<'this, TX: DbTx<'this>> ChangeSetReader for DatabaseProvider<'this, TX> {
-    fn account_block_changeset(&self, block_number: BlockNumber) -> RethResult<Vec<AccountBeforeTx>> {
+    fn account_block_changeset(
+        &self,
+        block_number: BlockNumber,
+    ) -> RethResult<Vec<AccountBeforeTx>> {
         let range = block_number..=block_number;
         self.tx
             .cursor_read::<tables::AccountChangeSet>()?
@@ -931,7 +934,11 @@ impl<'this, TX: DbTx<'this>> BlockHashReader for DatabaseProvider<'this, TX> {
         Ok(self.tx.get::<tables::CanonicalHeaders>(number)?)
     }
 
-    fn canonical_hashes_range(&self, start: BlockNumber, end: BlockNumber) -> RethResult<Vec<H256>> {
+    fn canonical_hashes_range(
+        &self,
+        start: BlockNumber,
+        end: BlockNumber,
+    ) -> RethResult<Vec<H256>> {
         let range = start..end;
         let mut cursor = self.tx.cursor_read::<tables::CanonicalHeaders>()?;
         cursor
@@ -1034,7 +1041,10 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
     /// If the header for this block is not found, this returns `None`.
     /// If the header is found, but the transactions either do not exist, or are not indexed, this
     /// will return None.
-    fn block_with_senders(&self, block_number: BlockNumber) -> RethResult<Option<BlockWithSenders>> {
+    fn block_with_senders(
+        &self,
+        block_number: BlockNumber,
+    ) -> RethResult<Option<BlockWithSenders>> {
         let header = self
             .header_by_number(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
@@ -1087,7 +1097,10 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
         Ok(self.tx.get::<tables::Transactions>(id)?.map(Into::into))
     }
 
-    fn transaction_by_id_no_hash(&self, id: TxNumber) -> RethResult<Option<TransactionSignedNoHash>> {
+    fn transaction_by_id_no_hash(
+        &self,
+        id: TxNumber,
+    ) -> RethResult<Option<TransactionSignedNoHash>> {
         Ok(self.tx.get::<tables::Transactions>(id)?)
     }
 
@@ -1317,7 +1330,11 @@ impl<'this, TX: DbTx<'this>> EvmEnvProvider for DatabaseProvider<'this, TX> {
         self.fill_block_env_with_header(block_env, &header)
     }
 
-    fn fill_block_env_with_header(&self, block_env: &mut BlockEnv, header: &Header) -> RethResult<()> {
+    fn fill_block_env_with_header(
+        &self,
+        block_env: &mut BlockEnv,
+        header: &Header,
+    ) -> RethResult<()> {
         let total_difficulty = self
             .header_td_by_number(header.number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
@@ -1730,7 +1747,10 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
         self.append_history_index::<_, tables::AccountHistory>(account_transitions, ShardedKey::new)
     }
 
-    fn unwind_storage_history_indices(&self, range: Range<BlockNumberAddress>) -> RethResult<usize> {
+    fn unwind_storage_history_indices(
+        &self,
+        range: Range<BlockNumberAddress>,
+    ) -> RethResult<usize> {
         let storage_changesets = self
             .tx
             .cursor_read::<tables::StorageChangeSet>()?
@@ -1777,7 +1797,10 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
         Ok(changesets)
     }
 
-    fn unwind_account_history_indices(&self, range: RangeInclusive<BlockNumber>) -> RethResult<usize> {
+    fn unwind_account_history_indices(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> RethResult<usize> {
         let account_changeset = self
             .tx
             .cursor_read::<tables::AccountChangeSet>()?
@@ -2061,7 +2084,11 @@ impl<'this, TX: DbTx<'this>> PruneCheckpointReader for DatabaseProvider<'this, T
 }
 
 impl<'this, TX: DbTxMut<'this>> PruneCheckpointWriter for DatabaseProvider<'this, TX> {
-    fn save_prune_checkpoint(&self, part: PrunePart, checkpoint: PruneCheckpoint) -> RethResult<()> {
+    fn save_prune_checkpoint(
+        &self,
+        part: PrunePart,
+        checkpoint: PruneCheckpoint,
+    ) -> RethResult<()> {
         Ok(self.tx.put::<tables::PruneCheckpoints>(part, checkpoint)?)
     }
 }

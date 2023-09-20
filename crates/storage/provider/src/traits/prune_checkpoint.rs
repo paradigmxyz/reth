@@ -12,5 +12,6 @@ pub trait PruneCheckpointReader: Send + Sync {
 #[auto_impl::auto_impl(&, Arc)]
 pub trait PruneCheckpointWriter: Send + Sync {
     /// Save prune checkpoint.
-    fn save_prune_checkpoint(&self, part: PrunePart, checkpoint: PruneCheckpoint) -> RethResult<()>;
+    fn save_prune_checkpoint(&self, part: PrunePart, checkpoint: PruneCheckpoint)
+        -> RethResult<()>;
 }

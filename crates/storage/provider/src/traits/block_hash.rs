@@ -23,5 +23,6 @@ pub trait BlockHashReader: Send + Sync {
     /// Returns the available hashes of that range.
     ///
     /// Note: The range is `start..end`, so the expected result is `[start..end)`
-    fn canonical_hashes_range(&self, start: BlockNumber, end: BlockNumber) -> RethResult<Vec<H256>>;
+    fn canonical_hashes_range(&self, start: BlockNumber, end: BlockNumber)
+        -> RethResult<Vec<H256>>;
 }

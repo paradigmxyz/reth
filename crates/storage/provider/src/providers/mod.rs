@@ -81,7 +81,9 @@ where
                 drop(provider);
                 Ok(Self::with_latest(database, tree, header.seal(best.best_hash)))
             }
-            None => Err(RethError::Provider(ProviderError::HeaderNotFound(best.best_number.into()))),
+            None => {
+                Err(RethError::Provider(ProviderError::HeaderNotFound(best.best_number.into())))
+            }
         }
     }
 }
@@ -156,7 +158,11 @@ where
         self.database.provider()?.block_hash(number)
     }
 
-    fn canonical_hashes_range(&self, start: BlockNumber, end: BlockNumber) -> RethResult<Vec<H256>> {
+    fn canonical_hashes_range(
+        &self,
+        start: BlockNumber,
+        end: BlockNumber,
+    ) -> RethResult<Vec<H256>> {
         self.database.provider()?.canonical_hashes_range(start, end)
     }
 }
@@ -244,7 +250,10 @@ where
         self.database.provider()?.ommers(id)
     }
 
-    fn block_body_indices(&self, number: BlockNumber) -> RethResult<Option<StoredBlockBodyIndices>> {
+    fn block_body_indices(
+        &self,
+        number: BlockNumber,
+    ) -> RethResult<Option<StoredBlockBodyIndices>> {
         self.database.provider()?.block_body_indices(number)
     }
 
@@ -272,7 +281,10 @@ where
         self.database.provider()?.transaction_by_id(id)
     }
 
-    fn transaction_by_id_no_hash(&self, id: TxNumber) -> RethResult<Option<TransactionSignedNoHash>> {
+    fn transaction_by_id_no_hash(
+        &self,
+        id: TxNumber,
+    ) -> RethResult<Option<TransactionSignedNoHash>> {
         self.database.provider()?.transaction_by_id_no_hash(id)
     }
 
@@ -425,7 +437,11 @@ where
         self.database.provider()?.fill_block_env_at(block_env, at)
     }
 
-    fn fill_block_env_with_header(&self, block_env: &mut BlockEnv, header: &Header) -> RethResult<()> {
+    fn fill_block_env_with_header(
+        &self,
+        block_env: &mut BlockEnv,
+        header: &Header,
+    ) -> RethResult<()> {
         self.database.provider()?.fill_block_env_with_header(block_env, header)
     }
 
@@ -469,7 +485,10 @@ where
         self.database.latest()
     }
 
-    fn history_by_block_number(&self, block_number: BlockNumber) -> RethResult<StateProviderBox<'_>> {
+    fn history_by_block_number(
+        &self,
+        block_number: BlockNumber,
+    ) -> RethResult<StateProviderBox<'_>> {
         trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
         self.ensure_canonical_block(block_number)?;
         self.database.history_by_block_number(block_number)
@@ -703,7 +722,10 @@ where
         }
     }
 
-    fn sealed_header_by_number_or_tag(&self, id: BlockNumberOrTag) -> RethResult<Option<SealedHeader>> {
+    fn sealed_header_by_number_or_tag(
+        &self,
+        id: BlockNumberOrTag,
+    ) -> RethResult<Option<SealedHeader>> {
         match id {
             BlockNumberOrTag::Latest => Ok(Some(self.chain_info.get_canonical_head())),
             BlockNumberOrTag::Finalized => Ok(self.chain_info.get_finalized_header()),
@@ -774,7 +796,10 @@ where
     DB: Database,
     Tree: Sync + Send,
 {
-    fn account_block_changeset(&self, block_number: BlockNumber) -> RethResult<Vec<AccountBeforeTx>> {
+    fn account_block_changeset(
+        &self,
+        block_number: BlockNumber,
+    ) -> RethResult<Vec<AccountBeforeTx>> {
         self.database.provider()?.account_block_changeset(block_number)
     }
 }

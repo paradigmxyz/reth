@@ -232,7 +232,7 @@ where
         target: Option<H256>,
         pipeline_run_threshold: u64,
         hooks: EngineHooks,
-    ) -> Result<(Self, BeaconConsensusEngineHandle), RethError> {
+    ) -> RethResult<(Self, BeaconConsensusEngineHandle)> {
         let (to_engine, rx) = mpsc::unbounded_channel();
         Self::with_channel(
             client,
@@ -278,7 +278,7 @@ where
         to_engine: UnboundedSender<BeaconEngineMessage>,
         rx: UnboundedReceiver<BeaconEngineMessage>,
         hooks: EngineHooks,
-    ) -> Result<(Self, BeaconConsensusEngineHandle), RethError> {
+    ) -> RethResult<(Self, BeaconConsensusEngineHandle)> {
         let handle = BeaconConsensusEngineHandle { to_engine };
         let sync = EngineSyncController::new(
             pipeline,
@@ -327,7 +327,7 @@ where
     /// # Returns
     ///
     /// A target block hash if the pipeline is inconsistent, otherwise `None`.
-    fn check_pipeline_consistency(&self) -> Result<Option<H256>, RethError> {
+    fn check_pipeline_consistency(&self) -> RethResult<Option<H256>> {
         // If no target was provided, check if the stages are congruent - check if the
         // checkpoint of the last stage matches the checkpoint of the first.
         let first_stage_checkpoint = self
@@ -623,7 +623,7 @@ where
         &mut self,
         state: ForkchoiceState,
         attrs: Option<PayloadAttributes>,
-    ) -> Result<OnForkChoiceUpdated, RethError> {
+    ) -> RethResult<OnForkChoiceUpdated> {
         trace!(target: "consensus::engine", ?state, "Received new forkchoice state update");
         if state.head_block_hash.is_zero() {
             return Ok(OnForkChoiceUpdated::invalid_state())
@@ -1323,7 +1323,7 @@ where
     ///
     /// If the given block is missing from the database, this will return `false`. Otherwise, `true`
     /// is returned: the database contains the hash and the tree was updated.
-    fn update_tree_on_finished_pipeline(&mut self, block_hash: H256) -> Result<bool, RethError> {
+    fn update_tree_on_finished_pipeline(&mut self, block_hash: H256) -> RethResult<bool> {
         let synced_to_finalized = match self.blockchain.block_number(block_hash)? {
             Some(number) => {
                 // Attempt to restore the tree.

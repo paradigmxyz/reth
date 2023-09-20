@@ -14,14 +14,21 @@ pub type StateProviderBox<'a> = Box<dyn StateProvider + 'a>;
 #[auto_impl(&, Arc, Box)]
 pub trait StateProvider: BlockHashReader + AccountReader + StateRootProvider + Send + Sync {
     /// Get storage of given account.
-    fn storage(&self, account: Address, storage_key: StorageKey) -> RethResult<Option<StorageValue>>;
+    fn storage(
+        &self,
+        account: Address,
+        storage_key: StorageKey,
+    ) -> RethResult<Option<StorageValue>>;
 
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: H256) -> RethResult<Option<Bytecode>>;
 
     /// Get account and storage proofs.
-    fn proof(&self, address: Address, keys: &[H256])
-        -> RethResult<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)>;
+    fn proof(
+        &self,
+        address: Address,
+        keys: &[H256],
+    ) -> RethResult<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)>;
 
     /// Get account code by its address.
     ///

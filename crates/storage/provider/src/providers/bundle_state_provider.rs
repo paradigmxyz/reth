@@ -34,7 +34,11 @@ impl<SP: StateProvider, BSDP: BundleStateDataProvider> BlockHashReader
         self.state_provider.block_hash(block_number)
     }
 
-    fn canonical_hashes_range(&self, _start: BlockNumber, _end: BlockNumber) -> RethResult<Vec<H256>> {
+    fn canonical_hashes_range(
+        &self,
+        _start: BlockNumber,
+        _end: BlockNumber,
+    ) -> RethResult<Vec<H256>> {
         unimplemented!()
     }
 }
