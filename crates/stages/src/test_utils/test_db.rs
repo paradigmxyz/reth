@@ -12,11 +12,7 @@ use reth_db::{
 use reth_interfaces::test_utils::generators::ChangeSet;
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader, StorageEntry,
-<<<<<<< HEAD
-    H256, MAINNET, U256,
-=======
     TxHash, TxNumber, H256, MAINNET, U256,
->>>>>>> main
 };
 use reth_provider::{DatabaseProviderRO, DatabaseProviderRW, HistoryWriter, ProviderFactory};
 use std::{
@@ -273,20 +269,6 @@ impl TestTransaction {
         })
     }
 
-<<<<<<< HEAD
-    /// Insert ordered collection of [Receipt] into corresponding table.
-    pub fn insert_receipts<'a, I>(&self, receipts: I, tx_offset: Option<u64>) -> Result<(), DbError>
-    where
-        I: Iterator<Item = &'a Receipt>,
-    {
-        self.commit(|tx| {
-            let mut next_tx_num = tx_offset.unwrap_or_default();
-
-            receipts.into_iter().try_for_each(|receipt| {
-                tx.put::<tables::Receipts>(next_tx_num, receipt.clone())?;
-                next_tx_num += 1;
-                Ok(())
-=======
     pub fn insert_tx_hash_numbers<I>(&self, tx_hash_numbers: I) -> Result<(), DbError>
     where
         I: IntoIterator<Item = (TxHash, TxNumber)>,
@@ -320,7 +302,6 @@ impl TestTransaction {
             transaction_senders.into_iter().try_for_each(|(tx_num, sender)| {
                 // Insert into receipts table.
                 tx.put::<tables::TxSenders>(tx_num, sender)
->>>>>>> main
             })
         })
     }

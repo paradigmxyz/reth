@@ -1,18 +1,13 @@
 use super::cache::EthStateCache;
 use crate::{
-    eth::{
-        error::{EthApiError},
-        logs_utils,
-    },
+    eth::{error::EthApiError, logs_utils},
     result::{rpc_error_with_code, ToRpcResult},
     EthSubscriptionIdProvider,
 };
 use async_trait::async_trait;
 use itertools::Itertools;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_primitives::{
-    Address,  BlockNumber, IntegerList,H256,
-};
+use reth_primitives::{Address, BlockNumber, IntegerList, H256};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, LogIndexProvider};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{
@@ -328,11 +323,9 @@ where
     // async fn block_and_receipts_by_number(
     //     &self,
     //     hash_or_number: BlockHashOrNumber,
-    // ) -> EthResult<Option<(SealedBlock, Vec<Receipt>)>> {
-    //     let block_hash = match self.provider.convert_block_hash(hash_or_number)? {
-    //         Some(hash) => hash,
-    //         None => return Ok(None),
-    //     };
+    // ) -> EthResult<Option<(SealedBlock, Vec<Receipt>)>> { let block_hash = match
+    //   self.provider.convert_block_hash(hash_or_number)? { Some(hash) => hash, None => return
+    //   Ok(None), };
 
     //     Ok(self.eth_cache.get_block_and_receipts(block_hash).await?)
     // }
@@ -365,7 +358,12 @@ where
         if let Some(filter_address) = filter.address.to_value_or_array() {
             log_index_filter.install_address_filter(&self.provider, &filter_address)?;
         }
-        let topics = filter.topics.clone().into_iter().filter_map(|t| t.to_value_or_array()).collect::<Vec<_>>();
+        let topics = filter
+            .topics
+            .clone()
+            .into_iter()
+            .filter_map(|t| t.to_value_or_array())
+            .collect::<Vec<_>>();
         if !topics.is_empty() {
             log_index_filter.install_topic_filter(&self.provider, &topics)?;
         }
@@ -396,14 +394,11 @@ where
                     false,
                 );
 
-
                 // size check but only if range is multiple blocks, so we always return all
                 // logs of a single block
                 if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
-                    return Err(FilterError::QueryExceedsMaxResults(
-                        self.max_logs_per_response,
-                    ))
-                }       
+                    return Err(FilterError::QueryExceedsMaxResults(self.max_logs_per_response))
+                }
             }
         }
 

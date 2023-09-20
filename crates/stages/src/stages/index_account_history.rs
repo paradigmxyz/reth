@@ -116,12 +116,13 @@ mod tests {
         transaction::{DbTx, DbTxMut},
         BlockNumberList,
     };
-    use reth_provider::ProviderFactory;
     use reth_interfaces::test_utils::{
         generators,
         generators::{random_block_range, random_changeset_range, random_contract_account_range},
     };
     use reth_primitives::{hex_literal::hex, Address, BlockNumber, PruneMode, H160, H256, MAINNET};
+    use reth_provider::ProviderFactory;
+    use std::collections::BTreeMap;
 
     const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));
 

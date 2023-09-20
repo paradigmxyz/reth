@@ -193,7 +193,9 @@ mod tests {
                         .map(|tx| random_receipt(&mut rng, tx, Some(logs_per_receipt))),
                 );
             }
-            self.tx.insert_receipts(receipts.iter(), tx_offset)?;
+            self.tx.insert_receipts(receipts.iter().enumerate().map(|(idx, receipt)| {
+                (idx as u64 + tx_offset.unwrap_or_default(), receipt.clone())
+            }))?;
 
             Ok((blocks, receipts))
         }
