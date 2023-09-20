@@ -181,16 +181,33 @@ impl ChainSpecProvider for MockEthProvider {
 }
 
 impl TransactionsProvider for MockEthProvider {
-    fn transaction_id(&self, _tx_hash: TxHash) -> Result<Option<TxNumber>> {
-        todo!()
+    fn transaction_id(&self, tx_hash: TxHash) -> Result<Option<TxNumber>> {
+        let lock = self.blocks.lock();
+        let tx_number = lock
+            .values()
+            .flat_map(|block| &block.body)
+            .position(|tx| tx.hash() == tx_hash)
+            .map(|pos| pos as TxNumber);
+
+        Ok(tx_number)
     }
 
-    fn transaction_by_id(&self, _id: TxNumber) -> Result<Option<TransactionSigned>> {
-        Ok(None)
+    fn transaction_by_id(&self, id: TxNumber) -> Result<Option<TransactionSigned>> {
+        let lock = self.blocks.lock();
+        let transaction = lock.values().flat_map(|block| &block.body).nth(id as usize).cloned();
+
+        Ok(transaction)
     }
 
-    fn transaction_by_id_no_hash(&self, _id: TxNumber) -> Result<Option<TransactionSignedNoHash>> {
-        Ok(None)
+    fn transaction_by_id_no_hash(&self, id: TxNumber) -> Result<Option<TransactionSignedNoHash>> {
+        let lock = self.blocks.lock();
+        let transaction = lock
+            .values()
+            .flat_map(|block| &block.body)
+            .nth(id as usize)
+            .map(|tx| Into::<TransactionSignedNoHash>::into(tx.clone()));
+
+        Ok(transaction)
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> Result<Option<TransactionSigned>> {
@@ -203,13 +220,37 @@ impl TransactionsProvider for MockEthProvider {
 
     fn transaction_by_hash_with_meta(
         &self,
-        _hash: TxHash,
+        hash: TxHash,
     ) -> Result<Option<(TransactionSigned, TransactionMeta)>> {
+        let lock = self.blocks.lock();
+        for (block_hash, block) in lock.iter() {
+            for (index, tx) in block.body.iter().enumerate() {
+                if tx.hash() == hash {
+                    let meta = TransactionMeta {
+                        tx_hash: hash,
+                        index: index as u64,
+                        block_hash: *block_hash,
+                        block_number: block.header.number,
+                        base_fee: block.header.base_fee_per_gas,
+                        excess_blob_gas: block.header.excess_blob_gas,
+                    };
+                    return Ok(Some((tx.clone(), meta)))
+                }
+            }
+        }
         Ok(None)
     }
 
-    fn transaction_block(&self, _id: TxNumber) -> Result<Option<BlockNumber>> {
-        unimplemented!()
+    fn transaction_block(&self, id: TxNumber) -> Result<Option<BlockNumber>> {
+        let lock = self.blocks.lock();
+        let mut current_tx_number: TxNumber = 0;
+        for block in lock.values() {
+            if current_tx_number + (block.body.len() as TxNumber) > id {
+                return Ok(Some(block.header.number))
+            }
+            current_tx_number += block.body.len() as TxNumber;
+        }
+        Ok(None)
     }
 
     fn transactions_by_block(
@@ -236,17 +277,45 @@ impl TransactionsProvider for MockEthProvider {
 
     fn transactions_by_tx_range(
         &self,
-        _range: impl RangeBounds<TxNumber>,
+        range: impl RangeBounds<TxNumber>,
     ) -> Result<Vec<reth_primitives::TransactionSignedNoHash>> {
-        unimplemented!()
+        let lock = self.blocks.lock();
+        let transactions = lock
+            .values()
+            .flat_map(|block| &block.body)
+            .enumerate()
+            .filter_map(|(tx_number, tx)| {
+                if range.contains(&(tx_number as TxNumber)) {
+                    Some(tx.clone().into())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(transactions)
     }
 
-    fn senders_by_tx_range(&self, _range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
-        unimplemented!()
+    fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
+        let lock = self.blocks.lock();
+        let transactions = lock
+            .values()
+            .flat_map(|block| &block.body)
+            .enumerate()
+            .filter_map(|(tx_number, tx)| {
+                if range.contains(&(tx_number as TxNumber)) {
+                    Some(tx.recover_signer()?)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(transactions)
     }
 
-    fn transaction_sender(&self, _id: TxNumber) -> Result<Option<Address>> {
-        unimplemented!()
+    fn transaction_sender(&self, id: TxNumber) -> Result<Option<Address>> {
+        self.transaction_by_id(id).map(|tx_option| tx_option.map(|tx| tx.recover_signer().unwrap()))
     }
 }
 
