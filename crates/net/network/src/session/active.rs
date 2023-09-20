@@ -585,7 +585,7 @@ impl Future for ActiveSession {
                         Poll::Ready(Ok(_)) => {
                             let _ = to_session_manager_poll_tx.send_item(msg);
                         }
-                        Poll::Ready(Err(_)) => {}
+                        Poll::Ready(Err(_)) => return Poll::Ready(()),
                         Poll::Pending => {
                             this.pending_message_to_session = Some(msg);
                             break 'receive
@@ -642,9 +642,8 @@ impl Future for ActiveSession {
             // check for timed out requests
             if this.check_timed_out_requests(Instant::now()) {
                 if let Poll::Ready(Ok(_)) = to_session_manager_poll_tx.poll_reserve(cx) {
-                    let _ = to_session_manager_poll_tx.send_item(
-                        ActiveSessionMessage::ProtocolBreach { peer_id: this.remote_peer_id },
-                    );
+                    let msg = ActiveSessionMessage::ProtocolBreach { peer_id: this.remote_peer_id };
+                    this.pending_message_to_session = Some(msg);
                 }
             }
         }
