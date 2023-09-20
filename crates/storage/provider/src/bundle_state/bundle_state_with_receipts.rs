@@ -355,7 +355,7 @@ impl BundleStateWithReceipts {
         let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
 
-        for (idx, receipts) in self.receipts.receipt_vec.into_iter().enumerate() {
+        for (idx, receipts) in self.receipts.into_iter().enumerate() {
             if !receipts.is_empty() {
                 let (_, body_indices) = bodies_cursor
                     .seek_exact(self.first_block + idx as u64)?

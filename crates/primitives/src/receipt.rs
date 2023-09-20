@@ -119,6 +119,21 @@ impl DerefMut for Receipts {
     }
 }
 
+impl IntoIterator for Receipts {
+    type Item = Vec<Option<Receipt>>;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.receipt_vec.into_iter()
+    }
+}
+
+impl FromIterator<Vec<Option<Receipt>>> for Receipts {
+    fn from_iter<I: IntoIterator<Item = Vec<Option<Receipt>>>>(iter: I) -> Self {
+        Self::from_vec(iter.into_iter().collect())
+    }
+}
+
 impl From<Receipt> for ReceiptWithBloom {
     fn from(receipt: Receipt) -> Self {
         let bloom = receipt.bloom_slow();
