@@ -330,10 +330,10 @@ pub enum PayloadError {
     /// Invalid payload base fee.
     #[error("Invalid payload base fee: {0}")]
     BaseFee(U256),
-    /// Invalid payload base fee.
+    /// Invalid payload blob gas used.
     #[error("Invalid payload blob gas used: {0}")]
     BlobGasUsed(U256),
-    /// Invalid payload base fee.
+    /// Invalid payload excess blob gas.
     #[error("Invalid payload excess blob gas: {0}")]
     ExcessBlobGas(U256),
     /// Invalid payload block hash.

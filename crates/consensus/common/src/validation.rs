@@ -247,6 +247,21 @@ pub fn validate_block_standalone(
         }
     }
 
+    // EIP-4844: Shard Blob Transactions
+    if chain_spec.is_cancun_activated_at_timestamp(block.timestamp) {
+        // Check that the blob gas used in the header matches the sum of the blob gas used by each
+        // blob tx
+        let header_blob_gas_used = block.blob_gas_used.ok_or(ConsensusError::BlobGasUsedMissing)?;
+        let total_blob_gas =
+            block.blob_transactions().iter().filter_map(|tx| tx.blob_gas_used()).sum();
+        if total_blob_gas != header_blob_gas_used {
+            return Err(ConsensusError::BlobGasUsedDiff {
+                header_blob_gas_used,
+                expected_blob_gas_used: total_blob_gas,
+            })
+        }
+    }
+
     Ok(())
 }
 
@@ -491,9 +506,9 @@ mod tests {
     use mockall::mock;
     use reth_interfaces::{Error::Consensus, Result};
     use reth_primitives::{
-        hex_literal::hex, proofs, Account, Address, BlockHash, BlockHashOrNumber, Bytes,
-        ChainSpecBuilder, Header, Signature, TransactionKind, TransactionSigned, Withdrawal,
-        MAINNET, U256,
+        constants::eip4844::DATA_GAS_PER_BLOB, hex_literal::hex, proofs, Account, Address,
+        BlockBody, BlockHash, BlockHashOrNumber, Bytes, ChainSpecBuilder, Header, Signature,
+        TransactionKind, TransactionSigned, Withdrawal, H256, MAINNET, U256,
     };
     use std::ops::RangeBounds;
 
@@ -613,6 +628,26 @@ mod tests {
         let tx = TransactionSigned::from_transaction_and_signature(request, signature);
         let signer = Address::zero();
         TransactionSignedEcRecovered::from_signed_transaction(tx, signer)
+    }
+
+    fn mock_blob_tx(nonce: u64, num_blobs: usize) -> TransactionSigned {
+        let request = Transaction::Eip4844(TxEip4844 {
+            chain_id: 1u64,
+            nonce,
+            max_fee_per_gas: 0x28f000fff,
+            max_priority_fee_per_gas: 0x28f000fff,
+            max_fee_per_blob_gas: 0x7,
+            gas_limit: 10,
+            to: TransactionKind::Call(Address::default()),
+            value: 3,
+            input: Bytes::from(vec![1, 2]),
+            access_list: Default::default(),
+            blob_versioned_hashes: vec![H256::random(); num_blobs],
+        });
+
+        let signature = Signature { odd_y_parity: true, r: U256::default(), s: U256::default() };
+
+        TransactionSigned::from_transaction_and_signature(request, signature)
     }
 
     /// got test block
@@ -821,5 +856,42 @@ mod tests {
         .seal_slow();
 
         assert_eq!(validate_header_standalone(&header, &chain_spec), Ok(()));
+    }
+
+    #[test]
+    fn cancun_block_incorrect_blob_gas_used() {
+        let chain_spec = ChainSpecBuilder::mainnet().cancun_activated().build();
+
+        // create a tx with 10 blobs
+        let transaction = mock_blob_tx(1, 10);
+
+        let header = Header {
+            base_fee_per_gas: Some(1337u64),
+            withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
+            blob_gas_used: Some(1),
+            transactions_root: proofs::calculate_transaction_root(&[transaction.clone()]),
+            ..Default::default()
+        }
+        .seal_slow();
+
+        let body = BlockBody {
+            transactions: vec![transaction],
+            ommers: vec![],
+            withdrawals: Some(vec![]),
+        };
+
+        let block = SealedBlock::new(header, body);
+
+        // 10 blobs times the blob gas per blob
+        let expected_blob_gas_used = 10 * DATA_GAS_PER_BLOB;
+
+        // validate blob, it should fail blob gas used validation
+        assert_eq!(
+            validate_block_standalone(&block, &chain_spec),
+            Err(ConsensusError::BlobGasUsedDiff {
+                header_blob_gas_used: 1,
+                expected_blob_gas_used
+            })
+        );
     }
 }
