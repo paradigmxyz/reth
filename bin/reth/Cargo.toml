@@ -132,6 +132,7 @@ open_revm_metrics_record = [
     "reth-stages/open_revm_metrics_record",
     ]
 open_revm_instruction_log = ["reth-revm/open_revm_instruction_log"]
+finish_after_execution_stage = ["reth-stages/finish_after_execution_stage"]
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }

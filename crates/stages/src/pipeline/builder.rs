@@ -42,6 +42,20 @@ where
     /// [`StageSetBuilder`][crate::StageSetBuilder].
     pub fn add_stages<Set: StageSet<DB>>(mut self, set: Set) -> Self {
         for stage in set.builder().build() {
+            #[cfg(feature = "finish_after_execution_stage")]
+            {
+                match stage.id() {
+                    StageId::MerkleUnwind |
+                    StageId::AccountHashing |
+                    StageId::StorageHashing |
+                    StageId::MerkleExecute |
+                    StageId::TransactionLookup |
+                    StageId::IndexAccountHistory |
+                    StageId::IndexStorageHistory => continue,
+                    _ => println!("will input stage: {:?}", stage.id()),
+                }
+            }
+
             self.stages.push(stage);
         }
         self

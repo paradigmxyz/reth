@@ -884,7 +884,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 )),
             )
             .build(db, self.chain.clone());
-
         Ok(pipeline)
     }
 
