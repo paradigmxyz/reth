@@ -376,7 +376,7 @@ where
         // can consume the list since we're not using the request anymore
         let initial = request.access_list.take().unwrap_or_default();
 
-        let precompiles = get_precompiles(&env.cfg.spec_id);
+        let precompiles = get_precompiles(env.cfg.spec_id);
         let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
         let (result, _env) = inspect(&mut db, env, &mut inspector)?;
 
