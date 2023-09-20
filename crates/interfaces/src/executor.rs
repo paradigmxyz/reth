@@ -1,4 +1,4 @@
-use reth_primitives::{BlockHash, BlockNumHash, Bloom, PrunePartError, H256};
+use reth_primitives::{BlockNumHash, Bloom, PrunePartError, H256};
 use thiserror::Error;
 
 /// Transaction validation errors
@@ -52,9 +52,6 @@ pub enum BlockExecutionError {
     CanonicalCommit { inner: String },
 
     // === tree errors ===
-    // TODO(mattsse): move this to tree error
-    #[error("Block hash {block_hash} not found in blockchain tree chain")]
-    BlockHashNotFoundInChain { block_hash: BlockHash },
     #[error(
         "Appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
     )]
