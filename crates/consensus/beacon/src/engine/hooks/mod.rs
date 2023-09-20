@@ -11,6 +11,9 @@ pub(crate) use controller::{EngineHooksController, PolledHook};
 mod prune;
 pub use prune::PruneHook;
 
+mod snapshot;
+pub use snapshot::SnapshotHook;
+
 /// Collection of [engine hooks][`EngineHook`].
 #[derive(Default)]
 pub struct EngineHooks {
@@ -52,6 +55,8 @@ pub trait EngineHook: Send + Sync + 'static {
 pub struct EngineContext {
     /// Tip block number.
     pub tip_block_number: BlockNumber,
+    /// Finalized block number, if known.
+    pub finalized_block_number: Option<BlockNumber>,
 }
 
 /// An event emitted when [hook][`EngineHook`] is polled.
