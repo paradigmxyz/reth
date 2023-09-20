@@ -9,7 +9,7 @@ use crate::{
 use futures::FutureExt;
 use metrics::Counter;
 use reth_db::database::Database;
-use reth_interfaces::sync::SyncState;
+use reth_interfaces::{sync::SyncState, RethError};
 use reth_primitives::BlockNumber;
 use reth_prune::{Pruner, PrunerError, PrunerWithResult};
 use reth_tasks::TaskSpawner;
@@ -62,8 +62,8 @@ impl<DB: Database + 'static> PruneHook<DB> {
                             EngineHookError::Internal(Box::new(err))
                         }
                         PrunerError::Interface(err) => err.into(),
-                        PrunerError::Database(err) => reth_interfaces::Error::Database(err).into(),
-                        PrunerError::Provider(err) => reth_interfaces::Error::Provider(err).into(),
+                        PrunerError::Database(err) => RethError::Database(err).into(),
+                        PrunerError::Provider(err) => RethError::Provider(err).into(),
                     })),
                 }
             }

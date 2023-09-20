@@ -18,7 +18,7 @@ use reth_interfaces::{
     executor::{BlockExecutionError, BlockValidationError},
     p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
     sync::{NetworkSyncUpdater, SyncState},
-    Error,
+    RethError, RethResult,
 };
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
@@ -232,7 +232,7 @@ where
         target: Option<H256>,
         pipeline_run_threshold: u64,
         hooks: EngineHooks,
-    ) -> Result<(Self, BeaconConsensusEngineHandle), Error> {
+    ) -> RethResult<(Self, BeaconConsensusEngineHandle)> {
         let (to_engine, rx) = mpsc::unbounded_channel();
         Self::with_channel(
             client,
@@ -278,7 +278,7 @@ where
         to_engine: UnboundedSender<BeaconEngineMessage>,
         rx: UnboundedReceiver<BeaconEngineMessage>,
         hooks: EngineHooks,
-    ) -> Result<(Self, BeaconConsensusEngineHandle), Error> {
+    ) -> RethResult<(Self, BeaconConsensusEngineHandle)> {
         let handle = BeaconConsensusEngineHandle { to_engine };
         let sync = EngineSyncController::new(
             pipeline,
@@ -327,7 +327,7 @@ where
     /// # Returns
     ///
     /// A target block hash if the pipeline is inconsistent, otherwise `None`.
-    fn check_pipeline_consistency(&self) -> Result<Option<H256>, Error> {
+    fn check_pipeline_consistency(&self) -> RethResult<Option<H256>> {
         // If no target was provided, check if the stages are congruent - check if the
         // checkpoint of the last stage matches the checkpoint of the first.
         let first_stage_checkpoint = self
@@ -555,7 +555,7 @@ where
         &mut self,
         state: ForkchoiceState,
         attrs: Option<PayloadAttributes>,
-        tx: oneshot::Sender<Result<OnForkChoiceUpdated, Error>>,
+        tx: oneshot::Sender<Result<OnForkChoiceUpdated, RethError>>,
     ) -> OnForkchoiceUpdateOutcome {
         self.metrics.forkchoice_updated_messages.increment(1);
         self.blockchain.on_forkchoice_update_received(&state);
@@ -563,7 +563,7 @@ where
         let on_updated = match self.forkchoice_updated(state, attrs) {
             Ok(response) => response,
             Err(error) => {
-                if let Error::Execution(ref err) = error {
+                if let RethError::Execution(ref err) = error {
                     if err.is_fatal() {
                         // FCU resulted in a fatal error from which we can't recover
                         let err = err.clone();
@@ -623,7 +623,7 @@ where
         &mut self,
         state: ForkchoiceState,
         attrs: Option<PayloadAttributes>,
-    ) -> Result<OnForkChoiceUpdated, Error> {
+    ) -> RethResult<OnForkChoiceUpdated> {
         trace!(target: "consensus::engine", ?state, "Received new forkchoice state update");
         if state.head_block_hash.is_zero() {
             return Ok(OnForkChoiceUpdated::invalid_state())
@@ -690,7 +690,7 @@ where
                 PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash))
             }
             Err(error) => {
-                if let Error::Canonical(ref err) = error {
+                if let RethError::Canonical(ref err) = error {
                     if err.is_fatal() {
                         tracing::error!(target: "consensus::engine", ?err, "Encountered fatal error");
                         return Err(error)
@@ -719,7 +719,7 @@ where
     fn record_make_canonical_latency(
         &self,
         start: Instant,
-        outcome: &Result<CanonicalOutcome, Error>,
+        outcome: &Result<CanonicalOutcome, RethError>,
     ) {
         let elapsed = start.elapsed();
         self.metrics.make_canonical_latency.record(elapsed);
@@ -747,7 +747,7 @@ where
         &mut self,
         state: ForkchoiceState,
         status: &PayloadStatus,
-    ) -> Result<Option<OnForkChoiceUpdated>, reth_interfaces::Error> {
+    ) -> RethResult<Option<OnForkChoiceUpdated>> {
         // We only perform consistency checks if the status is VALID because if the status is
         // INVALID, we want to return the correct _type_ of error to the CL so we can properly
         // describe the reason it is invalid. For example, it's possible that the status is invalid
@@ -776,7 +776,7 @@ where
     fn ensure_consistent_state(
         &mut self,
         state: ForkchoiceState,
-    ) -> Result<Option<OnForkChoiceUpdated>, reth_interfaces::Error> {
+    ) -> RethResult<Option<OnForkChoiceUpdated>> {
         // Ensure that the finalized block, if not zero, is known and in the canonical chain
         // after the head block is canonicalized.
         //
@@ -816,11 +816,7 @@ where
     ///
     /// This also updates the tracked safe and finalized blocks, and should be called before
     /// returning a VALID forkchoice update response
-    fn update_canon_chain(
-        &self,
-        head: SealedHeader,
-        update: &ForkchoiceState,
-    ) -> Result<(), Error> {
+    fn update_canon_chain(&self, head: SealedHeader, update: &ForkchoiceState) -> RethResult<()> {
         self.update_head(head)?;
         self.update_finalized_block(update.finalized_block_hash)?;
         self.update_safe_block(update.safe_block_hash)?;
@@ -835,7 +831,7 @@ where
     ///
     /// This should be called before returning a VALID forkchoice update response
     #[inline]
-    fn update_head(&self, head: SealedHeader) -> Result<(), reth_interfaces::Error> {
+    fn update_head(&self, head: SealedHeader) -> RethResult<()> {
         let mut head_block = Head {
             number: head.number,
             hash: head.hash,
@@ -850,7 +846,7 @@ where
 
         head_block.total_difficulty =
             self.blockchain.header_td_by_number(head_block.number)?.ok_or_else(|| {
-                Error::Provider(ProviderError::TotalDifficultyNotFound {
+                RethError::Provider(ProviderError::TotalDifficultyNotFound {
                     number: head_block.number,
                 })
             })?;
@@ -863,17 +859,17 @@ where
     ///
     /// Returns an error if the block is not found.
     #[inline]
-    fn update_safe_block(&self, safe_block_hash: H256) -> Result<(), reth_interfaces::Error> {
+    fn update_safe_block(&self, safe_block_hash: H256) -> RethResult<()> {
         if !safe_block_hash.is_zero() {
             if self.blockchain.safe_block_hash()? == Some(safe_block_hash) {
                 // nothing to update
                 return Ok(())
             }
 
-            let safe = self
-                .blockchain
-                .find_block_by_hash(safe_block_hash, BlockSource::Any)?
-                .ok_or_else(|| Error::Provider(ProviderError::UnknownBlockHash(safe_block_hash)))?;
+            let safe =
+                self.blockchain.find_block_by_hash(safe_block_hash, BlockSource::Any)?.ok_or_else(
+                    || RethError::Provider(ProviderError::UnknownBlockHash(safe_block_hash)),
+                )?;
             self.blockchain.set_safe(safe.header.seal(safe_block_hash));
         }
         Ok(())
@@ -883,10 +879,7 @@ where
     ///
     /// Returns an error if the block is not found.
     #[inline]
-    fn update_finalized_block(
-        &self,
-        finalized_block_hash: H256,
-    ) -> Result<(), reth_interfaces::Error> {
+    fn update_finalized_block(&self, finalized_block_hash: H256) -> RethResult<()> {
         if !finalized_block_hash.is_zero() {
             if self.blockchain.finalized_block_hash()? == Some(finalized_block_hash) {
                 // nothing to update
@@ -897,7 +890,7 @@ where
                 .blockchain
                 .find_block_by_hash(finalized_block_hash, BlockSource::Any)?
                 .ok_or_else(|| {
-                    Error::Provider(ProviderError::UnknownBlockHash(finalized_block_hash))
+                    RethError::Provider(ProviderError::UnknownBlockHash(finalized_block_hash))
                 })?;
             self.blockchain.finalize_block(finalized.number);
             self.blockchain.set_finalized(finalized.header.seal(finalized_block_hash));
@@ -915,7 +908,7 @@ where
     fn on_failed_canonical_forkchoice_update(
         &mut self,
         state: &ForkchoiceState,
-        error: Error,
+        error: RethError,
     ) -> PayloadStatus {
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
 
@@ -929,7 +922,7 @@ where
 
         #[allow(clippy::single_match)]
         match &error {
-            Error::Canonical(
+            RethError::Canonical(
                 error @ CanonicalError::Validation(BlockValidationError::BlockPreMerge { .. }),
             ) => {
                 warn!(target: "consensus::engine", ?error, ?state, "Failed to canonicalize the head hash");
@@ -938,7 +931,7 @@ where
                 })
                 .with_latest_valid_hash(H256::zero())
             }
-            Error::Execution(BlockExecutionError::BlockHashNotFoundInChain { .. }) => {
+            RethError::Execution(BlockExecutionError::BlockHashNotFoundInChain { .. }) => {
                 // This just means we couldn't find the block when attempting to make it canonical,
                 // so we should not warn the user, since this will result in us attempting to sync
                 // to a new target and is considered normal operation during sync
@@ -1330,7 +1323,7 @@ where
     ///
     /// If the given block is missing from the database, this will return `false`. Otherwise, `true`
     /// is returned: the database contains the hash and the tree was updated.
-    fn update_tree_on_finished_pipeline(&mut self, block_hash: H256) -> Result<bool, Error> {
+    fn update_tree_on_finished_pipeline(&mut self, block_hash: H256) -> RethResult<bool> {
         let synced_to_finalized = match self.blockchain.block_number(block_hash)? {
             Some(number) => {
                 // Attempt to restore the tree.
@@ -1495,7 +1488,7 @@ where
                     // it's part of the canonical chain: if it's the safe or the finalized block
                     if matches!(
                         err,
-                        Error::Canonical(CanonicalError::BlockchainTree(
+                        RethError::Canonical(CanonicalError::BlockchainTree(
                             BlockchainTreeError::BlockHashNotFoundInChain { .. }
                         ))
                     ) {
@@ -1580,9 +1573,9 @@ where
                         Ok(header) => match header {
                             Some(header) => header,
                             None => {
-                                return Some(Err(Error::Provider(ProviderError::HeaderNotFound(
-                                    max_block.into(),
-                                ))
+                                return Some(Err(RethError::Provider(
+                                    ProviderError::HeaderNotFound(max_block.into()),
+                                )
                                 .into()))
                             }
                         },
@@ -1755,7 +1748,7 @@ where
                             }
                             OnForkchoiceUpdateOutcome::Fatal(err) => {
                                 // fatal error, we can terminate the future
-                                return Poll::Ready(Err(Error::Execution(err).into()))
+                                return Poll::Ready(Err(RethError::Execution(err).into()))
                             }
                         }
                     }
