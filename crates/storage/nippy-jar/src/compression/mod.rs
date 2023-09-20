@@ -14,6 +14,8 @@ pub trait Compression: Serialize + for<'a> Deserialize<'a> {
     fn compress_to<W: Write>(&self, src: &[u8], dest: &mut W) -> Result<(), NippyJarError>;
 
     /// Returns `true` if it's ready to compress.
+    ///
+    /// Example: it will return false, if `zstd` with dictionary is set, but wasn't generated.
     fn is_ready(&self) -> bool {
         true
     }
