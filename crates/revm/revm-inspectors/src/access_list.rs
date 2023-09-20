@@ -28,7 +28,7 @@ impl AccessListInspector {
         precompiles: impl IntoIterator<Item = Address>,
     ) -> Self {
         AccessListInspector {
-            excluded: [from, to].into_iter().chain(precompiles.into_iter()).collect(),
+            excluded: [from, to].into_iter().chain(precompiles).collect(),
             access_list: access_list
                 .0
                 .into_iter()
