@@ -177,8 +177,23 @@ impl PayloadBuilderAttributes {
         // configure evm env based on parent block
         let mut cfg = CfgEnv::default();
         cfg.chain_id = chain_spec.chain().id();
+
         // ensure we're not missing any timestamp based hardforks
         cfg.spec_id = revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp);
+
+        // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
+        // cancun now, we need to set the excess blob gas to the default value
+        let excess_blob_gas = parent.next_block_blob_fee().map_or_else(
+            || {
+                if chain_spec.is_cancun_activated_at_timestamp(self.timestamp) {
+                    // default excess blob gas is zero
+                    Some(0)
+                } else {
+                    None
+                }
+            },
+            Some,
+        );
 
         let block_env = BlockEnv {
             number: U256::from(parent.number + 1),
@@ -192,7 +207,7 @@ impl PayloadBuilderAttributes {
                 parent.next_block_base_fee(chain_spec.base_fee_params).unwrap_or_default(),
             ),
             // calculate excess gas based on parent block's blob gas usage
-            excess_blob_gas: parent.next_block_blob_fee(),
+            excess_blob_gas,
         };
 
         (cfg, block_env)
