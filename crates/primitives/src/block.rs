@@ -205,7 +205,7 @@ impl SealedBlock {
     }
 
     /// Calculates the total gas used by blob transactions in the sealed block.
-    pub fn calculate_blob_gas_used(&self) -> u64 {
+    pub fn blob_gas_used(&self) -> u64 {
         self.blob_transactions().iter().filter_map(|tx| tx.blob_gas_used()).sum()
     }
 }
