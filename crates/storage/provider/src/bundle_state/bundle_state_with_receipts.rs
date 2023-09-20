@@ -5,8 +5,8 @@ use reth_db::{
 };
 use reth_interfaces::db::DatabaseError;
 use reth_primitives::{
-    bloom::logs_bloom, keccak256, proofs::calculate_receipt_root_ref, Account, Address,
-    BlockNumber, Bloom, Bytecode, Log, Receipt, StorageEntry, H256, U256,
+    keccak256, logs_bloom, proofs::calculate_receipt_root_ref, Account, Address, BlockNumber,
+    Bloom, Bytecode, Log, Receipt, StorageEntry, H256, U256,
 };
 use reth_revm_primitives::{
     db::states::BundleState, into_reth_acc, into_revm_acc, primitives::AccountInfo,

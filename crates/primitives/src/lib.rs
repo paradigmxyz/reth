@@ -24,9 +24,7 @@
 pub mod abi;
 mod account;
 pub mod basefee;
-mod bits;
 mod block;
-pub mod bloom;
 mod chain;
 mod compression;
 pub mod constants;
@@ -54,12 +52,10 @@ mod withdrawal;
 pub mod proofs;
 
 pub use account::{Account, Bytecode};
-pub use bits::H512;
 pub use block::{
     Block, BlockBody, BlockBodyRoots, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
     BlockWithSenders, ForkBlock, SealedBlock, SealedBlockWithSenders,
 };
-pub use bloom::Bloom;
 pub use bytes::{Buf, BufMut, BytesMut};
 pub use chain::{
     AllGenesisFormats, BaseFeeParams, Chain, ChainInfo, ChainSpec, ChainSpecBuilder,
@@ -76,7 +72,7 @@ pub use genesis::{Genesis, GenesisAccount};
 pub use hardfork::Hardfork;
 pub use header::{Head, Header, HeadersDirection, SealedHeader};
 pub use integer_list::IntegerList;
-pub use log::Log;
+pub use log::{logs_bloom, Log};
 pub use net::{
     goerli_nodes, holesky_nodes, mainnet_nodes, sepolia_nodes, NodeRecord, GOERLI_BOOTNODES,
     HOLESKY_BOOTNODES, MAINNET_BOOTNODES, SEPOLIA_BOOTNODES,
@@ -123,7 +119,8 @@ pub type StorageValue = U256;
 pub type Selector = [u8; 4];
 
 pub use alloy_primitives::{
-    address, b256, Address, Bytes, B128 as H128, B256 as H256, B64 as H64, U256, U64,
+    address, b256, bloom, Address, Bloom, BloomInput, Bytes, B128 as H128, B256 as H256,
+    B512 as H512, B64 as H64, U256, U64,
 };
 pub use ethers_core::{types::BigEndianHash, utils as rpc_utils};
 pub use ruint::{

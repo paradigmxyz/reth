@@ -1,6 +1,6 @@
 use crate::{H256, KECCAK_EMPTY, U256};
+use byteorder::{BigEndian, ReadBytesExt};
 use bytes::Buf;
-use fixed_hash::byteorder::{BigEndian, ReadBytesExt};
 use reth_codecs::{main_codec, Compact};
 use revm_primitives::{Bytecode as RevmBytecode, BytecodeState, Bytes, JumpMap};
 use serde::{Deserialize, Serialize};

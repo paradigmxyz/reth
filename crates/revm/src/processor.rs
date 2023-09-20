@@ -538,7 +538,7 @@ pub fn verify_receipt<'a>(
     }
 
     // Create header log bloom.
-    let logs_bloom = receipts_with_bloom.iter().fold(Bloom::zero(), |bloom, r| bloom | r.bloom);
+    let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
     if logs_bloom != expected_logs_bloom {
         return Err(BlockValidationError::BloomLogDiff {
             expected: Box::new(expected_logs_bloom),

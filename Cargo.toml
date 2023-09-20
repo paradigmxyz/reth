@@ -173,3 +173,7 @@ assert_matches = "1.5.0"
 proptest = "1.0"
 proptest-derive = "0.4"
 serial_test = "2"
+
+# TODO
+[patch.crates-io]
+alloy-primitives = { git = "https://github.com/alloy-rs/core" }

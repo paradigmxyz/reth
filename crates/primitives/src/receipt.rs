@@ -1,7 +1,6 @@
 use crate::{
-    bloom::logs_bloom,
     compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR},
-    Bloom, Log, TxType,
+    logs_bloom, Bloom, Log, TxType,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use reth_codecs::{main_codec, Compact, CompactZstd};

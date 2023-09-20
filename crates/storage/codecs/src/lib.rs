@@ -8,7 +8,10 @@
 pub use codecs_derive::*;
 
 use bytes::Buf;
-use revm_primitives::{Address, Bytes, B256 as H256, U256};
+use revm_primitives::{
+    alloy_primitives::{Bloom, B512 as H512},
+    Address, Bytes, B256 as H256, U256,
+};
 
 /// Trait that implements the `Compact` codec.
 ///
@@ -302,7 +305,7 @@ macro_rules! impl_hash_compact {
     };
 }
 
-impl_hash_compact!(H256, Address);
+impl_hash_compact!(Address, H256, H512, Bloom);
 
 impl Compact for bool {
     /// `bool` vars go directly to the `StructFlags` and are not written to the buffer.

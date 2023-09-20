@@ -222,7 +222,9 @@ mod ethnum_support {
 mod ethereum_types_support {
     use super::*;
     use ethereum_types::*;
-    use revm_primitives::{ruint::aliases::U128 as RU128, Address, B256, U256 as RU256};
+    use revm_primitives::{
+        alloy_primitives::B512, ruint::aliases::U128 as RU128, Address, B256, U256 as RU256,
+    };
 
     macro_rules! fixed_hash_impl {
         ($t:ty) => {
@@ -241,6 +243,8 @@ mod ethereum_types_support {
 
     fixed_hash_impl!(Address);
     fixed_hash_impl!(B256);
+    fixed_hash_impl!(B512);
+    fixed_hash_impl!(Bloom);
 
     fixed_hash_impl!(H64);
     fixed_hash_impl!(H128);
