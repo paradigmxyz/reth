@@ -10,6 +10,7 @@ pub(crate) use controller::{EngineHooksController, PolledHook};
 
 mod prune;
 pub use prune::PruneHook;
+use reth_interfaces::RethError;
 
 /// Collection of [engine hooks][`EngineHook`].
 #[derive(Default)]
@@ -96,9 +97,9 @@ pub enum EngineHookError {
     /// Hook channel closed.
     #[error("Hook channel closed")]
     ChannelClosed,
-    /// Common error. Wrapper around [reth_interfaces::Error].
+    /// Common error. Wrapper around [RethError].
     #[error(transparent)]
-    Common(#[from] reth_interfaces::Error),
+    Common(#[from] RethError),
     /// An internal error occurred.
     #[error("Internal hook error occurred.")]
     Internal(#[from] Box<dyn std::error::Error + Send + Sync>),

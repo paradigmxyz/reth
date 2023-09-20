@@ -1,6 +1,7 @@
 use super::TestTransaction;
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::DatabaseEnv;
+use reth_interfaces::{db::DatabaseError, RethError};
 use reth_primitives::MAINNET;
 use reth_provider::ProviderFactory;
 use std::{borrow::Borrow, sync::Arc};
@@ -9,11 +10,11 @@ use tokio::sync::oneshot;
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum TestRunnerError {
     #[error("Database error occurred.")]
-    Database(#[from] reth_interfaces::db::DatabaseError),
+    Database(#[from] DatabaseError),
     #[error("Internal runner error occurred.")]
     Internal(#[from] Box<dyn std::error::Error>),
     #[error("Internal interface error occurred.")]
-    Interface(#[from] reth_interfaces::Error),
+    Interface(#[from] RethError),
 }
 
 /// A generic test runner for stages.

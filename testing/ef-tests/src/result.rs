@@ -4,6 +4,7 @@ use crate::Case;
 use reth_db::DatabaseError;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+use reth_interfaces::RethError;
 
 /// Test errors
 ///
@@ -42,7 +43,7 @@ pub enum Error {
     Assertion(String),
     /// An error internally in reth occurred.
     #[error("Test failed: {0}")]
-    RethError(#[from] reth_interfaces::Error),
+    RethError(#[from] RethError),
     /// An error occurred while decoding RLP.
     #[error("An error occurred deserializing RLP")]
     RlpDecodeError(#[from] reth_rlp::DecodeError),

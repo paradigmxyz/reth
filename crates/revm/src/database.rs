@@ -1,4 +1,4 @@
-use reth_interfaces::Error;
+use reth_interfaces::RethError;
 use reth_primitives::{H160, H256, KECCAK_EMPTY, U256};
 use reth_provider::StateProvider;
 use revm::{
@@ -11,7 +11,7 @@ use revm::{
 pub type SubState<DB> = CacheDB<StateProviderDatabase<DB>>;
 
 /// State boxed database with reth Error.
-pub type RethStateDBBox<'a> = StateDBBox<'a, Error>;
+pub type RethStateDBBox<'a> = StateDBBox<'a, RethError>;
 
 /// Wrapper around StateProvider that implements revm database trait
 #[derive(Debug, Clone)]
@@ -40,7 +40,7 @@ impl<DB: StateProvider> StateProviderDatabase<DB> {
 }
 
 impl<DB: StateProvider> Database for StateProviderDatabase<DB> {
-    type Error = Error;
+    type Error = RethError;
 
     fn basic(&mut self, address: H160) -> Result<Option<AccountInfo>, Self::Error> {
         Ok(self.0.basic_account(address)?.map(|account| AccountInfo {

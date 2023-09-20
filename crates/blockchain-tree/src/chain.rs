@@ -8,7 +8,7 @@ use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::error::{BlockchainTreeError, InsertBlockError},
     consensus::{Consensus, ConsensusError},
-    Error,
+    RethError,
 };
 use reth_primitives::{
     BlockHash, BlockNumber, ForkBlock, SealedBlockWithSenders, SealedHeader, U256,
@@ -183,7 +183,7 @@ impl AppendableChain {
         post_state_data_provider: BSDP,
         externals: &TreeExternals<DB, C, EF>,
         block_kind: BlockKind,
-    ) -> Result<BundleStateWithReceipts, Error>
+    ) -> Result<BundleStateWithReceipts, RethError>
     where
         BSDP: BundleStateDataProvider,
         DB: Database,
@@ -230,7 +230,7 @@ impl AppendableChain {
         parent_block: &SealedHeader,
         post_state_data_provider: BSDP,
         externals: &TreeExternals<DB, C, EF>,
-    ) -> Result<BundleStateWithReceipts, Error>
+    ) -> Result<BundleStateWithReceipts, RethError>
     where
         BSDP: BundleStateDataProvider,
         DB: Database,
@@ -252,7 +252,7 @@ impl AppendableChain {
         parent_block: &SealedHeader,
         post_state_data_provider: BSDP,
         externals: &TreeExternals<DB, C, EF>,
-    ) -> Result<BundleStateWithReceipts, Error>
+    ) -> Result<BundleStateWithReceipts, RethError>
     where
         BSDP: BundleStateDataProvider,
         DB: Database,
