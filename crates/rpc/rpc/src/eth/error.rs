@@ -297,6 +297,18 @@ pub enum RpcInvalidTransactionError {
     /// Block `blob_gas_price` is greater than tx-specified `max_fee_per_blob_gas` after Cancun.
     #[error("max fee per blob gas less than block blob gas fee")]
     BlobFeeCapTooLow,
+    /// Blob transaction has a versioned hash with an invalid blob
+    #[error("blob hash version mismatch")]
+    BlobHashVersionMismatch,
+    /// Blob transaction has no versioned hashes
+    #[error("blob transaction missing blob hashes")]
+    BlobTransactionMissingBlobHashes,
+    /// Blob transaction has too many blobs
+    #[error("blob transaction exceeds max blobs per block")]
+    TooManyBlobs,
+    /// Blob transaction is a create transaction
+    #[error("blob transaction is a create transaction")]
+    BlobTransactionIsCreate,
 }
 
 impl RpcInvalidTransactionError {
@@ -394,6 +406,16 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             }
             InvalidTransaction::BlobGasPriceGreaterThanMax => {
                 RpcInvalidTransactionError::BlobFeeCapTooLow
+            }
+            InvalidTransaction::EmptyBlobs => {
+                RpcInvalidTransactionError::BlobTransactionMissingBlobHashes
+            }
+            InvalidTransaction::BlobVersionNotSupported => {
+                RpcInvalidTransactionError::BlobHashVersionMismatch
+            }
+            InvalidTransaction::TooManyBlobs => RpcInvalidTransactionError::TooManyBlobs,
+            InvalidTransaction::BlobCreateTransaction => {
+                RpcInvalidTransactionError::BlobTransactionIsCreate
             }
         }
     }
