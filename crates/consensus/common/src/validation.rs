@@ -252,8 +252,7 @@ pub fn validate_block_standalone(
         // Check that the blob gas used in the header matches the sum of the blob gas used by each
         // blob tx
         let header_blob_gas_used = block.blob_gas_used.ok_or(ConsensusError::BlobGasUsedMissing)?;
-        let total_blob_gas =
-            block.blob_transactions().iter().filter_map(|tx| tx.blob_gas_used()).sum();
+        let total_blob_gas = block.blob_gas_used();
         if total_blob_gas != header_blob_gas_used {
             return Err(ConsensusError::BlobGasUsedDiff {
                 header_blob_gas_used,
