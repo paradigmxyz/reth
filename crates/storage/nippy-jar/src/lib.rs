@@ -578,13 +578,20 @@ mod tests {
         let _num_columns = 2;
         let file_path = tempfile::NamedTempFile::new().unwrap();
         let data = vec![col1.clone(), col2.clone()];
+        let block_start = 500;
+
+        #[derive(Serialize, Deserialize, Debug)]
+        pub struct BlockJarHeader {
+            block_start: usize,
+        }
 
         // Create file
         {
-            let mut nippy = NippyJar::<NoJarHeader>::new(_num_columns, file_path.path())
+            let mut nippy = NippyJar::<BlockJarHeader>::new(_num_columns, file_path.path())
                 .with_zstd(true, 5000)
                 .with_cuckoo_filter(col1.len())
-                .with_mphf();
+                .with_mphf()
+                .with_user_header(BlockJarHeader { block_start });
 
             nippy.prepare_compression(data.clone()).unwrap();
             nippy.prepare_index(&col1).unwrap();
@@ -593,11 +600,12 @@ mod tests {
 
         // Read file
         {
-            let mut loaded_nippy = NippyJar::<NoJarHeader>::load(file_path.path()).unwrap();
+            let mut loaded_nippy = NippyJar::<BlockJarHeader>::load(file_path.path()).unwrap();
 
             assert!(loaded_nippy.compressor.is_some());
             assert!(loaded_nippy.filter.is_some());
             assert!(loaded_nippy.phf.is_some());
+            assert_eq!(loaded_nippy.user_header().block_start, block_start);
 
             let mut dicts = vec![];
             if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor.as_mut() {
