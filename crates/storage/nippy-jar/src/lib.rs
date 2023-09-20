@@ -33,11 +33,16 @@ const NIPPY_JAR_VERSION: usize = 1;
 /// A [`Row`] is a list of its selected column values.
 type Row = Vec<Vec<u8>>;
 
+/// Placeholder type for when a jar has no user header.
+pub type NoJarHeader = bool;
+
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
-pub struct NippyJar {
+pub struct NippyJar<H> {
     /// Version
     version: usize,
+    /// User header data
+    user_header: Option<H>,
     /// Number of columns
     columns: usize,
     /// Compressor if required
@@ -58,11 +63,15 @@ pub struct NippyJar {
     path: Option<PathBuf>,
 }
 
-impl NippyJar {
+impl<H> NippyJar<H>
+where
+    H: Send + Sync + Serialize + for<'a> Deserialize<'a>,
+{
     /// Creates new [`NippyJar`].
     pub fn new(columns: usize, path: &Path) -> Self {
         NippyJar {
             version: NIPPY_JAR_VERSION,
+            user_header: None,
             columns,
             compressor: None,
             filter: None,
@@ -96,6 +105,17 @@ impl NippyJar {
     pub fn with_gomphf(mut self) -> Self {
         self.phf = Some(Functions::GoFmph(GoFmph::new()));
         self
+    }
+
+    /// Adds a user header.
+    pub fn with_user_header(mut self, data: H) -> Self {
+        self.user_header = Some(data);
+        self
+    }
+
+    /// Gets a reference to the user header.
+    pub fn user_header(&self) -> &H {
+        self.user_header.as_ref().expect("should exist")
     }
 
     /// Loads the file configuration and returns [`Self`].
@@ -302,7 +322,10 @@ impl NippyJar {
     }
 }
 
-impl Filter for NippyJar {
+impl<H> Filter for NippyJar<H>
+where
+    H: Send + Sync + Serialize + for<'a> Deserialize<'a>,
+{
     fn add(&mut self, element: &[u8]) -> Result<(), NippyJarError> {
         self.filter.as_mut().ok_or(NippyJarError::FilterMissing)?.add(element)
     }
@@ -312,7 +335,10 @@ impl Filter for NippyJar {
     }
 }
 
-impl PerfectHashingFunction for NippyJar {
+impl<H> PerfectHashingFunction for NippyJar<H>
+where
+    H: Send + Sync + Serialize + for<'a> Deserialize<'a>,
+{
     fn set_keys<T: AsRef<[u8]> + Sync + Clone + Hash>(
         &mut self,
         keys: &[T],
@@ -359,17 +385,17 @@ mod tests {
         let num_rows = col1.len() as u64;
         let file_path = tempfile::NamedTempFile::new().unwrap();
 
-        let mut nippy = NippyJar::new(num_columns, file_path.path());
+        let mut nippy = NippyJar::<NoJarHeader>::new(num_columns, file_path.path());
         assert!(matches!(NippyJar::set_keys(&mut nippy, &col1), Err(NippyJarError::PHFMissing)));
 
-        let check_phf = |nippy: &mut NippyJar| {
+        let check_phf = |nippy: &mut NippyJar<_>| {
             assert!(matches!(
                 NippyJar::get_index(nippy, &col1[0]),
                 Err(NippyJarError::PHFMissingKeys)
             ));
             assert!(NippyJar::set_keys(nippy, &col1).is_ok());
 
-            let collect_indexes = |nippy: &NippyJar| -> Vec<u64> {
+            let collect_indexes = |nippy: &NippyJar<_>| -> Vec<u64> {
                 col1.iter()
                     .map(|value| NippyJar::get_index(nippy, value.as_slice()).unwrap().unwrap())
                     .collect()
@@ -386,7 +412,7 @@ mod tests {
             // Ensure that loaded phf provides the same function outputs
             nippy.prepare_index(&col1).unwrap();
             nippy.freeze(vec![col1.clone(), col2.clone()], num_rows).unwrap();
-            let loaded_nippy = NippyJar::load(file_path.path()).unwrap();
+            let loaded_nippy = NippyJar::<NoJarHeader>::load(file_path.path()).unwrap();
             assert_eq!(indexes, collect_indexes(&loaded_nippy));
         };
 
@@ -406,7 +432,7 @@ mod tests {
         let num_rows = col1.len() as u64;
         let file_path = tempfile::NamedTempFile::new().unwrap();
 
-        let mut nippy = NippyJar::new(_num_columns, file_path.path());
+        let mut nippy = NippyJar::<NoJarHeader>::new(_num_columns, file_path.path());
 
         assert!(matches!(Filter::add(&mut nippy, &col1[0]), Err(NippyJarError::FilterMissing)));
 
@@ -428,7 +454,7 @@ mod tests {
         assert!(matches!(Filter::add(&mut nippy, &col1[4]), Err(NippyJarError::FilterMaxCapacity)));
 
         nippy.freeze(vec![col1.clone(), col2.clone()], num_rows).unwrap();
-        let loaded_nippy = NippyJar::load(file_path.path()).unwrap();
+        let loaded_nippy = NippyJar::<NoJarHeader>::load(file_path.path()).unwrap();
 
         assert_eq!(nippy, loaded_nippy);
 
@@ -446,10 +472,11 @@ mod tests {
         let _num_columns = 2;
         let file_path = tempfile::NamedTempFile::new().unwrap();
 
-        let nippy = NippyJar::new(_num_columns, file_path.path());
+        let nippy = NippyJar::<NoJarHeader>::new(_num_columns, file_path.path());
         assert!(nippy.compressor.is_none());
 
-        let mut nippy = NippyJar::new(_num_columns, file_path.path()).with_zstd(true, 5000);
+        let mut nippy =
+            NippyJar::<NoJarHeader>::new(_num_columns, file_path.path()).with_zstd(true, 5000);
         assert!(nippy.compressor.is_some());
 
         if let Some(Compressors::Zstd(zstd)) = &mut nippy.compressor {
@@ -482,7 +509,7 @@ mod tests {
 
         nippy.freeze(data.clone(), num_rows).unwrap();
 
-        let mut loaded_nippy = NippyJar::load(file_path.path()).unwrap();
+        let mut loaded_nippy = NippyJar::<NoJarHeader>::load(file_path.path()).unwrap();
         assert_eq!(nippy, loaded_nippy);
 
         let mut dicts = vec![];
@@ -513,17 +540,18 @@ mod tests {
         let _num_columns = 2;
         let file_path = tempfile::NamedTempFile::new().unwrap();
 
-        let nippy = NippyJar::new(_num_columns, file_path.path());
+        let nippy = NippyJar::<NoJarHeader>::new(_num_columns, file_path.path());
         assert!(nippy.compressor.is_none());
 
-        let mut nippy = NippyJar::new(_num_columns, file_path.path()).with_zstd(false, 5000);
+        let mut nippy =
+            NippyJar::<NoJarHeader>::new(_num_columns, file_path.path()).with_zstd(false, 5000);
         assert!(nippy.compressor.is_some());
 
         let data = vec![col1.clone(), col2.clone()];
 
         nippy.freeze(data.clone(), num_rows).unwrap();
 
-        let loaded_nippy = NippyJar::load(file_path.path()).unwrap();
+        let loaded_nippy = NippyJar::<NoJarHeader>::load(file_path.path()).unwrap();
         assert_eq!(nippy, loaded_nippy);
 
         if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor.as_ref() {
@@ -553,7 +581,7 @@ mod tests {
 
         // Create file
         {
-            let mut nippy = NippyJar::new(_num_columns, file_path.path())
+            let mut nippy = NippyJar::<NoJarHeader>::new(_num_columns, file_path.path())
                 .with_zstd(true, 5000)
                 .with_cuckoo_filter(col1.len())
                 .with_mphf();
@@ -565,7 +593,7 @@ mod tests {
 
         // Read file
         {
-            let mut loaded_nippy = NippyJar::load(file_path.path()).unwrap();
+            let mut loaded_nippy = NippyJar::<NoJarHeader>::load(file_path.path()).unwrap();
 
             assert!(loaded_nippy.compressor.is_some());
             assert!(loaded_nippy.filter.is_some());
@@ -617,7 +645,7 @@ mod tests {
 
         // Create file
         {
-            let mut nippy = NippyJar::new(_num_columns, file_path.path())
+            let mut nippy = NippyJar::<NoJarHeader>::new(_num_columns, file_path.path())
                 .with_zstd(true, 5000)
                 .with_cuckoo_filter(col1.len())
                 .with_mphf();
@@ -629,7 +657,7 @@ mod tests {
 
         // Read file
         {
-            let mut loaded_nippy = NippyJar::load(file_path.path()).unwrap();
+            let mut loaded_nippy = NippyJar::<NoJarHeader>::load(file_path.path()).unwrap();
 
             let mut dicts = vec![];
             if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor.as_mut() {

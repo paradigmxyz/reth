@@ -3,14 +3,15 @@ use crate::{
     Filter, NippyJar, NippyJarError, PerfectHashingFunction, Row,
 };
 use memmap2::Mmap;
+use serde::{de::Deserialize, ser::Serialize};
 use std::{clone::Clone, fs::File};
 use sucds::int_vectors::Access;
 use zstd::bulk::Decompressor;
 
 /// Simple cursor implementation to retrieve data from [`NippyJar`].
-pub struct NippyJarCursor<'a> {
+pub struct NippyJarCursor<'a, H> {
     /// [`NippyJar`] which holds most of the required configuration to read from the file.
-    jar: &'a NippyJar,
+    jar: &'a NippyJar<H>,
     /// Optional dictionary decompressors.
     zstd_decompressors: Option<Vec<Decompressor<'a>>>,
     /// Data file.
@@ -25,15 +26,21 @@ pub struct NippyJarCursor<'a> {
     row: u64,
 }
 
-impl<'a> std::fmt::Debug for NippyJarCursor<'a> {
+impl<'a, H> std::fmt::Debug for NippyJarCursor<'a, H>
+where
+    H: Send + Sync + Serialize + for<'b> Deserialize<'b> + core::fmt::Debug,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NippyJarCursor").field("config", &self.jar).finish_non_exhaustive()
     }
 }
 
-impl<'a> NippyJarCursor<'a> {
+impl<'a, H> NippyJarCursor<'a, H>
+where
+    H: Send + Sync + Serialize + for<'b> Deserialize<'b>,
+{
     pub fn new(
-        config: &'a NippyJar,
+        config: &'a NippyJar<H>,
         zstd_decompressors: Option<Vec<Decompressor<'a>>>,
     ) -> Result<Self, NippyJarError> {
         let file = File::open(config.data_path())?;

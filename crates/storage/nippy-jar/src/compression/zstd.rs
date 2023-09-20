@@ -179,7 +179,7 @@ impl Compression for Zstd {
 
     fn compress(&self, src: &[u8]) -> Result<Vec<u8>, NippyJarError> {
         let mut compressed = Vec::with_capacity(src.len());
-        
+
         self.compress_to(src, &mut compressed)?;
 
         Ok(compressed)
