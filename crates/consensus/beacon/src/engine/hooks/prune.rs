@@ -43,7 +43,7 @@ impl<DB: Database + 'static> PruneHook<DB> {
     fn poll_pruner(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<(EngineHookEvent, Option<EngineHookAction>)> {
+    ) -> Poll<reth_interfaces::Result<(EngineHookEvent, Option<EngineHookAction>)>> {
         let result = match self.pruner_state {
             PrunerState::Idle(_) => return Poll::Pending,
             PrunerState::Running(ref mut fut) => {
@@ -73,7 +73,7 @@ impl<DB: Database + 'static> PruneHook<DB> {
             }
         };
 
-        Poll::Ready((event, None))
+        Poll::Ready(Ok((event, None)))
     }
 
     /// This will try to spawn the pruner if it is idle:
@@ -132,11 +132,11 @@ impl<DB: Database + 'static> EngineHook for PruneHook<DB> {
         &mut self,
         cx: &mut Context<'_>,
         ctx: EngineContext,
-    ) -> Poll<(EngineHookEvent, Option<EngineHookAction>)> {
+    ) -> Poll<reth_interfaces::Result<(EngineHookEvent, Option<EngineHookAction>)>> {
         // Try to spawn a pruner
         match self.try_spawn_pruner(ctx.tip_block_number) {
             Some((EngineHookEvent::NotReady, _)) => return Poll::Pending,
-            Some((event, action)) => return Poll::Ready((event, action)),
+            Some((event, action)) => return Poll::Ready(Ok((event, action))),
             None => (),
         }
 

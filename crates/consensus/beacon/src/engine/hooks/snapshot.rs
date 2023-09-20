@@ -36,7 +36,7 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
     fn poll_snapshotter(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<(EngineHookEvent, Option<EngineHookAction>)> {
+    ) -> Poll<reth_interfaces::Result<(EngineHookEvent, Option<EngineHookAction>)>> {
         let result = match self.state {
             SnapshotterState::Idle(_) => return Poll::Pending,
             SnapshotterState::Running(ref mut fut) => {
@@ -70,7 +70,7 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
             }
         };
 
-        Poll::Ready((event, None))
+        Poll::Ready(Ok((event, None)))
     }
 
     /// This will try to spawn the snapshotter if it is idle:
@@ -86,13 +86,12 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
     fn try_spawn_snapshotter(
         &mut self,
         finalized_block_number: BlockNumber,
-    ) -> Option<(EngineHookEvent, Option<EngineHookAction>)> {
-        match &mut self.state {
+    ) -> reth_interfaces::Result<Option<(EngineHookEvent, Option<EngineHookAction>)>> {
+        Ok(match &mut self.state {
             SnapshotterState::Idle(snapshotter) => {
-                let mut snapshotter = snapshotter.take()?;
+                let Some(mut snapshotter) = snapshotter.take() else { return Ok(None) };
 
-                // TODO(alexey): handle error
-                let request = snapshotter.get_snapshot_request(finalized_block_number).unwrap();
+                let request = snapshotter.get_snapshot_request(finalized_block_number)?;
 
                 // Check if the snapshotting of any parts has been requested.
                 if request.any() {
@@ -113,7 +112,7 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
                 }
             }
             SnapshotterState::Running(_) => None,
-        }
+        })
     }
 }
 
@@ -126,15 +125,15 @@ impl<DB: Database + 'static> EngineHook for SnapshotHook<DB> {
         &mut self,
         cx: &mut Context<'_>,
         ctx: EngineContext,
-    ) -> Poll<(EngineHookEvent, Option<EngineHookAction>)> {
+    ) -> Poll<reth_interfaces::Result<(EngineHookEvent, Option<EngineHookAction>)>> {
         let Some(finalized_block_number) = ctx.finalized_block_number else {
-            return Poll::Ready((EngineHookEvent::NotReady, None))
+            return Poll::Ready(Ok((EngineHookEvent::NotReady, None)))
         };
 
         // Try to spawn a snapshotter
-        match self.try_spawn_snapshotter(finalized_block_number) {
+        match self.try_spawn_snapshotter(finalized_block_number)? {
             Some((EngineHookEvent::NotReady, _)) => return Poll::Pending,
-            Some((event, action)) => return Poll::Ready((event, action)),
+            Some((event, action)) => return Poll::Ready(Ok((event, action))),
             None => (),
         }
 

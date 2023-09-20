@@ -60,6 +60,8 @@ impl<DB: Database> Snapshotter<DB> {
 
     /// Run the snapshotter
     pub fn run(&mut self, request: SnapshotRequest) -> SnapshotterResult {
+        // TODO(alexey): snapshot logic
+
         if let Some(headers) = request.headers {
             self.last_snapshots.headers = headers;
         }
@@ -78,15 +80,15 @@ impl<DB: Database> Snapshotter<DB> {
     pub fn get_snapshot_request(
         &self,
         finalized_block_number: BlockNumber,
-    ) -> Result<SnapshotRequest, SnapshotterError> {
+    ) -> reth_interfaces::Result<SnapshotRequest> {
         let provider = self.provider_factory.provider()?;
 
         let finalized_block_indices = provider
             .block_body_indices(finalized_block_number)?
-            .ok_or(SnapshotterError::InconsistentData("Block indices not found"))?;
+            .ok_or(reth_interfaces::Error::Custom("Block indices not found".to_string()))?;
         let finalized_tx_number = finalized_block_indices.last_tx_num();
 
-        let request = SnapshotRequest {
+        Ok(SnapshotRequest {
             headers: finalized_block_number
                 .checked_sub(self.last_snapshots.headers)
                 .expect("finalized block should be greater than last headers snapshot")
@@ -102,8 +104,6 @@ impl<DB: Database> Snapshotter<DB> {
                 .expect("finalized tx number should be greater than last transactions snapshot")
                 .gt(&self.thresholds.transactions)
                 .then_some(finalized_tx_number),
-        };
-
-        Ok(request)
+        })
     }
 }

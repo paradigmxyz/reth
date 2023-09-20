@@ -44,7 +44,7 @@ pub trait EngineHook: Send + Sync + 'static {
         &mut self,
         cx: &mut Context<'_>,
         ctx: EngineContext,
-    ) -> Poll<(EngineHookEvent, Option<EngineHookAction>)>;
+    ) -> Poll<reth_interfaces::Result<(EngineHookEvent, Option<EngineHookAction>)>>;
 
     /// Returns [db access level][`EngineHookDBAccessLevel`] the hook needs.
     fn db_access_level(&self) -> EngineHookDBAccessLevel;
