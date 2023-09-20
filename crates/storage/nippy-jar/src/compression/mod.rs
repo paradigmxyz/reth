@@ -5,6 +5,7 @@ use std::io::Write;
 mod zstd;
 pub use zstd::{Zstd, ZstdState};
 
+/// Trait that will compress column values
 pub trait Compression: Serialize + for<'a> Deserialize<'a> {
     /// Returns decompressed data.
     fn decompress(&self, value: &[u8]) -> Result<Vec<u8>, NippyJarError>;
