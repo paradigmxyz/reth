@@ -5,6 +5,7 @@ use crate::{
     BeaconForkChoiceUpdateError, BeaconOnNewPayloadError,
 };
 use futures::TryFutureExt;
+use reth_interfaces::RethResult;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes,
     PayloadStatus,
@@ -63,7 +64,7 @@ impl BeaconConsensusEngineHandle {
         &self,
         state: ForkchoiceState,
         payload_attrs: Option<PayloadAttributes>,
-    ) -> oneshot::Receiver<Result<OnForkChoiceUpdated, reth_interfaces::Error>> {
+    ) -> oneshot::Receiver<RethResult<OnForkChoiceUpdated>> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_engine.send(BeaconEngineMessage::ForkchoiceUpdated {
             state,

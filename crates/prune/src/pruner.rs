@@ -11,6 +11,7 @@ use reth_db::{
     transaction::DbTxMut,
     BlockNumberList,
 };
+use reth_interfaces::RethResult;
 use reth_primitives::{
     BlockNumber, ChainSpec, PruneBatchSizes, PruneCheckpoint, PruneMode, PruneModes, PrunePart,
     TxNumber, MINIMUM_PRUNING_DISTANCE,
@@ -279,7 +280,7 @@ impl<DB: Database> Pruner<DB> {
         provider: &DatabaseProviderRW<'_, DB>,
         prune_part: PrunePart,
         to_block: BlockNumber,
-    ) -> reth_interfaces::Result<Option<RangeInclusive<BlockNumber>>> {
+    ) -> RethResult<Option<RangeInclusive<BlockNumber>>> {
         let from_block = provider
             .get_prune_checkpoint(prune_part)?
             .and_then(|checkpoint| checkpoint.block_number)
@@ -309,7 +310,7 @@ impl<DB: Database> Pruner<DB> {
         provider: &DatabaseProviderRW<'_, DB>,
         prune_part: PrunePart,
         to_block: BlockNumber,
-    ) -> reth_interfaces::Result<Option<RangeInclusive<TxNumber>>> {
+    ) -> RethResult<Option<RangeInclusive<TxNumber>>> {
         let from_tx_number = provider
             .get_prune_checkpoint(prune_part)?
             // Checkpoint exists, prune from the next transaction after the highest pruned one

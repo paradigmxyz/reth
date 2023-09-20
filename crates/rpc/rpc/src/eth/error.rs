@@ -5,6 +5,7 @@ use jsonrpsee::{
     core::Error as RpcError,
     types::{error::CALL_EXECUTION_FAILED_CODE, ErrorObject},
 };
+use reth_interfaces::RethError;
 use reth_primitives::{abi::decode_revert_reason, Address, Bytes, U256};
 use reth_revm::tracing::js::JsInspectorError;
 use reth_rpc_types::{error::EthRpcErrorCode, BlockError, CallInputError};
@@ -61,7 +62,7 @@ pub enum EthApiError {
     BothStateAndStateDiffInOverride(Address),
     /// Other internal error
     #[error(transparent)]
-    Internal(reth_interfaces::Error),
+    Internal(RethError),
     /// Error related to signing
     #[error(transparent)]
     Signing(#[from] SignError),
@@ -153,10 +154,10 @@ impl From<JsInspectorError> for EthApiError {
     }
 }
 
-impl From<reth_interfaces::Error> for EthApiError {
-    fn from(error: reth_interfaces::Error) -> Self {
+impl From<RethError> for EthApiError {
+    fn from(error: RethError) -> Self {
         match error {
-            reth_interfaces::Error::Provider(err) => err.into(),
+            RethError::Provider(err) => err.into(),
             err => EthApiError::Internal(err),
         }
     }

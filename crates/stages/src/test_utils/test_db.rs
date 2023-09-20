@@ -9,7 +9,7 @@ use reth_db::{
     transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
     DatabaseEnv, DatabaseError as DbError,
 };
-use reth_interfaces::test_utils::generators::ChangeSet;
+use reth_interfaces::{test_utils::generators::ChangeSet, RethResult};
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader, StorageEntry,
     TxHash, TxNumber, H256, MAINNET, U256,
@@ -379,11 +379,7 @@ impl TestTransaction {
         })
     }
 
-    pub fn insert_history<I>(
-        &self,
-        changesets: I,
-        block_offset: Option<u64>,
-    ) -> reth_interfaces::Result<()>
+    pub fn insert_history<I>(&self, changesets: I, block_offset: Option<u64>) -> RethResult<()>
     where
         I: IntoIterator<Item = ChangeSet>,
     {

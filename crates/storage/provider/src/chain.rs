@@ -1,7 +1,7 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
 use crate::bundle_state::BundleStateWithReceipts;
-use reth_interfaces::{executor::BlockExecutionError, Error};
+use reth_interfaces::{executor::BlockExecutionError, RethResult};
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader, TransactionSigned, TxHash,
@@ -163,7 +163,7 @@ impl Chain {
     /// Merge two chains by appending the given chain into the current one.
     ///
     /// The state of accounts for this chain is set to the state of the newest chain.
-    pub fn append_chain(&mut self, chain: Chain) -> Result<(), Error> {
+    pub fn append_chain(&mut self, chain: Chain) -> RethResult<()> {
         let chain_tip = self.tip();
         if chain_tip.hash != chain.fork_block_hash() {
             return Err(BlockExecutionError::AppendChainDoesntConnect {

@@ -1,5 +1,5 @@
 //! Collection of methods for block validation.
-use reth_interfaces::{consensus::ConsensusError, Result as RethResult};
+use reth_interfaces::{consensus::ConsensusError, RethResult};
 use reth_primitives::{
     constants::{
         self,
@@ -504,7 +504,7 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use mockall::mock;
-    use reth_interfaces::{Error::Consensus, Result};
+    use reth_interfaces::{RethError::Consensus, RethResult};
     use reth_primitives::{
         constants::eip4844::DATA_GAS_PER_BLOB, hex_literal::hex, proofs, Account, Address,
         BlockBody, BlockHash, BlockHashOrNumber, Bytes, ChainSpecBuilder, Header, Signature,
@@ -516,7 +516,7 @@ mod tests {
         WithdrawalsProvider {}
 
         impl WithdrawalsProvider for WithdrawalsProvider {
-            fn latest_withdrawal(&self) -> Result<Option<Withdrawal>> ;
+            fn latest_withdrawal(&self) -> RethResult<Option<Withdrawal>> ;
 
             fn withdrawals_by_block(
                 &self,
@@ -555,44 +555,44 @@ mod tests {
     }
 
     impl AccountReader for Provider {
-        fn basic_account(&self, _address: Address) -> Result<Option<Account>> {
+        fn basic_account(&self, _address: Address) -> RethResult<Option<Account>> {
             Ok(self.account)
         }
     }
 
     impl HeaderProvider for Provider {
-        fn is_known(&self, _block_hash: &BlockHash) -> Result<bool> {
+        fn is_known(&self, _block_hash: &BlockHash) -> RethResult<bool> {
             Ok(self.is_known)
         }
 
-        fn header(&self, _block_number: &BlockHash) -> Result<Option<Header>> {
+        fn header(&self, _block_number: &BlockHash) -> RethResult<Option<Header>> {
             Ok(self.parent.clone())
         }
 
-        fn header_by_number(&self, _num: u64) -> Result<Option<Header>> {
+        fn header_by_number(&self, _num: u64) -> RethResult<Option<Header>> {
             Ok(self.parent.clone())
         }
 
-        fn header_td(&self, _hash: &BlockHash) -> Result<Option<U256>> {
+        fn header_td(&self, _hash: &BlockHash) -> RethResult<Option<U256>> {
             Ok(None)
         }
 
-        fn header_td_by_number(&self, _number: BlockNumber) -> Result<Option<U256>> {
+        fn header_td_by_number(&self, _number: BlockNumber) -> RethResult<Option<U256>> {
             Ok(None)
         }
 
-        fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>> {
+        fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
             Ok(vec![])
         }
 
         fn sealed_headers_range(
             &self,
             _range: impl RangeBounds<BlockNumber>,
-        ) -> Result<Vec<SealedHeader>> {
+        ) -> RethResult<Vec<SealedHeader>> {
             Ok(vec![])
         }
 
-        fn sealed_header(&self, _block_number: BlockNumber) -> Result<Option<SealedHeader>> {
+        fn sealed_header(&self, _block_number: BlockNumber) -> RethResult<Option<SealedHeader>> {
             Ok(None)
         }
     }
@@ -606,7 +606,7 @@ mod tests {
             self.withdrawals_provider.withdrawals_by_block(_id, _timestamp)
         }
 
-        fn latest_withdrawal(&self) -> Result<Option<Withdrawal>> {
+        fn latest_withdrawal(&self) -> RethResult<Option<Withdrawal>> {
             self.withdrawals_provider.latest_withdrawal()
         }
     }
