@@ -157,7 +157,7 @@ impl Compression for Zstd {
     fn decompress(&self, value: &[u8]) -> Result<Vec<u8>, NippyJarError> {
         let mut decompressed = Vec::with_capacity(value.len() * 2);
         let mut decoder = zstd::Decoder::new(value)?;
-        decoder.read_exact(&mut decompressed)?;
+        decoder.read_to_end(&mut decompressed)?;
         Ok(decompressed)
     }
 

@@ -440,7 +440,7 @@ mod tests {
     }
 
     #[test]
-    fn test_zstd() {
+    fn test_zstd_with_dictionaries() {
         let (col1, col2) = test_data(None);
         let num_rows = col1.len() as u64;
         let _num_columns = 2;
@@ -503,6 +503,42 @@ mod tests {
                 assert_eq!((&row[0], &row[1]), (&data[0][row_index], &data[1][row_index]));
                 row_index += 1;
             }
+        }
+    }
+
+    #[test]
+    fn test_zstd_no_dictionaries() {
+        let (col1, col2) = test_data(None);
+        let num_rows = col1.len() as u64;
+        let _num_columns = 2;
+        let file_path = tempfile::NamedTempFile::new().unwrap();
+
+        let nippy = NippyJar::new(_num_columns, file_path.path());
+        assert!(nippy.compressor.is_none());
+
+        let mut nippy = NippyJar::new(_num_columns, file_path.path()).with_zstd(false, 5000);
+        assert!(nippy.compressor.is_some());
+
+        let data = vec![col1.clone(), col2.clone()];
+
+        nippy.freeze(data.clone(), num_rows).unwrap();
+
+        let loaded_nippy = NippyJar::load(file_path.path()).unwrap();
+        assert_eq!(nippy, loaded_nippy);
+
+        if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor.as_ref() {
+            assert!(!zstd.use_dict);
+
+            let mut cursor = NippyJarCursor::new(&loaded_nippy, None).unwrap();
+
+            // Iterate over compressed values and compare
+            let mut row_index = 0usize;
+            while let Some(row) = cursor.next_row().unwrap() {
+                assert_eq!((&row[0], &row[1]), (&data[0][row_index], &data[1][row_index]));
+                row_index += 1;
+            }
+        } else {
+            panic!("Expected Zstd compressor")
         }
     }
 
