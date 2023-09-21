@@ -44,7 +44,8 @@ impl SnapshotTargets {
     }
 
     /// Returns `true` if all targets are either [`None`] or multiple of `block_interval`.
-    fn is_block_interval_respected(&self, block_interval: u64) -> bool {
+    #[cfg(debug_assertions)]
+    fn is_multiple_of_block_interval(&self, block_interval: u64) -> bool {
         [
             self.headers.as_ref(),
             self.receipts.as_ref().map(|(blocks, _)| blocks),
@@ -52,6 +53,25 @@ impl SnapshotTargets {
         ]
         .iter()
         .all(|blocks| blocks.map_or(true, |blocks| (blocks.end() + 1) % block_interval == 0))
+    }
+
+    // Returns `true` if all targets are either [`None`] or has beginning of the range equal to the
+    // highest snapshot.
+    #[cfg(debug_assertions)]
+    fn is_contiguous_to_highest_snapshots(&self, snapshots: HighestSnapshots) -> bool {
+        [
+            (self.headers.as_ref(), snapshots.headers),
+            (self.receipts.as_ref().map(|(blocks, _)| blocks), snapshots.receipts),
+            (self.transactions.as_ref().map(|(blocks, _)| blocks), snapshots.transactions),
+        ]
+        .iter()
+        .all(|(target, highest)| {
+            target.map_or(true, |block_number| {
+                highest.map_or(*block_number.start() == 0, |previous_block_number| {
+                    *block_number.start() == previous_block_number + 1
+                })
+            })
+        })
     }
 }
 
@@ -70,6 +90,7 @@ impl<DB: Database> Snapshotter<DB> {
         }
     }
 
+    #[cfg(test)]
     fn set_highest_snapshots_from_targets(&mut self, targets: &SnapshotTargets) {
         if let Some(block_number) = &targets.headers {
             self.highest_snapshots.headers = Some(*block_number.end());
@@ -84,10 +105,10 @@ impl<DB: Database> Snapshotter<DB> {
 
     /// Run the snapshotter
     pub fn run(&mut self, targets: SnapshotTargets) -> SnapshotterResult {
-        debug_assert!(targets.is_block_interval_respected(self.block_interval));
-        // TODO(alexey): snapshot logic
+        debug_assert!(targets.is_multiple_of_block_interval(self.block_interval));
+        debug_assert!(targets.is_contiguous_to_highest_snapshots(self.highest_snapshots));
 
-        self.set_highest_snapshots_from_targets(&targets);
+        // TODO(alexey): snapshot logic
 
         Ok(targets)
     }
@@ -210,7 +231,8 @@ mod tests {
                 transactions: Some((0..=1, 0..=3))
             }
         );
-        assert!(targets.is_block_interval_respected(snapshotter.block_interval));
+        assert!(targets.is_multiple_of_block_interval(snapshotter.block_interval));
+        assert!(targets.is_contiguous_to_highest_snapshots(snapshotter.highest_snapshots));
         // Imitate snapshotter run according to the targets which updates the last snapshots state
         snapshotter.set_highest_snapshots_from_targets(&targets);
 
@@ -230,6 +252,7 @@ mod tests {
                 transactions: Some((2..=3, 4..=7))
             }
         );
-        assert!(targets.is_block_interval_respected(snapshotter.block_interval));
+        assert!(targets.is_multiple_of_block_interval(snapshotter.block_interval));
+        assert!(targets.is_contiguous_to_highest_snapshots(snapshotter.highest_snapshots));
     }
 }
