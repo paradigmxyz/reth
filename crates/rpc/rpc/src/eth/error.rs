@@ -370,7 +370,7 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
         use revm::primitives::InvalidTransaction;
         match err {
             InvalidTransaction::InvalidChainId => RpcInvalidTransactionError::InvalidChainId,
-            InvalidTransaction::GasMaxFeeGreaterThanPriorityFee => {
+            InvalidTransaction::PriorityFeeGreaterThanMaxFee => {
                 RpcInvalidTransactionError::TipAboveFeeCap
             }
             InvalidTransaction::GasPriceLessThanBasefee => RpcInvalidTransactionError::FeeCapTooLow,
