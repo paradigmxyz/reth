@@ -68,7 +68,23 @@ where
     let hash = H256::default();
     let tx_hash = TxHash::default();
     let block_number = BlockNumberOrTag::default();
-    let call_request = CallRequest::default();
+    // let call_request = CallRequest::default();
+    let call_request = CallRequest {
+        from: None,
+        to: None,
+        gas_price: None,
+        max_fee_per_gas: None,
+        max_priority_fee_per_gas: None,
+        gas: None,
+        value: None,
+        input: None.into(),
+        nonce: None,
+        chain_id: None,
+        access_list: None,
+        max_fee_per_blob_gas: None,
+        blob_versioned_hashes: Some(Vec::new()),
+        transaction_type: None,
+    };
     println!("{:?}", call_request);
     let transaction_request = TransactionRequest::default();
     let bytes = Bytes::default();

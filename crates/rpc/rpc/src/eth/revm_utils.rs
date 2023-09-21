@@ -441,6 +441,7 @@ impl CallFees {
                 }
                 // Check if blob_hashes are present
                 if blob_versioned_hashes.is_none() {
+                    println!("blob version is none");
                     // Fail if not present
                     return Err(RpcInvalidTransactionError::BlobVersionedHashesNotIncluded.into())
                 }
