@@ -130,6 +130,10 @@ pub trait TransactionPool: Send + Sync + Clone {
         self.new_transactions_listener_for(TransactionListenerKind::PropagateOnly)
     }
 
+    /// Returns a new Stream that yields blob "sidecars" (blobs w/ assoc. kzg
+    /// commitments/proofs) for eip-4844 transactions inserted into the pool
+    fn blob_transaction_sidecars_listener(&self) -> Receiver<NewBlobSidecar>;
+
     /// Returns a new stream that yields new valid transactions added to the pool
     /// depending on the given [TransactionListenerKind] argument.
     fn new_transactions_listener_for(
@@ -727,7 +731,7 @@ pub struct EthPooledTransaction {
     /// max_blob_fee_per_gas * blob_gas_used`.
     pub(crate) cost: U256,
 
-    /// The blob side car this transaction
+    /// The blob side car for this transaction
     pub(crate) blob_sidecar: EthBlobTransactionSidecar,
 }
 
@@ -1042,4 +1046,15 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
             }
         }
     }
+}
+
+/// This type represents a new blob sidecar that has been stored in the transaction pool's
+/// blobstore; it includes the TransasctionHash of the blob transaction along with the assoc.
+/// sidecar (blobs, commitments, proofs)
+#[derive(Debug)]
+pub struct NewBlobSidecar {
+    /// The blob transaction hash.
+    pub tx_hash: TxHash,
+    /// the blob transaction sidecar.
+    pub sidecar: BlobTransactionSidecar,
 }
