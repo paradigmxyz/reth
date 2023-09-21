@@ -371,6 +371,8 @@ impl CallFees {
     ///
     /// If no `gasPrice` or `maxFeePerGas` is set, then the `gas_price` in the returned `gas_price`
     /// will be `0`. See: <https://github.com/ethereum/go-ethereum/blob/2754b197c935ee63101cbbca2752338246384fec/internal/ethapi/transaction_args.go#L242-L255>
+    /// 
+    /// if 'gasPrice' is None , 'call_max_fee', 'call_priority_fee','max_fee_per_blob_gas' is set, we treat it as 4844 transaction.
     fn ensure_fees(
         call_gas_price: Option<U256>,
         call_max_fee: Option<U256>,
@@ -428,7 +430,9 @@ impl CallFees {
                     // Fail if not present
                     return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
                 }
-                Ok(CallFees { gas_price: max_fee, max_priority_fee_per_gas, max_fee_per_blob_gas })
+                else{
+                    Ok(CallFees { gas_price: max_fee, max_priority_fee_per_gas, max_fee_per_blob_gas })
+                }
             }
 
             _ => Err(EthApiError::ConflictingFeeFieldsInRequest),
