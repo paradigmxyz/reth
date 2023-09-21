@@ -14,7 +14,7 @@ use sucds::{
 };
 
 pub mod filter;
-use filter::{Cuckoo, Filter, Filters};
+use filter::{Cuckoo, InclusionFilter, InclusionFilters};
 
 pub mod compression;
 use compression::{Compression, Compressors};
@@ -70,7 +70,7 @@ pub struct NippyJar<H = ()> {
     /// Optional compression algorithm applied to the data.
     compressor: Option<Compressors>,
     /// Optional filter function for data membership checks.
-    filter: Option<Filters>,
+    filter: Option<InclusionFilters>,
     /// Optional Perfect Hashing Function (PHF) for unique offset mapping.
     phf: Option<Functions>,
     /// Index mapping PHF output to value offsets in `offsets`.
@@ -124,7 +124,7 @@ where
 
     /// Adds [`filter::Cuckoo`] filter.
     pub fn with_cuckoo_filter(mut self, max_capacity: usize) -> Self {
-        self.filter = Some(Filters::Cuckoo(Cuckoo::new(max_capacity)));
+        self.filter = Some(InclusionFilters::Cuckoo(Cuckoo::new(max_capacity)));
         self
     }
 
@@ -355,7 +355,7 @@ where
     }
 }
 
-impl<H> Filter for NippyJar<H>
+impl<H> InclusionFilter for NippyJar<H>
 where
     H: Send + Sync + Serialize + for<'a> Deserialize<'a>,
 {
@@ -467,35 +467,35 @@ mod tests {
 
         let mut nippy = NippyJar::new_without_header(_num_columns, file_path.path());
 
-        assert!(matches!(Filter::add(&mut nippy, &col1[0]), Err(NippyJarError::FilterMissing)));
+        assert!(matches!(InclusionFilter::add(&mut nippy, &col1[0]), Err(NippyJarError::FilterMissing)));
 
         nippy = nippy.with_cuckoo_filter(4);
 
         // Add col1[0]
-        assert!(!Filter::contains(&nippy, &col1[0]).unwrap());
-        assert!(Filter::add(&mut nippy, &col1[0]).is_ok());
-        assert!(Filter::contains(&nippy, &col1[0]).unwrap());
+        assert!(!InclusionFilter::contains(&nippy, &col1[0]).unwrap());
+        assert!(InclusionFilter::add(&mut nippy, &col1[0]).is_ok());
+        assert!(InclusionFilter::contains(&nippy, &col1[0]).unwrap());
 
         // Add col1[1]
-        assert!(!Filter::contains(&nippy, &col1[1]).unwrap());
-        assert!(Filter::add(&mut nippy, &col1[1]).is_ok());
-        assert!(Filter::contains(&nippy, &col1[1]).unwrap());
+        assert!(!InclusionFilter::contains(&nippy, &col1[1]).unwrap());
+        assert!(InclusionFilter::add(&mut nippy, &col1[1]).is_ok());
+        assert!(InclusionFilter::contains(&nippy, &col1[1]).unwrap());
 
         // // Add more columns until max_capacity
-        assert!(Filter::add(&mut nippy, &col1[2]).is_ok());
-        assert!(Filter::add(&mut nippy, &col1[3]).is_ok());
-        assert!(matches!(Filter::add(&mut nippy, &col1[4]), Err(NippyJarError::FilterMaxCapacity)));
+        assert!(InclusionFilter::add(&mut nippy, &col1[2]).is_ok());
+        assert!(InclusionFilter::add(&mut nippy, &col1[3]).is_ok());
+        assert!(matches!(InclusionFilter::add(&mut nippy, &col1[4]), Err(NippyJarError::FilterMaxCapacity)));
 
         nippy.freeze(vec![col1.clone(), col2.clone()], num_rows).unwrap();
         let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
 
         assert_eq!(nippy, loaded_nippy);
 
-        assert!(Filter::contains(&loaded_nippy, &col1[0]).unwrap());
-        assert!(Filter::contains(&loaded_nippy, &col1[1]).unwrap());
-        assert!(Filter::contains(&loaded_nippy, &col1[2]).unwrap());
-        assert!(Filter::contains(&loaded_nippy, &col1[3]).unwrap());
-        assert!(!Filter::contains(&loaded_nippy, &col1[4]).unwrap());
+        assert!(InclusionFilter::contains(&loaded_nippy, &col1[0]).unwrap());
+        assert!(InclusionFilter::contains(&loaded_nippy, &col1[1]).unwrap());
+        assert!(InclusionFilter::contains(&loaded_nippy, &col1[2]).unwrap());
+        assert!(InclusionFilter::contains(&loaded_nippy, &col1[3]).unwrap());
+        assert!(!InclusionFilter::contains(&loaded_nippy, &col1[4]).unwrap());
     }
 
     #[test]

@@ -5,7 +5,7 @@ mod cuckoo;
 pub use cuckoo::Cuckoo;
 
 /// Membership filter set trait.
-pub trait Filter {
+pub trait InclusionFilter {
     /// Add element to the inclusion list.
     fn add(&mut self, element: &[u8]) -> Result<(), NippyJarError>;
 
@@ -13,27 +13,27 @@ pub trait Filter {
     fn contains(&self, element: &[u8]) -> Result<bool, NippyJarError>;
 }
 
-/// Enum with different [`Filter`] types.
+/// Enum with different [`InclusionFilter`] types.
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
-pub enum Filters {
+pub enum InclusionFilters {
     Cuckoo(Cuckoo),
     // Avoids irrefutable let errors. Remove this after adding another one.
     Unused,
 }
 
-impl Filter for Filters {
+impl InclusionFilter for InclusionFilters {
     fn add(&mut self, element: &[u8]) -> Result<(), NippyJarError> {
         match self {
-            Filters::Cuckoo(c) => c.add(element),
-            Filters::Unused => todo!(),
+            InclusionFilters::Cuckoo(c) => c.add(element),
+            InclusionFilters::Unused => todo!(),
         }
     }
 
     fn contains(&self, element: &[u8]) -> Result<bool, NippyJarError> {
         match self {
-            Filters::Cuckoo(c) => c.contains(element),
-            Filters::Unused => todo!(),
+            InclusionFilters::Cuckoo(c) => c.contains(element),
+            InclusionFilters::Unused => todo!(),
         }
     }
 }

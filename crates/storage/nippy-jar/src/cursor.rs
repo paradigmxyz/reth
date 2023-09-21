@@ -1,6 +1,6 @@
 use crate::{
     compression::{Compression, Zstd},
-    Filter, NippyJar, NippyJarError, PerfectHashingFunction, Row,
+    InclusionFilter, NippyJar, NippyJarError, PerfectHashingFunction, Row,
 };
 use memmap2::Mmap;
 use serde::{de::Deserialize, ser::Serialize};

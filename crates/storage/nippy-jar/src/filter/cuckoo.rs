@@ -1,4 +1,4 @@
-use super::Filter;
+use super::InclusionFilter;
 use crate::NippyJarError;
 use cuckoofilter::{self, CuckooFilter, ExportedCuckooFilter};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -21,7 +21,7 @@ impl Cuckoo {
     }
 }
 
-impl Filter for Cuckoo {
+impl InclusionFilter for Cuckoo {
     fn add(&mut self, element: &[u8]) -> Result<(), NippyJarError> {
         if self.remaining == 0 {
             return Err(NippyJarError::FilterMaxCapacity)
