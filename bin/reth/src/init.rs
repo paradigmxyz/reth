@@ -6,7 +6,9 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::{db::DatabaseError, RethError};
-use reth_primitives::{stage::StageId, Account, Bytecode, ChainSpec, Receipts, StorageEntry, H256, U256};
+use reth_primitives::{
+    stage::StageId, Account, Bytecode, ChainSpec, Receipts, StorageEntry, H256, U256,
+};
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
     BundleStateWithReceipts, DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown,
