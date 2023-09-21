@@ -103,6 +103,26 @@ jobs:
           - sim: ethereum/rpc-compat
             include: [debug_]
             experimental: true
+          # Pyspec cancun jobs
+          - sim: pyspec
+            include: [cancun/eip4844]
+            experimental: true
+          - sim: pyspec
+            include: [cancun/eip4788]
+            experimental: true
+          - sim: pyspec
+            include: [cancun/eip6780]
+            experimental: true
+          - sim: pyspec
+            include: [cancun/eip5656]
+            experimental: true
+          - sim: pyspec
+            include: [cancun/eip1153]
+            experimental: true
+          # TODO: uncomment once there are hive tests for EIP-7516
+          # - sim: pyspec
+          #   include: [cancun/eip7516]
+          #   experimental: true
       fail-fast: false
     needs: prepare
     name: run
