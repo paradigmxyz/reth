@@ -150,12 +150,16 @@ where
     pub fn load(path: &Path) -> Result<Self, NippyJarError> {
         // Read [`Self`] located at the data file.
         let data_file = File::open(path)?;
+
+        // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
         let data_reader = unsafe { memmap2::Mmap::map(&data_file)? };
         let mut obj: Self = bincode::deserialize_from(data_reader.as_ref())?;
         obj.path = Some(path.to_path_buf());
 
         // Read the offsets lists located at the index file.
         let offsets_file = File::open(obj.index_path())?;
+
+        // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
         let mmap = unsafe { memmap2::Mmap::map(&offsets_file)? };
         let mut offsets_reader = mmap.as_ref();
         obj.offsets = EliasFano::deserialize_from(&mut offsets_reader)?;

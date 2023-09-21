@@ -44,7 +44,10 @@ where
         zstd_decompressors: Option<Vec<Decompressor<'a>>>,
     ) -> Result<Self, NippyJarError> {
         let file = File::open(config.data_path())?;
+
+        // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
         let mmap = unsafe { Mmap::map(&file)? };
+
         Ok(NippyJarCursor {
             jar: config,
             zstd_decompressors,

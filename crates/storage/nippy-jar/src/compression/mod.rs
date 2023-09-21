@@ -5,6 +5,7 @@ use std::io::Write;
 mod zstd;
 pub use zstd::{Zstd, ZstdState};
 
+/// Trait that will compress column values
 pub trait Compression: Serialize + for<'a> Deserialize<'a> {
     /// Returns decompressed data.
     fn decompress(&self, value: &[u8]) -> Result<Vec<u8>, NippyJarError>;
@@ -16,6 +17,8 @@ pub trait Compression: Serialize + for<'a> Deserialize<'a> {
     fn compress(&self, src: &[u8]) -> Result<Vec<u8>, NippyJarError>;
 
     /// Returns `true` if it's ready to compress.
+    ///
+    /// Example: it will return false, if `zstd` with dictionary is set, but wasn't generated.
     fn is_ready(&self) -> bool {
         true
     }
@@ -29,6 +32,7 @@ pub trait Compression: Serialize + for<'a> Deserialize<'a> {
     }
 }
 
+/// Enum with different [`Compression`] types.
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub enum Compressors {
