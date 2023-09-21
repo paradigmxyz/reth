@@ -4,7 +4,7 @@
 //! it can be converted into the container type [`TypedTransactionRequest`].
 
 use reth_primitives::{
-    AccessList, Address, Bytes, Transaction, TxEip1559, TxEip2930, TxLegacy, U128, U256,
+    AccessList, Address, Bytes, Transaction, TxEip1559, TxEip2930, TxLegacy, U128, U256, U64,
 };
 use reth_rlp::{BufMut, Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
@@ -33,7 +33,7 @@ impl TypedTransactionRequest {
         Some(match self {
             TypedTransactionRequest::Legacy(tx) => Transaction::Legacy(TxLegacy {
                 chain_id: tx.chain_id,
-                nonce: tx.nonce.try_into().ok()?,
+                nonce: tx.nonce.as_u64(),
                 gas_price: tx.gas_price.to(),
                 gas_limit: tx.gas_limit.try_into().ok()?,
                 to: tx.kind.into(),
@@ -42,7 +42,7 @@ impl TypedTransactionRequest {
             }),
             TypedTransactionRequest::EIP2930(tx) => Transaction::Eip2930(TxEip2930 {
                 chain_id: tx.chain_id,
-                nonce: tx.nonce.try_into().ok()?,
+                nonce: tx.nonce.as_u64(),
                 gas_price: tx.gas_price.to(),
                 gas_limit: tx.gas_limit.try_into().ok()?,
                 to: tx.kind.into(),
@@ -52,7 +52,7 @@ impl TypedTransactionRequest {
             }),
             TypedTransactionRequest::EIP1559(tx) => Transaction::Eip1559(TxEip1559 {
                 chain_id: tx.chain_id,
-                nonce: tx.nonce.try_into().ok()?,
+                nonce: tx.nonce.as_u64(),
                 max_fee_per_gas: tx.max_fee_per_gas.to(),
                 gas_limit: tx.gas_limit.try_into().ok()?,
                 to: tx.kind.into(),
@@ -68,7 +68,7 @@ impl TypedTransactionRequest {
 /// Represents a legacy transaction request
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LegacyTransactionRequest {
-    pub nonce: U256,
+    pub nonce: U64,
     pub gas_price: U128,
     pub gas_limit: U256,
     pub kind: TransactionKind,
@@ -81,7 +81,7 @@ pub struct LegacyTransactionRequest {
 #[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub struct EIP2930TransactionRequest {
     pub chain_id: u64,
-    pub nonce: U256,
+    pub nonce: U64,
     pub gas_price: U128,
     pub gas_limit: U256,
     pub kind: TransactionKind,
@@ -94,7 +94,7 @@ pub struct EIP2930TransactionRequest {
 #[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub struct EIP1559TransactionRequest {
     pub chain_id: u64,
-    pub nonce: U256,
+    pub nonce: U64,
     pub max_priority_fee_per_gas: U128,
     pub max_fee_per_gas: U128,
     pub gas_limit: U256,
