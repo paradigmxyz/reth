@@ -108,7 +108,7 @@ fn fill(
 
     Transaction {
         hash: signed_tx.hash(),
-        nonce: U256::from(signed_tx.nonce()),
+        nonce: U64::from(signed_tx.nonce()),
         from: signer,
         to,
         value: U256::from(signed_tx.value()),
