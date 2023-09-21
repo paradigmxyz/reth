@@ -207,6 +207,7 @@ mod tests {
         // Expected output in a TokenStream format. Commas matter!
         let should_output = quote! {
             pub use TestStruct_flags::TestStructFlags;
+            #[allow(non_snake_case)]
             mod TestStruct_flags {
                 use bytes::Buf;
                 use modular_bitfield::prelude::*;
