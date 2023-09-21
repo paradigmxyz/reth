@@ -10,7 +10,7 @@ use reth_db::{
     transaction::DbTx,
     BlockNumberList,
 };
-use reth_interfaces::Result;
+use reth_interfaces::RethResult;
 use reth_primitives::{
     Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, H256,
 };
@@ -68,7 +68,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
     }
 
     /// Lookup an account in the AccountHistory table
-    pub fn account_history_lookup(&self, address: Address) -> Result<HistoryInfo> {
+    pub fn account_history_lookup(&self, address: Address) -> RethResult<HistoryInfo> {
         if !self.lowest_available_blocks.is_account_history_available(self.block_number) {
             return Err(ProviderError::StateAtBlockPruned(self.block_number).into())
         }
@@ -87,7 +87,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
         &self,
         address: Address,
         storage_key: StorageKey,
-    ) -> Result<HistoryInfo> {
+    ) -> RethResult<HistoryInfo> {
         if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
             return Err(ProviderError::StateAtBlockPruned(self.block_number).into())
         }
@@ -106,7 +106,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
         key: K,
         key_filter: impl Fn(&K) -> bool,
         lowest_available_block_number: Option<BlockNumber>,
-    ) -> Result<HistoryInfo>
+    ) -> RethResult<HistoryInfo>
     where
         T: Table<Key = K, Value = BlockNumberList>,
     {
@@ -160,7 +160,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
 
 impl<'a, 'b, TX: DbTx<'a>> AccountReader for HistoricalStateProviderRef<'a, 'b, TX> {
     /// Get basic account information.
-    fn basic_account(&self, address: Address) -> Result<Option<Account>> {
+    fn basic_account(&self, address: Address) -> RethResult<Option<Account>> {
         match self.account_history_lookup(address)? {
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => Ok(self
@@ -182,11 +182,15 @@ impl<'a, 'b, TX: DbTx<'a>> AccountReader for HistoricalStateProviderRef<'a, 'b, 
 
 impl<'a, 'b, TX: DbTx<'a>> BlockHashReader for HistoricalStateProviderRef<'a, 'b, TX> {
     /// Get block hash by number.
-    fn block_hash(&self, number: u64) -> Result<Option<H256>> {
+    fn block_hash(&self, number: u64) -> RethResult<Option<H256>> {
         self.tx.get::<tables::CanonicalHeaders>(number).map_err(Into::into)
     }
 
-    fn canonical_hashes_range(&self, start: BlockNumber, end: BlockNumber) -> Result<Vec<H256>> {
+    fn canonical_hashes_range(
+        &self,
+        start: BlockNumber,
+        end: BlockNumber,
+    ) -> RethResult<Vec<H256>> {
         let range = start..end;
         self.tx
             .cursor_read::<tables::CanonicalHeaders>()
@@ -194,21 +198,25 @@ impl<'a, 'b, TX: DbTx<'a>> BlockHashReader for HistoricalStateProviderRef<'a, 'b
                 cursor
                     .walk_range(range)?
                     .map(|result| result.map(|(_, hash)| hash).map_err(Into::into))
-                    .collect::<Result<Vec<_>>>()
+                    .collect::<RethResult<Vec<_>>>()
             })?
             .map_err(Into::into)
     }
 }
 
 impl<'a, 'b, TX: DbTx<'a>> StateRootProvider for HistoricalStateProviderRef<'a, 'b, TX> {
-    fn state_root(&self, _post_state: BundleStateWithReceipts) -> Result<H256> {
+    fn state_root(&self, _post_state: BundleStateWithReceipts) -> RethResult<H256> {
         Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
     }
 }
 
 impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, TX> {
     /// Get storage.
-    fn storage(&self, address: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
+    fn storage(
+        &self,
+        address: Address,
+        storage_key: StorageKey,
+    ) -> RethResult<Option<StorageValue>> {
         match self.storage_history_lookup(address, storage_key)? {
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => Ok(Some(
@@ -234,7 +242,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
     }
 
     /// Get account code by its hash
-    fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytecode>> {
+    fn bytecode_by_hash(&self, code_hash: H256) -> RethResult<Option<Bytecode>> {
         self.tx.get::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
 
@@ -243,7 +251,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
         &self,
         _address: Address,
         _keys: &[H256],
-    ) -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
+    ) -> RethResult<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
         Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
     }
 }

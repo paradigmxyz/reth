@@ -1,4 +1,3 @@
-use reth_interfaces::sync::SyncState;
 use reth_primitives::BlockNumber;
 use std::{
     fmt::Debug,
@@ -10,6 +9,7 @@ pub(crate) use controller::{EngineHooksController, PolledHook};
 
 mod prune;
 pub use prune::PruneHook;
+use reth_interfaces::RethError;
 
 /// Collection of [engine hooks][`EngineHook`].
 #[derive(Default)]
@@ -85,10 +85,7 @@ impl EngineHookEvent {
 
 /// An action that the caller of [hook][`EngineHook`] should act upon.
 #[derive(Debug, Copy, Clone)]
-pub enum EngineHookAction {
-    /// Notify about a [SyncState] update.
-    UpdateSyncState(SyncState),
-}
+pub enum EngineHookAction {}
 
 /// An error returned by [hook][`EngineHook`].
 #[derive(Debug, thiserror::Error)]
@@ -96,9 +93,9 @@ pub enum EngineHookError {
     /// Hook channel closed.
     #[error("Hook channel closed")]
     ChannelClosed,
-    /// Common error. Wrapper around [reth_interfaces::Error].
+    /// Common error. Wrapper around [RethError].
     #[error(transparent)]
-    Common(#[from] reth_interfaces::Error),
+    Common(#[from] RethError),
     /// An internal error occurred.
     #[error("Internal hook error occurred.")]
     Internal(#[from] Box<dyn std::error::Error + Send + Sync>),

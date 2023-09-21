@@ -233,14 +233,14 @@ impl OpObj {
         let to_string = FunctionObjectBuilder::new(
             context,
             NativeFunction::from_copy_closure(move |_this, _args, _ctx| {
-                let op = OpCode::try_from_u8(value)
+                let op = OpCode::new(value)
                     .or_else(|| {
                         // if the opcode is invalid, we'll use the invalid opcode to represent it
                         // because this is invoked before the opcode is
                         // executed, the evm will eventually return a `Halt`
                         // with invalid/unknown opcode as result
                         let invalid_opcode = 0xfe;
-                        OpCode::try_from_u8(invalid_opcode)
+                        OpCode::new(invalid_opcode)
                     })
                     .expect("is valid opcode;");
                 let s = op.to_string();

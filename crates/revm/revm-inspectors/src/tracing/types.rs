@@ -637,7 +637,7 @@ impl CallTraceStep {
     /// Returns true if the step is a STOP opcode
     #[inline]
     pub(crate) fn is_stop(&self) -> bool {
-        matches!(self.op.u8(), opcode::STOP)
+        matches!(self.op.get(), opcode::STOP)
     }
 
     /// Returns true if the step is a call operation, any of
@@ -645,7 +645,7 @@ impl CallTraceStep {
     #[inline]
     pub(crate) fn is_calllike_op(&self) -> bool {
         matches!(
-            self.op.u8(),
+            self.op.get(),
             opcode::CALL |
                 opcode::DELEGATECALL |
                 opcode::STATICCALL |

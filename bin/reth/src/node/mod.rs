@@ -46,6 +46,7 @@ use reth_interfaces::{
         either::EitherDownloader,
         headers::{client::HeadersClient, downloader::HeaderDownloader},
     },
+    RethResult,
 };
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
@@ -664,7 +665,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         Ok(handle)
     }
 
-    fn lookup_head(&self, db: Arc<DatabaseEnv>) -> Result<Head, reth_interfaces::Error> {
+    fn lookup_head(&self, db: Arc<DatabaseEnv>) -> RethResult<Head> {
         let factory = ProviderFactory::new(db, self.chain.clone());
         let provider = factory.provider()?;
 
@@ -700,7 +701,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         db: DB,
         client: Client,
         tip: H256,
-    ) -> Result<u64, reth_interfaces::Error>
+    ) -> RethResult<u64>
     where
         DB: Database,
         Client: HeadersClient,
@@ -716,7 +717,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         db: DB,
         client: Client,
         tip: BlockHashOrNumber,
-    ) -> Result<SealedHeader, reth_interfaces::Error>
+    ) -> RethResult<SealedHeader>
     where
         DB: Database,
         Client: HeadersClient,
