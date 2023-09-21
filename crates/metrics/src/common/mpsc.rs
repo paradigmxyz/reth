@@ -291,9 +291,7 @@ impl<T: Send + 'static> MeteredPollSender<T> {
     /// metrics depending on the result.
     pub fn poll_reserve(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), PollSendError<T>>> {
         match self.sender.poll_reserve(cx) {
-            Poll::Ready(Ok(permit)) => {
-                Poll::Ready(Ok(permit))
-            }
+            Poll::Ready(Ok(permit)) => Poll::Ready(Ok(permit)),
             Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
             Poll::Pending => {
                 self.metrics.back_pressure.increment(1);
