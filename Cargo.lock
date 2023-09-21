@@ -5680,6 +5680,7 @@ dependencies = [
  "metrics",
  "reth-metrics-derive",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
