@@ -51,7 +51,7 @@ pub enum BlockValidationError {
         /// The expected gas used
         expected: u64,
         /// Gas spent by each transaction
-        gas_spent_by_tx: Vec<(u64, u64)>,
+        gas_spent_by_tx: Result<Vec<(u64, u64)>, &'static str>,
     },
     /// Error for pre-merge block
     #[error("Block {hash:?} is pre merge")]
