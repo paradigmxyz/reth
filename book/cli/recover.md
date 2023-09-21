@@ -1,24 +1,17 @@
-# `reth init`
+# `reth recover`
 
-Initialize the database from a genesis file
+Scripts for node recovery
 
 ```bash
-$ reth init --help
+$ reth recover --help
 
-Usage: reth init [OPTIONS]
+Usage: reth recover [OPTIONS] <COMMAND>
+
+Commands:
+  storage-tries  Recover the node by deleting dangling storage tries
+  help           Print this message or the help of the given subcommand(s)
 
 Options:
-      --datadir <DATA_DIR>
-          The path to the data dir for all reth files and subdirectories.
-          
-          Defaults to the OS-specific data directory:
-          
-          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-          - Windows: `{FOLDERID_RoamingAppData}/reth/`
-          - macOS: `$HOME/Library/Application Support/reth/`
-          
-          [default: default]
-
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
           
@@ -44,20 +37,6 @@ Options:
 
   -h, --help
           Print help (see a summary with '-h')
-
-Database:
-      --db.log-level <LOG_LEVEL>
-          Database logging level. Levels higher than "notice" require a debug build
-
-          Possible values:
-          - fatal:   Enables logging for critical conditions, i.e. assertion failures
-          - error:   Enables logging for error conditions
-          - warn:    Enables logging for warning conditions
-          - notice:  Enables logging for normal but significant condition
-          - verbose: Enables logging for verbose informational
-          - debug:   Enables logging for debug-level messages
-          - trace:   Enables logging for trace debug-level messages
-          - extra:   Enables logging for extra debug-level messages
 
 Logging:
       --log.directory <PATH>
@@ -105,4 +84,14 @@ Display:
 
   -q, --quiet
           Silence all log output
+```
+
+## `reth recover storage-tries`
+
+Recover the node by deleting dangling storage tries
+
+```bash
+$ reth recover storage-tries --help
+
+Usage: reth recover storage-tries [OPTIONS]
 ```

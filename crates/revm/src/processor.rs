@@ -8,7 +8,7 @@ use crate::{
 };
 use reth_interfaces::{
     executor::{BlockExecutionError, BlockValidationError},
-    Error,
+    RethError,
 };
 use reth_primitives::{
     Address, Block, BlockNumber, Bloom, ChainSpec, Hardfork, Header, PruneMode, PruneModes,
@@ -46,7 +46,7 @@ pub struct EVMProcessor<'a> {
     /// The configured chain-spec
     chain_spec: Arc<ChainSpec>,
     /// revm instance that contains database and env environment.
-    evm: EVM<StateDBBox<'a, Error>>,
+    evm: EVM<StateDBBox<'a, RethError>>,
     /// Hook and inspector stack that we want to invoke on that hook.
     stack: InspectorStack,
     /// The collection of receipts.
@@ -106,7 +106,10 @@ impl<'a> EVMProcessor<'a> {
     }
 
     /// Create a new EVM processor with the given revm state.
-    pub fn new_with_state(chain_spec: Arc<ChainSpec>, revm_state: StateDBBox<'a, Error>) -> Self {
+    pub fn new_with_state(
+        chain_spec: Arc<ChainSpec>,
+        revm_state: StateDBBox<'a, RethError>,
+    ) -> Self {
         let mut evm = EVM::new();
         evm.database(revm_state);
         EVMProcessor {
@@ -128,7 +131,7 @@ impl<'a> EVMProcessor<'a> {
     }
 
     /// Returns a reference to the database
-    pub fn db_mut(&mut self) -> &mut StateDBBox<'a, Error> {
+    pub fn db_mut(&mut self) -> &mut StateDBBox<'a, RethError> {
         // Option will be removed from EVM in the future.
         // as it is always some.
         // https://github.com/bluealloy/revm/issues/697
@@ -552,6 +555,7 @@ pub fn verify_receipt<'a>(
 
 #[cfg(test)]
 mod tests {
+    use reth_interfaces::RethResult;
     use reth_primitives::{
         constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
         keccak256, Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, MAINNET,
@@ -594,14 +598,14 @@ mod tests {
     }
 
     impl AccountReader for StateProviderTest {
-        fn basic_account(&self, address: Address) -> reth_interfaces::Result<Option<Account>> {
+        fn basic_account(&self, address: Address) -> RethResult<Option<Account>> {
             let ret = Ok(self.accounts.get(&address).map(|(_, acc)| *acc));
             ret
         }
     }
 
     impl BlockHashReader for StateProviderTest {
-        fn block_hash(&self, number: u64) -> reth_interfaces::Result<Option<H256>> {
+        fn block_hash(&self, number: u64) -> RethResult<Option<H256>> {
             Ok(self.block_hash.get(&number).cloned())
         }
 
@@ -609,7 +613,7 @@ mod tests {
             &self,
             start: BlockNumber,
             end: BlockNumber,
-        ) -> reth_interfaces::Result<Vec<H256>> {
+        ) -> RethResult<Vec<H256>> {
             let range = start..end;
             Ok(self
                 .block_hash
@@ -620,10 +624,7 @@ mod tests {
     }
 
     impl StateRootProvider for StateProviderTest {
-        fn state_root(
-            &self,
-            _bundle_state: BundleStateWithReceipts,
-        ) -> reth_interfaces::Result<H256> {
+        fn state_root(&self, _bundle_state: BundleStateWithReceipts) -> RethResult<H256> {
             todo!()
         }
     }
@@ -632,15 +633,15 @@ mod tests {
         fn storage(
             &self,
             account: Address,
-            storage_key: reth_primitives::StorageKey,
-        ) -> reth_interfaces::Result<Option<reth_primitives::StorageValue>> {
+            storage_key: StorageKey,
+        ) -> RethResult<Option<reth_primitives::StorageValue>> {
             Ok(self
                 .accounts
                 .get(&account)
                 .and_then(|(storage, _)| storage.get(&storage_key).cloned()))
         }
 
-        fn bytecode_by_hash(&self, code_hash: H256) -> reth_interfaces::Result<Option<Bytecode>> {
+        fn bytecode_by_hash(&self, code_hash: H256) -> RethResult<Option<Bytecode>> {
             Ok(self.contracts.get(&code_hash).cloned())
         }
 
@@ -648,7 +649,7 @@ mod tests {
             &self,
             _address: Address,
             _keys: &[H256],
-        ) -> reth_interfaces::Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
+        ) -> RethResult<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
             todo!()
         }
     }
