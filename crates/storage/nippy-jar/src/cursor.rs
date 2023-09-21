@@ -40,16 +40,16 @@ where
     H: Send + Sync + Serialize + for<'b> Deserialize<'b>,
 {
     pub fn new(
-        config: &'a NippyJar<H>,
+        jar: &'a NippyJar<H>,
         zstd_decompressors: Option<Vec<Decompressor<'a>>>,
     ) -> Result<Self, NippyJarError> {
-        let file = File::open(config.data_path())?;
+        let file = File::open(jar.data_path())?;
 
         // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
         let mmap = unsafe { Mmap::map(&file)? };
 
         Ok(NippyJarCursor {
-            jar: config,
+            jar,
             zstd_decompressors,
             file_handle: file,
             mmap_handle: mmap,
