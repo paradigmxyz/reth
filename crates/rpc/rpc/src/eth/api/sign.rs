@@ -21,7 +21,8 @@ impl<Provider, Pool, Network> EthApi<Provider, Pool, Network> {
 
     pub(crate) async fn sign_typed_data(&self, data: Value, account: Address) -> EthResult<Bytes> {
         let signer = self.find_signer(&account)?;
-        let data = serde_json::from_value::<TypedData>(data).map_err(|_| SignError::TypedData)?;
+        let data =
+            serde_json::from_value::<TypedData>(data).map_err(|_| SignError::InvalidTypedData)?;
         let signature = signer.sign_typed_data(account, &data)?;
         let bytes = hex::encode(signature.to_bytes()).as_bytes().into();
         Ok(bytes)
