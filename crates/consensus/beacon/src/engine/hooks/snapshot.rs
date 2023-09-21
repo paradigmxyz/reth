@@ -74,8 +74,8 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
     }
 
     /// This will try to spawn the snapshotter if it is idle:
-    /// 1. Check if snapshotting is needed through [Snapshotter::get_snapshot_request] and then
-    ///    [SnapshotRequest::any_some](reth_snapshot::SnapshotRequest::any).
+    /// 1. Check if snapshotting is needed through [Snapshotter::get_snapshot_targets] and then
+    ///    [SnapshotTargets::any](reth_snapshot::SnapshotTargets::any).
     /// 2.
     ///     1. If snapshotting is needed, pass snapshot request to the [Snapshotter::run] and spawn
     ///        it in a separate task. Set snapshotter state to [SnapshotterState::Running].
@@ -91,15 +91,15 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
             SnapshotterState::Idle(snapshotter) => {
                 let Some(mut snapshotter) = snapshotter.take() else { return Ok(None) };
 
-                let request = snapshotter.get_snapshot_request(finalized_block_number)?;
+                let targets = snapshotter.get_snapshot_targets(finalized_block_number)?;
 
                 // Check if the snapshotting of any parts has been requested.
-                if request.any() {
+                if targets.any() {
                     let (tx, rx) = oneshot::channel();
                     self.task_spawner.spawn_critical_blocking(
                         "snapshotter task",
                         Box::pin(async move {
-                            let result = snapshotter.run(request);
+                            let result = snapshotter.run(targets);
                             let _ = tx.send((snapshotter, result));
                         }),
                     );
