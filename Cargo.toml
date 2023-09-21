@@ -40,6 +40,7 @@ members = [
     "crates/storage/libmdbx-rs",
     "crates/storage/libmdbx-rs/mdbx-sys",
     "crates/storage/provider",
+    "crates/storage/nippy-jar",
     "crates/tracing",
     "crates/tasks",
     "crates/transaction-pool",
