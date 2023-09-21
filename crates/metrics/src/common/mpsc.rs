@@ -292,7 +292,6 @@ impl<T: Send + 'static> MeteredPollSender<T> {
     pub fn poll_reserve(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), PollSendError<T>>> {
         match self.sender.poll_reserve(cx) {
             Poll::Ready(Ok(permit)) => {
-                self.metrics.messages_sent.increment(1);
                 Poll::Ready(Ok(permit))
             }
             Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
