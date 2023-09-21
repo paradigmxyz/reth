@@ -62,7 +62,8 @@ type Row = Vec<Vec<u8>>;
 pub struct NippyJar<H = ()> {
     /// The version of the NippyJar format.
     version: usize,
-    /// Optional user-defined header data.
+    /// User-defined header data.
+    /// Default: zero-sized unit type: no header data
     user_header: H,
     /// Number of data columns in the jar.
     columns: usize,
