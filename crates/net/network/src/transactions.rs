@@ -335,6 +335,87 @@ where
         propagated
     }
 
+    /// Propagate the transaction to single peer either as full object or hash
+    ///
+    /// The message for new pooled hashes depends on the negotiated version of the stream.
+    /// See [NewPooledTransactionHashes]
+    ///
+    /// Note: EIP-4844 are disallowed from being broadcast in full and are only ever sent as hashes, see also <https://eips.ethereum.org/EIPS/eip-4844#networking>.
+    fn propagate_transaction_to_single_peer(&mut self, hash: TxHash, peer_id: PeerId) {
+        // Nothing to propagate while initially syncing
+        if self.network.is_initially_syncing() {
+            return
+        }
+
+        trace!(target: "net::tx", "Start propagating transaction");
+
+        // This fetches a transaction from the pool, including the blob transactions, which are
+        // only ever sent as hashes.
+        let propagated = {
+            let tx = match self.pool.get(&hash) {
+                Some(tx) => PropagateTransaction::new(tx),
+                None => return,
+            };
+            let peer = match self.peers.get_mut(&peer_id) {
+                Some(peer) => peer,
+                None => return,
+            };
+
+            let mut propagated = PropagatedTransactions::default();
+
+            // filter all transactions unknown to the peer
+            let mut hashes = PooledTransactionsHashesBuilder::new(peer.version);
+            let mut full_transactions = FullTransactionsBuilder::default();
+
+            if peer.transactions.insert(tx.hash()) {
+                hashes.push(&tx);
+
+                // Do not send full 4844 transaction hashes to peers.
+                //
+                //  Nodes MUST NOT automatically broadcast blob transactions to their peers.
+                //  Instead, those transactions are only announced using
+                //  `NewPooledTransactionHashes` messages, and can then be manually requested
+                //  via `GetPooledTransactions`.
+                //
+                // From: <https://eips.ethereum.org/EIPS/eip-4844#networking>
+                if !tx.transaction.is_eip4844() {
+                    full_transactions.push(&tx);
+                }
+            }
+
+            let new_pooled_hashes = hashes.build();
+
+            if !new_pooled_hashes.is_empty() {
+                let new_full_transactions = full_transactions.build();
+                if !new_full_transactions.is_empty() {
+                    for tx in new_full_transactions.iter() {
+                        propagated
+                            .0
+                            .entry(tx.hash())
+                            .or_default()
+                            .push(PropagateKind::Full(peer_id));
+                    }
+                    // send full transactions
+                    self.network.send_transactions(peer_id, new_full_transactions);
+                } else {
+                    for hash in new_pooled_hashes.iter_hashes().copied() {
+                        propagated.0.entry(hash).or_default().push(PropagateKind::Hash(peer_id));
+                    }
+                    // send hashes of transactions
+                    self.network.send_transactions_hashes(peer_id, new_pooled_hashes);
+                }
+            }
+
+            // Update propagated transactions metrics
+            self.metrics.propagated_transactions.increment(propagated.0.len() as u64);
+
+            propagated
+        };
+
+        // notify pool so events get fired
+        self.pool.on_propagated(propagated);
+    }
+
     /// Request handler for an incoming `NewPooledTransactionHashes`
     fn on_new_pooled_transaction_hashes(
         &mut self,
@@ -428,7 +509,9 @@ where
     fn on_command(&mut self, cmd: TransactionsCommand) {
         match cmd {
             TransactionsCommand::PropagateHash(hash) => self.on_new_transactions(vec![hash]),
-            TransactionsCommand::PropagateHashTo(_hash, _peer) => todo!(),
+            TransactionsCommand::PropagateHashTo(hash, peer) => {
+                self.propagate_transaction_to_single_peer(hash, peer)
+            }
             TransactionsCommand::GetActivePeers => todo!(),
             TransactionsCommand::PropagateTransactionsTo(_txs, _peer) => todo!(),
             TransactionsCommand::GetTransactionHashes(_peers) => todo!(),
