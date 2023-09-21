@@ -450,6 +450,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             None
         };
 
+        let (_highest_snapshots_tx, highest_snapshots_rx) = watch::channel(None);
+
         let mut hooks = EngineHooks::new();
 
         if let Some(prune_config) = prune_config {
@@ -460,6 +462,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 prune_config.block_interval,
                 prune_config.parts,
                 self.chain.prune_batch_sizes,
+                highest_snapshots_rx,
             );
             hooks.add(PruneHook::new(pruner, Box::new(ctx.task_executor.clone())));
         }

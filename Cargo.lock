@@ -5895,8 +5895,10 @@ dependencies = [
  "reth-metrics",
  "reth-primitives",
  "reth-provider",
+ "reth-snapshot",
  "reth-stages",
  "thiserror",
+ "tokio",
  "tracing",
 ]
 
@@ -6131,6 +6133,8 @@ dependencies = [
  "reth-provider",
  "reth-stages",
  "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

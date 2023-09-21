@@ -20,6 +20,7 @@ use reth_provider::{
     BlockReader, DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
     TransactionsProvider,
 };
+use reth_snapshot::HighestSnapshotsTracker;
 use std::{collections::HashMap, ops::RangeInclusive, sync::Arc, time::Instant};
 use tracing::{debug, error, info, instrument, trace};
 
@@ -45,6 +46,7 @@ pub struct Pruner<DB> {
     modes: PruneModes,
     /// Maximum entries to prune per block, per prune part.
     batch_sizes: PruneBatchSizes,
+    highest_snapshots_tracker: HighestSnapshotsTracker,
 }
 
 impl<DB: Database> Pruner<DB> {
@@ -55,6 +57,7 @@ impl<DB: Database> Pruner<DB> {
         min_block_interval: usize,
         modes: PruneModes,
         batch_sizes: PruneBatchSizes,
+        highest_snapshots_tracker: HighestSnapshotsTracker,
     ) -> Self {
         Self {
             metrics: Metrics::default(),
@@ -63,6 +66,7 @@ impl<DB: Database> Pruner<DB> {
             last_pruned_block_number: None,
             modes,
             batch_sizes,
+            highest_snapshots_tracker,
         }
     }
 
@@ -80,13 +84,25 @@ impl<DB: Database> Pruner<DB> {
 
         let provider = self.provider_factory.provider_rw()?;
 
-        let mut done = true;
+        let highest_snapshots = *self.highest_snapshots_tracker.borrow();
 
+        let mut done = true;
         let mut parts_done = HashMap::new();
 
-        if let Some((to_block, prune_mode)) =
-            self.modes.prune_target_block_receipts(tip_block_number)?
-        {
+        if let Some((to_block, prune_mode)) = highest_snapshots.map_or(
+            // If highest snapshots data is not available, just use the tip
+            self.modes.prune_target_block_receipts(tip_block_number),
+            |snapshots| {
+                // If highest snapshots data is available, require receipts to be snapshotted and
+                // use highest snapshotted block number
+                snapshots
+                    .receipts
+                    .and_then(|block_number| {
+                        self.modes.prune_target_block_receipts(block_number).transpose()
+                    })
+                    .transpose()
+            },
+        )? {
             trace!(
                 target: "pruner",
                 prune_part = ?PrunePart::Receipts,
@@ -248,17 +264,31 @@ impl<DB: Database> Pruner<DB> {
     /// Returns `true` if the pruning is needed at the provided tip block number.
     /// This determined by the check against minimum pruning interval and last pruned block number.
     pub fn is_pruning_needed(&self, tip_block_number: BlockNumber) -> bool {
+        let highest_snapshots = *self.highest_snapshots_tracker.borrow();
+
+        let target_block_number = if let Some(highest_snapshots) = highest_snapshots {
+            let Some(highest_snapshotted_block_number) = highest_snapshots.max_block_number()
+            else {
+                return false
+            };
+
+            highest_snapshotted_block_number
+        } else {
+            tip_block_number
+        };
         if self.last_pruned_block_number.map_or(true, |last_pruned_block_number| {
             // Saturating subtraction is needed for the case when the chain was reverted, meaning
             // current block number might be less than the previously pruned block number. If
             // that's the case, no pruning is needed as outdated data is also reverted.
-            tip_block_number.saturating_sub(last_pruned_block_number) >=
+            target_block_number.saturating_sub(last_pruned_block_number) >=
                 self.min_block_interval as u64
         }) {
             debug!(
                 target: "pruner",
                 last_pruned_block_number = ?self.last_pruned_block_number,
                 %tip_block_number,
+                ?highest_snapshots,
+                %target_block_number,
                 "Minimum pruning interval reached"
             );
             true
@@ -931,26 +961,48 @@ mod tests {
         ReceiptsLogPruneConfig, TxNumber, H256, MAINNET,
     };
     use reth_provider::{PruneCheckpointReader, TransactionsProvider};
+    use reth_snapshot::HighestSnapshots;
     use reth_stages::test_utils::TestTransaction;
     use std::{collections::BTreeMap, ops::AddAssign};
+    use tokio::sync::watch;
 
     #[test]
     fn is_pruning_needed() {
         let db = create_test_rw_db();
-        let pruner =
-            Pruner::new(db, MAINNET.clone(), 5, PruneModes::none(), PruneBatchSizes::default());
+        let (highest_snapshots_tx, highest_snapshots_rx) = watch::channel(None);
+        let mut pruner = Pruner::new(
+            db,
+            MAINNET.clone(),
+            5,
+            PruneModes::none(),
+            PruneBatchSizes::default(),
+            highest_snapshots_rx,
+        );
 
         // No last pruned block number was set before
         let first_block_number = 1;
         assert!(pruner.is_pruning_needed(first_block_number));
+        pruner.last_pruned_block_number = Some(first_block_number);
 
-        // Delta is not less than min block interval
+        // Delta is greater than min block interval
         let second_block_number = first_block_number + pruner.min_block_interval as u64;
         assert!(pruner.is_pruning_needed(second_block_number));
+        pruner.last_pruned_block_number = Some(second_block_number);
 
         // Delta is less than min block interval
         let third_block_number = second_block_number;
-        assert!(pruner.is_pruning_needed(third_block_number));
+        assert!(!pruner.is_pruning_needed(third_block_number));
+
+        // Highest snapshotted block number is too low
+        highest_snapshots_tx
+            .send(Some(HighestSnapshots {
+                headers: Some(third_block_number),
+                receipts: Some(second_block_number),
+                transactions: None,
+            }))
+            .expect("send to channel");
+        let fourth_block_number = third_block_number + pruner.min_block_interval as u64;
+        assert!(!pruner.is_pruning_needed(fourth_block_number));
     }
 
     #[test]
@@ -988,6 +1040,7 @@ mod tests {
                 PruneModes { receipts: Some(prune_mode), ..Default::default() },
                 // Less than total amount of blocks to prune to test the batching logic
                 PruneBatchSizes::default().with_receipts(10),
+                watch::channel(None).1,
             );
 
             let next_tx_number_to_prune = tx
@@ -1082,6 +1135,7 @@ mod tests {
                 PruneModes { transaction_lookup: Some(prune_mode), ..Default::default() },
                 // Less than total amount of blocks to prune to test the batching logic
                 PruneBatchSizes::default().with_transaction_lookup(10),
+                watch::channel(None).1,
             );
 
             let next_tx_number_to_prune = tx
@@ -1179,6 +1233,7 @@ mod tests {
                 PruneModes { sender_recovery: Some(prune_mode), ..Default::default() },
                 // Less than total amount of blocks to prune to test the batching logic
                 PruneBatchSizes::default().with_transaction_senders(10),
+                watch::channel(None).1,
             );
 
             let next_tx_number_to_prune = tx
@@ -1285,6 +1340,7 @@ mod tests {
                 PruneModes { account_history: Some(prune_mode), ..Default::default() },
                 // Less than total amount of blocks to prune to test the batching logic
                 PruneBatchSizes::default().with_account_history(2000),
+                watch::channel(None).1,
             );
 
             let provider = tx.inner_rw();
@@ -1415,6 +1471,7 @@ mod tests {
                 PruneModes { storage_history: Some(prune_mode), ..Default::default() },
                 // Less than total amount of blocks to prune to test the batching logic
                 PruneBatchSizes::default().with_storage_history(2000),
+                watch::channel(None).1,
             );
 
             let provider = tx.inner_rw();
@@ -1553,6 +1610,7 @@ mod tests {
                 },
                 // Less than total amount of blocks to prune to test the batching logic
                 PruneBatchSizes::default().with_storage_history(10),
+                watch::channel(None).1,
             );
 
             let result = pruner.prune_receipts_by_logs(&provider, tip);
