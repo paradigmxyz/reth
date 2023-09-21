@@ -77,15 +77,19 @@ where
             if filter.contains(key)? {
                 // May have false positives
                 if let Some(row_index) = phf.get_index(key)? {
-                    self.row =
-                        self.jar.offsets_index.access(row_index as usize).expect("built from same")
-                            as u64;
+                    self.row = self
+                        .jar
+                        .offsets_index
+                        .access(row_index as usize)
+                        .expect("built from same set") as u64;
                     return self.next_row()
                 }
             }
+        } else {
+            return Err(NippyJarError::UnsupportedFilterQuery)
         }
 
-        Err(NippyJarError::UnsupportedFilterQuery)
+        Ok(None)
     }
 
     /// Returns a row by its number.
@@ -131,15 +135,19 @@ where
             if filter.contains(key)? {
                 // May have false positives
                 if let Some(row_index) = phf.get_index(key)? {
-                    self.row =
-                        self.jar.offsets_index.access(row_index as usize).expect("built from same")
-                            as u64;
+                    self.row = self
+                        .jar
+                        .offsets_index
+                        .access(row_index as usize)
+                        .expect("built from same set") as u64;
                     return self.next_row_with_cols::<MASK, COLUMNS>()
                 }
             }
+        } else {
+            return Err(NippyJarError::UnsupportedFilterQuery)
         }
 
-        Err(NippyJarError::UnsupportedFilterQuery)
+        Ok(None)
     }
 
     /// Returns a row by its number by using a `MASK` to only read certain columns from the row.
