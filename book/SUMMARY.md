@@ -35,5 +35,6 @@
    1. [reth test-vectors](./cli/test-vectors.md)
    1. [reth config](./cli/config.md)
    1. [reth debug](./cli/debug.md)
+   1. [reth recover](./cli/recover.md)
 1. [Developers](./developers/developers.md)
    1. [Contribute](./developers/contribute.md)

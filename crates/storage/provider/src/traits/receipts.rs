@@ -1,4 +1,4 @@
-use reth_interfaces::Result;
+use reth_interfaces::RethResult;
 use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumberOrTag, Receipt, TxHash, TxNumber};
 
 use crate::BlockIdReader;
@@ -9,17 +9,17 @@ pub trait ReceiptProvider: Send + Sync {
     /// Get receipt by transaction number
     ///
     /// Returns `None` if the transaction is not found.
-    fn receipt(&self, id: TxNumber) -> Result<Option<Receipt>>;
+    fn receipt(&self, id: TxNumber) -> RethResult<Option<Receipt>>;
 
     /// Get receipt by transaction hash.
     ///
     /// Returns `None` if the transaction is not found.
-    fn receipt_by_hash(&self, hash: TxHash) -> Result<Option<Receipt>>;
+    fn receipt_by_hash(&self, hash: TxHash) -> RethResult<Option<Receipt>>;
 
     /// Get receipts by block num or hash.
     ///
     /// Returns `None` if the block is not found.
-    fn receipts_by_block(&self, block: BlockHashOrNumber) -> Result<Option<Vec<Receipt>>>;
+    fn receipts_by_block(&self, block: BlockHashOrNumber) -> RethResult<Option<Vec<Receipt>>>;
 }
 
 /// Trait extension for `ReceiptProvider`, for types that implement `BlockId` conversion.
@@ -34,7 +34,7 @@ pub trait ReceiptProvider: Send + Sync {
 /// retrieving the receipts should be done using the type's `ReceiptProvider` methods.
 pub trait ReceiptProviderIdExt: ReceiptProvider + BlockIdReader {
     /// Get receipt by block id
-    fn receipts_by_block_id(&self, block: BlockId) -> Result<Option<Vec<Receipt>>> {
+    fn receipts_by_block_id(&self, block: BlockId) -> RethResult<Option<Vec<Receipt>>> {
         let id = match block {
             BlockId::Hash(hash) => BlockHashOrNumber::Hash(hash.block_hash),
             BlockId::Number(num_tag) => {
@@ -55,7 +55,7 @@ pub trait ReceiptProviderIdExt: ReceiptProvider + BlockIdReader {
     fn receipts_by_number_or_tag(
         &self,
         number_or_tag: BlockNumberOrTag,
-    ) -> Result<Option<Vec<Receipt>>> {
+    ) -> RethResult<Option<Vec<Receipt>>> {
         self.receipts_by_block_id(number_or_tag.into())
     }
 }

@@ -9,6 +9,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
+use reth_interfaces::RethError;
 use reth_primitives::{BlockHashOrNumber, Receipt, SealedBlock};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider};
 use reth_rpc_api::EthFilterApiServer;
@@ -458,8 +459,8 @@ impl From<FilterError> for jsonrpsee::types::error::ErrorObject<'static> {
     }
 }
 
-impl From<reth_interfaces::Error> for FilterError {
-    fn from(err: reth_interfaces::Error) -> Self {
+impl From<RethError> for FilterError {
+    fn from(err: RethError) -> Self {
         FilterError::EthAPIError(err.into())
     }
 }
