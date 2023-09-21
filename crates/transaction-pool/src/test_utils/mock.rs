@@ -62,25 +62,21 @@ macro_rules! get_value {
 // Generates all setters and getters
 macro_rules! make_setters_getters {
     ($($name:ident => $t:ty);*) => {
-  paste! {
-        $(
+        paste! {$(
             pub fn [<set_ $name>](&mut self, $name: $t) -> &mut Self {
                 set_value!(self => $name);
                 self
             }
 
-            pub fn [<with_$name>](mut self, $name: $t) -> Self {
+            pub fn [<with_ $name>](mut self, $name: $t) -> Self {
                 set_value!(self => $name);
                 self
             }
 
-            pub fn [<get_$name>](&self) -> $t {
+            pub fn [<get_ $name>](&self) -> $t {
                 get_value!(self => $name).clone()
             }
-
-        )*
-
-    }
+        )*}
     };
 }
 

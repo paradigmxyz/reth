@@ -370,7 +370,7 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
         use revm::primitives::InvalidTransaction;
         match err {
             InvalidTransaction::InvalidChainId => RpcInvalidTransactionError::InvalidChainId,
-            InvalidTransaction::GasMaxFeeGreaterThanPriorityFee => {
+            InvalidTransaction::PriorityFeeGreaterThanMaxFee => {
                 RpcInvalidTransactionError::TipAboveFeeCap
             }
             InvalidTransaction::GasPriceLessThanBasefee => RpcInvalidTransactionError::FeeCapTooLow,
@@ -600,8 +600,11 @@ pub enum SignError {
     NoAccount,
     /// TypedData has invalid format.
     #[error("Given typed data is not valid")]
-    TypedData,
-    /// No chainid
+    InvalidTypedData,
+    /// Invalid transaction request in `sign_transaction`.
+    #[error("Invalid transaction request")]
+    InvalidTransactionRequest,
+    /// No chain ID was given.
     #[error("No chainid")]
     NoChainId,
 }

@@ -110,7 +110,7 @@ pub struct CallRequest {
     #[serde(default, flatten)]
     pub input: CallInput,
     /// Nonce
-    pub nonce: Option<U256>,
+    pub nonce: Option<U64>,
     /// chain id
     pub chain_id: Option<U64>,
     /// AccessList

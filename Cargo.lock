@@ -6236,7 +6236,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "3.3.0"
-source = "git+https://github.com/bluealloy/revm#cb39117aac3586ab77c67dab35da8ad81b3a0a53"
+source = "git+https://github.com/bluealloy/revm#6e65230a4e6f4fb18b377cbf0929308795728841"
 dependencies = [
  "auto_impl",
  "revm-interpreter",
@@ -6246,7 +6246,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "1.1.2"
-source = "git+https://github.com/bluealloy/revm#cb39117aac3586ab77c67dab35da8ad81b3a0a53"
+source = "git+https://github.com/bluealloy/revm#6e65230a4e6f4fb18b377cbf0929308795728841"
 dependencies = [
  "derive_more",
  "enumn",
@@ -6257,7 +6257,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "2.0.3"
-source = "git+https://github.com/bluealloy/revm#cb39117aac3586ab77c67dab35da8ad81b3a0a53"
+source = "git+https://github.com/bluealloy/revm#6e65230a4e6f4fb18b377cbf0929308795728841"
 dependencies = [
  "c-kzg 0.1.0 (git+https://github.com/ethereum/c-kzg-4844)",
  "hex",
@@ -6275,7 +6275,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "1.1.2"
-source = "git+https://github.com/bluealloy/revm#cb39117aac3586ab77c67dab35da8ad81b3a0a53"
+source = "git+https://github.com/bluealloy/revm#6e65230a4e6f4fb18b377cbf0929308795728841"
 dependencies = [
  "arbitrary",
  "auto_impl",
