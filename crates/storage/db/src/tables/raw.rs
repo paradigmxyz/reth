@@ -105,13 +105,20 @@ impl<V: Value> RawValue<V> {
     pub fn new(value: V) -> Self {
         Self { value: V::compress(value).as_ref().to_vec(), _phantom: std::marker::PhantomData }
     }
+
     /// Returns the decompressed value.
     pub fn value(&self) -> Result<V, DatabaseError> {
         V::decompress(&self.value)
     }
+
     /// Returns the raw value as seen on the database.
     pub fn raw_value(&self) -> &Vec<u8> {
         &self.value
+    }
+
+    /// Consumes [`Self`] and returns the inner raw value.
+    pub fn take(self) -> Vec<u8> {
+        self.value
     }
 }
 
@@ -141,5 +148,9 @@ impl<V: Value> Compress for RawValue<V> {
 impl<V: Value> Decompress for RawValue<V> {
     fn decompress<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
         Ok(Self { value: value.as_ref().to_vec(), _phantom: std::marker::PhantomData })
+    }
+
+    fn decompress_owned(value: Vec<u8>) -> Result<Self, DatabaseError> {
+        Ok(Self { value, _phantom: std::marker::PhantomData })
     }
 }
