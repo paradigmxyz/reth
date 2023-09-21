@@ -113,25 +113,44 @@ impl<DB: Database> Snapshotter<DB> {
             .last_tx_num();
 
         // Calculate block ranges to snapshot
-        let from_block_number =
-            self.highest_snapshots.headers.map_or(0, |block_number| block_number + 1);
-        let headers_block_range = from_block_number..=to_block_number;
-        let receipts_block_range = from_block_number..=to_block_number;
-        let transactions_block_range = from_block_number..=to_block_number;
+        let headers_block_range =
+            self.highest_snapshots.headers.map_or(0, |block_number| block_number + 1)..=
+                to_block_number;
+        let receipts_block_range =
+            self.highest_snapshots.receipts.map_or(0, |block_number| block_number + 1)..=
+                to_block_number;
+        let transactions_block_range =
+            self.highest_snapshots.transactions.map_or(0, |block_number| block_number + 1)..=
+                to_block_number;
 
         // Calculate transaction ranges to snapshot
-        let from_tx_number = if let Some(previous_block_number) = self.highest_snapshots.headers {
-            provider
-                .block_body_indices(previous_block_number)?
-                .ok_or(reth_interfaces::Error::Custom(
-                    "Block body indices for previous block number not found".to_string(),
-                ))?
-                .next_tx_num()
-        } else {
-            0
-        };
-        let receipts_tx_range = from_tx_number..=to_tx_number;
-        let transactions_tx_range = from_tx_number..=to_tx_number;
+        let receipts_from_tx_number =
+            if let Some(previous_block_number) = self.highest_snapshots.receipts {
+                provider
+                    .block_body_indices(previous_block_number)?
+                    .ok_or(reth_interfaces::Error::Custom(
+                        "Block body indices for previous block number not found".to_string(),
+                    ))?
+                    .next_tx_num()
+            } else {
+                0
+            };
+        let receipts_tx_range = receipts_from_tx_number..=to_tx_number;
+
+        let transactions_from_tx_number =
+            if self.highest_snapshots.transactions == self.highest_snapshots.receipts {
+                receipts_from_tx_number
+            } else if let Some(previous_block_number) = self.highest_snapshots.transactions {
+                provider
+                    .block_body_indices(previous_block_number)?
+                    .ok_or(reth_interfaces::Error::Custom(
+                        "Block body indices for previous block number not found".to_string(),
+                    ))?
+                    .next_tx_num()
+            } else {
+                0
+            };
+        let transactions_tx_range = transactions_from_tx_number..=to_tx_number;
 
         Ok(SnapshotTargets {
             headers: headers_block_range
