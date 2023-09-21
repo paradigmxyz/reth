@@ -144,8 +144,8 @@ where
         &self.user_header
     }
 
-    /// Loads the file configuration and returns [`Self`]. 
-    /// 
+    /// Loads the file configuration and returns [`Self`].
+    ///
     /// **The user must ensure the header type matches the one used during the jar's creation.**
     pub fn load(path: &Path) -> Result<Self, NippyJarError> {
         // Read [`Self`] located at the data file.
