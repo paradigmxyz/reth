@@ -92,26 +92,10 @@ impl FillableTransaction for TransactionSigned {
 }
 
 /// Returns the addresses of the precompiles corresponding to the SpecId.
-pub(crate) fn get_precompiles(spec_id: &SpecId) -> Vec<reth_primitives::H160> {
-    let spec = match spec_id {
-        SpecId::FRONTIER | SpecId::FRONTIER_THAWING => return vec![],
-        SpecId::HOMESTEAD | SpecId::DAO_FORK | SpecId::TANGERINE | SpecId::SPURIOUS_DRAGON => {
-            PrecompilesSpecId::HOMESTEAD
-        }
-        SpecId::BYZANTIUM | SpecId::CONSTANTINOPLE | SpecId::PETERSBURG => {
-            PrecompilesSpecId::BYZANTIUM
-        }
-        SpecId::ISTANBUL | SpecId::MUIR_GLACIER => PrecompilesSpecId::ISTANBUL,
-        SpecId::BERLIN |
-        SpecId::LONDON |
-        SpecId::ARROW_GLACIER |
-        SpecId::GRAY_GLACIER |
-        SpecId::MERGE |
-        SpecId::SHANGHAI => PrecompilesSpecId::BERLIN,
-        SpecId::CANCUN => PrecompilesSpecId::CANCUN,
-        SpecId::LATEST => PrecompilesSpecId::LATEST,
-    };
-    Precompiles::new(spec).addresses().into_iter().map(Address::from).collect()
+#[inline]
+pub(crate) fn get_precompiles(spec_id: SpecId) -> impl IntoIterator<Item = Address> {
+    let spec = PrecompilesSpecId::from_spec_id(spec_id);
+    Precompiles::new(spec).addresses().into_iter().copied().map(Address::from)
 }
 
 /// Executes the [Env] against the given [Database] without committing state changes.

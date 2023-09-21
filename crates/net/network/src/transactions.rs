@@ -64,8 +64,7 @@ pub struct TransactionsHandle {
     manager_tx: mpsc::UnboundedSender<TransactionsCommand>,
 }
 
-// === impl TransactionsHandle ===
-
+/// Implementation of the `TransactionsHandle` API.
 impl TransactionsHandle {
     fn send(&self, cmd: TransactionsCommand) {
         let _ = self.manager_tx.send(cmd);
@@ -74,6 +73,31 @@ impl TransactionsHandle {
     /// Manually propagate the transaction that belongs to the hash.
     pub fn propagate(&self, hash: TxHash) {
         self.send(TransactionsCommand::PropagateHash(hash))
+    }
+
+    /// Manually propagate the transaction that belongs to the hash to a specific peer.
+    pub fn propagate_hash_to(&self, hash: TxHash, peer: PeerId) {
+        self.send(TransactionsCommand::PropagateHashTo(hash, peer))
+    }
+
+    /// Request the active peer IDs from the [`TransactionsManager`].
+    pub fn get_active_peers(&self) {
+        self.send(TransactionsCommand::GetActivePeers)
+    }
+
+    /// Manually propagate full transactions to a specific peer.
+    pub fn propagate_transactions_to(&self, transactions: Vec<TxHash>, peer: PeerId) {
+        self.send(TransactionsCommand::PropagateTransactionsTo(transactions, peer))
+    }
+
+    /// Request the transaction hashes known by specific peers.
+    pub fn get_transaction_hashes(&self, peers: Vec<PeerId>) {
+        self.send(TransactionsCommand::GetTransactionHashes(peers))
+    }
+
+    /// Request the transaction hashes known by a specific peer.
+    pub fn get_peer_transaction_hashes(&self, peer: PeerId) {
+        self.send(TransactionsCommand::GetPeerTransactionHashes(peer))
     }
 }
 
@@ -404,6 +428,11 @@ where
     fn on_command(&mut self, cmd: TransactionsCommand) {
         match cmd {
             TransactionsCommand::PropagateHash(hash) => self.on_new_transactions(vec![hash]),
+            TransactionsCommand::PropagateHashTo(_hash, _peer) => todo!(),
+            TransactionsCommand::GetActivePeers => todo!(),
+            TransactionsCommand::PropagateTransactionsTo(_txs, _peer) => todo!(),
+            TransactionsCommand::GetTransactionHashes(_peers) => todo!(),
+            TransactionsCommand::GetPeerTransactionHashes(_peer) => todo!(),
         }
     }
 
@@ -829,7 +858,18 @@ struct Peer {
 
 /// Commands to send to the [`TransactionsManager`]
 enum TransactionsCommand {
+    /// Propagate a transaction hash to the network.
     PropagateHash(H256),
+    /// Propagate a transaction hash to a specific peer.
+    PropagateHashTo(H256, PeerId),
+    /// Request the list of active peer IDs from the [`TransactionsManager`].
+    GetActivePeers,
+    /// Propagate a collection of full transactions to a specific peer.
+    PropagateTransactionsTo(Vec<TxHash>, PeerId),
+    /// Request transaction hashes known by specific peers from the [`TransactionsManager`].
+    GetTransactionHashes(Vec<PeerId>),
+    /// Request transaction hashes known by a specific peer from the [`TransactionsManager`].
+    GetPeerTransactionHashes(PeerId),
 }
 
 /// All events related to transactions emitted by the network.

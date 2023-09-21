@@ -1,4 +1,4 @@
-use crate::{blockchain_tree::error::InsertBlockError, Error};
+use crate::{blockchain_tree::error::InsertBlockError, RethResult};
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader,
@@ -66,14 +66,14 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     fn connect_buffered_blocks_to_canonical_hashes_and_finalize(
         &self,
         last_finalized_block: BlockNumber,
-    ) -> Result<(), Error>;
+    ) -> RethResult<()>;
 
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
     /// tree by attempting to connect the buffered blocks to canonical hashes.
     ///
     /// `N` is the `max_reorg_depth` plus the number of block hashes needed to satisfy the
     /// `BLOCKHASH` opcode in the EVM.
-    fn connect_buffered_blocks_to_canonical_hashes(&self) -> Result<(), Error>;
+    fn connect_buffered_blocks_to_canonical_hashes(&self) -> RethResult<()>;
 
     /// Make a block and its parent chain part of the canonical chain by committing it to the
     /// database.
@@ -86,10 +86,10 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     /// # Returns
     ///
     /// Returns `Ok` if the blocks were canonicalized, or if the blocks were already canonical.
-    fn make_canonical(&self, block_hash: &BlockHash) -> Result<CanonicalOutcome, Error>;
+    fn make_canonical(&self, block_hash: &BlockHash) -> RethResult<CanonicalOutcome>;
 
     /// Unwind tables and put it inside state
-    fn unwind(&self, unwind_to: BlockNumber) -> Result<(), Error>;
+    fn unwind(&self, unwind_to: BlockNumber) -> RethResult<()>;
 }
 
 /// All possible outcomes of a canonicalization attempt of [BlockchainTreeEngine::make_canonical].
@@ -219,7 +219,7 @@ pub trait BlockchainTreeViewer: Send + Sync {
     fn find_canonical_ancestor(&self, parent_hash: BlockHash) -> Option<BlockHash>;
 
     /// Return whether or not the block is known and in the canonical chain.
-    fn is_canonical(&self, hash: BlockHash) -> Result<bool, Error>;
+    fn is_canonical(&self, hash: BlockHash) -> RethResult<bool>;
 
     /// Given the hash of a block, this checks the buffered blocks for the lowest ancestor in the
     /// buffer.

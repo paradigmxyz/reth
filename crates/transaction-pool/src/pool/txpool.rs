@@ -1326,7 +1326,15 @@ impl<T: PoolTransaction> AllTransactions<T> {
         if transaction.is_eip4844() {
             transaction =
                 self.ensure_valid_blob_transaction(transaction, on_chain_balance, ancestor)?;
+            let blob_fee_cap = transaction.transaction.max_fee_per_blob_gas().unwrap_or_default();
+            if blob_fee_cap >= self.pending_blob_fee as u128 {
+                state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+            }
+        } else {
+            // Non-EIP4844 transaction always satisfy the blob fee cap condition
+            state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
         }
+
         let transaction = Arc::new(transaction);
 
         // If there's no ancestor tx then this is the next transaction.
@@ -1668,6 +1676,44 @@ mod tests {
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
         traits::TransactionOrigin,
     };
+
+    #[test]
+    fn test_insert_blob() {
+        let on_chain_balance = U256::MAX;
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+        let tx = MockTransaction::eip4844().inc_price().inc_limit();
+        let valid_tx = f.validated(tx);
+        let InsertOk { updates, replaced_tx, move_to, state, .. } =
+            pool.insert_tx(valid_tx.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        assert!(updates.is_empty());
+        assert!(replaced_tx.is_none());
+        assert!(state.contains(TxState::NO_NONCE_GAPS));
+        assert!(state.contains(TxState::ENOUGH_BALANCE));
+        assert!(state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+        assert_eq!(move_to, SubPool::Pending);
+
+        let inserted = pool.txs.get(&valid_tx.transaction_id).unwrap();
+        assert_eq!(inserted.subpool, SubPool::Pending);
+    }
+
+    #[test]
+    fn test_insert_blob_not_enough_blob_fee() {
+        let on_chain_balance = U256::MAX;
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions { pending_blob_fee: 10_000_000, ..Default::default() };
+        pool.pending_blob_fee = 10_000_000;
+        let tx = MockTransaction::eip4844().inc_price().inc_limit();
+        let valid_tx = f.validated(tx);
+        let InsertOk { state, .. } =
+            pool.insert_tx(valid_tx.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        assert!(state.contains(TxState::NO_NONCE_GAPS));
+        assert!(!state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+
+        let _ = pool.txs.get(&valid_tx.transaction_id).unwrap();
+    }
 
     #[test]
     fn test_insert_pending() {
