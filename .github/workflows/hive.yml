@@ -119,10 +119,9 @@ jobs:
           - sim: pyspec
             include: [cancun/eip1153]
             experimental: true
-          # TODO: uncomment once there are hive tests for EIP-7516
-          # - sim: pyspec
-          #   include: [cancun/eip7516]
-          #   experimental: true
+          - sim: pyspec
+            include: [cancun/eip7516]
+            experimental: true
       fail-fast: false
     needs: prepare
     name: run
