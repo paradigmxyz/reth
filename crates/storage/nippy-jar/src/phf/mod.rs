@@ -9,14 +9,14 @@ mod go_fmph;
 pub use go_fmph::GoFmph;
 
 /// Trait to build and query a perfect hashing function.
-pub trait KeySet: Serialize + for<'a> Deserialize<'a> {
+pub trait PerfectHashingFunction: Serialize + for<'a> Deserialize<'a> {
     /// Adds the key set and builds the perfect hashing function.
     fn set_keys<T: AsRef<[u8]> + Sync + Clone + Hash>(
         &mut self,
         keys: &[T],
     ) -> Result<(), NippyJarError>;
 
-    /// Get corresponding key index.
+    /// Get corresponding associated integer. There might be false positives.
     fn get_index(&self, key: &[u8]) -> Result<Option<u64>, NippyJarError>;
 }
 
@@ -28,7 +28,7 @@ pub enum Functions {
     GoFmph(GoFmph),
 }
 
-impl KeySet for Functions {
+impl PerfectHashingFunction for Functions {
     fn set_keys<T: AsRef<[u8]> + Sync + Clone + Hash>(
         &mut self,
         keys: &[T],

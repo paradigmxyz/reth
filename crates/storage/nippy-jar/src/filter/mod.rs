@@ -4,14 +4,16 @@ use serde::{Deserialize, Serialize};
 mod cuckoo;
 pub use cuckoo::Cuckoo;
 
+/// Membership filter set trait.
 pub trait Filter {
     /// Add element to the inclusion list.
     fn add(&mut self, element: &[u8]) -> Result<(), NippyJarError>;
 
-    /// Checks if the element belongs to the inclusion list. There might be false positives.
+    /// Checks if the element belongs to the inclusion list. **There might be false positives.**
     fn contains(&self, element: &[u8]) -> Result<bool, NippyJarError>;
 }
 
+/// Enum with different [`Filter`] types.
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub enum Filters {

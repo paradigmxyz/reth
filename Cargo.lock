@@ -4145,6 +4145,7 @@ dependencies = [
 name = "nippy-jar"
 version = "0.1.0-alpha.8"
 dependencies = [
+ "anyhow",
  "bincode",
  "bloomfilter",
  "bytes",
@@ -4153,6 +4154,7 @@ dependencies = [
  "ph",
  "rand 0.8.5",
  "serde",
+ "sucds 0.8.0",
  "tempfile",
  "thiserror",
  "zstd",
@@ -5935,7 +5937,7 @@ dependencies = [
  "serde_with",
  "sha2",
  "strum 0.25.0",
- "sucds",
+ "sucds 0.6.0",
  "tempfile",
  "test-fuzz",
  "thiserror",
@@ -7334,6 +7336,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "64accd20141dfbef67ad83c51d588146cff7810616e1bda35a975be369059533"
 dependencies = [
  "anyhow",
+]
+
+[[package]]
+name = "sucds"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ab2433064439f81e28aa0ec2ded1c27a95636a7024767ded6047a57e54958d8"
+dependencies = [
+ "anyhow",
+ "num-traits",
 ]
 
 [[package]]

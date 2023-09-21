@@ -4,7 +4,12 @@ use std::{
     fs::File,
     io::{Read, Write},
 };
-use zstd::bulk::{Compressor, Decompressor};
+use zstd::{
+    bulk::{Compressor, Decompressor},
+    dict::DecoderDictionary,
+};
+
+type RawDictionary = Vec<u8>;
 
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum ZstdState {
@@ -23,7 +28,7 @@ pub struct Zstd {
     /// Max size of a dictionary
     pub(crate) max_dict_size: usize,
     /// List of column dictionaries.
-    pub(crate) raw_dictionaries: Option<Vec<Vec<u8>>>,
+    pub(crate) raw_dictionaries: Option<Vec<RawDictionary>>,
     /// Number of columns to compress.
     columns: usize,
 }
@@ -41,18 +46,31 @@ impl Zstd {
         }
     }
 
-    /// If using dictionaries, creates a list of [`Decompressor`].
-    pub fn generate_decompressors(&self) -> Result<Vec<Decompressor<'_>>, NippyJarError> {
-        if let Some(dictionaries) = &self.raw_dictionaries {
-            return Ok((0..self.columns)
-                .map(|column| Decompressor::with_dictionary(&dictionaries[column]))
-                .collect::<Result<Vec<_>, _>>()?)
-        }
-        Ok(vec![])
+    /// If using dictionaries, creates a list of [`DecoderDictionary`].
+    ///
+    /// Consumes `self.raw_dictionaries` in the process.
+    pub fn generate_decompress_dictionaries<'a>(&mut self) -> Option<Vec<DecoderDictionary<'a>>> {
+        self.raw_dictionaries.take().map(|dicts| {
+            // TODO Can we use ::new instead, and avoid consuming?
+            dicts.iter().map(|dict| DecoderDictionary::copy(dict)).collect()
+        })
+    }
+
+    /// Creates a list of [`Decompressor`] using the given dictionaries.
+    pub fn generate_decompressors<'a>(
+        &self,
+        dictionaries: &'a [DecoderDictionary<'a>],
+    ) -> Result<Vec<Decompressor<'a>>, NippyJarError> {
+        debug_assert!(dictionaries.len() == self.columns);
+
+        Ok(dictionaries
+            .iter()
+            .map(Decompressor::with_prepared_dictionary)
+            .collect::<Result<Vec<_>, _>>()?)
     }
 
     /// If using dictionaries, creates a list of [`Compressor`].
-    pub fn generate_compressors(&self) -> Result<Option<Vec<Compressor>>, NippyJarError> {
+    pub fn generate_compressors<'a>(&self) -> Result<Option<Vec<Compressor<'a>>>, NippyJarError> {
         match self.state {
             ZstdState::PendingDictionary => Err(NippyJarError::CompressorNotReady),
             ZstdState::Ready => {
@@ -76,8 +94,7 @@ impl Zstd {
 
     /// Compresses a value using a dictionary.
     pub fn compress_with_dictionary(
-        &self,
-        value: &[u8],
+        column_value: &[u8],
         tmp_buf: &mut Vec<u8>,
         handle: &mut File,
         compressor: Option<&mut Compressor>,
@@ -88,8 +105,8 @@ impl Zstd {
             // enough, the compressed buffer will actually be larger. We keep retrying.
             // If we eventually fail, it probably means it's another kind of error.
             let mut multiplier = 1;
-            while let Err(err) = compressor.compress_to_buffer(value, tmp_buf) {
-                tmp_buf.reserve(value.len() * multiplier);
+            while let Err(err) = compressor.compress_to_buffer(column_value, tmp_buf) {
+                tmp_buf.reserve(column_value.len() * multiplier);
                 multiplier += 1;
                 if multiplier == 5 {
                     return Err(NippyJarError::Disconnect(err))
@@ -99,7 +116,37 @@ impl Zstd {
             handle.write_all(tmp_buf)?;
             tmp_buf.clear();
         } else {
-            handle.write_all(value)?;
+            handle.write_all(column_value)?;
+        }
+
+        Ok(())
+    }
+
+    /// Decompresses a value using a dictionary to a user provided buffer.
+    pub fn decompress_with_dictionary(
+        column_value: &[u8],
+        output: &mut Vec<u8>,
+        decompressor: &mut Decompressor<'_>,
+    ) -> Result<(), NippyJarError> {
+        let mut multiplier = 1;
+
+        // Just an estimation.
+        let required_capacity = column_value.len() * 2;
+
+        output.reserve(required_capacity.saturating_sub(output.capacity()));
+
+        // Decompressor requires the destination buffer to be big enough to write to, otherwise it
+        // fails. However, we don't know how big it will be. We keep retrying.
+        // If we eventually fail, it probably means it's another kind of error.
+        while let Err(err) = decompressor.decompress_to_buffer(column_value, output) {
+            output.reserve(
+                Decompressor::upper_bound(column_value).unwrap_or(required_capacity) * multiplier,
+            );
+
+            multiplier += 1;
+            if multiplier == 5 {
+                return Err(NippyJarError::Disconnect(err))
+            }
         }
 
         Ok(())
@@ -110,9 +157,10 @@ impl Compression for Zstd {
     fn decompress(&self, value: &[u8]) -> Result<Vec<u8>, NippyJarError> {
         let mut decompressed = Vec::with_capacity(value.len() * 2);
         let mut decoder = zstd::Decoder::new(value)?;
-        decoder.read_exact(&mut decompressed)?;
+        decoder.read_to_end(&mut decompressed)?;
         Ok(decompressed)
     }
+
     fn compress_to<W: Write>(&self, src: &[u8], dest: &mut W) -> Result<(), NippyJarError> {
         let level = 0;
 

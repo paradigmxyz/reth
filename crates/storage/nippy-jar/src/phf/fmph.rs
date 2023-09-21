@@ -1,5 +1,4 @@
-use super::KeySet;
-use crate::NippyJarError;
+use crate::{NippyJarError, PerfectHashingFunction};
 use ph::fmph::{BuildConf, Function};
 use serde::{
     de::Error as DeSerdeError, ser::Error as SerdeError, Deserialize, Deserializer, Serialize,
@@ -19,7 +18,7 @@ impl Fmph {
     }
 }
 
-impl KeySet for Fmph {
+impl PerfectHashingFunction for Fmph {
     fn set_keys<T: AsRef<[u8]> + Sync + Clone + Hash>(
         &mut self,
         keys: &[T],
