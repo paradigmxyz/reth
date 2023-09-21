@@ -600,8 +600,11 @@ pub enum SignError {
     NoAccount,
     /// TypedData has invalid format.
     #[error("Given typed data is not valid")]
-    TypedData,
-    /// No chainid
+    InvalidTypedData,
+    /// Invalid transaction request in `sign_transaction`.
+    #[error("Invalid transaction request")]
+    InvalidTransactionRequest,
+    /// No chain ID was given.
     #[error("No chainid")]
     NoChainId,
 }
