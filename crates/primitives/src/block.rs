@@ -203,6 +203,11 @@ impl SealedBlock {
             self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * std::mem::size_of::<Header>() +
             self.withdrawals.as_ref().map(|w| w.iter().map(Withdrawal::size).sum::<usize>() + w.capacity() * std::mem::size_of::<Withdrawal>()).unwrap_or(std::mem::size_of::<Option<Vec<Withdrawal>>>())
     }
+
+    /// Calculates the total gas used by blob transactions in the sealed block.
+    pub fn blob_gas_used(&self) -> u64 {
+        self.blob_transactions().iter().filter_map(|tx| tx.blob_gas_used()).sum()
+    }
 }
 
 impl From<SealedBlock> for Block {

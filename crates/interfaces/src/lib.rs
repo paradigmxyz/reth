@@ -28,7 +28,7 @@ pub mod executor;
 
 /// Possible errors when interacting with the chain.
 mod error;
-pub use error::{Error, Result};
+pub use error::{RethError, RethResult};
 
 /// P2P traits.
 pub mod p2p;

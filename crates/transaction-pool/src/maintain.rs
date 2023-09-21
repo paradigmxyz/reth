@@ -10,6 +10,7 @@ use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
 };
+use reth_interfaces::RethError;
 use reth_primitives::{
     Address, BlockHash, BlockNumber, BlockNumberOrTag, FromRecoveredTransaction,
 };
@@ -470,7 +471,7 @@ fn load_accounts<Client, I>(
     client: Client,
     at: BlockHash,
     addresses: I,
-) -> Result<LoadedAccounts, Box<(HashSet<Address>, reth_interfaces::Error)>>
+) -> Result<LoadedAccounts, Box<(HashSet<Address>, RethError)>>
 where
     I: Iterator<Item = Address>,
 

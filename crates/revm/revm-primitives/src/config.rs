@@ -10,7 +10,9 @@ pub fn revm_spec_by_timestamp_after_merge(
     chain_spec: &ChainSpec,
     timestamp: u64,
 ) -> revm::primitives::SpecId {
-    if chain_spec.is_fork_active_at_timestamp(Hardfork::Shanghai, timestamp) {
+    if chain_spec.is_cancun_activated_at_timestamp(timestamp) {
+        revm::primitives::CANCUN
+    } else if chain_spec.is_shanghai_activated_at_timestamp(timestamp) {
         revm::primitives::SHANGHAI
     } else {
         revm::primitives::MERGE
@@ -57,6 +59,14 @@ mod tests {
     use reth_primitives::{ChainSpecBuilder, Head, MAINNET, U256};
     #[test]
     fn test_to_revm_spec() {
+        assert_eq!(
+            revm_spec(&ChainSpecBuilder::mainnet().cancun_activated().build(), Head::default()),
+            revm::primitives::CANCUN
+        );
+        assert_eq!(
+            revm_spec(&ChainSpecBuilder::mainnet().shanghai_activated().build(), Head::default()),
+            revm::primitives::SHANGHAI
+        );
         assert_eq!(
             revm_spec(&ChainSpecBuilder::mainnet().paris_activated().build(), Head::default()),
             revm::primitives::MERGE
