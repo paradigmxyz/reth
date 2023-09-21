@@ -446,7 +446,8 @@ where
         if request.nonce.is_none() {
             let nonce =
                 self.get_transaction_count(from, Some(BlockId::Number(BlockNumberOrTag::Pending)))?;
-            request.nonce = Some(nonce);
+            // note: `.to()` can't panic because the nonce is constructed from a `u64`
+            request.nonce = Some(U64::from(nonce.to::<u64>()));
         }
 
         let chain_id = self.chain_id();

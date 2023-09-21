@@ -48,12 +48,14 @@ impl DevSigner {
     fn get_key(&self, account: Address) -> Result<&SecretKey> {
         self.accounts.get(&account).ok_or(SignError::NoAccount)
     }
+
     fn sign_hash(&self, hash: H256, account: Address) -> Result<Signature> {
         let secret = self.get_key(account)?;
         let signature = sign_message(H256::from_slice(secret.as_ref()), hash);
         signature.map_err(|_| SignError::CouldNotSign)
     }
 }
+
 #[async_trait::async_trait]
 impl EthSigner for DevSigner {
     fn accounts(&self) -> Vec<Address> {
@@ -77,7 +79,7 @@ impl EthSigner for DevSigner {
         address: &Address,
     ) -> Result<TransactionSigned> {
         // convert to primitive transaction
-        let transaction = request.into_transaction();
+        let transaction = request.into_transaction().ok_or(SignError::InvalidTransactionRequest)?;
         let tx_signature_hash = transaction.signature_hash();
         let signature = self.sign_hash(tx_signature_hash, *address)?;
 
@@ -85,7 +87,8 @@ impl EthSigner for DevSigner {
     }
 
     fn sign_typed_data(&self, address: Address, payload: &TypedData) -> Result<Signature> {
-        let encoded: H256 = payload.encode_eip712().map_err(|_| SignError::TypedData)?.into();
+        let encoded: H256 =
+            payload.encode_eip712().map_err(|_| SignError::InvalidTypedData)?.into();
         self.sign_hash(encoded, address)
     }
 }

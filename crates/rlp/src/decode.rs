@@ -257,8 +257,8 @@ mod ethereum_types_support {
             aliases::{B160, B64},
             Bloom, B512,
         },
-        ruint::aliases::U128 as RU128,
-        Address, FixedBytes, B256, U256 as RU256,
+        ruint::aliases::{U128 as RU128, U256 as RU256, U64 as RU64},
+        Address, FixedBytes, B256,
     };
 
     macro_rules! fixed_hash_impl {
@@ -348,8 +348,9 @@ mod ethereum_types_support {
         };
     }
 
-    fixed_revm_uint_impl!(RU256, 32);
+    fixed_revm_uint_impl!(RU64, 8);
     fixed_revm_uint_impl!(RU128, 16);
+    fixed_revm_uint_impl!(RU256, 32);
 
     fixed_uint_impl!(U64, 8);
     fixed_uint_impl!(U128, 16);

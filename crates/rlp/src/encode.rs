@@ -223,7 +223,9 @@ mod ethereum_types_support {
     use super::*;
     use ethereum_types::*;
     use revm_primitives::{
-        alloy_primitives::B512, ruint::aliases::U128 as RU128, Address, B256, U256 as RU256,
+        alloy_primitives::B512,
+        ruint::aliases::{U128 as RU128, U256 as RU256, U64 as RU64},
+        Address, B256,
     };
 
     macro_rules! fixed_hash_impl {
@@ -299,6 +301,7 @@ mod ethereum_types_support {
         };
     }
 
+    fixed_revm_uint_impl!(RU64, 8);
     fixed_revm_uint_impl!(RU128, 16);
     fixed_revm_uint_impl!(RU256, 32);
     impl_max_encoded_len!(RU256, { length_of_length(32) + 32 });
