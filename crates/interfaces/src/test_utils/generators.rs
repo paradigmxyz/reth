@@ -318,7 +318,7 @@ pub fn random_storage_entry<R: Rng>(rng: &mut R, key_range: std::ops::Range<u64>
 pub fn random_eoa_account<R: Rng>(rng: &mut R) -> (Address, Account) {
     let nonce: u64 = rng.gen();
     let balance = U256::from(rng.gen::<u32>());
-    let addr = Address::new(rng.gen());
+    let addr = rng.gen();
 
     (addr, Account { nonce, balance, bytecode_hash: None })
 }
@@ -371,12 +371,12 @@ pub fn random_receipt<R: Rng>(
 
 /// Generate random log
 pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: Option<u8>) -> Log {
-    let data_byte_count = rng.gen::<u8>();
-    let topics_count = topics_count.unwrap_or_else(|| rng.gen::<u8>());
+    let data_byte_count = rng.gen::<u8>() as usize;
+    let topics_count = topics_count.unwrap_or_else(|| rng.gen()) as usize;
     Log {
-        address: address.unwrap_or_else(|| Address::new(rng.gen())),
-        topics: (0..topics_count).map(|_| H256::new(rng.gen())).collect(),
-        data: Bytes::from((0..data_byte_count).map(|_| rng.gen::<u8>()).collect::<Vec<_>>()),
+        address: address.unwrap_or_else(|| rng.gen()),
+        topics: std::iter::repeat_with(|| rng.gen()).take(topics_count).collect(),
+        data: std::iter::repeat_with(|| rng.gen()).take(data_byte_count).collect::<Vec<_>>().into(),
     }
 }
 
