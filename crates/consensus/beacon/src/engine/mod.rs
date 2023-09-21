@@ -4,7 +4,7 @@ use crate::{
         message::OnForkChoiceUpdated,
         metrics::EngineMetrics,
     },
-    hooks::{EngineContext, EngineHookAction, EngineHooksController},
+    hooks::{EngineContext, EngineHooksController},
     sync::{EngineSyncController, EngineSyncEvent},
 };
 use futures::{Future, StreamExt};
@@ -69,7 +69,7 @@ mod handle;
 pub use handle::BeaconConsensusEngineHandle;
 
 mod forkchoice;
-use crate::hooks::{EngineHooks, PolledHook};
+use crate::hooks::{EngineHookEvent, EngineHooks, PolledHook};
 pub use forkchoice::ForkchoiceStatus;
 
 mod metrics;
@@ -1678,19 +1678,28 @@ where
 
     fn on_hook_result(&self, result: PolledHook) -> Result<(), BeaconConsensusEngineError> {
         if let Some(action) = result.action {
-            match action {
-                EngineHookAction::UpdateSyncState(state) => {
-                    self.sync_state_updater.update_sync_state(state)
-                }
-            }
+            match action {}
         }
 
-        if result.event.is_finished() && result.db_access_level.is_read_write() {
-            // If the hook had read-write access to the database,
-            // it means that the engine may have accumulated some buffered blocks.
-            if let Err(error) = self.blockchain.connect_buffered_blocks_to_canonical_hashes() {
-                error!(target: "consensus::engine", ?error, "Error connecting buffered blocks to canonical hashes on hook result");
-                return Err(error.into())
+        if result.db_access_level.is_read_write() {
+            match result.event {
+                EngineHookEvent::NotReady => {}
+                EngineHookEvent::Started => {
+                    // If the hook has read-write access to the database, it means that the engine
+                    // can't process any FCU/payload messages from CL. To prevent CL from sending us
+                    // unneeded updates, we need to respond `true` on `eth_syncing` request.
+                    self.sync_state_updater.update_sync_state(SyncState::Syncing)
+                }
+                EngineHookEvent::Finished(_) => {
+                    // If the hook had read-write access to the database, it means that the engine
+                    // may have accumulated some buffered blocks.
+                    if let Err(error) =
+                        self.blockchain.connect_buffered_blocks_to_canonical_hashes()
+                    {
+                        error!(target: "consensus::engine", ?error, "Error connecting buffered blocks to canonical hashes on hook result");
+                        return Err(error.into())
+                    }
+                }
             }
         }
 
