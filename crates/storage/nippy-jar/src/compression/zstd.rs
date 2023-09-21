@@ -23,6 +23,8 @@ pub enum ZstdState {
 pub struct Zstd {
     /// State. Should be ready before compressing.
     pub(crate) state: ZstdState,
+    /// Compression level. A level of `0` uses zstd's default (currently `3`).
+    pub(crate) level: i32,
     /// Uses custom dictionaries to compress data.
     pub(crate) use_dict: bool,
     /// Max size of a dictionary
@@ -36,14 +38,19 @@ pub struct Zstd {
 impl Zstd {
     /// Creates new [`Zstd`].
     pub fn new(use_dict: bool, max_dict_size: usize, columns: usize) -> Self {
-        // TODO add level
         Self {
             state: if use_dict { ZstdState::PendingDictionary } else { ZstdState::Ready },
+            level: 0,
             use_dict,
             max_dict_size,
             raw_dictionaries: None,
             columns,
         }
+    }
+
+    pub fn with_level(mut self, level: i32) -> Self {
+        self.level = level;
+        self
     }
 
     /// If using dictionaries, creates a list of [`DecoderDictionary`].
@@ -162,14 +169,20 @@ impl Compression for Zstd {
     }
 
     fn compress_to<W: Write>(&self, src: &[u8], dest: &mut W) -> Result<(), NippyJarError> {
-        let level = 0;
-
-        let mut encoder = zstd::Encoder::new(dest, level)?;
+        let mut encoder = zstd::Encoder::new(dest, self.level)?;
         encoder.write_all(src)?;
 
         encoder.finish()?;
 
         Ok(())
+    }
+
+    fn compress(&self, src: &[u8]) -> Result<Vec<u8>, NippyJarError> {
+        let mut compressed = Vec::with_capacity(src.len());
+
+        self.compress_to(src, &mut compressed)?;
+
+        Ok(compressed)
     }
 
     fn is_ready(&self) -> bool {

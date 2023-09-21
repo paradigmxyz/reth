@@ -13,6 +13,9 @@ pub trait Compression: Serialize + for<'a> Deserialize<'a> {
     /// Compresses data from `src` to `dest`
     fn compress_to<W: Write>(&self, src: &[u8], dest: &mut W) -> Result<(), NippyJarError>;
 
+    /// Compresses data from `src`
+    fn compress(&self, src: &[u8]) -> Result<Vec<u8>, NippyJarError>;
+
     /// Returns `true` if it's ready to compress.
     ///
     /// Example: it will return false, if `zstd` with dictionary is set, but wasn't generated.
@@ -45,9 +48,17 @@ impl Compression for Compressors {
             Compressors::Unused => unimplemented!(),
         }
     }
+
     fn compress_to<W: Write>(&self, src: &[u8], dest: &mut W) -> Result<(), NippyJarError> {
         match self {
             Compressors::Zstd(zstd) => zstd.compress_to(src, dest),
+            Compressors::Unused => unimplemented!(),
+        }
+    }
+
+    fn compress(&self, src: &[u8]) -> Result<Vec<u8>, NippyJarError> {
+        match self {
+            Compressors::Zstd(zstd) => zstd.compress(src),
             Compressors::Unused => unimplemented!(),
         }
     }
