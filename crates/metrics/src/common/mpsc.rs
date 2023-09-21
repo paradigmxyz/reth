@@ -316,6 +316,12 @@ impl<T: Send + 'static> MeteredPollSender<T> {
     }
 }
 
+impl<T> Clone for MeteredPollSender<T> {
+    fn clone(&self) -> Self {
+        Self { sender: self.sender.clone(), metrics: self.metrics.clone() }
+    }
+}
+
 /// Throughput metrics for [MeteredPollSender]
 #[derive(Clone, Metrics)]
 #[metrics(dynamic = true)]
