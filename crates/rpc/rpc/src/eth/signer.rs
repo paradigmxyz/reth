@@ -77,7 +77,7 @@ impl EthSigner for DevSigner {
         address: &Address,
     ) -> Result<TransactionSigned> {
         // convert to primitive transaction
-        let transaction = request.into_transaction();
+        let transaction = request.into_transaction().unwrap();
         let tx_signature_hash = transaction.signature_hash();
         let signature = self.sign_hash(tx_signature_hash, *address)?;
 
