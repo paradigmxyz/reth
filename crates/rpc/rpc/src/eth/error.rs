@@ -5,6 +5,7 @@ use jsonrpsee::{
     core::Error as RpcError,
     types::{error::CALL_EXECUTION_FAILED_CODE, ErrorObject},
 };
+use reth_interfaces::RethError;
 use reth_primitives::{abi::decode_revert_reason, Address, Bytes, U256};
 use reth_revm::tracing::js::JsInspectorError;
 use reth_rpc_types::{error::EthRpcErrorCode, BlockError, CallInputError};
@@ -61,7 +62,7 @@ pub enum EthApiError {
     BothStateAndStateDiffInOverride(Address),
     /// Other internal error
     #[error(transparent)]
-    Internal(reth_interfaces::Error),
+    Internal(RethError),
     /// Error related to signing
     #[error(transparent)]
     Signing(#[from] SignError),
@@ -153,10 +154,10 @@ impl From<JsInspectorError> for EthApiError {
     }
 }
 
-impl From<reth_interfaces::Error> for EthApiError {
-    fn from(error: reth_interfaces::Error) -> Self {
+impl From<RethError> for EthApiError {
+    fn from(error: RethError) -> Self {
         match error {
-            reth_interfaces::Error::Provider(err) => err.into(),
+            RethError::Provider(err) => err.into(),
             err => EthApiError::Internal(err),
         }
     }
@@ -296,9 +297,18 @@ pub enum RpcInvalidTransactionError {
     /// Block `blob_gas_price` is greater than tx-specified `max_fee_per_blob_gas` after Cancun.
     #[error("max fee per blob gas less than block blob gas fee")]
     BlobFeeCapTooLow,
-    /// `blob_hashes`/`blob_versioned_hashees is mandatory to be included
-    #[error("blob_versioned_hashes is mandatory to be included ")]
-    BlobVersionedHashesNotIncluded,
+    /// Blob transaction has a versioned hash with an invalid blob
+    #[error("blob hash version mismatch")]
+    BlobHashVersionMismatch,
+    /// Blob transaction has no versioned hashes
+    #[error("blob transaction missing blob hashes")]
+    BlobTransactionMissingBlobHashes,
+    /// Blob transaction has too many blobs
+    #[error("blob transaction exceeds max blobs per block")]
+    TooManyBlobs,
+    /// Blob transaction is a create transaction
+    #[error("blob transaction is a create transaction")]
+    BlobTransactionIsCreate,
 }
 
 impl RpcInvalidTransactionError {
@@ -396,6 +406,16 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             }
             InvalidTransaction::BlobGasPriceGreaterThanMax => {
                 RpcInvalidTransactionError::BlobFeeCapTooLow
+            }
+            InvalidTransaction::EmptyBlobs => {
+                RpcInvalidTransactionError::BlobTransactionMissingBlobHashes
+            }
+            InvalidTransaction::BlobVersionNotSupported => {
+                RpcInvalidTransactionError::BlobHashVersionMismatch
+            }
+            InvalidTransaction::TooManyBlobs => RpcInvalidTransactionError::TooManyBlobs,
+            InvalidTransaction::BlobCreateTransaction => {
+                RpcInvalidTransactionError::BlobTransactionIsCreate
             }
         }
     }

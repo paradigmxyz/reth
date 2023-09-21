@@ -16,6 +16,7 @@ reth-rlp.workspace = true
 reth-transaction-pool.workspace = true
 reth-interfaces.workspace = true
 reth-revm-primitives = { path = "../../revm/revm-primitives" }
+reth-rpc-types-compat.workspace = true
 
 ## ethereum
 revm-primitives.workspace = true

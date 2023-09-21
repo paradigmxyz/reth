@@ -1,6 +1,6 @@
 use auto_impl::auto_impl;
 use reth_db::models::AccountBeforeTx;
-use reth_interfaces::Result;
+use reth_interfaces::RethResult;
 use reth_primitives::{Account, Address, BlockNumber};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -13,7 +13,7 @@ pub trait AccountReader: Send + Sync {
     /// Get basic account information.
     ///
     /// Returns `None` if the account doesn't exist.
-    fn basic_account(&self, address: Address) -> Result<Option<Account>>;
+    fn basic_account(&self, address: Address) -> RethResult<Option<Account>>;
 }
 
 /// Account reader
@@ -23,7 +23,7 @@ pub trait AccountExtReader: Send + Sync {
     fn changed_accounts_with_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
-    ) -> Result<BTreeSet<Address>>;
+    ) -> RethResult<BTreeSet<Address>>;
 
     /// Get basic account information for multiple accounts. A more efficient version than calling
     /// [`AccountReader::basic_account`] repeatedly.
@@ -32,7 +32,7 @@ pub trait AccountExtReader: Send + Sync {
     fn basic_accounts(
         &self,
         _iter: impl IntoIterator<Item = Address>,
-    ) -> Result<Vec<(Address, Option<Account>)>>;
+    ) -> RethResult<Vec<(Address, Option<Account>)>>;
 
     /// Iterate over account changesets and return all account addresses that were changed alongside
     /// each specific set of blocks.
@@ -41,12 +41,15 @@ pub trait AccountExtReader: Send + Sync {
     fn changed_accounts_and_blocks_with_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<BTreeMap<Address, Vec<BlockNumber>>>;
+    ) -> RethResult<BTreeMap<Address, Vec<BlockNumber>>>;
 }
 
 /// AccountChange reader
 #[auto_impl(&, Arc, Box)]
 pub trait ChangeSetReader: Send + Sync {
     /// Iterate over account changesets and return the account state from before this block.
-    fn account_block_changeset(&self, block_number: BlockNumber) -> Result<Vec<AccountBeforeTx>>;
+    fn account_block_changeset(
+        &self,
+        block_number: BlockNumber,
+    ) -> RethResult<Vec<AccountBeforeTx>>;
 }

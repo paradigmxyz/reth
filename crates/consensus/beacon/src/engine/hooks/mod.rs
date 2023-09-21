@@ -6,10 +6,11 @@ use std::{
 };
 
 mod controller;
-pub(crate) use controller::EngineHooksController;
+pub(crate) use controller::{EngineHooksController, PolledHook};
 
 mod prune;
 pub use prune::PruneHook;
+use reth_interfaces::RethError;
 
 /// Collection of [engine hooks][`EngineHook`].
 #[derive(Default)]
@@ -88,9 +89,6 @@ impl EngineHookEvent {
 pub enum EngineHookAction {
     /// Notify about a [SyncState] update.
     UpdateSyncState(SyncState),
-    /// Read the last relevant canonical hashes from the database and update the block indices of
-    /// the blockchain tree.
-    RestoreCanonicalHashes,
 }
 
 /// An error returned by [hook][`EngineHook`].
@@ -99,15 +97,16 @@ pub enum EngineHookError {
     /// Hook channel closed.
     #[error("Hook channel closed")]
     ChannelClosed,
-    /// Common error. Wrapper around [reth_interfaces::Error].
+    /// Common error. Wrapper around [RethError].
     #[error(transparent)]
-    Common(#[from] reth_interfaces::Error),
+    Common(#[from] RethError),
     /// An internal error occurred.
     #[error("Internal hook error occurred.")]
     Internal(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
 /// Level of database access the hook needs for execution.
+#[derive(Debug, Copy, Clone)]
 pub enum EngineHookDBAccessLevel {
     /// Read-only database access.
     ReadOnly,

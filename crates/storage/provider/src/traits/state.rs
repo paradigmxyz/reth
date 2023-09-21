@@ -1,7 +1,7 @@
 use super::AccountReader;
 use crate::{BlockHashReader, BlockIdReader, BundleStateWithReceipts};
 use auto_impl::auto_impl;
-use reth_interfaces::{provider::ProviderError, Result};
+use reth_interfaces::{provider::ProviderError, RethResult};
 use reth_primitives::{
     Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag, Bytecode, Bytes,
     StorageKey, StorageValue, H256, KECCAK_EMPTY, U256,
@@ -14,19 +14,26 @@ pub type StateProviderBox<'a> = Box<dyn StateProvider + 'a>;
 #[auto_impl(&, Arc, Box)]
 pub trait StateProvider: BlockHashReader + AccountReader + StateRootProvider + Send + Sync {
     /// Get storage of given account.
-    fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>>;
+    fn storage(
+        &self,
+        account: Address,
+        storage_key: StorageKey,
+    ) -> RethResult<Option<StorageValue>>;
 
     /// Get account code by its hash
-    fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytecode>>;
+    fn bytecode_by_hash(&self, code_hash: H256) -> RethResult<Option<Bytecode>>;
 
     /// Get account and storage proofs.
-    fn proof(&self, address: Address, keys: &[H256])
-        -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)>;
+    fn proof(
+        &self,
+        address: Address,
+        keys: &[H256],
+    ) -> RethResult<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)>;
 
     /// Get account code by its address.
     ///
     /// Returns `None` if the account doesn't exist or account is not a contract
-    fn account_code(&self, addr: Address) -> Result<Option<Bytecode>> {
+    fn account_code(&self, addr: Address) -> RethResult<Option<Bytecode>> {
         // Get basic account information
         // Returns None if acc doesn't exist
         let acc = match self.basic_account(addr)? {
@@ -49,7 +56,7 @@ pub trait StateProvider: BlockHashReader + AccountReader + StateRootProvider + S
     /// Get account balance by its address.
     ///
     /// Returns `None` if the account doesn't exist
-    fn account_balance(&self, addr: Address) -> Result<Option<U256>> {
+    fn account_balance(&self, addr: Address) -> RethResult<Option<U256>> {
         // Get basic account information
         // Returns None if acc doesn't exist
         match self.basic_account(addr)? {
@@ -61,7 +68,7 @@ pub trait StateProvider: BlockHashReader + AccountReader + StateRootProvider + S
     /// Get account nonce by its address.
     ///
     /// Returns `None` if the account doesn't exist
-    fn account_nonce(&self, addr: Address) -> Result<Option<u64>> {
+    fn account_nonce(&self, addr: Address) -> RethResult<Option<u64>> {
         // Get basic account information
         // Returns None if acc doesn't exist
         match self.basic_account(addr)? {
@@ -96,12 +103,12 @@ pub trait StateProvider: BlockHashReader + AccountReader + StateRootProvider + S
 /// to be used, since block `n` was executed on its parent block's state.
 pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     /// Storage provider for latest block.
-    fn latest(&self) -> Result<StateProviderBox<'_>>;
+    fn latest(&self) -> RethResult<StateProviderBox<'_>>;
 
     /// Returns a [StateProvider] indexed by the given [BlockId].
     ///
     /// Note: if a number or hash is provided this will only look at historical(canonical) state.
-    fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox<'_>> {
+    fn state_by_block_id(&self, block_id: BlockId) -> RethResult<StateProviderBox<'_>> {
         match block_id {
             BlockId::Number(block_number) => self.state_by_block_number_or_tag(block_number),
             BlockId::Hash(block_hash) => self.history_by_block_hash(block_hash.into()),
@@ -114,7 +121,7 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     fn state_by_block_number_or_tag(
         &self,
         number_or_tag: BlockNumberOrTag,
-    ) -> Result<StateProviderBox<'_>> {
+    ) -> RethResult<StateProviderBox<'_>> {
         match number_or_tag {
             BlockNumberOrTag::Latest => self.latest(),
             BlockNumberOrTag::Finalized => {
@@ -148,37 +155,37 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     ///
     ///
     /// Note: this only looks at historical blocks, not pending blocks.
-    fn history_by_block_number(&self, block: BlockNumber) -> Result<StateProviderBox<'_>>;
+    fn history_by_block_number(&self, block: BlockNumber) -> RethResult<StateProviderBox<'_>>;
 
     /// Returns a historical [StateProvider] indexed by the given block hash.
     ///
     /// Note: this only looks at historical blocks, not pending blocks.
-    fn history_by_block_hash(&self, block: BlockHash) -> Result<StateProviderBox<'_>>;
+    fn history_by_block_hash(&self, block: BlockHash) -> RethResult<StateProviderBox<'_>>;
 
     /// Returns _any_[StateProvider] with matching block hash.
     ///
     /// This will return a [StateProvider] for either a historical or pending block.
-    fn state_by_block_hash(&self, block: BlockHash) -> Result<StateProviderBox<'_>>;
+    fn state_by_block_hash(&self, block: BlockHash) -> RethResult<StateProviderBox<'_>>;
 
     /// Storage provider for pending state.
     ///
     /// Represents the state at the block that extends the canonical chain by one.
     /// If there's no `pending` block, then this is equal to [StateProviderFactory::latest]
-    fn pending(&self) -> Result<StateProviderBox<'_>>;
+    fn pending(&self) -> RethResult<StateProviderBox<'_>>;
 
     /// Storage provider for pending state for the given block hash.
     ///
     /// Represents the state at the block that extends the canonical chain.
     ///
     /// If the block couldn't be found, returns `None`.
-    fn pending_state_by_hash(&self, block_hash: H256) -> Result<Option<StateProviderBox<'_>>>;
+    fn pending_state_by_hash(&self, block_hash: H256) -> RethResult<Option<StateProviderBox<'_>>>;
 
     /// Return a [StateProvider] that contains post state data provider.
     /// Used to inspect or execute transaction on the pending state.
     fn pending_with_provider(
         &self,
         post_state_data: Box<dyn BundleStateDataProvider>,
-    ) -> Result<StateProviderBox<'_>>;
+    ) -> RethResult<StateProviderBox<'_>>;
 }
 
 /// Blockchain trait provider that gives access to the blockchain state that is not yet committed
@@ -191,7 +198,7 @@ pub trait BlockchainTreePendingStateProvider: Send + Sync {
     fn pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> Result<Box<dyn BundleStateDataProvider>> {
+    ) -> RethResult<Box<dyn BundleStateDataProvider>> {
         Ok(self
             .find_pending_state_provider(block_hash)
             .ok_or(ProviderError::StateForHashNotFound(block_hash))?)
@@ -227,5 +234,5 @@ pub trait BundleStateDataProvider: Send + Sync {
 #[auto_impl[Box,&, Arc]]
 pub trait StateRootProvider: Send + Sync {
     /// Returns the state root of the BundleState on top of the current state.
-    fn state_root(&self, post_state: BundleStateWithReceipts) -> Result<H256>;
+    fn state_root(&self, post_state: BundleStateWithReceipts) -> RethResult<H256>;
 }

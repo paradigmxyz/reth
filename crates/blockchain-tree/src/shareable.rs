@@ -8,7 +8,7 @@ use reth_interfaces::{
         InsertPayloadOk,
     },
     consensus::Consensus,
-    Error,
+    RethResult,
 };
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders,
@@ -66,26 +66,27 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
         tree.update_chains_metrics();
     }
 
-    fn restore_canonical_hashes_and_finalize(
+    fn connect_buffered_blocks_to_canonical_hashes_and_finalize(
         &self,
         last_finalized_block: BlockNumber,
-    ) -> Result<(), Error> {
-        trace!(target: "blockchain_tree", ?last_finalized_block, "Restoring canonical hashes for last finalized block");
+    ) -> RethResult<()> {
+        trace!(target: "blockchain_tree", ?last_finalized_block, "Connecting buffered blocks to canonical hashes and finalizing the tree");
         let mut tree = self.tree.write();
-        let res = tree.restore_canonical_hashes_and_finalize(last_finalized_block);
+        let res =
+            tree.connect_buffered_blocks_to_canonical_hashes_and_finalize(last_finalized_block);
         tree.update_chains_metrics();
         res
     }
 
-    fn restore_canonical_hashes(&self) -> Result<(), Error> {
-        trace!(target: "blockchain_tree", "Restoring canonical hashes");
+    fn connect_buffered_blocks_to_canonical_hashes(&self) -> RethResult<()> {
+        trace!(target: "blockchain_tree", "Connecting buffered blocks to canonical hashes");
         let mut tree = self.tree.write();
-        let res = tree.restore_canonical_hashes();
+        let res = tree.connect_buffered_blocks_to_canonical_hashes();
         tree.update_chains_metrics();
         res
     }
 
-    fn make_canonical(&self, block_hash: &BlockHash) -> Result<CanonicalOutcome, Error> {
+    fn make_canonical(&self, block_hash: &BlockHash) -> RethResult<CanonicalOutcome> {
         trace!(target: "blockchain_tree", ?block_hash, "Making block canonical");
         let mut tree = self.tree.write();
         let res = tree.make_canonical(block_hash);
@@ -93,7 +94,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
         res
     }
 
-    fn unwind(&self, unwind_to: BlockNumber) -> Result<(), Error> {
+    fn unwind(&self, unwind_to: BlockNumber) -> RethResult<()> {
         trace!(target: "blockchain_tree", ?unwind_to, "Unwinding to block number");
         let mut tree = self.tree.write();
         let res = tree.unwind(unwind_to);
@@ -158,7 +159,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
         self.tree.read().block_indices().canonical_tip()
     }
 
-    fn is_canonical(&self, hash: BlockHash) -> Result<bool, Error> {
+    fn is_canonical(&self, hash: BlockHash) -> RethResult<bool> {
         trace!(target: "blockchain_tree", ?hash, "Checking if block is canonical");
         self.tree.read().is_block_hash_canonical(&hash)
     }
