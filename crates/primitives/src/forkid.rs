@@ -4,7 +4,7 @@
 
 #![deny(missing_docs)]
 
-use crate::{BlockNumber, Head, H256};
+use crate::{hex, BlockNumber, Head, H256};
 use crc::*;
 use reth_codecs::derive_arbitrary;
 use reth_rlp::*;
@@ -379,7 +379,7 @@ impl Cache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hex_literal::hex;
+    use crate::hex_literal::hex;
     use revm_primitives::b256;
 
     const GENESIS_HASH: H256 =

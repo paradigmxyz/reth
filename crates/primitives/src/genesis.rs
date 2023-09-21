@@ -551,8 +551,7 @@ mod ethers_compat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Address, Bytes, U256};
-    use hex_literal::hex;
+    use crate::{hex_literal::hex, Address, Bytes, U256};
     use std::{collections::HashMap, str::FromStr};
 
     #[test]

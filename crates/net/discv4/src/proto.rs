@@ -500,7 +500,7 @@ mod tests {
     };
     use enr::{EnrBuilder, EnrPublicKey};
     use rand::{thread_rng, Rng, RngCore};
-    use reth_primitives::{hex_literal::hex, ForkHash};
+    use reth_primitives::{hex, ForkHash};
 
     #[test]
     fn test_endpoint_ipv_v4() {

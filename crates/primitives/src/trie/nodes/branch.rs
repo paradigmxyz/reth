@@ -202,7 +202,7 @@ impl Compact for BranchNodeCompact {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hex_literal::hex;
+    use crate::hex_literal::hex;
 
     #[test]
     fn node_encoding() {

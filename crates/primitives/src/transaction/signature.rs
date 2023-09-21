@@ -140,7 +140,7 @@ impl Signature {
 
     /// Turn this signature into its hex-encoded representation.
     pub fn to_hex_bytes(&self) -> Bytes {
-        Bytes(hex::encode(self.to_bytes()).into())
+        crate::hex::encode(self.to_bytes()).into()
     }
 
     /// Calculates a heuristic for the in-memory size of the [Signature].

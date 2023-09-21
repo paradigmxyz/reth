@@ -561,8 +561,7 @@ impl ECIES {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hex_literal::hex;
-    use reth_primitives::b256;
+    use reth_primitives::{b256, hex};
 
     #[test]
     fn ecdh() {

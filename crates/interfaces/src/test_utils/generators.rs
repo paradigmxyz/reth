@@ -382,14 +382,12 @@ pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: O
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
-
     use super::*;
-    use hex_literal::hex;
     use reth_primitives::{
-        keccak256, public_key_to_address, AccessList, Address, TransactionKind, TxEip1559,
+        hex, keccak256, public_key_to_address, AccessList, Address, TransactionKind, TxEip1559,
     };
     use secp256k1::KeyPair;
+    use std::str::FromStr;
 
     #[test]
     fn test_sign_message() {

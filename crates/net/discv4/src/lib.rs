@@ -28,6 +28,7 @@
 //!
 //! - `serde` (default): Enable serde support
 //! - `test-utils`: Export utilities for testing
+
 use crate::{
     error::{DecodePacketError, Discv4Error},
     proto::{FindNode, Message, Neighbours, Packet, Ping, Pong},
@@ -45,7 +46,7 @@ use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse, EnrWrapper};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
-    ForkId, PeerId, H256,
+    hex, ForkId, PeerId, H256,
 };
 use reth_rlp::{RlpDecodable, RlpEncodable};
 use secp256k1::SecretKey;
@@ -2060,7 +2061,7 @@ mod tests {
     use super::*;
     use crate::test_utils::{create_discv4, create_discv4_with_config, rng_endpoint, rng_record};
     use rand::{thread_rng, Rng};
-    use reth_primitives::{hex_literal::hex, mainnet_nodes, ForkHash};
+    use reth_primitives::{hex, mainnet_nodes, ForkHash};
     use reth_rlp::{Decodable, Encodable};
     use std::{future::poll_fn, net::Ipv4Addr};
 

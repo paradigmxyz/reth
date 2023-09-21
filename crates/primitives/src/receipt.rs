@@ -288,13 +288,12 @@ impl<'a> Encodable for ReceiptWithBloomEncoder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{hex_literal::hex, Address, H256};
-    use ethers_core::types::Bytes;
+    use crate::hex_literal::hex;
+    use alloy_primitives::{address, b256, bytes, Bytes};
     use reth_rlp::{Decodable, Encodable};
-    use std::str::FromStr;
 
-    #[test]
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
+    #[test]
     fn encode_legacy_receipt() {
         let expected = hex!("f901668001b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85ff85d940000000000000000000000000000000000000011f842a0000000000000000000000000000000000000000000000000000000000000deada0000000000000000000000000000000000000000000000000000000000000beef830100ff");
 
@@ -304,18 +303,12 @@ mod tests {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 0x1u64,
                 logs: vec![Log {
-                    address: Address::from_str("0000000000000000000000000000000000000011").unwrap(),
+                    address: address!("0000000000000000000000000000000000000011"),
                     topics: vec![
-                        H256::from_str(
-                            "000000000000000000000000000000000000000000000000000000000000dead",
-                        )
-                        .unwrap(),
-                        H256::from_str(
-                            "000000000000000000000000000000000000000000000000000000000000beef",
-                        )
-                        .unwrap(),
+                        b256!("000000000000000000000000000000000000000000000000000000000000dead"),
+                        b256!("000000000000000000000000000000000000000000000000000000000000beef"),
                     ],
-                    data: Bytes::from_str("0100ff").unwrap().0.into(),
+                    data: bytes!("0100ff"),
                 }],
                 success: false,
             },
@@ -329,8 +322,8 @@ mod tests {
         assert_eq!(data, expected);
     }
 
-    #[test]
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
+    #[test]
     fn decode_legacy_receipt() {
         let data = hex!("f901668001b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85ff85d940000000000000000000000000000000000000011f842a0000000000000000000000000000000000000000000000000000000000000deada0000000000000000000000000000000000000000000000000000000000000beef830100ff");
 
@@ -340,18 +333,12 @@ mod tests {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 0x1u64,
                 logs: vec![Log {
-                    address: Address::from_str("0000000000000000000000000000000000000011").unwrap(),
+                    address: address!("0000000000000000000000000000000000000011"),
                     topics: vec![
-                        H256::from_str(
-                            "000000000000000000000000000000000000000000000000000000000000dead",
-                        )
-                        .unwrap(),
-                        H256::from_str(
-                            "000000000000000000000000000000000000000000000000000000000000beef",
-                        )
-                        .unwrap(),
+                        b256!("000000000000000000000000000000000000000000000000000000000000dead"),
+                        b256!("000000000000000000000000000000000000000000000000000000000000beef"),
                     ],
-                    data: Bytes::from_str("0100ff").unwrap().0.into(),
+                    data: bytes!("0100ff"),
                 }],
                 success: false,
             },
@@ -370,22 +357,18 @@ mod tests {
             tx_type: TxType::Legacy,
             logs: vec![
                 Log {
-                    address: Address::from_str("0x4bf56695415f725e43c3e04354b604bcfb6dfb6e")
-                        .unwrap(),
-                    topics: vec![H256::from_str(
-                        "0xc69dc3d7ebff79e41f525be431d5cd3cc08f80eaf0f7819054a726eeb7086eb9",
-                    )
-                    .unwrap()],
-                    data: crate::Bytes::from(vec![1; 0xffffff]),
+                    address: address!("4bf56695415f725e43c3e04354b604bcfb6dfb6e"),
+                    topics: vec![b256!(
+                        "c69dc3d7ebff79e41f525be431d5cd3cc08f80eaf0f7819054a726eeb7086eb9"
+                    )],
+                    data: Bytes::from(vec![1; 0xffffff]),
                 },
                 Log {
-                    address: Address::from_str("0xfaca325c86bf9c2d5b413cd7b90b209be92229c2")
-                        .unwrap(),
-                    topics: vec![H256::from_str(
-                        "0x8cca58667b1e9ffa004720ac99a3d61a138181963b294d270d91c53d36402ae2",
-                    )
-                    .unwrap()],
-                    data: crate::Bytes::from(vec![1; 0xffffff]),
+                    address: address!("faca325c86bf9c2d5b413cd7b90b209be92229c2"),
+                    topics: vec![b256!(
+                        "8cca58667b1e9ffa004720ac99a3d61a138181963b294d270d91c53d36402ae2"
+                    )],
+                    data: Bytes::from(vec![1; 0xffffff]),
                 },
             ],
         };

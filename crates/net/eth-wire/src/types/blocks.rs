@@ -93,9 +93,8 @@ mod test {
     use crate::types::{
         message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
     };
-    use hex_literal::hex;
     use reth_primitives::{
-        BlockHashOrNumber, Header, HeadersDirection, Signature, Transaction, TransactionKind,
+        hex, BlockHashOrNumber, Header, HeadersDirection, Signature, Transaction, TransactionKind,
         TransactionSigned, TxLegacy, U256,
     };
     use reth_rlp::{Decodable, Encodable};

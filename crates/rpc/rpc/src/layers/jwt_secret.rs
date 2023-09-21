@@ -1,7 +1,10 @@
-use hex::encode as hex_encode;
 use jsonwebtoken::{decode, errors::ErrorKind, Algorithm, DecodingKey, Validation};
 use rand::Rng;
-use reth_primitives::{fs, fs::FsPathError};
+use reth_primitives::{
+    fs,
+    fs::FsPathError,
+    hex::{self, encode as hex_encode},
+};
 use serde::{Deserialize, Serialize};
 use std::{
     path::Path,
@@ -195,10 +198,9 @@ impl Claims {
 
 #[cfg(test)]
 mod tests {
-    use super::{Claims, JwtError, JwtSecret};
+    use super::*;
     use crate::layers::jwt_secret::JWT_MAX_IAT_DIFF;
     use assert_matches::assert_matches;
-    use hex::encode as hex_encode;
     use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
     use reth_primitives::fs::FsPathError;
     use std::{

@@ -578,7 +578,7 @@ impl IntoRecoveredTransaction for MockTransaction {
             gas_price: self.get_gas_price(),
             gas_limit: self.get_gas_limit(),
             to: TransactionKind::Call(Address::from_slice(
-                &hex::decode("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap()[..],
+                &hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046")[..],
             )),
             value: 693361000000000u64.into(),
             input: Default::default(),

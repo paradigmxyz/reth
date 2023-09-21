@@ -48,7 +48,6 @@ impl From<Vec<TransactionSigned>> for PooledTransactions {
 #[cfg(test)]
 mod test {
     use crate::{message::RequestPair, GetPooledTransactions, PooledTransactions};
-    use hex_literal::hex;
     use reth_primitives::{
         hex, Signature, Transaction, TransactionKind, TransactionSigned, TxEip1559, TxLegacy, U256,
     };

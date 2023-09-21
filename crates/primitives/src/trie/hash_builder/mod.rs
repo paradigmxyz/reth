@@ -115,7 +115,7 @@ impl HashBuilder {
     pub fn print_stack(&self) {
         println!("============ STACK ===============");
         for item in &self.stack {
-            println!("{}", hex::encode(item));
+            println!("{}", crate::hex::encode(item));
         }
         println!("============ END STACK ===============");
     }
@@ -189,7 +189,7 @@ impl HashBuilder {
                 tracing::Level::TRACE,
                 "loop",
                 i,
-                current = hex::encode(&current.hex_data),
+                current = crate::hex::encode(&current.hex_data),
                 ?build_extensions
             );
             let _enter = span.enter();
@@ -247,7 +247,7 @@ impl HashBuilder {
                         tracing::debug!(target: "trie::hash_builder", ?leaf_node, "pushing leaf node");
                         tracing::trace!(target: "trie::hash_builder", rlp = {
                             self.rlp_buf.clear();
-                            hex::encode(&leaf_node.rlp(&mut self.rlp_buf))
+                            crate::hex::encode(&leaf_node.rlp(&mut self.rlp_buf))
                         }, "leaf node rlp");
 
                         self.rlp_buf.clear();
@@ -277,7 +277,7 @@ impl HashBuilder {
                 tracing::debug!(target: "trie::hash_builder", ?extension_node, "pushing extension node");
                 tracing::trace!(target: "trie::hash_builder", rlp = {
                     self.rlp_buf.clear();
-                    hex::encode(&extension_node.rlp(&mut self.rlp_buf))
+                    crate::hex::encode(&extension_node.rlp(&mut self.rlp_buf))
                 }, "extension node rlp");
                 self.rlp_buf.clear();
                 self.stack.push(extension_node.rlp(&mut self.rlp_buf));
@@ -343,7 +343,7 @@ impl HashBuilder {
         self.stack.resize(first_child_idx, vec![]);
 
         tracing::debug!(target: "trie::hash_builder", "pushing branch node with {:?} mask from stack", state_mask);
-        tracing::trace!(target: "trie::hash_builder", rlp = hex::encode(&rlp), "branch node rlp");
+        tracing::trace!(target: "trie::hash_builder", rlp = crate::hex::encode(&rlp), "branch node rlp");
         self.stack.push(rlp);
         children
     }

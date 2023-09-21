@@ -199,7 +199,7 @@ impl TxEip4844 {
             gas_limit: Decodable::decode(buf)?,
             to: Decodable::decode(buf)?,
             value: Decodable::decode(buf)?,
-            input: Bytes(Decodable::decode(buf)?),
+            input: Decodable::decode(buf)?,
             access_list: Decodable::decode(buf)?,
             max_fee_per_blob_gas: Decodable::decode(buf)?,
             blob_versioned_hashes: Decodable::decode(buf)?,

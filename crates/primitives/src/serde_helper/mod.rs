@@ -40,7 +40,7 @@ where
     S: Serializer,
     T: AsRef<[u8]>,
 {
-    s.serialize_str(&hex::encode(x.as_ref()))
+    s.serialize_str(&crate::hex::encode(x.as_ref()))
 }
 
 /// Serialize a byte vec as a hex string _without_ 0x prefix

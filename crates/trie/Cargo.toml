@@ -24,7 +24,6 @@ tokio = { workspace = true, default-features = false, features = ["sync"] }
 tracing.workspace = true
 
 # misc 
-hex = "0.4"
 thiserror.workspace = true
 derive_more = "0.99"
 

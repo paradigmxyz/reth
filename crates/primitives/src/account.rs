@@ -101,7 +101,7 @@ impl Compact for Bytecode {
         Self: Sized,
     {
         let len = buf.read_u32::<BigEndian>().expect("could not read bytecode length");
-        let bytes = revm_primitives::Bytes::from(buf.copy_to_bytes(len as usize));
+        let bytes = Bytes::from(buf.copy_to_bytes(len as usize));
         let variant = buf.read_u8().expect("could not read bytecode variant");
         let decoded = match variant {
             0 => Bytecode(RevmBytecode::new_raw(bytes)),
@@ -124,7 +124,7 @@ impl Compact for Bytecode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hex_literal::hex;
+    use crate::hex_literal::hex;
 
     #[test]
     fn test_account() {

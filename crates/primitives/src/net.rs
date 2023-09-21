@@ -91,7 +91,7 @@ impl NodeRecord {
 impl fmt::Display for NodeRecord {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("enode://")?;
-        hex::encode(self.id.as_slice()).fmt(f)?;
+        crate::hex::encode(self.id.as_slice()).fmt(f)?;
         f.write_char('@')?;
         match self.address {
             IpAddr::V4(ip) => {

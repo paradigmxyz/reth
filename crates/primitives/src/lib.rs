@@ -119,26 +119,17 @@ pub type StorageValue = U256;
 pub type Selector = [u8; 4];
 
 pub use alloy_primitives::{
-    address, b256, bloom, Address, Bloom, BloomInput, Bytes, B128 as H128, B256 as H256,
-    B512 as H512, B64 as H64, U256, U64,
+    self, address, b256, bloom, bytes, hex, hex_literal, keccak256, Address, Bloom, BloomInput,
+    Bytes, B128 as H128, B256 as H256, B512 as H512, B64 as H64, U256, U64,
 };
 pub use ethers_core::{types::BigEndianHash, utils as rpc_utils};
+pub use revm_primitives;
 pub use ruint::{
+    self,
     aliases::{U128, U8},
     UintTryTo,
 };
-
-#[doc(hidden)]
-mod __reexport {
-    pub use bytes;
-    pub use hex;
-    pub use hex_literal;
-    pub use revm_primitives::{self, alloy_primitives};
-    pub use tiny_keccak;
-}
-
-// Useful reexports
-pub use __reexport::*;
+pub use tiny_keccak;
 
 /// Various utilities
 pub mod utils {
@@ -152,18 +143,6 @@ pub mod kzg {
 
 /// Helpers for working with serde
 pub mod serde_helper;
-
-/// Returns the keccak256 hash for the given data.
-#[inline]
-pub fn keccak256(data: impl AsRef<[u8]>) -> H256 {
-    use tiny_keccak::{Hasher, Keccak};
-
-    let mut buf = [0u8; 32];
-    let mut hasher = Keccak::v256();
-    hasher.update(data.as_ref());
-    hasher.finalize(&mut buf);
-    buf.into()
-}
 
 #[cfg(any(test, feature = "arbitrary"))]
 pub use arbitrary;

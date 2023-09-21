@@ -149,10 +149,9 @@ impl Default for Status {
 mod tests {
     use crate::types::{EthVersion, Status};
     use ethers_core::types::Chain as NamedChain;
-    use hex_literal::hex;
     use rand::Rng;
     use reth_primitives::{
-        Chain, ChainSpec, ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head, H256, U256,
+        hex, Chain, ChainSpec, ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head, H256, U256,
     };
     use reth_rlp::{Decodable, Encodable};
     use std::str::FromStr;

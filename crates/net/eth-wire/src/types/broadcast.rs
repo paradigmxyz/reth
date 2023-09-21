@@ -309,11 +309,7 @@ impl Decodable for NewPooledTransactionHashes68 {
         }
 
         let encodable = EncodableNewPooledTransactionHashes68::decode(buf)?;
-        Ok(Self {
-            types: encodable.types.0.into(),
-            sizes: encodable.sizes,
-            hashes: encodable.hashes,
-        })
+        Ok(Self { types: encodable.types.into(), sizes: encodable.sizes, hashes: encodable.hashes })
     }
 }
 
@@ -321,7 +317,7 @@ impl Decodable for NewPooledTransactionHashes68 {
 mod tests {
     use super::*;
     use bytes::BytesMut;
-    use hex_literal::hex;
+    use reth_primitives::hex;
     use reth_rlp::{Decodable, Encodable};
     use std::str::FromStr;
 

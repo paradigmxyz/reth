@@ -37,8 +37,7 @@ mod test {
         types::{message::RequestPair, GetReceipts},
         Receipts,
     };
-    use hex_literal::hex;
-    use reth_primitives::{Log, Receipt, ReceiptWithBloom, TxType};
+    use reth_primitives::{hex, Log, Receipt, ReceiptWithBloom, TxType};
     use reth_rlp::{Decodable, Encodable};
 
     #[test]

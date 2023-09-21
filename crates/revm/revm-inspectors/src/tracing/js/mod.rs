@@ -387,11 +387,7 @@ where
                 gas: inputs.gas_limit,
             };
             if let Err(err) = self.try_enter(frame) {
-                return (
-                    InstructionResult::Revert,
-                    Gas::new(0),
-                    reth_primitives::bytes::Bytes::from(err.to_string()).into(),
-                )
+                return (InstructionResult::Revert, Gas::new(0), err.to_string().into())
             }
         }
 
@@ -410,11 +406,7 @@ where
             let frame_result =
                 FrameResult { gas_used: remaining_gas.spend(), output: out.clone(), error: None };
             if let Err(err) = self.try_exit(frame_result) {
-                return (
-                    InstructionResult::Revert,
-                    Gas::new(0),
-                    reth_primitives::bytes::Bytes::from(err.to_string()).into(),
-                )
+                return (InstructionResult::Revert, Gas::new(0), err.to_string().into())
             }
         }
 
@@ -447,12 +439,7 @@ where
             let frame =
                 CallFrame { contract: call.contract.clone(), kind: call.kind, gas: call.gas_limit };
             if let Err(err) = self.try_enter(frame) {
-                return (
-                    InstructionResult::Revert,
-                    None,
-                    Gas::new(0),
-                    reth_primitives::bytes::Bytes::from(err.to_string()).into(),
-                )
+                return (InstructionResult::Revert, None, Gas::new(0), err.to_string().into())
             }
         }
 
@@ -472,12 +459,7 @@ where
             let frame_result =
                 FrameResult { gas_used: remaining_gas.spend(), output: out.clone(), error: None };
             if let Err(err) = self.try_exit(frame_result) {
-                return (
-                    InstructionResult::Revert,
-                    None,
-                    Gas::new(0),
-                    reth_primitives::bytes::Bytes::from(err.to_string()).into(),
-                )
+                return (InstructionResult::Revert, None, Gas::new(0), err.to_string().into())
             }
         }
 
