@@ -198,18 +198,21 @@ impl Compression for Zstd {
             return Ok(())
         }
 
-        // There's a per 2GB hard limit on each column data training, iterator should take care of
-        // it. Each element should ideally be bigger than 1 (otherwise sigev) huffman coding
-        // + sueprstring ?
-
-        // TODO select columns not to compress
-        // TODO calculate max memory of machine before parallelizing
+        // There's a per 2GB hard limit on each column data set for training
+        // REFERENCE: https://github.com/facebook/zstd/blob/dev/programs/zstd.1.md#dictionary-builder
+        // ```
+        // -M#, --memory=#: Limit the amount of sample data loaded for training (default: 2 GB).
+        // Note that the default (2 GB) is also the maximum. This parameter can be useful in
+        // situations where the training set size is not well controlled and could be potentially
+        // very large. Since speed of the training process is directly correlated to the size of the
+        // training sample set, a smaller sample set leads to faster training.`
+        // ```
 
         if columns.len() != self.columns {
             return Err(NippyJarError::ColumnLenMismatch(self.columns, columns.len()))
         }
 
-        // TODO parallel
+        // TODO: parallel calculation
         let mut dictionaries = vec![];
         for column in columns {
             // ZSTD requires all training data to be continuous in memory, alongside the size of
