@@ -461,13 +461,16 @@ mod tests {
     #[test]
     fn test_filter() {
         let (col1, col2) = test_data(Some(1));
-        let _num_columns = 2;
+        let num_columns = 2;
         let num_rows = col1.len() as u64;
         let file_path = tempfile::NamedTempFile::new().unwrap();
 
-        let mut nippy = NippyJar::new_without_header(_num_columns, file_path.path());
+        let mut nippy = NippyJar::new_without_header(num_columns, file_path.path());
 
-        assert!(matches!(InclusionFilter::add(&mut nippy, &col1[0]), Err(NippyJarError::FilterMissing)));
+        assert!(matches!(
+            InclusionFilter::add(&mut nippy, &col1[0]),
+            Err(NippyJarError::FilterMissing)
+        ));
 
         nippy = nippy.with_cuckoo_filter(4);
 
@@ -484,7 +487,10 @@ mod tests {
         // // Add more columns until max_capacity
         assert!(InclusionFilter::add(&mut nippy, &col1[2]).is_ok());
         assert!(InclusionFilter::add(&mut nippy, &col1[3]).is_ok());
-        assert!(matches!(InclusionFilter::add(&mut nippy, &col1[4]), Err(NippyJarError::FilterMaxCapacity)));
+        assert!(matches!(
+            InclusionFilter::add(&mut nippy, &col1[4]),
+            Err(NippyJarError::FilterMaxCapacity)
+        ));
 
         nippy.freeze(vec![col1.clone(), col2.clone()], num_rows).unwrap();
         let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
@@ -502,14 +508,14 @@ mod tests {
     fn test_zstd_with_dictionaries() {
         let (col1, col2) = test_data(None);
         let num_rows = col1.len() as u64;
-        let _num_columns = 2;
+        let num_columns = 2;
         let file_path = tempfile::NamedTempFile::new().unwrap();
 
-        let nippy = NippyJar::new_without_header(_num_columns, file_path.path());
+        let nippy = NippyJar::new_without_header(num_columns, file_path.path());
         assert!(nippy.compressor.is_none());
 
         let mut nippy =
-            NippyJar::new_without_header(_num_columns, file_path.path()).with_zstd(true, 5000);
+            NippyJar::new_without_header(num_columns, file_path.path()).with_zstd(true, 5000);
         assert!(nippy.compressor.is_some());
 
         if let Some(Compressors::Zstd(zstd)) = &mut nippy.compressor {
@@ -518,7 +524,7 @@ mod tests {
             // Make sure the number of column iterators match the initial set up ones.
             assert!(matches!(
                 zstd.prepare_compression(vec![col1.clone(), col2.clone(), col2.clone()]),
-                Err(NippyJarError::ColumnLenMismatch(_num_columns, 3))
+                Err(NippyJarError::ColumnLenMismatch(columns, 3)) if columns == num_columns
             ));
         }
 
@@ -536,7 +542,7 @@ mod tests {
         if let Some(Compressors::Zstd(zstd)) = &nippy.compressor {
             assert!(matches!(
                 (&zstd.state, zstd.raw_dictionaries.as_ref().map(|dict| dict.len())),
-                (compression::ZstdState::Ready, Some(_num_columns))
+                (compression::ZstdState::Ready, Some(columns)) if columns == num_columns
             ));
         }
 
@@ -570,14 +576,14 @@ mod tests {
     fn test_zstd_no_dictionaries() {
         let (col1, col2) = test_data(None);
         let num_rows = col1.len() as u64;
-        let _num_columns = 2;
+        let num_columns = 2;
         let file_path = tempfile::NamedTempFile::new().unwrap();
 
-        let nippy = NippyJar::new_without_header(_num_columns, file_path.path());
+        let nippy = NippyJar::new_without_header(num_columns, file_path.path());
         assert!(nippy.compressor.is_none());
 
         let mut nippy =
-            NippyJar::new_without_header(_num_columns, file_path.path()).with_zstd(false, 5000);
+            NippyJar::new_without_header(num_columns, file_path.path()).with_zstd(false, 5000);
         assert!(nippy.compressor.is_some());
 
         let data = vec![col1.clone(), col2.clone()];
@@ -608,7 +614,7 @@ mod tests {
     fn test_full_nippy_jar() {
         let (col1, col2) = test_data(None);
         let num_rows = col1.len() as u64;
-        let _num_columns = 2;
+        let num_columns = 2;
         let file_path = tempfile::NamedTempFile::new().unwrap();
         let data = vec![col1.clone(), col2.clone()];
         let block_start = 500;
@@ -621,7 +627,7 @@ mod tests {
         // Create file
         {
             let mut nippy =
-                NippyJar::new(_num_columns, file_path.path(), BlockJarHeader { block_start })
+                NippyJar::new(num_columns, file_path.path(), BlockJarHeader { block_start })
                     .with_zstd(true, 5000)
                     .with_cuckoo_filter(col1.len())
                     .with_mphf();
@@ -680,13 +686,13 @@ mod tests {
     fn test_selectable_column_values() {
         let (col1, col2) = test_data(None);
         let num_rows = col1.len() as u64;
-        let _num_columns = 2;
+        let num_columns = 2;
         let file_path = tempfile::NamedTempFile::new().unwrap();
         let data = vec![col1.clone(), col2.clone()];
 
         // Create file
         {
-            let mut nippy = NippyJar::new_without_header(_num_columns, file_path.path())
+            let mut nippy = NippyJar::new_without_header(num_columns, file_path.path())
                 .with_zstd(true, 5000)
                 .with_cuckoo_filter(col1.len())
                 .with_mphf();
