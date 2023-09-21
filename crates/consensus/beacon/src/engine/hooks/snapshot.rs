@@ -8,6 +8,7 @@ use crate::{
 };
 use futures::FutureExt;
 use reth_db::database::Database;
+use reth_interfaces::{RethError, RethResult};
 use reth_primitives::BlockNumber;
 use reth_snapshot::{Snapshotter, SnapshotterError, SnapshotterWithResult};
 use reth_tasks::TaskSpawner;
@@ -36,7 +37,7 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
     fn poll_snapshotter(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<reth_interfaces::Result<(EngineHookEvent, Option<EngineHookAction>)>> {
+    ) -> Poll<RethResult<(EngineHookEvent, Option<EngineHookAction>)>> {
         let result = match self.state {
             SnapshotterState::Idle(_) => return Poll::Pending,
             SnapshotterState::Running(ref mut fut) => {
@@ -55,12 +56,8 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
                             EngineHookError::Internal(Box::new(err))
                         }
                         SnapshotterError::Interface(err) => err.into(),
-                        SnapshotterError::Database(err) => {
-                            reth_interfaces::Error::Database(err).into()
-                        }
-                        SnapshotterError::Provider(err) => {
-                            reth_interfaces::Error::Provider(err).into()
-                        }
+                        SnapshotterError::Database(err) => RethError::Database(err).into(),
+                        SnapshotterError::Provider(err) => RethError::Provider(err).into(),
                     })),
                 }
             }
@@ -86,7 +83,7 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
     fn try_spawn_snapshotter(
         &mut self,
         finalized_block_number: BlockNumber,
-    ) -> reth_interfaces::Result<Option<(EngineHookEvent, Option<EngineHookAction>)>> {
+    ) -> RethResult<Option<(EngineHookEvent, Option<EngineHookAction>)>> {
         Ok(match &mut self.state {
             SnapshotterState::Idle(snapshotter) => {
                 let Some(mut snapshotter) = snapshotter.take() else { return Ok(None) };
@@ -125,7 +122,7 @@ impl<DB: Database + 'static> EngineHook for SnapshotHook<DB> {
         &mut self,
         cx: &mut Context<'_>,
         ctx: EngineContext,
-    ) -> Poll<reth_interfaces::Result<(EngineHookEvent, Option<EngineHookAction>)>> {
+    ) -> Poll<RethResult<(EngineHookEvent, Option<EngineHookAction>)>> {
         let Some(finalized_block_number) = ctx.finalized_block_number else {
             return Poll::Ready(Ok((EngineHookEvent::NotReady, None)))
         };

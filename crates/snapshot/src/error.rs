@@ -1,4 +1,5 @@
 use reth_db::DatabaseError;
+use reth_interfaces::RethError;
 use reth_provider::ProviderError;
 use thiserror::Error;
 
@@ -8,7 +9,7 @@ pub enum SnapshotterError {
     InconsistentData(&'static str),
 
     #[error("An interface error occurred.")]
-    Interface(#[from] reth_interfaces::Error),
+    Interface(#[from] RethError),
 
     #[error(transparent)]
     Database(#[from] DatabaseError),

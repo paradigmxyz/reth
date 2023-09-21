@@ -9,7 +9,7 @@ pub(crate) use controller::{EngineHooksController, PolledHook};
 
 mod prune;
 pub use prune::PruneHook;
-use reth_interfaces::RethError;
+use reth_interfaces::{RethError, RethResult};
 
 mod snapshot;
 pub use snapshot::SnapshotHook;
@@ -44,7 +44,7 @@ pub trait EngineHook: Send + Sync + 'static {
         &mut self,
         cx: &mut Context<'_>,
         ctx: EngineContext,
-    ) -> Poll<reth_interfaces::Result<(EngineHookEvent, Option<EngineHookAction>)>>;
+    ) -> Poll<RethResult<(EngineHookEvent, Option<EngineHookAction>)>>;
 
     /// Returns [db access level][`EngineHookDBAccessLevel`] the hook needs.
     fn db_access_level(&self) -> EngineHookDBAccessLevel;

@@ -9,7 +9,7 @@ use crate::{
 use futures::FutureExt;
 use metrics::Counter;
 use reth_db::database::Database;
-use reth_interfaces::RethError;
+use reth_interfaces::{RethError, RethResult};
 use reth_primitives::BlockNumber;
 use reth_prune::{Pruner, PrunerError, PrunerWithResult};
 use reth_tasks::TaskSpawner;
@@ -43,7 +43,7 @@ impl<DB: Database + 'static> PruneHook<DB> {
     fn poll_pruner(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<reth_interfaces::Result<(EngineHookEvent, Option<EngineHookAction>)>> {
+    ) -> Poll<RethResult<(EngineHookEvent, Option<EngineHookAction>)>> {
         let result = match self.pruner_state {
             PrunerState::Idle(_) => return Poll::Pending,
             PrunerState::Running(ref mut fut) => {
@@ -125,7 +125,7 @@ impl<DB: Database + 'static> EngineHook for PruneHook<DB> {
         &mut self,
         cx: &mut Context<'_>,
         ctx: EngineContext,
-    ) -> Poll<reth_interfaces::Result<(EngineHookEvent, Option<EngineHookAction>)>> {
+    ) -> Poll<RethResult<(EngineHookEvent, Option<EngineHookAction>)>> {
         // Try to spawn a pruner
         match self.try_spawn_pruner(ctx.tip_block_number) {
             Some((EngineHookEvent::NotReady, _)) => return Poll::Pending,

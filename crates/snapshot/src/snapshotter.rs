@@ -2,6 +2,7 @@
 
 use crate::SnapshotterError;
 use reth_db::database::Database;
+use reth_interfaces::{RethError, RethResult};
 use reth_primitives::{BlockNumber, ChainSpec, TxNumber};
 use reth_provider::{BlockReader, ProviderFactory};
 use std::{ops::RangeInclusive, sync::Arc};
@@ -96,7 +97,7 @@ impl<DB: Database> Snapshotter<DB> {
     pub fn get_snapshot_targets(
         &self,
         finalized_block_number: BlockNumber,
-    ) -> reth_interfaces::Result<SnapshotTargets> {
+    ) -> RethResult<SnapshotTargets> {
         let provider = self.provider_factory.provider()?;
 
         // Round down `finalized_block_number` to a multiple of `block_interval`
@@ -107,7 +108,7 @@ impl<DB: Database> Snapshotter<DB> {
 
         let to_tx_number = provider
             .block_body_indices(to_block_number)?
-            .ok_or(reth_interfaces::Error::Custom(
+            .ok_or(RethError::Custom(
                 "Block body indices for current block number not found".to_string(),
             ))?
             .last_tx_num();
@@ -128,7 +129,7 @@ impl<DB: Database> Snapshotter<DB> {
             if let Some(previous_block_number) = self.highest_snapshots.receipts {
                 provider
                     .block_body_indices(previous_block_number)?
-                    .ok_or(reth_interfaces::Error::Custom(
+                    .ok_or(RethError::Custom(
                         "Block body indices for previous block number not found".to_string(),
                     ))?
                     .next_tx_num()
@@ -143,7 +144,7 @@ impl<DB: Database> Snapshotter<DB> {
             } else if let Some(previous_block_number) = self.highest_snapshots.transactions {
                 provider
                     .block_body_indices(previous_block_number)?
-                    .ok_or(reth_interfaces::Error::Custom(
+                    .ok_or(RethError::Custom(
                         "Block body indices for previous block number not found".to_string(),
                     ))?
                     .next_tx_num()
@@ -179,7 +180,10 @@ impl<DB: Database> Snapshotter<DB> {
 mod tests {
     use crate::{snapshotter::SnapshotTargets, Snapshotter};
     use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::{generators, generators::random_block_range};
+    use reth_interfaces::{
+        test_utils::{generators, generators::random_block_range},
+        RethError,
+    };
     use reth_primitives::{H256, MAINNET};
     use reth_stages::test_utils::TestTransaction;
 
@@ -194,10 +198,7 @@ mod tests {
         let mut snapshotter = Snapshotter::new(tx.inner_raw(), MAINNET.clone(), 2);
 
         // Block body indices not found
-        assert_matches!(
-            snapshotter.get_snapshot_targets(5),
-            Err(reth_interfaces::Error::Custom(_))
-        );
+        assert_matches!(snapshotter.get_snapshot_targets(5), Err(RethError::Custom(_)));
 
         // Snapshot targets has data per part up to the passed finalized block number
         let targets = snapshotter.get_snapshot_targets(1).expect("get snapshot targets");
