@@ -411,7 +411,7 @@ impl CallFees {
                 })
             }
             (None, max_fee_per_gas, max_priority_fee_per_gas, max_fee_per_blob_gas) => {
-                // request for 4844 transaction
+                // request for eip-4844 transaction
                 let max_fee = max_fee_per_gas.unwrap_or(base_fee);
 
                 if let Some(max_priority) = max_priority_fee_per_gas {
@@ -425,9 +425,8 @@ impl CallFees {
                 }
                 // Check if blob_hashes are present
                 if blob_versioned_hashes.is_none() {
-                    println!("blob version is none");
                     // Fail if not present
-                    return Err(RpcInvalidTransactionError::BlobVersionedHashesNotIncluded.into())
+                    return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
                 }
                 Ok(CallFees { gas_price: max_fee, max_priority_fee_per_gas, max_fee_per_blob_gas })
             }
