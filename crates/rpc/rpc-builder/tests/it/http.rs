@@ -69,7 +69,6 @@ where
     let tx_hash = TxHash::default();
     let block_number = BlockNumberOrTag::default();
     let call_request = CallRequest::default();
-    println!("it is none , {:?}",call_request.blob_versioned_hashes.is_none());
     let transaction_request = TransactionRequest::default();
     let bytes = Bytes::default();
     let tx = Bytes::from(hex!("02f871018303579880850555633d1b82520894eee27662c2b8eba3cd936a23f039f3189633e4c887ad591c62bdaeb180c080a07ea72c68abfb8fca1bd964f0f99132ed9280261bdca3e549546c0205e800f7d0a05b4ef3039e9c9b9babc179a1878fb825b5aaf5aed2fa8744854150157b08d6f3"));
