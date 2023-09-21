@@ -335,22 +335,15 @@ where
         propagated
     }
 
-    /// Propagate the transaction to single peer as hash
-    fn propagate_hash_to(&mut self, hash: TxHash, peer_id: PeerId) {
-        // Nothing to propagate while initially syncing
-        if self.network.is_initially_syncing() {
-            return
-        }
+    /// Propagate the transactions to single peer as hashes
+    fn propagate_hashes_to(&mut self, hashes: Vec<TxHash>, peer_id: PeerId) {
+        trace!(target: "net::tx", "Start propagating transactions as hashes");
 
-        trace!(target: "net::tx", "Start propagating transaction hash");
-
-        // This fetches a transaction from the pool, including the blob transactions, which are
+        // This fetches a transactions from the pool, including the blob transactions, which are
         // only ever sent as hashes.
         let propagated = {
-            let tx = match self.pool.get(&hash) {
-                Some(tx) => PropagateTransaction::new(tx),
-                None => return,
-            };
+            let to_propagate: Vec<PropagateTransaction> =
+                self.pool.get_all(hashes).into_iter().map(PropagateTransaction::new).collect();
             let peer = match self.peers.get_mut(&peer_id) {
                 Some(peer) => peer,
                 None => return,
@@ -361,8 +354,10 @@ where
             // check if transaction is known to peer
             let mut hashes = PooledTransactionsHashesBuilder::new(peer.version);
 
-            if peer.transactions.insert(tx.hash()) {
-                hashes.push(&tx);
+            for tx in to_propagate {
+                if peer.transactions.insert(tx.hash()) {
+                    hashes.push(&tx);
+                }
             }
 
             let new_pooled_hashes = hashes.build();
@@ -478,7 +473,9 @@ where
     fn on_command(&mut self, cmd: TransactionsCommand) {
         match cmd {
             TransactionsCommand::PropagateHash(hash) => self.on_new_transactions(vec![hash]),
-            TransactionsCommand::PropagateHashTo(hash, peer) => self.propagate_hash_to(hash, peer),
+            TransactionsCommand::PropagateHashTo(hash, peer) => {
+                self.propagate_hashes_to(vec![hash], peer)
+            }
             TransactionsCommand::GetActivePeers => todo!(),
             TransactionsCommand::PropagateTransactionsTo(_txs, _peer) => todo!(),
             TransactionsCommand::GetTransactionHashes(_peers) => todo!(),
