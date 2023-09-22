@@ -1,5 +1,8 @@
 use crate::HeaderProvider;
-use reth_db::table::Decompress;
+use reth_db::{
+    table::{Decompress, Table},
+    HeaderTD,
+};
 use reth_interfaces::RethResult;
 use reth_nippy_jar::{NippyJar, NippyJarCursor};
 use reth_primitives::{BlockHash, BlockNumber, Header, SealedHeader, U256};
@@ -23,6 +26,7 @@ impl<'a> SnapshotProvider<'a> {
 
 impl<'a> HeaderProvider for SnapshotProvider<'a> {
     fn header(&self, block_hash: &BlockHash) -> RethResult<Option<Header>> {
+        // WIP
         let mut cursor = self.cursor();
 
         let header = Header::decompress(
@@ -42,8 +46,21 @@ impl<'a> HeaderProvider for SnapshotProvider<'a> {
         unimplemented!();
     }
 
-    fn header_td(&self, _block_hash: &BlockHash) -> RethResult<Option<U256>> {
-        unimplemented!();
+    fn header_td(&self, block_hash: &BlockHash) -> RethResult<Option<U256>> {
+        // WIP
+        let mut cursor = self.cursor();
+
+        let row = cursor.row_by_key_with_cols::<0b11, 2>(&block_hash.0).unwrap().unwrap();
+
+        let header = Header::decompress(&row[0]).unwrap();
+        let td = <HeaderTD as Table>::Value::decompress(&row[1]).unwrap();
+
+        if &header.hash_slow() == block_hash {
+            return Ok(Some(td.0))
+        } else {
+            // check next snapshot
+        }
+        Ok(None)
     }
 
     fn header_td_by_number(&self, _number: BlockNumber) -> RethResult<Option<U256>> {
@@ -160,8 +177,16 @@ mod test {
             for header in headers {
                 let header_hash = header.hash();
                 let header = header.unseal();
+
+                // Compare Header
                 assert_eq!(header, db_provider.header(&header_hash).unwrap().unwrap());
                 assert_eq!(header, snap_provider.header(&header_hash).unwrap().unwrap());
+
+                // Compare HeaderTD
+                assert_eq!(
+                    db_provider.header_td(&header_hash).unwrap().unwrap(),
+                    snap_provider.header_td(&header_hash).unwrap().unwrap()
+                );
             }
         }
     }
