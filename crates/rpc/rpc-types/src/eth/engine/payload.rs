@@ -850,6 +850,6 @@ mod tests {
 
     #[test]
     fn test_deserialize_validation_execution_payload() {
-        let _execution_payload: ExecutionPayload = serde_json::from_str(EXECUTION_PAYLOAD).unwrap();
+        let _execution_payload: ExecutionPayloadV2 = serde_json::from_str(EXECUTION_PAYLOAD).unwrap();
     }
 }
