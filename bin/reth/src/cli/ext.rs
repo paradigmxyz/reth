@@ -7,7 +7,7 @@ use reth_network_api::{NetworkInfo, Peers};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::ChainSpec;
 use reth_provider::{
-    BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider,
+    AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider,
     StateProviderFactory,
 };
 use reth_rpc_builder::{RethModuleRegistry, TransportRpcModules};
@@ -49,6 +49,7 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     where
         Conf: RethRpcConfig,
         Provider: BlockReaderIdExt
+            + AccountReader
             + StateProviderFactory
             + EvmEnvProvider
             + ChainSpecProvider
@@ -173,6 +174,7 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
     where
         Conf: RethRpcConfig,
         Provider: BlockReaderIdExt
+            + AccountReader
             + StateProviderFactory
             + EvmEnvProvider
             + ChainSpecProvider

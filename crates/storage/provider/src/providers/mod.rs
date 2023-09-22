@@ -1,12 +1,12 @@
 use crate::{
-    BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
+    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonChainTracker,
     CanonStateNotifications, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, HeaderProvider, ProviderError, PruneCheckpointReader, ReceiptProvider,
     ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox, StateProviderFactory,
     TransactionsProvider, WithdrawalsProvider,
 };
-use reth_db::{database::Database, models::StoredBlockBodyIndices};
+use reth_db::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_interfaces::{
     blockchain_tree::{BlockchainTreeEngine, BlockchainTreeViewer},
     consensus::ForkchoiceState,
@@ -14,7 +14,7 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
-    Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
+    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
     BlockNumberOrTag, BlockWithSenders, ChainInfo, ChainSpec, Header, PruneCheckpoint, PrunePart,
     Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256, U256,
@@ -801,5 +801,17 @@ where
         block_number: BlockNumber,
     ) -> RethResult<Vec<AccountBeforeTx>> {
         self.database.provider()?.account_block_changeset(block_number)
+    }
+}
+
+impl<DB, Tree> AccountReader for BlockchainProvider<DB, Tree> 
+where
+    DB: Database + Sync + Send,
+    Tree: Sync + Send,
+
+{
+    /// Get basic account information.
+    fn basic_account(&self, address: Address) -> RethResult<Option<Account>> {
+        self.database.provider()?.basic_account(address)
     }
 }
