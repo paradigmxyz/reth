@@ -10,10 +10,7 @@ use reth_rpc_types::{
 };
 use reth_rpc_types_compat::engine::payload::try_into_sealed_block;
 
-use reth_tasks::TaskSpawner;
-use std::{ future::Future, sync::Arc};
-use tokio::sync::oneshot;
-use tracing::info;
+use std::sync::Arc;
 
 /// `validation` API implementation.
 ///
@@ -31,31 +28,9 @@ impl<Provider> ValidationApi<Provider> {
     }
 
     /// Create a new instance of the [ValidationApi]
-    pub fn new(provider: Provider, task_spawner: Box<dyn TaskSpawner>) -> Self {
-        let inner = Arc::new(ValidationApiInner { provider, task_spawner });
+    pub fn new(provider: Provider) -> Self {
+        let inner = Arc::new(ValidationApiInner { provider});
         Self { inner }
-    }
-}
-
-impl<Provider> ValidationApi<Provider>
-where
-    Provider: BlockReaderIdExt + ChangeSetReader + StateProviderFactory  + ChainSpecProvider + 'static,
-{
-    /// Executes the future on a new blocking task.
-    async fn on_blocking_task<C, F, R>(&self, c: C) -> EthResult<R>
-    where
-        C: FnOnce(Self) -> F,
-        F: Future<Output = EthResult<R>> + Send + 'static,
-        R: Send + 'static,
-    {
-        let (tx, rx) = oneshot::channel();
-        let this = self.clone();
-        let f = c(this);
-        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
-            let res = f.await;
-            let _ = tx.send(res);
-        }));
-        rx.await.map_err(|_| EthApiError::InternalEthError)?
     }
 }
 
@@ -87,6 +62,4 @@ impl<Provider> Clone for ValidationApi<Provider> {
 struct ValidationApiInner<Provider> {
     /// The provider that can interact with the chain.
     provider: Provider,
-    /// The type that can spawn tasks which would otherwise block.
-    task_spawner: Box<dyn TaskSpawner>,
 }

@@ -1003,7 +1003,7 @@ where
                                 .into()
                         },
                         RethRpcModule::Validation => {
-                            ValidationApi::new(self.provider.clone(), Box::new(self.executor.clone()))
+                            ValidationApi::new(self.provider.clone())
                                 .into_rpc()
                                 .into()
                         }
