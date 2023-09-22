@@ -4,9 +4,7 @@ use crate::{error::DecodePacketError, EnrForkIdEntry, PeerId, MAX_PACKET_SIZE, M
 use enr::{Enr, EnrKey};
 use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
-    keccak256,
-    rpc_utils::rlp,
-    ForkId, NodeRecord, H256,
+    keccak256, ForkId, NodeRecord, H256,
 };
 use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header};
 use reth_rlp_derive::{RlpDecodable, RlpEncodable};

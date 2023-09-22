@@ -19,7 +19,6 @@
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
-#![allow(clippy::non_canonical_clone_impl)]
 
 pub mod abi;
 mod account;
@@ -40,16 +39,15 @@ pub mod listener;
 mod log;
 mod net;
 mod peer;
+pub mod proofs;
 mod prune;
 mod receipt;
+pub mod serde_helper;
 pub mod stage;
 mod storage;
 mod transaction;
 pub mod trie;
 mod withdrawal;
-
-/// Helper function for calculating Merkle proofs and hashes
-pub mod proofs;
 
 pub use account::{Account, Bytecode};
 pub use block::{
@@ -83,7 +81,6 @@ pub use prune::{
     ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE,
 };
 pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef};
-pub use revm_primitives::JumpMap;
 pub use serde_helper::JsonU256;
 pub use storage::StorageEntry;
 pub use transaction::{
@@ -98,38 +95,17 @@ pub use transaction::{
 };
 pub use withdrawal::Withdrawal;
 
-/// A block hash.
-pub type BlockHash = H256;
-/// A block number.
-pub type BlockNumber = u64;
-/// A transaction hash is a kecack hash of an RLP encoded signed transaction.
-pub type TxHash = H256;
-/// The sequence number of all existing transactions.
-pub type TxNumber = u64;
-/// The index of transaction in a block.
-pub type TxIndex = u64;
-/// Chain identifier type (introduced in EIP-155).
-pub type ChainId = u64;
-/// An account storage key.
-pub type StorageKey = H256;
-/// An account storage value.
-pub type StorageValue = U256;
-/// Solidity contract functions are addressed using the first four byte of the Keccak-256 hash of
-/// their signature
-pub type Selector = [u8; 4];
-
+// Re-exports
+pub use self::ruint::UintTryTo;
 pub use alloy_primitives::{
-    self, address, b256, bloom, bytes, hex, hex_literal, keccak256, Address, Bloom, BloomInput,
-    Bytes, B128 as H128, B256 as H256, B512 as H512, B64 as H64, U256, U64,
+    self, address, b256, bloom, bytes, hex, hex_literal, keccak256, ruint, Address, BlockHash,
+    BlockNumber, Bloom, BloomInput, Bytes, ChainId, Selector, StorageKey, StorageValue, TxHash,
+    TxIndex, TxNumber, B128 as H128, B256 as H256, B512 as H512, B64 as H64, U128, U256, U64, U8,
 };
-pub use ethers_core::{types::BigEndianHash, utils as rpc_utils};
-pub use revm_primitives;
-pub use ruint::{
-    self,
-    aliases::{U128, U8},
-    UintTryTo,
-};
-pub use tiny_keccak;
+pub use revm_primitives::{self, JumpMap};
+
+#[cfg(any(test, feature = "arbitrary"))]
+pub use arbitrary;
 
 /// Various utilities
 pub mod utils {
@@ -140,9 +116,3 @@ pub mod utils {
 pub mod kzg {
     pub use c_kzg::*;
 }
-
-/// Helpers for working with serde
-pub mod serde_helper;
-
-#[cfg(any(test, feature = "arbitrary"))]
-pub use arbitrary;

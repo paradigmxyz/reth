@@ -1,4 +1,6 @@
-//! Various serde utilities
+//! [serde] utilities.
+
+use crate::H256;
 
 mod storage;
 
@@ -6,7 +8,6 @@ use serde::Serializer;
 pub use storage::*;
 
 mod jsonu256;
-use crate::H256;
 pub use jsonu256::*;
 
 pub mod num;

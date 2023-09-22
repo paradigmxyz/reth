@@ -1,3 +1,5 @@
+//! Helper function for calculating Merkle proofs and hashes.
+
 use crate::{
     keccak256,
     trie::{HashBuilder, Nibbles},

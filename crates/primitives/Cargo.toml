@@ -18,15 +18,10 @@ revm-primitives = { workspace = true, features = ["serde"] }
 # ethereum
 alloy-primitives = { workspace = true, features = ["std", "rand"] }
 ethers-core = { workspace = true, default-features = false }
-tiny-keccak = { version = "2.0", features = ["keccak"] }
 ruint = { version = "1.9.0", features = ["primitive-types", "rlp"] }
 
 # crypto
-secp256k1 = { workspace = true, default-features = false, features = [
-    "global-context",
-    "alloc",
-    "recovery",
-] }
+secp256k1 = { workspace = true, features = ["global-context", "recovery"] }
 
 # for eip-4844
 c-kzg = { workspace = true, features = ["serde"] }
