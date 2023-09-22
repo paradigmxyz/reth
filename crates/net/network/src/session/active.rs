@@ -304,13 +304,9 @@ impl ActiveSession {
     /// Returns the message if the bounded channel is currently unable to handle this message.
     #[allow(clippy::result_large_err)]
     fn try_emit_broadcast(&self, message: PeerMessage) -> Result<(), ActiveSessionMessage> {
-        let sender = self.to_session_manager.inner().get_ref();
-        if sender.is_none() {
-            return Ok(())
-        }
+        let Some(sender) = self.to_session_manager.inner().get_ref() else { return Ok(()) };
 
         match sender
-            .unwrap()
             .try_send(ActiveSessionMessage::ValidMessage { peer_id: self.remote_peer_id, message })
         {
             Ok(_) => Ok(()),
@@ -334,13 +330,9 @@ impl ActiveSession {
     /// Returns the message if the bounded channel is currently unable to handle this message.
     #[allow(clippy::result_large_err)]
     fn try_emit_request(&self, message: PeerMessage) -> Result<(), ActiveSessionMessage> {
-        let sender = self.to_session_manager.inner().get_ref();
-        if sender.is_none() {
-            return Ok(())
-        }
+        let Some(sender) = self.to_session_manager.inner().get_ref() else { return Ok(()) };
 
         match sender
-            .unwrap()
             .try_send(ActiveSessionMessage::ValidMessage { peer_id: self.remote_peer_id, message })
         {
             Ok(_) => Ok(()),
