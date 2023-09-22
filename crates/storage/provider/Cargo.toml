@@ -14,6 +14,7 @@ reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-revm-primitives = { path = "../../revm/revm-primitives" }
 reth-db = { path = "../db" }
+reth-nippy-jar = { path = "../nippy-jar" }
 reth-trie = { path = "../../trie" }
 
 # async
@@ -45,6 +46,7 @@ reth-interfaces = { workspace = true, features = ["test-utils"] }
 parking_lot.workspace = true
 tempfile = "3.3"
 assert_matches.workspace = true
+rand = "0.8"
 
 [features]
 test-utils = ["reth-rlp"]

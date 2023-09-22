@@ -29,14 +29,13 @@ macro_rules! generate_snapshot_func {
                 /// * `row_count`: Total rows to add to `NippyJar`. Must match row count in `range`.
                 /// * `nippy_jar`: Snapshot object responsible for file generation.
                 #[allow(non_snake_case)]
-                pub fn [<create_snapshot$(_ $tbl)+>]<
+                pub fn [<create_snapshot$(_ $tbl)+>]<'tx,
                     $($tbl: Table<Key=K>,)+
                     HashTbl: Table<Key=K>,
-                    Tx: for<'tx> DbTx<'tx>,
                     K
                 >
                 (
-                    tx: &Tx,
+                    tx: &impl DbTx<'tx>,
                     range: RangeInclusive<K>,
                     compression_set: Option<Vec<impl Iterator<Item = Vec<u8>>>>,
                     use_hash: bool,
@@ -47,7 +46,7 @@ macro_rules! generate_snapshot_func {
                 {
                     let range: RangeInclusive<RawKey<K>> = RawKey::new(*range.start())..=RawKey::new(*range.end());
 
-                    handle_compression_and_indexing::<HashTbl, Tx>(
+                    handle_compression_and_indexing::<HashTbl>(
                         tx, compression_set, use_hash.then_some(range.clone()), nippy_jar
                     )?;
 
@@ -75,8 +74,8 @@ macro_rules! generate_snapshot_func {
     };
 }
 
-fn handle_compression_and_indexing<HashTbl: Table, Tx: for<'tx> DbTx<'tx>>(
-    tx: &Tx,
+fn handle_compression_and_indexing<'tx, HashTbl: Table>(
+    tx: &impl DbTx<'tx>,
     compression_set: Option<Vec<impl Iterator<Item = Vec<u8>>>>,
     hash_range: Option<impl RangeBounds<RawKey<<HashTbl as Table>::Key>>>,
     nippy_jar: &mut NippyJar,
