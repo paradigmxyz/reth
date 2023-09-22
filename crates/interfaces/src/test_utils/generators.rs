@@ -368,7 +368,7 @@ pub fn random_receipt<R: Rng>(
 /// Generate random log
 pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: Option<u8>) -> Log {
     let data_byte_count = rng.gen::<u8>();
-    let topics_count = topics_count.unwrap_or_else(|| rng.gen::<u8>());
+    let topics_count: u8 = topics_count.unwrap_or_else(|| rng.gen_range(0..=4));
     Log {
         address: address.unwrap_or_else(|| rng.gen()),
         topics: (0..topics_count).map(|_| rng.gen()).collect(),

@@ -1,3 +1,5 @@
+//! Implementation of `eth` filter RPC.
+
 use super::cache::EthStateCache;
 use crate::{
     eth::{error::EthApiError, logs_utils},
@@ -406,9 +408,9 @@ where
     }
 }
 
-// TODO: fix topic filtering
+/// TODO: docs
 #[derive(Debug)]
-struct LogIndexFilter {
+pub struct LogIndexFilter {
     /// Full block range.
     block_range: RangeInclusive<BlockNumber>,
     /// The maximum number of headers to read at once for range filter.
@@ -421,11 +423,13 @@ struct LogIndexFilter {
 }
 
 impl LogIndexFilter {
-    fn new(block_range: RangeInclusive<BlockNumber>, max_headers_range: u64) -> Self {
+    /// Create new instance of [LogIndexFilter].
+    pub fn new(block_range: RangeInclusive<BlockNumber>, max_headers_range: u64) -> Self {
         Self { block_range, max_headers_range, indices: None }
     }
 
-    fn iter(&self) -> Vec<Vec<BlockNumber>> {
+    /// Iterate over block numbers chunked by `max_headers_range`.
+    pub fn iter(&self) -> Vec<Vec<BlockNumber>> {
         match self.indices {
             Some(Some(ref indices)) => indices
                 .iter(0)
@@ -440,12 +444,12 @@ impl LogIndexFilter {
     }
 
     /// Returns `true` if the filter is active but has no matching block numbers.
-    fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         matches!(self.indices, Some(None))
     }
 
     /// Change the inner indices to be the union of itself and incoming.
-    fn intersection_indices(&mut self, new_indices: Option<IntegerList>) {
+    pub fn intersection_indices(&mut self, new_indices: Option<IntegerList>) {
         match (&mut self.indices, new_indices) {
             // Existing filter is already empty, no need to update.
             (Some(None), _) => (),
@@ -464,7 +468,8 @@ impl LogIndexFilter {
         }
     }
 
-    fn install_address_filter(
+    /// Intersect current filter with the new address filter.
+    pub fn install_address_filter(
         &mut self,
         provider: &impl LogIndexProvider,
         address_filter: &ValueOrArray<Address>,
@@ -487,7 +492,8 @@ impl LogIndexFilter {
         Ok(())
     }
 
-    fn install_topic_filter(
+    /// Intersect current filter with the new topic filter.
+    pub fn install_topic_filter(
         &mut self,
         provider: &impl LogIndexProvider,
         topic_filters: &[ValueOrArray<H256>],
@@ -540,10 +546,13 @@ enum FilterKind {
 /// Errors that can occur in the handler implementation
 #[derive(Debug, thiserror::Error)]
 pub enum FilterError {
+    /// Requested filter was not found.
     #[error("filter not found")]
     FilterNotFound(FilterId),
+    /// Query exceeds the maximum allowed results per response.
     #[error("Query exceeds max results {0}")]
     QueryExceedsMaxResults(usize),
+    /// Wrapper around [EthApiError].
     #[error(transparent)]
     EthAPIError(#[from] EthApiError),
     /// Error thrown when a spawned task failed to deliver a response.

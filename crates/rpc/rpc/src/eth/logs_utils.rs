@@ -1,8 +1,10 @@
+//! Utilities for log filtering.
+
 use reth_primitives::{BlockNumHash, ChainInfo, Receipt, TxHash, U256};
 use reth_rpc_types::{FilteredParams, Log};
 
 /// Returns all matching logs of a block's receipts grouped with the hash of their transaction.
-pub(crate) fn matching_block_logs<I>(
+pub fn matching_block_logs<I>(
     filter: &FilteredParams,
     block: BlockNumHash,
     tx_and_receipts: I,
@@ -17,7 +19,7 @@ where
 }
 
 /// Appends all matching logs of a block's receipts grouped with the hash of their transaction
-pub(crate) fn append_matching_block_logs<I>(
+pub fn append_matching_block_logs<I>(
     all_logs: &mut Vec<Log>,
     filter: &FilteredParams,
     block: BlockNumHash,
@@ -52,7 +54,7 @@ pub(crate) fn append_matching_block_logs<I>(
 }
 
 /// Returns true if the log matches the filter and should be included
-pub(crate) fn log_matches_filter(
+pub fn log_matches_filter(
     block: BlockNumHash,
     log: &reth_primitives::Log,
     params: &FilteredParams,
@@ -69,7 +71,7 @@ pub(crate) fn log_matches_filter(
 }
 
 /// Computes the block range based on the filter range and current block numbers
-pub(crate) fn get_filter_block_range(
+pub fn get_filter_block_range(
     from_block: Option<u64>,
     to_block: Option<u64>,
     start_block: u64,
