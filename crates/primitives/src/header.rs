@@ -1,6 +1,6 @@
 use crate::{
     basefee::calculate_next_block_base_fee,
-    eip4844::{calc_blob_fee, calculate_excess_blob_gas},
+    eip4844::{calc_blob_gasprice, calculate_excess_blob_gas},
     keccak256,
     proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
     BaseFeeParams, BlockBodyRoots, BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes, H160, H256,
@@ -186,7 +186,7 @@ impl Header {
     ///
     /// Returns `None` if `excess_blob_gas` is None
     pub fn blob_fee(&self) -> Option<u64> {
-        self.excess_blob_gas.map(calc_blob_fee)
+        self.excess_blob_gas.map(calc_blob_gasprice)
     }
 
     /// Returns the blob fee for the next block according to the EIP-4844 spec.
@@ -195,7 +195,7 @@ impl Header {
     ///
     /// See also [Self::next_block_excess_blob_gas]
     pub fn next_block_blob_fee(&self) -> Option<u64> {
-        self.next_block_excess_blob_gas().map(calc_blob_fee)
+        self.next_block_excess_blob_gas().map(calc_blob_gasprice)
     }
 
     /// Calculate base fee for next block according to the EIP-1559 spec.

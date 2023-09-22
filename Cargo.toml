@@ -99,8 +99,8 @@ reth-network-api = { path = "./crates/net/network-api" }
 reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat" }
 
 # revm
-revm = { git = "https://github.com/bluealloy/revm", rev = "6e65230a" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "6e65230a" }
+revm = { git = "https://github.com/bluealloy/revm", rev = "516f62cc" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "516f62cc" }
 
 ## eth
 ethers-core = { version = "2.0", default-features = false }
