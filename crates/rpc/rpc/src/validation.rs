@@ -2,7 +2,10 @@ use crate::result::ToRpcResultExt;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_consensus_common::validation::full_validation;
-use reth_provider::{BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, StateProviderFactory, AccountReader, HeaderProvider, WithdrawalsProvider};
+use reth_provider::{
+    AccountReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, HeaderProvider,
+    StateProviderFactory, WithdrawalsProvider,
+};
 use reth_rpc_api::ValidationApiServer;
 use reth_rpc_types::ExecutionPayloadValidation;
 use reth_rpc_types_compat::engine::payload::try_into_sealed_block;
@@ -26,7 +29,7 @@ impl<Provider> ValidationApi<Provider> {
 
     /// Create a new instance of the [ValidationApi]
     pub fn new(provider: Provider) -> Self {
-        let inner = Arc::new(ValidationApiInner { provider});
+        let inner = Arc::new(ValidationApiInner { provider });
         Self { inner }
     }
 }
@@ -34,12 +37,22 @@ impl<Provider> ValidationApi<Provider> {
 #[async_trait]
 impl<Provider> ValidationApiServer for ValidationApi<Provider>
 where
-    Provider: BlockReaderIdExt + ChainSpecProvider + ChangeSetReader + StateProviderFactory + HeaderProvider + AccountReader + WithdrawalsProvider + 'static,
+    Provider: BlockReaderIdExt
+        + ChainSpecProvider
+        + ChangeSetReader
+        + StateProviderFactory
+        + HeaderProvider
+        + AccountReader
+        + WithdrawalsProvider
+        + 'static,
 {
     /// Validates a block submitted to the relay
-    async fn validate_builder_submission_v1(&self, execution_payload: ExecutionPayloadValidation) -> RpcResult<()>  {
+    async fn validate_builder_submission_v1(
+        &self,
+        execution_payload: ExecutionPayloadValidation,
+    ) -> RpcResult<()> {
         let block = try_into_sealed_block(execution_payload.into(), None).map_ok_or_rpc_err()?;
-        let chain_spec =  self.provider().chain_spec();
+        let chain_spec = self.provider().chain_spec();
         full_validation(&block, self.provider(), &chain_spec).map_ok_or_rpc_err()
     }
 }

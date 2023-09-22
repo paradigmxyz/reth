@@ -847,10 +847,12 @@ mod tests {
             serde_json::from_str(input);
         assert!(payload_res.is_err());
     }
-    const EXECUTION_PAYLOAD: &str = include_str!("../../../test_data/validation/execution_payload.json");
+    const EXECUTION_PAYLOAD: &str =
+        include_str!("../../../test_data/validation/execution_payload.json");
 
     #[test]
     fn test_deserialize_validation_execution_payload() {
-        let _execution_payload: ExecutionPayloadV2 = serde_json::from_str(EXECUTION_PAYLOAD).unwrap();
+        let _execution_payload: ExecutionPayloadV2 =
+            serde_json::from_str(EXECUTION_PAYLOAD).unwrap();
     }
 }

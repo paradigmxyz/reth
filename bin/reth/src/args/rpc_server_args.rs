@@ -11,8 +11,8 @@ use clap::{
 use futures::TryFutureExt;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider,
-    HeaderProvider, StateProviderFactory,
+    AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
+    EvmEnvProvider, HeaderProvider, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{
@@ -187,7 +187,7 @@ impl RpcServerArgs {
     ) -> eyre::Result<(RpcServerHandle, AuthServerHandle)>
     where
         Provider: BlockReaderIdExt
-            + AccountReader 
+            + AccountReader
             + HeaderProvider
             + StateProviderFactory
             + EvmEnvProvider

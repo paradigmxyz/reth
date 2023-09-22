@@ -1,11 +1,11 @@
-pub use crate::{ExecutionPayload, eth::engine::{ExecutionPayloadV2,ExecutionPayloadV1}, Withdrawal};
-use reth_primitives::{
-    Address, Bloom, Bytes, H256,  U256, U64,
+pub use crate::{
+    eth::engine::{ExecutionPayloadV1, ExecutionPayloadV2},
+    ExecutionPayload, Withdrawal,
 };
+use derivative::Derivative;
+use reth_primitives::{Address, Bloom, Bytes, H256, U256, U64};
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 use serde_this_or_that::as_u64;
-use derivative::Derivative;
-
 
 /// Structure to deserialize execution payloads sent according to the builder api spec
 #[derive(Derivative)]
@@ -29,7 +29,7 @@ pub struct ExecutionPayloadValidation {
     pub extra_data: Bytes,
     pub base_fee_per_gas: U256,
     pub block_hash: H256,
-    #[derivative(Debug="ignore")]
+    #[derivative(Debug = "ignore")]
     pub transactions: Vec<Bytes>,
     pub withdrawals: Vec<WithdrawalValidation>,
 }
@@ -53,24 +53,23 @@ impl Into<ExecutionPayload> for ExecutionPayloadValidation {
     fn into(self) -> ExecutionPayload {
         ExecutionPayload::V2(ExecutionPayloadV2 {
             payload_inner: ExecutionPayloadV1 {
-            parent_hash: self.parent_hash,
-            fee_recipient: self.fee_recipient,
-            state_root: self.state_root,
-            receipts_root: self.receipts_root,
-            logs_bloom: self.logs_bloom,
-            prev_randao: self.prev_randao,
-            block_number: self.block_number.into(),
-            gas_limit: self.gas_limit.into(),
-            gas_used: self.gas_used.into(),
-            timestamp: self.timestamp.into(),
-            extra_data: self.extra_data,
-            base_fee_per_gas: self.base_fee_per_gas,
-            block_hash: self.block_hash,
-            transactions: self.transactions,
+                parent_hash: self.parent_hash,
+                fee_recipient: self.fee_recipient,
+                state_root: self.state_root,
+                receipts_root: self.receipts_root,
+                logs_bloom: self.logs_bloom,
+                prev_randao: self.prev_randao,
+                block_number: self.block_number.into(),
+                gas_limit: self.gas_limit.into(),
+                gas_used: self.gas_used.into(),
+                timestamp: self.timestamp.into(),
+                extra_data: self.extra_data,
+                base_fee_per_gas: self.base_fee_per_gas,
+                block_hash: self.block_hash,
+                transactions: self.transactions,
             },
             withdrawals: self.withdrawals.into_iter().map(|w| w.into()).collect(),
-        }
-        )
+        })
     }
 }
 
@@ -84,4 +83,3 @@ impl Into<Withdrawal> for WithdrawalValidation {
         }
     }
 }
-

@@ -18,7 +18,10 @@ use reth_rpc_api::{
     Web3ApiClient,
 };
 use reth_rpc_builder::RethRpcModule;
-use reth_rpc_types::{trace::filter::TraceFilter, CallRequest, Filter, Index, TransactionRequest, ExecutionPayloadValidation};
+use reth_rpc_types::{
+    trace::filter::TraceFilter, CallRequest, ExecutionPayloadValidation, Filter, Index,
+    TransactionRequest,
+};
 use std::collections::HashSet;
 
 fn is_unimplemented(err: Error) -> bool {
@@ -33,9 +36,7 @@ fn is_unimplemented(err: Error) -> bool {
 
 fn get_call_error_message(err: Error) -> Option<String> {
     match err {
-        Error::Call(error_obj) => {
-                Some(error_obj.message().to_string())
-        }
+        Error::Call(error_obj) => Some(error_obj.message().to_string()),
         _ => None,
     }
 }
@@ -68,16 +69,20 @@ where
     AdminApiClient::node_info(client).await.unwrap();
 }
 
-    const EXECUTION_PAYLOAD: &str = include_str!("../../../rpc-types/test_data/validation/execution_payload.json");
+const EXECUTION_PAYLOAD: &str =
+    include_str!("../../../rpc-types/test_data/validation/execution_payload.json");
 async fn test_validation_calls<C>(client: &C)
 where
     C: ClientT + SubscriptionClientT + Sync,
 {
-        let execution_payload: ExecutionPayloadValidation = serde_json::from_str(EXECUTION_PAYLOAD).unwrap();
-        let expected_message = format!("Block parent [hash:{:?}] is not known.",  execution_payload.parent_hash);
-        let result = ValidationApiClient::validate_builder_submission_v1(client,  execution_payload).await;
-        let error_message = get_call_error_message(result.unwrap_err()).unwrap();
-        assert_eq!(error_message, expected_message);
+    let execution_payload: ExecutionPayloadValidation =
+        serde_json::from_str(EXECUTION_PAYLOAD).unwrap();
+    let expected_message =
+        format!("Block parent [hash:{:?}] is not known.", execution_payload.parent_hash);
+    let result =
+        ValidationApiClient::validate_builder_submission_v1(client, execution_payload).await;
+    let error_message = get_call_error_message(result.unwrap_err()).unwrap();
+    assert_eq!(error_message, expected_message);
 }
 
 async fn test_basic_eth_calls<C>(client: &C)

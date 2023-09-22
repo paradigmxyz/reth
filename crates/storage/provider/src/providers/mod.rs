@@ -804,11 +804,10 @@ where
     }
 }
 
-impl<DB, Tree> AccountReader for BlockchainProvider<DB, Tree> 
+impl<DB, Tree> AccountReader for BlockchainProvider<DB, Tree>
 where
     DB: Database + Sync + Send,
     Tree: Sync + Send,
-
 {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {

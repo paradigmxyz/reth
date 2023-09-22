@@ -4,8 +4,8 @@ use crate::eth::error::EthApiError;
 use jsonrpsee::core::RpcResult;
 use reth_interfaces::RethResult;
 use reth_primitives::{Block, SealedBlock};
-use std::fmt::Display;
 use reth_rpc_types::engine::PayloadError;
+use std::fmt::Display;
 
 /// Helper trait to easily convert various `Result` types into [`RpcResult`]
 pub(crate) trait ToRpcResult<Ok, Err> {

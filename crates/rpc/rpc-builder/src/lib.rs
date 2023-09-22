@@ -113,8 +113,8 @@ use jsonrpsee::{
 use reth_ipc::server::IpcServer;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EvmEnvProvider, StateProviderFactory,
+    AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
+    ChangeSetReader, EvmEnvProvider, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{
@@ -1001,11 +1001,9 @@ where
                             RethApi::new(self.provider.clone(), Box::new(self.executor.clone()))
                                 .into_rpc()
                                 .into()
-                        },
+                        }
                         RethRpcModule::Validation => {
-                            ValidationApi::new(self.provider.clone())
-                                .into_rpc()
-                                .into()
+                            ValidationApi::new(self.provider.clone()).into_rpc().into()
                         }
                     })
                     .clone()

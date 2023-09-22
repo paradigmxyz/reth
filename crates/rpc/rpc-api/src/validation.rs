@@ -7,5 +7,8 @@ use reth_rpc_types::ExecutionPayloadValidation;
 pub trait ValidationApi {
     /// Validates a block submitted to the relay
     #[method(name = "validateBuilderSubmissionV1")]
-    async fn validate_builder_submission_v1(&self, execution_payload: ExecutionPayloadValidation) -> RpcResult<()>;
+    async fn validate_builder_submission_v1(
+        &self,
+        execution_payload: ExecutionPayloadValidation,
+    ) -> RpcResult<()>;
 }
