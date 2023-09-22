@@ -1,4 +1,3 @@
-use reth_interfaces::sync::SyncState;
 use reth_primitives::BlockNumber;
 use std::{
     fmt::Debug,
@@ -86,10 +85,7 @@ impl EngineHookEvent {
 
 /// An action that the caller of [hook][`EngineHook`] should act upon.
 #[derive(Debug, Copy, Clone)]
-pub enum EngineHookAction {
-    /// Notify about a [SyncState] update.
-    UpdateSyncState(SyncState),
-}
+pub enum EngineHookAction {}
 
 /// An error returned by [hook][`EngineHook`].
 #[derive(Debug, thiserror::Error)]

@@ -9,7 +9,7 @@ use crate::{
 use futures::FutureExt;
 use metrics::Counter;
 use reth_db::database::Database;
-use reth_interfaces::{sync::SyncState, RethError};
+use reth_interfaces::RethError;
 use reth_primitives::BlockNumber;
 use reth_prune::{Pruner, PrunerError, PrunerWithResult};
 use reth_tasks::TaskSpawner;
@@ -104,14 +104,7 @@ impl<DB: Database + 'static> PruneHook<DB> {
                     self.metrics.runs.increment(1);
                     self.pruner_state = PrunerState::Running(rx);
 
-                    Some((
-                        EngineHookEvent::Started,
-                        // Engine can't process any FCU/payload messages from CL while we're
-                        // pruning, as pruner needs an exclusive write access to the database. To
-                        // prevent CL from sending us unneeded updates, we need to respond `true`
-                        // on `eth_syncing` request.
-                        Some(EngineHookAction::UpdateSyncState(SyncState::Syncing)),
-                    ))
+                    Some((EngineHookEvent::Started, None))
                 } else {
                     self.pruner_state = PrunerState::Idle(Some(pruner));
                     Some((EngineHookEvent::NotReady, None))

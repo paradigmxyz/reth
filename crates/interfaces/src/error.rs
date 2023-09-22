@@ -23,6 +23,9 @@ pub enum RethError {
     #[error(transparent)]
     Canonical(#[from] crate::blockchain_tree::error::CanonicalError),
 
+    #[error(transparent)]
+    BlockchainTree(#[from] crate::blockchain_tree::error::BlockchainTreeError),
+
     #[error("{0}")]
     Custom(String),
 }

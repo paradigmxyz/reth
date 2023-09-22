@@ -7,7 +7,7 @@ use crate::{
 use sha2::{Digest, Sha256};
 
 // re-exports from revm for calculating blob fee
-pub use revm_primitives::calc_blob_fee;
+pub use revm_primitives::calc_blob_gasprice;
 
 /// Calculates the versioned hash for a KzgCommitment
 ///
