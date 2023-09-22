@@ -1,16 +1,18 @@
-pub use crate::{
+use crate::{
     eth::engine::{ExecutionPayloadV1, ExecutionPayloadV2},
     ExecutionPayload, Withdrawal,
 };
 use derivative::Derivative;
-use reth_primitives::{Address, Bloom, Bytes, H256, U256, U64};
-use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
+use reth_primitives::{Address, Bloom, Bytes, H256, U256};
+use serde::{ Deserialize, Serialize};
 use serde_this_or_that::as_u64;
 
 /// Structure to deserialize execution payloads sent according to the builder api spec
+/// Numeric fields deserialized as decimals (unlike crate::eth::engine::ExecutionPayload)
 #[derive(Derivative)]
 #[derivative(Debug)]
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(missing_docs)]
 pub struct ExecutionPayloadValidation {
     pub parent_hash: H256,
     pub fee_recipient: Address,
@@ -34,6 +36,7 @@ pub struct ExecutionPayloadValidation {
     pub withdrawals: Vec<WithdrawalValidation>,
 }
 
+/// Withdrawal object with numbers deserialized as decimals
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WithdrawalValidation {
     /// Monotonically increasing identifier issued by consensus layer.
@@ -49,37 +52,37 @@ pub struct WithdrawalValidation {
     pub amount: u64,
 }
 
-impl Into<ExecutionPayload> for ExecutionPayloadValidation {
-    fn into(self) -> ExecutionPayload {
+impl From<ExecutionPayloadValidation> for ExecutionPayload {
+    fn from(val: ExecutionPayloadValidation) -> Self {
         ExecutionPayload::V2(ExecutionPayloadV2 {
             payload_inner: ExecutionPayloadV1 {
-                parent_hash: self.parent_hash,
-                fee_recipient: self.fee_recipient,
-                state_root: self.state_root,
-                receipts_root: self.receipts_root,
-                logs_bloom: self.logs_bloom,
-                prev_randao: self.prev_randao,
-                block_number: self.block_number.into(),
-                gas_limit: self.gas_limit.into(),
-                gas_used: self.gas_used.into(),
-                timestamp: self.timestamp.into(),
-                extra_data: self.extra_data,
-                base_fee_per_gas: self.base_fee_per_gas,
-                block_hash: self.block_hash,
-                transactions: self.transactions,
+                parent_hash: val.parent_hash,
+                fee_recipient: val.fee_recipient,
+                state_root: val.state_root,
+                receipts_root: val.receipts_root,
+                logs_bloom: val.logs_bloom,
+                prev_randao: val.prev_randao,
+                block_number: val.block_number.into(),
+                gas_limit: val.gas_limit.into(),
+                gas_used: val.gas_used.into(),
+                timestamp: val.timestamp.into(),
+                extra_data: val.extra_data,
+                base_fee_per_gas: val.base_fee_per_gas,
+                block_hash: val.block_hash,
+                transactions: val.transactions,
             },
-            withdrawals: self.withdrawals.into_iter().map(|w| w.into()).collect(),
+            withdrawals: val.withdrawals.into_iter().map(|w| w.into()).collect(),
         })
     }
 }
 
-impl Into<Withdrawal> for WithdrawalValidation {
-    fn into(self) -> Withdrawal {
+impl From<WithdrawalValidation> for Withdrawal {
+    fn from(val: WithdrawalValidation) -> Self {
         Withdrawal {
-            index: self.index,
-            validator_index: self.validator_index,
-            address: self.address,
-            amount: self.amount,
+            index: val.index,
+            validator_index: val.validator_index,
+            address: val.address,
+            amount: val.amount,
         }
     }
 }
