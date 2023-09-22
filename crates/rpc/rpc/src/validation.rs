@@ -1,8 +1,9 @@
 use crate::eth::error::{EthApiError, EthResult};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
+use reth_consensus_common::validation::full_validation;
 use reth_primitives::Bytes;
-use reth_provider::{BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
+use reth_provider::{BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, StateProviderFactory, AccountReader, HeaderProvider, WithdrawalsProvider};
 use reth_rpc_api::ValidationApiServer;
 use reth_rpc_types::{
     ExecutionPayload,
@@ -39,7 +40,7 @@ impl<Provider> ValidationApi<Provider> {
 
 impl<Provider> ValidationApi<Provider>
 where
-    Provider: BlockReaderIdExt + ChangeSetReader + StateProviderFactory + 'static,
+    Provider: BlockReaderIdExt + ChangeSetReader + StateProviderFactory  + ChainSpecProvider + 'static,
 {
     /// Executes the future on a new blocking task.
     async fn on_blocking_task<C, F, R>(&self, c: C) -> EthResult<R>
@@ -62,12 +63,14 @@ where
 #[async_trait]
 impl<Provider> ValidationApiServer for ValidationApi<Provider>
 where
-    Provider: BlockReaderIdExt + ChangeSetReader + StateProviderFactory + 'static,
+    Provider: BlockReaderIdExt + ChainSpecProvider + ChangeSetReader + StateProviderFactory + HeaderProvider + AccountReader + WithdrawalsProvider + 'static,
 {
     /// Validates a block submitted to the relay
     async fn validate_builder_submission_v1(&self, message: Message, execution_payload: ExecutionPayload, signature: String) -> RpcResult<Bytes>  {
         let block = try_into_sealed_block(execution_payload, Some(message.parent_hash)).unwrap();
         info!(target: "reth::rpc::validation", "Block decoded");
+        let chain_spec =  self.provider().chain_spec();
+        full_validation(&block, self.provider(), &chain_spec).unwrap();
         Ok(block.header.hash().as_bytes().into())
     }
 }
