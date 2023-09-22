@@ -122,6 +122,29 @@ jobs:
           - sim: pyspec
             include: [cancun/eip7516]
             experimental: true
+          # Pyspec shanghai jobs
+          - sim: pyspec
+            include: [shanghai/eip3651]
+            experimental: true
+          - sim: pyspec
+            include: [shanghai/eip3855]
+            experimental: true
+          - sim: pyspec
+            include: [shanghai/eip3860]
+            experimental: true
+          - sim: pyspec
+            include: [shanghai/eip4895]
+          # Pyspec merge and earlier jobs
+          - sim: pyspec
+            include: [merge]
+          - sim: pyspec
+            include: [berlin]
+          - sim: pyspec
+            include: [istanbul]
+          - sim: pyspec
+            include: [homestead]
+          - sim: pyspec
+            include: [frontier]
       fail-fast: false
     needs: prepare
     name: run
