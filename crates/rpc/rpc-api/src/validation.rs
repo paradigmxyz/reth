@@ -1,7 +1,7 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::Bytes;
 use reth_rpc_types::{
-    engine::ExecutionPayloadV2,
+    engine::ExecutionPayload,
     Message
 };
 
@@ -11,5 +11,5 @@ use reth_rpc_types::{
 pub trait ValidationApi {
     /// Validates a block submitted to the relay
     #[method(name = "validateBuilderSubmissionV1")]
-    async fn validate_builder_submission_v1(&self, message: Message, execution_payload: ExecutionPayloadV2, signature: String) -> RpcResult<Bytes>;
+    async fn validate_builder_submission_v1(&self, message: Message, execution_payload: ExecutionPayload, signature: String) -> RpcResult<Bytes>;
 }
