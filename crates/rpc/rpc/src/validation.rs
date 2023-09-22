@@ -4,10 +4,7 @@ use jsonrpsee::core::RpcResult;
 use reth_consensus_common::validation::full_validation;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, StateProviderFactory, AccountReader, HeaderProvider, WithdrawalsProvider};
 use reth_rpc_api::ValidationApiServer;
-use reth_rpc_types::{
-    ExecutionPayloadValidation,
-    Message
-};
+use reth_rpc_types::ExecutionPayloadValidation;
 use reth_rpc_types_compat::engine::payload::try_into_sealed_block;
 
 use std::sync::Arc;
@@ -40,7 +37,7 @@ where
     Provider: BlockReaderIdExt + ChainSpecProvider + ChangeSetReader + StateProviderFactory + HeaderProvider + AccountReader + WithdrawalsProvider + 'static,
 {
     /// Validates a block submitted to the relay
-    async fn validate_builder_submission_v1(&self, message: Message, execution_payload: ExecutionPayloadValidation, signature: String) -> RpcResult<()>  {
+    async fn validate_builder_submission_v1(&self, execution_payload: ExecutionPayloadValidation) -> RpcResult<()>  {
         let block = try_into_sealed_block(execution_payload.into(), None).map_ok_or_rpc_err()?;
         let chain_spec =  self.provider().chain_spec();
         full_validation(&block, self.provider(), &chain_spec).map_ok_or_rpc_err()
