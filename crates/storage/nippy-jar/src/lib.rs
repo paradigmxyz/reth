@@ -94,6 +94,10 @@ impl NippyJar<()> {
     pub fn load_without_header(path: &Path) -> Result<Self, NippyJarError> {
         NippyJar::<()>::load(path)
     }
+
+    pub fn uses_filters(&self) -> bool {
+        self.filter.is_some() && self.phf.is_some()
+    }
 }
 
 impl<H> NippyJar<H>

@@ -155,7 +155,6 @@ mod test {
                 &tx,
                 range,
                 none_vec,
-                with_filter,
                 row_count as usize,
                 &mut nippy_jar,
             )

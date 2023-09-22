@@ -6,7 +6,7 @@ use crate::{
     transaction::DbTx,
     DatabaseError, RawKey, RawTable,
 };
-use reth_interfaces::{RethResult};
+use reth_interfaces::RethResult;
 use reth_nippy_jar::NippyJar;
 use std::ops::{RangeBounds, RangeInclusive};
 
@@ -26,7 +26,6 @@ macro_rules! generate_snapshot_func {
                 /// * `tx`: Database transaction.
                 /// * `range`: Data range for columns in tables.
                 /// * `dict_compression_set`: Sets of column data for compression dictionaries. Max size is 2GB. Row count is independent.
-                /// * `use_hash`: Flag to indicate whether to create snapshot filters/phf from `TxHash` or `BlockHash`
                 /// * `row_count`: Total rows to add to `NippyJar`. Must match row count in `range`.
                 /// * `nippy_jar`: Snapshot object responsible for file generation.
                 #[allow(non_snake_case)]
@@ -39,7 +38,6 @@ macro_rules! generate_snapshot_func {
                     tx: &impl DbTx<'tx>,
                     range: RangeInclusive<K>,
                     dict_compression_set: Option<Vec<impl Iterator<Item = Vec<u8>>>>,
-                    use_hash: bool,
                     row_count: usize,
                     nippy_jar: &mut NippyJar
                 ) -> RethResult<()>
@@ -48,7 +46,10 @@ macro_rules! generate_snapshot_func {
                     let range: RangeInclusive<RawKey<K>> = RawKey::new(*range.start())..=RawKey::new(*range.end());
 
                     handle_compression_and_indexing::<HashTbl>(
-                        tx, dict_compression_set, use_hash.then_some(range.clone()), nippy_jar
+                        tx,
+                        dict_compression_set,
+                        nippy_jar.uses_filters().then_some(range.clone()),
+                        nippy_jar
                     )?;
 
                     // Creates the cursors for the columns
