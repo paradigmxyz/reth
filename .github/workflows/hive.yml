@@ -136,15 +136,15 @@ jobs:
             include: [shanghai/eip4895]
           # Pyspec merge and earlier jobs
           - sim: pyspec
-            include: [merge]
+            include: [merge/]
           - sim: pyspec
-            include: [berlin]
+            include: [berlin/]
           - sim: pyspec
-            include: [istanbul]
+            include: [istanbul/]
           - sim: pyspec
-            include: [homestead]
+            include: [homestead/]
           - sim: pyspec
-            include: [frontier]
+            include: [frontier/]
       fail-fast: false
     needs: prepare
     name: run
