@@ -429,7 +429,7 @@ impl CallFees {
                 // Check if blob_hashes are present
                 if blob_versioned_hashes.as_ref().is_none() {
                     // Fail if not present
-                    return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
+                    Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
                 } else {
                     Ok(CallFees {
                         gas_price: max_fee,
