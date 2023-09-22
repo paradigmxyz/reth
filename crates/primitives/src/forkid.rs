@@ -165,6 +165,7 @@ pub struct ForkFilter {
     /// [eip-6122]: https://eips.ethereum.org/EIPS/eip-6122
     forks: BTreeMap<ForkFilterKey, ForkHash>,
 
+    /// The current head, used to select forks that are active locally.
     head: Head,
 
     cache: Cache,
@@ -173,17 +174,22 @@ pub struct ForkFilter {
 impl ForkFilter {
     /// Create the filter from provided head, genesis block hash, past forks and expected future
     /// forks.
-    pub fn new<F>(head: Head, genesis: H256, forks: F) -> Self
+    pub fn new<F>(head: Head, genesis_hash: H256, genesis_timestamp: u64, forks: F) -> Self
     where
         F: IntoIterator<Item = ForkFilterKey>,
     {
-        let genesis_fork_hash = ForkHash::from(genesis);
+        let genesis_fork_hash = ForkHash::from(genesis_hash);
         let mut forks = forks.into_iter().collect::<BTreeSet<_>>();
         forks.remove(&ForkFilterKey::Time(0));
         forks.remove(&ForkFilterKey::Block(0));
 
         let forks = forks
             .into_iter()
+            // filter out forks that are pre-genesis by timestamp
+            .filter(|key| match key {
+                ForkFilterKey::Block(_) => true,
+                ForkFilterKey::Time(time) => *time > genesis_timestamp,
+            })
             .fold(
                 (BTreeMap::from([(ForkFilterKey::Block(0), genesis_fork_hash)]), genesis_fork_hash),
                 |(mut acc, base_hash), key| {
@@ -395,6 +401,7 @@ mod tests {
         let mut filter = ForkFilter::new(
             Head { number: 0, ..Default::default() },
             GENESIS_HASH,
+            0,
             vec![
                 ForkFilterKey::Block(1_150_000),
                 ForkFilterKey::Block(1_920_000),
@@ -568,6 +575,7 @@ mod tests {
         let mut fork_filter = ForkFilter::new(
             Head { number: 0, ..Default::default() },
             GENESIS_HASH,
+            0,
             vec![ForkFilterKey::Block(b1), ForkFilterKey::Block(b2)],
         );
 

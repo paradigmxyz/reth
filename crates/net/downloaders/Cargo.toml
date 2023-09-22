@@ -14,7 +14,6 @@ reth-interfaces.workspace = true
 reth-primitives.workspace = true
 reth-db = { path = "../../storage/db" }
 reth-tasks.workspace = true
-reth-metrics.workspace = true
 
 # async
 futures.workspace = true
@@ -23,6 +22,10 @@ pin-project.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["codec"] }
+
+# metrics
+reth-metrics.workspace = true
+metrics.workspace = true
 
 # misc
 tracing.workspace = true
@@ -39,7 +42,7 @@ reth-db = { path = "../../storage/db", features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-tracing = { path = "../../tracing" }
 
-assert_matches = "1.5.0"
+assert_matches.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 reth-rlp.workspace = true
 itertools.workspace = true

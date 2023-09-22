@@ -3,7 +3,7 @@ use jsonrpsee::{
     server::logger::{HttpRequest, Logger, MethodKind, Params, TransportProtocol},
 };
 use reth_metrics::{
-    metrics::{self, Counter, Histogram},
+    metrics::{Counter, Histogram},
     Metrics,
 };
 use std::{net::SocketAddr, time::Instant};

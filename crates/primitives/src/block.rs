@@ -161,6 +161,11 @@ impl SealedBlock {
         )
     }
 
+    /// Returns only the blob transactions, if any, from the block body.
+    pub fn blob_transactions(&self) -> Vec<&TransactionSigned> {
+        self.body.iter().filter(|tx| tx.is_eip4844()).collect()
+    }
+
     /// Expensive operation that recovers transaction signer. See [SealedBlockWithSenders].
     pub fn senders(&self) -> Option<Vec<Address>> {
         TransactionSigned::recover_signers(&self.body, self.body.len())
@@ -197,6 +202,11 @@ impl SealedBlock {
             self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * std::mem::size_of::<TransactionSigned>() +
             self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * std::mem::size_of::<Header>() +
             self.withdrawals.as_ref().map(|w| w.iter().map(Withdrawal::size).sum::<usize>() + w.capacity() * std::mem::size_of::<Withdrawal>()).unwrap_or(std::mem::size_of::<Option<Vec<Withdrawal>>>())
+    }
+
+    /// Calculates the total gas used by blob transactions in the sealed block.
+    pub fn blob_gas_used(&self) -> u64 {
+        self.blob_transactions().iter().filter_map(|tx| tx.blob_gas_used()).sum()
     }
 }
 
@@ -805,7 +815,7 @@ pub struct BlockBody {
 }
 
 impl BlockBody {
-    /// Create a [`Block`](Block) from the body and its header.
+    /// Create a [`Block`] from the body and its header.
     pub fn create_block(&self, header: Header) -> Block {
         Block {
             header,

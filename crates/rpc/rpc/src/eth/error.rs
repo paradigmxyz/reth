@@ -5,11 +5,15 @@ use jsonrpsee::{
     core::Error as RpcError,
     types::{error::CALL_EXECUTION_FAILED_CODE, ErrorObject},
 };
+use reth_interfaces::RethError;
 use reth_primitives::{abi::decode_revert_reason, Address, Bytes, U256};
 use reth_revm::tracing::js::JsInspectorError;
 use reth_rpc_types::{error::EthRpcErrorCode, BlockError, CallInputError};
-use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolError};
+use reth_transaction_pool::error::{
+    Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolTransactionError,
+};
 use revm::primitives::{EVMError, ExecutionResult, Halt, OutOfGasError};
+use revm_primitives::InvalidHeader;
 use std::time::Duration;
 
 /// Result alias
@@ -41,6 +45,9 @@ pub enum EthApiError {
     /// An internal error where prevrandao is not set in the evm's environment
     #[error("Prevrandao not in th EVM's environment after merge")]
     PrevrandaoNotSet,
+    /// Excess_blob_gas is not set for Cancun and above.
+    #[error("Excess blob gas missing th EVM's environment after Cancun")]
+    ExcessBlobGasNotSet,
     /// Thrown when a call or transaction request (`eth_call`, `eth_estimateGas`,
     /// `eth_sendTransaction`) contains conflicting fields (legacy, EIP-1559)
     #[error("both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")]
@@ -56,7 +63,7 @@ pub enum EthApiError {
     BothStateAndStateDiffInOverride(Address),
     /// Other internal error
     #[error(transparent)]
-    Internal(reth_interfaces::Error),
+    Internal(RethError),
     /// Error related to signing
     #[error(transparent)]
     Signing(#[from] SignError),
@@ -108,6 +115,7 @@ impl From<EthApiError> for ErrorObject<'static> {
             EthApiError::InvalidTransaction(err) => err.into(),
             EthApiError::PoolError(err) => err.into(),
             EthApiError::PrevrandaoNotSet |
+            EthApiError::ExcessBlobGasNotSet |
             EthApiError::InvalidBlockData(_) |
             EthApiError::Internal(_) |
             EthApiError::TransactionNotFound => internal_rpc_err(error.to_string()),
@@ -147,10 +155,10 @@ impl From<JsInspectorError> for EthApiError {
     }
 }
 
-impl From<reth_interfaces::Error> for EthApiError {
-    fn from(error: reth_interfaces::Error) -> Self {
+impl From<RethError> for EthApiError {
+    fn from(error: RethError) -> Self {
         match error {
-            reth_interfaces::Error::Provider(err) => err.into(),
+            RethError::Provider(err) => err.into(),
             err => EthApiError::Internal(err),
         }
     }
@@ -181,7 +189,10 @@ where
     fn from(err: EVMError<T>) -> Self {
         match err {
             EVMError::Transaction(err) => RpcInvalidTransactionError::from(err).into(),
-            EVMError::PrevrandaoNotSet => EthApiError::PrevrandaoNotSet,
+            EVMError::Header(InvalidHeader::PrevrandaoNotSet) => EthApiError::PrevrandaoNotSet,
+            EVMError::Header(InvalidHeader::ExcessBlobGasNotSet) => {
+                EthApiError::ExcessBlobGasNotSet
+            }
             EVMError::Database(err) => err.into(),
         }
     }
@@ -276,6 +287,31 @@ pub enum RpcInvalidTransactionError {
     /// The transaction is before Spurious Dragon and has a chain ID
     #[error("Transactions before Spurious Dragon should not have a chain ID.")]
     OldLegacyChainId,
+    /// The transitions is before Berlin and has access list
+    #[error("Transactions before Berlin should not have access list")]
+    AccessListNotSupported,
+    /// `max_fee_per_blob_gas` is not supported for blocks before the Cancun hardfork.
+    #[error("max_fee_per_blob_gas is not supported for blocks before the Cancun hardfork.")]
+    MaxFeePerBlobGasNotSupported,
+    /// `blob_hashes`/`blob_versioned_hashes` is not supported for blocks before the Cancun
+    /// hardfork.
+    #[error("blob_versioned_hashes is not supported for blocks before the Cancun hardfork.")]
+    BlobVersionedHashesNotSupported,
+    /// Block `blob_gas_price` is greater than tx-specified `max_fee_per_blob_gas` after Cancun.
+    #[error("max fee per blob gas less than block blob gas fee")]
+    BlobFeeCapTooLow,
+    /// Blob transaction has a versioned hash with an invalid blob
+    #[error("blob hash version mismatch")]
+    BlobHashVersionMismatch,
+    /// Blob transaction has no versioned hashes
+    #[error("blob transaction missing blob hashes")]
+    BlobTransactionMissingBlobHashes,
+    /// Blob transaction has too many blobs
+    #[error("blob transaction exceeds max blobs per block")]
+    TooManyBlobs,
+    /// Blob transaction is a create transaction
+    #[error("blob transaction is a create transaction")]
+    BlobTransactionIsCreate,
 }
 
 impl RpcInvalidTransactionError {
@@ -337,7 +373,7 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
         use revm::primitives::InvalidTransaction;
         match err {
             InvalidTransaction::InvalidChainId => RpcInvalidTransactionError::InvalidChainId,
-            InvalidTransaction::GasMaxFeeGreaterThanPriorityFee => {
+            InvalidTransaction::PriorityFeeGreaterThanMaxFee => {
                 RpcInvalidTransactionError::TipAboveFeeCap
             }
             InvalidTransaction::GasPriceLessThanBasefee => RpcInvalidTransactionError::FeeCapTooLow,
@@ -348,7 +384,7 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
                 RpcInvalidTransactionError::GasTooHigh
             }
             InvalidTransaction::RejectCallerWithCode => RpcInvalidTransactionError::SenderNoEOA,
-            InvalidTransaction::LackOfFundForGasLimit { .. } => {
+            InvalidTransaction::LackOfFundForMaxFee { .. } => {
                 RpcInvalidTransactionError::InsufficientFunds
             }
             InvalidTransaction::OverflowPaymentInTransaction => {
@@ -362,6 +398,28 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             }
             InvalidTransaction::NonceTooHigh { .. } => RpcInvalidTransactionError::NonceTooHigh,
             InvalidTransaction::NonceTooLow { .. } => RpcInvalidTransactionError::NonceTooLow,
+            InvalidTransaction::AccessListNotSupported => {
+                RpcInvalidTransactionError::AccessListNotSupported
+            }
+            InvalidTransaction::MaxFeePerBlobGasNotSupported => {
+                RpcInvalidTransactionError::MaxFeePerBlobGasNotSupported
+            }
+            InvalidTransaction::BlobVersionedHashesNotSupported => {
+                RpcInvalidTransactionError::BlobVersionedHashesNotSupported
+            }
+            InvalidTransaction::BlobGasPriceGreaterThanMax => {
+                RpcInvalidTransactionError::BlobFeeCapTooLow
+            }
+            InvalidTransaction::EmptyBlobs => {
+                RpcInvalidTransactionError::BlobTransactionMissingBlobHashes
+            }
+            InvalidTransaction::BlobVersionNotSupported => {
+                RpcInvalidTransactionError::BlobHashVersionMismatch
+            }
+            InvalidTransaction::TooManyBlobs => RpcInvalidTransactionError::TooManyBlobs,
+            InvalidTransaction::BlobCreateTransaction => {
+                RpcInvalidTransactionError::BlobTransactionIsCreate
+            }
         }
     }
 }
@@ -381,10 +439,9 @@ impl From<reth_primitives::InvalidTransactionError> for RpcInvalidTransactionErr
                 RpcInvalidTransactionError::OldLegacyChainId
             }
             InvalidTransactionError::ChainIdMismatch => RpcInvalidTransactionError::InvalidChainId,
-            InvalidTransactionError::Eip2930Disabled => {
-                RpcInvalidTransactionError::TxTypeNotSupported
-            }
-            InvalidTransactionError::Eip1559Disabled => {
+            InvalidTransactionError::Eip2930Disabled |
+            InvalidTransactionError::Eip1559Disabled |
+            InvalidTransactionError::Eip4844Disabled => {
                 RpcInvalidTransactionError::TxTypeNotSupported
             }
             InvalidTransactionError::TxTypeNotSupported => {
@@ -468,6 +525,18 @@ pub enum RpcPoolError {
     ExceedsMaxInitCodeSize,
     #[error(transparent)]
     Invalid(#[from] RpcInvalidTransactionError),
+    /// Custom pool error
+    #[error("{0:?}")]
+    PoolTransactionError(Box<dyn PoolTransactionError>),
+    /// Eip-4844 related error
+    #[error(transparent)]
+    Eip4844(#[from] Eip4844PoolTransactionError),
+    /// Thrown if a conflicting transaction type is already in the pool
+    ///
+    /// In other words, thrown if a transaction with the same sender that violates the exclusivity
+    /// constraint (blob vs normal tx)
+    #[error("address already reserved")]
+    AddressAlreadyReserved,
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
@@ -491,6 +560,9 @@ impl From<PoolError> for RpcPoolError {
             PoolError::InvalidTransaction(_, err) => err.into(),
             PoolError::Other(_, err) => RpcPoolError::Other(err),
             PoolError::AlreadyImported(_) => RpcPoolError::AlreadyKnown,
+            PoolError::ExistingConflictingTransactionType(_, _, _) => {
+                RpcPoolError::AddressAlreadyReserved
+            }
         }
     }
 }
@@ -505,6 +577,11 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             }
             InvalidPoolTransactionError::OversizedData(_, _) => RpcPoolError::OversizedData,
             InvalidPoolTransactionError::Underpriced => RpcPoolError::Underpriced,
+            InvalidPoolTransactionError::Other(err) => RpcPoolError::PoolTransactionError(err),
+            InvalidPoolTransactionError::Eip4844(err) => RpcPoolError::Eip4844(err),
+            InvalidPoolTransactionError::Overdraft => {
+                RpcPoolError::Invalid(RpcInvalidTransactionError::InsufficientFunds)
+            }
         }
     }
 }
@@ -526,8 +603,11 @@ pub enum SignError {
     NoAccount,
     /// TypedData has invalid format.
     #[error("Given typed data is not valid")]
-    TypedData,
-    /// No chainid
+    InvalidTypedData,
+    /// Invalid transaction request in `sign_transaction`.
+    #[error("Invalid transaction request")]
+    InvalidTransactionRequest,
+    /// No chain ID was given.
     #[error("No chainid")]
     NoChainId,
 }

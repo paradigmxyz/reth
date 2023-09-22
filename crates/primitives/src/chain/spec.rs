@@ -1,13 +1,13 @@
 use crate::{
     constants::{
         EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR, EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
-        EIP1559_INITIAL_BASE_FEE, EMPTY_WITHDRAWALS,
+        EIP1559_INITIAL_BASE_FEE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
     },
     forkid::ForkFilterKey,
     header::Head,
     proofs::genesis_state_root,
     Address, BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, Hardfork, Header,
-    SealedHeader, H160, H256, U256,
+    PruneBatchSizes, SealedHeader, EMPTY_OMMER_ROOT, H160, H256, U256,
 };
 use hex_literal::hex;
 use once_cell::sync::Lazy;
@@ -63,7 +63,8 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             11052984,
             H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
         )),
-        ..Default::default()
+        base_fee_params: BaseFeeParams::ethereum(),
+        prune_batch_sizes: PruneBatchSizes::mainnet(),
     }
     .into()
 });
@@ -104,7 +105,8 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             4367322,
             H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
         )),
-        ..Default::default()
+        base_fee_params: BaseFeeParams::ethereum(),
+        prune_batch_sizes: PruneBatchSizes::testnet(),
     }
     .into()
 });
@@ -149,7 +151,49 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             1273020,
             H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
         )),
-        ..Default::default()
+        base_fee_params: BaseFeeParams::ethereum(),
+        prune_batch_sizes: PruneBatchSizes::testnet(),
+    }
+    .into()
+});
+
+/// The Holesky spec
+pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    ChainSpec {
+        chain: Chain::holesky(),
+        genesis: serde_json::from_str(include_str!("../../res/genesis/holesky.json"))
+            .expect("Can't deserialize Holesky genesis json"),
+        genesis_hash: Some(H256(hex!(
+            "fd91bb7c01ae3f608b4d176078ca72bc7846791fdc02324481ca315ede4c9246"
+        ))),
+        paris_block_and_final_difficulty: Some((0, U256::from(1))),
+        fork_timestamps: ForkTimestamps::default().shanghai(1694790240),
+        hardforks: BTreeMap::from([
+            (Hardfork::Frontier, ForkCondition::Block(0)),
+            (Hardfork::Homestead, ForkCondition::Block(0)),
+            (Hardfork::Dao, ForkCondition::Block(0)),
+            (Hardfork::Tangerine, ForkCondition::Block(0)),
+            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+            (Hardfork::Byzantium, ForkCondition::Block(0)),
+            (Hardfork::Constantinople, ForkCondition::Block(0)),
+            (Hardfork::Petersburg, ForkCondition::Block(0)),
+            (Hardfork::Istanbul, ForkCondition::Block(0)),
+            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
+            (Hardfork::Berlin, ForkCondition::Block(0)),
+            (Hardfork::London, ForkCondition::Block(0)),
+            (
+                Hardfork::Paris,
+                ForkCondition::TTD { fork_block: None, total_difficulty: U256::ZERO },
+            ),
+            (Hardfork::Shanghai, ForkCondition::Timestamp(1694790240)),
+        ]),
+        deposit_contract: Some(DepositContract::new(
+            H160(hex!("4242424242424242424242424242424242424242")),
+            0,
+            H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
+        )),
+        base_fee_params: BaseFeeParams::ethereum(),
+        prune_batch_sizes: PruneBatchSizes::testnet(),
     }
     .into()
 });
@@ -203,7 +247,7 @@ pub struct BaseFeeParams {
 }
 
 impl BaseFeeParams {
-    /// Get the base fee parameters for ethereum mainnet
+    /// Get the base fee parameters for Ethereum mainnet
     pub const fn ethereum() -> BaseFeeParams {
         BaseFeeParams {
             max_change_denominator: EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
@@ -247,12 +291,18 @@ pub struct ChainSpec {
     /// The active hard forks and their activation conditions
     pub hardforks: BTreeMap<Hardfork, ForkCondition>,
 
-    /// The deposit contract deployed for PoS.
+    /// The deposit contract deployed for PoS
     #[serde(skip, default)]
     pub deposit_contract: Option<DepositContract>,
 
     /// The parameters that configure how a block's base fee is computed
     pub base_fee_params: BaseFeeParams,
+
+    /// The batch sizes for pruner, per block. In the actual pruner run it will be multiplied by
+    /// the amount of blocks between pruner runs to account for the difference in amount of new
+    /// data coming in.
+    #[serde(default)]
+    pub prune_batch_sizes: PruneBatchSizes,
 }
 
 impl Default for ChainSpec {
@@ -266,6 +316,7 @@ impl Default for ChainSpec {
             hardforks: Default::default(),
             deposit_contract: Default::default(),
             base_fee_params: BaseFeeParams::ethereum(),
+            prune_batch_sizes: Default::default(),
         }
     }
 }
@@ -294,7 +345,26 @@ impl ChainSpec {
             (self.fork(Hardfork::Shanghai).active_at_timestamp(self.genesis.timestamp))
                 .then_some(EMPTY_WITHDRAWALS);
 
+        // If Cancun is activated at genesis, we set:
+        // * parent beacon block root to 0x0
+        // * blob gas used to provided genesis or 0x0
+        // * excess blob gas to provided genesis or 0x0
+        let (parent_beacon_block_root, blob_gas_used, excess_blob_gas) =
+            if self.fork(Hardfork::Cancun).active_at_timestamp(self.genesis.timestamp) {
+                let blob_gas_used = self.genesis.blob_gas_used.unwrap_or(0);
+                let excess_blob_gas = self.genesis.excess_blob_gas.unwrap_or(0);
+                (Some(H256::zero()), Some(blob_gas_used), Some(excess_blob_gas))
+            } else {
+                (None, None, None)
+            };
+
         Header {
+            parent_hash: H256::zero(),
+            number: 0,
+            transactions_root: EMPTY_TRANSACTIONS,
+            ommers_hash: EMPTY_OMMER_ROOT,
+            receipts_root: EMPTY_RECEIPTS,
+            logs_bloom: Default::default(),
             gas_limit: self.genesis.gas_limit,
             difficulty: self.genesis.difficulty,
             nonce: self.genesis.nonce,
@@ -303,9 +373,12 @@ impl ChainSpec {
             timestamp: self.genesis.timestamp,
             mix_hash: self.genesis.mix_hash,
             beneficiary: self.genesis.coinbase,
+            gas_used: Default::default(),
             base_fee_per_gas,
             withdrawals_root,
-            ..Default::default()
+            parent_beacon_block_root,
+            blob_gas_used,
+            excess_blob_gas,
         }
     }
 
@@ -316,8 +389,11 @@ impl ChainSpec {
 
     /// Get the initial base fee of the genesis block.
     pub fn initial_base_fee(&self) -> Option<u64> {
+        // If the base fee is set in the genesis block, we use that instead of the default.
+        let genesis_base_fee = self.genesis.base_fee_per_gas.unwrap_or(EIP1559_INITIAL_BASE_FEE);
+
         // If London is activated at genesis, we set the initial base fee as per EIP-1559.
-        (self.fork(Hardfork::London).active_at_block(0)).then_some(EIP1559_INITIAL_BASE_FEE)
+        (self.fork(Hardfork::London).active_at_block(0)).then_some(genesis_base_fee)
     }
 
     /// Get the hash of the genesis block.
@@ -327,6 +403,11 @@ impl ChainSpec {
         } else {
             self.genesis_header().hash_slow()
         }
+    }
+
+    /// Get the timestamp of the genesis block.
+    pub fn genesis_timestamp(&self) -> u64 {
+        self.genesis.timestamp
     }
 
     /// Returns the final total difficulty if the given block number is after the Paris hardfork.
@@ -382,7 +463,7 @@ impl ChainSpec {
             .unwrap_or_else(|| self.is_fork_active_at_timestamp(Hardfork::Cancun, timestamp))
     }
 
-    /// Creates a [`ForkFilter`](crate::ForkFilter) for the block described by [Head].
+    /// Creates a [`ForkFilter`] for the block described by [Head].
     pub fn fork_filter(&self, head: Head) -> ForkFilter {
         let forks = self.forks_iter().filter_map(|(_, condition)| {
             // We filter out TTD-based forks w/o a pre-known block since those do not show up in the
@@ -395,7 +476,7 @@ impl ChainSpec {
             })
         });
 
-        ForkFilter::new(head, self.genesis_hash(), forks)
+        ForkFilter::new(head, self.genesis_hash(), self.genesis_timestamp(), forks)
     }
 
     /// Compute the [`ForkId`] for the given [`Head`] folowing eip-6122 spec
@@ -424,19 +505,22 @@ impl ChainSpec {
         }
 
         // timestamp are ALWAYS applied after the merge.
-        for (_, cond) in self.forks_iter() {
-            if let ForkCondition::Timestamp(timestamp) = cond {
-                if cond.active_at_head(head) {
-                    if timestamp != current_applied {
-                        forkhash += timestamp;
-                        current_applied = timestamp;
-                    }
-                } else {
-                    // can safely return here because we have already handled all block forks and
-                    // have handled all active timestamp forks, and set the next value to the
-                    // timestamp that is known but not active yet
-                    return ForkId { hash: forkhash, next: timestamp }
+        //
+        // this filter ensures that no block-based forks are returned
+        for timestamp in self.forks_iter().filter_map(|(_, cond)| {
+            cond.as_timestamp().filter(|time| time > &self.genesis.timestamp)
+        }) {
+            let cond = ForkCondition::Timestamp(timestamp);
+            if cond.active_at_head(head) {
+                if timestamp != current_applied {
+                    forkhash += timestamp;
+                    current_applied = timestamp;
                 }
+            } else {
+                // can safely return here because we have already handled all block forks and
+                // have handled all active timestamp forks, and set the next value to the
+                // timestamp that is known but not active yet
+                return ForkId { hash: forkhash, next: timestamp }
             }
         }
 
@@ -452,7 +536,7 @@ impl ChainSpec {
 impl From<Genesis> for ChainSpec {
     fn from(genesis: Genesis) -> Self {
         // Block-based hardforks
-        let hardfork_opts = vec![
+        let hardfork_opts = [
             (Hardfork::Homestead, genesis.config.homestead_block),
             (Hardfork::Dao, genesis.config.dao_fork_block),
             (Hardfork::Tangerine, genesis.config.eip150_block),
@@ -484,11 +568,16 @@ impl From<Genesis> for ChainSpec {
         }
 
         // Time-based hardforks
-        let time_hardforks = genesis
-            .config
-            .shanghai_time
-            .map(|time| (Hardfork::Shanghai, ForkCondition::Timestamp(time)))
-            .into_iter()
+        let time_hardfork_opts = [
+            (Hardfork::Shanghai, genesis.config.shanghai_time),
+            (Hardfork::Cancun, genesis.config.cancun_time),
+        ];
+
+        let time_hardforks = time_hardfork_opts
+            .iter()
+            .filter_map(|(hardfork, opt)| {
+                opt.map(|time| (*hardfork, ForkCondition::Timestamp(time)))
+            })
             .collect::<BTreeMap<_, _>>();
 
         hardforks.extend(time_hardforks);
@@ -579,7 +668,7 @@ impl From<AllGenesisFormats> for ChainSpec {
 }
 
 /// A helper to build custom chain specs
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ChainSpecBuilder {
     chain: Option<Chain>,
     genesis: Option<Genesis>,
@@ -705,7 +794,7 @@ impl ChainSpecBuilder {
 
     /// Enable Cancun at genesis.
     pub fn cancun_activated(mut self) -> Self {
-        self = self.paris_activated();
+        self = self.shanghai_activated();
         self.hardforks.insert(Hardfork::Cancun, ForkCondition::Timestamp(0));
         self
     }
@@ -1038,13 +1127,15 @@ impl DepositContract {
 #[cfg(test)]
 mod tests {
     use crate::{
-        Address, AllGenesisFormats, Chain, ChainSpec, ChainSpecBuilder, DisplayHardforks,
-        ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head, DEV, GOERLI, H256, MAINNET,
-        SEPOLIA, U256,
+        constants::EMPTY_WITHDRAWALS, Address, AllGenesisFormats, Chain, ChainSpec,
+        ChainSpecBuilder, DisplayHardforks, ForkCondition, ForkHash, ForkId, Genesis, Hardfork,
+        Head, DEV, GOERLI, H256, HOLESKY, MAINNET, SEPOLIA, U256,
     };
     use bytes::BytesMut;
     use ethers_core::types as EtherType;
     use reth_rlp::Encodable;
+    use std::str::FromStr;
+
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
         for (block, expected_id) in cases {
             let computed_id = spec.fork_id(block);
@@ -1478,6 +1569,61 @@ Post-merge hard forks (timestamp based):
         );
     }
 
+    /// Constructs a [ChainSpec] with the given [ChainSpecBuilder], shanghai, and cancun fork
+    /// timestamps.
+    fn construct_chainspec(
+        builder: ChainSpecBuilder,
+        shanghai_time: u64,
+        cancun_time: u64,
+    ) -> ChainSpec {
+        builder
+            .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(shanghai_time))
+            .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(cancun_time))
+            .build()
+    }
+
+    /// Tests that time-based forks which are active at genesis are not included in forkid hash.
+    ///
+    /// This is based off of the test vectors here:
+    /// <https://github.com/ethereum/go-ethereum/blob/2e02c1ffd9dffd1ec9e43c6b66f6c9bd1e556a0b/core/forkid/forkid_test.go#L390-L440>
+    #[test]
+    fn test_timestamp_fork_in_genesis() {
+        let timestamp = 1690475657u64;
+        let default_spec_builder = ChainSpecBuilder::default()
+            .chain(Chain::Id(1337))
+            .genesis(Genesis::default().with_timestamp(timestamp))
+            .paris_activated();
+
+        // test format: (chain spec, expected next value) - the forkhash will be determined by the
+        // genesis hash of the constructed chainspec
+        let tests = [
+            (
+                construct_chainspec(default_spec_builder.clone(), timestamp - 1, timestamp + 1),
+                timestamp + 1,
+            ),
+            (
+                construct_chainspec(default_spec_builder.clone(), timestamp, timestamp + 1),
+                timestamp + 1,
+            ),
+            (
+                construct_chainspec(default_spec_builder.clone(), timestamp + 1, timestamp + 2),
+                timestamp + 1,
+            ),
+        ];
+
+        for (spec, expected_timestamp) in tests {
+            let got_forkid = spec.fork_id(&Head { number: 0, timestamp: 0, ..Default::default() });
+            // This is slightly different from the geth test because we use the shanghai timestamp
+            // to determine whether or not to include a withdrawals root in the genesis header.
+            // This makes the genesis hash different, and as a result makes the ChainSpec fork hash
+            // different.
+            let genesis_hash = spec.genesis_hash();
+            let expected_forkid =
+                ForkId { hash: ForkHash::from(genesis_hash), next: expected_timestamp };
+            assert_eq!(got_forkid, expected_forkid);
+        }
+    }
+
     /// Checks that the fork is not active at a terminal ttd block.
     #[test]
     fn check_terminal_ttd() {
@@ -1733,12 +1879,71 @@ Post-merge hard forks (timestamp based):
 
     #[test]
     fn test_parse_genesis_json() {
-        let s = r#"{"config":{"ethash":{},"chainId":1337,"homesteadBlock":0,"eip150Block":0,"eip155Block":0,"eip158Block":0,"byzantiumBlock":0,"constantinopleBlock":0,"petersburgBlock":0,"istanbulBlock":0,"berlinBlock":0,"londonBlock":0,"terminalTotalDifficulty":0,"terminalTotalDifficultyPassed":true,"shanghaiTime":0},"nonce":"0x0","timestamp":"0x0","extraData":"0x","gasLimit":"0x4c4b40","difficulty":"0x1","mixHash":"0x0000000000000000000000000000000000000000000000000000000000000000","coinbase":"0x0000000000000000000000000000000000000000","alloc":{"658bdf435d810c91414ec09147daa6db62406379":{"balance":"0x487a9a304539440000"},"aa00000000000000000000000000000000000000":{"code":"0x6042","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x1","nonce":"0x1"},"bb00000000000000000000000000000000000000":{"code":"0x600154600354","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x2","nonce":"0x1"}},"number":"0x0","gasUsed":"0x0","parentHash":"0x0000000000000000000000000000000000000000000000000000000000000000","baseFeePerGas":"0x3b9aca00"}"#;
+        let s = r#"{"config":{"ethash":{},"chainId":1337,"homesteadBlock":0,"eip150Block":0,"eip155Block":0,"eip158Block":0,"byzantiumBlock":0,"constantinopleBlock":0,"petersburgBlock":0,"istanbulBlock":0,"berlinBlock":0,"londonBlock":0,"terminalTotalDifficulty":0,"terminalTotalDifficultyPassed":true,"shanghaiTime":0},"nonce":"0x0","timestamp":"0x0","extraData":"0x","gasLimit":"0x4c4b40","difficulty":"0x1","mixHash":"0x0000000000000000000000000000000000000000000000000000000000000000","coinbase":"0x0000000000000000000000000000000000000000","alloc":{"658bdf435d810c91414ec09147daa6db62406379":{"balance":"0x487a9a304539440000"},"aa00000000000000000000000000000000000000":{"code":"0x6042","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x1","nonce":"0x1"},"bb00000000000000000000000000000000000000":{"code":"0x600154600354","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x2","nonce":"0x1"}},"number":"0x0","gasUsed":"0x0","parentHash":"0x0000000000000000000000000000000000000000000000000000000000000000","baseFeePerGas":"0x1337"}"#;
         let genesis: Genesis = serde_json::from_str(s).unwrap();
         let acc = genesis
             .alloc
             .get(&"0xaa00000000000000000000000000000000000000".parse::<Address>().unwrap())
             .unwrap();
         assert_eq!(acc.balance, U256::from(1));
+        assert_eq!(genesis.base_fee_per_gas, Some(0x1337));
+    }
+
+    #[test]
+    fn test_parse_cancun_genesis_json() {
+        let s = r#"{"config":{"ethash":{},"chainId":1337,"homesteadBlock":0,"eip150Block":0,"eip155Block":0,"eip158Block":0,"byzantiumBlock":0,"constantinopleBlock":0,"petersburgBlock":0,"istanbulBlock":0,"berlinBlock":0,"londonBlock":0,"terminalTotalDifficulty":0,"terminalTotalDifficultyPassed":true,"shanghaiTime":0,"cancunTime":4661},"nonce":"0x0","timestamp":"0x0","extraData":"0x","gasLimit":"0x4c4b40","difficulty":"0x1","mixHash":"0x0000000000000000000000000000000000000000000000000000000000000000","coinbase":"0x0000000000000000000000000000000000000000","alloc":{"658bdf435d810c91414ec09147daa6db62406379":{"balance":"0x487a9a304539440000"},"aa00000000000000000000000000000000000000":{"code":"0x6042","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x1","nonce":"0x1"},"bb00000000000000000000000000000000000000":{"code":"0x600154600354","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x2","nonce":"0x1"}},"number":"0x0","gasUsed":"0x0","parentHash":"0x0000000000000000000000000000000000000000000000000000000000000000","baseFeePerGas":"0x3b9aca00"}"#;
+        let genesis: Genesis = serde_json::from_str(s).unwrap();
+        let acc = genesis
+            .alloc
+            .get(&"0xaa00000000000000000000000000000000000000".parse::<Address>().unwrap())
+            .unwrap();
+        assert_eq!(acc.balance, U256::from(1));
+        // assert that the cancun time was picked up
+        assert_eq!(genesis.config.cancun_time, Some(4661));
+    }
+
+    #[test]
+    fn test_default_cancun_header_forkhash() {
+        // set the gas limit from the hive test genesis according to the hash
+        let genesis = Genesis { gas_limit: 0x2fefd8u64, ..Default::default() };
+        let default_chainspec = ChainSpecBuilder::default()
+            .chain(Chain::Id(1337))
+            .genesis(genesis)
+            .cancun_activated()
+            .build();
+        let mut header = default_chainspec.genesis_header();
+
+        // set the state root to the same as in the hive test the hash was pulled from
+        header.state_root =
+            H256::from_str("0x62e2595e017f0ca23e08d17221010721a71c3ae932f4ea3cb12117786bb392d4")
+                .unwrap();
+
+        // shanghai is activated so we should have a withdrawals root
+        assert_eq!(header.withdrawals_root, Some(EMPTY_WITHDRAWALS));
+
+        // cancun is activated so we should have a zero parent beacon block root, zero blob gas
+        // used, and zero excess blob gas
+        assert_eq!(header.parent_beacon_block_root, Some(H256::zero()));
+        assert_eq!(header.blob_gas_used, Some(0));
+        assert_eq!(header.excess_blob_gas, Some(0));
+        println!("header: {:?}", header);
+
+        // check the genesis hash
+        let genesis_hash = header.hash_slow();
+        let expected_hash = H256::from(hex_literal::hex!(
+            "16bb7c59613a5bad3f7c04a852fd056545ade2483968d9a25a1abb05af0c4d37"
+        ));
+        assert_eq!(genesis_hash, expected_hash);
+
+        // check that the forkhash is correct
+        let expected_forkhash = ForkHash(hex_literal::hex!("8062457a"));
+        assert_eq!(ForkHash::from(genesis_hash), expected_forkhash);
+    }
+
+    #[test]
+    fn holesky_paris_activated_at_genesis() {
+        assert!(HOLESKY
+            .fork(Hardfork::Paris)
+            .active_at_ttd(HOLESKY.genesis.difficulty, HOLESKY.genesis.difficulty));
     }
 }

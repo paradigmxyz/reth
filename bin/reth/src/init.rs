@@ -5,9 +5,17 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
+use reth_interfaces::{db::DatabaseError, RethError};
 use reth_primitives::{stage::StageId, Account, Bytecode, ChainSpec, StorageEntry, H256, U256};
-use reth_provider::{DatabaseProviderRW, HashingWriter, HistoryWriter, PostState, ProviderFactory};
-use std::{collections::BTreeMap, sync::Arc};
+use reth_provider::{
+    bundle_state::{BundleStateInit, RevertsInit},
+    BundleStateWithReceipts, DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown,
+    ProviderFactory,
+};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 use tracing::debug;
 
 /// Database initialization error type.
@@ -25,11 +33,11 @@ pub enum InitDatabaseError {
 
     /// Low-level database error.
     #[error(transparent)]
-    DBError(#[from] reth_db::DatabaseError),
+    DBError(#[from] DatabaseError),
 
     /// Internal error.
     #[error(transparent)]
-    InternalError(#[from] reth_interfaces::Error),
+    InternalError(#[from] RethError),
 }
 
 /// Write the genesis block if it has not already been written
@@ -85,31 +93,63 @@ pub fn insert_genesis_state<DB: Database>(
     tx: &<DB as DatabaseGAT<'_>>::TXMut,
     genesis: &reth_primitives::Genesis,
 ) -> Result<(), InitDatabaseError> {
-    let mut state = PostState::default();
+    let mut state_init: BundleStateInit = HashMap::new();
+    let mut reverts_init = HashMap::new();
+    let mut contracts: HashMap<H256, Bytecode> = HashMap::new();
 
     for (address, account) in &genesis.alloc {
-        let mut bytecode_hash = None;
-        if let Some(code) = &account.code {
+        let bytecode_hash = if let Some(code) = &account.code {
             let bytecode = Bytecode::new_raw(code.0.clone());
-            // FIXME: Can bytecode_hash be Some(Bytes::new()) here?
-            bytecode_hash = Some(bytecode.hash);
-            state.add_bytecode(bytecode.hash, bytecode);
-        }
-        state.create_account(
-            0,
+            let hash = bytecode.hash_slow();
+            contracts.insert(hash, bytecode);
+            Some(hash)
+        } else {
+            None
+        };
+
+        // get state
+        let storage = account
+            .storage
+            .as_ref()
+            .map(|m| {
+                m.iter()
+                    .map(|(key, value)| {
+                        let value = U256::from_be_bytes(value.0);
+                        (*key, (U256::ZERO, value))
+                    })
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
+
+        reverts_init.insert(
             *address,
-            Account { nonce: account.nonce.unwrap_or(0), balance: account.balance, bytecode_hash },
+            (Some(None), storage.keys().map(|k| StorageEntry::new(*k, U256::ZERO)).collect()),
         );
-        if let Some(storage) = &account.storage {
-            let mut storage_changes = reth_provider::post_state::StorageChangeset::new();
-            for (&key, &value) in storage {
-                storage_changes
-                    .insert(U256::from_be_bytes(key.0), (U256::ZERO, U256::from_be_bytes(value.0)));
-            }
-            state.change_storage(0, *address, storage_changes);
-        }
+
+        state_init.insert(
+            *address,
+            (
+                None,
+                Some(Account {
+                    nonce: account.nonce.unwrap_or_default(),
+                    balance: account.balance,
+                    bytecode_hash,
+                }),
+                storage,
+            ),
+        );
     }
-    state.write_to_db(tx, 0)?;
+    let all_reverts_init: RevertsInit = HashMap::from([(0, reverts_init)]);
+
+    let bundle = BundleStateWithReceipts::new_init(
+        state_init,
+        all_reverts_init,
+        contracts.into_iter().collect(),
+        vec![],
+        0,
+    );
+
+    bundle.write_to_db(tx, OriginalValuesKnown::Yes)?;
 
     Ok(())
 }

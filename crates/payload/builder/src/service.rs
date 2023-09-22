@@ -48,6 +48,16 @@ impl PayloadStore {
     ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>> {
         self.inner.best_payload(id).await
     }
+
+    /// Returns the payload attributes associated with the given identifier.
+    ///
+    /// Note: this returns the attributes of the payload and does not resolve the job.
+    pub async fn payload_attributes(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<PayloadBuilderAttributes, PayloadBuilderError>> {
+        self.inner.payload_attributes(id).await
+    }
 }
 
 impl From<PayloadBuilderHandle> for PayloadStore {
@@ -94,6 +104,18 @@ impl PayloadBuilderHandle {
         rx.await.ok()?
     }
 
+    /// Returns the payload attributes associated with the given identifier.
+    ///
+    /// Note: this returns the attributes of the payload and does not resolve the job.
+    pub async fn payload_attributes(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<PayloadBuilderAttributes, PayloadBuilderError>> {
+        let (tx, rx) = oneshot::channel();
+        self.to_service.send(PayloadServiceCommand::PayloadAttributes(id, tx)).ok()?;
+        rx.await.ok()?
+    }
+
     /// Sends a message to the service to start building a new payload for the given payload.
     ///
     /// This is the same as [PayloadBuilderHandle::new_payload] but does not wait for the result and
@@ -124,10 +146,10 @@ impl PayloadBuilderHandle {
 ///
 /// This type is an endless future that manages the building of payloads.
 ///
-/// It tracks active payloads and their build jobs that run in the worker pool.
+/// It tracks active payloads and their build jobs that run in a worker pool.
 ///
-/// By design, this type relies entirely on the [PayloadJobGenerator] to create new payloads and
-/// does know nothing about how to build them, itt just drives the payload jobs.
+/// By design, this type relies entirely on the [`PayloadJobGenerator`] to create new payloads and
+/// does know nothing about how to build them, it just drives their jobs to completion.
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct PayloadBuilderService<Gen>
 where
@@ -141,7 +163,7 @@ where
     _service_tx: mpsc::UnboundedSender<PayloadServiceCommand>,
     /// Receiver half of the command channel.
     command_rx: UnboundedReceiverStream<PayloadServiceCommand>,
-    /// metrics for the payload builder service
+    /// Metrics for the payload builder service
     metrics: PayloadBuilderServiceMetrics,
 }
 
@@ -176,6 +198,17 @@ where
         id: PayloadId,
     ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>> {
         self.payload_jobs.iter().find(|(_, job_id)| *job_id == id).map(|(j, _)| j.best_payload())
+    }
+
+    /// Returns the payload attributes for the given payload.
+    fn payload_attributes(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<PayloadBuilderAttributes, PayloadBuilderError>> {
+        self.payload_jobs
+            .iter()
+            .find(|(_, job_id)| *job_id == id)
+            .map(|(j, _)| j.payload_attributes())
     }
 
     /// Returns the best payload for the given identifier that has been built so far and terminates
@@ -229,7 +262,6 @@ where
             }
 
             // marker for exit condition
-            // TODO(mattsse): this could be optmized so we only poll new jobs
             let mut new_job = false;
 
             // drain all requests
@@ -263,6 +295,9 @@ where
                     PayloadServiceCommand::BestPayload(id, tx) => {
                         let _ = tx.send(this.best_payload(id));
                     }
+                    PayloadServiceCommand::PayloadAttributes(id, tx) => {
+                        let _ = tx.send(this.payload_attributes(id));
+                    }
                     PayloadServiceCommand::Resolve(id, tx) => {
                         let _ = tx.send(this.resolve(id));
                     }
@@ -288,6 +323,11 @@ enum PayloadServiceCommand {
     ),
     /// Get the best payload so far
     BestPayload(PayloadId, oneshot::Sender<Option<Result<Arc<BuiltPayload>, PayloadBuilderError>>>),
+    /// Get the payload attributes for the given payload
+    PayloadAttributes(
+        PayloadId,
+        oneshot::Sender<Option<Result<PayloadBuilderAttributes, PayloadBuilderError>>>,
+    ),
     /// Resolve the payload and return the payload
     Resolve(PayloadId, oneshot::Sender<Option<PayloadFuture>>),
 }

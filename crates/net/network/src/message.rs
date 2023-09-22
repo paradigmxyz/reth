@@ -12,7 +12,7 @@ use reth_eth_wire::{
 };
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
 use reth_primitives::{
-    BlockBody, Bytes, Header, PeerId, ReceiptWithBloom, TransactionSigned, H256,
+    BlockBody, Bytes, Header, PeerId, PooledTransactionsElement, ReceiptWithBloom, H256,
 };
 use std::{
     fmt,
@@ -199,7 +199,7 @@ impl PeerResponse {
 pub enum PeerResponseResult {
     BlockHeaders(RequestResult<Vec<Header>>),
     BlockBodies(RequestResult<Vec<BlockBody>>),
-    PooledTransactions(RequestResult<Vec<TransactionSigned>>),
+    PooledTransactions(RequestResult<Vec<PooledTransactionsElement>>),
     NodeData(RequestResult<Vec<Bytes>>),
     Receipts(RequestResult<Vec<Vec<ReceiptWithBloom>>>),
 }

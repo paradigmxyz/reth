@@ -310,7 +310,7 @@ async fn test_connect_to_trusted_peer() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-#[ignore] // TODO: Re-enable once we figure out why this test is flakey
+#[cfg_attr(not(feature = "geth-tests"), ignore)]
 async fn test_incoming_node_id_blacklist() {
     reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
@@ -363,8 +363,7 @@ async fn test_incoming_node_id_blacklist() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-// #[cfg_attr(not(feature = "geth-tests"), ignore)]
-#[ignore] // TODO: Re-enable once we figure out why this test is flakey
+#[cfg_attr(not(feature = "geth-tests"), ignore)]
 async fn test_incoming_connect_with_single_geth() {
     reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
@@ -409,7 +408,6 @@ async fn test_incoming_connect_with_single_geth() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
 #[cfg_attr(not(feature = "geth-tests"), ignore)]
-#[ignore] // TODO: Re-enable once we figure out why this test is flakey
 async fn test_outgoing_connect_with_single_geth() {
     reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
@@ -456,7 +454,6 @@ async fn test_outgoing_connect_with_single_geth() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
 #[cfg_attr(not(feature = "geth-tests"), ignore)]
-#[ignore] // TODO: Re-enable once we figure out why this test is flakey
 async fn test_geth_disconnect() {
     reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
@@ -566,13 +563,12 @@ async fn test_shutdown() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
     let net = Testnet::create(1).await;
-    let (reth_p2p, reth_disc) = unused_tcp_udp();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let peers_config = PeersConfig::default().with_max_inbound(0);
 
     let config = NetworkConfigBuilder::new(secret_key)
-        .listener_addr(reth_p2p)
-        .discovery_addr(reth_disc)
+        .listener_port(0)
+        .discovery_port(0)
         .peer_config(peers_config)
         .build(NoopProvider::default());
     let network = NetworkManager::new(config).await.unwrap();

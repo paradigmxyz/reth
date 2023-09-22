@@ -1,6 +1,6 @@
 //! Ethereum protocol-related constants
 
-use crate::{H256, U256};
+use crate::{H160, H256, U256};
 use hex_literal::hex;
 use std::time::Duration;
 
@@ -84,6 +84,10 @@ pub const GOERLI_GENESIS: H256 =
 pub const SEPOLIA_GENESIS: H256 =
     H256(hex!("25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9"));
 
+/// Holesky genesis hash.
+pub const HOLESKY_GENESIS: H256 =
+    H256(hex!("ff9006519a8ce843ac9c28549d24211420b546e12ce2d170c77a8cca7964f23d"));
+
 /// Testnet genesis hash.
 pub const DEV_GENESIS: H256 =
     H256(hex!("2f980576711e3617a5e4d83dd539548ec0f7792007d505a3d2e9674833af2d7c"));
@@ -127,6 +131,13 @@ pub const BEACON_CONSENSUS_REORG_UNWIND_DEPTH: u64 = 3;
 /// See:
 /// <https://github.com/ethereum/go-ethereum/blob/a196f3e8a22b6ad22ced5c2e3baf32bc3ebd4ec9/consensus/ethash/consensus.go#L227-L229>
 pub const ALLOWED_FUTURE_BLOCK_TIME_SECONDS: u64 = 15;
+
+/// The address for the beacon roots contract defined in EIP-4788.
+pub const BEACON_ROOTS_ADDRESS: H160 = H160(hex!("bEAC020008aFF7331c0A389CB2AAb67597567d7a"));
+
+/// The caller to be used when calling the EIP-4788 beacon roots contract at the beginning of the
+/// block.
+pub const SYSTEM_ADDRESS: H160 = H160(hex!("fffffffffffffffffffffffffffffffffffffffe"));
 
 #[cfg(test)]
 mod tests {

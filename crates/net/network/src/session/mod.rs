@@ -4,7 +4,6 @@ use crate::{
     metrics::SessionManagerMetrics,
     session::{active::ActiveSession, config::SessionCounter},
 };
-pub use crate::{message::PeerRequestSender, session::handle::PeerInfo};
 use fnv::FnvHashMap;
 use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
@@ -40,11 +39,13 @@ use tracing::{instrument, trace};
 mod active;
 mod config;
 mod handle;
+pub use crate::message::PeerRequestSender;
 pub use config::{SessionLimits, SessionsConfig};
 pub use handle::{
     ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
     SessionCommand,
 };
+pub use reth_network_api::{Direction, PeerInfo};
 
 /// Internal identifier for active sessions.
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
@@ -175,12 +176,14 @@ impl SessionManager {
 
     /// Invoked on a received status update.
     ///
-    /// If the updated activated another fork, this will return a [`ForkTransition`] and updates the
-    /// active [`ForkId`](ForkId). See also [`ForkFilter::set_head`].
+    /// If the updated activated another fork, this will return a [ForkTransition] and updates the
+    /// active [ForkId]. See also [ForkFilter::set_head].
     pub(crate) fn on_status_update(&mut self, head: Head) -> Option<ForkTransition> {
         self.status.blockhash = head.hash;
         self.status.total_difficulty = head.total_difficulty;
-        self.fork_filter.set_head(head)
+        let transition = self.fork_filter.set_head(head);
+        self.status.forkid = self.fork_filter.current();
+        transition
     }
 
     /// An incoming TCP connection was received. This starts the authentication process to turn this
@@ -388,6 +391,7 @@ impl SessionManager {
             PendingSessionEvent::Established {
                 session_id,
                 remote_addr,
+                local_addr,
                 peer_id,
                 capabilities,
                 conn,
@@ -454,12 +458,14 @@ impl SessionManager {
                     ),
                     internal_request_timeout: Arc::clone(&timeout),
                     protocol_breach_request_timeout: self.protocol_breach_request_timeout,
+                    terminate_message: None,
                 };
 
                 self.spawn(session);
 
                 let client_version = Arc::new(client_id);
                 let handle = ActiveSessionHandle {
+                    status,
                     direction,
                     session_id,
                     remote_id: peer_id,
@@ -469,6 +475,7 @@ impl SessionManager {
                     commands_to_session,
                     client_version: Arc::clone(&client_version),
                     remote_addr,
+                    local_addr,
                 };
 
                 self.active_sessions.insert(peer_id, handle);
@@ -563,29 +570,14 @@ impl SessionManager {
 
     /// Returns [`PeerInfo`] for all connected peers
     pub fn get_peer_info(&self) -> Vec<PeerInfo> {
-        self.active_sessions
-            .values()
-            .map(|session| PeerInfo {
-                remote_id: session.remote_id,
-                direction: session.direction,
-                remote_addr: session.remote_addr,
-                capabilities: session.capabilities.clone(),
-                client_version: session.client_version.clone(),
-            })
-            .collect()
+        self.active_sessions.values().map(ActiveSessionHandle::peer_info).collect()
     }
 
     /// Returns [`PeerInfo`] for a given peer.
     ///
     /// Returns `None` if there's no active session to the peer.
     pub fn get_peer_info_by_id(&self, peer_id: PeerId) -> Option<PeerInfo> {
-        self.active_sessions.get(&peer_id).map(|session| PeerInfo {
-            remote_id: session.remote_id,
-            direction: session.direction,
-            remote_addr: session.remote_addr,
-            capabilities: session.capabilities.clone(),
-            client_version: session.client_version.clone(),
-        })
+        self.active_sessions.get(&peer_id).map(ActiveSessionHandle::peer_info)
     }
 }
 
@@ -713,36 +705,6 @@ impl PendingSessionHandshakeError {
     }
 }
 
-/// The direction of the connection.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum Direction {
-    /// Incoming connection.
-    Incoming,
-    /// Outgoing connection to a specific node.
-    Outgoing(PeerId),
-}
-
-impl Direction {
-    /// Returns `true` if this an incoming connection.
-    pub fn is_incoming(&self) -> bool {
-        matches!(self, Direction::Incoming)
-    }
-
-    /// Returns `true` if this an outgoing connection.
-    pub(crate) fn is_outgoing(&self) -> bool {
-        matches!(self, Direction::Outgoing(_))
-    }
-}
-
-impl std::fmt::Display for Direction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Direction::Incoming => write!(f, "incoming"),
-            Direction::Outgoing(_) => write!(f, "outgoing"),
-        }
-    }
-}
-
 /// The error thrown when the max configured limit has been reached and no more connections are
 /// accepted.
 #[derive(Debug, Clone, thiserror::Error)]
@@ -837,6 +799,7 @@ async fn authenticate(
     status: Status,
     fork_filter: ForkFilter,
 ) {
+    let local_addr = stream.inner().local_addr().ok();
     let stream = match get_eciess_stream(stream, secret_key, direction).await {
         Ok(stream) => stream,
         Err(error) => {
@@ -858,6 +821,7 @@ async fn authenticate(
         unauthed,
         session_id,
         remote_addr,
+        local_addr,
         direction,
         hello,
         status,
@@ -905,6 +869,7 @@ async fn authenticate_stream(
     stream: UnauthedP2PStream<ECIESStream<MeteredStream<TcpStream>>>,
     session_id: SessionId,
     remote_addr: SocketAddr,
+    local_addr: Option<SocketAddr>,
     direction: Direction,
     hello: HelloMessage,
     status: Status,
@@ -942,6 +907,7 @@ async fn authenticate_stream(
     PendingSessionEvent::Established {
         session_id,
         remote_addr,
+        local_addr,
         peer_id: their_hello.id,
         capabilities: Arc::new(Capabilities::from(their_hello.capabilities)),
         status: their_status,

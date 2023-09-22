@@ -12,19 +12,21 @@ use rand::{
     prelude::Distribution,
 };
 use reth_primitives::{
-    constants::MIN_PROTOCOL_BASE_FEE, hex, Address, FromRecoveredTransaction,
-    IntoRecoveredTransaction, Signature, Transaction, TransactionKind, TransactionSigned,
-    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxHash, TxLegacy, TxType, H256,
-    U128, U256,
+    constants::{eip4844::DATA_GAS_PER_BLOB, MIN_PROTOCOL_BASE_FEE},
+    hex, Address, FromRecoveredPooledTransaction, FromRecoveredTransaction,
+    IntoRecoveredTransaction, PooledTransactionsElementEcRecovered, Signature, Transaction,
+    TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930,
+    TxEip4844, TxHash, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, H256,
+    LEGACY_TX_TYPE_ID, U128, U256,
 };
 use std::{ops::Range, sync::Arc, time::Instant};
 
-pub(crate) type MockTxPool = TxPool<MockOrdering>;
+pub type MockTxPool = TxPool<MockOrdering>;
 
 pub type MockValidTx = ValidPoolTransaction<MockTransaction>;
 
 /// Create an empty `TxPool`
-pub(crate) fn mock_tx_pool() -> MockTxPool {
+pub fn mock_tx_pool() -> MockTxPool {
     MockTxPool::new(Default::default(), Default::default())
 }
 
@@ -60,25 +62,21 @@ macro_rules! get_value {
 // Generates all setters and getters
 macro_rules! make_setters_getters {
     ($($name:ident => $t:ty);*) => {
-  paste! {
-        $(
+        paste! {$(
             pub fn [<set_ $name>](&mut self, $name: $t) -> &mut Self {
                 set_value!(self => $name);
                 self
             }
 
-            pub fn [<with_$name>](mut self, $name: $t) -> Self {
+            pub fn [<with_ $name>](mut self, $name: $t) -> Self {
                 set_value!(self => $name);
                 self
             }
 
-            pub fn [<get_$name>](&self) -> $t {
+            pub fn [<get_ $name>](&self) -> $t {
                 get_value!(self => $name).clone()
             }
-
-        )*
-
-    }
+        )*}
     };
 }
 
@@ -110,6 +108,7 @@ pub enum MockTransaction {
         nonce: u64,
         max_fee_per_gas: u128,
         max_priority_fee_per_gas: u128,
+        max_fee_per_blob_gas: u128,
         gas_limit: u64,
         to: TransactionKind,
         value: U256,
@@ -154,6 +153,36 @@ impl MockTransaction {
         }
     }
 
+    /// Returns a new EIP1559 transaction with random address and hash and empty values
+    pub fn eip4844() -> Self {
+        MockTransaction::Eip4844 {
+            hash: H256::random(),
+            sender: Address::random(),
+            nonce: 0,
+            max_fee_per_gas: MIN_PROTOCOL_BASE_FEE as u128,
+            max_priority_fee_per_gas: MIN_PROTOCOL_BASE_FEE as u128,
+            max_fee_per_blob_gas: DATA_GAS_PER_BLOB as u128,
+            gas_limit: 0,
+            to: TransactionKind::Call(Address::random()),
+            value: Default::default(),
+        }
+    }
+
+    /// Sets the max fee per blob gas for EIP-4844 transactions,
+    pub fn with_blob_fee(mut self, val: u128) -> Self {
+        self.set_blob_fee(val);
+        self
+    }
+
+    /// Sets the max fee per blob gas for EIP-4844 transactions,
+    pub fn set_blob_fee(&mut self, val: u128) -> &mut Self {
+        if let MockTransaction::Eip4844 { max_fee_per_blob_gas, .. } = self {
+            *max_fee_per_blob_gas = val;
+        }
+        self
+    }
+
+    /// Sets the priority fee for dynamic fee transactions (EIP-1559 and EIP-4844)
     pub fn set_priority_fee(&mut self, val: u128) -> &mut Self {
         if let (MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } |
         MockTransaction::Eip4844 { max_priority_fee_per_gas, .. }) = self
@@ -164,11 +193,7 @@ impl MockTransaction {
     }
 
     pub fn with_priority_fee(mut self, val: u128) -> Self {
-        if let (MockTransaction::Eip1559 { ref mut max_priority_fee_per_gas, .. } |
-        MockTransaction::Eip4844 { ref mut max_priority_fee_per_gas, .. }) = self
-        {
-            *max_priority_fee_per_gas = val;
-        }
+        self.set_priority_fee(val);
         self
     }
 
@@ -192,11 +217,7 @@ impl MockTransaction {
     }
 
     pub fn with_max_fee(mut self, val: u128) -> Self {
-        if let (MockTransaction::Eip1559 { ref mut max_fee_per_gas, .. } |
-        MockTransaction::Eip4844 { ref mut max_fee_per_gas, .. }) = self
-        {
-            *max_fee_per_gas = val;
-        }
+        self.set_max_fee(val);
         self
     }
 
@@ -327,12 +348,24 @@ impl MockTransaction {
         next.with_gas_limit(gas)
     }
 
+    pub fn tx_type(&self) -> u8 {
+        match self {
+            Self::Legacy { .. } => LEGACY_TX_TYPE_ID,
+            Self::Eip1559 { .. } => EIP1559_TX_TYPE_ID,
+            Self::Eip4844 { .. } => EIP4844_TX_TYPE_ID,
+        }
+    }
+
     pub fn is_legacy(&self) -> bool {
         matches!(self, MockTransaction::Legacy { .. })
     }
 
     pub fn is_eip1559(&self) -> bool {
         matches!(self, MockTransaction::Eip1559 { .. })
+    }
+
+    pub fn is_eip4844(&self) -> bool {
+        matches!(self, MockTransaction::Eip4844 { .. })
     }
 }
 
@@ -396,6 +429,13 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Eip4844 { max_priority_fee_per_gas, .. } => {
                 Some(*max_priority_fee_per_gas)
             }
+        }
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        match self {
+            MockTransaction::Eip4844 { max_fee_per_blob_gas, .. } => Some(*max_fee_per_blob_gas),
+            _ => None,
         }
     }
 
@@ -505,13 +545,14 @@ impl FromRecoveredTransaction for MockTransaction {
                 input,
                 access_list,
                 blob_versioned_hashes: _,
-                max_fee_per_blob_gas: _,
+                max_fee_per_blob_gas,
             }) => MockTransaction::Eip4844 {
                 hash,
                 sender,
                 nonce,
                 max_fee_per_gas,
                 max_priority_fee_per_gas,
+                max_fee_per_blob_gas,
                 gas_limit,
                 to,
                 value: U256::from(value),
@@ -520,6 +561,12 @@ impl FromRecoveredTransaction for MockTransaction {
                 unimplemented!()
             }
         }
+    }
+}
+
+impl FromRecoveredPooledTransaction for MockTransaction {
+    fn from_recovered_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
+        FromRecoveredTransaction::from_recovered_transaction(tx.into_ecrecovered_transaction())
     }
 }
 
@@ -550,8 +597,6 @@ impl IntoRecoveredTransaction for MockTransaction {
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::arbitrary::Arbitrary for MockTransaction {
     type Parameters = ();
-    type Strategy = proptest::strategy::BoxedStrategy<MockTransaction>;
-
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::{any, Strategy};
 
@@ -610,6 +655,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     to,
                     value,
                     input,
+                    max_fee_per_blob_gas,
                     ..
                 }) => MockTransaction::Eip4844 {
                     sender,
@@ -617,6 +663,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     nonce: *nonce,
                     max_fee_per_gas: *max_fee_per_gas,
                     max_priority_fee_per_gas: *max_priority_fee_per_gas,
+                    max_fee_per_blob_gas: *max_fee_per_blob_gas,
                     gas_limit: *gas_limit,
                     to: *to,
                     value: U256::from(*value),
@@ -624,6 +671,8 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
             })
             .boxed()
     }
+
+    type Strategy = proptest::strategy::BoxedStrategy<MockTransaction>;
 }
 
 #[derive(Default)]
@@ -670,6 +719,10 @@ impl MockTransactionFactory {
 
     pub fn create_eip1559(&mut self) -> MockValidTx {
         self.validated(MockTransaction::eip1559())
+    }
+
+    pub fn create_eip4844(&mut self) -> MockValidTx {
+        self.validated(MockTransaction::eip4844())
     }
 }
 

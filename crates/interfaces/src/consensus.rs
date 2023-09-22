@@ -143,12 +143,18 @@ pub enum ConsensusError {
     ExcessBlobGasMissing,
     #[error("Unexpected excess blob gas")]
     ExcessBlobGasUnexpected,
+    #[error("Missing parent beacon block root")]
+    ParentBeaconBlockRootMissing,
+    #[error("Unexpected parent beacon block root")]
+    ParentBeaconBlockRootUnexpected,
     #[error("Blob gas used {blob_gas_used} exceeds maximum allowance {max_blob_gas_per_block}")]
     BlobGasUsedExceedsMaxBlobGasPerBlock { blob_gas_used: u64, max_blob_gas_per_block: u64 },
     #[error(
         "Blob gas used {blob_gas_used} is not a multiple of blob gas per blob {blob_gas_per_blob}"
     )]
     BlobGasUsedNotMultipleOfBlobGasPerBlob { blob_gas_used: u64, blob_gas_per_blob: u64 },
+    #[error("Blob gas used in the header {header_blob_gas_used} does not match the expected blob gas used {expected_blob_gas_used}")]
+    BlobGasUsedDiff { header_blob_gas_used: u64, expected_blob_gas_used: u64 },
     #[error("Invalid excess blob gas. Expected: {expected}, got: {got}. Parent excess blob gas: {parent_excess_blob_gas}, parent blob gas used: {parent_blob_gas_used}.")]
     ExcessBlobGasDiff {
         expected: u64,

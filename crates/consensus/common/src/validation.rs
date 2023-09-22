@@ -1,5 +1,5 @@
 //! Collection of methods for block validation.
-use reth_interfaces::{consensus::ConsensusError, Result as RethResult};
+use reth_interfaces::{consensus::ConsensusError, RethResult};
 use reth_primitives::{
     constants::{
         self,
@@ -50,6 +50,8 @@ pub fn validate_header_standalone(
         return Err(ConsensusError::BlobGasUsedUnexpected)
     } else if header.excess_blob_gas.is_some() {
         return Err(ConsensusError::ExcessBlobGasUnexpected)
+    } else if header.parent_beacon_block_root.is_some() {
+        return Err(ConsensusError::ParentBeaconBlockRootUnexpected)
     }
 
     Ok(())
@@ -242,6 +244,20 @@ pub fn validate_block_standalone(
                 }
                 prev_index = withdrawal.index;
             }
+        }
+    }
+
+    // EIP-4844: Shard Blob Transactions
+    if chain_spec.is_cancun_activated_at_timestamp(block.timestamp) {
+        // Check that the blob gas used in the header matches the sum of the blob gas used by each
+        // blob tx
+        let header_blob_gas_used = block.blob_gas_used.ok_or(ConsensusError::BlobGasUsedMissing)?;
+        let total_blob_gas = block.blob_gas_used();
+        if total_blob_gas != header_blob_gas_used {
+            return Err(ConsensusError::BlobGasUsedDiff {
+                header_blob_gas_used,
+                expected_blob_gas_used: total_blob_gas,
+            })
         }
     }
 
@@ -451,6 +467,7 @@ pub fn validate_4844_header_with_parent(
 ///
 ///  * `blob_gas_used` exists as a header field
 ///  * `excess_blob_gas` exists as a header field
+///  * `parent_beacon_block_root` exists as a header field
 ///  * `blob_gas_used` is less than or equal to `MAX_DATA_GAS_PER_BLOCK`
 ///  * `blob_gas_used` is a multiple of `DATA_GAS_PER_BLOB`
 pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), ConsensusError> {
@@ -458,6 +475,10 @@ pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), Cons
 
     if header.excess_blob_gas.is_none() {
         return Err(ConsensusError::ExcessBlobGasMissing)
+    }
+
+    if header.parent_beacon_block_root.is_none() {
+        return Err(ConsensusError::ParentBeaconBlockRootMissing)
     }
 
     if blob_gas_used > MAX_DATA_GAS_PER_BLOCK {
@@ -482,11 +503,11 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use mockall::mock;
-    use reth_interfaces::{Error::Consensus, Result};
+    use reth_interfaces::{RethError::Consensus, RethResult};
     use reth_primitives::{
-        hex_literal::hex, proofs, Account, Address, BlockHash, BlockHashOrNumber, Bytes,
-        ChainSpecBuilder, Header, Signature, TransactionKind, TransactionSigned, Withdrawal,
-        MAINNET, U256,
+        constants::eip4844::DATA_GAS_PER_BLOB, hex_literal::hex, proofs, Account, Address,
+        BlockBody, BlockHash, BlockHashOrNumber, Bytes, ChainSpecBuilder, Header, Signature,
+        TransactionKind, TransactionSigned, Withdrawal, H256, MAINNET, U256,
     };
     use std::ops::RangeBounds;
 
@@ -494,7 +515,7 @@ mod tests {
         WithdrawalsProvider {}
 
         impl WithdrawalsProvider for WithdrawalsProvider {
-            fn latest_withdrawal(&self) -> Result<Option<Withdrawal>> ;
+            fn latest_withdrawal(&self) -> RethResult<Option<Withdrawal>> ;
 
             fn withdrawals_by_block(
                 &self,
@@ -533,44 +554,44 @@ mod tests {
     }
 
     impl AccountReader for Provider {
-        fn basic_account(&self, _address: Address) -> Result<Option<Account>> {
+        fn basic_account(&self, _address: Address) -> RethResult<Option<Account>> {
             Ok(self.account)
         }
     }
 
     impl HeaderProvider for Provider {
-        fn is_known(&self, _block_hash: &BlockHash) -> Result<bool> {
+        fn is_known(&self, _block_hash: &BlockHash) -> RethResult<bool> {
             Ok(self.is_known)
         }
 
-        fn header(&self, _block_number: &BlockHash) -> Result<Option<Header>> {
+        fn header(&self, _block_number: &BlockHash) -> RethResult<Option<Header>> {
             Ok(self.parent.clone())
         }
 
-        fn header_by_number(&self, _num: u64) -> Result<Option<Header>> {
+        fn header_by_number(&self, _num: u64) -> RethResult<Option<Header>> {
             Ok(self.parent.clone())
         }
 
-        fn header_td(&self, _hash: &BlockHash) -> Result<Option<U256>> {
+        fn header_td(&self, _hash: &BlockHash) -> RethResult<Option<U256>> {
             Ok(None)
         }
 
-        fn header_td_by_number(&self, _number: BlockNumber) -> Result<Option<U256>> {
+        fn header_td_by_number(&self, _number: BlockNumber) -> RethResult<Option<U256>> {
             Ok(None)
         }
 
-        fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>> {
+        fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
             Ok(vec![])
         }
 
         fn sealed_headers_range(
             &self,
             _range: impl RangeBounds<BlockNumber>,
-        ) -> Result<Vec<SealedHeader>> {
+        ) -> RethResult<Vec<SealedHeader>> {
             Ok(vec![])
         }
 
-        fn sealed_header(&self, _block_number: BlockNumber) -> Result<Option<SealedHeader>> {
+        fn sealed_header(&self, _block_number: BlockNumber) -> RethResult<Option<SealedHeader>> {
             Ok(None)
         }
     }
@@ -584,7 +605,7 @@ mod tests {
             self.withdrawals_provider.withdrawals_by_block(_id, _timestamp)
         }
 
-        fn latest_withdrawal(&self) -> Result<Option<Withdrawal>> {
+        fn latest_withdrawal(&self) -> RethResult<Option<Withdrawal>> {
             self.withdrawals_provider.latest_withdrawal()
         }
     }
@@ -606,6 +627,26 @@ mod tests {
         let tx = TransactionSigned::from_transaction_and_signature(request, signature);
         let signer = Address::zero();
         TransactionSignedEcRecovered::from_signed_transaction(tx, signer)
+    }
+
+    fn mock_blob_tx(nonce: u64, num_blobs: usize) -> TransactionSigned {
+        let request = Transaction::Eip4844(TxEip4844 {
+            chain_id: 1u64,
+            nonce,
+            max_fee_per_gas: 0x28f000fff,
+            max_priority_fee_per_gas: 0x28f000fff,
+            max_fee_per_blob_gas: 0x7,
+            gas_limit: 10,
+            to: TransactionKind::Call(Address::default()),
+            value: 3,
+            input: Bytes::from(vec![1, 2]),
+            access_list: Default::default(),
+            blob_versioned_hashes: vec![H256::random(); num_blobs],
+        });
+
+        let signature = Signature { odd_y_parity: true, r: U256::default(), s: U256::default() };
+
+        TransactionSigned::from_transaction_and_signature(request, signature)
     }
 
     /// got test block
@@ -633,6 +674,7 @@ mod tests {
             withdrawals_root: None,
             blob_gas_used: None,
             excess_blob_gas: None,
+            parent_beacon_block_root: None,
         };
         // size: 0x9b5
 
@@ -813,5 +855,42 @@ mod tests {
         .seal_slow();
 
         assert_eq!(validate_header_standalone(&header, &chain_spec), Ok(()));
+    }
+
+    #[test]
+    fn cancun_block_incorrect_blob_gas_used() {
+        let chain_spec = ChainSpecBuilder::mainnet().cancun_activated().build();
+
+        // create a tx with 10 blobs
+        let transaction = mock_blob_tx(1, 10);
+
+        let header = Header {
+            base_fee_per_gas: Some(1337u64),
+            withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
+            blob_gas_used: Some(1),
+            transactions_root: proofs::calculate_transaction_root(&[transaction.clone()]),
+            ..Default::default()
+        }
+        .seal_slow();
+
+        let body = BlockBody {
+            transactions: vec![transaction],
+            ommers: vec![],
+            withdrawals: Some(vec![]),
+        };
+
+        let block = SealedBlock::new(header, body);
+
+        // 10 blobs times the blob gas per blob
+        let expected_blob_gas_used = 10 * DATA_GAS_PER_BLOB;
+
+        // validate blob, it should fail blob gas used validation
+        assert_eq!(
+            validate_block_standalone(&block, &chain_spec),
+            Err(ConsensusError::BlobGasUsedDiff {
+                header_blob_gas_used: 1,
+                expected_blob_gas_used
+            })
+        );
     }
 }

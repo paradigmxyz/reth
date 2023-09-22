@@ -28,7 +28,7 @@ pub(crate) struct PendingPool<T: TransactionOrdering> {
     ordering: T,
     /// Keeps track of transactions inserted in the pool.
     ///
-    /// This way we can determine when transactions where submitted to the pool.
+    /// This way we can determine when transactions were submitted to the pool.
     submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
     by_id: BTreeMap<TransactionId, PendingTransaction<T>>,
@@ -65,6 +65,19 @@ impl<T: TransactionOrdering> PendingPool<T> {
         }
     }
 
+    /// Clear all transactions from the pool without resetting other values.
+    /// Used for atomic reordering during basefee update.
+    ///
+    /// # Returns
+    ///
+    /// Returns all transactions by id.
+    fn clear_transactions(&mut self) -> BTreeMap<TransactionId, PendingTransaction<T>> {
+        self.independent_transactions.clear();
+        self.all.clear();
+        self.size_of.reset();
+        std::mem::take(&mut self.by_id)
+    }
+
     /// Returns an iterator over all transactions that are _currently_ ready.
     ///
     /// 1. The iterator _always_ returns transaction in order: It never returns a transaction with
@@ -88,7 +101,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
             all: self.by_id.clone(),
             independent: self.independent_transactions.clone(),
             invalid: Default::default(),
-            new_transaction_reciever: self.new_transaction_notifier.subscribe(),
+            new_transaction_receiver: Some(self.new_transaction_notifier.subscribe()),
+            skip_blobs: false,
         }
     }
 
@@ -149,43 +163,37 @@ impl<T: TransactionOrdering> PendingPool<T> {
         &mut self,
         base_fee: u64,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        // Create a collection for txs to remove .
-        let mut to_remove = Vec::new();
+        // Create a collection for removed transactions.
+        let mut removed = Vec::new();
 
-        // Iterate over transactions, find the ones we need to remove and update others in place.
-        {
-            let mut iter = self.by_id.iter_mut().peekable();
-            while let Some((id, tx)) = iter.next() {
-                if tx.transaction.max_fee_per_gas() < base_fee as u128 {
-                    // This transaction no longer satisfies the basefee: remove it and all its
-                    // descendants.
-                    to_remove.push(*id);
-                    'this: while let Some((peek, _)) = iter.peek() {
-                        if peek.sender != id.sender {
-                            break 'this
-                        }
-                        to_remove.push(**peek);
-                        iter.next();
+        // Drain and iterate over all transactions.
+        let mut transactions_iter = self.clear_transactions().into_iter().peekable();
+        while let Some((id, mut tx)) = transactions_iter.next() {
+            if tx.transaction.max_fee_per_gas() < base_fee as u128 {
+                // Add this tx to the removed collection since it no longer satisfies the base fee
+                // condition. Decrease the total pool size.
+                removed.push(Arc::clone(&tx.transaction));
+
+                // Remove all dependent transactions.
+                'this: while let Some((next_id, next_tx)) = transactions_iter.peek() {
+                    if next_id.sender != id.sender {
+                        break 'this
                     }
-                } else {
-                    // Update the transaction with new priority.
-                    let new_priority =
-                        self.ordering.priority(&tx.transaction.transaction, base_fee);
-                    tx.priority = new_priority;
-
-                    self.all.insert(tx.clone());
+                    removed.push(Arc::clone(&next_tx.transaction));
+                    transactions_iter.next();
                 }
+            } else {
+                // Re-insert the transaction with new priority.
+                tx.priority = self.ordering.priority(&tx.transaction.transaction, base_fee);
+
+                self.size_of += tx.transaction.size();
+                if self.ancestor(&id).is_none() {
+                    self.independent_transactions.insert(tx.clone());
+                }
+                self.all.insert(tx.clone());
+                self.by_id.insert(id, tx);
             }
         }
-
-        let mut removed = Vec::with_capacity(to_remove.len());
-        for id in to_remove {
-            removed.push(self.remove_transaction(&id).expect("transaction exists"));
-        }
-
-        // Clear ordered lists since the priority would be changed.
-        self.independent_transactions.clear();
-        self.all.clear();
 
         removed
     }
@@ -260,10 +268,10 @@ impl<T: TransactionOrdering> PendingPool<T> {
         id: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         let tx = self.by_id.remove(id)?;
-        self.all.remove(&tx);
         self.size_of -= tx.transaction.size();
+        self.all.remove(&tx);
         self.independent_transactions.remove(&tx);
-        Some(tx.transaction.clone())
+        Some(tx.transaction)
     }
 
     fn next_id(&mut self) -> u64 {
@@ -292,6 +300,22 @@ impl<T: TransactionOrdering> PendingPool<T> {
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.by_id.is_empty()
+    }
+
+    /// Returns `true` if the transaction with the given id is already included in this pool.
+    #[cfg(test)]
+    pub(crate) fn contains(&self, id: &TransactionId) -> bool {
+        self.by_id.contains_key(id)
+    }
+
+    /// Asserts that the bijection between `by_id` and `all` is valid.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn assert_invariants(&self) {
+        assert_eq!(self.by_id.len(), self.all.len(), "by_id.len() != all.len()");
+        assert!(
+            self.independent_transactions.len() <= self.all.len(),
+            "independent.len() > all.len()"
+        );
     }
 }
 

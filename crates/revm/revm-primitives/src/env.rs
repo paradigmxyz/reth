@@ -1,9 +1,10 @@
 use crate::config::revm_spec;
 use reth_primitives::{
+    constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
     recover_signer, Address, Bytes, Chain, ChainSpec, Head, Header, Transaction, TransactionKind,
-    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxLegacy, U256,
+    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxLegacy, H256, U256,
 };
-use revm::primitives::{AnalysisKind, BlockEnv, CfgEnv, SpecId, TransactTo, TxEnv};
+use revm::primitives::{AnalysisKind, BlockEnv, CfgEnv, Env, SpecId, TransactTo, TxEnv};
 
 /// Convenience function to call both [fill_cfg_env] and [fill_block_env]
 pub fn fill_cfg_and_block_env(
@@ -36,9 +37,8 @@ pub fn fill_cfg_env(
         },
     );
 
-    cfg_env.chain_id = U256::from(chain_spec.chain().id());
+    cfg_env.chain_id = chain_spec.chain().id();
     cfg_env.spec_id = spec_id;
-    cfg_env.perf_all_precompiles_have_balance = false;
     cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
 }
 
@@ -73,6 +73,11 @@ pub fn fill_block_env_with_coinbase(
     }
     block_env.basefee = U256::from(header.base_fee_per_gas.unwrap_or_default());
     block_env.gas_limit = U256::from(header.gas_limit);
+
+    // EIP-4844 excess blob gas of this block, introduced in Cancun
+    if let Some(excess_blob_gas) = header.excess_blob_gas {
+        block_env.set_blob_excess_gas_and_price(excess_blob_gas);
+    }
 }
 
 /// Return the coinbase address for the given header and chain spec.
@@ -105,6 +110,51 @@ pub fn tx_env_with_recovered(transaction: &TransactionSignedEcRecovered) -> TxEn
     let mut tx_env = TxEnv::default();
     fill_tx_env(&mut tx_env, transaction.as_ref(), transaction.signer());
     tx_env
+}
+
+/// Fill transaction environment with the EIP-4788 system contract message data.
+///
+/// This requirements for the beacon root contract call defined by
+/// [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) are:
+///
+/// At the start of processing any execution block where `block.timestamp >= FORK_TIMESTAMP` (i.e.
+/// before processing any transactions), call `BEACON_ROOTS_ADDRESS` as `SYSTEM_ADDRESS` with the
+/// 32-byte input of `header.parent_beacon_block_root`, a gas limit of `30_000_000`, and `0` value.
+/// This will trigger the `set()` routine of the beacon roots contract. This is a system operation
+/// and therefore:
+///  * the call must execute to completion
+///  * the call does not count against the block’s gas limit
+///  * the call does not follow the EIP-1559 burn semantics - no value should be transferred as
+///  part of the call
+///  * if no code exists at `BEACON_ROOTS_ADDRESS`, the call must fail silently
+pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_block_root: H256) {
+    env.tx = TxEnv {
+        caller: SYSTEM_ADDRESS,
+        transact_to: TransactTo::Call(BEACON_ROOTS_ADDRESS),
+        // Explicitly set nonce to None so revm does not do any nonce checks
+        nonce: None,
+        gas_limit: 30_000_000,
+        value: U256::ZERO,
+        data: parent_beacon_block_root.to_fixed_bytes().to_vec().into(),
+        // Setting the gas price to zero enforces that no value is transferred as part of the call,
+        // and that the call will not count against the block's gas limit
+        gas_price: U256::ZERO,
+        // The chain ID check is not relevant here and is disabled if set to None
+        chain_id: None,
+        // Setting the gas priority fee to None ensures the effective gas price is derived from the
+        // `gas_price` field, which we need to be zero
+        gas_priority_fee: None,
+        access_list: Vec::new(),
+        // blob fields can be None for this tx
+        blob_hashes: Vec::new(),
+        max_fee_per_blob_gas: None,
+    };
+
+    // ensure the block gas limit is >= the tx
+    env.block.gas_limit = U256::from(env.tx.gas_limit);
+
+    // disable the base fee check for this call by setting the base fee to zero
+    env.block.basefee = U256::ZERO;
 }
 
 /// Fill transaction environment from [TransactionSignedEcRecovered].
@@ -221,8 +271,8 @@ where
             to,
             value,
             access_list,
-            blob_versioned_hashes: _,
-            max_fee_per_blob_gas: _,
+            blob_versioned_hashes,
+            max_fee_per_blob_gas,
             input,
         }) => {
             tx_env.gas_limit = *gas_limit;
@@ -249,6 +299,8 @@ where
                     )
                 })
                 .collect();
+            tx_env.blob_hashes = blob_versioned_hashes.clone();
+            tx_env.max_fee_per_blob_gas = Some(U256::from(*max_fee_per_blob_gas));
         }
     }
 }

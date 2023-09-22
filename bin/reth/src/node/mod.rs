@@ -8,7 +8,10 @@ use crate::{
         DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
         RpcServerArgs, TxPoolArgs,
     },
-    cli::ext::{RethCliExt, RethNodeCommandConfig},
+    cli::{
+        config::RethRpcConfig,
+        ext::{RethCliExt, RethNodeCommandConfig},
+    },
     dirs::{DataDirPath, MaybePlatformPath},
     init::init_genesis,
     node::cl_events::ConsensusLayerHealthEvents,
@@ -17,12 +20,15 @@ use crate::{
     utils::get_single_header,
     version::SHORT_VERSION,
 };
-use clap::Parser;
+use clap::{value_parser, Parser};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{future::Either, pin_mut, stream, stream_select, StreamExt};
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
-use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine, MIN_BLOCKS_FOR_PIPELINE_RUN};
+use reth_beacon_consensus::{
+    hooks::{EngineHooks, PruneHook},
+    BeaconConsensus, BeaconConsensusEngine, MIN_BLOCKS_FOR_PIPELINE_RUN,
+};
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
@@ -40,18 +46,20 @@ use reth_interfaces::{
         either::EitherDownloader,
         headers::{client::HeadersClient, downloader::HeaderDownloader},
     },
+    RethResult,
 };
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
-use reth_network_api::NetworkInfo;
+use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_primitives::{
-    stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head,
-    SealedHeader, H256,
+    constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
+    kzg::KzgSettings,
+    stage::StageId,
+    BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head, SealedHeader, H256,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
     HeaderProvider, ProviderFactory, StageCheckpointReader,
 };
-use reth_prune::BatchSizes;
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
@@ -65,7 +73,9 @@ use reth_stages::{
     MetricEventsSender, MetricsListener,
 };
 use reth_tasks::TaskExecutor;
-use reth_transaction_pool::{EthTransactionValidator, TransactionPool};
+use reth_transaction_pool::{
+    blobstore::InMemoryBlobStore, TransactionPool, TransactionValidationTaskExecutor,
+};
 use secp256k1::SecretKey;
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
@@ -121,6 +131,26 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     #[arg(long, value_name = "SOCKET", value_parser = parse_socket_address, help_heading = "Metrics")]
     pub metrics: Option<SocketAddr>,
 
+    /// Add a new instance of a node.
+    ///
+    /// Configures the ports of the node to avoid conflicts with the defaults.
+    /// This is useful for running multiple nodes on the same machine.
+    ///
+    /// Max number of instances is 200. It is chosen in a way so that it's not possible to have
+    /// port numbers that conflict with each other.
+    ///
+    /// Changes to the following port numbers:
+    /// - DISCOVERY_PORT: default + `instance` - 1
+    /// - AUTH_PORT: default + `instance` * 100 - 100
+    /// - HTTP_RPC_PORT: default - `instance` + 1
+    /// - WS_RPC_PORT: default + `instance` * 2 - 2
+    #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
+    pub instance: u16,
+
+    /// Overrides the KZG trusted setup by reading from the supplied file.
+    #[arg(long, value_name = "PATH")]
+    pub trusted_setup_file: Option<PathBuf>,
+
     /// All networking related arguments
     #[clap(flatten)]
     pub network: NetworkArgs,
@@ -166,6 +196,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             config,
             chain,
             metrics,
+            trusted_setup_file,
+            instance,
             network,
             rpc,
             txpool,
@@ -181,6 +213,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             config,
             chain,
             metrics,
+            instance,
+            trusted_setup_file,
             network,
             rpc,
             txpool,
@@ -237,6 +271,9 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let metrics_listener = MetricsListener::new(metrics_rx);
         ctx.task_executor.spawn_critical("metrics listener task", metrics_listener);
 
+        let prune_config =
+            self.pruning.prune_config(Arc::clone(&self.chain))?.or(config.prune.clone());
+
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
             db.clone(),
@@ -254,6 +291,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 tree_externals,
                 canon_state_notification_sender.clone(),
                 tree_config,
+                prune_config.clone().map(|config| config.parts),
             )?
             .with_sync_metrics_tx(metrics_tx.clone()),
         );
@@ -261,16 +299,14 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // setup the blockchain provider
         let factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
         let blockchain_db = BlockchainProvider::new(factory, blockchain_tree.clone())?;
+        let blob_store = InMemoryBlobStore::default();
+        let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
+            .kzg_settings(self.kzg_settings()?)
+            .with_additional_tasks(1)
+            .build_with_tasks(blockchain_db.clone(), ctx.task_executor.clone(), blob_store.clone());
 
-        let transaction_pool = reth_transaction_pool::Pool::eth_pool(
-            EthTransactionValidator::with_additional_tasks(
-                blockchain_db.clone(),
-                Arc::clone(&self.chain),
-                ctx.task_executor.clone(),
-                1,
-            ),
-            self.txpool.pool_config(),
-        );
+        let transaction_pool =
+            reth_transaction_pool::Pool::eth_pool(validator, blob_store, self.txpool.pool_config());
         info!(target: "reth::cli", "Transaction pool initialized");
 
         // spawn txpool maintenance task
@@ -314,7 +350,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 default_peers_path,
             )
             .await?;
-        info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
+        info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), enode = %network.local_node_record(), "Connected to P2P network");
         debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
         let network_client = network.fetch_client().await?;
 
@@ -336,8 +372,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         } else {
             None
         };
-
-        let prune_config = self.pruning.prune_config(Arc::clone(&self.chain))?.or(config.prune);
 
         // Configure the pipeline
         let (mut pipeline, client) = if self.dev.dev {
@@ -373,7 +407,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     db.clone(),
                     &ctx.task_executor,
                     metrics_tx,
-                    prune_config,
+                    prune_config.clone(),
                     max_block,
                 )
                 .await?;
@@ -393,7 +427,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     db.clone(),
                     &ctx.task_executor,
                     metrics_tx,
-                    prune_config,
+                    prune_config.clone(),
                     max_block,
                 )
                 .await?;
@@ -416,16 +450,19 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             None
         };
 
-        let pruner = prune_config.map(|prune_config| {
-            info!(target: "reth::cli", "Pruner initialized");
-            reth_prune::Pruner::new(
+        let mut hooks = EngineHooks::new();
+
+        if let Some(prune_config) = prune_config {
+            info!(target: "reth::cli", ?prune_config, "Pruner initialized");
+            let pruner = reth_prune::Pruner::new(
                 db.clone(),
                 self.chain.clone(),
                 prune_config.block_interval,
                 prune_config.parts,
-                BatchSizes::default(),
-            )
-        });
+                self.chain.prune_batch_sizes,
+            );
+            hooks.add(PruneHook::new(pruner, Box::new(ctx.task_executor.clone())));
+        }
 
         // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
@@ -441,7 +478,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             MIN_BLOCKS_FOR_PIPELINE_RUN,
             consensus_engine_tx,
             consensus_engine_rx,
-            pruner,
+            hooks,
         )?;
         info!(target: "reth::cli", "Consensus engine initialized");
 
@@ -475,6 +512,9 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // extract the jwt secret from the args if possible
         let default_jwt_path = data_dir.jwt_path();
         let jwt_secret = self.rpc.jwt_secret(default_jwt_path)?;
+
+        // adjust rpc port numbers based on instance number
+        self.adjust_instance_ports();
 
         // Start RPC servers
         let (_rpc_server, _auth_server) = self
@@ -561,6 +601,18 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .wrap_err_with(|| format!("Could not load config file {:?}", config_path))
     }
 
+    /// Loads the trusted setup params from a given file path or falls back to
+    /// `MAINNET_KZG_TRUSTED_SETUP`.
+    fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
+        if let Some(ref trusted_setup_file) = self.trusted_setup_file {
+            let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file)
+                .map_err(LoadKzgSettingsError::KzgError)?;
+            Ok(Arc::new(trusted_setup))
+        } else {
+            Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
+        }
+    }
+
     fn init_trusted_nodes(&self, config: &mut Config) {
         config.peers.connect_trusted_nodes_only = self.network.trusted_only;
 
@@ -613,7 +665,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         Ok(handle)
     }
 
-    fn lookup_head(&self, db: Arc<DatabaseEnv>) -> Result<Head, reth_interfaces::Error> {
+    fn lookup_head(&self, db: Arc<DatabaseEnv>) -> RethResult<Head> {
         let factory = ProviderFactory::new(db, self.chain.clone());
         let provider = factory.provider()?;
 
@@ -646,10 +698,10 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     /// NOTE: The download is attempted with infinite retries.
     async fn lookup_or_fetch_tip<DB, Client>(
         &self,
-        db: &DB,
+        db: DB,
         client: Client,
         tip: H256,
-    ) -> Result<u64, reth_interfaces::Error>
+    ) -> RethResult<u64>
     where
         DB: Database,
         Client: HeadersClient,
@@ -662,10 +714,10 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     /// NOTE: The download is attempted with infinite retries.
     async fn fetch_tip<DB, Client>(
         &self,
-        db: &DB,
+        db: DB,
         client: Client,
         tip: BlockHashOrNumber,
-    ) -> Result<SealedHeader, reth_interfaces::Error>
+    ) -> RethResult<SealedHeader>
     where
         DB: Database,
         Client: HeadersClient,
@@ -710,11 +762,19 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .set_head(head)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::UNSPECIFIED,
-                self.network.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
+                // set discovery port based on instance number
+                match self.network.port {
+                    Some(port) => port + self.instance - 1,
+                    None => DEFAULT_DISCOVERY_PORT + self.instance - 1,
+                },
             )))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::UNSPECIFIED,
-                self.network.discovery.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
+                // set discovery port based on instance number
+                match self.network.port {
+                    Some(port) => port + self.instance - 1,
+                    None => DEFAULT_DISCOVERY_PORT + self.instance - 1,
+                },
             )))
             .build(ProviderFactory::new(db, self.chain.clone()))
     }
@@ -765,6 +825,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         let factory = factory.with_stack_config(stack_config);
 
+        let prune_modes = prune_config.map(|prune| prune.parts).unwrap_or_default();
+
         let header_mode =
             if continuous { HeaderSyncMode::Continuous } else { HeaderSyncMode::Tip(tip_rx) };
         let pipeline = builder
@@ -791,13 +853,14 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                         ExecutionStageThresholds {
                             max_blocks: stage_config.execution.max_blocks,
                             max_changes: stage_config.execution.max_changes,
+                            max_cumulative_gas: stage_config.execution.max_cumulative_gas,
                         },
                         stage_config
                             .merkle
                             .clean_threshold
                             .max(stage_config.account_hashing.clean_threshold)
                             .max(stage_config.storage_hashing.clean_threshold),
-                        prune_config.map(|prune| prune.parts).unwrap_or_default(),
+                        prune_modes.clone(),
                     )
                     .with_metrics_tx(metrics_tx),
                 )
@@ -810,17 +873,32 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     stage_config.storage_hashing.commit_threshold,
                 ))
                 .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
-                .set(TransactionLookupStage::new(stage_config.transaction_lookup.commit_threshold))
+                .set(TransactionLookupStage::new(
+                    stage_config.transaction_lookup.commit_threshold,
+                    prune_modes.clone(),
+                ))
                 .set(IndexAccountHistoryStage::new(
                     stage_config.index_account_history.commit_threshold,
+                    prune_modes.clone(),
                 ))
                 .set(IndexStorageHistoryStage::new(
                     stage_config.index_storage_history.commit_threshold,
+                    prune_modes,
                 )),
             )
             .build(db, self.chain.clone());
 
         Ok(pipeline)
+    }
+
+    /// Change rpc port numbers based on the instance number.
+    fn adjust_instance_ports(&mut self) {
+        // auth port is scaled by a factor of instance * 100
+        self.rpc.auth_port += self.instance * 100 - 100;
+        // http port is scaled by a factor of -instance
+        self.rpc.http_port -= self.instance - 1;
+        // ws port is scaled by a factor of instance * 2
+        self.rpc.ws_port += self.instance * 2 - 2;
     }
 }
 
@@ -952,5 +1030,38 @@ mod tests {
         assert!(cmd.network.discovery.disable_discovery);
 
         assert!(cmd.dev.dev);
+    }
+
+    #[test]
+    fn parse_instance() {
+        let mut cmd = NodeCommand::<()>::parse_from(["reth"]);
+        cmd.adjust_instance_ports();
+        cmd.network.port = Some(DEFAULT_DISCOVERY_PORT + cmd.instance - 1);
+        // check rpc port numbers
+        assert_eq!(cmd.rpc.auth_port, 8551);
+        assert_eq!(cmd.rpc.http_port, 8545);
+        assert_eq!(cmd.rpc.ws_port, 8546);
+        // check network listening port number
+        assert_eq!(cmd.network.port.unwrap(), 30303);
+
+        let mut cmd = NodeCommand::<()>::parse_from(["reth", "--instance", "2"]);
+        cmd.adjust_instance_ports();
+        cmd.network.port = Some(DEFAULT_DISCOVERY_PORT + cmd.instance - 1);
+        // check rpc port numbers
+        assert_eq!(cmd.rpc.auth_port, 8651);
+        assert_eq!(cmd.rpc.http_port, 8544);
+        assert_eq!(cmd.rpc.ws_port, 8548);
+        // check network listening port number
+        assert_eq!(cmd.network.port.unwrap(), 30304);
+
+        let mut cmd = NodeCommand::<()>::parse_from(["reth", "--instance", "3"]);
+        cmd.adjust_instance_ports();
+        cmd.network.port = Some(DEFAULT_DISCOVERY_PORT + cmd.instance - 1);
+        // check rpc port numbers
+        assert_eq!(cmd.rpc.auth_port, 8751);
+        assert_eq!(cmd.rpc.http_port, 8543);
+        assert_eq!(cmd.rpc.ws_port, 8550);
+        // check network listening port number
+        assert_eq!(cmd.network.port.unwrap(), 30305);
     }
 }

@@ -55,7 +55,7 @@ use std::{
 };
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 /// Manages the _entire_ state of the network.
 ///
@@ -271,7 +271,7 @@ where
     ///     let local_key = rng_secret_key();
     ///
     ///     let config =
-    ///         NetworkConfig::<NoopProvider>::builder(local_key).boot_nodes(mainnet_nodes()).build(client.clone());
+    ///         NetworkConfig::builder(local_key).boot_nodes(mainnet_nodes()).build(client.clone());
     ///
     ///     // create the network instance
     ///     let (handle, network, transactions, request_handler) = NetworkManager::builder(config)
@@ -676,15 +676,16 @@ where
                             let total_active =
                                 this.num_active_peers.fetch_add(1, Ordering::Relaxed) + 1;
                             this.metrics.connected_peers.set(total_active as f64);
-                            info!(
-                                target : "net",
+                            debug!(
+                                target: "net",
                                 ?remote_addr,
                                 %client_version,
                                 ?peer_id,
                                 ?total_active,
+                                kind=%direction,
+                                peer_enode=%NodeRecord::new(remote_addr, peer_id),
                                 "Session established"
                             );
-                            debug!(target: "net", kind=%direction, peer_enode=%NodeRecord::new(remote_addr, peer_id), "Established peer enode");
 
                             if direction.is_incoming() {
                                 this.swarm

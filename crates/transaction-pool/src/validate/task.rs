@@ -1,9 +1,19 @@
 //! A validation service for transactions.
 
-use crate::validate::TransactionValidatorError;
+use crate::{
+    blobstore::BlobStore,
+    validate::{EthTransactionValidatorBuilder, TransactionValidatorError},
+    EthTransactionValidator, PoolTransaction, TransactionOrigin, TransactionValidationOutcome,
+    TransactionValidator,
+};
 use futures_util::{lock::Mutex, StreamExt};
+use reth_primitives::{ChainSpec, SealedBlock};
+use reth_tasks::TaskSpawner;
 use std::{future::Future, pin::Pin, sync::Arc};
-use tokio::sync::mpsc;
+use tokio::{
+    sync,
+    sync::{mpsc, oneshot},
+};
 use tokio_stream::wrappers::ReceiverStream;
 
 /// A service that performs validation jobs.
@@ -58,5 +68,124 @@ impl ValidationJobSender {
         job: Pin<Box<dyn Future<Output = ()> + Send>>,
     ) -> Result<(), TransactionValidatorError> {
         self.tx.send(job).await.map_err(|_| TransactionValidatorError::ValidationServiceUnreachable)
+    }
+}
+
+/// A [TransactionValidator] implementation that validates ethereum transaction.
+///
+/// This validator is non-blocking, all validation work is done in a separate task.
+#[derive(Debug, Clone)]
+pub struct TransactionValidationTaskExecutor<V> {
+    /// The validator that will validate transactions on a separate task.
+    pub validator: V,
+    /// The sender half to validation tasks that perform the actual validation.
+    pub to_validation_task: Arc<sync::Mutex<ValidationJobSender>>,
+}
+
+// === impl TransactionValidationTaskExecutor ===
+
+impl TransactionValidationTaskExecutor<()> {
+    /// Convenience method to create a [EthTransactionValidatorBuilder]
+    pub fn eth_builder(chain_spec: Arc<ChainSpec>) -> EthTransactionValidatorBuilder {
+        EthTransactionValidatorBuilder::new(chain_spec)
+    }
+}
+
+impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx>> {
+    /// Creates a new instance for the given [ChainSpec]
+    ///
+    /// This will spawn a single validation tasks that performs the actual validation.
+    /// See [TransactionValidationTaskExecutor::eth_with_additional_tasks]
+    pub fn eth<T, S: BlobStore>(
+        client: Client,
+        chain_spec: Arc<ChainSpec>,
+        blob_store: S,
+        tasks: T,
+    ) -> Self
+    where
+        T: TaskSpawner,
+    {
+        Self::eth_with_additional_tasks(client, chain_spec, blob_store, tasks, 0)
+    }
+
+    /// Creates a new instance for the given [ChainSpec]
+    ///
+    /// By default this will enable support for:
+    ///   - shanghai
+    ///   - eip1559
+    ///   - eip2930
+    ///
+    /// This will always spawn a validation task that performs the actual validation. It will spawn
+    /// `num_additional_tasks` additional tasks.
+    pub fn eth_with_additional_tasks<T, S: BlobStore>(
+        client: Client,
+        chain_spec: Arc<ChainSpec>,
+        blob_store: S,
+        tasks: T,
+        num_additional_tasks: usize,
+    ) -> Self
+    where
+        T: TaskSpawner,
+    {
+        EthTransactionValidatorBuilder::new(chain_spec)
+            .with_additional_tasks(num_additional_tasks)
+            .build_with_tasks::<Client, Tx, T, S>(client, tasks, blob_store)
+    }
+}
+
+impl<V> TransactionValidationTaskExecutor<V> {
+    /// Creates a new executor instance with the given validator for transaction validation.
+    ///
+    /// Initializes the executor with the provided validator and sets up communication for
+    /// validation tasks.
+    pub fn new(validator: V) -> Self {
+        let (tx, _) = ValidationTask::new();
+        Self { validator, to_validation_task: Arc::new(sync::Mutex::new(tx)) }
+    }
+}
+
+#[async_trait::async_trait]
+impl<V> TransactionValidator for TransactionValidationTaskExecutor<V>
+where
+    V: TransactionValidator + Clone + 'static,
+{
+    type Transaction = <V as TransactionValidator>::Transaction;
+
+    async fn validate_transaction(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> TransactionValidationOutcome<Self::Transaction> {
+        let hash = *transaction.hash();
+        let (tx, rx) = oneshot::channel();
+        {
+            let to_validation_task = self.to_validation_task.clone();
+            let to_validation_task = to_validation_task.lock().await;
+            let validator = self.validator.clone();
+            let res = to_validation_task
+                .send(Box::pin(async move {
+                    let res = validator.validate_transaction(origin, transaction).await;
+                    let _ = tx.send(res);
+                }))
+                .await;
+            if res.is_err() {
+                return TransactionValidationOutcome::Error(
+                    hash,
+                    Box::new(TransactionValidatorError::ValidationServiceUnreachable),
+                )
+            }
+        }
+
+        match rx.await {
+            Ok(res) => res,
+            Err(_) => TransactionValidationOutcome::Error(
+                hash,
+                Box::new(TransactionValidatorError::ValidationServiceUnreachable),
+            ),
+        }
+    }
+
+    fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
+        self.validator.on_new_head_block(new_tip_block)
     }
 }

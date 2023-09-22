@@ -40,4 +40,4 @@ block-padding = "0.3.2"
 cipher = { version = "0.4.3", features = ["block-padding"] }
 
 [dev-dependencies]
-hex-literal = "0.3.4"
+hex-literal.workspace = true

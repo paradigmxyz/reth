@@ -1,5 +1,5 @@
 use reth_metrics::{
-    metrics::{self, Counter, Gauge, Histogram},
+    metrics::{Counter, Gauge, Histogram},
     Metrics,
 };
 
@@ -13,8 +13,6 @@ pub(crate) struct EngineMetrics {
     pub(crate) forkchoice_updated_messages: Counter,
     /// The total count of new payload messages received.
     pub(crate) new_payload_messages: Counter,
-    /// The number of times the pruner was run.
-    pub(crate) pruner_runs: Counter,
     /// Latency for making canonical already canonical block
     pub(crate) make_canonical_already_canonical_latency: Histogram,
     /// Latency for making canonical committed block

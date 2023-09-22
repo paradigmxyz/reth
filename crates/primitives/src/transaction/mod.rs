@@ -5,25 +5,25 @@ use crate::{
 pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
+pub use eip1559::TxEip1559;
+pub use eip2930::TxEip2930;
+pub use eip4844::{
+    BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError, TxEip4844,
+};
 pub use error::InvalidTransactionError;
+pub use legacy::TxLegacy;
 pub use meta::TransactionMeta;
 use once_cell::sync::Lazy;
+pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
-use reth_rlp::{
-    length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
-};
+use reth_rlp::{Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
 use serde::{Deserialize, Serialize};
 pub use signature::Signature;
 use std::mem;
 pub use tx_type::{
     TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
-
-pub use eip1559::TxEip1559;
-pub use eip2930::TxEip2930;
-pub use eip4844::TxEip4844;
-pub use legacy::TxLegacy;
 
 mod access_list;
 mod eip1559;
@@ -32,6 +32,7 @@ mod eip4844;
 mod error;
 mod legacy;
 mod meta;
+mod pooled;
 mod signature;
 mod tx_type;
 pub(crate) mod util;
@@ -98,9 +99,12 @@ impl Transaction {
     /// Heavy operation that return signature hash over rlp encoded transaction.
     /// It is only for signature signing or signer recovery.
     pub fn signature_hash(&self) -> H256 {
-        let mut buf = BytesMut::new();
-        self.encode(&mut buf);
-        keccak256(&buf)
+        match self {
+            Transaction::Legacy(tx) => tx.signature_hash(),
+            Transaction::Eip2930(tx) => tx.signature_hash(),
+            Transaction::Eip1559(tx) => tx.signature_hash(),
+            Transaction::Eip4844(tx) => tx.signature_hash(),
+        }
     }
 
     /// Get chain_id.
@@ -142,10 +146,10 @@ impl Transaction {
     /// Get transaction type
     pub fn tx_type(&self) -> TxType {
         match self {
-            Transaction::Legacy { .. } => TxType::Legacy,
-            Transaction::Eip2930 { .. } => TxType::EIP2930,
-            Transaction::Eip1559 { .. } => TxType::EIP1559,
-            Transaction::Eip4844 { .. } => TxType::EIP4844,
+            Transaction::Legacy(legacy_tx) => legacy_tx.tx_type(),
+            Transaction::Eip2930(access_list_tx) => access_list_tx.tx_type(),
+            Transaction::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.tx_type(),
+            Transaction::Eip4844(blob_tx) => blob_tx.tx_type(),
         }
     }
 
@@ -226,6 +230,15 @@ impl Transaction {
             }
             _ => None,
         }
+    }
+
+    /// Returns the blob gas used for all blobs of the EIP-4844 transaction if it is an EIP-4844
+    /// transaction.
+    ///
+    /// This is the number of blobs times the
+    /// [DATA_GAS_PER_BLOB](crate::constants::eip4844::DATA_GAS_PER_BLOB) a single blob consumes.
+    pub fn blob_gas_used(&self) -> Option<u64> {
+        self.as_eip4844().map(TxEip4844::blob_gas)
     }
 
     /// Return the max priority fee per gas if the transaction is an EIP-1559 transaction, and
@@ -314,216 +327,6 @@ impl Transaction {
         }
     }
 
-    /// Encodes EIP-155 arguments into the desired buffer. Only encodes values for legacy
-    /// transactions.
-    pub(crate) fn encode_eip155_fields(&self, out: &mut dyn bytes::BufMut) {
-        // if this is a legacy transaction without a chain ID, it must be pre-EIP-155
-        // and does not need to encode the chain ID for the signature hash encoding
-        if let Transaction::Legacy(TxLegacy { chain_id: Some(id), .. }) = self {
-            // EIP-155 encodes the chain ID and two zeroes
-            id.encode(out);
-            0x00u8.encode(out);
-            0x00u8.encode(out);
-        }
-    }
-
-    /// Outputs the length of EIP-155 fields. Only outputs a non-zero value for EIP-155 legacy
-    /// transactions.
-    pub(crate) fn eip155_fields_len(&self) -> usize {
-        if let Transaction::Legacy(TxLegacy { chain_id: Some(id), .. }) = self {
-            // EIP-155 encodes the chain ID and two zeroes, so we add 2 to the length of the chain
-            // ID to get the length of all 3 fields
-            // len(chain_id) + (0x00) + (0x00)
-            id.length() + 2
-        } else {
-            // this is either a pre-EIP-155 legacy transaction or a typed transaction
-            0
-        }
-    }
-
-    /// Outputs the length of the transaction's fields, without a RLP header or length of the
-    /// eip155 fields.
-    pub(crate) fn fields_len(&self) -> usize {
-        match self {
-            Transaction::Legacy(TxLegacy {
-                chain_id: _,
-                nonce,
-                gas_price,
-                gas_limit,
-                to,
-                value,
-                input,
-            }) => {
-                let mut len = 0;
-                len += nonce.length();
-                len += gas_price.length();
-                len += gas_limit.length();
-                len += to.length();
-                len += value.length();
-                len += input.0.length();
-                len
-            }
-            Transaction::Eip2930(TxEip2930 {
-                chain_id,
-                nonce,
-                gas_price,
-                gas_limit,
-                to,
-                value,
-                input,
-                access_list,
-            }) => {
-                let mut len = 0;
-                len += chain_id.length();
-                len += nonce.length();
-                len += gas_price.length();
-                len += gas_limit.length();
-                len += to.length();
-                len += value.length();
-                len += input.0.length();
-                len += access_list.length();
-                len
-            }
-            Transaction::Eip1559(TxEip1559 {
-                chain_id,
-                nonce,
-                gas_limit,
-                max_fee_per_gas,
-                max_priority_fee_per_gas,
-                to,
-                value,
-                input,
-                access_list,
-            }) => {
-                let mut len = 0;
-                len += chain_id.length();
-                len += nonce.length();
-                len += max_priority_fee_per_gas.length();
-                len += max_fee_per_gas.length();
-                len += gas_limit.length();
-                len += to.length();
-                len += value.length();
-                len += input.0.length();
-                len += access_list.length();
-                len
-            }
-            Transaction::Eip4844(TxEip4844 {
-                chain_id,
-                nonce,
-                gas_limit,
-                max_fee_per_gas,
-                max_priority_fee_per_gas,
-                to,
-                value,
-                access_list,
-                blob_versioned_hashes,
-                max_fee_per_blob_gas,
-                input,
-            }) => {
-                let mut len = 0;
-                len += chain_id.length();
-                len += nonce.length();
-                len += gas_limit.length();
-                len += max_fee_per_gas.length();
-                len += max_priority_fee_per_gas.length();
-                len += to.length();
-                len += value.length();
-                len += access_list.length();
-                len += blob_versioned_hashes.length();
-                len += max_fee_per_blob_gas.length();
-                len += input.0.length();
-                len
-            }
-        }
-    }
-
-    /// Encodes only the transaction's fields into the desired buffer, without a RLP header.
-    pub(crate) fn encode_fields(&self, out: &mut dyn bytes::BufMut) {
-        match self {
-            Transaction::Legacy(TxLegacy {
-                chain_id: _,
-                nonce,
-                gas_price,
-                gas_limit,
-                to,
-                value,
-                input,
-            }) => {
-                nonce.encode(out);
-                gas_price.encode(out);
-                gas_limit.encode(out);
-                to.encode(out);
-                value.encode(out);
-                input.0.encode(out);
-            }
-            Transaction::Eip2930(TxEip2930 {
-                chain_id,
-                nonce,
-                gas_price,
-                gas_limit,
-                to,
-                value,
-                input,
-                access_list,
-            }) => {
-                chain_id.encode(out);
-                nonce.encode(out);
-                gas_price.encode(out);
-                gas_limit.encode(out);
-                to.encode(out);
-                value.encode(out);
-                input.0.encode(out);
-                access_list.encode(out);
-            }
-            Transaction::Eip1559(TxEip1559 {
-                chain_id,
-                nonce,
-                gas_limit,
-                max_fee_per_gas,
-                max_priority_fee_per_gas,
-                to,
-                value,
-                input,
-                access_list,
-            }) => {
-                chain_id.encode(out);
-                nonce.encode(out);
-                max_priority_fee_per_gas.encode(out);
-                max_fee_per_gas.encode(out);
-                gas_limit.encode(out);
-                to.encode(out);
-                value.encode(out);
-                input.0.encode(out);
-                access_list.encode(out);
-            }
-            Transaction::Eip4844(TxEip4844 {
-                chain_id,
-                nonce,
-                gas_limit,
-                max_fee_per_gas,
-                max_priority_fee_per_gas,
-                to,
-                value,
-                access_list,
-                blob_versioned_hashes,
-                max_fee_per_blob_gas,
-                input,
-            }) => {
-                chain_id.encode(out);
-                nonce.encode(out);
-                max_priority_fee_per_gas.encode(out);
-                max_fee_per_gas.encode(out);
-                gas_limit.encode(out);
-                to.encode(out);
-                value.encode(out);
-                input.0.encode(out);
-                access_list.encode(out);
-                max_fee_per_blob_gas.encode(out);
-                blob_versioned_hashes.encode(out);
-            }
-        }
-    }
-
     /// This encodes the transaction _without_ the signature, and is only suitable for creating a
     /// hash intended for signing.
     pub fn encode_without_signature(&self, out: &mut dyn bytes::BufMut) {
@@ -539,29 +342,18 @@ impl Transaction {
         with_header: bool,
     ) {
         match self {
-            Transaction::Legacy(TxLegacy { chain_id, .. }) => {
+            Transaction::Legacy(legacy_tx) => {
                 // do nothing w/ with_header
-                let payload_length =
-                    self.fields_len() + signature.payload_len_with_eip155_chain_id(*chain_id);
-                let header = Header { list: true, payload_length };
-                header.encode(out);
-                self.encode_fields(out);
-                signature.encode_with_eip155_chain_id(out, *chain_id);
+                legacy_tx.encode_with_signature(signature, out)
             }
-            _ => {
-                let payload_length = self.fields_len() + signature.payload_len();
-                if with_header {
-                    Header {
-                        list: false,
-                        payload_length: 1 + length_of_length(payload_length) + payload_length,
-                    }
-                    .encode(out);
-                }
-                out.put_u8(self.tx_type() as u8);
-                let header = Header { list: true, payload_length };
-                header.encode(out);
-                self.encode_fields(out);
-                signature.encode(out);
+            Transaction::Eip2930(access_list_tx) => {
+                access_list_tx.encode_with_signature(signature, out, with_header)
+            }
+            Transaction::Eip1559(dynamic_fee_tx) => {
+                dynamic_fee_tx.encode_with_signature(signature, out, with_header)
+            }
+            Transaction::Eip4844(blob_tx) => {
+                blob_tx.encode_with_signature(signature, out, with_header)
             }
         }
     }
@@ -604,6 +396,62 @@ impl Transaction {
             Transaction::Eip2930(tx) => tx.size(),
             Transaction::Eip1559(tx) => tx.size(),
             Transaction::Eip4844(tx) => tx.size(),
+        }
+    }
+
+    /// Returns true if the transaction is a legacy transaction.
+    #[inline]
+    pub fn is_legacy(&self) -> bool {
+        matches!(self, Transaction::Legacy(_))
+    }
+
+    /// Returns true if the transaction is an EIP-2930 transaction.
+    #[inline]
+    pub fn is_eip2930(&self) -> bool {
+        matches!(self, Transaction::Eip2930(_))
+    }
+
+    /// Returns true if the transaction is an EIP-1559 transaction.
+    #[inline]
+    pub fn is_eip1559(&self) -> bool {
+        matches!(self, Transaction::Eip1559(_))
+    }
+
+    /// Returns true if the transaction is an EIP-4844 transaction.
+    #[inline]
+    pub fn is_eip4844(&self) -> bool {
+        matches!(self, Transaction::Eip4844(_))
+    }
+
+    /// Returns the [TxLegacy] variant if the transaction is a legacy transaction.
+    pub fn as_legacy(&self) -> Option<&TxLegacy> {
+        match self {
+            Transaction::Legacy(tx) => Some(tx),
+            _ => None,
+        }
+    }
+
+    /// Returns the [TxEip2930] variant if the transaction is an EIP-2930 transaction.
+    pub fn as_eip2830(&self) -> Option<&TxEip2930> {
+        match self {
+            Transaction::Eip2930(tx) => Some(tx),
+            _ => None,
+        }
+    }
+
+    /// Returns the [TxEip1559] variant if the transaction is an EIP-1559 transaction.
+    pub fn as_eip1559(&self) -> Option<&TxEip1559> {
+        match self {
+            Transaction::Eip1559(tx) => Some(tx),
+            _ => None,
+        }
+    }
+
+    /// Returns the [TxEip4844] variant if the transaction is an EIP-4844 transaction.
+    pub fn as_eip4844(&self) -> Option<&TxEip4844> {
+        match self {
+            Transaction::Eip4844(tx) => Some(tx),
+            _ => None,
         }
     }
 }
@@ -667,32 +515,27 @@ impl Default for Transaction {
 impl Encodable for Transaction {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
-            Transaction::Legacy { .. } => {
-                Header { list: true, payload_length: self.fields_len() + self.eip155_fields_len() }
-                    .encode(out);
-                self.encode_fields(out);
-                self.encode_eip155_fields(out);
+            Transaction::Legacy(legacy_tx) => {
+                legacy_tx.encode_for_signing(out);
             }
-            _ => {
-                out.put_u8(self.tx_type() as u8);
-                Header { list: true, payload_length: self.fields_len() }.encode(out);
-                self.encode_fields(out);
+            Transaction::Eip2930(access_list_tx) => {
+                access_list_tx.encode_for_signing(out);
+            }
+            Transaction::Eip1559(dynamic_fee_tx) => {
+                dynamic_fee_tx.encode_for_signing(out);
+            }
+            Transaction::Eip4844(blob_tx) => {
+                blob_tx.encode_for_signing(out);
             }
         }
     }
 
     fn length(&self) -> usize {
         match self {
-            Transaction::Legacy { .. } => {
-                let payload_length = self.fields_len() + self.eip155_fields_len();
-                // 'header length' + 'payload length'
-                length_of_length(payload_length) + payload_length
-            }
-            _ => {
-                let payload_length = self.fields_len();
-                // 'transaction type byte length' + 'header length' + 'payload length'
-                1 + length_of_length(payload_length) + payload_length
-            }
+            Transaction::Legacy(legacy_tx) => legacy_tx.payload_len_for_signature(),
+            Transaction::Eip2930(access_list_tx) => access_list_tx.payload_len_for_signature(),
+            Transaction::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.payload_len_for_signature(),
+            Transaction::Eip4844(blob_tx) => blob_tx.payload_len_for_signature(),
         }
     }
 }
@@ -1018,19 +861,15 @@ impl TransactionSigned {
     /// Output the length of the encode_inner(out, true). Note to assume that `with_header` is only
     /// `true`.
     pub(crate) fn payload_len_inner(&self) -> usize {
-        match self.transaction {
-            Transaction::Legacy(TxLegacy { chain_id, .. }) => {
-                let payload_length = self.transaction.fields_len() +
-                    self.signature.payload_len_with_eip155_chain_id(chain_id);
-                // 'header length' + 'payload length'
-                length_of_length(payload_length) + payload_length
+        match &self.transaction {
+            Transaction::Legacy(legacy_tx) => legacy_tx.payload_len_with_signature(&self.signature),
+            Transaction::Eip2930(access_list_tx) => {
+                access_list_tx.payload_len_with_signature(&self.signature)
             }
-            _ => {
-                let payload_length = self.transaction.fields_len() + self.signature.payload_len();
-                // 'transaction type byte length' + 'header length' + 'payload length'
-                let len = 1 + length_of_length(payload_length) + payload_length;
-                length_of_length(len) + len
+            Transaction::Eip1559(dynamic_fee_tx) => {
+                dynamic_fee_tx.payload_len_with_signature(&self.signature)
             }
+            Transaction::Eip4844(blob_tx) => blob_tx.payload_len_with_signature(&self.signature),
         }
     }
 
@@ -1056,16 +895,20 @@ impl TransactionSigned {
         mem::size_of::<TxHash>() + self.transaction.size() + self.signature.size()
     }
 
-    /// Decodes legacy transaction from the data buffer.
+    /// Decodes legacy transaction from the data buffer into a tuple.
     ///
     /// This expects `rlp(legacy_tx)`
-    fn decode_rlp_legacy_transaction(data: &mut &[u8]) -> Result<TransactionSigned, DecodeError> {
+    // TODO: make buf advancement semantics consistent with `decode_enveloped_typed_transaction`,
+    // so decoding methods do not need to manually advance the buffer
+    pub(crate) fn decode_rlp_legacy_transaction_tuple(
+        data: &mut &[u8],
+    ) -> Result<(TxLegacy, TxHash, Signature), DecodeError> {
         // keep this around, so we can use it to calculate the hash
         let original_encoding = *data;
 
         let header = Header::decode(data)?;
 
-        let mut transaction = Transaction::Legacy(TxLegacy {
+        let mut transaction = TxLegacy {
             nonce: Decodable::decode(data)?,
             gas_price: Decodable::decode(data)?,
             gas_limit: Decodable::decode(data)?,
@@ -1073,22 +916,34 @@ impl TransactionSigned {
             value: Decodable::decode(data)?,
             input: Bytes(Decodable::decode(data)?),
             chain_id: None,
-        });
+        };
         let (signature, extracted_id) = Signature::decode_with_eip155_chain_id(data)?;
-        if let Some(id) = extracted_id {
-            transaction.set_chain_id(id);
-        }
+        transaction.chain_id = extracted_id;
 
         let tx_length = header.payload_length + header.length();
         let hash = keccak256(&original_encoding[..tx_length]);
-        let signed = TransactionSigned { transaction, hash, signature };
+        Ok((transaction, hash, signature))
+    }
+
+    /// Decodes legacy transaction from the data buffer.
+    ///
+    /// This expects `rlp(legacy_tx)`
+    // TODO: make buf advancement semantics consistent with `decode_enveloped_typed_transaction`,
+    // so decoding methods do not need to manually advance the buffer
+    pub fn decode_rlp_legacy_transaction(
+        data: &mut &[u8],
+    ) -> Result<TransactionSigned, DecodeError> {
+        let (transaction, hash, signature) =
+            TransactionSigned::decode_rlp_legacy_transaction_tuple(data)?;
+        let signed =
+            TransactionSigned { transaction: Transaction::Legacy(transaction), hash, signature };
         Ok(signed)
     }
 
     /// Decodes en enveloped EIP-2718 typed transaction.
     ///
     /// CAUTION: this expects that `data` is `[id, rlp(tx)]`
-    fn decode_enveloped_typed_transaction(
+    pub fn decode_enveloped_typed_transaction(
         data: &mut &[u8],
     ) -> Result<TransactionSigned, DecodeError> {
         // keep this around so we can use it to calculate the hash
@@ -1096,6 +951,7 @@ impl TransactionSigned {
 
         let tx_type = *data.first().ok_or(DecodeError::InputTooShort)?;
         data.advance(1);
+
         // decode the list header for the rest of the transaction
         let header = Header::decode(data)?;
         if !header.list {
@@ -1107,40 +963,9 @@ impl TransactionSigned {
 
         // decode common fields
         let transaction = match tx_type {
-            1 => Transaction::Eip2930(TxEip2930 {
-                chain_id: Decodable::decode(data)?,
-                nonce: Decodable::decode(data)?,
-                gas_price: Decodable::decode(data)?,
-                gas_limit: Decodable::decode(data)?,
-                to: Decodable::decode(data)?,
-                value: Decodable::decode(data)?,
-                input: Bytes(Decodable::decode(data)?),
-                access_list: Decodable::decode(data)?,
-            }),
-            2 => Transaction::Eip1559(TxEip1559 {
-                chain_id: Decodable::decode(data)?,
-                nonce: Decodable::decode(data)?,
-                max_priority_fee_per_gas: Decodable::decode(data)?,
-                max_fee_per_gas: Decodable::decode(data)?,
-                gas_limit: Decodable::decode(data)?,
-                to: Decodable::decode(data)?,
-                value: Decodable::decode(data)?,
-                input: Bytes(Decodable::decode(data)?),
-                access_list: Decodable::decode(data)?,
-            }),
-            3 => Transaction::Eip4844(TxEip4844 {
-                chain_id: Decodable::decode(data)?,
-                nonce: Decodable::decode(data)?,
-                max_priority_fee_per_gas: Decodable::decode(data)?,
-                max_fee_per_gas: Decodable::decode(data)?,
-                gas_limit: Decodable::decode(data)?,
-                to: Decodable::decode(data)?,
-                value: Decodable::decode(data)?,
-                input: Bytes(Decodable::decode(data)?),
-                access_list: Decodable::decode(data)?,
-                max_fee_per_blob_gas: Decodable::decode(data)?,
-                blob_versioned_hashes: Decodable::decode(data)?,
-            }),
+            1 => Transaction::Eip2930(TxEip2930::decode_inner(data)?),
+            2 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
+            3 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
             _ => return Err(DecodeError::Custom("unsupported typed transaction type")),
         };
 
@@ -1258,7 +1083,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
 }
 
 /// Signed transaction with recovered signer.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq, AsRef, Deref, Default)]
 pub struct TransactionSignedEcRecovered {
     /// Signer of the transaction
     signer: Address,
@@ -1328,6 +1153,16 @@ impl FromRecoveredTransaction for TransactionSignedEcRecovered {
     fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
         tx
     }
+}
+
+/// A transaction type that can be created from a [`PooledTransactionsElementEcRecovered`]
+/// transaction.
+///
+/// This is a conversion trait that'll ensure transactions received via P2P can be converted to the
+/// transaction type that the transaction pool uses.
+pub trait FromRecoveredPooledTransaction {
+    /// Converts to this type from the given [`PooledTransactionsElementEcRecovered`].
+    fn from_recovered_transaction(tx: PooledTransactionsElementEcRecovered) -> Self;
 }
 
 /// The inverse of [`FromRecoveredTransaction`] that ensure the transaction can be sent over the

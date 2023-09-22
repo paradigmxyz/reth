@@ -2,6 +2,6 @@ mod error;
 mod metrics;
 mod pruner;
 
+use crate::metrics::Metrics;
 pub use error::PrunerError;
-use metrics::Metrics;
-pub use pruner::{BatchSizes, Pruner, PrunerResult, PrunerWithResult};
+pub use pruner::{Pruner, PrunerResult, PrunerWithResult};

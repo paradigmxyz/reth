@@ -92,26 +92,10 @@ impl FillableTransaction for TransactionSigned {
 }
 
 /// Returns the addresses of the precompiles corresponding to the SpecId.
-pub(crate) fn get_precompiles(spec_id: &SpecId) -> Vec<reth_primitives::H160> {
-    let spec = match spec_id {
-        SpecId::FRONTIER | SpecId::FRONTIER_THAWING => return vec![],
-        SpecId::HOMESTEAD | SpecId::DAO_FORK | SpecId::TANGERINE | SpecId::SPURIOUS_DRAGON => {
-            PrecompilesSpecId::HOMESTEAD
-        }
-        SpecId::BYZANTIUM | SpecId::CONSTANTINOPLE | SpecId::PETERSBURG => {
-            PrecompilesSpecId::BYZANTIUM
-        }
-        SpecId::ISTANBUL | SpecId::MUIR_GLACIER => PrecompilesSpecId::ISTANBUL,
-        SpecId::BERLIN |
-        SpecId::LONDON |
-        SpecId::ARROW_GLACIER |
-        SpecId::GRAY_GLACIER |
-        SpecId::MERGE |
-        SpecId::SHANGHAI |
-        SpecId::CANCUN => PrecompilesSpecId::BERLIN,
-        SpecId::LATEST => PrecompilesSpecId::LATEST,
-    };
-    Precompiles::new(spec).addresses().into_iter().map(Address::from).collect()
+#[inline]
+pub(crate) fn get_precompiles(spec_id: SpecId) -> impl IntoIterator<Item = Address> {
+    let spec = PrecompilesSpecId::from_spec_id(spec_id);
+    Precompiles::new(spec).addresses().into_iter().copied().map(Address::from)
 }
 
 /// Executes the [Env] against the given [Database] without committing state changes.
@@ -286,6 +270,8 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         nonce,
         access_list,
         chain_id,
+        blob_versioned_hashes,
+        max_fee_per_blob_gas,
         ..
     } = request;
 
@@ -311,6 +297,9 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         data: input.try_into_unique_input()?.map(|data| data.0).unwrap_or_default(),
         chain_id: chain_id.map(|c| c.as_u64()),
         access_list: access_list.map(AccessList::flattened).unwrap_or_default(),
+        // EIP-4844 fields
+        blob_hashes: blob_versioned_hashes,
+        max_fee_per_blob_gas,
     };
 
     Ok(env)
@@ -488,19 +477,13 @@ where
                 account,
                 new_account_state
                     .into_iter()
-                    .map(|(slot, value)| {
-                        (U256::from_be_bytes(slot.0), U256::from_be_bytes(value.0))
-                    })
+                    .map(|(slot, value)| (U256::from_be_bytes(slot.0), value))
                     .collect(),
             )?;
         }
         (None, Some(account_state_diff)) => {
             for (slot, value) in account_state_diff {
-                db.insert_account_storage(
-                    account,
-                    U256::from_be_bytes(slot.0),
-                    U256::from_be_bytes(value.0),
-                )?;
+                db.insert_account_storage(account, U256::from_be_bytes(slot.0), value)?;
             }
         }
     };

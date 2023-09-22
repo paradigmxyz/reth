@@ -15,13 +15,14 @@ tokio = { workspace = true, features = ["sync", "rt"] }
 tracing-futures = "0.2"
 futures-util.workspace = true
 
+## metrics
+reth-metrics.workspace = true
+metrics.workspace = true
+
 ## misc
 tracing.workspace = true
 thiserror.workspace = true
 dyn-clone = "1.0"
-
-## rpc/metrics
-reth-metrics.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }

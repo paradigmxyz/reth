@@ -29,6 +29,7 @@
 //!    - providing existing transactions
 //!    - ordering and providing the best transactions for block production
 //!    - monitoring memory footprint and enforce pool size limits
+//!    - storing blob data for transactions in a separate blobstore on insertion
 //!
 //! ## Assumptions
 //!
@@ -78,12 +79,18 @@
 //!
 //! The lowest layer is the actual pool implementations that manages (validated) transactions:
 //! [`TxPool`](crate::pool::txpool::TxPool). This is contained in a higher level pool type that
-//! guards the low level pool and handles additional listeners or metrics:
-//! [`PoolInner`](crate::pool::PoolInner)
+//! guards the low level pool and handles additional listeners or metrics: [`PoolInner`].
 //!
 //! The transaction pool will be used by separate consumers (RPC, P2P), to make sharing easier, the
-//! [`Pool`](crate::Pool) type is just an `Arc` wrapper around `PoolInner`. This is the usable type
-//! that provides the `TransactionPool` interface.
+//! [`Pool`] type is just an `Arc` wrapper around `PoolInner`. This is the usable type that provides
+//! the `TransactionPool` interface.
+//!
+//!
+//! ## Blob Transactions
+//!
+//! Blob transaction can be quite large hence they are stored in a separate blobstore. The pool is
+//! responsible for inserting blob data for new transactions into the blobstore.
+//! See also [ValidTransaction](validate::ValidTransaction)
 //!
 //!
 //! ## Examples
@@ -94,10 +101,13 @@
 //! use reth_primitives::MAINNET;
 //! use reth_provider::{ChainSpecProvider, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
-//! use reth_transaction_pool::{EthTransactionValidator, Pool, TransactionPool};
+//! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool, TransactionPool};
+//! use reth_transaction_pool::blobstore::InMemoryBlobStore;
 //!  async fn t<C>(client: C)  where C: StateProviderFactory + ChainSpecProvider + Clone + 'static{
+//!     let blob_store = InMemoryBlobStore::default();
 //!     let pool = Pool::eth_pool(
-//!         EthTransactionValidator::new(client, MAINNET.clone(), TokioTaskExecutor::default()),
+//!         TransactionValidationTaskExecutor::eth(client, MAINNET.clone(), blob_store.clone(), TokioTaskExecutor::default()),
+//!         blob_store,
 //!         Default::default(),
 //!     );
 //!   let mut transactions = pool.pending_transactions_listener();
@@ -119,14 +129,17 @@
 //! use reth_primitives::MAINNET;
 //! use reth_provider::{BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
-//! use reth_transaction_pool::{EthTransactionValidator, Pool};
+//! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool};
+//! use reth_transaction_pool::blobstore::InMemoryBlobStore;
 //! use reth_transaction_pool::maintain::maintain_transaction_pool_future;
 //!  async fn t<C, St>(client: C, stream: St)
 //!    where C: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
 //!     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 //!     {
+//!     let blob_store = InMemoryBlobStore::default();
 //!     let pool = Pool::eth_pool(
-//!         EthTransactionValidator::new(client.clone(), MAINNET.clone(), TokioTaskExecutor::default()),
+//!         TransactionValidationTaskExecutor::eth(client.clone(), MAINNET.clone(), blob_store.clone(), TokioTaskExecutor::default()),
+//!         blob_store,
 //!         Default::default(),
 //!     );
 //!
@@ -142,7 +155,7 @@
 //! - `test-utils`: Export utilities for testing
 use crate::pool::PoolInner;
 use aquamarine as _;
-use reth_primitives::{Address, TxHash, U256};
+use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
 use reth_provider::StateProviderFactory;
 use std::{
     collections::{HashMap, HashSet},
@@ -152,6 +165,7 @@ use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
 
 pub use crate::{
+    blobstore::{BlobStore, BlobStoreError},
     config::{
         PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP, REPLACE_BLOB_PRICE_BUMP,
         TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER, TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
@@ -165,13 +179,14 @@ pub use crate::{
     },
     traits::{
         AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
-        NewTransactionEvent, PendingTransactionListenerKind, PoolSize, PoolTransaction,
-        PooledTransaction, PropagateKind, PropagatedTransactions, TransactionOrigin,
-        TransactionPool, TransactionPoolExt,
+        EthBlobTransactionSidecar, EthPoolTransaction, EthPooledTransaction,
+        GetPooledTransactionLimit, NewTransactionEvent, PoolSize, PoolTransaction, PropagateKind,
+        PropagatedTransactions, TransactionListenerKind, TransactionOrigin, TransactionPool,
+        TransactionPoolExt,
     },
     validate::{
-        EthTransactionValidator, TransactionValidationOutcome, TransactionValidator,
-        ValidPoolTransaction,
+        EthTransactionValidator, TransactionValidationOutcome, TransactionValidationTaskExecutor,
+        TransactionValidator, ValidPoolTransaction,
     },
 };
 
@@ -182,6 +197,7 @@ pub mod noop;
 pub mod pool;
 pub mod validate;
 
+pub mod blobstore;
 mod config;
 mod identifier;
 mod ordering;
@@ -193,25 +209,26 @@ pub mod test_utils;
 
 /// A shareable, generic, customizable `TransactionPool` implementation.
 #[derive(Debug)]
-pub struct Pool<V: TransactionValidator, T: TransactionOrdering> {
+pub struct Pool<V, T: TransactionOrdering, S> {
     /// Arc'ed instance of the pool internals
-    pool: Arc<PoolInner<V, T>>,
+    pool: Arc<PoolInner<V, T, S>>,
 }
 
 // === impl Pool ===
 
-impl<V, T> Pool<V, T>
+impl<V, T, S> Pool<V, T, S>
 where
     V: TransactionValidator,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
+    S: BlobStore,
 {
     /// Create a new transaction pool instance.
-    pub fn new(validator: V, ordering: T, config: PoolConfig) -> Self {
-        Self { pool: Arc::new(PoolInner::new(validator, ordering, config)) }
+    pub fn new(validator: V, ordering: T, blob_store: S, config: PoolConfig) -> Self {
+        Self { pool: Arc::new(PoolInner::new(validator, ordering, blob_store, config)) }
     }
 
     /// Returns the wrapped pool.
-    pub(crate) fn inner(&self) -> &PoolInner<V, T> {
+    pub(crate) fn inner(&self) -> &PoolInner<V, T, S> {
         &self.pool
     }
 
@@ -260,13 +277,18 @@ where
     }
 }
 
-impl<Client>
-    Pool<EthTransactionValidator<Client, PooledTransaction>, CoinbaseTipOrdering<PooledTransaction>>
+impl<Client, S>
+    Pool<
+        TransactionValidationTaskExecutor<EthTransactionValidator<Client, EthPooledTransaction>>,
+        CoinbaseTipOrdering<EthPooledTransaction>,
+        S,
+    >
 where
     Client: StateProviderFactory + Clone + 'static,
+    S: BlobStore,
 {
-    /// Returns a new [Pool] that uses the default [EthTransactionValidator] when validating
-    /// [PooledTransaction]s and ords via [CoinbaseTipOrdering]
+    /// Returns a new [Pool] that uses the default [TransactionValidationTaskExecutor] when
+    /// validating [EthPooledTransaction]s and ords via [CoinbaseTipOrdering]
     ///
     /// # Example
     ///
@@ -274,28 +296,35 @@ where
     /// use reth_provider::StateProviderFactory;
     /// use reth_primitives::MAINNET;
     /// use reth_tasks::TokioTaskExecutor;
-    /// use reth_transaction_pool::{EthTransactionValidator, Pool};
-    /// # fn t<C>(client: C)  where C: StateProviderFactory + Clone + 'static{
+    /// use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool};
+    /// use reth_transaction_pool::blobstore::InMemoryBlobStore;
+    /// # fn t<C>(client: C)  where C: StateProviderFactory + Clone + 'static {
+    ///     let blob_store = InMemoryBlobStore::default();
     ///     let pool = Pool::eth_pool(
-    ///         EthTransactionValidator::new(client, MAINNET.clone(), TokioTaskExecutor::default()),
+    ///         TransactionValidationTaskExecutor::eth(client, MAINNET.clone(), blob_store.clone(), TokioTaskExecutor::default()),
+    ///         blob_store,
     ///         Default::default(),
     ///     );
     /// # }
     /// ```
     pub fn eth_pool(
-        validator: EthTransactionValidator<Client, PooledTransaction>,
+        validator: TransactionValidationTaskExecutor<
+            EthTransactionValidator<Client, EthPooledTransaction>,
+        >,
+        blob_store: S,
         config: PoolConfig,
     ) -> Self {
-        Self::new(validator, CoinbaseTipOrdering::default(), config)
+        Self::new(validator, CoinbaseTipOrdering::default(), blob_store, config)
     }
 }
 
 /// implements the `TransactionPool` interface for various transaction pool API consumers.
 #[async_trait::async_trait]
-impl<V, T> TransactionPool for Pool<V, T>
+impl<V, T, S> TransactionPool for Pool<V, T, S>
 where
     V: TransactionValidator,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
+    S: BlobStore,
 {
     type Transaction = T::Transaction;
 
@@ -344,15 +373,15 @@ where
         self.pool.add_all_transactions_event_listener()
     }
 
-    fn pending_transactions_listener_for(
-        &self,
-        kind: PendingTransactionListenerKind,
-    ) -> Receiver<TxHash> {
+    fn pending_transactions_listener_for(&self, kind: TransactionListenerKind) -> Receiver<TxHash> {
         self.pool.add_pending_listener(kind)
     }
 
-    fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
-        self.pool.add_new_transaction_listener()
+    fn new_transactions_listener_for(
+        &self,
+        kind: TransactionListenerKind,
+    ) -> Receiver<NewTransactionEvent<Self::Transaction>> {
+        self.pool.add_new_transaction_listener(kind)
     }
 
     fn pooled_transaction_hashes(&self) -> Vec<TxHash> {
@@ -372,6 +401,14 @@ where
         max: usize,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pooled_transactions().into_iter().take(max).collect()
+    }
+
+    fn get_pooled_transaction_elements(
+        &self,
+        tx_hashes: Vec<TxHash>,
+        limit: GetPooledTransactionLimit,
+    ) -> Vec<PooledTransactionsElement> {
+        self.pool.get_pooled_transaction_elements(tx_hashes, limit)
     }
 
     fn best_transactions(
@@ -432,12 +469,31 @@ where
     fn unique_senders(&self) -> HashSet<Address> {
         self.pool.unique_senders()
     }
+
+    fn get_blob(&self, tx_hash: TxHash) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
+        self.pool.blob_store().get(tx_hash)
+    }
+
+    fn get_all_blobs(
+        &self,
+        tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError> {
+        self.pool.blob_store().get_all(tx_hashes)
+    }
+
+    fn get_all_blobs_exact(
+        &self,
+        tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
+        self.pool.blob_store().get_exact(tx_hashes)
+    }
 }
 
-impl<V: TransactionValidator, T: TransactionOrdering> TransactionPoolExt for Pool<V, T>
+impl<V: TransactionValidator, T: TransactionOrdering, S> TransactionPoolExt for Pool<V, T, S>
 where
     V: TransactionValidator,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
+    S: BlobStore,
 {
     #[instrument(skip(self), target = "txpool")]
     fn set_block_info(&self, info: BlockInfo) {
@@ -445,16 +501,24 @@ where
         self.pool.set_block_info(info)
     }
 
-    fn on_canonical_state_change(&self, update: CanonicalStateUpdate) {
+    fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_>) {
         self.pool.on_canonical_state_change(update);
     }
 
     fn update_accounts(&self, accounts: Vec<ChangedAccount>) {
         self.pool.update_accounts(accounts);
     }
+
+    fn delete_blob(&self, tx: TxHash) {
+        self.pool.delete_blob(tx)
+    }
+
+    fn delete_blobs(&self, txs: Vec<TxHash>) {
+        self.pool.delete_blobs(txs)
+    }
 }
 
-impl<V: TransactionValidator, T: TransactionOrdering> Clone for Pool<V, T> {
+impl<V, T: TransactionOrdering, S> Clone for Pool<V, T, S> {
     fn clone(&self) -> Self {
         Self { pool: Arc::clone(&self.pool) }
     }

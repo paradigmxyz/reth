@@ -67,8 +67,7 @@ impl Status {
         Default::default()
     }
 
-    /// Create a [`StatusBuilder`] from the given [`ChainSpec`](reth_primitives::ChainSpec) and
-    /// head block.
+    /// Create a [`StatusBuilder`] from the given [`ChainSpec`] and head block.
     ///
     /// Sets the `chain` and `genesis`, `blockhash`, and `forkid` fields based on the [`ChainSpec`]
     /// and head.
