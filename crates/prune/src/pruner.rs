@@ -984,16 +984,19 @@ mod tests {
         assert!(pruner.is_pruning_needed(first_block_number));
         pruner.last_pruned_block_number = Some(first_block_number);
 
-        // Delta is greater than min block interval
+        // Tip block number delta is >= than min block interval
+        // Highest snapshotted block number is not set, hence ignored
         let second_block_number = first_block_number + pruner.min_block_interval as u64;
         assert!(pruner.is_pruning_needed(second_block_number));
         pruner.last_pruned_block_number = Some(second_block_number);
 
-        // Delta is less than min block interval
+        // Tip block number delta is < than min block interval
+        // Highest snapshotted block number is not set, hence ignored
         let third_block_number = second_block_number;
         assert!(!pruner.is_pruning_needed(third_block_number));
 
-        // Highest snapshotted block number is too low
+        // Highest snapshotted block number is set and its delta is < than min block interval
+        // Tip block number is ignored
         highest_snapshots_tx
             .send(Some(HighestSnapshots {
                 headers: Some(third_block_number),
@@ -1003,6 +1006,17 @@ mod tests {
             .expect("send to channel");
         let fourth_block_number = third_block_number + pruner.min_block_interval as u64;
         assert!(!pruner.is_pruning_needed(fourth_block_number));
+
+        // Highest snapshotted block number is set and its delta is >= than min block interval
+        // Tip block number is ignored
+        highest_snapshots_tx
+            .send(Some(HighestSnapshots {
+                headers: Some(fourth_block_number),
+                receipts: Some(third_block_number),
+                transactions: Some(second_block_number),
+            }))
+            .expect("send to channel");
+        assert!(pruner.is_pruning_needed(fourth_block_number));
     }
 
     #[test]
