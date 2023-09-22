@@ -1,6 +1,6 @@
 use crate::HeaderProvider;
 use reth_db::table::Decompress;
-use reth_interfaces::Result;
+use reth_interfaces::RethResult;
 use reth_nippy_jar::{NippyJar, NippyJarCursor};
 use reth_primitives::{BlockHash, BlockNumber, Header, SealedHeader, U256};
 use std::ops::RangeBounds;
@@ -22,7 +22,7 @@ impl<'a> SnapshotProvider<'a> {
 }
 
 impl<'a> HeaderProvider for SnapshotProvider<'a> {
-    fn header(&self, block_hash: &BlockHash) -> Result<Option<Header>> {
+    fn header(&self, block_hash: &BlockHash) -> RethResult<Option<Header>> {
         let mut cursor = self.cursor();
 
         let header = Header::decompress(
@@ -38,30 +38,30 @@ impl<'a> HeaderProvider for SnapshotProvider<'a> {
         Ok(None)
     }
 
-    fn header_by_number(&self, _num: BlockNumber) -> Result<Option<Header>> {
+    fn header_by_number(&self, _num: BlockNumber) -> RethResult<Option<Header>> {
         unimplemented!();
     }
 
-    fn header_td(&self, _block_hash: &BlockHash) -> Result<Option<U256>> {
+    fn header_td(&self, _block_hash: &BlockHash) -> RethResult<Option<U256>> {
         unimplemented!();
     }
 
-    fn header_td_by_number(&self, _number: BlockNumber) -> Result<Option<U256>> {
+    fn header_td_by_number(&self, _number: BlockNumber) -> RethResult<Option<U256>> {
         unimplemented!();
     }
 
-    fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>> {
+    fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
         unimplemented!();
     }
 
     fn sealed_headers_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
-    ) -> Result<Vec<SealedHeader>> {
+    ) -> RethResult<Vec<SealedHeader>> {
         unimplemented!();
     }
 
-    fn sealed_header(&self, _number: BlockNumber) -> Result<Option<SealedHeader>> {
+    fn sealed_header(&self, _number: BlockNumber) -> RethResult<Option<SealedHeader>> {
         unimplemented!();
     }
 }
