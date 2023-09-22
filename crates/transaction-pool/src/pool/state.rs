@@ -17,10 +17,14 @@ bitflags::bitflags! {
         const NOT_TOO_MUCH_GAS = 0b000100;
         /// Covers the Dynamic fee requirement.
         ///
-        /// Set to 1 if `feeCap` of the transaction meets the requirement of the pending block.
+        /// Set to 1 if `maxBlobFeePerGas` of the transaction meets the requirement of the pending block.
         const ENOUGH_FEE_CAP_BLOCK = 0b000010;
+        /// Covers the dynamic blob fee requirement, only relevant for EIP-4844 blob transactions
+        ///
+        /// Set to 1 if `maxBlobFeePer` of the transaction meets the requirement of the pending block.
+        const ENOUGH_BLOB_FEE_CAP_BLOCK = 0b000001;
 
-        const PENDING_POOL_BITS = Self::NO_PARKED_ANCESTORS.bits()| Self::NO_NONCE_GAPS.bits() | Self::ENOUGH_BALANCE.bits() | Self::NOT_TOO_MUCH_GAS.bits() |  Self::ENOUGH_FEE_CAP_BLOCK.bits();
+        const PENDING_POOL_BITS = Self::NO_PARKED_ANCESTORS.bits()| Self::NO_NONCE_GAPS.bits() | Self::ENOUGH_BALANCE.bits() | Self::NOT_TOO_MUCH_GAS.bits() |  Self::ENOUGH_FEE_CAP_BLOCK.bits() | Self::ENOUGH_BLOB_FEE_CAP_BLOCK.bits();
 
         const BASE_FEE_POOL_BITS = Self::NO_PARKED_ANCESTORS.bits() | Self::NO_NONCE_GAPS.bits() | Self::ENOUGH_BALANCE.bits() | Self::NOT_TOO_MUCH_GAS.bits();
 
@@ -140,12 +144,12 @@ mod tests {
         assert_eq!(SubPool::Pending, state.into());
         assert!(state.is_pending());
 
-        let bits = 0b111110;
+        let bits = 0b111111;
         let state = TxState::from_bits(bits).unwrap();
         assert_eq!(SubPool::Pending, state.into());
         assert!(state.is_pending());
 
-        let bits = 0b111110;
+        let bits = 0b111111;
         let state = TxState::from_bits(bits).unwrap();
         assert_eq!(SubPool::Pending, state.into());
         assert!(state.is_pending());

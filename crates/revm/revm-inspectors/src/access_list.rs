@@ -25,10 +25,10 @@ impl AccessListInspector {
         access_list: AccessList,
         from: Address,
         to: Address,
-        precompiles: Vec<Address>,
+        precompiles: impl IntoIterator<Item = Address>,
     ) -> Self {
         AccessListInspector {
-            excluded: [from, to].iter().chain(precompiles.iter()).copied().collect(),
+            excluded: [from, to].into_iter().chain(precompiles).collect(),
             access_list: access_list
                 .0
                 .into_iter()

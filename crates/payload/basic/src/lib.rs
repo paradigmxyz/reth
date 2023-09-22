@@ -16,7 +16,7 @@
 use crate::metrics::PayloadBuilderMetrics;
 use futures_core::ready;
 use futures_util::FutureExt;
-use reth_interfaces::Error;
+use reth_interfaces::{RethError, RethResult};
 use reth_payload_builder::{
     database::CachedReads, error::PayloadBuilderError, BuiltPayload, KeepPayloadJobAlive,
     PayloadBuilderAttributes, PayloadJob, PayloadJobGenerator,
@@ -964,12 +964,12 @@ impl WithdrawalsOutcome {
 /// Returns the withdrawals root.
 ///
 /// Returns `None` values pre shanghai
-fn commit_withdrawals<DB: Database<Error = Error>>(
+fn commit_withdrawals<DB: Database<Error = RethError>>(
     db: &mut State<DB>,
     chain_spec: &ChainSpec,
     timestamp: u64,
     withdrawals: Vec<Withdrawal>,
-) -> Result<WithdrawalsOutcome, Error> {
+) -> RethResult<WithdrawalsOutcome> {
     if !chain_spec.is_shanghai_activated_at_timestamp(timestamp) {
         return Ok(WithdrawalsOutcome::pre_shanghai())
     }

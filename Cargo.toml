@@ -40,6 +40,7 @@ members = [
     "crates/storage/libmdbx-rs",
     "crates/storage/libmdbx-rs/mdbx-sys",
     "crates/storage/provider",
+    "crates/storage/nippy-jar",
     "crates/tracing",
     "crates/tasks",
     "crates/transaction-pool",
@@ -98,8 +99,8 @@ reth-network-api = { path = "./crates/net/network-api" }
 reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat" }
 
 # revm
-revm = { git = "https://github.com/bluealloy/revm" }
-revm-primitives = { git = "https://github.com/bluealloy/revm" }
+revm = { git = "https://github.com/bluealloy/revm", rev = "516f62cc" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "516f62cc" }
 
 ## eth
 ethers-core = { version = "2.0", default-features = false }

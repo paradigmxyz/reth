@@ -1,7 +1,7 @@
 //! Async caching support for eth RPC
 
 use futures::{future::Either, Stream, StreamExt};
-use reth_interfaces::{provider::ProviderError, Result};
+use reth_interfaces::{provider::ProviderError, RethResult};
 use reth_primitives::{Block, Receipt, SealedBlock, TransactionSigned, H256};
 use reth_provider::{
     BlockReader, BlockSource, CanonStateNotification, EvmEnvProvider, StateProviderFactory,
@@ -30,16 +30,16 @@ mod multi_consumer;
 pub use multi_consumer::MultiConsumerLruCache;
 
 /// The type that can send the response to a requested [Block]
-type BlockResponseSender = oneshot::Sender<Result<Option<Block>>>;
+type BlockResponseSender = oneshot::Sender<RethResult<Option<Block>>>;
 
 /// The type that can send the response to a requested [Block]
-type BlockTransactionsResponseSender = oneshot::Sender<Result<Option<Vec<TransactionSigned>>>>;
+type BlockTransactionsResponseSender = oneshot::Sender<RethResult<Option<Vec<TransactionSigned>>>>;
 
 /// The type that can send the response to the requested receipts of a block.
-type ReceiptsResponseSender = oneshot::Sender<Result<Option<Vec<Receipt>>>>;
+type ReceiptsResponseSender = oneshot::Sender<RethResult<Option<Vec<Receipt>>>>;
 
 /// The type that can send the response to a requested env
-type EnvResponseSender = oneshot::Sender<Result<(CfgEnv, BlockEnv)>>;
+type EnvResponseSender = oneshot::Sender<RethResult<(CfgEnv, BlockEnv)>>;
 
 type BlockLruCache<L> = MultiConsumerLruCache<
     H256,
@@ -127,7 +127,7 @@ impl EthStateCache {
     /// Requests the [Block] for the block hash
     ///
     /// Returns `None` if the block does not exist.
-    pub(crate) async fn get_block(&self, block_hash: H256) -> Result<Option<Block>> {
+    pub(crate) async fn get_block(&self, block_hash: H256) -> RethResult<Option<Block>> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetBlock { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
@@ -136,7 +136,10 @@ impl EthStateCache {
     /// Requests the [Block] for the block hash, sealed with the given block hash.
     ///
     /// Returns `None` if the block does not exist.
-    pub(crate) async fn get_sealed_block(&self, block_hash: H256) -> Result<Option<SealedBlock>> {
+    pub(crate) async fn get_sealed_block(
+        &self,
+        block_hash: H256,
+    ) -> RethResult<Option<SealedBlock>> {
         Ok(self.get_block(block_hash).await?.map(|block| block.seal(block_hash)))
     }
 
@@ -146,7 +149,7 @@ impl EthStateCache {
     pub(crate) async fn get_block_transactions(
         &self,
         block_hash: H256,
-    ) -> Result<Option<Vec<TransactionSigned>>> {
+    ) -> RethResult<Option<Vec<TransactionSigned>>> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetBlockTransactions { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
@@ -156,7 +159,7 @@ impl EthStateCache {
     pub(crate) async fn get_transactions_and_receipts(
         &self,
         block_hash: H256,
-    ) -> Result<Option<(Vec<TransactionSigned>, Vec<Receipt>)>> {
+    ) -> RethResult<Option<(Vec<TransactionSigned>, Vec<Receipt>)>> {
         let transactions = self.get_block_transactions(block_hash);
         let receipts = self.get_receipts(block_hash);
 
@@ -168,7 +171,7 @@ impl EthStateCache {
     /// Requests the [Receipt] for the block hash
     ///
     /// Returns `None` if the block was not found.
-    pub(crate) async fn get_receipts(&self, block_hash: H256) -> Result<Option<Vec<Receipt>>> {
+    pub(crate) async fn get_receipts(&self, block_hash: H256) -> RethResult<Option<Vec<Receipt>>> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetReceipts { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
@@ -178,7 +181,7 @@ impl EthStateCache {
     pub(crate) async fn get_block_and_receipts(
         &self,
         block_hash: H256,
-    ) -> Result<Option<(SealedBlock, Vec<Receipt>)>> {
+    ) -> RethResult<Option<(SealedBlock, Vec<Receipt>)>> {
         let block = self.get_sealed_block(block_hash);
         let receipts = self.get_receipts(block_hash);
 
@@ -191,7 +194,7 @@ impl EthStateCache {
     ///
     /// Returns an error if the corresponding header (required for populating the envs) was not
     /// found.
-    pub(crate) async fn get_evm_env(&self, block_hash: H256) -> Result<(CfgEnv, BlockEnv)> {
+    pub(crate) async fn get_evm_env(&self, block_hash: H256) -> RethResult<(CfgEnv, BlockEnv)> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetEnv { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
@@ -248,7 +251,7 @@ where
     Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
 {
-    fn on_new_block(&mut self, block_hash: H256, res: Result<Option<Block>>) {
+    fn on_new_block(&mut self, block_hash: H256, res: RethResult<Option<Block>>) {
         if let Some(queued) = self.full_block_cache.remove(&block_hash) {
             // send the response to queued senders
             for tx in queued {
@@ -271,7 +274,7 @@ where
         }
     }
 
-    fn on_new_receipts(&mut self, block_hash: H256, res: Result<Option<Vec<Receipt>>>) {
+    fn on_new_receipts(&mut self, block_hash: H256, res: RethResult<Option<Vec<Receipt>>>) {
         if let Some(queued) = self.receipts_cache.remove(&block_hash) {
             // send the response to queued senders
             for tx in queued {
@@ -454,9 +457,9 @@ enum CacheAction {
     GetBlockTransactions { block_hash: H256, response_tx: BlockTransactionsResponseSender },
     GetEnv { block_hash: H256, response_tx: EnvResponseSender },
     GetReceipts { block_hash: H256, response_tx: ReceiptsResponseSender },
-    BlockResult { block_hash: H256, res: Result<Option<Block>> },
-    ReceiptsResult { block_hash: H256, res: Result<Option<Vec<Receipt>>> },
-    EnvResult { block_hash: H256, res: Box<Result<(CfgEnv, BlockEnv)>> },
+    BlockResult { block_hash: H256, res: RethResult<Option<Block>> },
+    ReceiptsResult { block_hash: H256, res: RethResult<Option<Vec<Receipt>>> },
+    EnvResult { block_hash: H256, res: Box<RethResult<(CfgEnv, BlockEnv)>> },
     CacheNewCanonicalChain { blocks: Vec<SealedBlock>, receipts: Vec<BlockReceipts> },
 }
 

@@ -282,13 +282,13 @@ impl TracingInspector {
         let stack =
             self.config.record_stack_snapshots.then(|| interp.stack.clone()).unwrap_or_default();
 
-        let op = OpCode::try_from_u8(interp.current_opcode())
+        let op = OpCode::new(interp.current_opcode())
             .or_else(|| {
                 // if the opcode is invalid, we'll use the invalid opcode to represent it because
                 // this is invoked before the opcode is executed, the evm will eventually return a
                 // `Halt` with invalid/unknown opcode as result
                 let invalid_opcode = 0xfe;
-                OpCode::try_from_u8(invalid_opcode)
+                OpCode::new(invalid_opcode)
             })
             .expect("is valid opcode;");
 

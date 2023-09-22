@@ -398,7 +398,7 @@ impl ParityTraceBuilder {
 
         // Calculate the stack items at this step
         let push_stack = {
-            let step_op = step.op.u8();
+            let step_op = step.op.get();
             let show_stack: usize;
             if (opcode::PUSH0..=opcode::PUSH32).contains(&step_op) {
                 show_stack = 1;
@@ -482,7 +482,7 @@ impl ParityTraceBuilder {
         let cost = self
             .spec_id
             .and_then(|spec_id| {
-                spec_opcode_gas(spec_id).get(step.op.u8() as usize).map(|op| op.get_gas())
+                spec_opcode_gas(spec_id).get(step.op.get() as usize).map(|op| op.get_gas())
             })
             .unwrap_or_default();
 

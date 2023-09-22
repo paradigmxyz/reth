@@ -1,9 +1,19 @@
-use crate::hooks::{EngineContext, EngineHook, EngineHookAction, EngineHookError, EngineHooks};
+use crate::hooks::{
+    EngineContext, EngineHook, EngineHookAction, EngineHookDBAccessLevel, EngineHookError,
+    EngineHookEvent, EngineHooks,
+};
 use std::{
     collections::VecDeque,
     task::{Context, Poll},
 };
 use tracing::debug;
+
+#[derive(Debug)]
+pub(crate) struct PolledHook {
+    pub(crate) event: EngineHookEvent,
+    pub(crate) action: Option<EngineHookAction>,
+    pub(crate) db_access_level: EngineHookDBAccessLevel,
+}
 
 /// Manages hooks under the control of the engine.
 ///
@@ -41,28 +51,27 @@ impl EngineHooksController {
         &mut self,
         cx: &mut Context<'_>,
         args: EngineContext,
-    ) -> Poll<Result<EngineHookAction, EngineHookError>> {
+    ) -> Poll<Result<PolledHook, EngineHookError>> {
         let Some(mut hook) = self.running_hook_with_db_write.take() else { return Poll::Pending };
 
         match hook.poll(cx, args) {
             Poll::Ready((event, action)) => {
+                let result = PolledHook { event, action, db_access_level: hook.db_access_level() };
+
                 debug!(
                     target: "consensus::engine::hooks",
                     hook = hook.name(),
-                    ?action,
-                    ?event,
+                    ?result,
                     "Polled running hook with db write access"
                 );
 
-                if !event.is_finished() {
+                if !result.event.is_finished() {
                     self.running_hook_with_db_write = Some(hook);
                 } else {
                     self.hooks.push_back(hook);
                 }
 
-                if let Some(action) = action {
-                    return Poll::Ready(Ok(action))
-                }
+                return Poll::Ready(Ok(result))
             }
             Poll::Pending => {
                 self.running_hook_with_db_write = Some(hook);
@@ -89,7 +98,7 @@ impl EngineHooksController {
         cx: &mut Context<'_>,
         args: EngineContext,
         db_write_active: bool,
-    ) -> Poll<Result<EngineHookAction, EngineHookError>> {
+    ) -> Poll<Result<PolledHook, EngineHookError>> {
         let Some(mut hook) = self.hooks.pop_front() else { return Poll::Pending };
 
         // Hook with DB write access level is not allowed to run due to already running hook with DB
@@ -101,23 +110,22 @@ impl EngineHooksController {
         }
 
         if let Poll::Ready((event, action)) = hook.poll(cx, args) {
+            let result = PolledHook { event, action, db_access_level: hook.db_access_level() };
+
             debug!(
                 target: "consensus::engine::hooks",
                 hook = hook.name(),
-                ?action,
-                ?event,
+                ?result,
                 "Polled next hook"
             );
 
-            if event.is_started() && hook.db_access_level().is_read_write() {
+            if result.event.is_started() && result.db_access_level.is_read_write() {
                 self.running_hook_with_db_write = Some(hook);
             } else {
                 self.hooks.push_back(hook);
             }
 
-            if let Some(action) = action {
-                return Poll::Ready(Ok(action))
-            }
+            return Poll::Ready(Ok(result))
         } else {
             self.hooks.push_back(hook);
         }

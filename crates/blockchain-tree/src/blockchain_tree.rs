@@ -14,7 +14,7 @@ use reth_interfaces::{
     },
     consensus::{Consensus, ConsensusError},
     executor::{BlockExecutionError, BlockValidationError},
-    Error,
+    RethResult,
 };
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, Hardfork, PruneModes, Receipt, SealedBlock,
@@ -112,7 +112,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         canon_state_notification_sender: CanonStateNotificationSender,
         config: BlockchainTreeConfig,
         prune_modes: Option<PruneModes>,
-    ) -> Result<Self, Error> {
+    ) -> RethResult<Self> {
         let max_reorg_depth = config.max_reorg_depth();
 
         let last_canonical_hashes = externals
@@ -120,7 +120,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             .tx()?
             .cursor_read::<tables::CanonicalHeaders>()?
             .walk_back(None)?
-            .take((max_reorg_depth + config.num_of_additional_canonical_block_hashes()) as usize)
+            .take(config.num_of_canonical_hashes() as usize)
             .collect::<Result<Vec<(BlockNumber, BlockHash)>, _>>()?;
 
         // TODO(rakita) save last finalized block inside database but for now just take
@@ -747,7 +747,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// tree by attempting to connect the buffered blocks to canonical hashes.
     ///
     ///
-    /// `N` is the `max_reorg_depth` plus the number of block hashes needed to satisfy the
+    /// `N` is the maximum of `max_reorg_depth` and the number of block hashes needed to satisfy the
     /// `BLOCKHASH` opcode in the EVM.
     ///
     /// # Note
@@ -757,11 +757,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     pub fn connect_buffered_blocks_to_canonical_hashes_and_finalize(
         &mut self,
         last_finalized_block: BlockNumber,
-    ) -> Result<(), Error> {
+    ) -> RethResult<()> {
         self.finalize_block(last_finalized_block);
-
-        let num_of_canonical_hashes =
-            self.config.max_reorg_depth() + self.config.num_of_additional_canonical_block_hashes();
 
         let last_canonical_hashes = self
             .externals
@@ -769,7 +766,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             .tx()?
             .cursor_read::<tables::CanonicalHeaders>()?
             .walk_back(None)?
-            .take(num_of_canonical_hashes as usize)
+            .take(self.config.num_of_canonical_hashes() as usize)
             .collect::<Result<BTreeMap<BlockNumber, BlockHash>, _>>()?;
 
         let (mut remove_chains, _) =
@@ -790,19 +787,16 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
     /// tree by attempting to connect the buffered blocks to canonical hashes.
     ///
-    /// `N` is the `max_reorg_depth` plus the number of block hashes needed to satisfy the
+    /// `N` is the maximum of `max_reorg_depth` and the number of block hashes needed to satisfy the
     /// `BLOCKHASH` opcode in the EVM.
-    pub fn connect_buffered_blocks_to_canonical_hashes(&mut self) -> Result<(), Error> {
-        let num_of_canonical_hashes =
-            self.config.max_reorg_depth() + self.config.num_of_additional_canonical_block_hashes();
-
+    pub fn connect_buffered_blocks_to_canonical_hashes(&mut self) -> RethResult<()> {
         let last_canonical_hashes = self
             .externals
             .db
             .tx()?
             .cursor_read::<tables::CanonicalHeaders>()?
             .walk_back(None)?
-            .take(num_of_canonical_hashes as usize)
+            .take(self.config.num_of_canonical_hashes() as usize)
             .collect::<Result<BTreeMap<BlockNumber, BlockHash>, _>>()?;
 
         self.connect_buffered_blocks_to_hashes(last_canonical_hashes)?;
@@ -813,7 +807,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     fn connect_buffered_blocks_to_hashes(
         &mut self,
         hashes: impl IntoIterator<Item = impl Into<BlockNumHash>>,
-    ) -> Result<(), Error> {
+    ) -> RethResult<()> {
         // check unconnected block buffer for childs of the canonical hashes
         for added_block in hashes.into_iter() {
             self.try_connect_buffered_blocks(added_block.into())
@@ -888,7 +882,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     ///
     /// Returns `Ok(None)` if the block hash is not canonical (block hash does not exist, or is
     /// included in a sidechain).
-    pub fn find_canonical_header(&self, hash: &BlockHash) -> Result<Option<SealedHeader>, Error> {
+    pub fn find_canonical_header(&self, hash: &BlockHash) -> RethResult<Option<SealedHeader>> {
         // if the indices show that the block hash is not canonical, it's either in a sidechain or
         // canonical, but in the db. If it is in a sidechain, it is not canonical. If it is not in
         // the db, then it is not canonical.
@@ -913,7 +907,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     }
 
     /// Determines whether or not a block is canonical, checking the db if necessary.
-    pub fn is_block_hash_canonical(&self, hash: &BlockHash) -> Result<bool, Error> {
+    pub fn is_block_hash_canonical(&self, hash: &BlockHash) -> RethResult<bool> {
         self.find_canonical_header(hash).map(|header| header.is_some())
     }
 
@@ -929,7 +923,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// Returns `Ok` if the blocks were canonicalized, or if the blocks were already canonical.
     #[track_caller]
     #[instrument(skip(self), target = "blockchain_tree")]
-    pub fn make_canonical(&mut self, block_hash: &BlockHash) -> Result<CanonicalOutcome, Error> {
+    pub fn make_canonical(&mut self, block_hash: &BlockHash) -> RethResult<CanonicalOutcome> {
         let old_block_indices = self.block_indices.clone();
         let old_buffered_blocks = self.buffered_blocks.parent_to_child.clone();
 
@@ -1080,7 +1074,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     }
 
     /// Canonicalize the given chain and commit it to the database.
-    fn commit_canonical(&self, chain: Chain) -> Result<(), Error> {
+    fn commit_canonical(&self, chain: Chain) -> RethResult<()> {
         let provider = DatabaseProvider::new_rw(
             self.externals.db.tx_mut()?,
             self.externals.chain_spec.clone(),
@@ -1102,7 +1096,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     }
 
     /// Unwind tables and put it inside state
-    pub fn unwind(&mut self, unwind_to: BlockNumber) -> Result<(), Error> {
+    pub fn unwind(&mut self, unwind_to: BlockNumber) -> RethResult<()> {
         // nothing to be done if unwind_to is higher then the tip
         if self.block_indices.canonical_tip().number <= unwind_to {
             return Ok(())
@@ -1123,7 +1117,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// Revert canonical blocks from the database and return them.
     ///
     /// The block, `revert_until`, is non-inclusive, i.e. `revert_until` stays in the database.
-    fn revert_canonical(&mut self, revert_until: BlockNumber) -> Result<Option<Chain>, Error> {
+    fn revert_canonical(&mut self, revert_until: BlockNumber) -> RethResult<Option<Chain>> {
         // read data that is needed for new sidechain
 
         let provider = DatabaseProvider::new_rw(

@@ -8,7 +8,7 @@ use crate::{
 };
 use reth_interfaces::{
     executor::{BlockExecutionError, BlockValidationError},
-    Error,
+    RethError,
 };
 use reth_primitives::{
     Address, Block, BlockNumber, Bloom, ChainSpec, Hardfork, Header, PruneMode, PruneModes,
@@ -46,7 +46,7 @@ pub struct EVMProcessor<'a> {
     /// The configured chain-spec
     chain_spec: Arc<ChainSpec>,
     /// revm instance that contains database and env environment.
-    evm: EVM<StateDBBox<'a, Error>>,
+    evm: EVM<StateDBBox<'a, RethError>>,
     /// Hook and inspector stack that we want to invoke on that hook.
     stack: InspectorStack,
     /// The collection of receipts.
@@ -106,7 +106,10 @@ impl<'a> EVMProcessor<'a> {
     }
 
     /// Create a new EVM processor with the given revm state.
-    pub fn new_with_state(chain_spec: Arc<ChainSpec>, revm_state: StateDBBox<'a, Error>) -> Self {
+    pub fn new_with_state(
+        chain_spec: Arc<ChainSpec>,
+        revm_state: StateDBBox<'a, RethError>,
+    ) -> Self {
         let mut evm = EVM::new();
         evm.database(revm_state);
         EVMProcessor {
@@ -128,7 +131,7 @@ impl<'a> EVMProcessor<'a> {
     }
 
     /// Returns a reference to the database
-    pub fn db_mut(&mut self) -> &mut StateDBBox<'a, Error> {
+    pub fn db_mut(&mut self) -> &mut StateDBBox<'a, RethError> {
         // Option will be removed from EVM in the future.
         // as it is always some.
         // https://github.com/bluealloy/revm/issues/697
@@ -552,21 +555,21 @@ pub fn verify_receipt<'a>(
 
 #[cfg(test)]
 mod tests {
+    use reth_interfaces::RethResult;
     use reth_primitives::{
         constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
+        hex_literal::hex,
         keccak256, Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, MAINNET,
     };
     use reth_provider::{AccountReader, BlockHashReader, StateRootProvider};
     use reth_revm_primitives::TransitionState;
     use revm::Database;
-    use std::{collections::HashMap, str::FromStr};
+    use std::collections::HashMap;
 
     use super::*;
 
-    /// Returns the beacon root contract code
-    fn beacon_root_contract_code() -> Bytes {
-        Bytes::from_str("0x3373fffffffffffffffffffffffffffffffffffffffe14604457602036146024575f5ffd5b620180005f350680545f35146037575f5ffd5b6201800001545f5260205ff35b6201800042064281555f359062018000015500").unwrap()
-    }
+    const BEACON_ROOT_CONTRACT_CODE: [u8; 97] =
+        hex!("3373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f35801560495762001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500");
 
     #[derive(Debug, Default, Clone, Eq, PartialEq)]
     struct StateProviderTest {
@@ -594,14 +597,14 @@ mod tests {
     }
 
     impl AccountReader for StateProviderTest {
-        fn basic_account(&self, address: Address) -> reth_interfaces::Result<Option<Account>> {
+        fn basic_account(&self, address: Address) -> RethResult<Option<Account>> {
             let ret = Ok(self.accounts.get(&address).map(|(_, acc)| *acc));
             ret
         }
     }
 
     impl BlockHashReader for StateProviderTest {
-        fn block_hash(&self, number: u64) -> reth_interfaces::Result<Option<H256>> {
+        fn block_hash(&self, number: u64) -> RethResult<Option<H256>> {
             Ok(self.block_hash.get(&number).cloned())
         }
 
@@ -609,7 +612,7 @@ mod tests {
             &self,
             start: BlockNumber,
             end: BlockNumber,
-        ) -> reth_interfaces::Result<Vec<H256>> {
+        ) -> RethResult<Vec<H256>> {
             let range = start..end;
             Ok(self
                 .block_hash
@@ -620,10 +623,7 @@ mod tests {
     }
 
     impl StateRootProvider for StateProviderTest {
-        fn state_root(
-            &self,
-            _bundle_state: BundleStateWithReceipts,
-        ) -> reth_interfaces::Result<H256> {
+        fn state_root(&self, _bundle_state: BundleStateWithReceipts) -> RethResult<H256> {
             todo!()
         }
     }
@@ -632,15 +632,15 @@ mod tests {
         fn storage(
             &self,
             account: Address,
-            storage_key: reth_primitives::StorageKey,
-        ) -> reth_interfaces::Result<Option<reth_primitives::StorageValue>> {
+            storage_key: StorageKey,
+        ) -> RethResult<Option<reth_primitives::StorageValue>> {
             Ok(self
                 .accounts
                 .get(&account)
                 .and_then(|(storage, _)| storage.get(&storage_key).cloned()))
         }
 
-        fn bytecode_by_hash(&self, code_hash: H256) -> reth_interfaces::Result<Option<Bytecode>> {
+        fn bytecode_by_hash(&self, code_hash: H256) -> RethResult<Option<Bytecode>> {
             Ok(self.contracts.get(&code_hash).cloned())
         }
 
@@ -648,7 +648,7 @@ mod tests {
             &self,
             _address: Address,
             _keys: &[H256],
-        ) -> reth_interfaces::Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
+        ) -> RethResult<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
             todo!()
         }
     }
@@ -660,7 +660,7 @@ mod tests {
 
         let mut db = StateProviderTest::default();
 
-        let beacon_root_contract_code = beacon_root_contract_code();
+        let beacon_root_contract_code = Bytes::from(BEACON_ROOT_CONTRACT_CODE);
 
         let beacon_root_contract_account = Account {
             balance: U256::ZERO,
@@ -717,7 +717,7 @@ mod tests {
         // header.timestamp
         // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH + HISTORY_BUFFER_LENGTH
         // should be parent_beacon_block_root
-        let history_buffer_length = 98304u64;
+        let history_buffer_length = 8191u64;
         let timestamp_index = header.timestamp % history_buffer_length;
         let parent_beacon_block_root_index =
             timestamp_index % history_buffer_length + history_buffer_length;
@@ -784,7 +784,7 @@ mod tests {
         // during the pre-block call
         let mut db = StateProviderTest::default();
 
-        let beacon_root_contract_code = beacon_root_contract_code();
+        let beacon_root_contract_code = Bytes::from(BEACON_ROOT_CONTRACT_CODE);
 
         let beacon_root_contract_account = Account {
             balance: U256::ZERO,
@@ -842,7 +842,7 @@ mod tests {
     fn eip_4788_genesis_call() {
         let mut db = StateProviderTest::default();
 
-        let beacon_root_contract_code = beacon_root_contract_code();
+        let beacon_root_contract_code = Bytes::from(BEACON_ROOT_CONTRACT_CODE);
 
         let beacon_root_contract_account = Account {
             balance: U256::ZERO,
@@ -922,7 +922,7 @@ mod tests {
 
         let mut db = StateProviderTest::default();
 
-        let beacon_root_contract_code = beacon_root_contract_code();
+        let beacon_root_contract_code = Bytes::from(BEACON_ROOT_CONTRACT_CODE);
 
         let beacon_root_contract_account = Account {
             balance: U256::ZERO,
@@ -965,7 +965,7 @@ mod tests {
         // header.timestamp
         // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH + HISTORY_BUFFER_LENGTH
         // should be parent_beacon_block_root
-        let history_buffer_length = 98304u64;
+        let history_buffer_length = 8191u64;
         let timestamp_index = header.timestamp % history_buffer_length;
         let parent_beacon_block_root_index =
             timestamp_index % history_buffer_length + history_buffer_length;
