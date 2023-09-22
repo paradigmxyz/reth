@@ -1,9 +1,9 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, H256};
+use reth_primitives::Bytes;
 use reth_rpc_types::{
     engine::ExecutionPayload,
-    validation::Message,
-    eth::transaction::Signature,
+    Message,
+    Signature,
 };
 
 /// Debug rpc interface.
