@@ -267,15 +267,20 @@ impl<DB: Database> Pruner<DB> {
         let highest_snapshots = *self.highest_snapshots_tracker.borrow();
 
         let target_block_number = if let Some(highest_snapshots) = highest_snapshots {
+            // Highest snapshots data is available, use maximum snapshotted block number as a target
+            // for determining if pruning is needed.
             let Some(highest_snapshotted_block_number) = highest_snapshots.max_block_number()
             else {
                 return false
             };
+            debug_assert!(highest_snapshotted_block_number <= tip_block_number);
 
             highest_snapshotted_block_number
         } else {
+            // Highest snapshots data is not available, use provided block number.
             tip_block_number
         };
+
         if self.last_pruned_block_number.map_or(true, |last_pruned_block_number| {
             // Saturating subtraction is needed for the case when the chain was reverted, meaning
             // current block number might be less than the previously pruned block number. If

@@ -29,12 +29,20 @@ pub type HighestSnapshotsTracker = watch::Receiver<Option<HighestSnapshots>>;
 /// Highest snapshotted block numbers, per data part.
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub struct HighestSnapshots {
+    /// Highest snapshotted block of headers, inclusive.
+    /// If [`None`], no snapshot is available.
     pub headers: Option<BlockNumber>,
+    /// Highest snapshotted block of receipts, inclusive.
+    /// If [`None`], no snapshot is available.
     pub receipts: Option<BlockNumber>,
+    /// Highest snapshotted block of transactions, inclusive.
+    /// If [`None`], no snapshot is available.
     pub transactions: Option<BlockNumber>,
 }
 
 impl HighestSnapshots {
+    /// Returns maximum snapshotted block number over all data parts.
+    /// If [`None`], no snapshots are available.
     pub fn max_block_number(&self) -> Option<BlockNumber> {
         self.headers.max(self.receipts).max(self.transactions)
     }
