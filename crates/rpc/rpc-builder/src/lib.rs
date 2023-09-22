@@ -123,7 +123,7 @@ use reth_rpc::{
     },
     AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider,
     NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TracingCallGuard, TracingCallPool, TxPoolApi,
-    Web3Api,
+    ValidationApi, Web3Api,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -681,6 +681,8 @@ pub enum RethRpcModule {
     Reth,
     /// `ots_` module
     Ots,
+    /// `validation_` module
+    Validation,
 }
 
 // === impl RethRpcModule ===
@@ -993,6 +995,11 @@ where
                         RethRpcModule::Ots => OtterscanApi::new(eth_api.clone()).into_rpc().into(),
                         RethRpcModule::Reth => {
                             RethApi::new(self.provider.clone(), Box::new(self.executor.clone()))
+                                .into_rpc()
+                                .into()
+                        },
+                        RethRpcModule::Validation => {
+                            ValidationApi::new(self.provider.clone(), Box::new(self.executor.clone()))
                                 .into_rpc()
                                 .into()
                         }
@@ -1905,6 +1912,7 @@ mod tests {
                 "rpc" => RethRpcModule::Rpc,
                 "ots" => RethRpcModule::Ots,
                 "reth" => RethRpcModule::Reth,
+                "validation" => RethRpcModule::Validation,
             );
     }
 
