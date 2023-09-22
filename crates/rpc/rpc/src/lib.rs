@@ -42,6 +42,7 @@ mod rpc;
 mod trace;
 pub mod tracing_call;
 mod txpool;
+mod validation;
 mod web3;
 
 pub use admin::AdminApi;
@@ -56,6 +57,7 @@ pub use rpc::RPCApi;
 pub use trace::TraceApi;
 pub use tracing_call::{TracingCallGuard, TracingCallPool};
 pub use txpool::TxPoolApi;
+pub use validation::ValidationApi;
 pub use web3::Web3Api;
 
 pub(crate) mod result;
