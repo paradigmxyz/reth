@@ -1,7 +1,7 @@
 use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
-    constants::SYSTEM_ADDRESS, Address, ChainSpec, Hardfork, Header, Withdrawal, H256, U256,
+    constants::SYSTEM_ADDRESS, Address, ChainSpec, Header, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::{env::fill_tx_env_with_beacon_root_contract_call, Database};
 use revm::{primitives::ResultAndState, DatabaseCommit, EVM};
@@ -109,8 +109,8 @@ where
     Ok(())
 }
 
-/// Returns a map of addresses to their balance increments if shanghai is active at the given
-/// timestamp.
+/// Returns a map of addresses to their balance increments if the Shanghai hardfork is active at the
+/// given timestamp.
 #[inline]
 pub fn post_block_withdrawals_balance_increments(
     chain_spec: &ChainSpec,
@@ -137,7 +137,7 @@ pub fn insert_post_block_withdrawals_balance_increments(
     balance_increments: &mut HashMap<Address, u128>,
 ) {
     // Process withdrawals
-    if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(block_timestamp) {
+    if chain_spec.is_shanghai_activated_at_timestamp(block_timestamp) {
         if let Some(withdrawals) = withdrawals {
             for withdrawal in withdrawals {
                 *balance_increments.entry(withdrawal.address).or_default() +=
