@@ -568,9 +568,10 @@ async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
 
     let config = NetworkConfigBuilder::new(secret_key)
         .listener_port(0)
-        .discovery_port(0)
+        .disable_discovery()
         .peer_config(peers_config)
         .build(NoopProvider::default());
+
     let network = NetworkManager::new(config).await.unwrap();
 
     let other_peer_handle = net.handles().next().unwrap();
@@ -580,9 +581,11 @@ async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
     other_peer_handle.add_peer(*handle.peer_id(), handle.local_addr());
 
     tokio::task::spawn(network);
-    let _handle = net.spawn();
+    let net_handle = net.spawn();
 
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     assert_eq!(handle.num_connected_peers(), 0);
+
+    net_handle.terminate().await;
 }
