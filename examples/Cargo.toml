@@ -26,6 +26,7 @@ reth-eth-wire.workspace = true
 reth-ecies.workspace = true
 secp256k1.workspace = true
 
+colored = "2.0.4"
 eyre = "0.6.8"
 futures.workspace = true
 async-trait.workspace = true
