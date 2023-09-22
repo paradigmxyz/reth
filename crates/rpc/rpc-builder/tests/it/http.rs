@@ -31,6 +31,15 @@ fn is_unimplemented(err: Error) -> bool {
     }
 }
 
+fn get_call_error_message(err: Error) -> Option<String> {
+    match err {
+        Error::Call(error_obj) => {
+                Some(error_obj.message().to_string())
+        }
+        _ => None,
+    }
+}
+
 async fn test_filter_calls<C>(client: &C)
 where
     C: ClientT + SubscriptionClientT + Sync,
@@ -68,7 +77,10 @@ where
         let execution_payload: ExecutionPayloadValidation = serde_json::from_str(EXECUTION_PAYLOAD).unwrap();
         let message: Message = serde_json::from_str(MESSAGE).unwrap();
         let signature: String =        "0xb000308c5639bcb4d4ee1ca180571e4fdd044ad017ee745c8d8e9f046f40e2bd36208ed3074267599cfa21ca68d381a50cd78e5a7e3c4fe3b4fbd61952d68220f83d4c0c751647fcb861212cc54fda136d749176b7767ec55c0e7903de49885e".to_string();
-        ValidationApiClient::validate_builder_submission_v1(client, message, execution_payload, signature).await.unwrap();
+        let result = ValidationApiClient::validate_builder_submission_v1(client, message, execution_payload.clone(), signature).await;
+        let error_message = get_call_error_message(result.unwrap_err()).unwrap();
+        let expected_message = format!("Block parent [hash:{:?}] is not known.",  execution_payload.parent_hash);
+        assert_eq!(error_message, expected_message);
 }
 
 async fn test_basic_eth_calls<C>(client: &C)

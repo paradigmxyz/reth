@@ -125,6 +125,17 @@ impl ToRpcResultExt for RethResult<Option<Block>> {
     }
 }
 
+impl ToRpcResultExt for RethResult<()> {
+    type Ok = ();
+
+    fn map_ok_or_rpc_err(self) -> RpcResult<<Self as ToRpcResultExt>::Ok> {
+        match self {
+            Ok(()) => Ok(()),
+            Err(err) => Err(internal_rpc_err(err.to_string())),
+        }
+    }
+}
+
 /// Constructs an invalid params JSON-RPC error.
 pub(crate) fn invalid_params_rpc_err(
     msg: impl Into<String>,
