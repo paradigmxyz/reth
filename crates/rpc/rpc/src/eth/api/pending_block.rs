@@ -7,7 +7,7 @@ use reth_primitives::{
     proofs, Block, ChainSpec, Header, IntoRecoveredTransaction, Receipt, SealedBlock, SealedHeader,
     EMPTY_OMMER_ROOT, H256, U256,
 };
-use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
+use reth_provider::{BundleStateWithReceipts, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
     env::tx_env_with_recovered,
@@ -38,7 +38,7 @@ impl PendingBlockEnv {
         pool: &Pool,
     ) -> EthResult<SealedBlock>
     where
-        Client: StateProviderFactory,
+        Client: StateProviderFactory + ChainSpecProvider,
         Pool: TransactionPool,
     {
         let Self { cfg, block_env, origin } = self;
@@ -50,7 +50,7 @@ impl PendingBlockEnv {
 
         let mut cumulative_gas_used = 0;
         let mut sum_blob_gas_used = 0;
-        let block_gas_limit: u64 = block_env.gas_limit.try_into().unwrap_or(u64::MAX);
+        let block_gas_limit: u64 = block_env.gas_limit.to::<u64>();
         let base_fee = block_env.basefee.to::<u64>();
         let block_number = block_env.number.to::<u64>();
 
@@ -64,28 +64,22 @@ impl PendingBlockEnv {
             PendingBlockEnvOrigin::DerivedFromLatest(_) => (None, None),
         };
 
+        let chain_spec = client.chain_spec();
+
         let parent_beacon_block_root = if origin.is_actual_pending() {
+            // apply eip-4788 pre block contract call
+            pre_block_beacon_root_contract_call(
+                &mut db,
+                chain_spec.as_ref(),
+                block_number,
+                &cfg,
+                &block_env,
+                origin.header().parent_beacon_block_root,
+            )?;
             origin.header().parent_beacon_block_root
         } else {
             None
         };
-
-        let chain_spec = ChainSpec::default(); // mainnet
-
-        // apply eip-4788 pre block contract call
-        pre_block_beacon_root_contract_call(
-            &mut db,
-            &chain_spec,
-            block_number,
-            &cfg,
-            &block_env,
-            block_env
-                .timestamp
-                .to_string()
-                .parse::<u64>()
-                .expect("timestamp should be converted into u64"),
-            parent_beacon_block_root,
-        )?;
 
         let mut receipts = Vec::new();
 
@@ -174,11 +168,7 @@ impl PendingBlockEnv {
         // executes the withdrawals and commits them to the Database and BundleState.
         let balance_increments = post_block_withdrawals_balance_increments(
             &chain_spec,
-            block_env
-                .timestamp
-                .to_string()
-                .parse::<u64>()
-                .expect("timestamp should be converted into u64"),
+            block_env.timestamp.try_into().unwrap_or(u64::MAX),
             withdrawals.clone().unwrap_or_default().as_ref(),
         );
 
@@ -198,6 +188,14 @@ impl PendingBlockEnv {
         // create the block header
         let transactions_root = proofs::calculate_transaction_root(&executed_txs);
 
+        // check if cancun is activated to set eip4844 header fields correctly
+        let blob_gas_used =
+            if chain_spec.is_cancun_activated_at_timestamp(block_env.timestamp.to::<u64>()) {
+                Some(sum_blob_gas_used)
+            } else {
+                None
+            };
+
         let header = Header {
             parent_hash,
             ommers_hash: EMPTY_OMMER_ROOT,
@@ -215,7 +213,7 @@ impl PendingBlockEnv {
             gas_limit: block_gas_limit,
             difficulty: U256::ZERO,
             gas_used: cumulative_gas_used,
-            blob_gas_used: Some(sum_blob_gas_used),
+            blob_gas_used,
             excess_blob_gas: block_env.excess_blob_gas,
             extra_data: Default::default(),
             parent_beacon_block_root,
@@ -242,7 +240,6 @@ fn pre_block_beacon_root_contract_call<DB>(
     block_number: u64,
     initialized_cfg: &CfgEnv,
     initialized_block_env: &BlockEnv,
-    timestamp: u64,
     parent_beacon_block_root: Option<H256>,
 ) -> EthResult<()>
 where
@@ -263,7 +260,7 @@ where
     // initialize a block from the env, because the pre block call needs the block itself
     apply_beacon_root_contract_call(
         chain_spec,
-        timestamp,
+        initialized_block_env.timestamp.to::<u64>(),
         block_number,
         parent_beacon_block_root,
         &mut evm_pre_block,
