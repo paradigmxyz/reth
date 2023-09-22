@@ -1,25 +1,18 @@
-use reth_primitives::{Account, Address, Log as RethLog, H256, KECCAK_EMPTY};
-use revm::primitives::{AccountInfo, Log};
+use reth_primitives::{
+    revm_primitives::{AccountInfo, Log},
+    Account, Log as RethLog, KECCAK_EMPTY,
+};
 
 /// Check equality between [`reth_primitives::Log`] and [`revm::primitives::Log`]
 pub fn is_log_equal(revm_log: &Log, reth_log: &reth_primitives::Log) -> bool {
-    revm_log.topics.len() == reth_log.topics.len() &&
-        revm_log.address.0 == reth_log.address.0 &&
-        revm_log.data == reth_log.data.0 &&
-        !revm_log
-            .topics
-            .iter()
-            .zip(reth_log.topics.iter())
-            .any(|(revm_topic, reth_topic)| revm_topic.0 != reth_topic.0)
+    revm_log.address == reth_log.address &&
+        revm_log.data == reth_log.data &&
+        revm_log.topics == reth_log.topics
 }
 
 /// Into reth primitive [Log] from [revm::primitives::Log].
 pub fn into_reth_log(log: Log) -> RethLog {
-    RethLog {
-        address: Address(log.address.0),
-        topics: log.topics.into_iter().map(|h| H256::new(h.0)).collect(),
-        data: log.data,
-    }
+    RethLog { address: log.address, topics: log.topics, data: log.data }
 }
 
 /// Create reth primitive [Account] from [revm::primitives::AccountInfo].

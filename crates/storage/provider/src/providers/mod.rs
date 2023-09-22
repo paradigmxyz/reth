@@ -19,11 +19,7 @@ use reth_primitives::{
     Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256, U256,
 };
-use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
-pub use state::{
-    historical::{HistoricalStateProvider, HistoricalStateProviderRef},
-    latest::{LatestStateProvider, LatestStateProviderRef},
-};
+use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
     collections::{BTreeMap, HashSet},
     ops::RangeBounds,
@@ -31,6 +27,11 @@ use std::{
     time::Instant,
 };
 use tracing::trace;
+
+pub use state::{
+    historical::{HistoricalStateProvider, HistoricalStateProviderRef},
+    latest::{LatestStateProvider, LatestStateProviderRef},
+};
 
 mod bundle_state_provider;
 mod chain_info;

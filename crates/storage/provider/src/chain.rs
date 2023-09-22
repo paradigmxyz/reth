@@ -360,7 +360,7 @@ pub enum ChainSplit {
 mod tests {
     use super::*;
     use reth_primitives::{Address, H256};
-    use reth_revm_primitives::{
+    use revm::{
         db::BundleState,
         primitives::{AccountInfo, HashMap},
     };

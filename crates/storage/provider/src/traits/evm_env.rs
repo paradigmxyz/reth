@@ -1,6 +1,6 @@
 use reth_interfaces::RethResult;
 use reth_primitives::{BlockHashOrNumber, Header};
-use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
+use revm::primitives::{BlockEnv, CfgEnv};
 
 /// A provider type that knows chain specific information required to configure an
 /// [Env](reth_revm_primitives::primitives::Env)

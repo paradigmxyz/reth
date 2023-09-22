@@ -3,8 +3,8 @@ use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     constants::SYSTEM_ADDRESS, Address, ChainSpec, Hardfork, Header, Withdrawal, H256, U256,
 };
-use reth_revm_primitives::{env::fill_tx_env_with_beacon_root_contract_call, Database};
-use revm::{primitives::ResultAndState, DatabaseCommit, EVM};
+use reth_revm_primitives::env::fill_tx_env_with_beacon_root_contract_call;
+use revm::{primitives::ResultAndState, Database, DatabaseCommit, EVM};
 use std::{collections::HashMap, fmt::Debug};
 
 /// Collect all balance changes at the end of the block.

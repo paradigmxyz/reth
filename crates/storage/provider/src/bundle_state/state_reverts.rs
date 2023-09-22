@@ -7,10 +7,8 @@ use reth_db::{
 };
 use reth_interfaces::db::DatabaseError;
 use reth_primitives::{BlockNumber, StorageEntry, H256, U256};
-use reth_revm_primitives::{
-    db::states::{PlainStateReverts, PlainStorageRevert, RevertToSlot},
-    into_reth_acc,
-};
+use reth_revm_primitives::into_reth_acc;
+use revm::db::states::{PlainStateReverts, PlainStorageRevert, RevertToSlot};
 use std::iter::Peekable;
 
 /// Revert of the state.

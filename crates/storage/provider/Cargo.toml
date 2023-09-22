@@ -16,6 +16,8 @@ reth-revm-primitives = { path = "../../revm/revm-primitives" }
 reth-db = { path = "../db" }
 reth-trie = { path = "../../trie" }
 
+revm.workspace = true
+
 # async
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 tokio-stream = { workspace = true, features = ["sync"] }
@@ -39,7 +41,6 @@ rayon = "1.7"
 reth-db = { path = "../db", features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
 reth-rlp.workspace = true
-revm.workspace = true
 reth-trie = { path = "../../trie", features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 parking_lot.workspace = true

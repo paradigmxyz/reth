@@ -1,3 +1,4 @@
+use crate::{StateChanges, StateReverts};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     tables,
@@ -8,18 +9,15 @@ use reth_primitives::{
     keccak256, logs_bloom, proofs::calculate_receipt_root_ref, Account, Address, BlockNumber,
     Bloom, Bytecode, Log, Receipt, StorageEntry, H256, U256,
 };
-use reth_revm_primitives::{
-    db::states::BundleState, into_reth_acc, into_revm_acc, primitives::AccountInfo,
-};
+use reth_revm_primitives::{into_reth_acc, into_revm_acc};
 use reth_trie::{
     hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
     StateRoot, StateRootError,
 };
+use revm::{db::states::BundleState, primitives::AccountInfo};
 use std::collections::HashMap;
 
-pub use reth_revm_primitives::db::states::OriginalValuesKnown;
-
-use crate::{StateChanges, StateReverts};
+pub use revm::db::states::OriginalValuesKnown;
 
 /// Bundle state of post execution changes and reverts
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -383,7 +381,7 @@ impl BundleStateWithReceipts {
 
 #[cfg(test)]
 mod tests {
-    use super::{StateChanges, StateReverts};
+    use super::*;
     use crate::{AccountReader, BundleStateWithReceipts, ProviderFactory};
     use reth_db::{
         cursor::{DbCursorRO, DbDupCursorRO},
@@ -394,7 +392,6 @@ mod tests {
         DatabaseEnv,
     };
     use reth_primitives::{Address, Receipt, StorageEntry, H256, MAINNET, U256};
-    use reth_revm_primitives::{into_reth_acc, primitives::HashMap};
     use revm::{
         db::{
             states::{
@@ -404,7 +401,9 @@ mod tests {
             },
             BundleState,
         },
-        primitives::{Account, AccountInfo as RevmAccountInfo, AccountStatus, StorageSlot},
+        primitives::{
+            Account, AccountInfo as RevmAccountInfo, AccountStatus, HashMap, StorageSlot,
+        },
         CacheState, DatabaseCommit, State,
     };
     use std::sync::Arc;
