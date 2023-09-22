@@ -6,6 +6,7 @@ use crate::{
     transaction::DbTx,
     DatabaseError, RawKey, RawTable,
 };
+use reth_interfaces::{RethResult};
 use reth_nippy_jar::NippyJar;
 use std::ops::{RangeBounds, RangeInclusive};
 
@@ -24,7 +25,7 @@ macro_rules! generate_snapshot_func {
                 ///
                 /// * `tx`: Database transaction.
                 /// * `range`: Data range for columns in tables.
-                /// * `compression_set`: Sets of column data for compression dictionaries. Max size is 2GB. Row count is independent.
+                /// * `dict_compression_set`: Sets of column data for compression dictionaries. Max size is 2GB. Row count is independent.
                 /// * `use_hash`: Flag to indicate whether to create snapshot filters/phf from `TxHash` or `BlockHash`
                 /// * `row_count`: Total rows to add to `NippyJar`. Must match row count in `range`.
                 /// * `nippy_jar`: Snapshot object responsible for file generation.
@@ -37,17 +38,17 @@ macro_rules! generate_snapshot_func {
                 (
                     tx: &impl DbTx<'tx>,
                     range: RangeInclusive<K>,
-                    compression_set: Option<Vec<impl Iterator<Item = Vec<u8>>>>,
+                    dict_compression_set: Option<Vec<impl Iterator<Item = Vec<u8>>>>,
                     use_hash: bool,
                     row_count: usize,
                     nippy_jar: &mut NippyJar
-                ) -> Result<(), DatabaseError>
+                ) -> RethResult<()>
                     where K: Key + Copy
                 {
                     let range: RangeInclusive<RawKey<K>> = RawKey::new(*range.start())..=RawKey::new(*range.end());
 
                     handle_compression_and_indexing::<HashTbl>(
-                        tx, compression_set, use_hash.then_some(range.clone()), nippy_jar
+                        tx, dict_compression_set, use_hash.then_some(range.clone()), nippy_jar
                     )?;
 
                     // Creates the cursors for the columns
@@ -56,7 +57,7 @@ macro_rules! generate_snapshot_func {
                         let [< $tbl _iter>] = [< $tbl _cursor>]
                             .walk_range(range.clone())?
                             .into_iter()
-                            .map(|row| row.map(|(_key, val)| val.take()).unwrap());
+                            .map(|row| row.map(|(_key, val)| val.take()).expect("exist in database"));
 
                     )+
 
@@ -65,7 +66,7 @@ macro_rules! generate_snapshot_func {
                         $(Box::new([< $tbl _iter>]),)+
                     ];
 
-                    nippy_jar.freeze(col_iterators, row_count as u64).unwrap();
+                    nippy_jar.freeze(col_iterators, row_count as u64)?;
 
                     Ok(())
                 }
@@ -76,26 +77,26 @@ macro_rules! generate_snapshot_func {
 
 fn handle_compression_and_indexing<'tx, HashTbl: Table>(
     tx: &impl DbTx<'tx>,
-    compression_set: Option<Vec<impl Iterator<Item = Vec<u8>>>>,
+    dict_compression_set: Option<Vec<impl Iterator<Item = Vec<u8>>>>,
     hash_range: Option<impl RangeBounds<RawKey<<HashTbl as Table>::Key>>>,
     nippy_jar: &mut NippyJar,
-) -> Result<(), DatabaseError> {
+) -> RethResult<()> {
     // Create PHF and Filter if required
     if let Some(hash_range) = hash_range {
         let mut cursor = tx.cursor_read::<RawTable<HashTbl>>()?;
 
         // This might get big but ph needs the values in memory.
-        let it: Vec<_> = cursor
+        let it = cursor
             .walk_range(hash_range)?
-            .map(|row| row.map(|(_key, value)| value.take()).unwrap())
-            .collect();
+            .map(|row| row.map(|(_key, value)| value.take()))
+            .collect::<Result<Vec<_>, DatabaseError>>()?;
 
-        nippy_jar.prepare_index(&it).unwrap();
+        nippy_jar.prepare_index(&it)?;
     }
 
     // Create compression dictionaries if required
-    if let Some(data_sets) = compression_set {
-        nippy_jar.prepare_compression(data_sets).unwrap();
+    if let Some(data_sets) = dict_compression_set {
+        nippy_jar.prepare_compression(data_sets)?;
     }
 
     Ok(())

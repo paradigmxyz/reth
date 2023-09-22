@@ -29,3 +29,9 @@ pub enum RethError {
     #[error("{0}")]
     Custom(String),
 }
+
+impl From<reth_nippy_jar::NippyJarError> for RethError {
+    fn from(err: reth_nippy_jar::NippyJarError) -> Self {
+        RethError::Custom(err.to_string())
+    }
+}

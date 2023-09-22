@@ -5683,6 +5683,7 @@ dependencies = [
  "reth-db",
  "reth-eth-wire",
  "reth-network-api",
+ "reth-nippy-jar",
  "reth-primitives",
  "reth-rpc-types",
  "revm-primitives",
