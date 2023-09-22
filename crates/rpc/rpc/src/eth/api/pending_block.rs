@@ -16,7 +16,9 @@ use reth_revm::{
 };
 use reth_transaction_pool::TransactionPool;
 use revm::{db::states::bundle_state::BundleRetention, Database, DatabaseCommit, State};
-use revm_primitives::{BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState};
+use revm_primitives::{
+    BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
+};
 use std::time::Instant;
 
 /// Configured [BlockEnv] and [CfgEnv] for a pending block
@@ -31,7 +33,12 @@ pub(crate) struct PendingBlockEnv {
 }
 
 impl PendingBlockEnv {
-    /// Builds a pending block from the given client and pool.
+    /// Builds a pending block using the given client and pool.
+    ///
+    /// If the origin is the actual pending block, the block is built with withdrawals.
+    ///
+    /// After Cancun, if the origin is the actual pending block, the block includes the EIP-4788 pre
+    /// block contract call using the parent beacon block root received from the CL.
     pub(crate) fn build_block<Client, Pool>(
         self,
         client: &Client,
@@ -57,9 +64,9 @@ impl PendingBlockEnv {
         let mut executed_txs = Vec::new();
         let mut best_txs = pool.best_transactions_with_base_fee(base_fee);
 
-        let (withdrawals, withdrawals_root) = match origin.clone() {
-            PendingBlockEnvOrigin::ActualPending(block) => {
-                (block.clone().withdrawals, block.withdrawals_root)
+        let (withdrawals, withdrawals_root) = match origin {
+            PendingBlockEnvOrigin::ActualPending(ref block) => {
+                (block.withdrawals.clone(), block.withdrawals_root)
             }
             PendingBlockEnvOrigin::DerivedFromLatest(_) => (None, None),
         };
@@ -67,7 +74,8 @@ impl PendingBlockEnv {
         let chain_spec = client.chain_spec();
 
         let parent_beacon_block_root = if origin.is_actual_pending() {
-            // apply eip-4788 pre block contract call
+            // apply eip-4788 pre block contract call if we got the block from the CL with the real
+            // parent beacon block root
             pre_block_beacon_root_contract_call(
                 &mut db,
                 chain_spec.as_ref(),
@@ -146,10 +154,10 @@ impl PendingBlockEnv {
                     }
                 }
             };
-            // commit changes
-            db.commit(state);
 
             let gas_used = result.gas_used();
+            // commit changes
+            db.commit(state);
 
             // add gas used by the transaction to cumulative gas used, before creating the receipt
             cumulative_gas_used += gas_used;
@@ -165,6 +173,7 @@ impl PendingBlockEnv {
             // append transaction to the list of executed transactions
             executed_txs.push(tx.into_signed());
         }
+
         // executes the withdrawals and commits them to the Database and BundleState.
         let balance_increments = post_block_withdrawals_balance_increments(
             &chain_spec,
@@ -172,6 +181,7 @@ impl PendingBlockEnv {
             withdrawals.clone().unwrap_or_default().as_ref(),
         );
 
+        // increment account balances for withdrawals
         db.increment_balances(balance_increments)?;
 
         // merge all transitions into bundle state.
@@ -190,11 +200,7 @@ impl PendingBlockEnv {
 
         // check if cancun is activated to set eip4844 header fields correctly
         let blob_gas_used =
-            if chain_spec.is_cancun_activated_at_timestamp(block_env.timestamp.to::<u64>()) {
-                Some(sum_blob_gas_used)
-            } else {
-                None
-            };
+            if cfg.spec_id >= SpecId::CANCUN { Some(sum_blob_gas_used) } else { None };
 
         let header = Header {
             parent_hash,
