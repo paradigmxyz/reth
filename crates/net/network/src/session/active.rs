@@ -356,14 +356,8 @@ impl ActiveSession {
 
     /// Notify the manager that the peer sent a bad message
     fn on_bad_message(&self) {
-        let sender = self.to_session_manager.inner().get_ref();
-        if sender.is_none() {
-            return
-        }
-
-        let _ = sender
-            .unwrap()
-            .try_send(ActiveSessionMessage::BadMessage { peer_id: self.remote_peer_id });
+        let Some(sender) = self.to_session_manager.inner().get_ref() else { return };
+        let _ = sender.try_send(ActiveSessionMessage::BadMessage { peer_id: self.remote_peer_id });
     }
 
     /// Report back that this session has been closed.
