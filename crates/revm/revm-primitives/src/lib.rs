@@ -14,7 +14,7 @@
 //! revm utils and implementations specific to reth.
 pub mod config;
 
-/// Helpers for configuring revm [Env](revm::primitives::Env)
+/// Helpers for configuring Revm [`Env`](reth_primitives::revm_primitives::Env).
 pub mod env;
 
 /// Helpers for type compatibility between reth and revm types

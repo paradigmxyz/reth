@@ -3,20 +3,21 @@ use reth_primitives::{
     Account, Log as RethLog, KECCAK_EMPTY,
 };
 
-/// Check equality between [`reth_primitives::Log`] and [`revm::primitives::Log`]
+/// Check equality between Revm and Reth `Log`s.
 pub fn is_log_equal(revm_log: &Log, reth_log: &reth_primitives::Log) -> bool {
     revm_log.address == reth_log.address &&
         revm_log.data == reth_log.data &&
         revm_log.topics == reth_log.topics
 }
 
-/// Into reth primitive [Log] from [revm::primitives::Log].
+/// Converts a Revm `Log` into a Reth `Log`.
 pub fn into_reth_log(log: Log) -> RethLog {
     RethLog { address: log.address, topics: log.topics, data: log.data }
 }
 
-/// Create reth primitive [Account] from [revm::primitives::AccountInfo].
-/// Check if revm bytecode hash is [KECCAK_EMPTY] and put None to reth [Account]
+/// Converts a Revm [`AccountInfo`] into a Reth [`Account`].
+///
+/// Sets `bytecode_hash` to `None` if `code_hash` is [`KECCAK_EMPTY`].
 pub fn into_reth_acc(revm_acc: AccountInfo) -> Account {
     let code_hash = revm_acc.code_hash;
     Account {
@@ -26,7 +27,9 @@ pub fn into_reth_acc(revm_acc: AccountInfo) -> Account {
     }
 }
 
-/// Create revm primitive [AccountInfo] from [reth_primitives::Account].
+/// Converts a Revm [`AccountInfo`] into a Reth [`Account`].
+///
+/// Sets `code_hash` to [`KECCAK_EMPTY`] if `bytecode_hash` is `None`.
 pub fn into_revm_acc(reth_acc: Account) -> AccountInfo {
     AccountInfo {
         balance: reth_acc.balance,
