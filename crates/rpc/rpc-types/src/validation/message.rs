@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 /// Message containing the block data to be validated
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Message {
     pub slot: U256,
     pub parent_hash: H256,

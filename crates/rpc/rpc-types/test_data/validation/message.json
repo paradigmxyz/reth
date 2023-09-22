@@ -1,11 +1,11 @@
 {
-    "slot": "6768260",
-    "parent_hash": "0x089dad69074a0f8096625853cebb35f893e71a4dcaa41b235867b07ae4e54dc2",
-    "block_hash": "0x54732505f10ea67ae1ececf3dd4aa0bef1d78770f234bd26ad2cd1eec0b36596",
-    "builder_pubkey": "0xb052beae829c5b6ea991bfe09960caad5b78dd9c1be18a477fb0121e47e8a89ce6364edc580a72b91106dbfbcb5f80c0",
-    "proposer_pubkey": "0x90c21cab1941c84260612db14aef768e555fed9b281a0c7fc21dda8228fa01b18680bd8819489faeb6f8f5ff881b31f7",
-    "proposer_fee_recipient": "0x6d2e03b7EfFEae98BD302A9F836D0d6Ab0002766",
-    "gas_limit": "30000000",
-    "gas_used": "10241365",
-    "value": "18829780302110960"
+  "slot": "6768260",
+  "parentHash": "0x089dad69074a0f8096625853cebb35f893e71a4dcaa41b235867b07ae4e54dc2",
+  "blockHash": "0x54732505f10ea67ae1ececf3dd4aa0bef1d78770f234bd26ad2cd1eec0b36596",
+  "builderPubkey": "0xb052beae829c5b6ea991bfe09960caad5b78dd9c1be18a477fb0121e47e8a89ce6364edc580a72b91106dbfbcb5f80c0",
+  "proposerPubkey": "0x90c21cab1941c84260612db14aef768e555fed9b281a0c7fc21dda8228fa01b18680bd8819489faeb6f8f5ff881b31f7",
+  "proposerFeeRecipient": "0x6d2e03b7EfFEae98BD302A9F836D0d6Ab0002766",
+  "gasLimit": "30000000",
+  "gasUsed": "10241365",
+  "value": "18829780302110960"
 }

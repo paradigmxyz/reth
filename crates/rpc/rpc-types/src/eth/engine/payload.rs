@@ -649,6 +649,7 @@ mod tests {
         assert_eq!(serde_json::to_string(&payload).unwrap(), s);
     }
 
+<<<<<<< HEAD
     #[test]
     fn serde_roundtrip_enveloped_txs_payload_v1() {
         // pulled from hive tests
@@ -844,5 +845,11 @@ mod tests {
         let payload_res: Result<ExecutionPayloadInputV2, serde_json::Error> =
             serde_json::from_str(input);
         assert!(payload_res.is_err());
+    }
+    const EXECUTION_PAYLOAD: &str = include_str!("../../../test_data/validation/execution_payload.json");
+
+    #[test]
+    fn test_deserialize_validation_execution_payload() {
+        let _execution_payload: ExecutionPayload = serde_json::from_str(EXECUTION_PAYLOAD).unwrap();
     }
 }
