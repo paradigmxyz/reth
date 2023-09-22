@@ -1366,6 +1366,17 @@ mod tests {
     }
 
     #[test]
+    fn decode_raw_tx_from_builder_payload() {
+        use crate::hex_literal::hex;
+
+        let raw =hex!("f8ad838a01fd8509312da3dc8305573094dac17f958d2ee523a2206206994597c13d831ec780b844a9059cbb00000000000000000000000062c3ba7f07a19bf34c44387988cb978cabdb16b80000000000000000000000000000000000000000000000000000000000fc134025a093752999a67df7af6d90d72c04ebbcf54f645cfe1d8652c1482fce6f0db0e260a07174f40005d9b53c206a44d7f829cc8f7edf71110cc11650c99d828a0704f406");
+
+        let mut pointer = raw.as_ref();
+        let tx = TransactionSigned::decode(&mut pointer).unwrap();
+        println!("Decoded tx: {:?}", tx);
+    }
+
+    #[test]
     fn decode_raw_tx_and_recover_signer() {
         use crate::hex_literal::hex;
         // transaction is from ropsten
