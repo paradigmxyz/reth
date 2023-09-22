@@ -8,7 +8,7 @@ use crate::{
 };
 use reth_interfaces::RethResult;
 use reth_nippy_jar::NippyJar;
-use std::ops::{RangeBounds, RangeInclusive};
+use std::ops::RangeInclusive;
 
 /// Macro that generates snapshot creation functions that take an arbitratry number of [`Table`] and
 /// creates a [`NippyJar`] file out of their [`Table::Value`]. Each list of [`Table::Value`] from a
@@ -25,19 +25,20 @@ macro_rules! generate_snapshot_func {
                 ///
                 /// * `tx`: Database transaction.
                 /// * `range`: Data range for columns in tables.
+                /// * `keys`: List of keys (eg. `TxHash` or `BlockHash`) with length equal to `row_count` and ordered by future column insertion from `range`.
                 /// * `dict_compression_set`: Sets of column data for compression dictionaries. Max size is 2GB. Row count is independent.
                 /// * `row_count`: Total rows to add to `NippyJar`. Must match row count in `range`.
                 /// * `nippy_jar`: Snapshot object responsible for file generation.
                 #[allow(non_snake_case)]
                 pub fn [<create_snapshot$(_ $tbl)+>]<'tx,
                     $($tbl: Table<Key=K>,)+
-                    HashTbl: Table<Key=K>,
                     K
                 >
                 (
                     tx: &impl DbTx<'tx>,
                     range: RangeInclusive<K>,
                     dict_compression_set: Option<Vec<impl Iterator<Item = Vec<u8>>>>,
+                    keys: Option<Vec<Vec<u8>>>,
                     row_count: usize,
                     nippy_jar: &mut NippyJar
                 ) -> RethResult<()>
@@ -45,12 +46,16 @@ macro_rules! generate_snapshot_func {
                 {
                     let range: RangeInclusive<RawKey<K>> = RawKey::new(*range.start())..=RawKey::new(*range.end());
 
-                    handle_compression_and_indexing::<HashTbl>(
-                        tx,
-                        dict_compression_set,
-                        nippy_jar.uses_filters().then_some(range.clone()),
-                        nippy_jar
-                    )?;
+                    // Create PHF and Filter if required
+                    if let Some(keys) = keys {
+                        // This might get big but ph needs the values in memory.
+                        nippy_jar.prepare_index(&keys)?;
+                    }
+
+                    // Create compression dictionaries if required
+                    if let Some(data_sets) = dict_compression_set {
+                        nippy_jar.prepare_compression(data_sets)?;
+                    }
 
                     // Creates the cursors for the columns
                     $(
@@ -74,33 +79,6 @@ macro_rules! generate_snapshot_func {
             }
         )+
     };
-}
-
-fn handle_compression_and_indexing<'tx, HashTbl: Table>(
-    tx: &impl DbTx<'tx>,
-    dict_compression_set: Option<Vec<impl Iterator<Item = Vec<u8>>>>,
-    hash_range: Option<impl RangeBounds<RawKey<<HashTbl as Table>::Key>>>,
-    nippy_jar: &mut NippyJar,
-) -> RethResult<()> {
-    // Create PHF and Filter if required
-    if let Some(hash_range) = hash_range {
-        let mut cursor = tx.cursor_read::<RawTable<HashTbl>>()?;
-
-        // This might get big but ph needs the values in memory.
-        let it = cursor
-            .walk_range(hash_range)?
-            .map(|row| row.map(|(_key, value)| value.take()))
-            .collect::<Result<Vec<_>, DatabaseError>>()?;
-
-        nippy_jar.prepare_index(&it)?;
-    }
-
-    // Create compression dictionaries if required
-    if let Some(data_sets) = dict_compression_set {
-        nippy_jar.prepare_compression(data_sets)?;
-    }
-
-    Ok(())
 }
 
 generate_snapshot_func!((T1), (T1, T2), (T1, T2, T3), (T1, T2, T3, T4),);

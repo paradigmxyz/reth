@@ -89,8 +89,12 @@ mod test {
     use crate::ProviderFactory;
     use rand::{self, seq::SliceRandom};
     use reth_db::{
-        database::Database, snapshot::create_snapshot_T1_T2, test_utils::create_test_rw_db,
-        transaction::DbTxMut, CanonicalHeaders, DatabaseError, HeaderNumbers, HeaderTD, Headers,
+        cursor::DbCursorRO,
+        database::Database,
+        snapshot::create_snapshot_T1_T2,
+        test_utils::create_test_rw_db,
+        transaction::{DbTx, DbTxMut},
+        CanonicalHeaders, DatabaseError, HeaderNumbers, HeaderTD, Headers, RawTable,
     };
     use reth_interfaces::test_utils::generators::{self, random_header_range};
     use reth_nippy_jar::NippyJar;
@@ -151,10 +155,21 @@ mod test {
             let mut none_vec = Some(vec![vec![vec![0u8]].into_iter()]);
             let _ = none_vec.take();
 
-            create_snapshot_T1_T2::<Headers, HeaderTD, CanonicalHeaders, BlockNumber>(
+            // Generate list of hashes for filters & PHF
+            let mut cursor = tx.cursor_read::<RawTable<CanonicalHeaders>>().unwrap();
+            let hashes = cursor
+                .walk(None)
+                .unwrap()
+                .map(|row| row.map(|(_key, value)| value.take()))
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(hashes.len(), row_count as usize);
+
+            create_snapshot_T1_T2::<Headers, HeaderTD, BlockNumber>(
                 &tx,
                 range,
                 none_vec,
+                Some(hashes),
                 row_count as usize,
                 &mut nippy_jar,
             )
