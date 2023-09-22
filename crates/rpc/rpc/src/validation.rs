@@ -67,9 +67,8 @@ where
     /// Validates a block submitted to the relay
     async fn validate_builder_submission_v1(&self, message: Message, execution_payload: ExecutionPayload, signature: String) -> RpcResult<Bytes>  {
         let block = try_into_sealed_block(execution_payload, Some(message.parent_hash)).unwrap();
-        info!("block: {:?}", block);
-        let empty_bytes = Bytes::from([0u8; 0]);
-        Ok(empty_bytes)
+        info!(target: "reth::rpc::validation", "Block decoded");
+        Ok(block.header.hash().as_bytes().into())
     }
 }
 
