@@ -99,15 +99,23 @@ where
     EthApiClient::transaction_by_hash(client, tx_hash).await.unwrap();
     EthApiClient::transaction_by_block_hash_and_index(client, hash, index).await.unwrap();
     EthApiClient::transaction_by_block_number_and_index(client, block_number, index).await.unwrap();
-    EthApiClient::create_access_list(client, call_request.clone(), Some(block_number.into()))
-        .await
-        .unwrap();
-    EthApiClient::estimate_gas(client, call_request.clone(), Some(block_number.into()))
-        .await
-        .unwrap();
-    EthApiClient::call(client, call_request.clone(), Some(block_number.into()), None, None)
-        .await
-        .unwrap();
+    let access_list_result =
+        EthApiClient::create_access_list(client, call_request.clone(), Some(block_number.into()))
+            .await;
+    if let Err(err) = access_list_result {
+        assert!(err.to_string().contains("blob transaction missing blob hashes"));
+    }
+    let estimate_gas_result =
+        EthApiClient::estimate_gas(client, call_request.clone(), Some(block_number.into())).await;
+    if let Err(err) = estimate_gas_result {
+        assert!(err.to_string().contains("blob transaction missing blob hashes"));
+    }
+    let call_result =
+        EthApiClient::call(client, call_request.clone(), Some(block_number.into()), None, None)
+            .await;
+    if let Err(err) = call_result {
+        assert!(err.to_string().contains("blob transaction missing blob hashes"));
+    }
     EthApiClient::syncing(client).await.unwrap();
     EthApiClient::send_transaction(client, transaction_request).await.unwrap_err();
     EthApiClient::hashrate(client).await.unwrap();

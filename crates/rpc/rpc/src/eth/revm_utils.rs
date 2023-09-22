@@ -287,7 +287,6 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         )?;
 
     let gas_limit = gas.unwrap_or(block_env.gas_limit.min(U256::from(u64::MAX)));
-
     let env = TxEnv {
         gas_limit: gas_limit.try_into().map_err(|_| RpcInvalidTransactionError::GasUintOverflow)?,
         nonce: nonce
@@ -427,7 +426,7 @@ impl CallFees {
                     }
                 }
                 // Check if blob_hashes are present
-                if blob_versioned_hashes.is_none() {
+                if blob_versioned_hashes.as_ref().is_none() {
                     // Fail if not present
                     return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
                 } else {
