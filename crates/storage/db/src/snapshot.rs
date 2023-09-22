@@ -3,8 +3,7 @@
 use crate::{
     abstraction::cursor::DbCursorRO,
     table::{Key, Table},
-    transaction::DbTx,
-    DatabaseError, RawKey, RawTable,
+    transaction::DbTx, RawKey, RawTable,
 };
 use reth_interfaces::RethResult;
 use reth_nippy_jar::NippyJar;
