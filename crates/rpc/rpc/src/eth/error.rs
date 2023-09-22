@@ -13,6 +13,7 @@ use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolTransactionError,
 };
 use revm::primitives::{EVMError, ExecutionResult, Halt, OutOfGasError};
+use revm_primitives::InvalidHeader;
 use std::time::Duration;
 
 /// Result alias
@@ -188,8 +189,10 @@ where
     fn from(err: EVMError<T>) -> Self {
         match err {
             EVMError::Transaction(err) => RpcInvalidTransactionError::from(err).into(),
-            EVMError::PrevrandaoNotSet => EthApiError::PrevrandaoNotSet,
-            EVMError::ExcessBlobGasNotSet => EthApiError::ExcessBlobGasNotSet,
+            EVMError::Header(InvalidHeader::PrevrandaoNotSet) => EthApiError::PrevrandaoNotSet,
+            EVMError::Header(InvalidHeader::ExcessBlobGasNotSet) => {
+                EthApiError::ExcessBlobGasNotSet
+            }
             EVMError::Database(err) => err.into(),
         }
     }

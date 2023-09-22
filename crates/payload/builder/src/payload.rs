@@ -13,7 +13,7 @@ use reth_rpc_types_compat::engine::payload::{
     convert_block_to_payload_field_v2, convert_standalonewithdraw_to_withdrawal,
     try_block_to_payload_v1, try_block_to_payload_v3,
 };
-use revm_primitives::{BlockEnv, CfgEnv, SpecId};
+use revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, SpecId};
 /// Contains the built payload.
 ///
 /// According to the [engine API specification](https://github.com/ethereum/execution-apis/blob/main/src/engine/README.md) the execution layer should build the initial version of the payload with an empty transaction set and then keep update it in order to maximize the revenue.
@@ -183,17 +183,20 @@ impl PayloadBuilderAttributes {
 
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
         // cancun now, we need to set the excess blob gas to the default value
-        let excess_blob_gas = parent.next_block_blob_fee().map_or_else(
-            || {
-                if cfg.spec_id == SpecId::CANCUN {
-                    // default excess blob gas is zero
-                    Some(0)
-                } else {
-                    None
-                }
-            },
-            Some,
-        );
+        let blob_excess_gas_and_price = parent
+            .next_block_blob_fee()
+            .map_or_else(
+                || {
+                    if cfg.spec_id == SpecId::CANCUN {
+                        // default excess blob gas is zero
+                        Some(0)
+                    } else {
+                        None
+                    }
+                },
+                Some,
+            )
+            .map(BlobExcessGasAndPrice::new);
 
         let block_env = BlockEnv {
             number: U256::from(parent.number + 1),
@@ -207,7 +210,7 @@ impl PayloadBuilderAttributes {
                 parent.next_block_base_fee(chain_spec.base_fee_params).unwrap_or_default(),
             ),
             // calculate excess gas based on parent block's blob gas usage
-            excess_blob_gas,
+            blob_excess_gas_and_price,
         };
 
         (cfg, block_env)
