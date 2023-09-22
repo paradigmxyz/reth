@@ -6,8 +6,7 @@ use reth_provider::{BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
 use reth_rpc_api::ValidationApiServer;
 use reth_rpc_types::{
     engine::ExecutionPayloadV2,
-    Message,
-    Signature,
+    Message
 };
 use reth_tasks::TaskSpawner;
 use std::{ future::Future, sync::Arc};
@@ -63,7 +62,7 @@ where
     Provider: BlockReaderIdExt + ChangeSetReader + StateProviderFactory + 'static,
 {
     /// Validates a block submitted to the relay
-    async fn validate_builder_submission_v1(&self, message: Message, execution_payload: ExecutionPayloadV2, signature: Signature) -> RpcResult<Bytes>  {
+    async fn validate_builder_submission_v1(&self, message: Message, execution_payload: ExecutionPayloadV2, signature: String) -> RpcResult<Bytes>  {
         let empty_bytes = Bytes::from([0u8; 0]);
         Ok(empty_bytes)
     }
