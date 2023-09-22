@@ -95,9 +95,11 @@ impl NippyJar<()> {
         NippyJar::<()>::load(path)
     }
 
+    /// Whether this [`NippyJar`] uses a [`InclusionFilters`] and [`Functions`].
     pub fn uses_filters(&self) -> bool {
         self.filter.is_some() && self.phf.is_some()
     }
+
 }
 
 impl<H> NippyJar<H>
