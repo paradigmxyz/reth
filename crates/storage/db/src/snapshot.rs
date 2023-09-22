@@ -1,11 +1,13 @@
 //! reth's snapshot creation from database tables
 
 use crate::{
-    abstraction::cursor::DbCursorRO, table::Table, transaction::DbTx, DatabaseError, RawKey,
-    RawTable,
+    abstraction::cursor::DbCursorRO,
+    table::{Key, Table},
+    transaction::DbTx,
+    DatabaseError, RawKey, RawTable,
 };
 use reth_nippy_jar::NippyJar;
-use std::ops::RangeBounds;
+use std::ops::{RangeBounds, RangeInclusive};
 
 /// Macro that generates snapshot creation functions that take an arbitratry number of [`Table`] and
 /// creates a [`NippyJar`] file out of their [`Table::Value`]. Each list of [`Table::Value`] from a
@@ -16,44 +18,44 @@ macro_rules! generate_snapshot_func {
     ($(($($tbl:ident),+)),+ $(,)? ) => {
         $(
             paste::item! {
-                ///  Creates a snapshot from the given tables. Each iterator of a `Table::Value` corresponds to a
-                /// column.
+                /// Creates a snapshot from specified tables. Each table's `Value` iterator represents a column.
                 ///
-                /// **User must make sure that the number of rows is the same in all ranges.**
+                /// **Ensure the range contains the same number of rows.**
                 ///
-                /// * `tx`: database transaction.
-                /// * `Tn_range`: `columnN` data range in the table.
-                /// * `compression_set`: column data sets for compression dictionaries. This can only be
-                /// done over a subset of the whole table (2GB maximum for now). Number of entries **is not tied to
-                /// `row_count`**.
-                /// * `hash_range`: range of a table which `Table::Value` is either `TxHash` or `BlockHash`,
-                ///   depending on the usecase.
-                /// * `row_count` total number of rows that will be added to [`NippyJar`]. **Must be the same across
-                ///   all `Tn_range` and `hash_range`.**
-                /// * `nippy_jar`: snapshot format object that will create all the necessary files.
+                /// * `tx`: Database transaction.
+                /// * `range`: Data range for columns in tables.
+                /// * `compression_set`: Sets of column data for compression dictionaries. Max size is 2GB. Row count is independent.
+                /// * `use_hash`: Flag to indicate whether to create snapshot filters/phf from `TxHash` or `BlockHash`
+                /// * `row_count`: Total rows to add to `NippyJar`. Must match row count in `range`.
+                /// * `nippy_jar`: Snapshot object responsible for file generation.
                 #[allow(non_snake_case)]
                 pub fn [<create_snapshot$(_ $tbl)+>]<
-                    $($tbl: Table,)+
-                    HashTbl: Table,
-                    Tx: for<'tx> DbTx<'tx>
-                >(
+                    $($tbl: Table<Key=K>,)+
+                    HashTbl: Table<Key=K>,
+                    Tx: for<'tx> DbTx<'tx>,
+                    K
+                >
+                (
                     tx: &Tx,
-                    $([< $tbl _range>]: impl RangeBounds<RawKey<<$tbl as Table>::Key>>,)+
+                    range: RangeInclusive<K>,
                     compression_set: Option<Vec<impl Iterator<Item = Vec<u8>>>>,
-                    hash_range: Option<impl RangeBounds<RawKey<<HashTbl as Table>::Key>>>,
+                    use_hash: bool,
                     row_count: usize,
                     nippy_jar: &mut NippyJar
-                ) -> Result<(), DatabaseError> {
+                ) -> Result<(), DatabaseError>
+                    where K: Key + Copy
+                {
+                    let range: RangeInclusive<RawKey<K>> = RawKey::new(*range.start())..=RawKey::new(*range.end());
 
                     handle_compression_and_indexing::<HashTbl, Tx>(
-                        tx, compression_set, hash_range, nippy_jar
+                        tx, compression_set, use_hash.then_some(range.clone()), nippy_jar
                     )?;
 
                     // Creates the cursors for the columns
                     $(
                         let mut [< $tbl _cursor>] = tx.cursor_read::<RawTable<$tbl>>()?;
                         let [< $tbl _iter>] = [< $tbl _cursor>]
-                            .walk_range([< $tbl _range>])?
+                            .walk_range(range.clone())?
                             .into_iter()
                             .map(|row| row.map(|(_key, val)| val.take()).unwrap());
 
