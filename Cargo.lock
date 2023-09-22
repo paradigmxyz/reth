@@ -6186,12 +6186,14 @@ dependencies = [
 name = "reth-rpc-types"
 version = "0.1.0-alpha.8"
 dependencies = [
+ "derivative",
  "itertools 0.11.0",
  "jsonrpsee-types",
  "rand 0.8.5",
  "reth-primitives",
  "reth-rlp",
  "serde",
+ "serde-this-or-that",
  "serde_json",
  "similar-asserts",
  "thiserror",
@@ -6856,6 +6858,15 @@ dependencies = [
  "array-init",
  "serde",
  "smallvec 0.6.14",
+]
+
+[[package]]
+name = "serde-this-or-that"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "634c5a3cb041e56cc2964386151c67d520f845445789da3bd46bfb1c94f5e3bb"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

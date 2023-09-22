@@ -18,7 +18,7 @@ use reth_rpc_api::{
     Web3ApiClient,
 };
 use reth_rpc_builder::RethRpcModule;
-use reth_rpc_types::{trace::filter::TraceFilter, CallRequest, Filter, Index, TransactionRequest, Message, ExecutionPayload};
+use reth_rpc_types::{trace::filter::TraceFilter, CallRequest, Filter, Index, TransactionRequest, Message, ExecutionPayloadValidation};
 use std::collections::HashSet;
 
 fn is_unimplemented(err: Error) -> bool {
@@ -65,7 +65,7 @@ async fn test_validation_calls<C>(client: &C)
 where
     C: ClientT + SubscriptionClientT + Sync,
 {
-        let execution_payload: ExecutionPayload = serde_json::from_str(EXECUTION_PAYLOAD).unwrap();
+        let execution_payload: ExecutionPayloadValidation = serde_json::from_str(EXECUTION_PAYLOAD).unwrap();
         let message: Message = serde_json::from_str(MESSAGE).unwrap();
         let signature: String =        "0xb000308c5639bcb4d4ee1ca180571e4fdd044ad017ee745c8d8e9f046f40e2bd36208ed3074267599cfa21ca68d381a50cd78e5a7e3c4fe3b4fbd61952d68220f83d4c0c751647fcb861212cc54fda136d749176b7767ec55c0e7903de49885e".to_string();
         ValidationApiClient::validate_builder_submission_v1(client, message, execution_payload, signature).await.unwrap();

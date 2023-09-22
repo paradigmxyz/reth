@@ -6,7 +6,7 @@ use reth_primitives::Bytes;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, StateProviderFactory, AccountReader, HeaderProvider, WithdrawalsProvider};
 use reth_rpc_api::ValidationApiServer;
 use reth_rpc_types::{
-    ExecutionPayload,
+    ExecutionPayloadValidation,
     Message
 };
 use reth_rpc_types_compat::engine::payload::try_into_sealed_block;
@@ -66,8 +66,10 @@ where
     Provider: BlockReaderIdExt + ChainSpecProvider + ChangeSetReader + StateProviderFactory + HeaderProvider + AccountReader + WithdrawalsProvider + 'static,
 {
     /// Validates a block submitted to the relay
-    async fn validate_builder_submission_v1(&self, message: Message, execution_payload: ExecutionPayload, signature: String) -> RpcResult<Bytes>  {
-        let block = try_into_sealed_block(execution_payload, Some(message.parent_hash)).unwrap();
+    async fn validate_builder_submission_v1(&self, message: Message, execution_payload: ExecutionPayloadValidation, signature: String) -> RpcResult<Bytes>  {
+        println!("execution_payload: {:#?}", execution_payload);
+        let block = try_into_sealed_block(execution_payload.into(), None).unwrap();
+        println!("BlockWithdrawals: {:#?}", block.withdrawals);
         info!(target: "reth::rpc::validation", "Block decoded");
         let chain_spec =  self.provider().chain_spec();
         full_validation(&block, self.provider(), &chain_spec).unwrap();

@@ -22,6 +22,8 @@ itertools.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 jsonrpsee-types = { workspace = true, optional = true }
+serde-this-or-that = "0.4.2"
+derivative = "2.2.0"
 
 
 [features]
