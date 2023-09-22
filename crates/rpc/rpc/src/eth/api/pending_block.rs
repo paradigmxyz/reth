@@ -214,7 +214,7 @@ impl PendingBlockEnv {
             difficulty: U256::ZERO,
             gas_used: cumulative_gas_used,
             blob_gas_used,
-            excess_blob_gas: block_env.excess_blob_gas,
+            excess_blob_gas: block_env.get_blob_excess_gas(),
             extra_data: Default::default(),
             parent_beacon_block_root,
         };
