@@ -373,6 +373,7 @@ impl CallFees {
     ///
     /// if 'gasPrice' is None , 'call_max_fee', 'call_priority_fee','max_fee_per_blob_gas' is set,
     /// we treat it as 4844 transaction.
+    /// Revert if transaction is 4844 and 'blob_versioned_hashes' is None
     fn ensure_fees(
         call_gas_price: Option<U256>,
         call_max_fee: Option<U256>,
