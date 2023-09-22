@@ -1,4 +1,3 @@
-use crate::eth::error::{EthApiError, EthResult};
 use crate::result::ToRpcResultExt;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -67,10 +66,7 @@ where
 {
     /// Validates a block submitted to the relay
     async fn validate_builder_submission_v1(&self, message: Message, execution_payload: ExecutionPayloadValidation, signature: String) -> RpcResult<()>  {
-        println!("execution_payload: {:#?}", execution_payload);
-        let block = try_into_sealed_block(execution_payload.into(), None).unwrap();
-        println!("BlockWithdrawals: {:#?}", block.withdrawals);
-        info!(target: "reth::rpc::validation", "Block decoded");
+        let block = try_into_sealed_block(execution_payload.into(), None).map_ok_or_rpc_err()?;
         let chain_spec =  self.provider().chain_spec();
         full_validation(&block, self.provider(), &chain_spec).map_ok_or_rpc_err()
     }

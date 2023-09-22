@@ -3,8 +3,9 @@
 use crate::eth::error::EthApiError;
 use jsonrpsee::core::RpcResult;
 use reth_interfaces::RethResult;
-use reth_primitives::Block;
+use reth_primitives::{Block, SealedBlock};
 use std::fmt::Display;
+use reth_rpc_types::engine::PayloadError;
 
 /// Helper trait to easily convert various `Result` types into [`RpcResult`]
 pub(crate) trait ToRpcResult<Ok, Err> {
@@ -131,6 +132,17 @@ impl ToRpcResultExt for RethResult<()> {
     fn map_ok_or_rpc_err(self) -> RpcResult<<Self as ToRpcResultExt>::Ok> {
         match self {
             Ok(()) => Ok(()),
+            Err(err) => Err(internal_rpc_err(err.to_string())),
+        }
+    }
+}
+
+impl ToRpcResultExt for Result<SealedBlock, PayloadError> {
+    type Ok = SealedBlock;
+
+    fn map_ok_or_rpc_err(self) -> RpcResult<<Self as ToRpcResultExt>::Ok> {
+        match self {
+            Ok(block) => Ok(block),
             Err(err) => Err(internal_rpc_err(err.to_string())),
         }
     }
