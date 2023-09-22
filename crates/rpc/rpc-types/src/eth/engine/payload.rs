@@ -245,6 +245,7 @@ impl From<Vec<BlobTransactionSidecar>> for BlobsBundleV1 {
 /// An execution payload, which can be either [ExecutionPayloadV1], [ExecutionPayloadV2], or
 /// [ExecutionPayloadV3].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum ExecutionPayload {
     /// V1 payload
     V1(ExecutionPayloadV1),
