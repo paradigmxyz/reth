@@ -75,6 +75,7 @@ pub mod clients {
         rpc::RpcApiServer,
         trace::TraceApiClient,
         txpool::TxPoolApiClient,
+        validation::ValidationApiClient,
         web3::Web3ApiClient,
     };
 }

@@ -13,12 +13,12 @@ use reth_primitives::{
     U256,
 };
 use reth_rpc_api::{
-    clients::{AdminApiClient, EthApiClient},
+    clients::{AdminApiClient, EthApiClient, ValidationApiClient},
     DebugApiClient, EthFilterApiClient, NetApiClient, OtterscanClient, TraceApiClient,
     Web3ApiClient,
 };
 use reth_rpc_builder::RethRpcModule;
-use reth_rpc_types::{trace::filter::TraceFilter, CallRequest, Filter, Index, TransactionRequest};
+use reth_rpc_types::{trace::filter::TraceFilter, CallRequest, Filter, Index, TransactionRequest, Message, ExecutionPayload};
 use std::collections::HashSet;
 
 fn is_unimplemented(err: Error) -> bool {
@@ -57,6 +57,18 @@ where
     AdminApiClient::add_trusted_peer(client, node).await.unwrap();
     AdminApiClient::remove_trusted_peer(client, node).await.unwrap();
     AdminApiClient::node_info(client).await.unwrap();
+}
+
+    const EXECUTION_PAYLOAD: &str = include_str!("../../../rpc-types/test_data/validation/execution_payload.json");
+    const MESSAGE: &str = include_str!("../../../rpc-types/test_data/validation/message.json");
+async fn test_validation_calls<C>(client: &C)
+where
+    C: ClientT + SubscriptionClientT + Sync,
+{
+        let execution_payload: ExecutionPayload = serde_json::from_str(EXECUTION_PAYLOAD).unwrap();
+        let message: Message = serde_json::from_str(MESSAGE).unwrap();
+        let signature: String =        "0xb000308c5639bcb4d4ee1ca180571e4fdd044ad017ee745c8d8e9f046f40e2bd36208ed3074267599cfa21ca68d381a50cd78e5a7e3c4fe3b4fbd61952d68220f83d4c0c751647fcb861212cc54fda136d749176b7767ec55c0e7903de49885e".to_string();
+    ValidationApiClient::validate_builder_submission_v1(client, message, execution_payload, signature).await.unwrap();
 }
 
 async fn test_basic_eth_calls<C>(client: &C)
@@ -298,6 +310,15 @@ async fn test_call_eth_functions_http() {
     let handle = launch_http(vec![RethRpcModule::Eth]).await;
     let client = handle.http_client().unwrap();
     test_basic_eth_calls(&client).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_call_validation_functions_http() {
+    reth_tracing::init_test_tracing();
+
+    let handle = launch_http(vec![RethRpcModule::Validation]).await;
+    let client = handle.http_client().unwrap();
+    test_validation_calls(&client).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
