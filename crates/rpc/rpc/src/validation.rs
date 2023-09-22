@@ -13,6 +13,7 @@ use reth_rpc_types_compat::engine::payload::try_into_sealed_block;
 use reth_tasks::TaskSpawner;
 use std::{ future::Future, sync::Arc};
 use tokio::sync::oneshot;
+use tracing::info;
 
 /// `validation` API implementation.
 ///
@@ -66,7 +67,7 @@ where
     /// Validates a block submitted to the relay
     async fn validate_builder_submission_v1(&self, message: Message, execution_payload: ExecutionPayload, signature: String) -> RpcResult<Bytes>  {
         let block = try_into_sealed_block(execution_payload, Some(message.parent_hash)).unwrap();
-        println!("block: {:?}", block);
+        info!("block: {:?}", block);
         let empty_bytes = Bytes::from([0u8; 0]);
         Ok(empty_bytes)
     }
