@@ -17,6 +17,7 @@ jobs:
   lint:
     name: code lint
     runs-on: ubuntu-20.04
+    timeout-minutes: 60
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -49,6 +50,7 @@ jobs:
   doc-lint:
     name: doc lint
     runs-on: ubuntu-20.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v3
       - name: Install toolchain
@@ -60,6 +62,7 @@ jobs:
   grafana-lint:
     name: grafana lint
     runs-on: ubuntu-20.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v3
       - name: Check dashboard JSON with jq
@@ -72,6 +75,7 @@ jobs:
     name: lint success
     runs-on: ubuntu-20.04
     needs: [lint, doc-lint, grafana-lint]
+    timeout-minutes: 60
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@release/v1
