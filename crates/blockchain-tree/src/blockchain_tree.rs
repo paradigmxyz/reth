@@ -120,7 +120,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             .tx()?
             .cursor_read::<tables::CanonicalHeaders>()?
             .walk_back(None)?
-            .take((max_reorg_depth + config.num_of_additional_canonical_block_hashes()) as usize)
+            .take(config.num_of_canonical_hashes() as usize)
             .collect::<Result<Vec<(BlockNumber, BlockHash)>, _>>()?;
 
         // TODO(rakita) save last finalized block inside database but for now just take
@@ -747,7 +747,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// tree by attempting to connect the buffered blocks to canonical hashes.
     ///
     ///
-    /// `N` is the `max_reorg_depth` plus the number of block hashes needed to satisfy the
+    /// `N` is the maximum of `max_reorg_depth` and the number of block hashes needed to satisfy the
     /// `BLOCKHASH` opcode in the EVM.
     ///
     /// # Note
@@ -760,16 +760,13 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     ) -> RethResult<()> {
         self.finalize_block(last_finalized_block);
 
-        let num_of_canonical_hashes =
-            self.config.max_reorg_depth() + self.config.num_of_additional_canonical_block_hashes();
-
         let last_canonical_hashes = self
             .externals
             .db
             .tx()?
             .cursor_read::<tables::CanonicalHeaders>()?
             .walk_back(None)?
-            .take(num_of_canonical_hashes as usize)
+            .take(self.config.num_of_canonical_hashes() as usize)
             .collect::<Result<BTreeMap<BlockNumber, BlockHash>, _>>()?;
 
         let (mut remove_chains, _) =
@@ -790,19 +787,16 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
     /// tree by attempting to connect the buffered blocks to canonical hashes.
     ///
-    /// `N` is the `max_reorg_depth` plus the number of block hashes needed to satisfy the
+    /// `N` is the maximum of `max_reorg_depth` and the number of block hashes needed to satisfy the
     /// `BLOCKHASH` opcode in the EVM.
     pub fn connect_buffered_blocks_to_canonical_hashes(&mut self) -> RethResult<()> {
-        let num_of_canonical_hashes =
-            self.config.max_reorg_depth() + self.config.num_of_additional_canonical_block_hashes();
-
         let last_canonical_hashes = self
             .externals
             .db
             .tx()?
             .cursor_read::<tables::CanonicalHeaders>()?
             .walk_back(None)?
-            .take(num_of_canonical_hashes as usize)
+            .take(self.config.num_of_canonical_hashes() as usize)
             .collect::<Result<BTreeMap<BlockNumber, BlockHash>, _>>()?;
 
         self.connect_buffered_blocks_to_hashes(last_canonical_hashes)?;
