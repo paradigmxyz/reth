@@ -650,7 +650,6 @@ mod tests {
         assert_eq!(serde_json::to_string(&payload).unwrap(), s);
     }
 
-<<<<<<< HEAD
     #[test]
     fn serde_roundtrip_enveloped_txs_payload_v1() {
         // pulled from hive tests

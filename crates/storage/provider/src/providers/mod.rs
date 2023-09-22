@@ -810,7 +810,7 @@ where
     Tree: Sync + Send,
 {
     /// Get basic account information.
-    fn basic_account(&self, address: Address) -> Result<Option<Account>> {
+    fn basic_account(&self, address: Address) -> RethResult<Option<Account>> {
         self.database.provider()?.basic_account(address)
     }
 }
