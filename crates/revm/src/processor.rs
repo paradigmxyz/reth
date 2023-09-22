@@ -349,7 +349,7 @@ impl<'a> EVMProcessor<'a> {
             return Err(BlockValidationError::BlockGasUsed {
                 got: cumulative_gas_used,
                 expected: block.gas_used,
-                gas_spent_by_tx: self.receipts.gas_spent_by_tx(),
+                gas_spent_by_tx: self.receipts.gas_spent_by_tx()?,
             }
             .into())
         }
