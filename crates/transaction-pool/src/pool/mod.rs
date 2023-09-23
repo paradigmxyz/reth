@@ -571,9 +571,9 @@ where
     /// Notify all listeners about a blob sidecar for a newly inserted blob (eip4844) transaction.
     fn on_new_blob_sidecar(&self, tx_hash: &TxHash, sidecar: &BlobTransactionSidecar) {
         let mut sidecar_listeners = self.blob_transaction_sidecar_listener.lock();
-        let new_blob_event = NewBlobSidecar { tx_hash: *tx_hash, sidecar: sidecar.clone() };
         sidecar_listeners.retain_mut(|listener| {
-            match listener.sender.try_send(new_blob_event.clone()) {
+            let new_blob_event = NewBlobSidecar { tx_hash: *tx_hash, sidecar: sidecar.clone() };
+            match listener.sender.try_send(new_blob_event) {
                 Ok(()) => true,
                 Err(err) => {
                     if matches!(err, mpsc::error::TrySendError::Full(_)) {

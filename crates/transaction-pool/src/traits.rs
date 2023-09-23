@@ -452,6 +452,17 @@ impl<T: PoolTransaction> Clone for NewTransactionEvent<T> {
     }
 }
 
+/// This type represents a new blob sidecar that has been stored in the transaction pool's
+/// blobstore; it includes the TransasctionHash of the blob transaction along with the assoc.
+/// sidecar (blobs, commitments, proofs)
+#[derive(Debug, Clone)]
+pub struct NewBlobSidecar {
+    /// hash of the EIP-4844 transaction.
+    pub tx_hash: TxHash,
+    /// the blob transaction sidecar.
+    pub sidecar: BlobTransactionSidecar,
+}
+
 /// Where the transaction originates from.
 ///
 /// Depending on where the transaction was picked up, it affects how the transaction is handled
@@ -1046,15 +1057,4 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
             }
         }
     }
-}
-
-/// This type represents a new blob sidecar that has been stored in the transaction pool's
-/// blobstore; it includes the TransasctionHash of the blob transaction along with the assoc.
-/// sidecar (blobs, commitments, proofs)
-#[derive(Debug, Clone)]
-pub struct NewBlobSidecar {
-    /// hash of the EIP-4844 transaction.
-    pub tx_hash: TxHash,
-    /// the blob transaction sidecar.
-    pub sidecar: BlobTransactionSidecar,
 }
