@@ -437,6 +437,16 @@ impl ChainSpec {
         &self.hardforks
     }
 
+    /// Get the fork id for the given hardfork.
+    pub fn hardfork_fork_id(&self, fork: Hardfork) -> ForkId {
+        self.fork_id(&self.fork(fork).satisfy())
+    }
+
+    /// Convenience method to get the fork id for [Hardfork::Shanghai] from a given chainspec.
+    pub fn shanghai_fork_id(&self) -> ForkId {
+        self.fork_id(&self.fork(Hardfork::Shanghai).satisfy())
+    }
+
     /// Get the fork condition for the given fork.
     pub fn fork(&self, fork: Hardfork) -> ForkCondition {
         self.hardforks.get(&fork).copied().unwrap_or(ForkCondition::Never)
