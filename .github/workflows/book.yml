@@ -10,6 +10,7 @@ jobs:
   test:
     runs-on: ubuntu-20.04
     name: test
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v3
@@ -32,6 +33,7 @@ jobs:
   lint:
     runs-on: ubuntu-20.04
     name: lint
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v3
@@ -49,6 +51,7 @@ jobs:
 
   build:
     runs-on: ubuntu-20.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v3
         with:
@@ -119,6 +122,8 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+
+    timeout-minutes: 60
 
     steps:
       - name: Deploy to GitHub Pages

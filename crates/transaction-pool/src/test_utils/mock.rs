@@ -153,7 +153,7 @@ impl MockTransaction {
         }
     }
 
-    /// Returns a new EIP1559 transaction with random address and hash and empty values
+    /// Returns a new EIP4844 transaction with random address and hash and empty values
     pub fn eip4844() -> Self {
         MockTransaction::Eip4844 {
             hash: H256::random(),
