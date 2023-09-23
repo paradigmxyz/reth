@@ -71,7 +71,7 @@ mod tests {
 
     #[test]
     fn test_prune_target_block() {
-        let tip = 1000;
+        let tip = 20000;
         let min_blocks = MINIMUM_PRUNING_DISTANCE;
         let prune_part = PrunePart::Receipts;
 
@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn test_should_prune() {
-        let tip = 1000;
+        let tip = 20000;
         let should_prune = true;
 
         let tests = vec![
