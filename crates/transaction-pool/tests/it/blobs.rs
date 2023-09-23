@@ -10,6 +10,8 @@ use reth_transaction_pool::{
 async fn blobs_exclusive() {
     let txpool = testing_pool();
     let mut mock_tx_factory = MockTransactionFactory::default();
+    // TODO: add blob sidecar to mock_eip4844_tx returned here so we can test the
+    // BlobTxSidecarListener in tx_pool
     let blob_tx = mock_tx_factory.create_eip4844();
 
     let hash = txpool
