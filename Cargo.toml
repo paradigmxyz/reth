@@ -25,8 +25,6 @@ members = [
     "crates/revm",
     "crates/revm/revm-primitives",
     "crates/revm/revm-inspectors",
-    "crates/rlp",
-    "crates/rlp/rlp-derive",
     "crates/rpc/ipc",
     "crates/rpc/rpc",
     "crates/rpc/rpc-api",
@@ -84,7 +82,6 @@ reth-primitives = { path = "./crates/primitives" }
 reth-interfaces = { path = "./crates/interfaces" }
 reth-provider = { path = "./crates/storage/provider" }
 reth-db = { path = "./crates/storage/db" }
-reth-rlp = { path = "./crates/rlp" }
 reth-rpc-types = { path = "./crates/rpc/rpc-types" }
 reth-rpc-builder = { path = "./crates/rpc/rpc-builder" }
 reth-blockchain-tree = { path = "./crates/blockchain-tree" }
@@ -104,6 +101,7 @@ revm-primitives = { git = "https://github.com/Evalir/revm/", branch = "reintrodu
 
 ## eth
 alloy-primitives = "0.3"
+alloy-rlp = "0.3"
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
 ethers-signers = { version = "2.0", default-features = false }

@@ -13,12 +13,11 @@ Ethereum network discovery
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-rlp.workspace = true
-reth-rlp-derive = { path = "../../rlp/rlp-derive" }
 reth-net-common = { path = "../common" }
 reth-net-nat = { path = "../nat" }
 
 # ethereum
+alloy-rlp = { workspace = true, features = ["derive"] }
 discv5.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery", "serde"] }
 enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }

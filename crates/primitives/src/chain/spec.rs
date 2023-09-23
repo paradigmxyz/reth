@@ -1131,9 +1131,9 @@ mod tests {
         ChainSpecBuilder, DisplayHardforks, ForkCondition, ForkHash, ForkId, Genesis, Hardfork,
         Head, DEV, GOERLI, H256, HOLESKY, MAINNET, SEPOLIA, U256,
     };
+    use alloy_rlp::Encodable;
     use bytes::BytesMut;
     use ethers_core::types::Chain as EthersChain;
-    use reth_rlp::Encodable;
     use std::str::FromStr;
 
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {

@@ -1,8 +1,8 @@
 use super::access_list::AccessList;
 use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, H256};
+use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header};
 use std::mem;
 
 /// Transaction with an [`AccessList`] ([EIP-2930](https://eips.ethereum.org/EIPS/eip-2930)).
@@ -80,7 +80,7 @@ impl TxEip2930 {
     /// - `value`
     /// - `data` (`input`)
     /// - `access_list`
-    pub(crate) fn decode_inner(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    pub(crate) fn decode_inner(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         Ok(Self {
             chain_id: Decodable::decode(buf)?,
             nonce: Decodable::decode(buf)?,
@@ -185,8 +185,8 @@ mod tests {
         transaction::{signature::Signature, TransactionKind},
         Address, Bytes, Transaction, TransactionSigned, U256,
     };
+    use alloy_rlp::{Decodable, Encodable};
     use bytes::BytesMut;
-    use reth_rlp::{Decodable, Encodable};
 
     #[test]
     fn test_decode_create() {

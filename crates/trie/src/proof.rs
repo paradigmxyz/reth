@@ -6,6 +6,7 @@ use crate::{
     walker::TrieWalker,
     ProofError, StorageRoot,
 };
+use alloy_rlp::Encodable;
 use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx};
 use reth_primitives::{
     keccak256,
@@ -15,7 +16,6 @@ use reth_primitives::{
     },
     Address, Bytes, H256,
 };
-use reth_rlp::Encodable;
 
 /// A struct for generating merkle proofs.
 ///

@@ -14,7 +14,6 @@ Reth RPC implementation
 reth-interfaces.workspace = true
 reth-primitives.workspace = true
 reth-rpc-api = { path = "../rpc-api" }
-reth-rlp.workspace = true
 reth-rpc-types.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
@@ -27,6 +26,7 @@ reth-rpc-types-compat.workspace = true
 lazy_static = "*"
 
 # eth
+alloy-rlp.workspace = true
 revm = { workspace = true, features = [
     "optional_block_gas_limit",
     "optional_eip3607",

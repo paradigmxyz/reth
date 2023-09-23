@@ -1,7 +1,7 @@
 //! Implements the `GetReceipts` and `Receipts` message types.
+use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{ReceiptWithBloom, H256};
-use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -37,8 +37,8 @@ mod test {
         types::{message::RequestPair, GetReceipts},
         Receipts,
     };
+    use alloy_rlp::{Decodable, Encodable};
     use reth_primitives::{hex, Log, Receipt, ReceiptWithBloom, TxType};
-    use reth_rlp::{Decodable, Encodable};
 
     #[test]
     fn roundtrip_eip1559() {

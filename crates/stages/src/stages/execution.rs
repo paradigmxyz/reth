@@ -507,6 +507,7 @@ impl ExecutionStageThresholds {
 mod tests {
     use super::*;
     use crate::test_utils::TestTransaction;
+    use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_db::{models::AccountBeforeTx, test_utils::create_test_rw_db};
     use reth_primitives::{
@@ -515,7 +516,6 @@ mod tests {
     };
     use reth_provider::{AccountReader, BlockWriter, ProviderFactory, ReceiptProvider};
     use reth_revm::Factory;
-    use reth_rlp::Decodable;
     use std::sync::Arc;
 
     fn stage() -> ExecutionStage<Factory> {

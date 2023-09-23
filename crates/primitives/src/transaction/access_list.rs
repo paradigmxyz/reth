@@ -1,8 +1,8 @@
 use std::mem;
 
 use crate::{Address, H256};
+use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use revm_primitives::U256;
 use serde::{Deserialize, Serialize};
 

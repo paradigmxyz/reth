@@ -1,9 +1,9 @@
 //! All capability related types
 
 use crate::{version::ParseVersionError, EthMessage, EthVersion};
+use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use reth_codecs::add_arbitrary_tests;
 use reth_primitives::bytes::{BufMut, Bytes};
-use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use smol_str::SmolStr;
 use std::fmt;
 
@@ -169,7 +169,7 @@ impl Encodable for Capabilities {
 }
 
 impl Decodable for Capabilities {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let inner = Vec::<Capability>::decode(buf)?;
 
         Ok(Self {

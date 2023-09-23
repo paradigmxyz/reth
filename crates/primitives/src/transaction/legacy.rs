@@ -1,7 +1,7 @@
 use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, H256};
+use alloy_rlp::{length_of_length, Encodable, Header};
 use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::{length_of_length, Encodable, Header};
 use std::mem;
 
 /// Legacy transaction.

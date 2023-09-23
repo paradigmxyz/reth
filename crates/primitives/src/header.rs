@@ -6,9 +6,9 @@ use crate::{
     Address, BaseFeeParams, BlockBodyRoots, BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes,
     H256, H64, U256,
 };
+use alloy_rlp::{length_of_length, Decodable, Encodable, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
 use bytes::{Buf, BufMut, BytesMut};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
-use reth_rlp::{length_of_length, Decodable, Encodable, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
 use serde::{Deserialize, Serialize};
 use std::{
     mem,
@@ -322,7 +322,7 @@ impl Header {
 impl Encodable for Header {
     fn encode(&self, out: &mut dyn BufMut) {
         let list_header =
-            reth_rlp::Header { list: true, payload_length: self.header_payload_length() };
+            alloy_rlp::Header { list: true, payload_length: self.header_payload_length() };
         list_header.encode(out);
         self.parent_hash.encode(out);
         self.ommers_hash.encode(out);
@@ -400,10 +400,10 @@ impl Encodable for Header {
 }
 
 impl Decodable for Header {
-    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
-        let rlp_head = reth_rlp::Header::decode(buf)?;
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let rlp_head = alloy_rlp::Header::decode(buf)?;
         if !rlp_head.list {
-            return Err(reth_rlp::DecodeError::UnexpectedString)
+            return Err(alloy_rlp::Error::UnexpectedString)
         }
         let started_len = buf.len();
         let mut this = Self {
@@ -476,7 +476,7 @@ impl Decodable for Header {
 
         let consumed = started_len - buf.len();
         if consumed != rlp_head.payload_length {
-            return Err(reth_rlp::DecodeError::ListLengthMismatch {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
             })
@@ -556,7 +556,7 @@ impl Encodable for SealedHeader {
 }
 
 impl Decodable for SealedHeader {
-    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let b = &mut &**buf;
         let started_len = buf.len();
 
@@ -651,7 +651,7 @@ impl Encodable for HeadersDirection {
 }
 
 impl Decodable for HeadersDirection {
-    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let value: bool = Decodable::decode(buf)?;
         Ok(value.into())
     }

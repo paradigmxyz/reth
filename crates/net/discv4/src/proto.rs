@@ -1,13 +1,14 @@
 #![allow(missing_docs)]
 
 use crate::{error::DecodePacketError, EnrForkIdEntry, PeerId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
+use alloy_rlp::{
+    length_of_length, Decodable, Encodable, Error as RlpError, Header, RlpDecodable, RlpEncodable,
+};
 use enr::{Enr, EnrKey};
 use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
     keccak256, ForkId, NodeRecord, H256,
 };
-use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header};
-use reth_rlp_derive::{RlpDecodable, RlpEncodable};
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
     SecretKey, SECP256K1,
@@ -254,24 +255,24 @@ where
 }
 
 impl<K: EnrKey> Decodable for EnrWrapper<K> {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let enr = <Enr<K> as rlp::Decodable>::decode(&rlp::Rlp::new(buf))
             .map_err(|e| match e {
-                rlp::DecoderError::RlpIsTooShort => DecodeError::InputTooShort,
-                rlp::DecoderError::RlpInvalidLength => DecodeError::Overflow,
-                rlp::DecoderError::RlpExpectedToBeList => DecodeError::UnexpectedString,
-                rlp::DecoderError::RlpExpectedToBeData => DecodeError::UnexpectedList,
+                rlp::DecoderError::RlpIsTooShort => RlpError::InputTooShort,
+                rlp::DecoderError::RlpInvalidLength => RlpError::Overflow,
+                rlp::DecoderError::RlpExpectedToBeList => RlpError::UnexpectedString,
+                rlp::DecoderError::RlpExpectedToBeData => RlpError::UnexpectedList,
                 rlp::DecoderError::RlpDataLenWithZeroPrefix |
-                rlp::DecoderError::RlpListLenWithZeroPrefix => DecodeError::LeadingZero,
-                rlp::DecoderError::RlpInvalidIndirection => DecodeError::NonCanonicalSize,
+                rlp::DecoderError::RlpListLenWithZeroPrefix => RlpError::LeadingZero,
+                rlp::DecoderError::RlpInvalidIndirection => RlpError::NonCanonicalSize,
                 rlp::DecoderError::RlpIncorrectListLen => {
-                    DecodeError::Custom("incorrect list length when decoding rlp")
+                    RlpError::Custom("incorrect list length when decoding rlp")
                 }
-                rlp::DecoderError::RlpIsTooBig => DecodeError::Custom("rlp is too big"),
+                rlp::DecoderError::RlpIsTooBig => RlpError::Custom("rlp is too big"),
                 rlp::DecoderError::RlpInconsistentLengthAndData => {
-                    DecodeError::Custom("inconsistent length and data when decoding rlp")
+                    RlpError::Custom("inconsistent length and data when decoding rlp")
                 }
-                rlp::DecoderError::Custom(s) => DecodeError::Custom(s),
+                rlp::DecoderError::Custom(s) => RlpError::Custom(s),
             })
             .map(EnrWrapper::new);
         if enr.is_ok() {
@@ -309,22 +310,22 @@ impl EnrResponse {
 }
 
 impl Decodable for EnrResponse {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(DecodeError::UnexpectedString)
+            return Err(RlpError::UnexpectedString)
         }
         // let started_len = b.len();
         let this = Self {
-            request_hash: reth_rlp::Decodable::decode(b)?,
+            request_hash: alloy_rlp::Decodable::decode(b)?,
             enr: EnrWrapper::<SecretKey>::decode(b)?,
         };
-        // TODO: `Decodable` can be derived once we have native reth_rlp decoding for ENR: <https://github.com/paradigmxyz/reth/issues/482>
+        // TODO: `Decodable` can be derived once we have native alloy_rlp decoding for ENR: <https://github.com/paradigmxyz/reth/issues/482>
         // Skipping the size check here is fine since the `buf` is the UDP datagram
         // let consumed = started_len - b.len();
         // if consumed != rlp_head.payload_length {
-        //     return Err(reth_rlp::DecodeError::ListLengthMismatch {
+        //     return Err(alloy_rlp::Error::ListLengthMismatch {
         //         expected: rlp_head.payload_length,
         //         got: consumed,
         //     })
@@ -384,11 +385,11 @@ impl Encodable for Ping {
 }
 
 impl Decodable for Ping {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(DecodeError::UnexpectedString)
+            return Err(RlpError::UnexpectedString)
         }
         let started_len = b.len();
         let _version = u32::decode(b)?;
@@ -406,7 +407,7 @@ impl Decodable for Ping {
 
         let consumed = started_len - b.len();
         if consumed > rlp_head.payload_length {
-            return Err(DecodeError::ListLengthMismatch {
+            return Err(RlpError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
             })
@@ -455,11 +456,11 @@ impl Encodable for Pong {
 }
 
 impl Decodable for Pong {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(DecodeError::UnexpectedString)
+            return Err(RlpError::UnexpectedString)
         }
         let started_len = b.len();
         let mut this = Self {
@@ -476,7 +477,7 @@ impl Decodable for Pong {
 
         let consumed = started_len - b.len();
         if consumed > rlp_head.payload_length {
-            return Err(DecodeError::ListLengthMismatch {
+            return Err(RlpError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
             })
@@ -715,8 +716,8 @@ mod tests {
     #[test]
     fn encode_decode_enr_msg() {
         use self::EnrWrapper;
+        use alloy_rlp::Decodable;
         use enr::secp256k1::SecretKey;
-        use reth_rlp::Decodable;
         use std::net::Ipv4Addr;
 
         let mut rng = rand::rngs::OsRng;
@@ -754,8 +755,8 @@ mod tests {
     #[test]
     fn encode_known_rlp_enr() {
         use self::EnrWrapper;
+        use alloy_rlp::Decodable;
         use enr::{secp256k1::SecretKey, EnrPublicKey};
-        use reth_rlp::Decodable;
         use std::net::Ipv4Addr;
 
         let valid_record =

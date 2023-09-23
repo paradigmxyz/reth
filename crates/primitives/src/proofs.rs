@@ -6,10 +6,10 @@ use crate::{
     Address, Bytes, GenesisAccount, Header, Log, ReceiptWithBloom, ReceiptWithBloomRef,
     TransactionSigned, Withdrawal, H256,
 };
+use alloy_rlp::Encodable;
 use bytes::{BufMut, BytesMut};
 use hash_db::Hasher;
 use plain_hasher::PlainHasher;
-use reth_rlp::Encodable;
 use revm_primitives::b256;
 use std::collections::HashMap;
 use triehash::sec_trie_root;
@@ -114,7 +114,7 @@ where
 pub fn calculate_log_root(logs: &[Log]) -> H256 {
     //https://github.com/ethereum/go-ethereum/blob/356bbe343a30789e77bb38f25983c8f2f2bfbb47/cmd/evm/internal/t8ntool/execution.go#L255
     let mut logs_rlp = Vec::new();
-    reth_rlp::encode_list(logs, &mut logs_rlp);
+    alloy_rlp::encode_list(logs, &mut logs_rlp);
     keccak256(logs_rlp)
 }
 
@@ -122,7 +122,7 @@ pub fn calculate_log_root(logs: &[Log]) -> H256 {
 pub fn calculate_ommers_root(ommers: &[Header]) -> H256 {
     // RLP Encode
     let mut ommers_rlp = Vec::new();
-    reth_rlp::encode_list(ommers, &mut ommers_rlp);
+    alloy_rlp::encode_list(ommers, &mut ommers_rlp);
     keccak256(ommers_rlp)
 }
 
@@ -147,7 +147,7 @@ mod tests {
         Address, Block, GenesisAccount, Log, Receipt, ReceiptWithBloom, TxType, H256, U256,
     };
     use alloy_primitives::bloom;
-    use reth_rlp::Decodable;
+    use alloy_rlp::Decodable;
     use revm_primitives::b256;
     use std::{collections::HashMap, str::FromStr};
 

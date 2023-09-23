@@ -4,13 +4,13 @@ use crate::{
     types::{EthMessage, ProtocolMessage, Status},
     CanDisconnect, DisconnectReason, EthVersion,
 };
+use alloy_rlp::Encodable;
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
     ForkFilter,
 };
-use reth_rlp::Encodable;
 use std::{
     pin::Pin,
     task::{Context, Poll},
