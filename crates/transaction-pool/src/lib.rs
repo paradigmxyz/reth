@@ -180,9 +180,9 @@ pub use crate::{
     traits::{
         AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
         EthBlobTransactionSidecar, EthPoolTransaction, EthPooledTransaction,
-        GetPooledTransactionLimit, NewTransactionEvent, PoolSize, PoolTransaction, PropagateKind,
-        PropagatedTransactions, TransactionListenerKind, TransactionOrigin, TransactionPool,
-        TransactionPoolExt,
+        GetPooledTransactionLimit, NewBlobSidecar, NewTransactionEvent, PoolSize, PoolTransaction,
+        PropagateKind, PropagatedTransactions, TransactionListenerKind, TransactionOrigin,
+        TransactionPool, TransactionPoolExt,
     },
     validate::{
         EthTransactionValidator, TransactionValidationOutcome, TransactionValidationTaskExecutor,
@@ -375,6 +375,10 @@ where
 
     fn pending_transactions_listener_for(&self, kind: TransactionListenerKind) -> Receiver<TxHash> {
         self.pool.add_pending_listener(kind)
+    }
+
+    fn blob_transaction_sidecars_listener(&self) -> Receiver<NewBlobSidecar> {
+        self.pool.add_blob_sidecar_listener()
     }
 
     fn new_transactions_listener_for(
