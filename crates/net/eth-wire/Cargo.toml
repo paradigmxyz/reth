@@ -13,7 +13,7 @@ repository.workspace = true
 reth-codecs = { path = "../../storage/codecs" }
 reth-primitives.workspace = true
 reth-ecies = { path = "../ecies" }
-alloy-rlp = { workspace = true, features = ["derive", "smol_str"] }
+alloy-rlp = { workspace = true, features = ["derive"] }
 reth-discv4 = { path = "../discv4" }
 
 # metrics
@@ -33,7 +33,6 @@ tokio-stream.workspace = true
 pin-project.workspace = true
 tracing.workspace = true
 snap = "1.0.5"
-smol_str = "0.2"
 async-trait.workspace = true
 
 # arbitrary utils
@@ -57,7 +56,7 @@ proptest-derive.workspace = true
 
 [features]
 default = ["serde"]
-serde = ["dep:serde", "smol_str/serde"]
+serde = ["dep:serde"]
 arbitrary = ["reth-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
 
 [[test]]
