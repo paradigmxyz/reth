@@ -5655,7 +5655,6 @@ dependencies = [
  "reth-tracing",
  "secp256k1",
  "serde",
- "smol_str",
  "snap",
  "test-fuzz",
  "thiserror",
