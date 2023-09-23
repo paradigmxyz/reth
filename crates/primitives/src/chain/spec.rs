@@ -439,9 +439,7 @@ impl ChainSpec {
 
     /// Get the fork id for the given hardfork.
     pub fn hardfork_fork_id(&self, fork: Hardfork) -> ForkId {
-        let head = &self.fork(fork).satisfy();
-        println!("head is: {:#?}", head);
-        self.fork_id(head)
+        self.fork_id(&self.fork(fork).satisfy())
     }
 
     /// Convenience method to get the fork id for [Hardfork::Shanghai] from a given chainspec.
@@ -511,9 +509,16 @@ impl ChainSpec {
             if let ForkCondition::Block(block) |
             ForkCondition::TTD { fork_block: Some(block), .. } = cond
             {
-                dbg!(cond);
-                dbg!(head);
-                if cond.active_at_head(head) {
+                // the timestamp check here is a bit brittle as its tied to the self.satisfy() impl
+                // returning a non-0 head.timestamp for ForkCondition::Timestamp, and a 0
+                // timestamp for the other ForkCondition types
+                // this check is required though - without it, we will drop into the else block and
+                // shortcircuit for heads valid during timestamp-based forks, leading to an
+                // incorrect ForkId for Shanghai, Cancun etc. An alternative fix
+                // here would be to modify the Head returned in self.satisfy() to
+                // include a valid blocknum for ForkCondition::Timestamp, thus not
+                // excercising the else block, and calculating an incorrect fork_hash
+                if cond.active_at_head(head) || head.timestamp > 0 {
                     if block != current_applied {
                         forkhash += block;
                         current_applied = block;
@@ -532,11 +537,8 @@ impl ChainSpec {
         for timestamp in self.forks_iter().filter_map(|(_, cond)| {
             cond.as_timestamp().filter(|time| time > &self.genesis.timestamp)
         }) {
-            dbg!(timestamp);
-            println!("FUCKKKK: {:#?}", head);
             let cond = ForkCondition::Timestamp(timestamp);
             if cond.active_at_head(head) {
-                dbg!("fuck");
                 if timestamp != current_applied {
                     forkhash += timestamp;
                     current_applied = timestamp;
@@ -963,9 +965,7 @@ impl ForkCondition {
         match *self {
             ForkCondition::Block(number) => Head { number, ..Default::default() },
             ForkCondition::Timestamp(timestamp) => {
-                dbg!(timestamp);
                 let head = Head { timestamp, ..Default::default() };
-                dbg!(head);
                 head
             }
             ForkCondition::TTD { total_difficulty, .. } => {
@@ -1173,7 +1173,7 @@ mod tests {
         }
     }
 
-    fn test_hardfork_fork_id(spec: &ChainSpec, cases: &[(Hardfork, ForkId)]) {
+    fn test_hardfork_fork_ids(spec: &ChainSpec, cases: &[(Hardfork, ForkId)]) {
         for (hardfork, expected_id) in cases {
             let computed_id = spec.hardfork_fork_id(*hardfork);
             assert_eq!(
@@ -1334,7 +1334,7 @@ Post-merge hard forks (timestamp based):
 
     #[test]
     fn mainnet_hardfork_fork_ids() {
-        test_hardfork_fork_id(
+        test_hardfork_fork_ids(
             &MAINNET,
             &[
                 (
@@ -1392,6 +1392,110 @@ Post-merge hard forks (timestamp based):
                 ),
                 // First Shanghai block
                 (Hardfork::Shanghai, ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 0 }),
+            ],
+        );
+    }
+
+    #[test]
+    fn goerli_hardfork_fork_ids() {
+        test_hardfork_fork_ids(
+            &GOERLI,
+            &[
+                (
+                    Hardfork::Frontier,
+                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
+                ),
+                (
+                    Hardfork::Homestead,
+                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
+                ),
+                (
+                    Hardfork::Tangerine,
+                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
+                ),
+                (
+                    Hardfork::SpuriousDragon,
+                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
+                ),
+                (
+                    Hardfork::Byzantium,
+                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
+                ),
+                (
+                    Hardfork::Constantinople,
+                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
+                ),
+                (
+                    Hardfork::Petersburg,
+                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
+                ),
+                (
+                    Hardfork::Istanbul,
+                    ForkId { hash: ForkHash([0xc2, 0x5e, 0xfa, 0x5c]), next: 4460644 },
+                ),
+                (
+                    Hardfork::Berlin,
+                    ForkId { hash: ForkHash([0x75, 0x7a, 0x1c, 0x47]), next: 5062605 },
+                ),
+                (
+                    Hardfork::London,
+                    ForkId { hash: ForkHash([0xb8, 0xc6, 0x29, 0x9d]), next: 1678832736 },
+                ),
+                (Hardfork::Shanghai, ForkId { hash: ForkHash([0xf9, 0x84, 0x3a, 0xbf]), next: 0 }),
+            ],
+        );
+    }
+
+    #[test]
+    fn sepolia_hardfork_fork_ids() {
+        test_hardfork_fork_ids(
+            &SEPOLIA,
+            &[
+                (
+                    Hardfork::Frontier,
+                    ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
+                ),
+                (
+                    Hardfork::Homestead,
+                    ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
+                ),
+                (
+                    Hardfork::Tangerine,
+                    ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
+                ),
+                (
+                    Hardfork::SpuriousDragon,
+                    ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
+                ),
+                (
+                    Hardfork::Byzantium,
+                    ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
+                ),
+                (
+                    Hardfork::Constantinople,
+                    ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
+                ),
+                (
+                    Hardfork::Petersburg,
+                    ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
+                ),
+                (
+                    Hardfork::Istanbul,
+                    ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
+                ),
+                (
+                    Hardfork::Berlin,
+                    ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
+                ),
+                (
+                    Hardfork::London,
+                    ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
+                ),
+                (
+                    Hardfork::Paris,
+                    ForkId { hash: ForkHash([0xb9, 0x6c, 0xbd, 0x13]), next: 1677557088 },
+                ),
+                (Hardfork::Shanghai, ForkId { hash: ForkHash([0xf7, 0xf9, 0xbc, 0x08]), next: 0 }),
             ],
         );
     }
