@@ -569,6 +569,7 @@ impl BlobTransaction {
 
 /// This represents a set of blobs, and its corresponding commitments and proofs.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[repr(C)]
 pub struct BlobTransactionSidecar {
     /// The blob data.
     pub blobs: Vec<Blob>,
@@ -586,12 +587,7 @@ impl BlobTransactionSidecar {
     /// - `commitments`
     /// - `proofs`
     pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut) {
-        // Encode the blobs, commitments, and proofs
-        // self.blobs.encode(out);
-        // self.commitments.encode(out);
-        // self.proofs.encode(out);
-        let _ = out;
-        todo!("ckzg rlp")
+        BlobTransactionSidecarRlp::wrap_ref(self).encode(out);
     }
 
     /// Outputs the RLP length of the [BlobTransactionSidecar] fields, without a RLP header.
@@ -606,13 +602,7 @@ impl BlobTransactionSidecar {
     /// - `commitments`
     /// - `proofs`
     pub(crate) fn decode_inner(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        // Ok(Self {
-        //     blobs: Decodable::decode(buf)?,
-        //     commitments: Decodable::decode(buf)?,
-        //     proofs: Decodable::decode(buf)?,
-        // })
-        let _ = buf;
-        todo!("ckzg rlp")
+        Ok(BlobTransactionSidecarRlp::decode(buf)?.unwrap())
     }
 
     /// Calculates a size heuristic for the in-memory size of the [BlobTransactionSidecar].
@@ -621,5 +611,43 @@ impl BlobTransactionSidecar {
         self.blobs.len() * BYTES_PER_BLOB + // blobs
         self.commitments.len() * BYTES_PER_COMMITMENT + // commitments
         self.proofs.len() * BYTES_PER_PROOF // proofs
+    }
+}
+
+// Wrapper for c-kzg rlp
+#[repr(C)]
+struct BlobTransactionSidecarRlp {
+    blobs: Vec<[u8; c_kzg::BYTES_PER_BLOB]>,
+    commitments: Vec<[u8; 48]>,
+    proofs: Vec<[u8; 48]>,
+}
+
+const _: [(); std::mem::size_of::<BlobTransactionSidecar>()] =
+    [(); std::mem::size_of::<BlobTransactionSidecarRlp>()];
+
+impl BlobTransactionSidecarRlp {
+    fn wrap_ref(other: &BlobTransactionSidecar) -> &Self {
+        // SAFETY: Same repr and size
+        unsafe { &*(other as *const BlobTransactionSidecar).cast::<Self>() }
+    }
+
+    fn unwrap(self) -> BlobTransactionSidecar {
+        // SAFETY: Same repr and size
+        unsafe { std::mem::transmute(self) }
+    }
+
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
+        // Encode the blobs, commitments, and proofs
+        self.blobs.encode(out);
+        self.commitments.encode(out);
+        self.proofs.encode(out);
+    }
+
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        Ok(Self {
+            blobs: Decodable::decode(buf)?,
+            commitments: Decodable::decode(buf)?,
+            proofs: Decodable::decode(buf)?,
+        })
     }
 }
