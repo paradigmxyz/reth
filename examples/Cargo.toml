@@ -21,12 +21,8 @@ reth-network-api.workspace = true
 reth-network.workspace = true
 reth-transaction-pool.workspace = true
 reth-tasks.workspace = true
-reth-discv4.workspace = true
-reth-eth-wire.workspace = true
-reth-ecies.workspace = true
-secp256k1.workspace = true
 
-colored = "2.0.4"
+
 eyre = "0.6.8"
 futures.workspace = true
 async-trait.workspace = true
@@ -43,7 +39,3 @@ path = "network.rs"
 [[example]]
 name = "network-txpool"
 path = "network-txpool.rs"
-
-[[example]]
-name = "manual-p2p"
-path = "manual-p2p.rs"

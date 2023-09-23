@@ -2440,15 +2440,11 @@ name = "examples"
 version = "0.0.0"
 dependencies = [
  "async-trait",
- "colored",
  "eyre",
  "futures",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-db",
- "reth-discv4",
- "reth-ecies",
- "reth-eth-wire",
  "reth-network",
  "reth-network-api",
  "reth-primitives",
@@ -2458,7 +2454,6 @@ dependencies = [
  "reth-rpc-types",
  "reth-tasks",
  "reth-transaction-pool",
- "secp256k1",
  "tokio",
 ]
 
@@ -3873,6 +3868,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d0d1830bcd151a6fc4aea1369af235b36c1528fe976b8ff678683c9995eade8"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "manual-p2p"
+version = "0.0.0"
+dependencies = [
+ "colored",
+ "eyre",
+ "futures",
+ "once_cell",
+ "reth-discv4",
+ "reth-ecies",
+ "reth-eth-wire",
+ "reth-network",
+ "reth-primitives",
+ "secp256k1",
+ "tokio",
 ]
 
 [[package]]
