@@ -12,7 +12,7 @@ use std::{
 
 /// A container type that caches reads from an underlying [DatabaseRef].
 ///
-/// This is intended to be used in conjunction with [State](revm::db::State)
+/// This is intended to be used in conjunction with `revm::db::State`
 /// during payload building which repeatedly accesses the same data.
 ///
 /// # Example
@@ -118,7 +118,7 @@ impl<'a, DB: DatabaseRef> Database for CachedReadsDbMut<'a, DB> {
 /// A [DatabaseRef] that caches reads inside [CachedReads].
 ///
 /// This is intended to be used as the [DatabaseRef] for
-/// [State](revm::db::State) for repeated payload build jobs.
+/// `revm::db::State` for repeated payload build jobs.
 #[derive(Debug)]
 pub struct CachedReadsDBRef<'a, DB> {
     inner: RefCell<CachedReadsDbMut<'a, DB>>,
