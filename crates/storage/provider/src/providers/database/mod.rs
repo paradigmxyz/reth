@@ -406,6 +406,7 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
 mod tests {
     use super::ProviderFactory;
     use crate::{BlockHashReader, BlockNumReader, BlockWriter, TransactionsProvider};
+    use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_db::{
         tables,
@@ -416,7 +417,6 @@ mod tests {
     use reth_primitives::{
         hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, TxNumber, H256,
     };
-    use reth_rlp::Decodable;
     use std::{ops::RangeInclusive, sync::Arc};
 
     #[test]

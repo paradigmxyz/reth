@@ -1,12 +1,12 @@
 //! Dummy blocks and data for tests
 
 use crate::{BundleStateWithReceipts, DatabaseProviderRW};
+use alloy_rlp::Decodable;
 use reth_db::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_primitives::{
     b256, hex_literal::hex, Account, Address, BlockNumber, Bytes, Header, Log, Receipt,
     SealedBlock, SealedBlockWithSenders, StorageEntry, TxType, Withdrawal, H256, U256,
 };
-use reth_rlp::Decodable;
 use std::collections::HashMap;
 
 /// Assert genesis block

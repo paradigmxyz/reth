@@ -2077,12 +2077,12 @@ dependencies = [
 name = "ef-tests"
 version = "0.1.0-alpha.8"
 dependencies = [
+ "alloy-rlp",
  "reth-db",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
- "reth-rlp",
  "reth-stages",
  "serde",
  "serde_json",
@@ -2498,12 +2498,6 @@ dependencies = [
  "thiserror",
  "tracing",
 ]
-
-[[package]]
-name = "ethnum"
-version = "1.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c8ff382b2fa527fb7fb06eeebfc5bbb3f17e3cc6b9d70b006c41daa8824adac"
 
 [[package]]
 name = "event-listener"
@@ -5293,6 +5287,7 @@ dependencies = [
 name = "reth"
 version = "0.1.0-alpha.8"
 dependencies = [
+ "alloy-rlp",
  "aquamarine",
  "backon",
  "boyer-moore-magiclen",
@@ -5337,7 +5332,6 @@ dependencies = [
  "reth-prune",
  "reth-revm",
  "reth-revm-inspectors",
- "reth-rlp",
  "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-builder",
@@ -5382,6 +5376,7 @@ dependencies = [
 name = "reth-basic-payload-builder"
 version = "0.1.0-alpha.8"
 dependencies = [
+ "alloy-rlp",
  "futures-core",
  "futures-util",
  "metrics",
@@ -5391,7 +5386,6 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
- "reth-rlp",
  "reth-tasks",
  "reth-transaction-pool",
  "revm",
@@ -5539,6 +5533,7 @@ dependencies = [
 name = "reth-discv4"
 version = "0.1.0-alpha.8"
 dependencies = [
+ "alloy-rlp",
  "discv5",
  "enr",
  "generic-array",
@@ -5547,8 +5542,6 @@ dependencies = [
  "reth-net-common",
  "reth-net-nat",
  "reth-primitives",
- "reth-rlp",
- "reth-rlp-derive",
  "reth-tracing",
  "rlp",
  "secp256k1",
@@ -5563,6 +5556,7 @@ dependencies = [
 name = "reth-dns-discovery"
 version = "0.1.0-alpha.8"
 dependencies = [
+ "alloy-rlp",
  "async-trait",
  "data-encoding",
  "enr",
@@ -5570,7 +5564,6 @@ dependencies = [
  "parking_lot 0.12.1",
  "reth-net-common",
  "reth-primitives",
- "reth-rlp",
  "reth-tracing",
  "schnellru",
  "secp256k1",
@@ -5587,6 +5580,7 @@ dependencies = [
 name = "reth-downloaders"
 version = "0.1.0-alpha.8"
 dependencies = [
+ "alloy-rlp",
  "assert_matches",
  "futures",
  "futures-util",
@@ -5598,7 +5592,6 @@ dependencies = [
  "reth-interfaces",
  "reth-metrics",
  "reth-primitives",
- "reth-rlp",
  "reth-tasks",
  "reth-tracing",
  "tempfile",
@@ -5614,6 +5607,7 @@ name = "reth-ecies"
 version = "0.1.0-alpha.8"
 dependencies = [
  "aes 0.8.3",
+ "alloy-rlp",
  "block-padding",
  "byteorder",
  "cipher 0.4.4",
@@ -5627,7 +5621,6 @@ dependencies = [
  "rand 0.8.5",
  "reth-net-common",
  "reth-primitives",
- "reth-rlp",
  "secp256k1",
  "sha2",
  "sha3",
@@ -5643,6 +5636,7 @@ dependencies = [
 name = "reth-eth-wire"
 version = "0.1.0-alpha.8"
 dependencies = [
+ "alloy-rlp",
  "arbitrary",
  "async-trait",
  "bytes",
@@ -5658,7 +5652,6 @@ dependencies = [
  "reth-ecies",
  "reth-metrics",
  "reth-primitives",
- "reth-rlp",
  "reth-tracing",
  "secp256k1",
  "serde",
@@ -5799,6 +5792,7 @@ dependencies = [
 name = "reth-network"
 version = "0.1.0-alpha.8"
 dependencies = [
+ "alloy-rlp",
  "aquamarine",
  "async-trait",
  "auto_impl",
@@ -5827,8 +5821,6 @@ dependencies = [
  "reth-network-api",
  "reth-primitives",
  "reth-provider",
- "reth-rlp",
- "reth-rlp-derive",
  "reth-rpc-types",
  "reth-tasks",
  "reth-tracing",
@@ -5882,13 +5874,13 @@ dependencies = [
 name = "reth-payload-builder"
 version = "0.1.0-alpha.8"
 dependencies = [
+ "alloy-rlp",
  "futures-util",
  "metrics",
  "reth-interfaces",
  "reth-metrics",
  "reth-primitives",
  "reth-revm-primitives",
- "reth-rlp",
  "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-transaction-pool",
@@ -5906,6 +5898,7 @@ name = "reth-primitives"
 version = "0.1.0-alpha.8"
 dependencies = [
  "alloy-primitives",
+ "alloy-rlp",
  "arbitrary",
  "assert_matches",
  "byteorder",
@@ -5926,8 +5919,6 @@ dependencies = [
  "rand 0.8.5",
  "rayon",
  "reth-codecs",
- "reth-rlp",
- "reth-rlp-derive",
  "revm-primitives",
  "ruint",
  "secp256k1",
@@ -5953,6 +5944,7 @@ dependencies = [
 name = "reth-provider"
 version = "0.1.0-alpha.8"
 dependencies = [
+ "alloy-rlp",
  "assert_matches",
  "auto_impl",
  "itertools 0.11.0",
@@ -5963,7 +5955,6 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "reth-revm-primitives",
- "reth-rlp",
  "reth-trie",
  "revm",
  "tempfile",
@@ -6028,37 +6019,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-rlp"
-version = "0.1.0-alpha.8"
-dependencies = [
- "arrayvec",
- "auto_impl",
- "bytes",
- "c-kzg 0.1.0 (git+https://github.com/ethereum/c-kzg-4844?rev=fbef59a3f9e8fa998bdb5069d212daf83d586aa5)",
- "criterion",
- "ethereum-types",
- "ethnum",
- "hex-literal",
- "pprof",
- "reth-rlp",
- "reth-rlp-derive",
- "revm-primitives",
- "smol_str",
-]
-
-[[package]]
-name = "reth-rlp-derive"
-version = "0.1.0-alpha.8"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.37",
-]
-
-[[package]]
 name = "reth-rpc"
 version = "0.1.0-alpha.8"
 dependencies = [
+ "alloy-rlp",
  "assert_matches",
  "async-trait",
  "bytes",
@@ -6081,7 +6045,6 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
- "reth-rlp",
  "reth-rpc-api",
  "reth-rpc-engine-api",
  "reth-rpc-types",
@@ -6165,6 +6128,7 @@ dependencies = [
 name = "reth-rpc-engine-api"
 version = "0.1.0-alpha.8"
 dependencies = [
+ "alloy-rlp",
  "assert_matches",
  "async-trait",
  "jsonrpsee-core",
@@ -6174,7 +6138,6 @@ dependencies = [
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
- "reth-rlp",
  "reth-rpc-api",
  "reth-rpc-types",
  "reth-rpc-types-compat",
@@ -6188,11 +6151,11 @@ dependencies = [
 name = "reth-rpc-types"
 version = "0.1.0-alpha.8"
 dependencies = [
+ "alloy-rlp",
  "itertools 0.11.0",
  "jsonrpsee-types",
  "rand 0.8.5",
  "reth-primitives",
- "reth-rlp",
  "serde",
  "serde_json",
  "similar-asserts",
@@ -6203,8 +6166,8 @@ dependencies = [
 name = "reth-rpc-types-compat"
 version = "0.1.0-alpha.8"
 dependencies = [
+ "alloy-rlp",
  "reth-primitives",
- "reth-rlp",
  "reth-rpc-types",
 ]
 
@@ -6212,6 +6175,7 @@ dependencies = [
 name = "reth-stages"
 version = "0.1.0-alpha.8"
 dependencies = [
+ "alloy-rlp",
  "aquamarine",
  "assert_matches",
  "async-trait",
@@ -6235,7 +6199,6 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
- "reth-rlp",
  "reth-trie",
  "revm",
  "serde",
@@ -6275,6 +6238,7 @@ dependencies = [
 name = "reth-transaction-pool"
 version = "0.1.0-alpha.8"
 dependencies = [
+ "alloy-rlp",
  "aquamarine",
  "assert_matches",
  "async-trait",
@@ -6292,7 +6256,6 @@ dependencies = [
  "reth-metrics",
  "reth-primitives",
  "reth-provider",
- "reth-rlp",
  "reth-tasks",
  "serde",
  "thiserror",
@@ -6305,6 +6268,7 @@ dependencies = [
 name = "reth-trie"
 version = "0.1.0-alpha.8"
 dependencies = [
+ "alloy-rlp",
  "criterion",
  "derive_more",
  "pretty_assertions",
@@ -6313,7 +6277,6 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
- "reth-rlp",
  "thiserror",
  "tokio",
  "tokio-stream",

@@ -1,5 +1,6 @@
 //! Some payload tests
 
+use alloy_rlp::{Decodable, DecodeError};
 use assert_matches::assert_matches;
 use reth_interfaces::test_utils::generators::{
     self, random_block, random_block_range, random_header, Rng,
@@ -9,7 +10,6 @@ use reth_primitives::{
     proofs::{self},
     Block, SealedBlock, TransactionSigned, H256, U256,
 };
-use reth_rlp::{Decodable, DecodeError};
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadV1, PayloadError,
 };

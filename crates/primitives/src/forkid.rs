@@ -5,9 +5,9 @@
 #![deny(missing_docs)]
 
 use crate::{hex, BlockNumber, Head, H256};
+use alloy_rlp::*;
 use crc::*;
 use reth_codecs::derive_arbitrary;
-use reth_rlp::*;
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,

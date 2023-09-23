@@ -62,7 +62,7 @@ pub enum BlobStoreError {
     MissingSidecar(H256),
     /// Failed to decode the stored blob data.
     #[error("failed to decode blob data: {0}")]
-    DecodeError(#[from] reth_rlp::DecodeError),
+    DecodeError(#[from] alloy_rlp::DecodeError),
     /// Other implementation specific error.
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync>),

@@ -2,12 +2,12 @@ use crate::{
     compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR},
     keccak256, Address, Bytes, TxHash, H256,
 };
+use alloy_rlp::{Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
 use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
-use reth_rlp::{Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
 use serde::{Deserialize, Serialize};
 use std::mem;
 
@@ -595,7 +595,7 @@ impl Compact for TransactionKind {
 }
 
 impl Encodable for TransactionKind {
-    fn encode(&self, out: &mut dyn reth_rlp::BufMut) {
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         match self {
             TransactionKind::Call(to) => to.encode(out),
             TransactionKind::Create => out.put_u8(EMPTY_STRING_CODE),
@@ -1193,8 +1193,8 @@ mod tests {
         Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered, H256, U256,
     };
     use alloy_primitives::{b256, bytes};
+    use alloy_rlp::{Decodable, DecodeError, Encodable};
     use bytes::BytesMut;
-    use reth_rlp::{Decodable, DecodeError, Encodable};
     use secp256k1::{KeyPair, Secp256k1};
     use std::str::FromStr;
 

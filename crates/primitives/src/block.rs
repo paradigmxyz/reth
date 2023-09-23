@@ -1,8 +1,8 @@
 use crate::{
     Address, BlockHash, BlockNumber, Header, SealedHeader, TransactionSigned, Withdrawal, H256, U64,
 };
+use alloy_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use reth_codecs::derive_arbitrary;
-use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{
     de::{MapAccess, Visitor},
     ser::SerializeStruct,

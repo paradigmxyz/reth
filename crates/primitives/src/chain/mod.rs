@@ -3,8 +3,8 @@ use crate::{
     net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
     NodeRecord, U256, U64,
 };
+use alloy_rlp::{Decodable, Encodable};
 use reth_codecs::add_arbitrary_tests;
-use reth_rlp::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
 
@@ -180,7 +180,7 @@ impl FromStr for Chain {
 }
 
 impl Encodable for Chain {
-    fn encode(&self, out: &mut dyn reth_rlp::BufMut) {
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         match self {
             Self::Named(chain) => u64::from(*chain).encode(out),
             Self::Id(id) => id.encode(out),
@@ -195,7 +195,7 @@ impl Encodable for Chain {
 }
 
 impl Decodable for Chain {
-    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
+    fn decode(buf: &mut &[u8]) -> Result<Self, alloy_rlp::DecodeError> {
         Ok(u64::decode(buf)?.into())
     }
 }

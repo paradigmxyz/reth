@@ -1,4 +1,5 @@
 use super::file_codec::BlockFileCodec;
+use alloy_rlp::{Decodable, Header as RlpHeader};
 use itertools::Either;
 use reth_interfaces::{
     p2p::{
@@ -14,7 +15,6 @@ use reth_primitives::{
     Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId,
     H256,
 };
-use reth_rlp::{Decodable, Header as RlpHeader};
 use std::{
     collections::HashMap,
     iter::zip,
@@ -65,7 +65,7 @@ pub enum FileClientError {
 
     /// An error occurred when decoding blocks, headers, or rlp headers from the file.
     #[error(transparent)]
-    Rlp(#[from] reth_rlp::DecodeError),
+    Rlp(#[from] alloy_rlp::DecodeError),
 }
 
 impl FileClient {
@@ -255,6 +255,7 @@ mod tests {
         headers::{reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::child_header},
         test_utils::{generate_bodies, generate_bodies_file},
     };
+    use alloy_rlp::Encodable;
     use assert_matches::assert_matches;
     use futures::SinkExt;
     use futures_util::stream::StreamExt;
@@ -267,7 +268,6 @@ mod tests {
         test_utils::TestConsensus,
     };
     use reth_primitives::SealedHeader;
-    use reth_rlp::Encodable;
     use std::{
         io::{Read, Seek, SeekFrom, Write},
         sync::Arc,

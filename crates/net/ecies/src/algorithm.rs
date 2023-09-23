@@ -6,6 +6,7 @@ use crate::{
     ECIESError,
 };
 use aes::{cipher::StreamCipher, Aes128, Aes256};
+use alloy_rlp::{Encodable, Rlp, RlpEncodable, RlpMaxEncodedLen};
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use ctr::Ctr64BE;
 use digest::{crypto_common::KeyIvInit, Digest};
@@ -15,7 +16,6 @@ use reth_primitives::{
     bytes::{BufMut, Bytes, BytesMut},
     H128, H256, H512 as PeerId,
 };
-use reth_rlp::{Encodable, Rlp, RlpEncodable, RlpMaxEncodedLen};
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
     PublicKey, SecretKey, SECP256K1,
@@ -352,7 +352,7 @@ impl ECIES {
             protocol_version: u8,
         }
 
-        reth_rlp::encode_fixed_size(&S {
+        alloy_rlp::encode_fixed_size(&S {
             id: pk2id(&self.ephemeral_public_key),
             nonce: self.nonce,
             protocol_version: PROTOCOL_VERSION as u8,

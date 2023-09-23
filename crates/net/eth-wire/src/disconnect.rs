@@ -1,10 +1,10 @@
 //! Disconnect
 
+use alloy_rlp::{Decodable, DecodeError, Encodable, Header};
 use futures::{Sink, SinkExt};
 use reth_codecs::derive_arbitrary;
 use reth_ecies::stream::ECIESStream;
 use reth_primitives::bytes::{Buf, BufMut};
-use reth_rlp::{Decodable, DecodeError, Encodable, Header};
 use std::fmt::Display;
 use thiserror::Error;
 use tokio::io::AsyncWrite;
@@ -189,8 +189,8 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{p2pstream::P2PMessage, DisconnectReason};
+    use alloy_rlp::{Decodable, Encodable};
     use reth_primitives::hex;
-    use reth_rlp::{Decodable, Encodable};
 
     fn all_reasons() -> Vec<DisconnectReason> {
         vec![

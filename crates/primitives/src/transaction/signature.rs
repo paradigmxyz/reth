@@ -1,8 +1,8 @@
 use crate::{transaction::util::secp256k1, Address, H256, U256};
 use alloy_primitives::Bytes;
+use alloy_rlp::{Decodable, DecodeError, Encodable};
 use bytes::Buf;
 use reth_codecs::{derive_arbitrary, Compact};
-use reth_rlp::{Decodable, DecodeError, Encodable};
 use serde::{Deserialize, Serialize};
 
 /// r, s: Values corresponding to the signature of the
@@ -51,7 +51,7 @@ impl Signature {
     /// Encodes the `v` value using the legacy scheme with EIP-155 support depends on chain_id.
     pub(crate) fn encode_with_eip155_chain_id(
         &self,
-        out: &mut dyn reth_rlp::BufMut,
+        out: &mut dyn alloy_rlp::BufMut,
         chain_id: Option<u64>,
     ) {
         self.v(chain_id).encode(out);
@@ -99,7 +99,7 @@ impl Signature {
     }
 
     /// Encode the `odd_y_parity`, `r`, `s` values without a RLP header.
-    pub fn encode(&self, out: &mut dyn reth_rlp::BufMut) {
+    pub fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         self.odd_y_parity.encode(out);
         self.r.encode(out);
         self.s.encode(out);

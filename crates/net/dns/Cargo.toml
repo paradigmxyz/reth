@@ -12,9 +12,9 @@ description = "Support for EIP-1459 Node Discovery via DNS"
 # reth
 reth-primitives.workspace = true
 reth-net-common = { path = "../common" }
-reth-rlp.workspace = true
 
 # ethereum
+alloy-rlp.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery", "serde"] }
 enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }
 

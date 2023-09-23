@@ -4,9 +4,9 @@ use crate::{
     Address, BlobTransaction, Bytes, Signature, Transaction, TransactionSigned,
     TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxHash, TxLegacy, EIP4844_TX_TYPE_ID, H256,
 };
+use alloy_rlp::{Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE};
 use bytes::Buf;
 use derive_more::{AsRef, Deref};
-use reth_rlp::{Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE};
 use serde::{Deserialize, Serialize};
 
 /// A response to `GetPooledTransactions`. This can include either a blob transaction, or a

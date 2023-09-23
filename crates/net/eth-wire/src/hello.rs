@@ -2,7 +2,7 @@ use crate::{capability::Capability, EthVersion, ProtocolVersion};
 use reth_codecs::derive_arbitrary;
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_primitives::{constants::RETH_CLIENT_VERSION, PeerId};
-use reth_rlp::{RlpDecodable, RlpEncodable};
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -110,7 +110,7 @@ impl HelloMessageBuilder {
 mod tests {
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use reth_ecies::util::pk2id;
-    use reth_rlp::{Decodable, Encodable, EMPTY_STRING_CODE};
+    use alloy_rlp::{Decodable, Encodable, EMPTY_STRING_CODE};
     use secp256k1::{SecretKey, SECP256K1};
 
     use crate::{

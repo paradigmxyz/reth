@@ -9,9 +9,9 @@ use crate::{
     kzg_to_versioned_hash, Bytes, ChainId, Signature, Transaction, TransactionKind,
     TransactionSigned, TxHash, TxType, EIP4844_TX_TYPE_ID, H256,
 };
+use alloy_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header};
 use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header};
 use serde::{Deserialize, Serialize};
 use std::{mem, ops::Deref};
 

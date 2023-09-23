@@ -1,7 +1,7 @@
 //! Config traits for various node components.
 
+use alloy_rlp::Encodable;
 use reth_primitives::{Bytes, BytesMut};
-use reth_rlp::Encodable;
 use reth_rpc::{eth::gas_oracle::GasPriceOracleConfig, JwtError, JwtSecret};
 use reth_rpc_builder::{
     auth::AuthServerConfig, error::RpcError, EthConfig, IpcServerBuilder, RpcServerConfig,

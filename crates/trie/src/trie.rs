@@ -8,6 +8,7 @@ use crate::{
     walker::TrieWalker,
     StateRootError, StorageRootError,
 };
+use alloy_rlp::Encodable;
 use reth_db::{tables, transaction::DbTx};
 use reth_primitives::{
     keccak256,
@@ -15,7 +16,6 @@ use reth_primitives::{
     trie::{HashBuilder, Nibbles},
     Address, BlockNumber, StorageEntry, H256,
 };
-use reth_rlp::Encodable;
 use std::{
     collections::{HashMap, HashSet},
     ops::RangeInclusive,
@@ -513,7 +513,7 @@ where
                     }
                 }
                 hash_builder
-                    .add_leaf(storage_key_nibbles, reth_rlp::encode_fixed_size(&value).as_ref());
+                    .add_leaf(storage_key_nibbles, alloy_rlp::encode_fixed_size(&value).as_ref());
                 storage = hashed_storage_cursor.next()?;
             }
         }
@@ -1326,7 +1326,7 @@ mod tests {
             hashed_storage
                 .upsert(hashed_address, StorageEntry { key: H256::new(key), value })
                 .unwrap();
-            hb.add_leaf(Nibbles::unpack(key), &reth_rlp::encode_fixed_size(&value));
+            hb.add_leaf(Nibbles::unpack(key), &alloy_rlp::encode_fixed_size(&value));
         }
 
         let root = hb.root();

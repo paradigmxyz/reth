@@ -1,6 +1,6 @@
 use crate::{Address, Bloom, Bytes, H256};
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::{RlpDecodable, RlpEncodable};
 
 /// Ethereum Log
 #[main_codec(rlp)]

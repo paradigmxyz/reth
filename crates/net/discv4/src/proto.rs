@@ -1,12 +1,12 @@
 #![allow(missing_docs)]
 
 use crate::{error::DecodePacketError, EnrForkIdEntry, PeerId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
+use alloy_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header};
 use enr::{Enr, EnrKey};
 use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
     keccak256, ForkId, NodeRecord, H256,
 };
-use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header};
 use reth_rlp_derive::{RlpDecodable, RlpEncodable};
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
@@ -317,14 +317,14 @@ impl Decodable for EnrResponse {
         }
         // let started_len = b.len();
         let this = Self {
-            request_hash: reth_rlp::Decodable::decode(b)?,
+            request_hash: alloy_rlp::Decodable::decode(b)?,
             enr: EnrWrapper::<SecretKey>::decode(b)?,
         };
         // TODO: `Decodable` can be derived once we have native reth_rlp decoding for ENR: <https://github.com/paradigmxyz/reth/issues/482>
         // Skipping the size check here is fine since the `buf` is the UDP datagram
         // let consumed = started_len - b.len();
         // if consumed != rlp_head.payload_length {
-        //     return Err(reth_rlp::DecodeError::ListLengthMismatch {
+        //     return Err(alloy_rlp::DecodeError::ListLengthMismatch {
         //         expected: rlp_head.payload_length,
         //         got: consumed,
         //     })
@@ -715,8 +715,8 @@ mod tests {
     #[test]
     fn encode_decode_enr_msg() {
         use self::EnrWrapper;
+        use alloy_rlp::Decodable;
         use enr::secp256k1::SecretKey;
-        use reth_rlp::Decodable;
         use std::net::Ipv4Addr;
 
         let mut rng = rand::rngs::OsRng;
@@ -754,8 +754,8 @@ mod tests {
     #[test]
     fn encode_known_rlp_enr() {
         use self::EnrWrapper;
+        use alloy_rlp::Decodable;
         use enr::{secp256k1::SecretKey, EnrPublicKey};
-        use reth_rlp::Decodable;
         use std::net::Ipv4Addr;
 
         let valid_record =

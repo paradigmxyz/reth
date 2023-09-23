@@ -1,8 +1,8 @@
 //! Compatibility functions for rpc `Block` type.
 
 use crate::transaction::from_recovered_with_block_context;
+use alloy_rlp::Encodable;
 use reth_primitives::{Block as PrimitiveBlock, Header as PrimitiveHeader, H256, U256};
-use reth_rlp::Encodable;
 use reth_rpc_types::{Block, BlockError, BlockTransactions, BlockTransactionsKind, Header};
 
 /// Converts the given primitive block into a [Block] response with the given

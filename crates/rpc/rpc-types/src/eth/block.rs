@@ -56,7 +56,7 @@ pub enum BlockError {
     InvalidSignature,
     /// A raw block failed to decode
     #[error("failed to decode raw block {0}")]
-    RlpDecodeRawBlock(reth_rlp::DecodeError),
+    RlpDecodeRawBlock(alloy_rlp::DecodeError),
 }
 
 /// Block representation

@@ -6,6 +6,7 @@ use crate::{
     pinger::{Pinger, PingerEvent},
     DisconnectReason, HelloMessage,
 };
+use alloy_rlp::{Decodable, DecodeError, Encodable, EMPTY_LIST_CODE};
 use futures::{Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_codecs::derive_arbitrary;
@@ -14,7 +15,6 @@ use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
     hex,
 };
-use reth_rlp::{Decodable, DecodeError, Encodable, EMPTY_LIST_CODE};
 use std::{
     collections::{BTreeSet, HashMap, HashSet, VecDeque},
     io,
