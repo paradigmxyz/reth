@@ -1051,9 +1051,9 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
 /// This type represents a new blob sidecar that has been stored in the transaction pool's
 /// blobstore; it includes the TransasctionHash of the blob transaction along with the assoc.
 /// sidecar (blobs, commitments, proofs)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NewBlobSidecar {
-    /// The blob transaction hash.
+    /// hash of the EIP-4844 transaction.
     pub tx_hash: TxHash,
     /// the blob transaction sidecar.
     pub sidecar: BlobTransactionSidecar,
