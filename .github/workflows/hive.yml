@@ -137,14 +137,19 @@ jobs:
           # Pyspec merge and earlier jobs
           - sim: pyspec
             include: [merge/]
+            experimental: true
           - sim: pyspec
             include: [berlin/]
+            experimental: true
           - sim: pyspec
             include: [istanbul/]
+            experimental: true
           - sim: pyspec
             include: [homestead/]
+            experimental: true
           - sim: pyspec
             include: [frontier/]
+            experimental: true
       fail-fast: false
     needs: prepare
     name: run
