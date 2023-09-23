@@ -150,7 +150,7 @@ checksum = "0942ffc6dcaadf03badf6e6a2d0228460359d5e34b57ccdc720b7382dfbd5ec5"
 [[package]]
 name = "alloy-primitives"
 version = "0.3.2"
-source = "git+https://github.com/alloy-rs/core#6835eeff2a3f24b0c2369f10fae48caa660bd970"
+source = "git+https://github.com/alloy-rs/core#0c21fcc48eab0b52c20d3e98c739bac862aad8ff"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
@@ -5891,6 +5891,7 @@ dependencies = [
  "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-transaction-pool",
+ "revm",
  "revm-primitives",
  "sha2",
  "thiserror",

@@ -105,6 +105,10 @@
 //!
 //! - `test-utils`: Export utilities for testing
 
+// used in doctests
+#[cfg(test)]
+use revm as _;
+
 pub mod database;
 pub mod error;
 mod metrics;

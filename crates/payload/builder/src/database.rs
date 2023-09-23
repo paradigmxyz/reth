@@ -12,14 +12,14 @@ use std::{
 
 /// A container type that caches reads from an underlying [DatabaseRef].
 ///
-/// This is intended to be used in conjunction with [State](revm_primitives::db::State)
+/// This is intended to be used in conjunction with [State](revm::db::State)
 /// during payload building which repeatedly accesses the same data.
 ///
 /// # Example
 ///
 /// ```
 /// use reth_payload_builder::database::CachedReads;
-/// use revm_primitives::db::{DatabaseRef, State};
+/// use revm::db::{DatabaseRef, State};
 ///
 /// fn build_payload<DB: DatabaseRef>(db: DB) {
 ///     let mut cached_reads = CachedReads::default();
@@ -118,7 +118,7 @@ impl<'a, DB: DatabaseRef> Database for CachedReadsDbMut<'a, DB> {
 /// A [DatabaseRef] that caches reads inside [CachedReads].
 ///
 /// This is intended to be used as the [DatabaseRef] for
-/// [State](revm_primitives::db::State) for repeated payload build jobs.
+/// [State](revm::db::State) for repeated payload build jobs.
 #[derive(Debug)]
 pub struct CachedReadsDBRef<'a, DB> {
     inner: RefCell<CachedReadsDbMut<'a, DB>>,
