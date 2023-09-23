@@ -9,7 +9,7 @@ use crate::{
     kzg_to_versioned_hash, Bytes, ChainId, Signature, Transaction, TransactionKind,
     TransactionSigned, TxHash, TxType, EIP4844_TX_TYPE_ID, H256,
 };
-use alloy_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header};
+use alloy_rlp::{length_of_length, Decodable, Encodable, Error as RlpError, Header};
 use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
 use serde::{Deserialize, Serialize};
@@ -190,7 +190,7 @@ impl TxEip4844 {
     /// - `access_list`
     /// - `max_fee_per_blob_gas`
     /// - `blob_versioned_hashes`
-    pub fn decode_inner(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    pub fn decode_inner(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         Ok(Self {
             chain_id: Decodable::decode(buf)?,
             nonce: Decodable::decode(buf)?,
@@ -517,11 +517,11 @@ impl BlobTransaction {
     ///
     /// Note: this should be used only when implementing other RLP decoding methods, and does not
     /// represent the full RLP decoding of the `PooledTransactionsElement` type.
-    pub(crate) fn decode_inner(data: &mut &[u8]) -> Result<Self, DecodeError> {
+    pub(crate) fn decode_inner(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
         // decode the _first_ list header for the rest of the transaction
         let header = Header::decode(data)?;
         if !header.list {
-            return Err(DecodeError::Custom("PooledTransactions blob tx must be encoded as a list"))
+            return Err(RlpError::Custom("PooledTransactions blob tx must be encoded as a list"))
         }
 
         // Now we need to decode the inner 4844 transaction and its signature:
@@ -529,7 +529,7 @@ impl BlobTransaction {
         // `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
         let header = Header::decode(data)?;
         if !header.list {
-            return Err(DecodeError::Custom(
+            return Err(RlpError::Custom(
                 "PooledTransactions inner blob tx must be encoded as a list",
             ))
         }
@@ -587,9 +587,11 @@ impl BlobTransactionSidecar {
     /// - `proofs`
     pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut) {
         // Encode the blobs, commitments, and proofs
-        self.blobs.encode(out);
-        self.commitments.encode(out);
-        self.proofs.encode(out);
+        // self.blobs.encode(out);
+        // self.commitments.encode(out);
+        // self.proofs.encode(out);
+        let _ = out;
+        todo!("ckzg rlp")
     }
 
     /// Outputs the RLP length of the [BlobTransactionSidecar] fields, without a RLP header.
@@ -603,12 +605,14 @@ impl BlobTransactionSidecar {
     /// - `blobs`
     /// - `commitments`
     /// - `proofs`
-    pub(crate) fn decode_inner(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        Ok(Self {
-            blobs: Decodable::decode(buf)?,
-            commitments: Decodable::decode(buf)?,
-            proofs: Decodable::decode(buf)?,
-        })
+    pub(crate) fn decode_inner(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        // Ok(Self {
+        //     blobs: Decodable::decode(buf)?,
+        //     commitments: Decodable::decode(buf)?,
+        //     proofs: Decodable::decode(buf)?,
+        // })
+        let _ = buf;
+        todo!("ckzg rlp")
     }
 
     /// Calculates a size heuristic for the in-memory size of the [BlobTransactionSidecar].

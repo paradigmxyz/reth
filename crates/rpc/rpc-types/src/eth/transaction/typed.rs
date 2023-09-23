@@ -3,7 +3,7 @@
 //! transaction deserialized from the json input of an RPC call. Depending on what fields are set,
 //! it can be converted into the container type [`TypedTransactionRequest`].
 
-use alloy_rlp::{BufMut, Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
+use alloy_rlp::{BufMut, Decodable, Encodable, Error as RlpError, RlpDecodable, RlpEncodable};
 use reth_primitives::{
     AccessList, Address, Bytes, Transaction, TxEip1559, TxEip2930, TxLegacy, U128, U256, U64,
 };
@@ -143,7 +143,7 @@ impl Encodable for TransactionKind {
 }
 
 impl Decodable for TransactionKind {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if let Some(&first) = buf.first() {
             if first == 0x80 {
                 *buf = &buf[1..];
@@ -153,7 +153,7 @@ impl Decodable for TransactionKind {
                 Ok(TransactionKind::Call(addr))
             }
         } else {
-            Err(DecodeError::InputTooShort)
+            Err(RlpError::InputTooShort)
         }
     }
 }

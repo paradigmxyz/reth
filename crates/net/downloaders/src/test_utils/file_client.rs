@@ -65,7 +65,7 @@ pub enum FileClientError {
 
     /// An error occurred when decoding blocks, headers, or rlp headers from the file.
     #[error(transparent)]
-    Rlp(#[from] alloy_rlp::DecodeError),
+    Rlp(#[from] alloy_rlp::Error),
 }
 
 impl FileClient {

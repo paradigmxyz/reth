@@ -1,10 +1,10 @@
 //! Types for broadcasting new data.
 use crate::{EthMessage, EthVersion};
-use reth_codecs::derive_arbitrary;
-use reth_primitives::{Block, Bytes, TransactionSigned, H256, U128};
 use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
+use reth_codecs::derive_arbitrary;
+use reth_primitives::{Block, Bytes, TransactionSigned, H256, U128};
 use std::sync::Arc;
 
 #[cfg(feature = "serde")]
@@ -300,7 +300,7 @@ impl Encodable for NewPooledTransactionHashes68 {
 }
 
 impl Decodable for NewPooledTransactionHashes68 {
-    fn decode(buf: &mut &[u8]) -> Result<Self, alloy_rlp::DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         #[derive(RlpDecodable)]
         struct EncodableNewPooledTransactionHashes68 {
             types: Bytes,
@@ -316,9 +316,9 @@ impl Decodable for NewPooledTransactionHashes68 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_rlp::{Decodable, Encodable};
     use bytes::BytesMut;
     use reth_primitives::hex;
-    use alloy_rlp::{Decodable, Encodable};
     use std::str::FromStr;
 
     /// Takes as input a struct / encoded hex message pair, ensuring that we encode to the exact hex

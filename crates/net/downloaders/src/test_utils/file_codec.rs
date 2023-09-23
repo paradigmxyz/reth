@@ -11,7 +11,7 @@ use tokio_util::codec::{Decoder, Encoder};
 ///
 /// If using with [`FramedRead`](tokio_util::codec::FramedRead), the user should make sure the
 /// framed reader has capacity for the entire block file. Otherwise, the decoder will return
-/// [`InputTooShort`](alloy_rlp::DecodeError::InputTooShort), because RLP headers can only be
+/// [`InputTooShort`](alloy_rlp::Error::InputTooShort), because RLP headers can only be
 /// decoded if the internal buffer is large enough to contain the entire block body.
 ///
 /// Without ensuring the framed reader has capacity for the entire file, a block body is likely to

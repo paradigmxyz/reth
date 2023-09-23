@@ -347,7 +347,7 @@ pub enum PayloadError {
     InvalidVersionedHashes,
     /// Encountered decoding error.
     #[error(transparent)]
-    Decode(#[from] alloy_rlp::DecodeError),
+    Decode(#[from] alloy_rlp::Error),
 }
 
 impl PayloadError {

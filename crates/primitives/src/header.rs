@@ -400,10 +400,10 @@ impl Encodable for Header {
 }
 
 impl Decodable for Header {
-    fn decode(buf: &mut &[u8]) -> Result<Self, alloy_rlp::DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let rlp_head = alloy_rlp::Header::decode(buf)?;
         if !rlp_head.list {
-            return Err(alloy_rlp::DecodeError::UnexpectedString)
+            return Err(alloy_rlp::Error::UnexpectedString)
         }
         let started_len = buf.len();
         let mut this = Self {
@@ -476,7 +476,7 @@ impl Decodable for Header {
 
         let consumed = started_len - buf.len();
         if consumed != rlp_head.payload_length {
-            return Err(alloy_rlp::DecodeError::ListLengthMismatch {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
             })
@@ -556,7 +556,7 @@ impl Encodable for SealedHeader {
 }
 
 impl Decodable for SealedHeader {
-    fn decode(buf: &mut &[u8]) -> Result<Self, alloy_rlp::DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let b = &mut &**buf;
         let started_len = buf.len();
 
@@ -651,7 +651,7 @@ impl Encodable for HeadersDirection {
 }
 
 impl Decodable for HeadersDirection {
-    fn decode(buf: &mut &[u8]) -> Result<Self, alloy_rlp::DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let value: bool = Decodable::decode(buf)?;
         Ok(value.into())
     }

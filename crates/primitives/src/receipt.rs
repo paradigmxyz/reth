@@ -89,11 +89,11 @@ impl ReceiptWithBloom {
     }
 
     /// Decodes the receipt payload
-    fn decode_receipt(buf: &mut &[u8], tx_type: TxType) -> Result<Self, alloy_rlp::DecodeError> {
+    fn decode_receipt(buf: &mut &[u8], tx_type: TxType) -> alloy_rlp::Result<Self> {
         let b = &mut &**buf;
         let rlp_head = alloy_rlp::Header::decode(b)?;
         if !rlp_head.list {
-            return Err(alloy_rlp::DecodeError::UnexpectedString)
+            return Err(alloy_rlp::Error::UnexpectedString)
         }
         let started_len = b.len();
 
@@ -105,7 +105,7 @@ impl ReceiptWithBloom {
         let this = Self { receipt: Receipt { tx_type, success, cumulative_gas_used, logs }, bloom };
         let consumed = started_len - b.len();
         if consumed != rlp_head.payload_length {
-            return Err(alloy_rlp::DecodeError::ListLengthMismatch {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
             })
@@ -125,19 +125,19 @@ impl Encodable for ReceiptWithBloom {
 }
 
 impl Decodable for ReceiptWithBloom {
-    fn decode(buf: &mut &[u8]) -> Result<Self, alloy_rlp::DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         // a receipt is either encoded as a string (non legacy) or a list (legacy).
         // We should not consume the buffer if we are decoding a legacy receipt, so let's
         // check if the first byte is between 0x80 and 0xbf.
         let rlp_type = *buf
             .first()
-            .ok_or(alloy_rlp::DecodeError::Custom("cannot decode a receipt from empty bytes"))?;
+            .ok_or(alloy_rlp::Error::Custom("cannot decode a receipt from empty bytes"))?;
 
         match rlp_type.cmp(&alloy_rlp::EMPTY_LIST_CODE) {
             Ordering::Less => {
                 // strip out the string header
                 let _header = alloy_rlp::Header::decode(buf)?;
-                let receipt_type = *buf.first().ok_or(alloy_rlp::DecodeError::Custom(
+                let receipt_type = *buf.first().ok_or(alloy_rlp::Error::Custom(
                     "typed receipt cannot be decoded from an empty slice",
                 ))?;
                 if receipt_type == 0x01 {
@@ -150,11 +150,11 @@ impl Decodable for ReceiptWithBloom {
                     buf.advance(1);
                     Self::decode_receipt(buf, TxType::EIP4844)
                 } else {
-                    Err(alloy_rlp::DecodeError::Custom("invalid receipt type"))
+                    Err(alloy_rlp::Error::Custom("invalid receipt type"))
                 }
             }
             Ordering::Equal => {
-                Err(alloy_rlp::DecodeError::Custom("an empty list is not a valid receipt encoding"))
+                Err(alloy_rlp::Error::Custom("an empty list is not a valid receipt encoding"))
             }
             Ordering::Greater => Self::decode_receipt(buf, TxType::Legacy),
         }

@@ -195,7 +195,7 @@ impl Encodable for Chain {
 }
 
 impl Decodable for Chain {
-    fn decode(buf: &mut &[u8]) -> Result<Self, alloy_rlp::DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         Ok(u64::decode(buf)?.into())
     }
 }

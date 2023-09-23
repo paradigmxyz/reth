@@ -2,7 +2,9 @@ use crate::{
     compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR},
     keccak256, Address, Bytes, TxHash, H256,
 };
-use alloy_rlp::{Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
+use alloy_rlp::{
+    Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
+};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
 use once_cell::sync::Lazy;
@@ -610,7 +612,7 @@ impl Encodable for TransactionKind {
 }
 
 impl Decodable for TransactionKind {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if let Some(&first) = buf.first() {
             if first == EMPTY_STRING_CODE {
                 buf.advance(1);
@@ -620,7 +622,7 @@ impl Decodable for TransactionKind {
                 Ok(TransactionKind::Call(addr))
             }
         } else {
-            Err(DecodeError::InputTooShort)
+            Err(RlpError::InputTooShort)
         }
     }
 }
@@ -903,7 +905,7 @@ impl TransactionSigned {
     // so decoding methods do not need to manually advance the buffer
     pub(crate) fn decode_rlp_legacy_transaction_tuple(
         data: &mut &[u8],
-    ) -> Result<(TxLegacy, TxHash, Signature), DecodeError> {
+    ) -> alloy_rlp::Result<(TxLegacy, TxHash, Signature)> {
         // keep this around, so we can use it to calculate the hash
         let original_encoding = *data;
 
@@ -931,9 +933,7 @@ impl TransactionSigned {
     /// This expects `rlp(legacy_tx)`
     // TODO: make buf advancement semantics consistent with `decode_enveloped_typed_transaction`,
     // so decoding methods do not need to manually advance the buffer
-    pub fn decode_rlp_legacy_transaction(
-        data: &mut &[u8],
-    ) -> Result<TransactionSigned, DecodeError> {
+    pub fn decode_rlp_legacy_transaction(data: &mut &[u8]) -> alloy_rlp::Result<TransactionSigned> {
         let (transaction, hash, signature) =
             TransactionSigned::decode_rlp_legacy_transaction_tuple(data)?;
         let signed =
@@ -946,17 +946,17 @@ impl TransactionSigned {
     /// CAUTION: this expects that `data` is `[id, rlp(tx)]`
     pub fn decode_enveloped_typed_transaction(
         data: &mut &[u8],
-    ) -> Result<TransactionSigned, DecodeError> {
+    ) -> alloy_rlp::Result<TransactionSigned> {
         // keep this around so we can use it to calculate the hash
         let original_encoding = *data;
 
-        let tx_type = *data.first().ok_or(DecodeError::InputTooShort)?;
+        let tx_type = *data.first().ok_or(RlpError::InputTooShort)?;
         data.advance(1);
 
         // decode the list header for the rest of the transaction
         let header = Header::decode(data)?;
         if !header.list {
-            return Err(DecodeError::Custom("typed tx fields must be encoded as a list"))
+            return Err(RlpError::Custom("typed tx fields must be encoded as a list"))
         }
 
         // length of tx encoding = tx type byte (size = 1) + length of header + payload length
@@ -967,7 +967,7 @@ impl TransactionSigned {
             1 => Transaction::Eip2930(TxEip2930::decode_inner(data)?),
             2 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
             3 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
-            _ => return Err(DecodeError::Custom("unsupported typed transaction type")),
+            _ => return Err(RlpError::Custom("unsupported typed transaction type")),
         };
 
         let signature = Signature::decode(data)?;
@@ -983,11 +983,11 @@ impl TransactionSigned {
     /// For legacy transactions, the format is encoded as: `rlp(tx)`
     /// For EIP-2718 typed transaction, the format is encoded as the type of the transaction
     /// followed by the rlp of the transaction: `type` + `rlp(tx)`
-    pub fn decode_enveloped(tx: Bytes) -> Result<Self, DecodeError> {
+    pub fn decode_enveloped(tx: Bytes) -> alloy_rlp::Result<Self> {
         let mut data = tx.as_ref();
 
         if data.is_empty() {
-            return Err(DecodeError::InputTooShort)
+            return Err(RlpError::InputTooShort)
         }
 
         // Check if the tx is a list
@@ -1021,7 +1021,7 @@ impl Encodable for TransactionSigned {
 ///
 /// CAUTION: this expects that the given buf contains rlp
 impl Decodable for TransactionSigned {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         // decode header
         let mut original_encoding = *buf;
         let header = Header::decode(buf)?;
@@ -1130,11 +1130,11 @@ impl Encodable for TransactionSignedEcRecovered {
 }
 
 impl Decodable for TransactionSignedEcRecovered {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let signed_transaction = TransactionSigned::decode(buf)?;
         let signer = signed_transaction
             .recover_signer()
-            .ok_or(DecodeError::Custom("Unable to recover decoded transaction signer."))?;
+            .ok_or(RlpError::Custom("Unable to recover decoded transaction signer."))?;
         Ok(TransactionSignedEcRecovered { signer, signed_transaction })
     }
 }
@@ -1193,7 +1193,7 @@ mod tests {
         Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered, H256, U256,
     };
     use alloy_primitives::{b256, bytes};
-    use alloy_rlp::{Decodable, DecodeError, Encodable};
+    use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use bytes::BytesMut;
     use secp256k1::{KeyPair, Secp256k1};
     use std::str::FromStr;
@@ -1202,7 +1202,7 @@ mod tests {
     fn test_decode_empty_typed_tx() {
         let input = [0x80u8];
         let res = TransactionSigned::decode(&mut &input[..]).unwrap_err();
-        assert_eq!(DecodeError::InputTooShort, res);
+        assert_eq!(RlpError::InputTooShort, res);
     }
 
     #[test]

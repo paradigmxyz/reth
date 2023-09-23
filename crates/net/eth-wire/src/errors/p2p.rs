@@ -12,7 +12,7 @@ pub enum P2PStreamError {
     #[error(transparent)]
     Io(#[from] io::Error),
     #[error(transparent)]
-    Rlp(#[from] alloy_rlp::DecodeError),
+    Rlp(#[from] alloy_rlp::Error),
     #[error(transparent)]
     Snap(#[from] snap::Error),
     #[error(transparent)]
@@ -73,7 +73,7 @@ pub enum P2PHandshakeError {
     #[error("Disconnected by peer: {0}")]
     Disconnected(DisconnectReason),
     #[error("error decoding a message during handshake: {0}")]
-    DecodeError(#[from] alloy_rlp::DecodeError),
+    DecodeError(#[from] alloy_rlp::Error),
 }
 
 /// An error that can occur when interacting with a pinger.

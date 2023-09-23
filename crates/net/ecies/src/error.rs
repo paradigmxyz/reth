@@ -63,7 +63,7 @@ pub enum ECIESErrorImpl {
     Secp256k1(secp256k1::Error),
     /// Error when decoding RLP data
     #[error(transparent)]
-    RLPDecoding(alloy_rlp::DecodeError),
+    RLPDecoding(alloy_rlp::Error),
     /// Error when converting to integer
     #[error(transparent)]
     FromInt(std::num::TryFromIntError),
@@ -111,8 +111,8 @@ impl From<secp256k1::Error> for ECIESError {
     }
 }
 
-impl From<alloy_rlp::DecodeError> for ECIESError {
-    fn from(source: alloy_rlp::DecodeError) -> Self {
+impl From<alloy_rlp::Error> for ECIESError {
+    fn from(source: alloy_rlp::Error) -> Self {
         ECIESErrorImpl::RLPDecoding(source).into()
     }
 }

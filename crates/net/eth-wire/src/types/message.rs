@@ -325,8 +325,8 @@ impl Encodable for EthMessageID {
 }
 
 impl Decodable for EthMessageID {
-    fn decode(buf: &mut &[u8]) -> Result<Self, alloy_rlp::DecodeError> {
-        let id = buf.first().ok_or(alloy_rlp::DecodeError::InputTooShort)?;
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let id = buf.first().ok_or(alloy_rlp::Error::InputTooShort)?;
         let id = match id {
             0x00 => EthMessageID::Status,
             0x01 => EthMessageID::NewBlockHashes,
@@ -343,7 +343,7 @@ impl Decodable for EthMessageID {
             0x0e => EthMessageID::NodeData,
             0x0f => EthMessageID::GetReceipts,
             0x10 => EthMessageID::Receipts,
-            _ => return Err(alloy_rlp::DecodeError::Custom("Invalid message ID")),
+            _ => return Err(alloy_rlp::Error::Custom("Invalid message ID")),
         };
         buf.advance(1);
         Ok(id)
@@ -416,7 +416,7 @@ impl<T> Decodable for RequestPair<T>
 where
     T: Decodable,
 {
-    fn decode(buf: &mut &[u8]) -> Result<Self, alloy_rlp::DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let _header = Header::decode(buf)?;
         Ok(Self { request_id: u64::decode(buf)?, message: T::decode(buf)? })
     }
