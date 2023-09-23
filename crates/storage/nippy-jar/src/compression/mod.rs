@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::io::Write;
 
 mod zstd;
-pub use zstd::{Zstd, ZstdState};
+pub use self::zstd::{Zstd, ZstdState};
 
 /// Trait that will compress column values
 pub trait Compression: Serialize + for<'a> Deserialize<'a> {
