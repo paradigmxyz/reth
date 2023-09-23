@@ -1,3 +1,5 @@
+//! Helper function for calculating Merkle proofs and hashes.
+
 use crate::{
     keccak256,
     trie::{HashBuilder, Nibbles},
@@ -6,19 +8,19 @@ use crate::{
 };
 use bytes::{BufMut, BytesMut};
 use hash_db::Hasher;
-use hex_literal::hex;
 use plain_hasher::PlainHasher;
 use reth_rlp::Encodable;
+use revm_primitives::b256;
 use std::collections::HashMap;
 use triehash::sec_trie_root;
 
 /// Keccak-256 hash of the RLP of an empty list, KEC("\xc0").
 pub const EMPTY_LIST_HASH: H256 =
-    H256(hex!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"));
+    b256!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347");
 
 /// Root hash of an empty trie.
 pub const EMPTY_ROOT: H256 =
-    H256(hex!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"));
+    b256!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421");
 
 /// A [Hasher] that calculates a keccak256 hash of the given data.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -133,23 +135,21 @@ pub fn genesis_state_root(genesis_alloc: &HashMap<Address, GenesisAccount>) -> H
         (address, Bytes::from(acc_rlp.freeze()))
     });
 
-    H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_accounts).0)
+    H256::new(sec_trie_root::<KeccakHasher, _, _, _>(encoded_accounts).0)
 }
 
 #[cfg(test)]
 mod tests {
-
-    use std::{collections::HashMap, str::FromStr};
-
+    use super::{calculate_withdrawals_root, EMPTY_ROOT};
     use crate::{
         hex_literal::hex,
         proofs::{calculate_receipt_root, calculate_transaction_root, genesis_state_root},
-        Address, Block, Bloom, GenesisAccount, Log, Receipt, ReceiptWithBloom, TxType, H160, H256,
-        U256,
+        Address, Block, GenesisAccount, Log, Receipt, ReceiptWithBloom, TxType, H256, U256,
     };
+    use alloy_primitives::bloom;
     use reth_rlp::Decodable;
-
-    use super::{calculate_withdrawals_root, EMPTY_ROOT};
+    use revm_primitives::b256;
+    use std::{collections::HashMap, str::FromStr};
 
     #[test]
     fn check_transaction_root() {
@@ -163,8 +163,8 @@ mod tests {
 
     #[test]
     fn check_receipt_root() {
-        let logs = vec![Log { address: H160::zero(), topics: vec![], data: Default::default() }];
-        let bloom =  Bloom(hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001"));
+        let logs = vec![Log { address: Address::ZERO, topics: vec![], data: Default::default() }];
+        let bloom = bloom!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001");
         let receipt = ReceiptWithBloom {
             receipt: Receipt {
                 tx_type: TxType::EIP2930,
@@ -176,10 +176,7 @@ mod tests {
         };
         let receipt = vec![receipt];
         let root = calculate_receipt_root(&receipt);
-        assert_eq!(
-            root,
-            H256(hex!("fe70ae4a136d98944951b2123859698d59ad251a381abc9960fa81cae3d0d4a0"))
-        );
+        assert_eq!(root, b256!("fe70ae4a136d98944951b2123859698d59ad251a381abc9960fa81cae3d0d4a0"));
     }
 
     #[test]
@@ -244,7 +241,7 @@ mod tests {
     #[test]
     fn test_sepolia_state_root() {
         let expected_root =
-            hex!("5eb6e371a698b8d68f665192350ffcecbbbf322916f4b51bd79bb6887da3f494").into();
+            hex!("5eb6e371a698b8d68f665192350ffcecbbbf322916f4b51bd79bb6887da3f494");
         let alloc = HashMap::from([
             (
                 hex!("a2A6d93439144FFE4D27c9E088dCD8b783946263").into(),

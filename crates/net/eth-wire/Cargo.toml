@@ -49,8 +49,6 @@ ethers-core = { workspace = true, default-features = false }
 
 test-fuzz = "4"
 tokio-util = { workspace = true, features = ["io", "codec"] }
-hex-literal.workspace = true
-hex = "0.4"
 rand.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 

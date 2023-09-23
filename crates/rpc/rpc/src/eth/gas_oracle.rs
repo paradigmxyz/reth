@@ -260,7 +260,7 @@ pub struct GasPriceOracleResult {
 
 impl Default for GasPriceOracleResult {
     fn default() -> Self {
-        Self { block_hash: H256::zero(), price: U256::from(GWEI_TO_WEI) }
+        Self { block_hash: H256::ZERO, price: U256::from(GWEI_TO_WEI) }
     }
 }
 

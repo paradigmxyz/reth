@@ -33,7 +33,7 @@ impl TypedTransactionRequest {
         Some(match self {
             TypedTransactionRequest::Legacy(tx) => Transaction::Legacy(TxLegacy {
                 chain_id: tx.chain_id,
-                nonce: tx.nonce.as_u64(),
+                nonce: tx.nonce.to(),
                 gas_price: tx.gas_price.to(),
                 gas_limit: tx.gas_limit.try_into().ok()?,
                 to: tx.kind.into(),
@@ -42,7 +42,7 @@ impl TypedTransactionRequest {
             }),
             TypedTransactionRequest::EIP2930(tx) => Transaction::Eip2930(TxEip2930 {
                 chain_id: tx.chain_id,
-                nonce: tx.nonce.as_u64(),
+                nonce: tx.nonce.to(),
                 gas_price: tx.gas_price.to(),
                 gas_limit: tx.gas_limit.try_into().ok()?,
                 to: tx.kind.into(),
@@ -52,7 +52,7 @@ impl TypedTransactionRequest {
             }),
             TypedTransactionRequest::EIP1559(tx) => Transaction::Eip1559(TxEip1559 {
                 chain_id: tx.chain_id,
-                nonce: tx.nonce.as_u64(),
+                nonce: tx.nonce.to(),
                 max_fee_per_gas: tx.max_fee_per_gas.to(),
                 gas_limit: tx.gas_limit.try_into().ok()?,
                 to: tx.kind.into(),

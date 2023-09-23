@@ -1,8 +1,7 @@
 //! Types for broadcasting new data.
 use crate::{EthMessage, EthVersion};
-use bytes::Bytes;
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{Block, TransactionSigned, H256, U128};
+use reth_primitives::{Block, Bytes, TransactionSigned, H256, U128};
 use reth_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
@@ -316,13 +315,11 @@ impl Decodable for NewPooledTransactionHashes68 {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
-    use bytes::BytesMut;
-    use hex_literal::hex;
-    use reth_rlp::{Decodable, Encodable};
-
     use super::*;
+    use bytes::BytesMut;
+    use reth_primitives::hex;
+    use reth_rlp::{Decodable, Encodable};
+    use std::str::FromStr;
 
     /// Takes as input a struct / encoded hex message pair, ensuring that we encode to the exact hex
     /// message, and decode to the exact struct.

@@ -806,7 +806,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             builder = builder.with_max_block(max_block)
         }
 
-        let (tip_tx, tip_rx) = watch::channel(H256::zero());
+        let (tip_tx, tip_rx) = watch::channel(H256::ZERO);
         use reth_revm_inspectors::stack::InspectorStackConfig;
         let factory = reth_revm::Factory::new(self.chain.clone());
 

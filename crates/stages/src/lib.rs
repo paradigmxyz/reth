@@ -44,7 +44,7 @@
 //! # );
 //! # let db = create_test_rw_db();
 //! # let bodies_downloader = BodiesDownloaderBuilder::default().build(
-//! #    Arc::new(TestBodiesClient { responder: |_| Ok((PeerId::zero(), vec![]).into()) }),
+//! #    Arc::new(TestBodiesClient { responder: |_| Ok((PeerId::ZERO, vec![]).into()) }),
 //! #    consensus.clone(),
 //! #    db.clone()
 //! # );

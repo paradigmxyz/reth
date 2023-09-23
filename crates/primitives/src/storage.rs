@@ -36,7 +36,7 @@ impl Compact for StorageEntry {
         B: bytes::BufMut + AsMut<[u8]>,
     {
         // for now put full bytes and later compress it.
-        buf.put_slice(&self.key.to_fixed_bytes()[..]);
+        buf.put_slice(&self.key[..]);
         self.value.to_compact(buf) + 32
     }
 

@@ -149,10 +149,9 @@ impl Default for Status {
 mod tests {
     use crate::types::{EthVersion, Status};
     use ethers_core::types::Chain as NamedChain;
-    use hex_literal::hex;
     use rand::Rng;
     use reth_primitives::{
-        Chain, ChainSpec, ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head, H256, U256,
+        hex, Chain, ChainSpec, ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head, H256, U256,
     };
     use reth_rlp::{Decodable, Encodable};
     use std::str::FromStr;
@@ -271,8 +270,8 @@ mod tests {
 
     #[test]
     fn init_custom_status_fields() {
-        let head_hash = H256::random();
         let mut rng = rand::thread_rng();
+        let head_hash = rng.gen();
         let total_difficulty = U256::from(rng.gen::<u64>());
 
         // create a genesis that has a random part, so we can check that the hash is preserved

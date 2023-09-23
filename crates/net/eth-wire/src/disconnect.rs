@@ -1,6 +1,5 @@
 //! Disconnect
 
-use bytes::Bytes;
 use futures::{Sink, SinkExt};
 use reth_codecs::derive_arbitrary;
 use reth_ecies::stream::ECIESStream;
@@ -178,7 +177,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<S> CanDisconnect<Bytes> for ECIESStream<S>
+impl<S> CanDisconnect<bytes::Bytes> for ECIESStream<S>
 where
     S: AsyncWrite + Unpin + Send,
 {

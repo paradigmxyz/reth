@@ -428,7 +428,7 @@ mod test {
         errors::EthStreamError, types::message::RequestPair, EthMessage, EthMessageID, GetNodeData,
         NodeData, ProtocolMessage,
     };
-    use hex_literal::hex;
+    use reth_primitives::hex;
     use reth_rlp::{Decodable, Encodable};
 
     fn encode<T: Encodable>(value: T) -> Vec<u8> {

@@ -79,13 +79,13 @@ mod tests {
     #[test]
     fn serde_transaction() {
         let transaction = Transaction {
-            hash: H256::from_low_u64_be(1),
+            hash: H256::with_last_byte(1),
             nonce: U64::from(2),
-            block_hash: Some(H256::from_low_u64_be(3)),
+            block_hash: Some(H256::with_last_byte(3)),
             block_number: Some(U256::from(4)),
             transaction_index: Some(U256::from(5)),
-            from: Address::from_low_u64_be(6),
-            to: Some(Address::from_low_u64_be(7)),
+            from: Address::with_last_byte(6),
+            to: Some(Address::with_last_byte(7)),
             value: U256::from(8),
             gas_price: Some(U128::from(9)),
             gas: U256::from(10),
@@ -116,13 +116,13 @@ mod tests {
     #[test]
     fn serde_transaction_with_parity_bit() {
         let transaction = Transaction {
-            hash: H256::from_low_u64_be(1),
+            hash: H256::with_last_byte(1),
             nonce: U64::from(2),
-            block_hash: Some(H256::from_low_u64_be(3)),
+            block_hash: Some(H256::with_last_byte(3)),
             block_number: Some(U256::from(4)),
             transaction_index: Some(U256::from(5)),
-            from: Address::from_low_u64_be(6),
-            to: Some(Address::from_low_u64_be(7)),
+            from: Address::with_last_byte(6),
+            to: Some(Address::with_last_byte(7)),
             value: U256::from(8),
             gas_price: Some(U128::from(9)),
             gas: U256::from(10),

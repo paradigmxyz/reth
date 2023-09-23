@@ -152,12 +152,12 @@ impl Compact for BranchNodeCompact {
 
         if let Some(root_hash) = root_hash {
             buf_size += H256::len_bytes();
-            buf.put_slice(root_hash.as_bytes());
+            buf.put_slice(root_hash.as_slice());
         }
 
         for hash in &hashes {
             buf_size += H256::len_bytes();
-            buf.put_slice(hash.as_bytes());
+            buf.put_slice(hash.as_slice());
         }
 
         buf_size
@@ -202,7 +202,7 @@ impl Compact for BranchNodeCompact {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hex_literal::hex;
+    use crate::hex_literal::hex;
 
     #[test]
     fn node_encoding() {

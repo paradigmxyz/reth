@@ -45,8 +45,8 @@ impl Encodable for ExtensionNode<'_> {
 impl std::fmt::Debug for ExtensionNode<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExtensionNode")
-            .field("prefix", &hex::encode(&self.prefix))
-            .field("node", &hex::encode(self.node))
+            .field("prefix", &crate::hex::encode(&self.prefix))
+            .field("node", &crate::hex::encode(self.node))
             .finish()
     }
 }

@@ -92,7 +92,7 @@ impl AccountHashingStage {
 
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, opts.blocks.clone(), H256::zero(), opts.txs);
+        let blocks = random_block_range(&mut rng, opts.blocks.clone(), H256::ZERO, opts.txs);
 
         for block in blocks {
             provider.insert_block(block, None, None).unwrap();

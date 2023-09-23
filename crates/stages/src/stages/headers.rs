@@ -385,6 +385,7 @@ mod tests {
         stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
+    use rand::Rng;
     use reth_interfaces::test_utils::{generators, generators::random_header};
     use reth_primitives::{stage::StageUnitCheckpoint, H256, MAINNET};
     use reth_provider::ProviderFactory;
@@ -416,7 +417,7 @@ mod tests {
                 let client = TestHeadersClient::default();
                 Self {
                     client: client.clone(),
-                    channel: watch::channel(H256::zero()),
+                    channel: watch::channel(H256::ZERO),
                     downloader_factory: Box::new(move || {
                         TestHeaderDownloader::new(
                             client.clone(),
@@ -524,7 +525,7 @@ mod tests {
                 let client = TestHeadersClient::default();
                 Self {
                     client: client.clone(),
-                    channel: watch::channel(H256::zero()),
+                    channel: watch::channel(H256::ZERO),
                     downloader_factory: Box::new(move || {
                         ReverseHeadersDownloaderBuilder::default()
                             .stream_batch_size(500)
@@ -604,7 +605,7 @@ mod tests {
 
         let mut rng = generators::rng();
 
-        let consensus_tip = H256::random();
+        let consensus_tip = rng.gen();
         runner.send_tip(consensus_tip);
 
         // Genesis

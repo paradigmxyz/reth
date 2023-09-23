@@ -84,7 +84,7 @@ mod tests {
                 state_mask: TrieMask::new(1),
                 tree_mask: TrieMask::new(0),
                 hash_mask: TrieMask::new(1),
-                hashes: vec![H256::zero()],
+                hashes: vec![H256::ZERO],
                 root_hash: None,
             }),
         };

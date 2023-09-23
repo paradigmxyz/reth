@@ -503,11 +503,15 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use mockall::mock;
-    use reth_interfaces::{RethError::Consensus, RethResult};
+    use reth_interfaces::{
+        test_utils::generators::{self, Rng},
+        RethError::Consensus,
+        RethResult,
+    };
     use reth_primitives::{
         constants::eip4844::DATA_GAS_PER_BLOB, hex_literal::hex, proofs, Account, Address,
         BlockBody, BlockHash, BlockHashOrNumber, Bytes, ChainSpecBuilder, Header, Signature,
-        TransactionKind, TransactionSigned, Withdrawal, H256, MAINNET, U256,
+        TransactionKind, TransactionSigned, Withdrawal, MAINNET, U256,
     };
     use std::ops::RangeBounds;
 
@@ -625,11 +629,12 @@ mod tests {
         let signature = Signature { odd_y_parity: true, r: U256::default(), s: U256::default() };
 
         let tx = TransactionSigned::from_transaction_and_signature(request, signature);
-        let signer = Address::zero();
+        let signer = Address::ZERO;
         TransactionSignedEcRecovered::from_signed_transaction(tx, signer)
     }
 
     fn mock_blob_tx(nonce: u64, num_blobs: usize) -> TransactionSigned {
+        let mut rng = generators::rng();
         let request = Transaction::Eip4844(TxEip4844 {
             chain_id: 1u64,
             nonce,
@@ -641,7 +646,7 @@ mod tests {
             value: 3,
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),
-            blob_versioned_hashes: vec![H256::random(); num_blobs],
+            blob_versioned_hashes: std::iter::repeat_with(|| rng.gen()).take(num_blobs).collect(),
         });
 
         let signature = Signature { odd_y_parity: true, r: U256::default(), s: U256::default() };

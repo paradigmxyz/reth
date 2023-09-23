@@ -62,7 +62,7 @@ impl GethTraceBuilder {
             }
 
             if opts.is_return_data_enabled() {
-                log.return_data = Some(trace_node.trace.output.clone().into());
+                log.return_data = Some(trace_node.trace.output.clone());
             }
 
             // Add step to geth trace
@@ -197,7 +197,7 @@ impl GethTraceBuilder {
                     AccountState {
                         balance: Some(db_acc.balance),
                         nonce: Some(U256::from(db_acc.nonce)),
-                        code: db_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
+                        code: db_acc.code.as_ref().map(|code| code.original_bytes()),
                         storage: None,
                     },
                 );
@@ -211,13 +211,13 @@ impl GethTraceBuilder {
                 let pre_state = AccountState {
                     balance: Some(db_acc.balance),
                     nonce: Some(U256::from(db_acc.nonce)),
-                    code: db_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
+                    code: db_acc.code.as_ref().map(|code| code.original_bytes()),
                     storage: None,
                 };
                 let post_state = AccountState {
                     balance: Some(changed_acc.balance),
                     nonce: Some(U256::from(changed_acc.nonce)),
-                    code: changed_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
+                    code: changed_acc.code.as_ref().map(|code| code.original_bytes()),
                     storage: None,
                 };
                 state_diff.pre.insert(addr, pre_state);

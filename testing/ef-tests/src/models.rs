@@ -7,9 +7,9 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{
-    keccak256, Account as RethAccount, Address, BigEndianHash, Bloom, Bytecode, Bytes, ChainSpec,
-    ChainSpecBuilder, Header as RethHeader, JsonU256, SealedHeader, StorageEntry, Withdrawal, H160,
-    H256, H64, U256,
+    keccak256, Account as RethAccount, Address, Bloom, Bytecode, Bytes, ChainSpec,
+    ChainSpecBuilder, Header as RethHeader, JsonU256, SealedHeader, StorageEntry, Withdrawal, H256,
+    H64, U256,
 };
 use serde::{self, Deserialize};
 use std::{collections::BTreeMap, ops::Deref};
@@ -96,7 +96,7 @@ impl From<Header> for SealedHeader {
             gas_limit: value.gas_limit.0.to::<u64>(),
             gas_used: value.gas_used.0.to::<u64>(),
             mix_hash: value.mix_hash,
-            nonce: value.nonce.into_uint().as_u64(),
+            nonce: u64::from_be_bytes(value.nonce.0),
             number: value.number.0.to::<u64>(),
             timestamp: value.timestamp.0.to::<u64>(),
             transactions_root: value.transactions_trie,
@@ -164,7 +164,7 @@ impl State {
                 },
             )?;
             if let Some(code_hash) = code_hash {
-                tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(account.code.0.clone()))?;
+                tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(account.code.clone()))?;
             }
             account.storage.iter().try_for_each(|(k, v)| {
                 tx.put::<tables::PlainStorageState>(
@@ -238,7 +238,7 @@ impl Account {
         let mut storage_cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
         for (slot, value) in self.storage.iter() {
             if let Some(entry) =
-                storage_cursor.seek_by_key_subkey(address, H256(slot.0.to_be_bytes()))?
+                storage_cursor.seek_by_key_subkey(address, H256::new(slot.0.to_be_bytes()))?
             {
                 if U256::from_be_bytes(entry.key.0) == slot.0 {
                     assert_equal(
@@ -404,7 +404,7 @@ pub struct Transaction {
 #[serde(rename_all = "camelCase")]
 pub struct AccessListItem {
     /// Account address
-    pub address: H160,
+    pub address: Address,
     /// Storage key.
     pub storage_keys: Vec<H256>,
 }

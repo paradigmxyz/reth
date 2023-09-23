@@ -1,4 +1,5 @@
 use crate::{transaction::util::secp256k1, Address, H256, U256};
+use alloy_primitives::Bytes;
 use bytes::Buf;
 use reth_codecs::{derive_arbitrary, Compact};
 use reth_rlp::{Decodable, DecodeError, Encodable};
@@ -123,7 +124,7 @@ impl Signature {
 
         // NOTE: we are removing error from underlying crypto library as it will restrain primitive
         // errors and we care only if recovery is passing or not.
-        secp256k1::recover_signer(&sig, hash.as_fixed_bytes()).ok()
+        secp256k1::recover_signer(&sig, &hash.0).ok()
     }
 
     /// Turn this signature into its byte
@@ -135,6 +136,11 @@ impl Signature {
         let v = u8::from(self.odd_y_parity) + 27;
         sig[64] = v;
         sig
+    }
+
+    /// Turn this signature into its hex-encoded representation.
+    pub fn to_hex_bytes(&self) -> Bytes {
+        crate::hex::encode(self.to_bytes()).into()
     }
 
     /// Calculates a heuristic for the in-memory size of the [Signature].

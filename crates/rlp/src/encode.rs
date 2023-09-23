@@ -222,8 +222,11 @@ mod ethnum_support {
 mod ethereum_types_support {
     use super::*;
     use ethereum_types::*;
-
-    use revm_primitives::{ruint::aliases::U128 as RU128, B160, B256, U256 as RU256};
+    use revm_primitives::{
+        alloy_primitives::B512,
+        ruint::aliases::{U128 as RU128, U256 as RU256, U64 as RU64},
+        Address, B256,
+    };
 
     macro_rules! fixed_hash_impl {
         ($t:ty) => {
@@ -240,8 +243,11 @@ mod ethereum_types_support {
         };
     }
 
-    fixed_hash_impl!(B160);
+    fixed_hash_impl!(Address);
     fixed_hash_impl!(B256);
+    fixed_hash_impl!(B512);
+    fixed_hash_impl!(Bloom);
+
     fixed_hash_impl!(H64);
     fixed_hash_impl!(H128);
     fixed_hash_impl!(H160);
@@ -295,6 +301,7 @@ mod ethereum_types_support {
         };
     }
 
+    fixed_revm_uint_impl!(RU64, 8);
     fixed_revm_uint_impl!(RU128, 16);
     fixed_revm_uint_impl!(RU256, 32);
     impl_max_encoded_len!(RU256, { length_of_length(32) + 32 });
@@ -353,6 +360,7 @@ impl Encodable for &str {
 }
 
 slice_impl!(Bytes);
+slice_impl!(revm_primitives::Bytes);
 slice_impl!(BytesMut);
 
 fn rlp_list_header<E, K>(v: &[K]) -> Header

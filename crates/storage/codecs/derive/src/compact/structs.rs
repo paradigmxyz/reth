@@ -139,10 +139,10 @@ impl<'a> StructHandler<'a> {
             If it's an alias type (which are not supported by proc_macro), be sure to add it to either `known_types` or `get_bit_size` lists in the derive crate."
         );
 
-        if ftype == "bytes::Bytes" {
+        if ftype == "Bytes" {
             self.lines.push(quote! {
-                let mut #name = bytes::Bytes::new();
-                (#name, buf) = bytes::Bytes::from_compact(buf, buf.len() as usize);
+                let mut #name = Bytes::new();
+                (#name, buf) = Bytes::from_compact(buf, buf.len() as usize);
             })
         } else {
             let ident_type = format_ident!("{ftype}");

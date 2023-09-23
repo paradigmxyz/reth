@@ -4,9 +4,7 @@ use crate::{error::DecodePacketError, EnrForkIdEntry, PeerId, MAX_PACKET_SIZE, M
 use enr::{Enr, EnrKey};
 use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
-    keccak256,
-    rpc_utils::rlp,
-    ForkId, NodeRecord, H256,
+    keccak256, ForkId, NodeRecord, H256,
 };
 use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header};
 use reth_rlp_derive::{RlpDecodable, RlpEncodable};
@@ -124,7 +122,7 @@ impl Message {
         sig_bytes.unsplit(payload);
 
         let hash = keccak256(&sig_bytes);
-        datagram.extend_from_slice(hash.as_bytes());
+        datagram.extend_from_slice(hash.as_slice());
 
         datagram.unsplit(sig_bytes);
         (datagram.freeze(), hash)
@@ -154,7 +152,7 @@ impl Message {
         let recoverable_sig = RecoverableSignature::from_compact(signature, recovery_id)?;
 
         // recover the public key
-        let msg = secp256k1::Message::from_slice(keccak256(&packet[97..]).as_bytes())?;
+        let msg = secp256k1::Message::from_slice(keccak256(&packet[97..]).as_slice())?;
 
         let pk = SECP256K1.recover_ecdsa(&msg, &recoverable_sig)?;
         let node_id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
@@ -500,7 +498,7 @@ mod tests {
     };
     use enr::{EnrBuilder, EnrPublicKey};
     use rand::{thread_rng, Rng, RngCore};
-    use reth_primitives::{hex_literal::hex, ForkHash};
+    use reth_primitives::{hex, ForkHash};
 
     #[test]
     fn test_endpoint_ipv_v4() {
@@ -592,7 +590,7 @@ mod tests {
             rng.fill_bytes(&mut ip);
             let msg = Pong {
                 to: rng_endpoint(&mut rng),
-                echo: H256::random(),
+                echo: rng.gen(),
                 expire: rng.gen(),
                 enr_sq: None,
             };
@@ -613,7 +611,7 @@ mod tests {
             rng.fill_bytes(&mut ip);
             let msg = Pong {
                 to: rng_endpoint(&mut rng),
-                echo: H256::random(),
+                echo: rng.gen(),
                 expire: rng.gen(),
                 enr_sq: Some(rng.gen()),
             };
@@ -721,7 +719,8 @@ mod tests {
         use reth_rlp::Decodable;
         use std::net::Ipv4Addr;
 
-        let key = SecretKey::new(&mut rand::rngs::OsRng);
+        let mut rng = rand::rngs::OsRng;
+        let key = SecretKey::new(&mut rng);
         let ip = Ipv4Addr::new(127, 0, 0, 1);
         let tcp = 3000;
 
@@ -738,7 +737,7 @@ mod tests {
             EnrWrapper::new(builder.build(&key).unwrap())
         };
 
-        let enr_respone = EnrResponse { request_hash: H256::random(), enr };
+        let enr_respone = EnrResponse { request_hash: rng.gen(), enr };
 
         let mut buf = Vec::new();
         enr_respone.encode(&mut buf);

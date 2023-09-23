@@ -1,8 +1,8 @@
 use crate::{H256, KECCAK_EMPTY, U256};
-use bytes::{Buf, Bytes};
-use fixed_hash::byteorder::{BigEndian, ReadBytesExt};
+use byteorder::{BigEndian, ReadBytesExt};
+use bytes::Buf;
 use reth_codecs::{main_codec, Compact};
-use revm_primitives::{Bytecode as RevmBytecode, BytecodeState, JumpMap};
+use revm_primitives::{Bytecode as RevmBytecode, BytecodeState, Bytes, JumpMap};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
@@ -101,7 +101,7 @@ impl Compact for Bytecode {
         Self: Sized,
     {
         let len = buf.read_u32::<BigEndian>().expect("could not read bytecode length");
-        let bytes = buf.copy_to_bytes(len as usize);
+        let bytes = Bytes::from(buf.copy_to_bytes(len as usize));
         let variant = buf.read_u8().expect("could not read bytecode variant");
         let decoded = match variant {
             0 => Bytecode(RevmBytecode::new_raw(bytes)),
@@ -124,7 +124,7 @@ impl Compact for Bytecode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hex_literal::hex;
+    use crate::hex_literal::hex;
 
     #[test]
     fn test_account() {

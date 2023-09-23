@@ -83,7 +83,7 @@ where
             opcode::BALANCE |
             opcode::SELFDESTRUCT => {
                 if let Ok(slot) = interpreter.stack().peek(0) {
-                    let addr: Address = H256::from(slot.to_be_bytes()).into();
+                    let addr = Address::from_word(H256::from(slot.to_be_bytes()));
                     if !self.excluded.contains(&addr) {
                         self.access_list.entry(addr).or_default();
                     }
@@ -91,7 +91,7 @@ where
             }
             opcode::DELEGATECALL | opcode::CALL | opcode::STATICCALL | opcode::CALLCODE => {
                 if let Ok(slot) = interpreter.stack().peek(1) {
-                    let addr: Address = H256::from(slot.to_be_bytes()).into();
+                    let addr = Address::from_word(H256::from(slot.to_be_bytes()));
                     if !self.excluded.contains(&addr) {
                         self.access_list.entry(addr).or_default();
                     }

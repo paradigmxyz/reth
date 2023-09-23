@@ -45,8 +45,8 @@ impl Encodable for LeafNode<'_> {
 impl std::fmt::Debug for LeafNode<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LeafNode")
-            .field("key", &hex::encode(&self.key))
-            .field("value", &hex::encode(self.value))
+            .field("key", &crate::hex::encode(&self.key))
+            .field("value", &crate::hex::encode(self.value))
             .finish()
     }
 }

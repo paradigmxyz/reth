@@ -4,9 +4,14 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
 )]
-use bytes::{Buf, Bytes};
+
 pub use codecs_derive::*;
-use revm_primitives::{B160 as H160, B256 as H256, U256};
+
+use bytes::Buf;
+use revm_primitives::{
+    alloy_primitives::{Bloom, B512 as H512},
+    Address, Bytes, B256 as H256, U256,
+};
 
 /// Trait that implements the `Compact` codec.
 ///
@@ -14,9 +19,9 @@ use revm_primitives::{B160 as H160, B256 as H256, U256};
 /// * Works best with structs that only have native types (eg. u64, H256, U256).
 /// * Fixed array types (H256, Address, Bloom) are not compacted.
 /// * Max size of `T` in `Option<T>` or `Vec<T>` shouldn't exceed `0xffff`.
-/// * Any `bytes::Bytes` field **should be placed last**.
+/// * Any `Bytes` field **should be placed last**.
 /// * Any other type which is not known to the derive module **should be placed last** in they
-///   contain a `bytes::Bytes` field.
+///   contain a `Bytes` field.
 ///
 /// The last two points make it easier to decode the data without saving the length on the
 /// `StructFlags`. It will fail compilation if it's not respected. If they're alias to known types,
@@ -30,6 +35,7 @@ pub trait Compact {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>;
+
     /// Takes a buffer which can be read from. Returns the object and `buf` with its internal cursor
     /// advanced (eg.`.advance(len)`).
     ///
@@ -253,11 +259,12 @@ impl Compact for Bytes {
         B: bytes::BufMut + AsMut<[u8]>,
     {
         let len = self.len();
-        buf.put(self);
+        buf.put(self.0);
         len
     }
+
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
-        (buf.copy_to_bytes(len), buf)
+        (buf.copy_to_bytes(len).into(), buf)
     }
 }
 
@@ -268,7 +275,7 @@ macro_rules! impl_hash_compact {
         $(
             impl Compact for $name {
                 fn to_compact<B>(self, buf: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
-                    buf.put_slice(&self.0);
+                    buf.put_slice(self.as_slice());
                     std::mem::size_of::<$name>()
                 }
 
@@ -298,7 +305,7 @@ macro_rules! impl_hash_compact {
     };
 }
 
-impl_hash_compact!(H256, H160);
+impl_hash_compact!(Address, H256, H512, Bloom);
 
 impl Compact for bool {
     /// `bool` vars go directly to the `StructFlags` and are not written to the buffer.
@@ -344,14 +351,12 @@ fn decode_varuint(mut buf: &[u8]) -> (usize, &[u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use revm_primitives::B160;
-
-    pub type Address = B160;
+    use revm_primitives::{Address, Bytes};
 
     #[test]
     fn compact_bytes() {
         let arr = [1, 2, 3, 4, 5];
-        let list = bytes::Bytes::copy_from_slice(&arr);
+        let list = Bytes::copy_from_slice(&arr);
         let mut buf = vec![];
         assert_eq!(list.clone().to_compact(&mut buf), list.len());
 
@@ -359,33 +364,33 @@ mod tests {
         buf.push(1);
 
         assert_eq!(&buf[..arr.len()], &arr);
-        assert_eq!(bytes::Bytes::from_compact(&buf, list.len()), (list, vec![1].as_slice()));
+        assert_eq!(Bytes::from_compact(&buf, list.len()), (list, vec![1].as_slice()));
     }
 
     #[test]
     fn compact_address() {
         let mut buf = vec![];
-        assert_eq!(Address::zero().to_compact(&mut buf), 20);
+        assert_eq!(Address::ZERO.to_compact(&mut buf), 20);
         assert_eq!(buf, vec![0; 20]);
 
         // Add some noise data.
         buf.push(1);
 
         // Address shouldn't care about the len passed, since it's not actually compacted.
-        assert_eq!(Address::from_compact(&buf, 1000), (Address::zero(), vec![1u8].as_slice()));
+        assert_eq!(Address::from_compact(&buf, 1000), (Address::ZERO, vec![1u8].as_slice()));
     }
 
     #[test]
     fn compact_h256() {
         let mut buf = vec![];
-        assert_eq!(H256::zero().to_compact(&mut buf), 32);
+        assert_eq!(H256::ZERO.to_compact(&mut buf), 32);
         assert_eq!(buf, vec![0; 32]);
 
         // Add some noise data.
         buf.push(1);
 
         // H256 shouldn't care about the len passed, since it's not actually compacted.
-        assert_eq!(H256::from_compact(&buf, 1000), (H256::zero(), vec![1u8].as_slice()));
+        assert_eq!(H256::from_compact(&buf, 1000), (H256::ZERO, vec![1u8].as_slice()));
     }
 
     #[test]
@@ -409,7 +414,7 @@ mod tests {
 
     #[test]
     fn compact_option() {
-        let opt = Some(H256::zero());
+        let opt = Some(H256::ZERO);
         let mut buf = vec![];
 
         assert_eq!(None::<H256>.to_compact(&mut buf), 0);
@@ -429,7 +434,7 @@ mod tests {
 
     #[test]
     fn compact_vec() {
-        let list = vec![H256::zero(), H256::zero()];
+        let list = vec![H256::ZERO, H256::ZERO];
         let mut buf = vec![];
 
         // Vec doesn't return a total length
@@ -498,22 +503,22 @@ mod tests {
         f_option_none: Option<H256>,
         f_option_some: Option<H256>,
         f_option_some_u64: Option<u64>,
-        f_vec_empty: Vec<H160>,
-        f_vec_some: Vec<H160>,
+        f_vec_empty: Vec<Address>,
+        f_vec_some: Vec<Address>,
     }
 
     impl Default for TestStruct {
         fn default() -> Self {
             TestStruct {
-                f_u64: 1u64,                                  // 4 bits | 1 byte
-                f_u256: U256::from(1u64),                     // 6 bits | 1 byte
-                f_bool_f: false,                              // 1 bit  | 0 bytes
-                f_bool_t: true,                               // 1 bit  | 0 bytes
-                f_option_none: None,                          // 1 bit  | 0 bytes
-                f_option_some: Some(H256::zero()),            // 1 bit  | 32 bytes
-                f_option_some_u64: Some(0xffffu64),           // 1 bit  | 1 + 2 bytes
-                f_vec_empty: vec![],                          // 0 bits | 1 bytes
-                f_vec_some: vec![H160::zero(), H160::zero()], // 0 bits | 1 + 20*2 bytes
+                f_u64: 1u64,                                    // 4 bits | 1 byte
+                f_u256: U256::from(1u64),                       // 6 bits | 1 byte
+                f_bool_f: false,                                // 1 bit  | 0 bytes
+                f_bool_t: true,                                 // 1 bit  | 0 bytes
+                f_option_none: None,                            // 1 bit  | 0 bytes
+                f_option_some: Some(H256::ZERO),                // 1 bit  | 32 bytes
+                f_option_some_u64: Some(0xffffu64),             // 1 bit  | 1 + 2 bytes
+                f_vec_empty: vec![],                            // 0 bits | 1 bytes
+                f_vec_some: vec![Address::ZERO, Address::ZERO], // 0 bits | 1 + 20*2 bytes
             }
         }
     }

@@ -1,8 +1,7 @@
 use crate::Log as RpcLog;
 use itertools::{EitherOrBoth::*, Itertools};
 use reth_primitives::{
-    bloom::{Bloom, Input},
-    keccak256, Address, BlockNumberOrTag, Log, H160, H256, U256, U64,
+    keccak256, Address, BlockNumberOrTag, Bloom, BloomInput, Log, H256, U256, U64,
 };
 use serde::{
     de::{DeserializeOwned, MapAccess, Visitor},
@@ -30,7 +29,7 @@ impl BloomFilter {
     /// If the filter is empty (the list is empty), then any bloom matches
     /// Otherwise, there must be at least one matche for the BloomFilter to match.
     pub fn matches(&self, bloom: Bloom) -> bool {
-        self.0.is_empty() || self.0.iter().any(|a| bloom.contains_bloom(a))
+        self.0.is_empty() || self.0.iter().any(|a| bloom.contains(a))
     }
 }
 
@@ -95,7 +94,7 @@ impl<T: Eq + Hash> FilterSet<T> {
 impl<T: AsRef<[u8]> + Eq + Hash> FilterSet<T> {
     /// Returns a list of Bloom (BloomFilter) corresponding to the filter's values
     pub fn to_bloom_filter(&self) -> BloomFilter {
-        self.0.iter().map(|a| Input::Raw(a.as_ref()).into()).collect::<Vec<Bloom>>().into()
+        self.0.iter().map(|a| BloomInput::Raw(a.as_ref()).into()).collect::<Vec<Bloom>>().into()
     }
 }
 
@@ -298,7 +297,7 @@ impl Filter {
     /// # use reth_primitives::H256;
     /// # use reth_rpc_types::Filter;
     /// # fn main() {
-    /// let filter = Filter::new().select(H256::zero());
+    /// let filter = Filter::new().select(H256::ZERO);
     /// # }
     /// ```
     /// This is the same as `at_block_hash`
@@ -627,14 +626,14 @@ pub enum ValueOrArray<T> {
     Array(Vec<T>),
 }
 
-impl From<H160> for ValueOrArray<H160> {
-    fn from(src: H160) -> Self {
+impl From<Address> for ValueOrArray<Address> {
+    fn from(src: Address) -> Self {
         ValueOrArray::Value(src)
     }
 }
 
-impl From<Vec<H160>> for ValueOrArray<H160> {
-    fn from(src: Vec<H160>) -> Self {
+impl From<Vec<Address>> for ValueOrArray<Address> {
+    fn from(src: Vec<Address>) -> Self {
         ValueOrArray::Array(src)
     }
 }
@@ -1036,9 +1035,9 @@ mod tests {
 
     fn build_bloom(address: Address, topic1: H256, topic2: H256) -> Bloom {
         let mut block_bloom = Bloom::default();
-        block_bloom.accrue(Input::Raw(&address[..]));
-        block_bloom.accrue(Input::Raw(&topic1[..]));
-        block_bloom.accrue(Input::Raw(&topic2[..]));
+        block_bloom.accrue(BloomInput::Raw(&address[..]));
+        block_bloom.accrue(BloomInput::Raw(&topic1[..]));
+        block_bloom.accrue(BloomInput::Raw(&topic2[..]));
         block_bloom
     }
 

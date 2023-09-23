@@ -7,10 +7,8 @@ use reth_db::{
 };
 use reth_interfaces::db::DatabaseError;
 use reth_primitives::{BlockNumber, StorageEntry, H256, U256};
-use reth_revm_primitives::{
-    db::states::{PlainStateReverts, PlainStorageRevert, RevertToSlot},
-    into_reth_acc,
-};
+use reth_revm_primitives::into_reth_acc;
+use revm::db::states::{PlainStateReverts, PlainStorageRevert, RevertToSlot};
 use std::iter::Peekable;
 
 /// Revert of the state.
@@ -48,7 +46,7 @@ impl StateReverts {
 
                 let mut storage = storage_revert
                     .into_iter()
-                    .map(|(k, v)| (H256(k.to_be_bytes()), v))
+                    .map(|(k, v)| (H256::new(k.to_be_bytes()), v))
                     .collect::<Vec<_>>();
                 // sort storage slots by key.
                 storage.par_sort_unstable_by_key(|a| a.0);

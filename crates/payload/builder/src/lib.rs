@@ -5,12 +5,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
 )]
 #![warn(missing_docs)]
-#![deny(
-    unused_must_use,
-    rust_2018_idioms,
-    rustdoc::broken_intra_doc_links,
-    unused_crate_dependencies
-)]
+#![deny(unused_must_use, rust_2018_idioms, unused_crate_dependencies)]
 #![doc(test(
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
@@ -109,6 +104,10 @@
 //! ## Feature Flags
 //!
 //! - `test-utils`: Export utilities for testing
+
+// used in doctests
+#[cfg(test)]
+use revm as _;
 
 pub mod database;
 pub mod error;

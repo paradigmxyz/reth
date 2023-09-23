@@ -37,7 +37,7 @@ pub(crate) fn id2pk(id: PeerId) -> Result<PublicKey, secp256k1::Error> {
     // SECP256K1_TAG_PUBKEY_UNCOMPRESSED = 0x04
     // see: https://github.com/bitcoin-core/secp256k1/blob/master/include/secp256k1.h#L211
     s[0] = 4;
-    s[1..].copy_from_slice(id.as_bytes());
+    s[1..].copy_from_slice(id.as_slice());
     PublicKey::from_slice(&s)
 }
 

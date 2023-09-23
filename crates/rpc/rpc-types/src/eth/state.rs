@@ -34,6 +34,7 @@ pub struct AccountOverride {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_primitives::address;
 
     #[test]
     fn test_state_override() {
@@ -43,9 +44,8 @@ mod tests {
             }
         }"#;
         let state_override: StateOverride = serde_json::from_str(s).unwrap();
-        let acc = state_override
-            .get(&"0x0000000000000000000000000000000000000124".parse().unwrap())
-            .unwrap();
+        let acc =
+            state_override.get(&address!("0000000000000000000000000000000000000124")).unwrap();
         assert!(acc.code.is_some());
     }
     #[test]
@@ -62,9 +62,8 @@ mod tests {
                 }
             }"#;
         let state_override: StateOverride = serde_json::from_str(s).unwrap();
-        let acc = state_override
-            .get(&"0x1b5212AF6b76113afD94cD2B5a78a73B7d7A8222".parse().unwrap())
-            .unwrap();
+        let acc =
+            state_override.get(&address!("1b5212AF6b76113afD94cD2B5a78a73B7d7A8222")).unwrap();
         assert!(acc.state_diff.is_some());
     }
 }

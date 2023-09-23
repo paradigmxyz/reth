@@ -37,7 +37,7 @@ impl MAC {
     /// Accumulate the given [`HeaderBytes`] into the MAC's internal state.
     pub fn update_header(&mut self, data: &HeaderBytes) {
         let aes = Aes256Enc::new_from_slice(self.secret.as_ref()).unwrap();
-        let mut encrypted = self.digest().to_fixed_bytes();
+        let mut encrypted = self.digest().0;
 
         aes.encrypt_padded::<NoPadding>(&mut encrypted, H128::len_bytes()).unwrap();
         for i in 0..data.len() {
@@ -51,7 +51,7 @@ impl MAC {
         self.hasher.update(data);
         let prev = self.digest();
         let aes = Aes256Enc::new_from_slice(self.secret.as_ref()).unwrap();
-        let mut encrypted = self.digest().to_fixed_bytes();
+        let mut encrypted = self.digest().0;
 
         aes.encrypt_padded::<NoPadding>(&mut encrypted, H128::len_bytes()).unwrap();
         for i in 0..16 {
