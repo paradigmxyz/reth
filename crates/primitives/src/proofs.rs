@@ -6,10 +6,10 @@ use crate::{
     Address, Bytes, GenesisAccount, Header, Log, ReceiptWithBloom, ReceiptWithBloomRef,
     TransactionSigned, Withdrawal, H256,
 };
+use alloy_rlp::Encodable;
 use bytes::{BufMut, BytesMut};
 use hash_db::Hasher;
 use plain_hasher::PlainHasher;
-use alloy_rlp::Encodable;
 use revm_primitives::b256;
 use std::collections::HashMap;
 use triehash::sec_trie_root;
