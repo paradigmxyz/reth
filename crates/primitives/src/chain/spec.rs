@@ -1181,17 +1181,14 @@ mod tests {
                 "Expected fork ID {:?}, computed fork ID {:?} for hardfork {}",
                 expected_id, computed_id, hardfork
             );
-        }
-    }
-
-    fn test_shanghai_forkid(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
-        for (block, expected_id) in cases {
-            let computed_id = spec.shanghai_fork_id();
-            assert_eq!(
-                expected_id, &computed_id,
-                "Expected fork ID {:?}, computed fork ID {:?} at block {}",
-                expected_id, computed_id, block.number
-            );
+            if let Hardfork::Shanghai = hardfork {
+                let shangai_id = spec.shanghai_fork_id();
+                assert_eq!(
+                    expected_id, &shangai_id,
+                    "Expected fork ID {:?}, computed fork ID {:?} for Shanghai hardfork",
+                    expected_id, computed_id
+                );
+            }
         }
     }
 
