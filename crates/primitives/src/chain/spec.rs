@@ -964,10 +964,7 @@ impl ForkCondition {
     pub(crate) fn satisfy(&self) -> Head {
         match *self {
             ForkCondition::Block(number) => Head { number, ..Default::default() },
-            ForkCondition::Timestamp(timestamp) => {
-                let head = Head { timestamp, ..Default::default() };
-                head
-            }
+            ForkCondition::Timestamp(timestamp) => Head { timestamp, ..Default::default() },
             ForkCondition::TTD { total_difficulty, .. } => {
                 Head { total_difficulty, ..Default::default() }
             }
