@@ -1,4 +1,7 @@
 on:
+  push:
+    branches:
+      - "dan/test-fork-hive-job"
   schedule:
     # every day
     - cron: '0 0 * * *'
