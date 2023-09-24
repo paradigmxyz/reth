@@ -438,13 +438,19 @@ impl ChainSpec {
     }
 
     /// Get the fork id for the given hardfork.
-    pub fn hardfork_fork_id(&self, fork: Hardfork) -> ForkId {
-        self.fork_id(&self.fork(fork).satisfy())
+    pub fn hardfork_fork_id(&self, fork: Hardfork) -> Option<ForkId> {
+        match self.fork(fork) {
+            ForkCondition::Never => None,
+            _ => Some(self.fork_id(&self.fork(fork).satisfy())),
+        }
     }
 
     /// Convenience method to get the fork id for [Hardfork::Shanghai] from a given chainspec.
-    pub fn shanghai_fork_id(&self) -> ForkId {
-        self.fork_id(&self.fork(Hardfork::Shanghai).satisfy())
+    pub fn shanghai_fork_id(&self) -> Option<ForkId> {
+        match self.fork(Hardfork::Shanghai) {
+            ForkCondition::Never => None,
+            _ => Some(self.fork_id(&self.fork(Hardfork::Shanghai).satisfy())),
+        }
     }
 
     /// Get the fork condition for the given fork.
@@ -518,7 +524,8 @@ impl ChainSpec {
                 // here would be to modify the Head returned in self.satisfy() to
                 // include a valid blocknum for ForkCondition::Timestamp, thus not
                 // excercising the else block, and calculating an incorrect fork_hash
-                if cond.active_at_head(head) || head.timestamp > 0 {
+                if cond.active_at_head(head) {
+                    //|| head.timestamp > 0 {
                     if block != current_applied {
                         forkhash += block;
                         current_applied = block;
@@ -1172,19 +1179,23 @@ mod tests {
 
     fn test_hardfork_fork_ids(spec: &ChainSpec, cases: &[(Hardfork, ForkId)]) {
         for (hardfork, expected_id) in cases {
-            let computed_id = spec.hardfork_fork_id(*hardfork);
-            assert_eq!(
-                expected_id, &computed_id,
-                "Expected fork ID {:?}, computed fork ID {:?} for hardfork {}",
-                expected_id, computed_id, hardfork
-            );
-            if let Hardfork::Shanghai = hardfork {
-                let shangai_id = spec.shanghai_fork_id();
+            if let Some(computed_id) = spec.hardfork_fork_id(*hardfork) {
                 assert_eq!(
-                    expected_id, &shangai_id,
-                    "Expected fork ID {:?}, computed fork ID {:?} for Shanghai hardfork",
-                    expected_id, computed_id
+                    expected_id, &computed_id,
+                    "Expected fork ID {:?}, computed fork ID {:?} for hardfork {}",
+                    expected_id, computed_id, hardfork
                 );
+                if let Hardfork::Shanghai = hardfork {
+                    if let Some(shangai_id) = spec.shanghai_fork_id() {
+                        assert_eq!(
+                            expected_id, &shangai_id,
+                            "Expected fork ID {:?}, computed fork ID {:?} for Shanghai hardfork",
+                            expected_id, computed_id
+                        );
+                    } else {
+                        panic!("Expected ForkCondition to return Some for Hardfork::Shanghai");
+                    }
+                }
             }
         }
     }
@@ -1384,7 +1395,6 @@ Post-merge hard forks (timestamp based):
                     Hardfork::GrayGlacier,
                     ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 1681338455 },
                 ),
-                // First Shanghai block
                 (Hardfork::Shanghai, ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 0 }),
             ],
         );
