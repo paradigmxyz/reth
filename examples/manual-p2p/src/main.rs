@@ -23,18 +23,17 @@ use tokio::net::TcpStream;
 type AuthedP2PStream = P2PStream<ECIESStream<TcpStream>>;
 type AuthedEthStream = EthStream<P2PStream<ECIESStream<TcpStream>>>;
 
-pub static BOOT_NODES: Lazy<Vec<NodeRecord>> = Lazy::new(|| mainnet_nodes());
+pub static MAINNET_BOOT_NODES: Lazy<Vec<NodeRecord>> = Lazy::new(mainnet_nodes);
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    // Setup discovery v4 protocol to find peers to talk to
-    let mut discv4_cfg = Discv4ConfigBuilder::default();
-    discv4_cfg.add_boot_nodes(BOOT_NODES.clone());
-    discv4_cfg.lookup_interval(Duration::from_secs(1));
-
-    // Setup configs related to this 'node'
+    // Setup configs related to this 'node' by creating a new random
     let our_key = rng_secret_key();
     let our_enr = NodeRecord::from_secret_key(DEFAULT_DISCOVERY_ADDRESS, &our_key);
+
+    // Setup discovery v4 protocol to find peers to talk to
+    let mut discv4_cfg = Discv4ConfigBuilder::default();
+    discv4_cfg.add_boot_nodes(MAINNET_BOOT_NODES.clone()).lookup_interval(Duration::from_secs(1));
 
     // Start discovery protocol
     let discv4 = Discv4::spawn(our_enr.udp_addr(), our_enr, our_key, discv4_cfg.build()).await?;
@@ -44,7 +43,7 @@ async fn main() -> eyre::Result<()> {
         tokio::spawn(async move {
             if let DiscoveryUpdate::Added(peer) = update {
                 // Boot nodes hard at work, lets not disturb them
-                if BOOT_NODES.contains(&peer) {
+                if MAINNET_BOOT_NODES.contains(&peer) {
                     return
                 }
 
@@ -56,7 +55,7 @@ async fn main() -> eyre::Result<()> {
                     }
                 };
 
-                let (mut eth_stream, their_status) = match handshake_eth(p2p_stream).await {
+                let (eth_stream, their_status) = match handshake_eth(p2p_stream).await {
                     Ok(s) => s,
                     Err(e) => {
                         println!("Failed ETH handshake with peer {}, {}", peer.address, e);
@@ -65,11 +64,11 @@ async fn main() -> eyre::Result<()> {
                 };
 
                 println!(
-                    "Succesfully connected to a peer at {}:{} ({}) using eth-wire version eth/{}",
+                    "Successfully connected to a peer at {}:{} ({}) using eth-wire version eth/{}",
                     peer.address, peer.tcp_port, their_hello.client_version, their_status.version
                 );
 
-                snoop(peer, &mut eth_stream).await;
+                snoop(peer, eth_stream).await;
             }
         });
     }
@@ -111,7 +110,7 @@ async fn handshake_eth(p2p_stream: AuthedP2PStream) -> eyre::Result<(AuthedEthSt
 
 // Snoop by greedily capturing all broadcasts that the peer emits
 // note: this node cannot handle request so will be disconnected by peer when challenged
-async fn snoop(peer: NodeRecord, eth_stream: &mut AuthedEthStream) {
+async fn snoop(peer: NodeRecord, mut eth_stream: AuthedEthStream) {
     while let Some(Ok(update)) = eth_stream.next().await {
         match update {
             EthMessage::NewPooledTransactionHashes66(txs) => {
