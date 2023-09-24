@@ -8,7 +8,6 @@
 
 use std::time::Duration;
 
-use colored::*;
 use futures::StreamExt;
 use once_cell::sync::Lazy;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
@@ -20,9 +19,6 @@ use reth_network::config::rng_secret_key;
 use reth_primitives::{mainnet_nodes, Chain, Hardfork, Head, NodeRecord, MAINNET, MAINNET_GENESIS};
 use secp256k1::{SecretKey, SECP256K1};
 use tokio::net::TcpStream;
-
-#[macro_use]
-mod color_print_macros;
 
 type AuthedP2PStream = P2PStream<ECIESStream<TcpStream>>;
 type AuthedEthStream = EthStream<P2PStream<ECIESStream<TcpStream>>>;
@@ -55,7 +51,7 @@ async fn main() -> eyre::Result<()> {
                 let (p2p_stream, their_hello) = match handshake_p2p(peer, our_key).await {
                     Ok(s) => s,
                     Err(e) => {
-                        print_yellow!("Failed P2P handshake with peer {}, {}", peer.address, e);
+                        println!("Failed P2P handshake with peer {}, {}", peer.address, e);
                         return
                     }
                 };
@@ -63,17 +59,14 @@ async fn main() -> eyre::Result<()> {
                 let (mut eth_stream, their_status) = match handshake_eth(p2p_stream).await {
                     Ok(s) => s,
                     Err(e) => {
-                        print_yellow!("Failed ETH handshake with peer {}, {}", peer.address, e);
+                        println!("Failed ETH handshake with peer {}, {}", peer.address, e);
                         return
                     }
                 };
 
-                print_green!(
+                println!(
                     "Succesfully connected to a peer at {}:{} ({}) using eth-wire version eth/{}",
-                    peer.address,
-                    peer.tcp_port,
-                    their_hello.client_version,
-                    their_status.version
+                    peer.address, peer.tcp_port, their_hello.client_version, their_status.version
                 );
 
                 snoop(peer, &mut eth_stream).await;
@@ -122,42 +115,35 @@ async fn snoop(peer: NodeRecord, eth_stream: &mut AuthedEthStream) {
     while let Some(Ok(update)) = eth_stream.next().await {
         match update {
             EthMessage::NewPooledTransactionHashes66(txs) => {
-                print_cyan_bold!("Got {} new tx hashes from peer {}", txs.0.len(), peer.address);
+                println!("Got {} new tx hashes from peer {}", txs.0.len(), peer.address);
             }
             EthMessage::NewBlock(block) => {
-                print_cyan_bold!("Got new block data {:?} from peer {}", block, peer.address);
+                println!("Got new block data {:?} from peer {}", block, peer.address);
             }
             EthMessage::NewPooledTransactionHashes68(txs) => {
-                print_cyan_bold!(
-                    "Got {} new tx hashes from peer {}",
-                    txs.hashes.len(),
-                    peer.address
-                );
+                println!("Got {} new tx hashes from peer {}", txs.hashes.len(), peer.address);
             }
             EthMessage::NewBlockHashes(block_hashes) => {
-                print_cyan_bold!(
+                println!(
                     "Got {} new block hashes from peer {}",
                     block_hashes.0.len(),
                     peer.address
                 );
             }
             EthMessage::GetNodeData(_) => {
-                print_red_bold!("Unable to serve GetNodeData request to peer {}", peer.address);
+                println!("Unable to serve GetNodeData request to peer {}", peer.address);
             }
             EthMessage::GetReceipts(_) => {
-                print_red_bold!("Unable to serve GetReceipts request to peer {}", peer.address);
+                println!("Unable to serve GetReceipts request to peer {}", peer.address);
             }
             EthMessage::GetBlockHeaders(_) => {
-                print_red_bold!("Unable to serve GetBlockHeaders request to peer {}", peer.address);
+                println!("Unable to serve GetBlockHeaders request to peer {}", peer.address);
             }
             EthMessage::GetBlockBodies(_) => {
-                print_red_bold!("Unable to serve GetBlockBodies request to peer {}", peer.address);
+                println!("Unable to serve GetBlockBodies request to peer {}", peer.address);
             }
             EthMessage::GetPooledTransactions(_) => {
-                print_red_bold!(
-                    "Unable to serve GetPooledTransactions request to peer {}",
-                    peer.address
-                );
+                println!("Unable to serve GetPooledTransactions request to peer {}", peer.address);
             }
             _ => {}
         }
