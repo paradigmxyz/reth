@@ -217,7 +217,12 @@ where
     }
 
     // apply block overrides
-    if let Some(block_overrides) = overrides.block {
+    if let Some(mut block_overrides) = overrides.block {
+        if let Some(block_hashes) = block_overrides.block_hash.take() {
+            // override block hashes
+            db.block_hashes
+                .extend(block_hashes.into_iter().map(|(num, hash)| (U256::from(num), hash)))
+        }
         apply_block_overrides(*block_overrides, &mut env.block);
     }
 
@@ -400,8 +405,16 @@ impl CallFees {
 
 /// Applies the given block overrides to the env
 fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
-    let BlockOverrides { number, difficulty, time, gas_limit, coinbase, random, base_fee } =
-        overrides;
+    let BlockOverrides {
+        number,
+        difficulty,
+        time,
+        gas_limit,
+        coinbase,
+        random,
+        base_fee,
+        block_hash: _,
+    } = overrides;
 
     if let Some(number) = number {
         env.number = number;
