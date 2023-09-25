@@ -16,6 +16,7 @@ revm-primitives = { workspace = true, features = ["serde"] }
 # ethereum
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
+alloy-sol-types.workspace = true
 ethers-core = { workspace = true, default-features = false }
 ruint = { version = "1.9.0", features = ["primitive-types", "rlp"] }
 
@@ -80,20 +81,11 @@ toml = "0.7.4"
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198 
 secp256k1.workspace = true
 criterion = "0.5"
-pprof = { version = "0.12", features = [
-    "flamegraph",
-    "frame-pointer",
-    "criterion",
-] }
+pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterion"] }
 
 [features]
 default = []
-arbitrary = [
-    "revm-primitives/arbitrary",
-    "dep:arbitrary",
-    "dep:proptest",
-    "dep:proptest-derive",
-]
+arbitrary = ["revm-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
 test-utils = []
 
 [[bench]]

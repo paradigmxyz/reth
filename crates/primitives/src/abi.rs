@@ -1,9 +1,7 @@
 //! Eth ABI helpers.
 
-// TODO: Use `alloy_sol_types::ContractError`
-
 use crate::constants::SELECTOR_LEN;
-use ethers_core::abi::AbiDecode;
+use alloy_sol_types::{GenericContractError, SolInterface};
 
 /// Returns the revert reason from the given output data, if it's an abi encoded String. Returns
 /// `None` if the output is not long enough to contain a function selector or the content is not a
@@ -11,8 +9,6 @@ use ethers_core::abi::AbiDecode;
 ///
 /// **Note:** it's assumed the `out` buffer starts with the call's signature
 pub fn decode_revert_reason(out: &[u8]) -> Option<String> {
-    use alloy_sol_types::{GenericContractError, SolInterface};
-
     // Ensure the output data is long enough to contain a function selector.
     if out.len() < SELECTOR_LEN {
         return None
