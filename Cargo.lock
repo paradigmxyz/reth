@@ -150,29 +150,6 @@ checksum = "0942ffc6dcaadf03badf6e6a2d0228460359d5e34b57ccdc720b7382dfbd5ec5"
 [[package]]
 name = "alloy-primitives"
 version = "0.3.2"
-source = "git+https://github.com/alloy-rs/core#0c21fcc48eab0b52c20d3e98c739bac862aad8ff"
-dependencies = [
- "alloy-rlp",
- "arbitrary",
- "bytes",
- "cfg-if",
- "const-hex",
- "derive_arbitrary",
- "derive_more",
- "getrandom 0.2.10",
- "hex-literal",
- "itoa",
- "proptest",
- "proptest-derive",
- "rand 0.8.5",
- "ruint",
- "serde",
- "tiny-keccak",
-]
-
-[[package]]
-name = "alloy-rlp"
-version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc0fac0fc16baf1f63f78b47c3d24718f3619b0714076f6a02957d808d52cbef"
 dependencies = [
@@ -7359,6 +7336,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "syn-solidity"
+version = "0.3.2"
+source = "git+https://github.com/alloy-rs/core?rev=5733dc1b3987b0d2f2677d055de85fd5f721b2fd#5733dc1b3987b0d2f2677d055de85fd5f721b2fd"
+dependencies = [
+ "paste",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.36",
 ]
 
 [[package]]
