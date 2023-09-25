@@ -7,6 +7,7 @@ use reth_primitives::{Account, Address, BlockNumber, Bytecode, Bytes, H256};
 
 /// A state provider that either resolves to data in a wrapped [`crate::BundleStateWithReceipts`],
 /// or an underlying state provider.
+#[derive(Debug)]
 pub struct BundleStateProvider<SP: StateProvider, BSDP: BundleStateDataProvider> {
     /// The inner state provider.
     pub(crate) state_provider: SP,

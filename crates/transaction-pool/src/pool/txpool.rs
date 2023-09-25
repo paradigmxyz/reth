@@ -696,7 +696,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Asserts all invariants of the  pool's:
     ///
-    ///  - All maps are bijections (`by_id`, `by_hash`)`
+    ///  - All maps are bijections (`by_id`, `by_hash`)
     ///  - Total size is equal to the sum of all sub-pools
     ///
     /// # Panics

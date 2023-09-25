@@ -15,7 +15,7 @@ use crate::{
 
 /// Mock database used for testing with inner BTreeMap structure
 /// TODO
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct DatabaseMock {
     /// Main data. TODO (Make it table aware)
     pub data: BTreeMap<Vec<u8>, Vec<u8>>,
@@ -115,6 +115,7 @@ impl<'a> DbTxMut<'a> for TxMock {
 impl<'a> TableImporter<'a> for TxMock {}
 
 /// Cursor that iterates over table
+#[derive(Debug)]
 pub struct CursorMock {
     _cursor: u32,
 }

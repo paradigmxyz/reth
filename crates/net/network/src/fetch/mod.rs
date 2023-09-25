@@ -30,6 +30,7 @@ pub use client::FetchClient;
 /// peers and sends the response once ready.
 ///
 /// This type maintains a list of connected peers that are available for requests.
+#[derive(Debug)]
 pub struct StateFetcher {
     /// Currently active [`GetBlockHeaders`] requests
     inflight_headers_requests:
@@ -296,6 +297,7 @@ enum PollAction {
 }
 
 /// Represents a connected peer
+#[derive(Debug)]
 struct Peer {
     /// The state this peer currently resides in.
     state: PeerState,
@@ -314,6 +316,7 @@ impl Peer {
 }
 
 /// Tracks the state of an individual peer
+#[derive(Debug)]
 enum PeerState {
     /// Peer is currently not handling requests and is available.
     Idle,
@@ -349,6 +352,7 @@ impl PeerState {
 
 /// A request that waits for a response from the network, so it can send it back through the
 /// response channel.
+#[derive(Debug)]
 struct Request<Req, Resp> {
     /// The issued request object
     /// TODO: this can be attached to the response in error case
@@ -358,6 +362,7 @@ struct Request<Req, Resp> {
 }
 
 /// Requests that can be sent to the Syncer from a [`FetchClient`]
+#[derive(Debug)]
 pub(crate) enum DownloadRequest {
     /// Download the requested headers and send response through channel
     GetBlockHeaders {

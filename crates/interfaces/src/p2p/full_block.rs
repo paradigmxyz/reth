@@ -354,6 +354,7 @@ fn ensure_valid_body_response(
 /// NOTE: this assumes that bodies responses are returned by the client in the same order as the
 /// hash array used to request them.
 #[must_use = "futures do nothing unless polled"]
+#[allow(missing_debug_implementations)]
 pub struct FetchFullBlockRangeFuture<Client>
 where
     Client: BodiesClient + HeadersClient,

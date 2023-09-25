@@ -85,6 +85,7 @@ impl StatusBuilder {
 }
 
 /// Builder for [`HelloMessage`] messages.
+#[derive(Debug)]
 pub struct HelloBuilder {
     hello: HelloMessage,
 }

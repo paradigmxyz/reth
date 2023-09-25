@@ -73,8 +73,8 @@ impl InspectorStack {
     }
 }
 
-#[derive(Default)]
 /// Configuration for the inspectors.
+#[derive(Debug, Default)]
 pub struct InspectorStackConfig {
     /// Enable revm inspector printer.
     /// In execution this will print opcode level traces directly to console.
