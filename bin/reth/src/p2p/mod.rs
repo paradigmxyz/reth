@@ -86,7 +86,6 @@ pub struct Command {
 
 /// `reth p2p` subcommands
 #[derive(Subcommand, Debug)]
-
 pub enum Subcommands {
     /// Download block header
     Header {

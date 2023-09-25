@@ -8,7 +8,6 @@ use reth_db::{
 
 /// The arguments for the `reth db clear` command
 #[derive(Parser, Debug)]
-
 pub struct Command {
     /// Table name
     pub table: Tables,
