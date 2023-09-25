@@ -1,17 +1,3 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![doc(
-    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
-    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
-)]
-#![warn(missing_docs)]
-#![deny(unused_must_use, rust_2018_idioms, rustdoc::broken_intra_doc_links)]
-#![allow(rustdoc::private_intra_doc_links)]
-#![doc(test(
-    no_crate_inject,
-    attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
-))]
-
 //! reth P2P networking.
 //!
 //! Ethereum's networking protocol is specified in [devp2p](https://github.com/ethereum/devp2p).
@@ -118,6 +104,15 @@
 //! - `serde` (default): Enable serde support for configuration types.
 //! - `test-utils`: Various utilities helpful for writing tests
 //! - `geth-tests`: Runs tests that require Geth to be installed locally.
+
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+)]
+#![warn(missing_docs)] // TODO: unreachable_pub
+#![deny(unused_must_use, rust_2018_idioms)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 #[cfg(any(test, feature = "test-utils"))]
 /// Common helpers for network testing.
