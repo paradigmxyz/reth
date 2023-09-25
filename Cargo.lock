@@ -3922,6 +3922,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "manual-p2p"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "futures",
+ "once_cell",
+ "reth-discv4",
+ "reth-ecies",
+ "reth-eth-wire",
+ "reth-network",
+ "reth-primitives",
+ "secp256k1",
+ "tokio",
+]
+
+[[package]]
 name = "match_cfg"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6008,12 +6024,15 @@ dependencies = [
  "boa_engine",
  "boa_gc",
  "hashbrown 0.14.0",
+ "icu_collections",
+ "icu_provider_macros",
  "reth-primitives",
  "reth-rpc-types",
  "revm",
  "serde",
  "serde_json",
  "thiserror",
+ "tinystr",
  "tokio",
 ]
 
