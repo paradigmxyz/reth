@@ -154,4 +154,3 @@ pub fn hash_message<T: AsRef<[u8]>>(message: T) -> H256 {
 
 #[cfg(any(test, feature = "arbitrary"))]
 pub use arbitrary;
-
