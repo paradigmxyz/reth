@@ -203,7 +203,7 @@ where
     /// Prepares beforehand the offsets index for querying rows based on `values` (eg. transaction
     /// hash). Expects `values` to be sorted in the same way as the data that is going to be
     /// later on inserted.
-    /// 
+    ///
     /// Currently collecting all items before acting on them.
     pub fn prepare_index<T: AsRef<[u8]> + Sync + Clone + Hash>(
         &mut self,
