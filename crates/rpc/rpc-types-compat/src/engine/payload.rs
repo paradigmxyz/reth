@@ -1,11 +1,11 @@
 //! Standalone Conversion Functions for Handling Different Versions of Execution Payloads in
 //! Ethereum's Engine
+use alloy_rlp::Decodable;
 use reth_primitives::{
     constants::{MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
     proofs::{self, EMPTY_LIST_HASH},
-    Block, Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawal, H256, U256,
+    Block, Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawal, H256, U256, U64,
 };
-use reth_rlp::Decodable;
 use reth_rpc_types::engine::{
     payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
     ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PayloadError,
@@ -36,10 +36,10 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         receipts_root: payload.receipts_root,
         withdrawals_root: None,
         logs_bloom: payload.logs_bloom,
-        number: payload.block_number.as_u64(),
-        gas_limit: payload.gas_limit.as_u64(),
-        gas_used: payload.gas_used.as_u64(),
-        timestamp: payload.timestamp.as_u64(),
+        number: payload.block_number.to(),
+        gas_limit: payload.gas_limit.to(),
+        gas_used: payload.gas_used.to(),
+        timestamp: payload.timestamp.to(),
         mix_hash: payload.prev_randao,
         base_fee_per_gas: Some(
             payload
@@ -82,8 +82,8 @@ pub fn try_payload_v3_to_block(payload: ExecutionPayloadV3) -> Result<Block, Pay
     // used and excess blob gas
     let mut base_block = try_payload_v2_to_block(payload.payload_inner)?;
 
-    base_block.header.blob_gas_used = Some(payload.blob_gas_used.as_u64());
-    base_block.header.excess_blob_gas = Some(payload.excess_blob_gas.as_u64());
+    base_block.header.blob_gas_used = Some(payload.blob_gas_used.to());
+    base_block.header.excess_blob_gas = Some(payload.excess_blob_gas.to());
 
     Ok(base_block)
 }
@@ -120,10 +120,10 @@ pub fn try_block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
         receipts_root: value.receipts_root,
         logs_bloom: value.logs_bloom,
         prev_randao: value.mix_hash,
-        block_number: value.number.into(),
-        gas_limit: value.gas_limit.into(),
-        gas_used: value.gas_used.into(),
-        timestamp: value.timestamp.into(),
+        block_number: U64::from(value.number),
+        gas_limit: U64::from(value.gas_limit),
+        gas_used: U64::from(value.gas_used),
+        timestamp: U64::from(value.timestamp),
         extra_data: value.extra_data.clone(),
         base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
         block_hash: value.hash(),
@@ -158,10 +158,10 @@ pub fn try_block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
             receipts_root: value.receipts_root,
             logs_bloom: value.logs_bloom,
             prev_randao: value.mix_hash,
-            block_number: value.number.into(),
-            gas_limit: value.gas_limit.into(),
-            gas_used: value.gas_used.into(),
-            timestamp: value.timestamp.into(),
+            block_number: U64::from(value.number),
+            gas_limit: U64::from(value.gas_limit),
+            gas_used: U64::from(value.gas_used),
+            timestamp: U64::from(value.timestamp),
             extra_data: value.extra_data.clone(),
             base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
             block_hash: value.hash(),
@@ -200,10 +200,10 @@ pub fn try_block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
                 receipts_root: value.receipts_root,
                 logs_bloom: value.logs_bloom,
                 prev_randao: value.mix_hash,
-                block_number: value.number.into(),
-                gas_limit: value.gas_limit.into(),
-                gas_used: value.gas_used.into(),
-                timestamp: value.timestamp.into(),
+                block_number: U64::from(value.number),
+                gas_limit: U64::from(value.gas_limit),
+                gas_used: U64::from(value.gas_used),
+                timestamp: U64::from(value.timestamp),
                 extra_data: value.extra_data.clone(),
                 base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
                 block_hash: value.hash(),
@@ -212,8 +212,8 @@ pub fn try_block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
             withdrawals,
         },
 
-        blob_gas_used: value.blob_gas_used.unwrap_or_default().into(),
-        excess_blob_gas: value.excess_blob_gas.unwrap_or_default().into(),
+        blob_gas_used: U64::from(value.blob_gas_used.unwrap_or_default()),
+        excess_blob_gas: U64::from(value.excess_blob_gas.unwrap_or_default()),
     }
 }
 

@@ -1,7 +1,8 @@
 use crate::{transaction::util::secp256k1, Address, H256, U256};
+use alloy_primitives::Bytes;
+use alloy_rlp::{Decodable, Encodable, Error as RlpError};
 use bytes::Buf;
 use reth_codecs::{derive_arbitrary, Compact};
-use reth_rlp::{Decodable, DecodeError, Encodable};
 use serde::{Deserialize, Serialize};
 
 /// r, s: Values corresponding to the signature of the
@@ -50,7 +51,7 @@ impl Signature {
     /// Encodes the `v` value using the legacy scheme with EIP-155 support depends on chain_id.
     pub(crate) fn encode_with_eip155_chain_id(
         &self,
-        out: &mut dyn reth_rlp::BufMut,
+        out: &mut dyn alloy_rlp::BufMut,
         chain_id: Option<u64>,
     ) {
         self.v(chain_id).encode(out);
@@ -73,7 +74,7 @@ impl Signature {
     /// This will return a chain ID if the `v` value is [EIP-155](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-155.md) compatible.
     pub(crate) fn decode_with_eip155_chain_id(
         buf: &mut &[u8],
-    ) -> Result<(Self, Option<u64>), DecodeError> {
+    ) -> alloy_rlp::Result<(Self, Option<u64>)> {
         let v = u64::decode(buf)?;
         let r = Decodable::decode(buf)?;
         let s = Decodable::decode(buf)?;
@@ -85,7 +86,7 @@ impl Signature {
         } else {
             // non-EIP-155 legacy scheme, v = 27 for even y-parity, v = 28 for odd y-parity
             if v != 27 && v != 28 {
-                return Err(DecodeError::Custom("invalid Ethereum signature (V is not 27 or 28)"))
+                return Err(RlpError::Custom("invalid Ethereum signature (V is not 27 or 28)"))
             }
             let odd_y_parity = v == 28;
             Ok((Signature { r, s, odd_y_parity }, None))
@@ -98,14 +99,14 @@ impl Signature {
     }
 
     /// Encode the `odd_y_parity`, `r`, `s` values without a RLP header.
-    pub fn encode(&self, out: &mut dyn reth_rlp::BufMut) {
+    pub fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         self.odd_y_parity.encode(out);
         self.r.encode(out);
         self.s.encode(out);
     }
 
     /// Decodes the `odd_y_parity`, `r`, `s` values without a RLP header.
-    pub fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    pub fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         Ok(Signature {
             odd_y_parity: Decodable::decode(buf)?,
             r: Decodable::decode(buf)?,
@@ -123,7 +124,7 @@ impl Signature {
 
         // NOTE: we are removing error from underlying crypto library as it will restrain primitive
         // errors and we care only if recovery is passing or not.
-        secp256k1::recover_signer(&sig, hash.as_fixed_bytes()).ok()
+        secp256k1::recover_signer(&sig, &hash.0).ok()
     }
 
     /// Turn this signature into its byte
@@ -135,6 +136,11 @@ impl Signature {
         let v = u8::from(self.odd_y_parity) + 27;
         sig[64] = v;
         sig
+    }
+
+    /// Turn this signature into its hex-encoded representation.
+    pub fn to_hex_bytes(&self) -> Bytes {
+        crate::hex::encode(self.to_bytes()).into()
     }
 
     /// Calculates a heuristic for the in-memory size of the [Signature].

@@ -4,13 +4,13 @@ use crate::{
     types::{EthMessage, ProtocolMessage, Status},
     CanDisconnect, DisconnectReason, EthVersion,
 };
+use alloy_rlp::Encodable;
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
     ForkFilter,
 };
-use reth_rlp::Encodable;
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -24,6 +24,7 @@ pub const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
 /// An un-authenticated [`EthStream`]. This is consumed and returns a [`EthStream`] after the
 /// `Status` handshake is completed.
 #[pin_project]
+#[derive(Debug)]
 pub struct UnauthedEthStream<S> {
     #[pin]
     inner: S,

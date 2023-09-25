@@ -37,7 +37,6 @@ reth-rpc-builder = { path = "../../crates/rpc/rpc-builder" }
 reth-rpc = { path = "../../crates/rpc/rpc" }
 reth-rpc-types = { path = "../../crates/rpc/rpc-types" }
 reth-rpc-api = { path = "../../crates/rpc/rpc-api" }
-reth-rlp.workspace = true
 reth-network = { path = "../../crates/net/network", features = ["serde"] }
 reth-network-api.workspace = true
 reth-downloaders = { path = "../../crates/net/downloaders", features = ["test-utils"] }
@@ -51,6 +50,7 @@ reth-prune = { path = "../../crates/prune" }
 reth-trie = { path = "../../crates/trie" }
 
 # crypto
+alloy-rlp.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
 # tracing
@@ -95,7 +95,6 @@ eyre = "0.6.8"
 clap = { version = "4", features = ["derive"] }
 tempfile = { version = "3.3.0" }
 backon = "0.4"
-hex = "0.4"
 thiserror.workspace = true
 pretty_assertions = "1.3.0"
 humantime = "2.1.0"

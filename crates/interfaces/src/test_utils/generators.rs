@@ -5,7 +5,7 @@ use rand::{
 use reth_primitives::{
     proofs, sign_message, Account, Address, BlockNumber, Bytes, Header, Log, Receipt, SealedBlock,
     SealedHeader, Signature, StorageEntry, Transaction, TransactionKind, TransactionSigned,
-    TxLegacy, H160, H256, U256,
+    TxLegacy, H256, U256,
 };
 use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey, SECP256K1};
 use std::{
@@ -79,7 +79,7 @@ pub fn random_tx<R: Rng>(rng: &mut R) -> Transaction {
         nonce: rng.gen::<u16>().into(),
         gas_price: rng.gen::<u16>().into(),
         gas_limit: rng.gen::<u16>().into(),
-        to: TransactionKind::Call(Address::random()),
+        to: TransactionKind::Call(rng.gen()),
         value: rng.gen::<u16>().into(),
         input: Bytes::default(),
     })
@@ -303,7 +303,12 @@ pub fn random_account_change<R: Rng>(
 
 /// Generate a random storage change.
 pub fn random_storage_entry<R: Rng>(rng: &mut R, key_range: std::ops::Range<u64>) -> StorageEntry {
-    let key = H256::from_low_u64_be(key_range.sample_single(rng));
+    let key = H256::new({
+        let n = key_range.sample_single(rng);
+        let mut m = [0u8; 32];
+        m[24..32].copy_from_slice(&n.to_be_bytes());
+        m
+    });
     let value = U256::from(rng.gen::<u64>());
 
     StorageEntry { key, value }
@@ -313,7 +318,7 @@ pub fn random_storage_entry<R: Rng>(rng: &mut R, key_range: std::ops::Range<u64>
 pub fn random_eoa_account<R: Rng>(rng: &mut R) -> (Address, Account) {
     let nonce: u64 = rng.gen();
     let balance = U256::from(rng.gen::<u32>());
-    let addr = H160::from(rng.gen::<u64>());
+    let addr = rng.gen();
 
     (addr, Account { nonce, balance, bytecode_hash: None })
 }
@@ -338,7 +343,7 @@ pub fn random_contract_account_range<R: Rng>(
     let mut accounts = Vec::with_capacity(acc_range.end.saturating_sub(acc_range.start) as usize);
     for _ in acc_range {
         let (address, eoa_account) = random_eoa_account(rng);
-        let account = Account { bytecode_hash: Some(H256::random()), ..eoa_account };
+        let account = Account { bytecode_hash: Some(rng.gen()), ..eoa_account };
         accounts.push((address, account))
     }
     accounts
@@ -366,25 +371,23 @@ pub fn random_receipt<R: Rng>(
 
 /// Generate random log
 pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: Option<u8>) -> Log {
-    let data_byte_count = rng.gen::<u8>();
-    let topics_count = topics_count.unwrap_or_else(|| rng.gen::<u8>());
+    let data_byte_count = rng.gen::<u8>() as usize;
+    let topics_count = topics_count.unwrap_or_else(|| rng.gen()) as usize;
     Log {
         address: address.unwrap_or_else(|| rng.gen()),
-        topics: (0..topics_count).map(|_| rng.gen()).collect(),
-        data: Bytes::from((0..data_byte_count).map(|_| rng.gen::<u8>()).collect::<Vec<_>>()),
+        topics: std::iter::repeat_with(|| rng.gen()).take(topics_count).collect(),
+        data: std::iter::repeat_with(|| rng.gen()).take(data_byte_count).collect::<Vec<_>>().into(),
     }
 }
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
-
     use super::*;
-    use hex_literal::hex;
     use reth_primitives::{
-        keccak256, public_key_to_address, AccessList, Address, TransactionKind, TxEip1559,
+        hex, keccak256, public_key_to_address, AccessList, Address, TransactionKind, TxEip1559,
     };
     use secp256k1::KeyPair;
+    use std::str::FromStr;
 
     #[test]
     fn test_sign_message() {

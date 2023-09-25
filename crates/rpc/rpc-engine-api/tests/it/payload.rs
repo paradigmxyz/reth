@@ -1,15 +1,14 @@
 //! Some payload tests
 
+use alloy_rlp::{Decodable, Error as RlpError};
 use assert_matches::assert_matches;
 use reth_interfaces::test_utils::generators::{
-    self, random_block, random_block_range, random_header,
+    self, random_block, random_block_range, random_header, Rng,
 };
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
-    proofs::{self},
-    Block, SealedBlock, TransactionSigned, H256, U256,
+    proofs, Block, SealedBlock, TransactionSigned, H256, U256,
 };
-use reth_rlp::{Decodable, DecodeError};
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadV1, PayloadError,
 };
@@ -60,7 +59,8 @@ fn payload_body_roundtrip() {
 #[test]
 fn payload_validation() {
     let mut rng = generators::rng();
-    let block = random_block(&mut rng, 100, Some(H256::random()), Some(3), Some(0));
+    let parent = rng.gen();
+    let block = random_block(&mut rng, 100, Some(parent), Some(3), Some(0));
 
     // Valid extra data
     let block_with_valid_extra_data = transform_block(block.clone(), |mut b| {
@@ -100,10 +100,7 @@ fn payload_validation() {
         *tx = Bytes::new().into();
     });
     let payload_with_invalid_txs = try_payload_v1_to_block(payload_with_invalid_txs);
-    assert_matches!(
-        payload_with_invalid_txs,
-        Err(PayloadError::Decode(DecodeError::InputTooShort))
-    );
+    assert_matches!(payload_with_invalid_txs, Err(PayloadError::Decode(RlpError::InputTooShort)));
 
     // Non empty ommers
     let block_with_ommers = transform_block(block.clone(), |mut b| {

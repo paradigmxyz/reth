@@ -1,11 +1,10 @@
 //! Types for broadcasting new data.
 use crate::{EthMessage, EthVersion};
-use bytes::Bytes;
-use reth_codecs::derive_arbitrary;
-use reth_primitives::{Block, TransactionSigned, H256, U128};
-use reth_rlp::{
+use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
+use reth_codecs::derive_arbitrary;
+use reth_primitives::{Block, Bytes, TransactionSigned, H256, U128};
 use std::sync::Arc;
 
 #[cfg(feature = "serde")]
@@ -243,8 +242,8 @@ pub struct NewPooledTransactionHashes68 {
     /// the following way:
     ///  * `[type_0: B_1, type_1: B_1, ...]`
     ///
-    /// This would make it seem like the [`Encodable`](reth_rlp::Encodable) and
-    /// [`Decodable`](reth_rlp::Decodable) implementations should directly use a `Vec<u8>` for
+    /// This would make it seem like the [`Encodable`](alloy_rlp::Encodable) and
+    /// [`Decodable`](alloy_rlp::Decodable) implementations should directly use a `Vec<u8>` for
     /// encoding and decoding, because it looks like this field should be encoded as a _list_ of
     /// bytes.
     ///
@@ -255,7 +254,7 @@ pub struct NewPooledTransactionHashes68 {
     /// **not** a RLP list.
     ///
     /// Because of this, we do not directly use the `Vec<u8>` when encoding and decoding, and
-    /// instead use the [`Encodable`](reth_rlp::Encodable) and [`Decodable`](reth_rlp::Decodable)
+    /// instead use the [`Encodable`](alloy_rlp::Encodable) and [`Decodable`](alloy_rlp::Decodable)
     /// implementations for `&[u8]` instead, which encodes into a RLP string, and expects an RLP
     /// string when decoding.
     pub types: Vec<u8>,
@@ -301,7 +300,7 @@ impl Encodable for NewPooledTransactionHashes68 {
 }
 
 impl Decodable for NewPooledTransactionHashes68 {
-    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         #[derive(RlpDecodable)]
         struct EncodableNewPooledTransactionHashes68 {
             types: Bytes,
@@ -316,13 +315,11 @@ impl Decodable for NewPooledTransactionHashes68 {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
-    use bytes::BytesMut;
-    use hex_literal::hex;
-    use reth_rlp::{Decodable, Encodable};
-
     use super::*;
+    use alloy_rlp::{Decodable, Encodable};
+    use bytes::BytesMut;
+    use reth_primitives::hex;
+    use std::str::FromStr;
 
     /// Takes as input a struct / encoded hex message pair, ensuring that we encode to the exact hex
     /// message, and decode to the exact struct.

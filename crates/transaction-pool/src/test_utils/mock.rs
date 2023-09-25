@@ -498,13 +498,13 @@ impl FromRecoveredTransaction for MockTransaction {
         let hash = transaction.hash();
         match transaction.transaction {
             Transaction::Legacy(TxLegacy {
-                chain_id,
+                chain_id: _,
                 nonce,
                 gas_price,
                 gas_limit,
                 to,
                 value,
-                input,
+                input: _,
             }) => MockTransaction::Legacy {
                 hash,
                 sender,
@@ -515,15 +515,15 @@ impl FromRecoveredTransaction for MockTransaction {
                 value: U256::from(value),
             },
             Transaction::Eip1559(TxEip1559 {
-                chain_id,
+                chain_id: _,
                 nonce,
                 gas_limit,
                 max_fee_per_gas,
                 max_priority_fee_per_gas,
                 to,
                 value,
-                input,
-                access_list,
+                input: _,
+                access_list: _,
             }) => MockTransaction::Eip1559 {
                 hash,
                 sender,
@@ -535,15 +535,15 @@ impl FromRecoveredTransaction for MockTransaction {
                 value: U256::from(value),
             },
             Transaction::Eip4844(TxEip4844 {
-                chain_id,
+                chain_id: _,
                 nonce,
                 gas_limit,
                 max_fee_per_gas,
                 max_priority_fee_per_gas,
                 to,
                 value,
-                input,
-                access_list,
+                input: _,
+                access_list: _,
                 blob_versioned_hashes: _,
                 max_fee_per_blob_gas,
             }) => MockTransaction::Eip4844 {
@@ -578,7 +578,7 @@ impl IntoRecoveredTransaction for MockTransaction {
             gas_price: self.get_gas_price(),
             gas_limit: self.get_gas_limit(),
             to: TransactionKind::Call(Address::from_slice(
-                &hex::decode("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap()[..],
+                &hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046")[..],
             )),
             value: 693361000000000u64.into(),
             input: Default::default(),

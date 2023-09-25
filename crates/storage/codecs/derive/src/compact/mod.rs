@@ -1,4 +1,3 @@
-extern crate proc_macro2;
 use proc_macro::{self, TokenStream};
 use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
@@ -144,7 +143,7 @@ fn should_use_alt_impl(ftype: &String, segment: &syn::PathSegment) -> bool {
                 if let (Some(path), 1) =
                     (arg_path.path.segments.first(), arg_path.path.segments.len())
                 {
-                    if ["H256", "H160", "Address", "Bloom", "TxHash"]
+                    if ["H256", "Address", "Address", "Bloom", "TxHash"]
                         .contains(&path.ident.to_string().as_str())
                     {
                         return true
@@ -178,6 +177,7 @@ pub fn is_flag_type(ftype: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pretty_assertions::assert_eq;
     use syn::parse2;
 
     #[test]
@@ -193,7 +193,7 @@ mod tests {
                 f_option_some: Option<H256>,
                 f_option_some_u64: Option<u64>,
                 f_vec_empty: Vec<U256>,
-                f_vec_some: Vec<H160>,
+                f_vec_some: Vec<Address>,
             }
         };
 
@@ -211,8 +211,7 @@ mod tests {
             mod TestStruct_flags {
                 use bytes::Buf;
                 use modular_bitfield::prelude::*;
-
-                #[doc="Fieldset that facilitates compacting the parent type. Used bytes: 2 | Unused bits: 1"]
+                #[doc = "Fieldset that facilitates compacting the parent type. Used bytes: 2 | Unused bits: 1"]
                 #[bitfield]
                 #[derive(Clone, Copy, Debug, Default)]
                 pub struct TestStructFlags {
@@ -227,7 +226,7 @@ mod tests {
                     unused: B1,
                 }
                 impl TestStructFlags {
-                    #[doc=r" Deserializes this fieldset and returns it, alongside the original slice in an advanced position."]
+                    #[doc = r" Deserializes this fieldset and returns it, alongside the original slice in an advanced position."]
                     pub fn from(mut buf: &[u8]) -> (Self, &[u8]) {
                         (
                             TestStructFlags::from_bytes([buf.get_u8(), buf.get_u8(),]),
@@ -312,6 +311,9 @@ mod tests {
             }
         };
 
-        assert_eq!(output.to_string(), should_output.to_string());
+        assert_eq!(
+            syn::parse2::<syn::File>(output).unwrap(),
+            syn::parse2::<syn::File>(should_output).unwrap()
+        );
     }
 }

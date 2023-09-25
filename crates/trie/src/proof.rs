@@ -6,6 +6,7 @@ use crate::{
     walker::TrieWalker,
     ProofError, StorageRoot,
 };
+use alloy_rlp::Encodable;
 use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx};
 use reth_primitives::{
     keccak256,
@@ -15,7 +16,6 @@ use reth_primitives::{
     },
     Address, Bytes, H256,
 };
-use reth_rlp::Encodable;
 
 /// A struct for generating merkle proofs.
 ///
@@ -34,6 +34,7 @@ use reth_rlp::Encodable;
 ///
 /// After traversing the path, the proof generator continues to restore the root node of the trie
 /// until completion. The root node is then inserted at the start of the proof.
+#[derive(Debug)]
 pub struct Proof<'a, 'b, TX, H> {
     /// A reference to the database transaction.
     tx: &'a TX,
@@ -208,7 +209,7 @@ where
 
         self.node_rlp_buf.clear();
         BranchNode::new(&branch_node_stack).rlp(node.state_mask, &mut self.node_rlp_buf);
-        Ok(Bytes::from(self.node_rlp_buf.as_slice()))
+        Ok(Bytes::copy_from_slice(self.node_rlp_buf.as_slice()))
     }
 
     /// Restore leaf node.
@@ -260,7 +261,7 @@ where
 
         self.node_rlp_buf.clear();
         leaf_node.rlp(&mut self.node_rlp_buf);
-        Ok(Some(Bytes::from(self.node_rlp_buf.as_slice())))
+        Ok(Some(Bytes::copy_from_slice(self.node_rlp_buf.as_slice())))
     }
 }
 

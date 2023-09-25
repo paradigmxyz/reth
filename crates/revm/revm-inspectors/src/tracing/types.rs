@@ -1,7 +1,7 @@
 //! Types for representing call trace items.
 
 use crate::tracing::{config::TraceStyle, utils::convert_memory};
-use reth_primitives::{abi::decode_revert_reason, bytes::Bytes, Address, H256, U256};
+use reth_primitives::{abi::decode_revert_reason, Address, Bytes, H256, U256, U64};
 use reth_rpc_types::trace::{
     geth::{AccountState, CallFrame, CallLogFrame, GethDefaultTracingOptions, StructLog},
     parity::{
@@ -303,7 +303,7 @@ impl CallTraceNode {
         if self.kind().is_any_create() {
             let code = self.trace.output.clone();
             if acc.code == Delta::Unchanged {
-                acc.code = Delta::Added(code.into())
+                acc.code = Delta::Added(code)
             }
         }
 
@@ -381,13 +381,13 @@ impl CallTraceNode {
         match self.kind() {
             CallKind::Call | CallKind::StaticCall | CallKind::CallCode | CallKind::DelegateCall => {
                 TraceOutput::Call(CallOutput {
-                    gas_used: self.trace.gas_used.into(),
-                    output: self.trace.output.clone().into(),
+                    gas_used: U64::from(self.trace.gas_used),
+                    output: self.trace.output.clone(),
                 })
             }
             CallKind::Create | CallKind::Create2 => TraceOutput::Create(CreateOutput {
-                gas_used: self.trace.gas_used.into(),
-                code: self.trace.output.clone().into(),
+                gas_used: U64::from(self.trace.gas_used),
+                code: self.trace.output.clone(),
                 address: self.trace.address,
             }),
         }
@@ -447,16 +447,16 @@ impl CallTraceNode {
                     from: self.trace.caller,
                     to: self.trace.address,
                     value: self.trace.value,
-                    gas: self.trace.gas_limit.into(),
-                    input: self.trace.data.clone().into(),
+                    gas: U64::from(self.trace.gas_limit),
+                    input: self.trace.data.clone(),
                     call_type: self.kind().into(),
                 })
             }
             CallKind::Create | CallKind::Create2 => Action::Create(CreateAction {
                 from: self.trace.caller,
                 value: self.trace.value,
-                gas: self.trace.gas_limit.into(),
-                init: self.trace.data.clone().into(),
+                gas: U64::from(self.trace.gas_limit),
+                init: self.trace.data.clone(),
             }),
         }
     }
@@ -472,8 +472,8 @@ impl CallTraceNode {
             value: Some(self.trace.value),
             gas: U256::from(self.trace.gas_limit),
             gas_used: U256::from(self.trace.gas_used),
-            input: self.trace.data.clone().into(),
-            output: (!self.trace.output.is_empty()).then(|| self.trace.output.clone().into()),
+            input: self.trace.data.clone(),
+            output: (!self.trace.output.is_empty()).then(|| self.trace.output.clone()),
             error: None,
             revert_reason: None,
             calls: Default::default(),
@@ -494,7 +494,7 @@ impl CallTraceNode {
                 .map(|log| CallLogFrame {
                     address: Some(self.execution_address()),
                     topics: Some(log.topics.clone()),
-                    data: Some(log.data.clone().into()),
+                    data: Some(log.data.clone()),
                 })
                 .collect();
         }

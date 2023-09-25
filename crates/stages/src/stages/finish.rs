@@ -8,6 +8,7 @@ use reth_provider::DatabaseProviderRW;
 /// This stage does not write anything; it's checkpoint is used to denote the highest fully synced
 /// block.
 #[derive(Default, Debug, Clone)]
+#[non_exhaustive]
 pub struct FinishStage;
 
 #[async_trait::async_trait]

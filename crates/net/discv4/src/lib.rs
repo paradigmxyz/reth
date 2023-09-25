@@ -1,16 +1,3 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![doc(
-    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
-    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
-)]
-#![warn(missing_docs, unused_crate_dependencies)]
-#![deny(unused_must_use, rust_2018_idioms)]
-#![doc(test(
-    no_crate_inject,
-    attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
-))]
-
 //! Discovery v4 implementation: <https://github.com/ethereum/devp2p/blob/master/discv4.md>
 //!
 //! Discv4 employs a kademlia-like routing table to store and manage discovered peers and topics.
@@ -28,10 +15,21 @@
 //!
 //! - `serde` (default): Enable serde support
 //! - `test-utils`: Export utilities for testing
+
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+)]
+#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
+#![deny(unused_must_use, rust_2018_idioms)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+
 use crate::{
     error::{DecodePacketError, Discv4Error},
     proto::{FindNode, Message, Neighbours, Packet, Ping, Pong},
 };
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 use discv5::{
     kbucket,
     kbucket::{
@@ -45,9 +43,8 @@ use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse, EnrWrapper};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
-    ForkId, PeerId, H256,
+    hex, ForkId, PeerId, H256,
 };
-use reth_rlp::{RlpDecodable, RlpEncodable};
 use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
@@ -355,7 +352,7 @@ impl Discv4 {
     /// Sets the pair in the EIP-868 [`Enr`] of the node.
     ///
     /// If the key already exists, this will update it.
-    pub fn set_eip868_rlp(&self, key: Vec<u8>, value: impl reth_rlp::Encodable) {
+    pub fn set_eip868_rlp(&self, key: Vec<u8>, value: impl alloy_rlp::Encodable) {
         let mut buf = BytesMut::new();
         value.encode(&mut buf);
         self.set_eip868_rlp_pair(key, buf.freeze())
@@ -383,6 +380,7 @@ impl Discv4 {
 
 /// Manages discv4 peer discovery over UDP.
 #[must_use = "Stream does nothing unless polled"]
+#[allow(missing_debug_implementations)]
 pub struct Discv4Service {
     /// Local address of the UDP socket.
     local_address: SocketAddr,
@@ -2059,9 +2057,9 @@ impl From<ForkId> for EnrForkIdEntry {
 mod tests {
     use super::*;
     use crate::test_utils::{create_discv4, create_discv4_with_config, rng_endpoint, rng_record};
+    use alloy_rlp::{Decodable, Encodable};
     use rand::{thread_rng, Rng};
-    use reth_primitives::{hex_literal::hex, mainnet_nodes, ForkHash};
-    use reth_rlp::{Decodable, Encodable};
+    use reth_primitives::{hex, mainnet_nodes, ForkHash};
     use std::{future::poll_fn, net::Ipv4Addr};
 
     #[tokio::test]
@@ -2193,8 +2191,8 @@ mod tests {
             enr_sq: Some(rng.gen()),
         };
 
-        let id = PeerId::random();
-        service.on_ping(ping, addr, id, H256::random());
+        let id = PeerId::random_with(&mut rng);
+        service.on_ping(ping, addr, id, rng.gen());
 
         let key = kad_key(id);
         match service.kbuckets.entry(&key) {
@@ -2225,8 +2223,8 @@ mod tests {
             enr_sq: Some(rng.gen()),
         };
 
-        let id = PeerId::random();
-        service.on_ping(ping, addr, id, H256::random());
+        let id = PeerId::random_with(&mut rng);
+        service.on_ping(ping, addr, id, rng.gen());
 
         let key = kad_key(id);
         match service.kbuckets.entry(&key) {

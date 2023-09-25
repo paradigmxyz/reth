@@ -470,7 +470,7 @@ where
                     access_list: request.access_list.clone(),
                     max_priority_fee_per_gas: Some(U256::from(max_fee_per_gas)),
                     transaction_type: None,
-                    blob_versioned_hashes: Vec::new(),
+                    blob_versioned_hashes: None,
                     max_fee_per_blob_gas: None,
                 },
                 BlockId::Number(BlockNumberOrTag::Pending),
@@ -480,21 +480,21 @@ where
 
         let transaction = match request.into_typed_request() {
             Some(TypedTransactionRequest::Legacy(mut m)) => {
-                m.chain_id = Some(chain_id.as_u64());
+                m.chain_id = Some(chain_id.to());
                 m.gas_limit = gas_limit;
                 m.gas_price = gas_price;
 
                 TypedTransactionRequest::Legacy(m)
             }
             Some(TypedTransactionRequest::EIP2930(mut m)) => {
-                m.chain_id = chain_id.as_u64();
+                m.chain_id = chain_id.to();
                 m.gas_limit = gas_limit;
                 m.gas_price = gas_price;
 
                 TypedTransactionRequest::EIP2930(m)
             }
             Some(TypedTransactionRequest::EIP1559(mut m)) => {
-                m.chain_id = chain_id.as_u64();
+                m.chain_id = chain_id.to();
                 m.gas_limit = gas_limit;
                 m.max_fee_per_gas = max_fee_per_gas;
 
@@ -871,7 +871,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
 
     let mut res_receipt = TransactionReceipt {
         transaction_hash: Some(meta.tx_hash),
-        transaction_index: meta.index.into(),
+        transaction_index: U64::from(meta.index),
         block_hash: Some(meta.block_hash),
         block_number: Some(U256::from(meta.block_number)),
         from: transaction.signer(),

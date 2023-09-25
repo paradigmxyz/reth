@@ -10,10 +10,11 @@ use crate::{
     result::{internal_rpc_err, ToRpcResult},
     EthApiSpec, TracingCallGuard,
 };
+use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
-    Account, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H160, H256,
+    Account, Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H256,
 };
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderBox};
 use reth_revm::{
@@ -24,7 +25,6 @@ use reth_revm::{
         FourByteInspector, TracingInspector, TracingInspectorConfig,
     },
 };
-use reth_rlp::{Decodable, Encodable};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::{
     trace::geth::{
@@ -330,7 +330,7 @@ where
             })
             .await?;
         let gas_used = res.result.gas_used();
-        let return_value = result_output(&res.result).unwrap_or_default().into();
+        let return_value = result_output(&res.result).unwrap_or_default();
         let frame = inspector.into_geth_builder().geth_traces(gas_used, return_value, config);
 
         Ok(frame.into())
@@ -530,7 +530,7 @@ where
 
         let (res, _) = inspect(db, env, &mut inspector)?;
         let gas_used = res.result.gas_used();
-        let return_value = result_output(&res.result).unwrap_or_default().into();
+        let return_value = result_output(&res.result).unwrap_or_default();
         let frame = inspector.into_geth_builder().geth_traces(gas_used, return_value, config);
 
         Ok((frame.into(), res.state))
@@ -833,7 +833,7 @@ where
         &self,
         _block_hash: H256,
         _tx_idx: usize,
-        _contract_address: H160,
+        _contract_address: Address,
         _key_start: H256,
         _max_result: u64,
     ) -> RpcResult<()> {

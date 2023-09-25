@@ -106,8 +106,8 @@ use crate::{
     traits::{GetPooledTransactionLimit, NewBlobSidecar, TransactionListenerKind},
     validate::ValidTransaction,
 };
+use alloy_rlp::Encodable;
 pub use listener::{AllTransactionsEvents, TransactionEvents};
-use reth_rlp::Encodable;
 
 mod best;
 mod blob;

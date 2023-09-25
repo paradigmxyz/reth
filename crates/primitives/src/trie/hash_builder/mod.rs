@@ -115,7 +115,7 @@ impl HashBuilder {
     pub fn print_stack(&self) {
         println!("============ STACK ===============");
         for item in &self.stack {
-            println!("{}", hex::encode(item));
+            println!("{}", crate::hex::encode(item));
         }
         println!("============ END STACK ===============");
     }
@@ -189,7 +189,7 @@ impl HashBuilder {
                 tracing::Level::TRACE,
                 "loop",
                 i,
-                current = hex::encode(&current.hex_data),
+                current = crate::hex::encode(&current.hex_data),
                 ?build_extensions
             );
             let _enter = span.enter();
@@ -247,7 +247,7 @@ impl HashBuilder {
                         tracing::debug!(target: "trie::hash_builder", ?leaf_node, "pushing leaf node");
                         tracing::trace!(target: "trie::hash_builder", rlp = {
                             self.rlp_buf.clear();
-                            hex::encode(&leaf_node.rlp(&mut self.rlp_buf))
+                            crate::hex::encode(&leaf_node.rlp(&mut self.rlp_buf))
                         }, "leaf node rlp");
 
                         self.rlp_buf.clear();
@@ -277,7 +277,7 @@ impl HashBuilder {
                 tracing::debug!(target: "trie::hash_builder", ?extension_node, "pushing extension node");
                 tracing::trace!(target: "trie::hash_builder", rlp = {
                     self.rlp_buf.clear();
-                    hex::encode(&extension_node.rlp(&mut self.rlp_buf))
+                    crate::hex::encode(&extension_node.rlp(&mut self.rlp_buf))
                 }, "extension node rlp");
                 self.rlp_buf.clear();
                 self.stack.push(extension_node.rlp(&mut self.rlp_buf));
@@ -343,7 +343,7 @@ impl HashBuilder {
         self.stack.resize(first_child_idx, vec![]);
 
         tracing::debug!(target: "trie::hash_builder", "pushing branch node with {:?} mask from stack", state_mask);
-        tracing::trace!(target: "trie::hash_builder", rlp = hex::encode(&rlp), "branch node rlp");
+        tracing::trace!(target: "trie::hash_builder", rlp = crate::hex::encode(&rlp), "branch node rlp");
         self.stack.push(rlp);
         children
     }
@@ -439,7 +439,7 @@ mod tests {
         K: AsRef<[u8]> + Ord,
     {
         let hashed = iter
-            .map(|(k, v)| (keccak256(k.as_ref()), reth_rlp::encode_fixed_size(v).to_vec()))
+            .map(|(k, v)| (keccak256(k.as_ref()), alloy_rlp::encode_fixed_size(v).to_vec()))
             // Collect into a btree map to sort the data
             .collect::<BTreeMap<_, _>>();
 
@@ -557,8 +557,8 @@ mod tests {
     #[test]
     fn test_root_rlp_hashed_data() {
         let data = HashMap::from([
-            (H256::from_low_u64_le(1), U256::from(2)),
-            (H256::from_low_u64_be(3), U256::from(4)),
+            (H256::with_last_byte(1), U256::from(2)),
+            (H256::with_last_byte(3), U256::from(4)),
         ]);
         assert_hashed_trie_root(data.iter());
     }
@@ -590,7 +590,7 @@ mod tests {
         // Skip the 0th element given in this example they have a common prefix and will
         // collapse to a Branch node.
         use crate::bytes::BytesMut;
-        use reth_rlp::Encodable;
+        use alloy_rlp::Encodable;
         let leaf1 = LeafNode::new(&Nibbles::unpack(&raw_input[0].0[1..]), input[0].1);
         let leaf2 = LeafNode::new(&Nibbles::unpack(&raw_input[1].0[1..]), input[1].1);
         let mut branch: [&dyn Encodable; 17] = [b""; 17];
@@ -599,7 +599,7 @@ mod tests {
         branch[4] = &leaf1;
         branch[7] = &leaf2;
         let mut branch_node_rlp = BytesMut::new();
-        reth_rlp::encode_list::<dyn Encodable, _>(&branch, &mut branch_node_rlp);
+        alloy_rlp::encode_list::<_, dyn Encodable>(&branch, &mut branch_node_rlp);
         let branch_node_hash = keccak256(branch_node_rlp);
 
         let mut hb2 = HashBuilder::default();

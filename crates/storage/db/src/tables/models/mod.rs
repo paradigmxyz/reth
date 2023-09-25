@@ -64,7 +64,7 @@ impl Decode for Vec<u8> {
 impl Encode for Address {
     type Encoded = [u8; 20];
     fn encode(self) -> Self::Encoded {
-        self.to_fixed_bytes()
+        self.0 .0
     }
 }
 
@@ -77,7 +77,7 @@ impl Decode for Address {
 impl Encode for H256 {
     type Encoded = [u8; 32];
     fn encode(self) -> Self::Encoded {
-        self.to_fixed_bytes()
+        self.0
     }
 }
 

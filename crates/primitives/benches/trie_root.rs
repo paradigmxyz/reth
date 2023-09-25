@@ -53,12 +53,12 @@ criterion_main!(benches);
 
 mod implementations {
     use super::*;
+    use alloy_rlp::Encodable;
     use bytes::BytesMut;
     use reth_primitives::{
         proofs::adjust_index_for_rlp,
         trie::{HashBuilder, Nibbles},
     };
-    use reth_rlp::Encodable;
     use std::vec::IntoIter;
 
     pub fn trie_hash_ordered_trie_root(receipts: IntoIter<ReceiptWithBloom>) -> H256 {

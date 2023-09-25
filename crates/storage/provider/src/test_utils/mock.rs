@@ -15,7 +15,7 @@ use reth_primitives::{
     SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, TxHash, TxNumber, H256, U256,
 };
-use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
+use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
     collections::{BTreeMap, HashMap},
     ops::RangeBounds,
@@ -68,7 +68,7 @@ impl ExtendedAccount {
     pub fn with_bytecode(mut self, bytecode: Bytes) -> Self {
         let hash = keccak256(&bytecode);
         self.account.bytecode_hash = Some(hash);
-        self.bytecode = Some(Bytecode::new_raw(bytecode.into()));
+        self.bytecode = Some(Bytecode::new_raw(bytecode));
         self
     }
 
@@ -476,7 +476,7 @@ impl AccountReader for MockEthProvider {
 }
 
 impl StateRootProvider for MockEthProvider {
-    fn state_root(&self, _state: BundleStateWithReceipts) -> RethResult<H256> {
+    fn state_root(&self, _state: &BundleStateWithReceipts) -> RethResult<H256> {
         todo!()
     }
 }

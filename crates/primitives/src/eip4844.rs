@@ -15,7 +15,7 @@ pub use revm_primitives::calc_blob_gasprice;
 pub fn kzg_to_versioned_hash(commitment: KzgCommitment) -> H256 {
     let mut res = Sha256::digest(commitment.as_slice());
     res[0] = VERSIONED_HASH_VERSION_KZG;
-    H256::from_slice(&res)
+    H256::new(res.into())
 }
 
 /// Calculates the excess data gas for the next block, after applying the current set of blobs on

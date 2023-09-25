@@ -58,10 +58,10 @@ reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-downloaders = { path = "../net/downloaders" }
 reth-eth-wire = { path = "../net/eth-wire" } # TODO(onbjerg): We only need this for [BlockBody]
 reth-blockchain-tree = { path = "../blockchain-tree" }
-reth-rlp.workspace = true
 reth-revm = { path = "../revm" }
 reth-trie = { path = "../trie", features = ["test-utils"] }
 
+alloy-rlp.workspace = true
 itertools.workspace = true
 tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 assert_matches.workspace = true

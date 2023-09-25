@@ -4,10 +4,10 @@
 
 #![deny(missing_docs)]
 
-use crate::{BlockNumber, Head, H256};
+use crate::{hex, BlockNumber, Head, H256};
+use alloy_rlp::*;
 use crc::*;
 use reth_codecs::derive_arbitrary;
-use reth_rlp::*;
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
@@ -379,9 +379,11 @@ impl Cache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hex_literal::hex;
+    use crate::hex_literal::hex;
+    use revm_primitives::b256;
+
     const GENESIS_HASH: H256 =
-        H256(hex!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"));
+        b256!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3");
 
     // EIP test vectors.
     #[test]

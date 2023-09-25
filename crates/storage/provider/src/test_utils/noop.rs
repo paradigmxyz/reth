@@ -15,7 +15,7 @@ use reth_primitives::{
     StorageKey, StorageValue, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash,
     TxNumber, H256, KECCAK_EMPTY, MAINNET, U256,
 };
-use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
+use revm::primitives::{BlockEnv, CfgEnv};
 use std::{ops::RangeBounds, sync::Arc};
 
 /// Supports various api interfaces for testing purposes.
@@ -253,7 +253,7 @@ impl ChangeSetReader for NoopProvider {
 }
 
 impl StateRootProvider for NoopProvider {
-    fn state_root(&self, _state: BundleStateWithReceipts) -> RethResult<H256> {
+    fn state_root(&self, _state: &BundleStateWithReceipts) -> RethResult<H256> {
         todo!()
     }
 }

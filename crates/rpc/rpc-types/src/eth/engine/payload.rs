@@ -155,10 +155,10 @@ impl From<SealedBlock> for ExecutionPayloadV1 {
             receipts_root: value.receipts_root,
             logs_bloom: value.logs_bloom,
             prev_randao: value.mix_hash,
-            block_number: value.number.into(),
-            gas_limit: value.gas_limit.into(),
-            gas_used: value.gas_used.into(),
-            timestamp: value.timestamp.into(),
+            block_number: U64::from(value.number),
+            gas_limit: U64::from(value.gas_limit),
+            gas_used: U64::from(value.gas_used),
+            timestamp: U64::from(value.timestamp),
             extra_data: value.extra_data.clone(),
             base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
             block_hash: value.hash(),
@@ -185,7 +185,7 @@ pub struct ExecutionPayloadV2 {
 impl ExecutionPayloadV2 {
     /// Returns the timestamp for the execution payload.
     pub fn timestamp(&self) -> u64 {
-        self.payload_inner.timestamp.as_u64()
+        self.payload_inner.timestamp.to()
     }
 }
 
@@ -215,7 +215,7 @@ impl ExecutionPayloadV3 {
 
     /// Returns the timestamp for the payload.
     pub fn timestamp(&self) -> u64 {
-        self.payload_inner.payload_inner.timestamp.as_u64()
+        self.payload_inner.payload_inner.timestamp.to()
     }
 }
 
@@ -267,7 +267,7 @@ impl ExecutionPayload {
     /// Returns the timestamp for the payload.
     pub fn timestamp(&self) -> u64 {
         match self {
-            ExecutionPayload::V1(payload) => payload.timestamp.as_u64(),
+            ExecutionPayload::V1(payload) => payload.timestamp.to(),
             ExecutionPayload::V2(payload) => payload.timestamp(),
             ExecutionPayload::V3(payload) => payload.timestamp(),
         }
@@ -294,11 +294,9 @@ impl ExecutionPayload {
     /// Returns the block number for this payload.
     pub fn block_number(&self) -> u64 {
         match self {
-            ExecutionPayload::V1(payload) => payload.block_number.as_u64(),
-            ExecutionPayload::V2(payload) => payload.payload_inner.block_number.as_u64(),
-            ExecutionPayload::V3(payload) => {
-                payload.payload_inner.payload_inner.block_number.as_u64()
-            }
+            ExecutionPayload::V1(payload) => payload.block_number.to(),
+            ExecutionPayload::V2(payload) => payload.payload_inner.block_number.to(),
+            ExecutionPayload::V3(payload) => payload.payload_inner.payload_inner.block_number.to(),
         }
     }
 }
@@ -349,7 +347,7 @@ pub enum PayloadError {
     InvalidVersionedHashes,
     /// Encountered decoding error.
     #[error(transparent)]
-    Decode(#[from] reth_rlp::DecodeError),
+    Decode(#[from] alloy_rlp::Error),
 }
 
 impl PayloadError {

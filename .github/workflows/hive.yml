@@ -134,6 +134,7 @@ jobs:
             experimental: true
           - sim: pyspec
             include: [shanghai/eip4895]
+            experimental: true
           # Pyspec merge and earlier jobs
           - sim: pyspec
             include: [merge/]

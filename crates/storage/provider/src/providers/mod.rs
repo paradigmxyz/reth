@@ -19,11 +19,7 @@ use reth_primitives::{
     Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256, U256,
 };
-use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
-pub use state::{
-    historical::{HistoricalStateProvider, HistoricalStateProviderRef},
-    latest::{LatestStateProvider, LatestStateProviderRef},
-};
+use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
     collections::{BTreeMap, HashSet},
     ops::RangeBounds,
@@ -31,6 +27,11 @@ use std::{
     time::Instant,
 };
 use tracing::trace;
+
+pub use state::{
+    historical::{HistoricalStateProvider, HistoricalStateProviderRef},
+    latest::{LatestStateProvider, LatestStateProviderRef},
+};
 
 mod bundle_state_provider;
 mod chain_info;
@@ -49,7 +50,7 @@ use reth_interfaces::blockchain_tree::{
 /// This type serves as the main entry point for interacting with the blockchain and provides data
 /// from database storage and from the blockchain tree (pending state etc.) It is a simple wrapper
 /// type that holds an instance of the database and the blockchain tree.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BlockchainProvider<DB, Tree> {
     /// Provider type used to access the database.
     database: ProviderFactory<DB>,

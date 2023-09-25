@@ -6,7 +6,7 @@ use crate::{
     TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
-use reth_interfaces::{RethError, RethResult};
+use reth_interfaces::{db::LogLevel, RethError, RethResult};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
@@ -14,13 +14,12 @@ use reth_primitives::{
     TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal,
     H256, U256,
 };
-use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
+use revm::primitives::{BlockEnv, CfgEnv};
 use std::{ops::RangeBounds, sync::Arc};
 use tracing::trace;
 
 mod provider;
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
-use reth_interfaces::db::LogLevel;
 
 /// A common provider that fetches data from a database.
 ///
@@ -407,6 +406,7 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
 mod tests {
     use super::ProviderFactory;
     use crate::{BlockHashReader, BlockNumReader, BlockWriter, TransactionsProvider};
+    use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_db::{
         tables,
@@ -417,7 +417,6 @@ mod tests {
     use reth_primitives::{
         hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, TxNumber, H256,
     };
-    use reth_rlp::Decodable;
     use std::{ops::RangeInclusive, sync::Arc};
 
     #[test]
@@ -437,7 +436,7 @@ mod tests {
 
         let chain_info = provider.chain_info().expect("should be ok");
         assert_eq!(chain_info.best_number, 0);
-        assert_eq!(chain_info.best_hash, H256::zero());
+        assert_eq!(chain_info.best_hash, H256::ZERO);
     }
 
     #[test]

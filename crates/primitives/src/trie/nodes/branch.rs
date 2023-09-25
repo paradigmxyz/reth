@@ -1,8 +1,8 @@
 use super::{super::TrieMask, rlp_node, CHILD_INDEX_RANGE};
 use crate::H256;
+use alloy_rlp::{BufMut, EMPTY_STRING_CODE};
 use bytes::Buf;
 use reth_codecs::Compact;
-use reth_rlp::{BufMut, EMPTY_STRING_CODE};
 use serde::{Deserialize, Serialize};
 
 /// A Branch node is only a pointer to the stack of nodes and is used to
@@ -47,7 +47,7 @@ impl<'a> BranchNode<'a> {
         // Create the RLP header from the mask elements present.
         let mut i = first_child_idx;
         let header = CHILD_INDEX_RANGE.fold(
-            reth_rlp::Header { list: true, payload_length: 1 },
+            alloy_rlp::Header { list: true, payload_length: 1 },
             |mut header, digit| {
                 if state_mask.is_bit_set(digit) {
                     header.payload_length += self.stack[i].len();
@@ -152,12 +152,12 @@ impl Compact for BranchNodeCompact {
 
         if let Some(root_hash) = root_hash {
             buf_size += H256::len_bytes();
-            buf.put_slice(root_hash.as_bytes());
+            buf.put_slice(root_hash.as_slice());
         }
 
         for hash in &hashes {
             buf_size += H256::len_bytes();
-            buf.put_slice(hash.as_bytes());
+            buf.put_slice(hash.as_slice());
         }
 
         buf_size
@@ -202,7 +202,7 @@ impl Compact for BranchNodeCompact {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hex_literal::hex;
+    use crate::hex_literal::hex;
 
     #[test]
     fn node_encoding() {

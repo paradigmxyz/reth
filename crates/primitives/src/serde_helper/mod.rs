@@ -1,4 +1,6 @@
-//! Various serde utilities
+//! [serde] utilities.
+
+use crate::H256;
 
 mod storage;
 
@@ -6,7 +8,6 @@ use serde::Serializer;
 pub use storage::*;
 
 mod jsonu256;
-use crate::H256;
 pub use jsonu256::*;
 
 pub mod num;
@@ -23,7 +24,7 @@ pub mod u64_hex {
     where
         D: Deserializer<'de>,
     {
-        U64::deserialize(deserializer).map(|val| val.as_u64())
+        U64::deserialize(deserializer).map(|val| val.to())
     }
 
     /// Serializes u64 as hex string
@@ -32,46 +33,15 @@ pub mod u64_hex {
     }
 }
 
-/// serde functions for handling bytes as hex strings, such as [bytes::Bytes]
-pub mod hex_bytes {
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    /// Serialize a byte vec as a hex string with 0x prefix
-    pub fn serialize<S, T>(x: T, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-        T: AsRef<[u8]>,
-    {
-        s.serialize_str(&format!("0x{}", hex::encode(x.as_ref())))
-    }
-
-    /// Deserialize a hex string into a byte vec
-    /// Accepts a hex string with optional 0x prefix
-    pub fn deserialize<'de, T, D>(d: D) -> Result<T, D::Error>
-    where
-        D: Deserializer<'de>,
-        T: From<Vec<u8>>,
-    {
-        let value = String::deserialize(d)?;
-        if let Some(value) = value.strip_prefix("0x") {
-            hex::decode(value)
-        } else {
-            hex::decode(&value)
-        }
-        .map(Into::into)
-        .map_err(|e| serde::de::Error::custom(e.to_string()))
-    }
-}
-
-/// Serialize a byte vec as a hex string _without_ 0x prefix.
+/// Serialize a byte vec as a hex string _without_ the "0x" prefix.
 ///
-/// This behaves exactly as [hex::encode]
+/// This behaves the same as `hex::encode`.
 pub fn serialize_hex_string_no_prefix<S, T>(x: T, s: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
     T: AsRef<[u8]>,
 {
-    s.serialize_str(&hex::encode(x.as_ref()))
+    s.serialize_str(&crate::hex::encode(x.as_ref()))
 }
 
 /// Serialize a byte vec as a hex string _without_ 0x prefix

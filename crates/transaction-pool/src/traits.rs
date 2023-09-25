@@ -4,6 +4,7 @@ use crate::{
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
+use alloy_rlp::Encodable;
 use futures_util::{ready, Stream};
 use reth_primitives::{
     Address, BlobTransactionSidecar, BlobTransactionValidationError,
@@ -12,7 +13,6 @@ use reth_primitives::{
     TransactionKind, TransactionSignedEcRecovered, TxEip4844, TxHash, EIP1559_TX_TYPE_ID,
     EIP4844_TX_TYPE_ID, H256, U256,
 };
-use reth_rlp::Encodable;
 use std::{
     collections::{HashMap, HashSet},
     fmt,

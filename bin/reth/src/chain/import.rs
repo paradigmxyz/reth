@@ -156,7 +156,7 @@ impl ImportCommand {
             .build(file_client.clone(), consensus.clone(), db.clone())
             .into_task();
 
-        let (tip_tx, tip_rx) = watch::channel(H256::zero());
+        let (tip_tx, tip_rx) = watch::channel(H256::ZERO);
         let factory = reth_revm::Factory::new(self.chain.clone());
 
         let max_block = file_client.max_block().unwrap_or(0);

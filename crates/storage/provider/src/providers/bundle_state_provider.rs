@@ -7,6 +7,7 @@ use reth_primitives::{Account, Address, BlockNumber, Bytecode, Bytes, H256};
 
 /// A state provider that either resolves to data in a wrapped [`crate::BundleStateWithReceipts`],
 /// or an underlying state provider.
+#[derive(Debug)]
 pub struct BundleStateProvider<SP: StateProvider, BSDP: BundleStateDataProvider> {
     /// The inner state provider.
     pub(crate) state_provider: SP,
@@ -58,10 +59,10 @@ impl<SP: StateProvider, BSDP: BundleStateDataProvider> AccountReader
 impl<SP: StateProvider, BSDP: BundleStateDataProvider> StateRootProvider
     for BundleStateProvider<SP, BSDP>
 {
-    fn state_root(&self, post_state: BundleStateWithReceipts) -> RethResult<H256> {
+    fn state_root(&self, post_state: &BundleStateWithReceipts) -> RethResult<H256> {
         let mut state = self.post_state_data_provider.state().clone();
-        state.extend(post_state);
-        self.state_provider.state_root(state)
+        state.extend(post_state.clone());
+        self.state_provider.state_root(&state)
     }
 }
 

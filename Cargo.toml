@@ -25,8 +25,6 @@ members = [
     "crates/revm",
     "crates/revm/revm-primitives",
     "crates/revm/revm-inspectors",
-    "crates/rlp",
-    "crates/rlp/rlp-derive",
     "crates/rpc/ipc",
     "crates/rpc/rpc",
     "crates/rpc/rpc-api",
@@ -50,6 +48,7 @@ members = [
     "examples",
     "examples/additional-rpc-namespace-in-cli",
     "examples/rpc-db",
+    "examples/manual-p2p",
 ]
 default-members = ["bin/reth"]
 
@@ -58,7 +57,7 @@ default-members = ["bin/reth"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.9"
 edition = "2021"
 rust-version = "1.70" # Remember to update .clippy.toml and README.md
 license = "MIT OR Apache-2.0"
@@ -84,7 +83,6 @@ reth-primitives = { path = "./crates/primitives" }
 reth-interfaces = { path = "./crates/interfaces" }
 reth-provider = { path = "./crates/storage/provider" }
 reth-db = { path = "./crates/storage/db" }
-reth-rlp = { path = "./crates/rlp" }
 reth-rpc-types = { path = "./crates/rpc/rpc-types" }
 reth-rpc-builder = { path = "./crates/rpc/rpc-builder" }
 reth-blockchain-tree = { path = "./crates/blockchain-tree" }
@@ -97,12 +95,17 @@ reth-tasks = { path = "./crates/tasks" }
 reth-network = { path = "./crates/net/network" }
 reth-network-api = { path = "./crates/net/network-api" }
 reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat" }
+reth-discv4 = { path = "./crates/net/discv4" }
+reth-eth-wire = { path = "./crates/net/eth-wire" }
+reth-ecies = { path = "./crates/net/ecies" }
 
 # revm
-revm = { git = "https://github.com/bluealloy/revm", rev = "516f62cc" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "516f62cc" }
+revm = { git = "https://github.com/Evalir/revm/", branch = "reintroduce-alloy-rebased" }
+revm-primitives = { git = "https://github.com/Evalir/revm/", branch = "reintroduce-alloy-rebased" }
 
 ## eth
+alloy-primitives = "0.3"
+alloy-rlp = "0.3"
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
 ethers-signers = { version = "2.0", default-features = false }
@@ -132,7 +135,7 @@ strum = "0.25"
 rayon = "1.7"
 itertools = "0.11"
 parking_lot = "0.12"
-metrics = "0.21.1"                                    # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
+metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
 hex-literal = "0.4"
 
 ### proc-macros
@@ -163,7 +166,7 @@ secp256k1 = { version = "0.27.0", default-features = false, features = [
 ] }
 enr = { version = "0.9", default-features = false, features = ["k256"] }
 # for eip-4844
-c-kzg = { git = "https://github.com/ethereum/c-kzg-4844", rev = "f5f6f863d475847876a2bd5ee252058d37c3a15d" }
+c-kzg = { git = "https://github.com/ethereum/c-kzg-4844", rev = "fbef59a3f9e8fa998bdb5069d212daf83d586aa5" }
 
 ## config
 confy = "0.5"
@@ -176,3 +179,7 @@ assert_matches = "1.5.0"
 proptest = "1.0"
 proptest-derive = "0.4"
 serial_test = "2"
+
+# TODO
+[patch.crates-io]
+alloy-primitives = { git = "https://github.com/alloy-rs/core" }

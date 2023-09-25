@@ -1,6 +1,6 @@
 use crate::{constants::GWEI_TO_WEI, serde_helper::u64_hex, Address};
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::{RlpDecodable, RlpEncodable};
 use std::mem;
 
 /// Withdrawal represents a validator withdrawal from the consensus layer.

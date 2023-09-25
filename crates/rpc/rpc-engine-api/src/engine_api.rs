@@ -361,7 +361,7 @@ where
         let local_hash = self
             .inner
             .provider
-            .block_hash(terminal_block_number.as_u64())
+            .block_hash(terminal_block_number.to())
             .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
 
         // Transition configuration exchange is successful if block hashes match
@@ -705,6 +705,7 @@ where
     }
 
     /// Handler for `engine_getPayloadBodiesByRangeV1`
+    ///
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyrangev1>
     ///
     /// Returns the execution payload bodies by the range starting at `start`, containing `count`
@@ -718,14 +719,14 @@ where
     /// ensuring that the range is limited properly, and that the range boundaries are computed
     /// correctly and without panics.
     ///
-    /// Note: If a block is pre shanghai, `withdrawals` field will be `null
+    /// Note: If a block is pre shanghai, `withdrawals` field will be `null`.
     async fn get_payload_bodies_by_range_v1(
         &self,
         start: U64,
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV1");
-        Ok(EngineApi::get_payload_bodies_by_range(self, start.as_u64(), count.as_u64()).await?)
+        Ok(EngineApi::get_payload_bodies_by_range(self, start.to(), count.to()).await?)
     }
 
     /// Handler for `engine_exchangeTransitionConfigurationV1`
@@ -951,7 +952,7 @@ mod tests {
             let transition_config = TransitionConfiguration {
                 terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap(),
                 terminal_block_hash: consensus_terminal_block.hash(),
-                terminal_block_number: terminal_block_number.into(),
+                terminal_block_number: U64::from(terminal_block_number),
             };
 
             // Unknown block number
@@ -989,7 +990,7 @@ mod tests {
             let transition_config = TransitionConfiguration {
                 terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap(),
                 terminal_block_hash: terminal_block.hash(),
-                terminal_block_number: terminal_block_number.into(),
+                terminal_block_number: U64::from(terminal_block_number),
             };
 
             handle.provider.add_block(terminal_block.hash(), terminal_block.unseal());

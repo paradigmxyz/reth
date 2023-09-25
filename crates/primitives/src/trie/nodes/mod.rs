@@ -1,5 +1,5 @@
 use crate::{keccak256, H256};
-use reth_rlp::EMPTY_STRING_CODE;
+use alloy_rlp::EMPTY_STRING_CODE;
 use std::ops::Range;
 
 mod branch;

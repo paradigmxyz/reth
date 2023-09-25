@@ -1,8 +1,8 @@
 use super::access_list::AccessList;
 use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, H256};
+use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header};
 use std::mem;
 
 /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
@@ -98,7 +98,7 @@ impl TxEip1559 {
     /// - `value`
     /// - `data` (`input`)
     /// - `access_list`
-    pub(crate) fn decode_inner(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    pub(crate) fn decode_inner(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         Ok(Self {
             chain_id: Decodable::decode(buf)?,
             nonce: Decodable::decode(buf)?,
@@ -107,7 +107,7 @@ impl TxEip1559 {
             gas_limit: Decodable::decode(buf)?,
             to: Decodable::decode(buf)?,
             value: Decodable::decode(buf)?,
-            input: Bytes(Decodable::decode(buf)?),
+            input: Decodable::decode(buf)?,
             access_list: Decodable::decode(buf)?,
         })
     }

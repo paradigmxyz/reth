@@ -3,7 +3,7 @@ use crate::tracing::{
     utils::get_create_address,
 };
 pub use arena::CallTraceArena;
-use reth_primitives::{bytes::Bytes, Address, H256, U256};
+use reth_primitives::{Address, Bytes, H256, U256};
 use revm::{
     inspectors::GasInspector,
     interpreter::{

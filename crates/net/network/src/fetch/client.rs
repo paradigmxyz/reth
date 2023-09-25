@@ -16,10 +16,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
 };
-use tokio::sync::{
-    mpsc::UnboundedSender,
-    oneshot::{self},
-};
+use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 /// Front-end API for fetching data from the network.
 ///

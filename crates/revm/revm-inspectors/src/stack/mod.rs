@@ -1,12 +1,11 @@
-use std::fmt::Debug;
-
-use reth_primitives::{bytes::Bytes, Address, TxHash, H256, U256};
+use reth_primitives::{Address, Bytes, TxHash, H256, U256};
 use revm::{
     inspectors::CustomPrintTracer,
     interpreter::{CallInputs, CreateInputs, Gas, InstructionResult, Interpreter},
     primitives::Env,
     Database, EVMData, Inspector,
 };
+use std::fmt::Debug;
 
 /// A wrapped [Inspector] that can be reused in the stack
 mod maybe_owned;
@@ -73,8 +72,8 @@ impl InspectorStack {
     }
 }
 
-#[derive(Default)]
 /// Configuration for the inspectors.
+#[derive(Debug, Default)]
 pub struct InspectorStackConfig {
     /// Enable revm inspector printer.
     /// In execution this will print opcode level traces directly to console.
