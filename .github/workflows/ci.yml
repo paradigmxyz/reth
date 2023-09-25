@@ -34,7 +34,7 @@ jobs:
           # Keep in sync with `.cargo/config.toml:build.rustdocflags`
           # This just should just add `-D warnings`
           RUSTDOCFLAGS: |
-            --cfg docsrs --generate-link-to-definition --enable-index-page \
+            --cfg docsrs --generate-link-to-definition --enable-index-page
             -Zunstable-options -D warnings
 
   fmt:
