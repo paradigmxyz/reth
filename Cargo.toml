@@ -105,14 +105,12 @@ revm-primitives = { git = "https://github.com/Evalir/revm/", branch = "reintrodu
 
 ## eth
 alloy-rlp = "0.3"
+alloy-dyn-abi = {version = "0.3.2",default-features = false}
+alloy-primitives = {version = "0.3.2",default-features = false}
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
 ethers-signers = { version = "2.0", default-features = false }
 ethers-middleware = { version = "2.0", default-features = false }
-
-#alloy
-alloy-dyn-abi = {version = "0.3.2",default-features = false}
-alloy-primitives = {version = "0.3.2",default-features = false}
 discv5 = { git = "https://github.com/sigp/discv5", rev = "d2e30e04ee62418b9e57278cee907c02b99d5bd1" }
 igd = { git = "https://github.com/stevefan1999-personal/rust-igd", rev = "c2d1f83eb1612a462962453cb0703bc93258b173" }
 

@@ -136,6 +136,3 @@ pub fn hash_message<T: AsRef<[u8]>>(message: T) -> H256 {
 
     (keccak256(&eth_message))
 }
-
-#[cfg(any(test, feature = "arbitrary"))]
-pub use arbitrary;
