@@ -114,21 +114,6 @@ pub mod kzg {
     pub use c_kzg::*;
 }
 
-/// Helpers for working with serde
-pub mod serde_helper;
-
-/// Returns the keccak256 hash for the given data.
-#[inline]
-pub fn keccak256(data: impl AsRef<[u8]>) -> H256 {
-    use tiny_keccak::{Hasher, Keccak};
-
-    let mut buf = [0u8; 32];
-    let mut hasher = Keccak::v256();
-    hasher.update(data.as_ref());
-    hasher.finalize(&mut buf);
-    buf.into()
-}
-
 /// Hash a message according to [EIP-191] (version `0x01`).
 ///
 /// The final message is a UTF-8 string, encoded as follows:
@@ -149,7 +134,7 @@ pub fn hash_message<T: AsRef<[u8]>>(message: T) -> H256 {
     eth_message.extend_from_slice(len_string.as_bytes());
     eth_message.extend_from_slice(message);
 
-    H256(*keccak256(&eth_message))
+    (keccak256(&eth_message))
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
