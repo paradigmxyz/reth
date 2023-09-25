@@ -13,6 +13,7 @@ use std::ops::RangeBounds;
 ///  WIP Rudimentary impl just for testes
 /// TODO: should be able to walk through snapshot files/block_ranges
 /// TODO: Arc over NippyJars and/or NippyJarCursors (LRU)
+#[derive(Debug)]
 pub struct SnapshotProvider<'a> {
     /// NippyJar
     pub jar: &'a NippyJar,
