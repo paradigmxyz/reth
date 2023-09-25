@@ -6024,12 +6024,15 @@ dependencies = [
  "boa_engine",
  "boa_gc",
  "hashbrown 0.14.0",
+ "icu_collections",
+ "icu_provider_macros",
  "reth-primitives",
  "reth-rpc-types",
  "revm",
  "serde",
  "serde_json",
  "thiserror",
+ "tinystr",
  "tokio",
 ]
 
