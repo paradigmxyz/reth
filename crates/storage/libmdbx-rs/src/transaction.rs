@@ -10,7 +10,7 @@ use indexmap::IndexSet;
 use libc::{c_uint, c_void};
 use parking_lot::Mutex;
 use std::{
-    fmt, fmt::Debug, marker::PhantomData, mem::size_of, ptr, rc::Rc, result, slice,
+    fmt, fmt::Debug, marker::PhantomData, mem::size_of, ptr, rc::Rc, slice,
     sync::mpsc::sync_channel,
 };
 
@@ -421,7 +421,7 @@ where
     K: TransactionKind,
     E: EnvironmentKind,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RoTransaction").finish()
     }
 }

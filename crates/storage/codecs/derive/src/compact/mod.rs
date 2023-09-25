@@ -1,4 +1,3 @@
-extern crate proc_macro2;
 use proc_macro::{self, TokenStream};
 use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
