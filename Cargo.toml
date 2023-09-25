@@ -104,7 +104,6 @@ revm = { git = "https://github.com/Evalir/revm/", branch = "reintroduce-alloy-re
 revm-primitives = { git = "https://github.com/Evalir/revm/", branch = "reintroduce-alloy-rebased" }
 
 ## eth
-alloy-primitives = "0.3"
 alloy-rlp = "0.3"
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
