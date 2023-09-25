@@ -5,8 +5,8 @@
     issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
 )]
 #![allow(clippy::type_complexity)]
-// TODO: add these warnings back
-// TODO: #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
+// TODO(danipopes): add these warnings
+// #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
