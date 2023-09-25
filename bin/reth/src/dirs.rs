@@ -10,14 +10,9 @@ use std::{
 
 /// Constructs a string to be used as a path for configuration and db paths.
 pub fn config_path_prefix(chain: Chain) -> String {
-    if chain == Chain::mainnet() {
-        "mainnet".to_string()
-    } else if chain == Chain::goerli() {
-        "goerli".to_string()
-    } else if chain == Chain::sepolia() {
-        "sepolia".to_string()
-    } else {
-        chain.id().to_string()
+    match chain {
+        Chain::Named(name) => name.to_string(),
+        Chain::Id(id) => id.to_string(),
     }
 }
 
@@ -324,5 +319,20 @@ mod tests {
         let path = MaybePlatformPath::<DataDirPath>::from_str("my/path/to/datadir").unwrap();
         let path = path.unwrap_or_chain_default(Chain::mainnet());
         assert!(path.as_ref().ends_with("my/path/to/datadir"), "{:?}", path);
+    }
+
+    #[test]
+    fn test_maybe_testnet_datadir_path() {
+        let path = MaybePlatformPath::<DataDirPath>::default();
+        let path = path.unwrap_or_chain_default(Chain::goerli());
+        assert!(path.as_ref().ends_with("reth/goerli"), "{:?}", path);
+
+        let path = MaybePlatformPath::<DataDirPath>::default();
+        let path = path.unwrap_or_chain_default(Chain::holesky());
+        assert!(path.as_ref().ends_with("reth/holesky"), "{:?}", path);
+
+        let path = MaybePlatformPath::<DataDirPath>::default();
+        let path = path.unwrap_or_chain_default(Chain::sepolia());
+        assert!(path.as_ref().ends_with("reth/sepolia"), "{:?}", path);
     }
 }
