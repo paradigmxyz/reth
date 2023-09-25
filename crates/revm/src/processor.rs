@@ -623,7 +623,7 @@ mod tests {
     }
 
     impl StateRootProvider for StateProviderTest {
-        fn state_root(&self, _bundle_state: BundleStateWithReceipts) -> RethResult<H256> {
+        fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> RethResult<H256> {
             todo!()
         }
     }
