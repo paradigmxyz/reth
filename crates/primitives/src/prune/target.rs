@@ -5,10 +5,11 @@ use crate::{
 use paste::paste;
 use serde::{Deserialize, Serialize};
 
-/// Minimum distance necessary from the tip so blockchain tree can work correctly:
-/// 1. Minimum 2 epochs (32 blocks per epoch) required to handle any reorg possible
+/// Minimum distance from the tip necessary for the node to work correctly:
+/// 1. Minimum 2 epochs (32 blocks per epoch) required to handle any reorg according to the
+///    consensus protocol.
 /// 2. Another 10k blocks to have a room for maneuver in case when things go wrong and a manual
-///    unwind is required
+///    unwind is required.
 pub const MINIMUM_PRUNING_DISTANCE: u64 = 32 * 2 + 10_000;
 
 /// Pruning configuration for every part of the data that can be pruned.
