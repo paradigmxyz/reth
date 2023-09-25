@@ -82,7 +82,7 @@ impl PeersHandle {
 ///
 /// The [`PeersManager`] will be notified on peer related changes
 #[derive(Debug)]
-pub(crate) struct PeersManager {
+pub struct PeersManager {
     /// All peers known to the network
     peers: HashMap<PeerId, Peer>,
     /// Copy of the sender half, so new [`PeersHandle`] can be created on demand.
@@ -118,7 +118,7 @@ pub(crate) struct PeersManager {
 
 impl PeersManager {
     /// Create a new instance with the given config
-    pub(crate) fn new(config: PeersConfig) -> Self {
+    pub fn new(config: PeersConfig) -> Self {
         let PeersConfig {
             refill_slots_interval,
             connection_info,
@@ -1039,6 +1039,7 @@ pub(crate) enum PeerCommand {
 
 /// Actions the peer manager can trigger.
 #[derive(Debug)]
+#[allow(missing_docs)]
 pub enum PeerAction {
     /// Start a new connection to a peer.
     Connect {
@@ -1069,7 +1070,7 @@ pub enum PeerAction {
     PeerRemoved(PeerId),
 }
 
-/// Config type for initiating a [`PeersManager`] instance
+/// Config type for initiating a [`PeersManager`] instance.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]

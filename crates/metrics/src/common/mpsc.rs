@@ -267,27 +267,27 @@ struct MeteredReceiverMetrics {
     messages_received: Counter,
 }
 
-/// A wrapper type around [PollSender](PollSender) that updates metrics on send.
+/// A wrapper type around [PollSender] that updates metrics on send.
 #[derive(Debug)]
 pub struct MeteredPollSender<T> {
-    /// The [PollSender](PollSender) that this wraps around
+    /// The [PollSender] that this wraps around.
     sender: PollSender<T>,
-    /// Holds metrics for this type
+    /// Holds metrics for this type.
     metrics: MeteredPollSenderMetrics,
 }
 
 impl<T: Send + 'static> MeteredPollSender<T> {
-    /// Creates a new [`MeteredPollSender`] wrapping around the provided [PollSender](PollSender)
+    /// Creates a new [`MeteredPollSender`] wrapping around the provided [PollSender].
     pub fn new(sender: PollSender<T>, scope: &'static str) -> Self {
         Self { sender, metrics: MeteredPollSenderMetrics::new(scope) }
     }
 
-    /// Returns the underlying [PollSender](PollSender).
+    /// Returns the underlying [PollSender].
     pub fn inner(&self) -> &PollSender<T> {
         &self.sender
     }
 
-    /// Calls the underlying [PollSender](PollSender)'s `poll_reserve`, incrementing the appropriate
+    /// Calls the underlying [PollSender]'s `poll_reserve`, incrementing the appropriate
     /// metrics depending on the result.
     pub fn poll_reserve(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), PollSendError<T>>> {
         match self.sender.poll_reserve(cx) {
@@ -300,7 +300,7 @@ impl<T: Send + 'static> MeteredPollSender<T> {
         }
     }
 
-    /// Calls the underlying [PollSender](PollSender)'s `send_item`, incrementing the appropriate
+    /// Calls the underlying [PollSender]'s `send_item`, incrementing the appropriate
     /// metrics depending on the result.
     pub fn send_item(&mut self, item: T) -> Result<(), PollSendError<T>> {
         match self.sender.send_item(item) {

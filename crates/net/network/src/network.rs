@@ -157,7 +157,7 @@ impl NetworkHandle {
         })
     }
 
-    /// Provides a shareable reference to the [`BandwidthMeter`] stored on the [`NetworkInner`]
+    /// Provides a shareable reference to the [`BandwidthMeter`] stored on the `NetworkInner`.
     pub fn bandwidth_meter(&self) -> &BandwidthMeter {
         &self.inner.bandwidth_meter
     }

@@ -204,6 +204,7 @@ impl<C> TestnetHandle<C> {
     }
 }
 
+/// A peer in the [`Testnet`].
 #[pin_project]
 #[derive(Debug)]
 pub struct Peer<C> {
