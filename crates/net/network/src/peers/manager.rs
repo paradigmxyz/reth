@@ -81,7 +81,8 @@ impl PeersHandle {
 /// From this type, connections to peers are established or disconnected, see [`PeerAction`].
 ///
 /// The [`PeersManager`] will be notified on peer related changes
-pub(crate) struct PeersManager {
+#[derive(Debug)]
+pub struct PeersManager {
     /// All peers known to the network
     peers: HashMap<PeerId, Peer>,
     /// Copy of the sender half, so new [`PeersHandle`] can be created on demand.
@@ -117,7 +118,7 @@ pub(crate) struct PeersManager {
 
 impl PeersManager {
     /// Create a new instance with the given config
-    pub(crate) fn new(config: PeersConfig) -> Self {
+    pub fn new(config: PeersConfig) -> Self {
         let PeersConfig {
             refill_slots_interval,
             connection_info,
@@ -1020,6 +1021,7 @@ impl PeerConnectionState {
 }
 
 /// Commands the [`PeersManager`] listens for.
+#[derive(Debug)]
 pub(crate) enum PeerCommand {
     /// Command for manually add
     Add(PeerId, SocketAddr),
@@ -1046,28 +1048,47 @@ pub enum PeerAction {
         remote_addr: SocketAddr,
     },
     /// Disconnect an existing connection.
-    Disconnect { peer_id: PeerId, reason: Option<DisconnectReason> },
+    Disconnect {
+        /// The peer ID of the established connection.
+        peer_id: PeerId,
+        /// An optional reason for the disconnect.
+        reason: Option<DisconnectReason>,
+    },
     /// Disconnect an existing incoming connection, because the peers reputation is below the
     /// banned threshold or is on the [`BanList`]
     DisconnectBannedIncoming {
-        /// Peer id of the established connection.
+        /// The peer ID of the established connection.
         peer_id: PeerId,
     },
     /// Ban the peer in discovery.
-    DiscoveryBanPeerId { peer_id: PeerId, ip_addr: IpAddr },
+    DiscoveryBanPeerId {
+        /// The peer ID.
+        peer_id: PeerId,
+        /// The IP address.
+        ip_addr: IpAddr,
+    },
     /// Ban the IP in discovery.
-    DiscoveryBanIp { ip_addr: IpAddr },
+    DiscoveryBanIp {
+        /// The IP address.
+        ip_addr: IpAddr,
+    },
     /// Ban the peer temporarily
-    BanPeer { peer_id: PeerId },
+    BanPeer {
+        /// The peer ID.
+        peer_id: PeerId,
+    },
     /// Unban the peer temporarily
-    UnBanPeer { peer_id: PeerId },
+    UnBanPeer {
+        /// The peer ID.
+        peer_id: PeerId,
+    },
     /// Emit peerAdded event
     PeerAdded(PeerId),
     /// Emit peerRemoved event
     PeerRemoved(PeerId),
 }
 
-/// Config type for initiating a [`PeersManager`] instance
+/// Config type for initiating a [`PeersManager`] instance.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]

@@ -150,6 +150,7 @@ impl HashedPostState {
 }
 
 /// The hashed cursor factory for the post state.
+#[derive(Debug)]
 pub struct HashedPostStateCursorFactory<'a, 'b, TX> {
     tx: &'a TX,
     post_state: &'b HashedPostState,

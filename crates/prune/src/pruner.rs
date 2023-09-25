@@ -33,6 +33,7 @@ pub type PrunerResult = Result<bool, PrunerError>;
 pub type PrunerWithResult<DB> = (Pruner<DB>, PrunerResult);
 
 /// Pruning routine. Main pruning logic happens in [Pruner::run].
+#[derive(Debug)]
 pub struct Pruner<DB> {
     metrics: Metrics,
     provider_factory: ProviderFactory<DB>,

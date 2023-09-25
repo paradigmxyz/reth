@@ -48,6 +48,7 @@ members = [
     "examples",
     "examples/additional-rpc-namespace-in-cli",
     "examples/rpc-db",
+    "examples/manual-p2p",
 ]
 default-members = ["bin/reth"]
 
@@ -56,7 +57,7 @@ default-members = ["bin/reth"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.9"
 edition = "2021"
 rust-version = "1.70" # Remember to update .clippy.toml and README.md
 license = "MIT OR Apache-2.0"
@@ -94,6 +95,9 @@ reth-tasks = { path = "./crates/tasks" }
 reth-network = { path = "./crates/net/network" }
 reth-network-api = { path = "./crates/net/network-api" }
 reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat" }
+reth-discv4 = { path = "./crates/net/discv4" }
+reth-eth-wire = { path = "./crates/net/eth-wire" }
+reth-ecies = { path = "./crates/net/ecies" }
 
 # revm
 revm = { git = "https://github.com/Evalir/revm/", branch = "reintroduce-alloy-rebased" }

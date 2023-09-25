@@ -10,6 +10,7 @@ use reth_primitives::{
 };
 
 /// A cursor over the storage trie.
+#[derive(Debug)]
 pub struct StorageTrieCursor<C> {
     /// The underlying cursor.
     pub cursor: C,

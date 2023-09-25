@@ -22,6 +22,7 @@ use std::{
 };
 
 /// StateRoot is used to compute the root node of a state trie.
+#[derive(Debug)]
 pub struct StateRoot<'a, 'b, TX, H> {
     /// A reference to the database transaction.
     pub tx: &'a TX,
@@ -368,6 +369,7 @@ where
 }
 
 /// StorageRoot is used to compute the root node of an account storage trie.
+#[derive(Debug)]
 pub struct StorageRoot<'a, 'b, TX, H> {
     /// A reference to the database transaction.
     pub tx: &'a TX,

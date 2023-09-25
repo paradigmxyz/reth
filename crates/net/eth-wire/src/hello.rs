@@ -45,6 +45,7 @@ impl HelloMessage {
     }
 }
 
+#[derive(Debug)]
 pub struct HelloMessageBuilder {
     /// The version of the `p2p` protocol.
     pub protocol_version: Option<ProtocolVersion>,

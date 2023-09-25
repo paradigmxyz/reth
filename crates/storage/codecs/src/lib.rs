@@ -1,4 +1,5 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
+//! Compact codec.
+
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
@@ -12,6 +13,8 @@ use revm_primitives::{
     alloy_primitives::{Bloom, B512 as H512},
     Address, Bytes, B256 as H256, U256,
 };
+
+pub use codecs_derive::*;
 
 /// Trait that implements the `Compact` codec.
 ///
@@ -495,7 +498,7 @@ mod tests {
 
     #[main_codec]
     #[derive(Debug, PartialEq, Clone)]
-    pub struct TestStruct {
+    struct TestStruct {
         f_u64: u64,
         f_u256: U256,
         f_bool_t: bool,
@@ -547,7 +550,7 @@ mod tests {
 
     #[main_codec]
     #[derive(Debug, PartialEq, Clone, Default)]
-    pub enum TestEnum {
+    enum TestEnum {
         #[default]
         Var0,
         Var1(TestStruct),

@@ -98,6 +98,7 @@ pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
 
 /// A container that wraps chains and block indices to allow searching for block hashes across all
 /// sidechains.
+#[derive(Debug)]
 pub struct BlockHashes<'a> {
     /// The current tracked chains.
     pub chains: &'a mut HashMap<BlockChainId, AppendableChain>,

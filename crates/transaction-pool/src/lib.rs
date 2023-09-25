@@ -1,22 +1,3 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![doc(
-    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
-    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
-)]
-#![warn(missing_docs)]
-#![deny(
-    unused_must_use,
-    rust_2018_idioms,
-    unreachable_pub,
-    missing_debug_implementations,
-    rustdoc::broken_intra_doc_links
-)]
-#![doc(test(
-    no_crate_inject,
-    attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
-))]
-
 //! Reth's transaction pool implementation.
 //!
 //! This crate provides a generic transaction pool implementation.
@@ -153,6 +134,16 @@
 //!
 //! - `serde` (default): Enable serde support
 //! - `test-utils`: Export utilities for testing
+
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+)]
+#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
+#![deny(unused_must_use, rust_2018_idioms)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+
 use crate::pool::PoolInner;
 use aquamarine as _;
 use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
@@ -180,9 +171,9 @@ pub use crate::{
     traits::{
         AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
         EthBlobTransactionSidecar, EthPoolTransaction, EthPooledTransaction,
-        GetPooledTransactionLimit, NewTransactionEvent, PoolSize, PoolTransaction, PropagateKind,
-        PropagatedTransactions, TransactionListenerKind, TransactionOrigin, TransactionPool,
-        TransactionPoolExt,
+        GetPooledTransactionLimit, NewBlobSidecar, NewTransactionEvent, PoolSize, PoolTransaction,
+        PropagateKind, PropagatedTransactions, TransactionListenerKind, TransactionOrigin,
+        TransactionPool, TransactionPoolExt,
     },
     validate::{
         EthTransactionValidator, TransactionValidationOutcome, TransactionValidationTaskExecutor,
@@ -375,6 +366,10 @@ where
 
     fn pending_transactions_listener_for(&self, kind: TransactionListenerKind) -> Receiver<TxHash> {
         self.pool.add_pending_listener(kind)
+    }
+
+    fn blob_transaction_sidecars_listener(&self) -> Receiver<NewBlobSidecar> {
+        self.pool.add_blob_sidecar_listener()
     }
 
     fn new_transactions_listener_for(

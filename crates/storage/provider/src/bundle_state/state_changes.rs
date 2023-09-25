@@ -10,7 +10,7 @@ use reth_revm_primitives::into_reth_acc;
 use revm::db::states::{PlainStorageChangeset, StateChangeset};
 
 /// A change to the state of the world.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct StateChanges(pub StateChangeset);
 
 impl From<StateChangeset> for StateChanges {

@@ -29,6 +29,7 @@ use tokio_stream::{Stream, StreamExt};
 use tracing::{debug, error};
 
 /// Mock discovery node
+#[derive(Debug)]
 pub struct MockDiscovery {
     local_addr: SocketAddr,
     local_enr: NodeRecord,
@@ -190,12 +191,14 @@ impl Stream for MockDiscovery {
 }
 
 /// The event type the mock service produces
+#[derive(Debug)]
 pub enum MockEvent {
     Pong { ping: Ping, pong: Pong, to: SocketAddr },
     Neighbours { nodes: Vec<NodeRecord>, to: SocketAddr },
 }
 
 /// Command for interacting with the `MockDiscovery` service
+#[derive(Debug)]
 pub enum MockCommand {
     MockPong { node_id: PeerId },
     MockNeighbours { target: PeerId, nodes: Vec<NodeRecord> },
