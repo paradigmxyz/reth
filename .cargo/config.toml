@@ -1,0 +1,6 @@
+[alias]
+docs = "doc --workspace --all-features --no-deps --document-private-items"
+
+[build]
+# Keep in sync with `.github/workflows/ci.yml:jobs.docs`
+rustdocflags = "--cfg docsrs --generate-link-to-definition --enable-index-page -Zunstable-options"
