@@ -85,8 +85,8 @@ impl EthSigner for DevSigner {
 
     fn sign_typed_data(&self, address: Address, payload: &TypedData) -> Result<Signature> {
         let encoded = payload.eip712_signing_hash().map_err(|_| SignError::InvalidTypedData)?;
-        let b256 = encoded.into();
-        self.sign_hash(H256(b256), address)
+        // let b256 = encoded;
+        self.sign_hash(encoded, address)
     }
 }
 

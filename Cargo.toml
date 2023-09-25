@@ -180,3 +180,5 @@ serial_test = "2"
 # TODO
 [patch.crates-io]
 alloy-primitives = { git = "https://github.com/alloy-rs/core" }
+alloy-dyn-abi = { git = "https://github.com/alloy-rs/core"}
+ethers-core = {git = "https://github.com/gakonst/ethers-rs"}
