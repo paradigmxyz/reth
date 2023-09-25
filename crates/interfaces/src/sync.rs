@@ -49,8 +49,7 @@ impl SyncState {
 }
 
 /// A [NetworkSyncUpdater] implementation that does nothing.
-#[derive(Debug, Clone, Default)]
-#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct NoopSyncStateUpdater;
 
 impl SyncStateProvider for NoopSyncStateUpdater {

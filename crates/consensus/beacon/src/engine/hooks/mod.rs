@@ -1,6 +1,7 @@
+use reth_interfaces::RethError;
 use reth_primitives::BlockNumber;
 use std::{
-    fmt::Debug,
+    fmt,
     task::{Context, Poll},
 };
 
@@ -9,12 +10,17 @@ pub(crate) use controller::{EngineHooksController, PolledHook};
 
 mod prune;
 pub use prune::PruneHook;
-use reth_interfaces::RethError;
 
 /// Collection of [engine hooks][`EngineHook`].
 #[derive(Default)]
 pub struct EngineHooks {
     inner: Vec<Box<dyn EngineHook>>,
+}
+
+impl fmt::Debug for EngineHooks {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EngineHooks").field("inner", &self.inner.len()).finish()
+    }
 }
 
 impl EngineHooks {

@@ -321,6 +321,7 @@ struct NetworkInner {
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
 #[allow(missing_docs)]
+#[derive(Debug)]
 pub(crate) enum NetworkHandleMessage {
     /// Adds an address for a peer.
     AddPeerAddress(PeerId, PeerKind, SocketAddr),

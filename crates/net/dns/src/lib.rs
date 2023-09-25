@@ -10,7 +10,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
 )]
-#![warn(missing_docs, unreachable_pub)]
+#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
@@ -57,7 +57,7 @@ mod sync;
 pub mod tree;
 
 /// [DnsDiscoveryService] front-end.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DnsDiscoveryHandle {
     /// Channel for sending commands to the service.
     to_service: UnboundedSender<DnsDiscoveryCommand>,
@@ -90,6 +90,7 @@ impl DnsDiscoveryHandle {
 
 /// A client that discovers nodes via DNS.
 #[must_use = "Service does nothing unless polled"]
+#[allow(missing_debug_implementations)]
 pub struct DnsDiscoveryService<R: Resolver = DnsResolver> {
     /// Copy of the sender half, so new [`DnsDiscoveryHandle`] can be created on demand.
     command_tx: UnboundedSender<DnsDiscoveryCommand>,

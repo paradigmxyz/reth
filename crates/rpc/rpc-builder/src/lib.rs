@@ -95,7 +95,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
 )]
-#![warn(missing_docs, unreachable_pub)]
+#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
@@ -430,7 +430,7 @@ impl RpcModuleConfig {
 }
 
 /// Configures [RpcModuleConfig]
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct RpcModuleConfigBuilder {
     eth: Option<EthConfig>,
 }
@@ -704,6 +704,7 @@ impl Serialize for RethRpcModule {
 }
 
 /// A Helper type the holds instances of the configured modules.
+#[derive(Debug)]
 pub struct RethModuleRegistry<Provider, Pool, Network, Tasks, Events> {
     provider: Provider,
     pool: Pool,

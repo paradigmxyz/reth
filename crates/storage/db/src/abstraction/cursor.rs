@@ -1,4 +1,5 @@
 use std::{
+    fmt,
     marker::PhantomData,
     ops::{Bound, RangeBounds},
 };
@@ -148,6 +149,16 @@ pub struct Walker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
     _tx_phantom: PhantomData<&'tx T>,
 }
 
+impl<'tx, T, CURSOR> fmt::Debug for Walker<'_, 'tx, T, CURSOR>
+where
+    T: Table,
+    CURSOR: DbCursorRO<'tx, T> + fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Walker").field("cursor", &self.cursor).field("start", &self.start).finish()
+    }
+}
+
 impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
     for Walker<'cursor, 'tx, T, CURSOR>
 {
@@ -193,6 +204,19 @@ pub struct ReverseWalker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
     start: IterPairResult<T>,
     /// Phantom data for 'tx. As it is only used for `DbCursorRO`.
     _tx_phantom: PhantomData<&'tx T>,
+}
+
+impl<'tx, T, CURSOR> fmt::Debug for ReverseWalker<'_, 'tx, T, CURSOR>
+where
+    T: Table,
+    CURSOR: DbCursorRO<'tx, T> + fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ReverseWalker")
+            .field("cursor", &self.cursor)
+            .field("start", &self.start)
+            .finish()
+    }
 }
 
 impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> ReverseWalker<'cursor, 'tx, T, CURSOR> {
@@ -245,6 +269,21 @@ pub struct RangeWalker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
     is_done: bool,
     /// Phantom data for 'tx. As it is only used for `DbCursorRO`.
     _tx_phantom: PhantomData<&'tx T>,
+}
+
+impl<'tx, T, CURSOR> fmt::Debug for RangeWalker<'_, 'tx, T, CURSOR>
+where
+    T: Table,
+    CURSOR: DbCursorRO<'tx, T> + fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RangeWalker")
+            .field("cursor", &self.cursor)
+            .field("start", &self.start)
+            .field("end_key", &self.end_key)
+            .field("is_done", &self.is_done)
+            .finish()
+    }
 }
 
 impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
@@ -320,6 +359,19 @@ pub struct DupWalker<'cursor, 'tx, T: DupSort, CURSOR: DbDupCursorRO<'tx, T>> {
     pub start: IterPairResult<T>,
     /// Phantom data for 'tx. As it is only used for `DbDupCursorRO`.
     pub _tx_phantom: PhantomData<&'tx T>,
+}
+
+impl<'tx, T, CURSOR> fmt::Debug for DupWalker<'_, 'tx, T, CURSOR>
+where
+    T: DupSort,
+    CURSOR: DbDupCursorRO<'tx, T> + fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DupWalker")
+            .field("cursor", &self.cursor)
+            .field("start", &self.start)
+            .finish()
+    }
 }
 
 impl<'cursor, 'tx, T: DupSort, CURSOR: DbCursorRW<'tx, T> + DbDupCursorRO<'tx, T>>

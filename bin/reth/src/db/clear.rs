@@ -1,5 +1,4 @@
 use clap::Parser;
-
 use reth_db::{
     database::Database,
     table::Table,
@@ -9,9 +8,9 @@ use reth_db::{
 
 /// The arguments for the `reth db clear` command
 #[derive(Parser, Debug)]
+
 pub struct Command {
     /// Table name
-    #[arg()]
     pub table: Tables,
 }
 

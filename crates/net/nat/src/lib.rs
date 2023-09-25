@@ -9,7 +9,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
 )]
-#![warn(missing_docs, unreachable_pub)]
+#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
@@ -109,6 +109,16 @@ pub struct ResolveNatInterval {
 }
 
 // === impl ResolveNatInterval ===
+
+impl fmt::Debug for ResolveNatInterval {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ResolveNatInterval")
+            .field("resolver", &self.resolver)
+            .field("future", &self.future.as_ref().map(drop))
+            .field("interval", &self.interval)
+            .finish()
+    }
+}
 
 impl ResolveNatInterval {
     fn with_interval(resolver: NatResolver, interval: tokio::time::Interval) -> Self {

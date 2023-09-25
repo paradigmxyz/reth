@@ -24,6 +24,7 @@ pub const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
 /// An un-authenticated [`EthStream`]. This is consumed and returns a [`EthStream`] after the
 /// `Status` handshake is completed.
 #[pin_project]
+#[derive(Debug)]
 pub struct UnauthedEthStream<S> {
     #[pin]
     inner: S,

@@ -81,6 +81,7 @@ impl PeersHandle {
 /// From this type, connections to peers are established or disconnected, see [`PeerAction`].
 ///
 /// The [`PeersManager`] will be notified on peer related changes
+#[derive(Debug)]
 pub(crate) struct PeersManager {
     /// All peers known to the network
     peers: HashMap<PeerId, Peer>,
@@ -1020,6 +1021,7 @@ impl PeerConnectionState {
 }
 
 /// Commands the [`PeersManager`] listens for.
+#[derive(Debug)]
 pub(crate) enum PeerCommand {
     /// Command for manually add
     Add(PeerId, SocketAddr),

@@ -4,8 +4,10 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
 )]
-#![allow(clippy::type_complexity)] // TODO: remove this
-// TODO: #![warn(missing_docs, unreachable_pub)]
+#![allow(clippy::type_complexity)]
+// TODO: remove this
+// TODO: #![warn(missing_debug_implementations,  missing_docs,
+// unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use)] // TODO: rust_2018_idioms
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
