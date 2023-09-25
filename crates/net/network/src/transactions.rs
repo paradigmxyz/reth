@@ -244,7 +244,7 @@ where
     fn on_new_transactions(&mut self, hashes: Vec<TxHash>) {
         // Nothing to propagate while initially syncing
         if self.network.is_initially_syncing() {
-            return
+            return;
         }
 
         trace!(target: "net::tx", "Start propagating transactions");
@@ -276,65 +276,107 @@ where
         let max_num_full = (self.peers.len() as f64).sqrt() as usize + 1;
 
         // Note: Assuming ~random~ order due to random state of the peers map hasher
-        for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
-            // filter all transactions unknown to the peer
-            let mut hashes = PooledTransactionsHashesBuilder::new(peer.version);
-            let mut full_transactions = FullTransactionsBuilder::default();
-
-            // Iterate through the transactions to propagate and fill the hashes and full
-            // transaction lists, before deciding whether or not to send full transactions to the
-            // peer.
-            for tx in to_propagate.iter() {
-                if peer.transactions.insert(tx.hash()) {
-                    hashes.push(tx);
-
-                    // Do not send full 4844 transaction hashes to peers.
-                    //
-                    //  Nodes MUST NOT automatically broadcast blob transactions to their peers.
-                    //  Instead, those transactions are only announced using
-                    //  `NewPooledTransactionHashes` messages, and can then be manually requested
-                    //  via `GetPooledTransactions`.
-                    //
-                    // From: <https://eips.ethereum.org/EIPS/eip-4844#networking>
-                    if !tx.transaction.is_eip4844() {
-                        full_transactions.push(tx);
-                    }
-                }
-            }
-            let mut new_pooled_hashes = hashes.build();
-
-            if !new_pooled_hashes.is_empty() {
-                // determine whether to send full tx objects or hashes.
-                if peer_idx > max_num_full {
-                    // enforce tx soft limit per message for the (unlikely) event the number of
-                    // hashes exceeds it
-                    new_pooled_hashes.truncate(NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT);
-
-                    for hash in new_pooled_hashes.iter_hashes().copied() {
-                        propagated.0.entry(hash).or_default().push(PropagateKind::Hash(*peer_id));
-                    }
-                    // send hashes of transactions
-                    self.network.send_transactions_hashes(*peer_id, new_pooled_hashes);
-                } else {
-                    let new_full_transactions = full_transactions.build();
-
-                    for tx in new_full_transactions.iter() {
-                        propagated
-                            .0
-                            .entry(tx.hash())
-                            .or_default()
-                            .push(PropagateKind::Full(*peer_id));
-                    }
-                    // send full transactions
-                    self.network.send_transactions(*peer_id, new_full_transactions);
-                }
-            }
+        for (peer_idx, peer_info) in self.peers.iter_mut().enumerate() {
+            Self::perform_peer_propagation(
+                &mut self.network,
+                &to_propagate,
+                peer_info,
+                &mut propagated,
+                peer_idx < max_num_full,
+            );
         }
 
         // Update propagated transactions metrics
         self.metrics.propagated_transactions.increment(propagated.0.len() as u64);
 
         propagated
+    }
+
+    /// Propagate the transactions to a specific peer
+    fn propagate_transactions_to_peer(&mut self, txs: Vec<TxHash>, peer_id: PeerId) -> PropagatedTransactions {
+        let mut propagated = PropagatedTransactions::default();
+        let peer_o = self.peers.get_mut(&peer_id);
+        if peer_o.is_none() {
+            return propagated;
+        }
+        let mut peer = peer_o.unwrap();
+
+        let to_propagate = self
+            .pool
+            .get_all(txs)
+            .into_iter()
+            .map(|tx| PropagateTransaction::new(tx))
+            .collect::<Vec<_>>();
+
+        Self::perform_peer_propagation(
+            &mut self.network,
+            &to_propagate,
+            (&peer_id, &mut peer),
+            &mut propagated,
+            true,
+        );
+
+        // Update propagated transactions metrics
+        self.metrics.propagated_transactions.increment(propagated.0.len() as u64);
+
+        propagated
+    }
+
+    fn perform_peer_propagation(
+        network: &mut NetworkHandle,
+        to_propagate: &[PropagateTransaction],
+        (peer_id, peer): (&PeerId, &mut Peer),
+        propagated: &mut PropagatedTransactions,
+        send_full: bool,
+    ) {
+        // filter all transactions unknown to the peer
+        let mut hashes = PooledTransactionsHashesBuilder::new(peer.version);
+        let mut full_transactions = FullTransactionsBuilder::default();
+
+        // Iterate through the transactions to propagate and fill the hashes and full
+        // transaction lists, before deciding whether or not to send full transactions to the
+        // peer.
+        for tx in to_propagate.iter() {
+            if peer.transactions.insert(tx.hash()) {
+                hashes.push(tx);
+
+                // Do not send full 4844 transaction hashes to peers.
+                //
+                //  Nodes MUST NOT automatically broadcast blob transactions to their peers.
+                //  Instead, those transactions are only announced using
+                //  `NewPooledTransactionHashes` messages, and can then be manually requested
+                //  via `GetPooledTransactions`.
+                //
+                // From: <https://eips.ethereum.org/EIPS/eip-4844#networking>
+                if !tx.transaction.is_eip4844() {
+                    full_transactions.push(tx);
+                }
+            }
+        }
+        let mut new_pooled_hashes = hashes.build();
+
+        if !new_pooled_hashes.is_empty() {
+            // determine whether to send full tx objects or hashes.
+            if !send_full {
+                // enforce tx soft limit per message for the (unlikely) event the number of
+                // hashes exceeds it
+                new_pooled_hashes.truncate(NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT);
+
+                for hash in new_pooled_hashes.iter_hashes().copied() {
+                    propagated.0.entry(hash).or_default().push(PropagateKind::Hash(*peer_id));
+                }
+                // send hashes of transactions
+                network.send_transactions_hashes(*peer_id, new_pooled_hashes);
+            } else {
+                let new_full_transactions = full_transactions.build();
+
+                for tx in new_full_transactions.iter() {
+                    propagated.0.entry(tx.hash()).or_default().push(PropagateKind::Full(*peer_id));
+                }
+                // send full transactions
+                network.send_transactions(*peer_id, new_full_transactions);
+            }
+        }
     }
 
     /// Request handler for an incoming `NewPooledTransactionHashes`
@@ -345,7 +387,7 @@ where
     ) {
         // If the node is initially syncing, ignore transactions
         if self.network.is_initially_syncing() {
-            return
+            return;
         }
 
         let mut num_already_seen = 0;
@@ -363,7 +405,7 @@ where
 
             if hashes.is_empty() {
                 // nothing to request
-                return
+                return;
             }
 
             // enforce recommended soft limit, however the peer may enforce an arbitrary limit on
@@ -382,7 +424,7 @@ where
             } else {
                 // peer channel is saturated, drop the request
                 self.metrics.egress_peer_channel_full.increment(1);
-                return
+                return;
             }
 
             if num_already_seen > 0 {
@@ -432,7 +474,10 @@ where
             TransactionsCommand::PropagateHash(hash) => self.on_new_transactions(vec![hash]),
             TransactionsCommand::PropagateHashTo(_hash, _peer) => todo!(),
             TransactionsCommand::GetActivePeers => todo!(),
-            TransactionsCommand::PropagateTransactionsTo(_txs, _peer) => todo!(),
+            TransactionsCommand::PropagateTransactionsTo(_txs, _peer) => {
+                let propagated = self.propagate_transactions_to_peer(_txs, _peer);
+                self.pool.on_propagated(propagated);
+            }
             TransactionsCommand::GetTransactionHashes(_peers) => todo!(),
             TransactionsCommand::GetPeerTransactionHashes(_peer) => todo!(),
         }
@@ -473,7 +518,7 @@ where
                         self.pool.pooled_transactions_max(NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT);
                     if pooled_txs.is_empty() {
                         // do not send a message if there are no transactions in the pool
-                        return
+                        return;
                     }
 
                     for pooled_tx in pooled_txs.into_iter() {
@@ -498,7 +543,7 @@ where
     ) {
         // If the node is pipeline syncing, ignore transactions
         if self.network.is_initially_syncing() {
-            return
+            return;
         }
 
         // tracks the quality of the given transactions
@@ -512,7 +557,7 @@ where
                     tx
                 } else {
                     has_bad_transactions = true;
-                    continue
+                    continue;
                 };
 
                 // track that the peer knows this transaction, but only if this is a new broadcast.
@@ -567,7 +612,7 @@ where
             RequestError::Timeout => ReputationChangeKind::Timeout,
             RequestError::ChannelClosed | RequestError::ConnectionDropped => {
                 // peer is already disconnected
-                return
+                return;
             }
             RequestError::BadResponse => ReputationChangeKind::BadTransactions,
         };
@@ -660,7 +705,7 @@ where
                     if err.is_bad_transaction() && !this.network.is_syncing() {
                         trace!(target: "net::tx", ?err, "Bad transaction import");
                         this.on_bad_import(*err.hash());
-                        continue
+                        continue;
                     }
                     this.on_good_import(*err.hash());
                 }
@@ -720,7 +765,7 @@ impl FullTransactionsBuilder {
     fn push(&mut self, transaction: &PropagateTransaction) {
         let new_size = self.total_size + transaction.size;
         if new_size > MAX_FULL_TRANSACTIONS_PACKET_SIZE {
-            return
+            return;
         }
 
         self.total_size = new_size;
