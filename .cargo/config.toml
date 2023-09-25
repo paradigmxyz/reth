@@ -1,2 +1,2 @@
 [alias]
-docs = "doc --workspace --all-features --no-deps --document-private-items"
+docs = "doc --workspace --all-features --no-deps"
