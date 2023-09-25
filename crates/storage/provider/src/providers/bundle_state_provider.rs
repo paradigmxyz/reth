@@ -58,10 +58,10 @@ impl<SP: StateProvider, BSDP: BundleStateDataProvider> AccountReader
 impl<SP: StateProvider, BSDP: BundleStateDataProvider> StateRootProvider
     for BundleStateProvider<SP, BSDP>
 {
-    fn state_root(&self, post_state: BundleStateWithReceipts) -> RethResult<H256> {
+    fn state_root(&self, post_state: &BundleStateWithReceipts) -> RethResult<H256> {
         let mut state = self.post_state_data_provider.state().clone();
-        state.extend(post_state);
-        self.state_provider.state_root(state)
+        state.extend(post_state.clone());
+        self.state_provider.state_root(&state)
     }
 }
 

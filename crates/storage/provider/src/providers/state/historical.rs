@@ -205,7 +205,7 @@ impl<'a, 'b, TX: DbTx<'a>> BlockHashReader for HistoricalStateProviderRef<'a, 'b
 }
 
 impl<'a, 'b, TX: DbTx<'a>> StateRootProvider for HistoricalStateProviderRef<'a, 'b, TX> {
-    fn state_root(&self, _post_state: BundleStateWithReceipts) -> RethResult<H256> {
+    fn state_root(&self, _post_state: &BundleStateWithReceipts) -> RethResult<H256> {
         Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
     }
 }

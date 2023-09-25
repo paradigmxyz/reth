@@ -793,7 +793,7 @@ where
     let logs_bloom = bundle.block_logs_bloom(block_number).expect("Number is in range");
 
     // calculate the state root
-    let state_root = state_provider.state_root(bundle)?;
+    let state_root = state_provider.state_root(&bundle)?;
 
     // create the block header
     let transactions_root = proofs::calculate_transaction_root(&executed_txs);
@@ -909,7 +909,7 @@ where
 
     // calculate the state root
     let bundle_state = BundleStateWithReceipts::new(db.take_bundle(), vec![], block_number);
-    let state_root = state.state_root(bundle_state)?;
+    let state_root = state.state_root(&bundle_state)?;
 
     let header = Header {
         parent_hash: parent_block.hash,
