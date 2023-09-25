@@ -32,8 +32,11 @@ pub trait TransactionKind: private::Sealed + Debug + 'static {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct RO;
+
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct RW;
 
 impl TransactionKind for RO {

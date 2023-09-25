@@ -35,8 +35,11 @@ pub trait EnvironmentKind: private::Sealed + Debug + 'static {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct NoWriteMap;
+
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct WriteMap;
 
 impl EnvironmentKind for NoWriteMap {
