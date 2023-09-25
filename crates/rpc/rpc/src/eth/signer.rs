@@ -66,7 +66,7 @@ impl EthSigner for DevSigner {
     async fn sign(&self, address: Address, message: &[u8]) -> Result<Signature> {
         // Hash message according to EIP 191:
         // https://ethereum.org/es/developers/docs/apis/json-rpc/#eth_sign
-        let hash = hash_message(message).into();
+        let hash = hash_message(message);
         self.sign_hash(hash, address)
     }
 
