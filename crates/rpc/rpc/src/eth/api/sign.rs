@@ -6,7 +6,8 @@ use crate::{
     },
     EthApi,
 };
-use ethers_core::types::transaction::eip712::TypedData;
+// use ethers_core::types::transaction::eip712::TypedData;
+use alloy_dyn_abi::TypedData;
 use reth_primitives::{Address, Bytes};
 use serde_json::Value;
 use std::ops::Deref;

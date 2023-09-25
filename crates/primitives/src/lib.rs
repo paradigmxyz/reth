@@ -170,5 +170,28 @@ pub fn keccak256(data: impl AsRef<[u8]>) -> H256 {
     buf.into()
 }
 
+/// Hash a message according to [EIP-191] (version `0x01`).
+///
+/// The final message is a UTF-8 string, encoded as follows:
+/// `"\x19Ethereum Signed Message:\n" + message.length + message`
+///
+/// This message is then hashed using [Keccak-256](keccak256).
+///
+/// [EIP-191]: https://eips.ethereum.org/EIPS/eip-191
+pub fn hash_message<T: AsRef<[u8]>>(message: T) -> H256 {
+    const PREFIX: &str = "\x19Ethereum Signed Message:\n";
+
+    let message = message.as_ref();
+    let len = message.len();
+    let len_string = len.to_string();
+
+    let mut eth_message = Vec::with_capacity(PREFIX.len() + len_string.len() + len);
+    eth_message.extend_from_slice(PREFIX.as_bytes());
+    eth_message.extend_from_slice(len_string.as_bytes());
+    eth_message.extend_from_slice(message);
+
+    H256(*keccak256(&eth_message))
+}
+
 #[cfg(any(test, feature = "arbitrary"))]
 pub use arbitrary;

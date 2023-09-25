@@ -1,11 +1,8 @@
 //! An abstraction over ethereum signers.
 
 use crate::eth::error::SignError;
-use ethers_core::{
-    types::transaction::eip712::{Eip712, TypedData},
-    utils::hash_message,
-};
-use reth_primitives::{sign_message, Address, Signature, TransactionSigned, H256};
+use alloy_dyn_abi::TypedData;
+use reth_primitives::{hash_message, sign_message, Address, Signature, TransactionSigned, H256};
 use reth_rpc_types::TypedTransactionRequest;
 
 use secp256k1::SecretKey;
@@ -87,11 +84,12 @@ impl EthSigner for DevSigner {
     }
 
     fn sign_typed_data(&self, address: Address, payload: &TypedData) -> Result<Signature> {
-        let encoded: H256 =
-            payload.encode_eip712().map_err(|_| SignError::InvalidTypedData)?.into();
-        self.sign_hash(encoded, address)
+        let encoded = payload.eip712_signing_hash().map_err(|_| SignError::InvalidTypedData)?;
+        let b256 = encoded.into();
+        self.sign_hash(H256(b256), address)
     }
 }
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -175,6 +173,7 @@ mod test {
         }"#
         );
         let data: TypedData = serde_json::from_value(eip_712_example).unwrap();
+        println!("typed data res{:?}", data);
         let signer = build_signer();
         let sig = signer.sign_typed_data(Address::default(), &data).unwrap();
         let expected = Signature {
