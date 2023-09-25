@@ -14,6 +14,7 @@ use reth_primitives::{
 use std::marker::PhantomData;
 
 /// State provider over latest state that takes tx reference.
+#[derive(Debug)]
 pub struct LatestStateProviderRef<'a, 'b, TX: DbTx<'a>> {
     /// database transaction
     db: &'b TX,
@@ -105,6 +106,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for LatestStateProviderRef<'a, 'b, TX> 
 }
 
 /// State provider for the latest state.
+#[derive(Debug)]
 pub struct LatestStateProvider<'a, TX: DbTx<'a>> {
     /// database transaction
     db: TX,

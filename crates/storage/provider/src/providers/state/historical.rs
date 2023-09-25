@@ -27,6 +27,7 @@ use std::marker::PhantomData;
 /// - [tables::StorageHistory]
 /// - [tables::AccountChangeSet]
 /// - [tables::StorageChangeSet]
+#[derive(Debug)]
 pub struct HistoricalStateProviderRef<'a, 'b, TX: DbTx<'a>> {
     /// Transaction
     tx: &'b TX,
@@ -258,6 +259,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
 
 /// State provider for a given block number.
 /// For more detailed description, see [HistoricalStateProviderRef].
+#[derive(Debug)]
 pub struct HistoricalStateProvider<'a, TX: DbTx<'a>> {
     /// Database transaction
     tx: TX,
@@ -314,7 +316,7 @@ delegate_provider_impls!(HistoricalStateProvider<'a, TX> where [TX: DbTx<'a>]);
 
 /// Lowest blocks at which different parts of the state are available.
 /// They may be [Some] if pruning is enabled.
-#[derive(Default, Copy, Clone)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct LowestAvailableBlocks {
     /// Lowest block number at which the account history is available. It may not be available if
     /// [reth_primitives::PrunePart::AccountHistory] was pruned.

@@ -14,7 +14,7 @@ use reth_revm_primitives::{
 use std::iter::Peekable;
 
 /// Revert of the state.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct StateReverts(pub PlainStateReverts);
 
 impl From<PlainStateReverts> for StateReverts {

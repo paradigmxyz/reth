@@ -13,7 +13,10 @@ use reth_interfaces::RethError;
 use reth_primitives::BlockNumber;
 use reth_prune::{Pruner, PrunerError, PrunerWithResult};
 use reth_tasks::TaskSpawner;
-use std::task::{ready, Context, Poll};
+use std::{
+    fmt,
+    task::{ready, Context, Poll},
+};
 use tokio::sync::oneshot;
 
 /// Manages pruning under the control of the engine.
@@ -25,6 +28,15 @@ pub struct PruneHook<DB> {
     /// The type that can spawn the pruner task.
     pruner_task_spawner: Box<dyn TaskSpawner>,
     metrics: Metrics,
+}
+
+impl<DB: fmt::Debug> fmt::Debug for PruneHook<DB> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PruneHook")
+            .field("pruner_state", &self.pruner_state)
+            .field("metrics", &self.metrics)
+            .finish()
+    }
 }
 
 impl<DB: Database + 'static> PruneHook<DB> {
@@ -150,6 +162,7 @@ impl<DB: Database + 'static> EngineHook for PruneHook<DB> {
 /// running, it acquires the write lock over the database. This means that we cannot forward to the
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
+#[derive(Debug)]
 enum PrunerState<DB> {
     /// Pruner is idle.
     Idle(Option<Pruner<DB>>),

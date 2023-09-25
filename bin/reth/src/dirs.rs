@@ -60,7 +60,7 @@ pub fn logs_dir() -> Option<PathBuf> {
 ///
 /// The data dir should contain a subdirectory for each chain, and those chain directories will
 /// include all information for that chain, such as the p2p secret.
-#[derive(Default, Debug, Clone)]
+#[derive(Clone, Copy, Debug, Default)]
 #[non_exhaustive]
 pub struct DataDirPath;
 
@@ -73,7 +73,7 @@ impl XdgPath for DataDirPath {
 /// Returns the path to the reth logs directory.
 ///
 /// Refer to [dirs_next::cache_dir] for cross-platform behavior.
-#[derive(Default, Debug, Clone)]
+#[derive(Clone, Copy, Debug, Default)]
 #[non_exhaustive]
 pub struct LogsDir;
 

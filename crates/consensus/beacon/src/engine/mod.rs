@@ -160,6 +160,7 @@ pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 ///
 /// If the future is polled more than once. Leads to undefined state.
 #[must_use = "Future does nothing unless polled"]
+#[allow(missing_debug_implementations)]
 pub struct BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database,

@@ -12,6 +12,7 @@ use std::marker::PhantomData;
 
 /// `TrieWalker` is a structure that enables traversal of a Merkle trie.
 /// It allows moving through the trie in a depth-first manner, skipping certain branches if the .
+#[derive(Debug)]
 pub struct TrieWalker<'a, K, C> {
     /// A mutable reference to a trie cursor instance used for navigating the trie.
     pub cursor: &'a mut C,

@@ -81,7 +81,7 @@ impl TransportReceiverT for Receiver {
     }
 }
 
-/// Builder for IPC transport [`Sender`] and ['Receiver`] pair.
+/// Builder for IPC transport [`Sender`] and [`Receiver`] pair.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct IpcTransportClientBuilder;

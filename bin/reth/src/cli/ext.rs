@@ -113,6 +113,7 @@ impl<T> RethNodeCommandExt for T where T: RethNodeCommandConfig + fmt::Debug + c
 ///
 /// This is a convenience type for [NoArgs<()>].
 #[derive(Debug, Clone, Copy, Default, Args)]
+#[non_exhaustive]
 pub struct DefaultRethNodeCommandConfig;
 
 impl RethNodeCommandConfig for DefaultRethNodeCommandConfig {}

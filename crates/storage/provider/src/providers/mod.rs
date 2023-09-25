@@ -49,7 +49,7 @@ use reth_interfaces::blockchain_tree::{
 /// This type serves as the main entry point for interacting with the blockchain and provides data
 /// from database storage and from the blockchain tree (pending state etc.) It is a simple wrapper
 /// type that holds an instance of the database and the blockchain tree.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BlockchainProvider<DB, Tree> {
     /// Provider type used to access the database.
     database: ProviderFactory<DB>,
