@@ -3,7 +3,8 @@
 use crate::{
     abstraction::cursor::DbCursorRO,
     table::{Key, Table},
-    transaction::DbTx, RawKey, RawTable,
+    transaction::DbTx,
+    RawKey, RawTable,
 };
 use reth_interfaces::RethResult;
 use reth_nippy_jar::NippyJar;
@@ -24,7 +25,7 @@ macro_rules! generate_snapshot_func {
                 ///
                 /// * `tx`: Database transaction.
                 /// * `range`: Data range for columns in tables.
-                /// * `keys`: List of keys (eg. `TxHash` or `BlockHash`) with length equal to `row_count` and ordered by future column insertion from `range`.
+                /// * `keys`: Iterator of keys (eg. `TxHash` or `BlockHash`) with length equal to `row_count` and ordered by future column insertion from `range`.
                 /// * `dict_compression_set`: Sets of column data for compression dictionaries. Max size is 2GB. Row count is independent.
                 /// * `row_count`: Total rows to add to `NippyJar`. Must match row count in `range`.
                 /// * `nippy_jar`: Snapshot object responsible for file generation.
@@ -37,7 +38,7 @@ macro_rules! generate_snapshot_func {
                     tx: &impl DbTx<'tx>,
                     range: RangeInclusive<K>,
                     dict_compression_set: Option<Vec<impl Iterator<Item = Vec<u8>>>>,
-                    keys: Option<Vec<Vec<u8>>>,
+                    keys: Option<impl Iterator<Item = impl AsRef<[u8]> + Send + Sync + Clone + std::hash::Hash>>,
                     row_count: usize,
                     nippy_jar: &mut NippyJar
                 ) -> RethResult<()>
@@ -47,8 +48,7 @@ macro_rules! generate_snapshot_func {
 
                     // Create PHF and Filter if required
                     if let Some(keys) = keys {
-                        // This might get big but ph needs the values in memory.
-                        nippy_jar.prepare_index(&keys)?;
+                        nippy_jar.prepare_index(keys, row_count)?;
                     }
 
                     // Create compression dictionaries if required

@@ -160,10 +160,7 @@ mod test {
             let hashes = cursor
                 .walk(None)
                 .unwrap()
-                .map(|row| row.map(|(_key, value)| value.take()))
-                .collect::<Result<Vec<_>, _>>()
-                .unwrap();
-            assert_eq!(hashes.len(), row_count as usize);
+                .map(|row| row.map(|(_key, value)| value.take()).expect("exist"));
 
             create_snapshot_T1_T2::<Headers, HeaderTD, BlockNumber>(
                 &tx,

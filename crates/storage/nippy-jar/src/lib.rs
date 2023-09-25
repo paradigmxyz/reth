@@ -203,19 +203,23 @@ where
     /// Prepares beforehand the offsets index for querying rows based on `values` (eg. transaction
     /// hash). Expects `values` to be sorted in the same way as the data that is going to be
     /// later on inserted.
+    /// 
+    /// Currently collecting all items before acting on them.
     pub fn prepare_index<T: AsRef<[u8]> + Sync + Clone + Hash>(
         &mut self,
-        values: &[T],
+        values: impl Iterator<Item = T>,
+        row_count: usize,
     ) -> Result<(), NippyJarError> {
-        let mut offsets_index = vec![0; values.len()];
+        let values = values.collect::<Vec<_>>();
+        let mut offsets_index = vec![0; row_count];
 
         // Builds perfect hashing function from the values
         if let Some(phf) = self.phf.as_mut() {
-            phf.set_keys(values)?;
+            phf.set_keys(&values)?;
         }
 
         if self.filter.is_some() || self.phf.is_some() {
-            for (row_num, v) in values.iter().enumerate() {
+            for (row_num, v) in values.into_iter().enumerate() {
                 if let Some(filter) = self.filter.as_mut() {
                     filter.add(v.as_ref())?;
                 }
@@ -448,7 +452,7 @@ mod tests {
             assert_eq!(indexes, collect_indexes(nippy));
 
             // Ensure that loaded phf provides the same function outputs
-            nippy.prepare_index(&col1).unwrap();
+            nippy.prepare_index(col1.iter(), col1.len()).unwrap();
             nippy.freeze(vec![col1.clone(), col2.clone()], num_rows).unwrap();
             let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
             assert_eq!(indexes, collect_indexes(&loaded_nippy));
@@ -638,7 +642,7 @@ mod tests {
                     .with_mphf();
 
             nippy.prepare_compression(data.clone()).unwrap();
-            nippy.prepare_index(&col1).unwrap();
+            nippy.prepare_index(col1.iter(), col1.len()).unwrap();
             nippy.freeze(data.clone(), num_rows).unwrap();
         }
 
@@ -703,7 +707,7 @@ mod tests {
                 .with_mphf();
 
             nippy.prepare_compression(data.clone()).unwrap();
-            nippy.prepare_index(&col1).unwrap();
+            nippy.prepare_index(col1.iter(), col1.len()).unwrap();
             nippy.freeze(data.clone(), num_rows).unwrap();
         }
 
