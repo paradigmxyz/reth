@@ -1155,6 +1155,12 @@ impl PeersConfig {
         self
     }
 
+    /// Configure how long to ban bad peers
+    pub fn with_ban_duration(mut self, ban_duration: Duration) -> Self {
+        self.ban_duration = ban_duration;
+        self
+    }
+
     /// Maximum occupied slots for outbound connections.
     pub fn with_max_pending_outbound(mut self, num_outbound: usize) -> Self {
         self.connection_info.num_outbound = num_outbound;
@@ -1216,6 +1222,18 @@ impl PeersConfig {
     /// Configures the max allowed backoff count.
     pub fn with_max_backoff_count(mut self, max_backoff_count: u32) -> Self {
         self.max_backoff_count = max_backoff_count;
+        self
+    }
+
+    /// Configures how to weigh reputation changes.
+    pub fn with_reputation_weights(mut self, reputation_weights: ReputationChangeWeights) -> Self {
+        self.reputation_weights = reputation_weights;
+        self
+    }
+
+    /// Configures how long to backoff peers that are we failed to connect to for non-fatal reasons
+    pub fn with_backoff_durations(mut self, backoff_durations: PeerBackoffDurations) -> Self {
+        self.backoff_durations = backoff_durations;
         self
     }
 
