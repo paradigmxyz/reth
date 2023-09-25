@@ -173,7 +173,6 @@ mod test {
         }"#
         );
         let data: TypedData = serde_json::from_value(eip_712_example).unwrap();
-        println!("typed data res{:?}", data);
         let signer = build_signer();
         let sig = signer.sign_typed_data(Address::default(), &data).unwrap();
         let expected = Signature {
