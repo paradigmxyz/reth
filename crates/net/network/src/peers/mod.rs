@@ -3,8 +3,8 @@
 mod manager;
 mod reputation;
 
-pub(crate) use manager::{InboundConnectionError, PeerAction, PeersManager};
-pub use manager::{Peer, PeersConfig, PeersHandle};
+pub(crate) use manager::InboundConnectionError;
+pub use manager::{Peer, PeerAction, PeersConfig, PeersHandle, PeersManager};
 pub use reputation::ReputationChangeWeights;
 pub use reth_network_api::PeerKind;
 

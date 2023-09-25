@@ -104,7 +104,7 @@ impl Zstd {
         column_value: &[u8],
         tmp_buf: &mut Vec<u8>,
         handle: &mut File,
-        compressor: Option<&mut Compressor>,
+        compressor: Option<&mut Compressor<'_>>,
     ) -> Result<(), NippyJarError> {
         if let Some(compressor) = compressor {
             // Compressor requires the destination buffer to be big enough to write, otherwise it

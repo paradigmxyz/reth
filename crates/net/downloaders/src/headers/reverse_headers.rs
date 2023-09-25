@@ -58,6 +58,7 @@ enum ReverseHeadersDownloaderError {
 /// the batches of headers that this downloader yields will start at the chain tip and move towards
 /// the local head: falling block numbers.
 #[must_use = "Stream does nothing unless polled"]
+#[allow(missing_debug_implementations)]
 pub struct ReverseHeadersDownloader<H: HeadersClient> {
     /// Consensus client used to validate headers
     consensus: Arc<dyn Consensus>,
