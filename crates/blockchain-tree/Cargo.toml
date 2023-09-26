@@ -17,7 +17,7 @@ normal = [
 # reth
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
-reth-db = { path = "../storage/db" }
+reth-db.workspace = true
 reth-provider.workspace = true
 reth-stages = { path = "../stages" }
 
@@ -35,7 +35,7 @@ aquamarine.workspace = true
 linked_hash_set = "0.1.4"
 
 [dev-dependencies]
-reth-db = { path = "../storage/db", features = ["test-utils"] }
+reth-db = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true , features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
