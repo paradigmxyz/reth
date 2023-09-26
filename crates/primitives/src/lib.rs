@@ -95,9 +95,10 @@ pub use withdrawal::Withdrawal;
 // Re-exports
 pub use self::ruint::UintTryTo;
 pub use alloy_primitives::{
-    self, address, b256, bloom, bytes, hex, hex_literal, keccak256, ruint, Address, BlockHash,
-    BlockNumber, Bloom, BloomInput, Bytes, ChainId, Selector, StorageKey, StorageValue, TxHash,
-    TxIndex, TxNumber, B128 as H128, B256 as H256, B512 as H512, B64 as H64, U128, U256, U64, U8,
+    self, address, b256, bloom, bytes, eip191_hash_message, hex, hex_literal, keccak256, ruint,
+    Address, BlockHash, BlockNumber, Bloom, BloomInput, Bytes, ChainId, Selector, StorageKey,
+    StorageValue, TxHash, TxIndex, TxNumber, B128 as H128, B256 as H256, B512 as H512, B64 as H64,
+    U128, U256, U64, U8,
 };
 pub use revm_primitives::{self, JumpMap};
 
@@ -112,27 +113,4 @@ pub mod utils {
 /// EIP-4844 + KZG helpers
 pub mod kzg {
     pub use c_kzg::*;
-}
-
-/// Hash a message according to [EIP-191] (version `0x01`)
-///
-/// The final message is a UTF-8 string, encoded as follows:
-/// `"\x19Ethereum Signed Message:\n" + message.length + message`
-///
-/// This message is then hashed using [Keccak-256](keccak256).
-///
-/// [EIP-191]: https://eips.ethereum.org/EIPS/eip-191
-pub fn hash_message<T: AsRef<[u8]>>(message: T) -> H256 {
-    const PREFIX: &str = "\x19Ethereum Signed Message:\n";
-
-    let message = message.as_ref();
-    let len = message.len();
-    let len_string = len.to_string();
-
-    let mut eth_message = Vec::with_capacity(PREFIX.len() + len_string.len() + len);
-    eth_message.extend_from_slice(PREFIX.as_bytes());
-    eth_message.extend_from_slice(len_string.as_bytes());
-    eth_message.extend_from_slice(message);
-
-    keccak256(&eth_message)
 }

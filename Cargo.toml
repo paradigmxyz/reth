@@ -178,8 +178,12 @@ proptest = "1.0"
 proptest-derive = "0.4"
 serial_test = "2"
 
-# TODO
+# TODO: Alloy 0.4
 [patch.crates-io]
-alloy-primitives = { git = "https://github.com/alloy-rs/core" }
-alloy-dyn-abi = { git = "https://github.com/alloy-rs/core" }
-alloy-sol-types = { git = "https://github.com/alloy-rs/core", rev = "5733dc1b3987b0d2f2677d055de85fd5f721b2fd" }
+alloy-dyn-abi = { git = "https://github.com/alloy-rs/core", rev = "7cb5bb220dfeacb780c55f4ca9f49650ae0bcce6" }
+alloy-json-abi = { git = "https://github.com/alloy-rs/core", rev = "7cb5bb220dfeacb780c55f4ca9f49650ae0bcce6" }
+alloy-primitives = { git = "https://github.com/alloy-rs/core", rev = "7cb5bb220dfeacb780c55f4ca9f49650ae0bcce6" }
+alloy-sol-macro = { git = "https://github.com/alloy-rs/core", rev = "7cb5bb220dfeacb780c55f4ca9f49650ae0bcce6" }
+alloy-sol-type-parser = { git = "https://github.com/alloy-rs/core", rev = "7cb5bb220dfeacb780c55f4ca9f49650ae0bcce6" }
+alloy-sol-types = { git = "https://github.com/alloy-rs/core", rev = "7cb5bb220dfeacb780c55f4ca9f49650ae0bcce6" }
+syn-solidity = { git = "https://github.com/alloy-rs/core", rev = "7cb5bb220dfeacb780c55f4ca9f49650ae0bcce6" }

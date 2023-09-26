@@ -2,7 +2,9 @@
 
 use crate::eth::error::SignError;
 use alloy_dyn_abi::TypedData;
-use reth_primitives::{hash_message, sign_message, Address, Signature, TransactionSigned, H256};
+use reth_primitives::{
+    eip191_hash_message, sign_message, Address, Signature, TransactionSigned, H256,
+};
 use reth_rpc_types::TypedTransactionRequest;
 
 use secp256k1::SecretKey;
@@ -66,7 +68,7 @@ impl EthSigner for DevSigner {
     async fn sign(&self, address: Address, message: &[u8]) -> Result<Signature> {
         // Hash message according to EIP 191:
         // https://ethereum.org/es/developers/docs/apis/json-rpc/#eth_sign
-        let hash = hash_message(message);
+        let hash = eip191_hash_message(message);
         self.sign_hash(hash, address)
     }
 

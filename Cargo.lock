@@ -150,12 +150,12 @@ checksum = "0942ffc6dcaadf03badf6e6a2d0228460359d5e34b57ccdc720b7382dfbd5ec5"
 [[package]]
 name = "alloy-dyn-abi"
 version = "0.3.2"
-source = "git+https://github.com/alloy-rs/core#fb5fcc26a14f297652a6e7edff395be350544d62"
+source = "git+https://github.com/alloy-rs/core?rev=7cb5bb220dfeacb780c55f4ca9f49650ae0bcce6#7cb5bb220dfeacb780c55f4ca9f49650ae0bcce6"
 dependencies = [
  "alloy-json-abi",
- "alloy-primitives 0.3.2 (git+https://github.com/alloy-rs/core)",
+ "alloy-primitives",
  "alloy-sol-type-parser",
- "alloy-sol-types 0.3.2 (git+https://github.com/alloy-rs/core)",
+ "alloy-sol-types",
  "const-hex",
  "derive_more",
  "itoa",
@@ -166,9 +166,9 @@ dependencies = [
 [[package]]
 name = "alloy-json-abi"
 version = "0.3.2"
-source = "git+https://github.com/alloy-rs/core#fb5fcc26a14f297652a6e7edff395be350544d62"
+source = "git+https://github.com/alloy-rs/core?rev=7cb5bb220dfeacb780c55f4ca9f49650ae0bcce6#7cb5bb220dfeacb780c55f4ca9f49650ae0bcce6"
 dependencies = [
- "alloy-primitives 0.3.2 (git+https://github.com/alloy-rs/core)",
+ "alloy-primitives",
  "alloy-sol-type-parser",
  "serde",
  "serde_json",
@@ -177,26 +177,7 @@ dependencies = [
 [[package]]
 name = "alloy-primitives"
 version = "0.3.2"
-source = "git+https://github.com/alloy-rs/core?rev=5733dc1b3987b0d2f2677d055de85fd5f721b2fd#5733dc1b3987b0d2f2677d055de85fd5f721b2fd"
-dependencies = [
- "alloy-rlp",
- "bytes",
- "cfg-if",
- "const-hex",
- "derive_more",
- "hex-literal",
- "itoa",
- "proptest",
- "rand 0.8.5",
- "ruint",
- "serde",
- "tiny-keccak",
-]
-
-[[package]]
-name = "alloy-primitives"
-version = "0.3.2"
-source = "git+https://github.com/alloy-rs/core#fb5fcc26a14f297652a6e7edff395be350544d62"
+source = "git+https://github.com/alloy-rs/core?rev=7cb5bb220dfeacb780c55f4ca9f49650ae0bcce6#7cb5bb220dfeacb780c55f4ca9f49650ae0bcce6"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
@@ -242,35 +223,21 @@ dependencies = [
 [[package]]
 name = "alloy-sol-macro"
 version = "0.3.2"
-source = "git+https://github.com/alloy-rs/core?rev=5733dc1b3987b0d2f2677d055de85fd5f721b2fd#5733dc1b3987b0d2f2677d055de85fd5f721b2fd"
+source = "git+https://github.com/alloy-rs/core?rev=7cb5bb220dfeacb780c55f4ca9f49650ae0bcce6#7cb5bb220dfeacb780c55f4ca9f49650ae0bcce6"
 dependencies = [
  "dunce",
  "heck",
  "proc-macro2",
  "quote",
  "syn 2.0.37",
- "syn-solidity 0.3.2 (git+https://github.com/alloy-rs/core?rev=5733dc1b3987b0d2f2677d055de85fd5f721b2fd)",
- "tiny-keccak",
-]
-
-[[package]]
-name = "alloy-sol-macro"
-version = "0.3.2"
-source = "git+https://github.com/alloy-rs/core#fb5fcc26a14f297652a6e7edff395be350544d62"
-dependencies = [
- "dunce",
- "heck",
- "proc-macro2",
- "quote",
- "syn 2.0.37",
- "syn-solidity 0.3.2 (git+https://github.com/alloy-rs/core)",
+ "syn-solidity",
  "tiny-keccak",
 ]
 
 [[package]]
 name = "alloy-sol-type-parser"
 version = "0.3.2"
-source = "git+https://github.com/alloy-rs/core#fb5fcc26a14f297652a6e7edff395be350544d62"
+source = "git+https://github.com/alloy-rs/core?rev=7cb5bb220dfeacb780c55f4ca9f49650ae0bcce6#7cb5bb220dfeacb780c55f4ca9f49650ae0bcce6"
 dependencies = [
  "winnow",
 ]
@@ -278,21 +245,10 @@ dependencies = [
 [[package]]
 name = "alloy-sol-types"
 version = "0.3.2"
-source = "git+https://github.com/alloy-rs/core?rev=5733dc1b3987b0d2f2677d055de85fd5f721b2fd#5733dc1b3987b0d2f2677d055de85fd5f721b2fd"
+source = "git+https://github.com/alloy-rs/core?rev=7cb5bb220dfeacb780c55f4ca9f49650ae0bcce6#7cb5bb220dfeacb780c55f4ca9f49650ae0bcce6"
 dependencies = [
- "alloy-primitives 0.3.2 (git+https://github.com/alloy-rs/core?rev=5733dc1b3987b0d2f2677d055de85fd5f721b2fd)",
- "alloy-sol-macro 0.3.2 (git+https://github.com/alloy-rs/core?rev=5733dc1b3987b0d2f2677d055de85fd5f721b2fd)",
- "const-hex",
- "serde",
-]
-
-[[package]]
-name = "alloy-sol-types"
-version = "0.3.2"
-source = "git+https://github.com/alloy-rs/core#fb5fcc26a14f297652a6e7edff395be350544d62"
-dependencies = [
- "alloy-primitives 0.3.2 (git+https://github.com/alloy-rs/core)",
- "alloy-sol-macro 0.3.2 (git+https://github.com/alloy-rs/core)",
+ "alloy-primitives",
+ "alloy-sol-macro",
  "const-hex",
  "serde",
 ]
@@ -6015,9 +5971,9 @@ dependencies = [
 name = "reth-primitives"
 version = "0.1.0-alpha.9"
 dependencies = [
- "alloy-primitives 0.3.2 (git+https://github.com/alloy-rs/core)",
+ "alloy-primitives",
  "alloy-rlp",
- "alloy-sol-types 0.3.2 (git+https://github.com/alloy-rs/core?rev=5733dc1b3987b0d2f2677d055de85fd5f721b2fd)",
+ "alloy-sol-types",
  "arbitrary",
  "assert_matches",
  "byteorder",
@@ -6145,7 +6101,7 @@ name = "reth-rpc"
 version = "0.1.0-alpha.9"
 dependencies = [
  "alloy-dyn-abi",
- "alloy-primitives 0.3.2 (git+https://github.com/alloy-rs/core)",
+ "alloy-primitives",
  "alloy-rlp",
  "assert_matches",
  "async-trait",
@@ -6450,7 +6406,7 @@ name = "revm-primitives"
 version = "1.1.2"
 source = "git+https://github.com/Evalir/revm/?branch=reintroduce-alloy-rebased#ded453ea768a80dbcf27de56b0d35b68c92f140c"
 dependencies = [
- "alloy-primitives 0.3.2 (git+https://github.com/alloy-rs/core)",
+ "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
  "auto_impl",
@@ -7470,18 +7426,7 @@ dependencies = [
 [[package]]
 name = "syn-solidity"
 version = "0.3.2"
-source = "git+https://github.com/alloy-rs/core?rev=5733dc1b3987b0d2f2677d055de85fd5f721b2fd#5733dc1b3987b0d2f2677d055de85fd5f721b2fd"
-dependencies = [
- "paste",
- "proc-macro2",
- "quote",
- "syn 2.0.37",
-]
-
-[[package]]
-name = "syn-solidity"
-version = "0.3.2"
-source = "git+https://github.com/alloy-rs/core#fb5fcc26a14f297652a6e7edff395be350544d62"
+source = "git+https://github.com/alloy-rs/core?rev=7cb5bb220dfeacb780c55f4ca9f49650ae0bcce6#7cb5bb220dfeacb780c55f4ca9f49650ae0bcce6"
 dependencies = [
  "paste",
  "proc-macro2",
