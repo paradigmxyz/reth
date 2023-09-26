@@ -15,7 +15,7 @@ pub fn trie_root_benchmark(c: &mut Criterion) {
             |description: &str| format!("receipts root | size: {size} | {description}");
 
         let receipts = &generate_test_data(size)[..];
-        assert_eq!(trie_hash_ordered_trie_root(&receipts), hash_builder_root(&receipts));
+        assert_eq!(trie_hash_ordered_trie_root(receipts), hash_builder_root(receipts));
 
         group.bench_function(group_name("triehash::ordered_trie_root"), |b| {
             b.iter(|| trie_hash_ordered_trie_root(black_box(receipts)));
