@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::{
     clone::Clone,
+    error::Error as StdError,
     fs::File,
-    hash::Hash,
     io::{Seek, Write},
     marker::Sync,
     path::{Path, PathBuf},
@@ -20,6 +20,7 @@ pub mod compression;
 use compression::{Compression, Compressors};
 
 pub mod phf;
+pub use phf::PHFKey;
 use phf::{Fmph, Functions, GoFmph, PerfectHashingFunction};
 
 mod error;
@@ -32,6 +33,9 @@ const NIPPY_JAR_VERSION: usize = 1;
 
 /// A [`Row`] is a list of its selected column values.
 type Row = Vec<Vec<u8>>;
+
+/// Alias type for a column value wrapped in `Result`
+pub type ColumnResultValue<T> = Result<T, Box<dyn StdError>>;
 
 /// `NippyJar` is a specialized storage format designed for immutable data.
 ///
@@ -205,9 +209,9 @@ where
     /// later on inserted.
     ///
     /// Currently collecting all items before acting on them.
-    pub fn prepare_index<T: AsRef<[u8]> + Sync + Clone + Hash>(
+    pub fn prepare_index<T: PHFKey>(
         &mut self,
-        values: impl IntoIterator<Item = Result<T, Box<dyn std::error::Error>>>,
+        values: impl IntoIterator<Item = ColumnResultValue<T>>,
         row_count: usize,
     ) -> Result<(), NippyJarError> {
         let values = values.into_iter().collect::<Result<Vec<_>, _>>()?;
@@ -239,7 +243,7 @@ where
     /// Writes all data and configuration to a file and the offset index to another.
     pub fn freeze(
         &mut self,
-        columns: Vec<impl IntoIterator<Item = Result<Vec<u8>, Box<dyn std::error::Error>>>>,
+        columns: Vec<impl IntoIterator<Item = ColumnResultValue<Vec<u8>>>>,
         total_rows: u64,
     ) -> Result<(), NippyJarError> {
         let mut file = self.freeze_check(&columns)?;
@@ -337,7 +341,7 @@ where
     /// Safety checks before creating and returning a [`File`] handle to write data to.
     fn freeze_check(
         &mut self,
-        columns: &Vec<impl IntoIterator<Item = Result<Vec<u8>, Box<dyn std::error::Error>>>>,
+        columns: &Vec<impl IntoIterator<Item = ColumnResultValue<Vec<u8>>>>,
     ) -> Result<File, NippyJarError> {
         if columns.len() != self.columns {
             return Err(NippyJarError::ColumnLenMismatch(self.columns, columns.len()))
@@ -382,10 +386,7 @@ impl<H> PerfectHashingFunction for NippyJar<H>
 where
     H: Send + Sync + Serialize + for<'a> Deserialize<'a>,
 {
-    fn set_keys<T: AsRef<[u8]> + Sync + Clone + Hash>(
-        &mut self,
-        keys: &[T],
-    ) -> Result<(), NippyJarError> {
+    fn set_keys<T: PHFKey>(&mut self, keys: &[T]) -> Result<(), NippyJarError> {
         self.phf.as_mut().ok_or(NippyJarError::PHFMissing)?.set_keys(keys)
     }
 
@@ -400,7 +401,7 @@ mod tests {
     use rand::{rngs::SmallRng, seq::SliceRandom, RngCore, SeedableRng};
     use std::collections::HashSet;
 
-    type ColumnValuesResult = Vec<Result<Vec<u8>, Box<dyn std::error::Error>>>;
+    type ColumnResultValues<T> = Vec<ColumnResultValue<T>>;
     type ColumnValues = Vec<Vec<u8>>;
 
     fn test_data(seed: Option<u64>) -> (ColumnValues, ColumnValues) {
@@ -422,7 +423,7 @@ mod tests {
         (gen(), gen())
     }
 
-    fn clone_with_result(col: &ColumnValues) -> ColumnValuesResult {
+    fn clone_with_result(col: &ColumnValues) -> ColumnResultValues<Vec<u8>> {
         col.iter().map(|v| Ok(v.clone())).collect()
     }
 

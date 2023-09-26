@@ -7,8 +7,8 @@ use crate::{
     RawKey, RawTable,
 };
 use reth_interfaces::RethResult;
-use reth_nippy_jar::NippyJar;
-use std::ops::RangeInclusive;
+use reth_nippy_jar::{ColumnResultValue, NippyJar, PHFKey};
+use std::{error::Error as StdError, ops::RangeInclusive};
 
 /// Macro that generates snapshot creation functions that take an arbitratry number of [`Table`] and
 /// creates a [`NippyJar`] file out of their [`Table::Value`]. Each list of [`Table::Value`] from a
@@ -38,7 +38,7 @@ macro_rules! generate_snapshot_func {
                     tx: &impl DbTx<'tx>,
                     range: RangeInclusive<K>,
                     dict_compression_set: Option<Vec<impl Iterator<Item = Vec<u8>>>>,
-                    keys: Option<impl Iterator<Item = Result<impl AsRef<[u8]> + Send + Sync + Clone + std::hash::Hash, Box<dyn std::error::Error>>>>,
+                    keys: Option<impl Iterator<Item = ColumnResultValue<impl PHFKey>>>,
                     row_count: usize,
                     nippy_jar: &mut NippyJar
                 ) -> RethResult<()>
@@ -65,7 +65,7 @@ macro_rules! generate_snapshot_func {
                             .map(|row|
                                 row
                                     .map(|(_key, val)| val.take())
-                                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+                                    .map_err(|e| Box::new(e) as Box<dyn StdError>)
                             );
 
                     )+
