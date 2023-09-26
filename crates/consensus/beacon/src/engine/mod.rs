@@ -1160,10 +1160,10 @@ where
                 // make sure there are no blob transactions in the payload if it is pre-cancun
                 // we perform this check before validating the block hash because INVALID_PARAMS
                 // must be returned over an INVALID response.
-                if !self.chain_spec().is_cancun_activated_at_timestamp(block.timestamp) {
-                    if block.blob_transactions().len() > 0 {
-                        return Err(BeaconOnNewPayloadError::PreCancunBlockWithBlobTransactions)
-                    }
+                if !self.chain_spec().is_cancun_activated_at_timestamp(block.timestamp) &&
+                    block.has_blob_transactions()
+                {
+                    return Err(BeaconOnNewPayloadError::PreCancunBlockWithBlobTransactions)
                 }
 
                 validate_block_hash(block_hash, block)
