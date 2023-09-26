@@ -3,7 +3,7 @@
 use crate::node::cl_events::ConsensusLayerHealthEvent;
 use futures::Stream;
 use reth_beacon_consensus::BeaconConsensusEngineEvent;
-use reth_interfaces::{blockchain_tree::CanonicalOutcome, consensus::ForkchoiceState};
+use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
 use reth_primitives::{
@@ -128,14 +128,9 @@ impl NodeState {
 
                 info!(number=block.number, hash=?block.hash, "Block added to canonical chain");
             }
-            BeaconConsensusEngineEvent::ChainCanonicalized(outcome, elapsed) => match outcome {
-                CanonicalOutcome::AlreadyCanonical { header } => {
-                    info!(number=header.number, header=?header.hash, ?elapsed, "Chain is already canonical");
-                }
-                CanonicalOutcome::Committed { head } => {
-                    info!(number=head.number, hash=?head.hash, ?elapsed, "Canonical chain committed");
-                }
-            },
+            BeaconConsensusEngineEvent::CanonicalChainCommitted(head, elapsed) => {
+                info!(number=head.number, hash=?head.hash, ?elapsed, "Canonical chain committed");
+            }
             BeaconConsensusEngineEvent::ForkBlockAdded(block) => {
                 info!(number=block.number, hash=?block.hash, "Block added to fork chain");
             }

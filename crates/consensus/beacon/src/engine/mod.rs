@@ -659,18 +659,30 @@ where
         let elapsed = self.record_make_canonical_latency(start, &make_canonical_result);
         let status = match make_canonical_result {
             Ok(outcome) => {
-                self.listeners.notify(BeaconConsensusEngineEvent::ChainCanonicalized(
-                    outcome.clone(),
-                    elapsed,
-                ));
+                match outcome {
+                    CanonicalOutcome::AlreadyCanonical { ref header } => {
+                        debug!(
+                            target: "consensus::engine",
+                            fcu_head_num=?header.number,
+                            current_head_num=?self.blockchain.canonical_tip().number,
+                            "Ignoring beacon update to old head"
+                        );
+                    }
+                    CanonicalOutcome::Committed { ref head } => {
+                        debug!(
+                            target: "consensus::engine",
+                            hash=?state.head_block_hash,
+                            number=head.number,
+                            "Canonicalized new head"
+                        );
 
-                if !outcome.is_already_canonical() {
-                    debug!(target: "consensus::engine", hash=?state.head_block_hash, number=outcome.header().number, "canonicalized new head");
-
-                    // new VALID update that moved the canonical chain forward
-                    let _ = self.update_head(outcome.header().clone());
-                } else {
-                    debug!(target: "consensus::engine", fcu_head_num=?outcome.header().number, current_head_num=?self.blockchain.canonical_tip().number, "Ignoring beacon update to old head");
+                        // new VALID update that moved the canonical chain forward
+                        let _ = self.update_head(head.clone());
+                        self.listeners.notify(BeaconConsensusEngineEvent::CanonicalChainCommitted(
+                            head.clone(),
+                            elapsed,
+                        ));
+                    }
                 }
 
                 if let Some(attrs) = attrs {
@@ -1481,13 +1493,15 @@ where
             let elapsed = self.record_make_canonical_latency(start, &make_canonical_result);
             match make_canonical_result {
                 Ok(outcome) => {
-                    self.listeners.notify(BeaconConsensusEngineEvent::ChainCanonicalized(
-                        outcome.clone(),
-                        elapsed,
-                    ));
+                    if let CanonicalOutcome::Committed { ref head } = outcome {
+                        self.listeners.notify(BeaconConsensusEngineEvent::CanonicalChainCommitted(
+                            head.clone(),
+                            elapsed,
+                        ));
+                    }
 
                     let new_head = outcome.into_header();
-                    debug!(target: "consensus::engine", hash=?new_head.hash, number=new_head.number, "canonicalized new head");
+                    debug!(target: "consensus::engine", hash=?new_head.hash, number=new_head.number, "Canonicalized new head");
 
                     // we can update the FCU blocks
                     let _ = self.update_canon_chain(new_head, &target);
