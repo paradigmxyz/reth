@@ -682,7 +682,7 @@ mod ethers_compat {
                 parent_hash: block.parent_hash.0.into(),
                 number: block.number.unwrap().as_u64(),
                 gas_limit: block.gas_limit.as_u64(),
-                difficulty: block.difficulty.into(),
+                difficulty: U256::from_limbs(block.difficulty.0),
                 nonce: block.nonce.unwrap().to_low_u64_be(),
                 extra_data: block.extra_data.0.clone().into(),
                 state_root: block.state_root.0.into(),
