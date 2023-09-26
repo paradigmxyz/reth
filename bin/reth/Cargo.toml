@@ -36,6 +36,7 @@ reth-rpc-engine-api = { path = "../../crates/rpc/rpc-engine-api" }
 reth-rpc-builder = { path = "../../crates/rpc/rpc-builder" }
 reth-rpc = { path = "../../crates/rpc/rpc" }
 reth-rpc-types = { path = "../../crates/rpc/rpc-types" }
+reth-rpc-types-compat = { path = "../../crates/rpc/rpc-types-compat" }
 reth-rpc-api = { path = "../../crates/rpc/rpc-api" }
 reth-rlp.workspace = true
 reth-network = { path = "../../crates/net/network", features = ["serde"] }

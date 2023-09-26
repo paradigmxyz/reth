@@ -5348,6 +5348,7 @@ dependencies = [
  "reth-rpc-builder",
  "reth-rpc-engine-api",
  "reth-rpc-types",
+ "reth-rpc-types-compat",
  "reth-stages",
  "reth-tasks",
  "reth-tracing",
