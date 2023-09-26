@@ -754,9 +754,9 @@ dependencies = [
 
 [[package]]
 name = "boa_ast"
-version = "0.17.0"
+version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7c261398db3b2f9ba05f76872721d6a8a142d10ae6c0a58d3ddc5c2853cc02d"
+checksum = "4db68af1129d6f3121a5acfc0274e5830fa7634f831d51c7097b211df387cf02"
 dependencies = [
  "bitflags 2.4.0",
  "boa_interner",
@@ -768,9 +768,9 @@ dependencies = [
 
 [[package]]
 name = "boa_engine"
-version = "0.17.0"
+version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f31e7a37b855625f1615a07414fb341361475950e57bb9396afe1389bbc2ccdc"
+checksum = "2aa20501c447c16298d47b498e063644679ad41a3e23030739b2d88fce91c16f"
 dependencies = [
  "bitflags 2.4.0",
  "boa_ast",
@@ -807,9 +807,9 @@ dependencies = [
 
 [[package]]
 name = "boa_gc"
-version = "0.17.0"
+version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2346f8ac7b736236de0608a7c75a9a32bac0a1137b98574cfebde6343e4ff6b7"
+checksum = "ec4e0898b1fc586a634f383f0968c7b1c26135c819322d4d2e077e892f1501a4"
 dependencies = [
  "boa_macros",
  "boa_profiler",
@@ -818,23 +818,24 @@ dependencies = [
 
 [[package]]
 name = "boa_icu_provider"
-version = "0.17.0"
+version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07652c6f1ca97bbe16bd2ab1ebc39313ac81568d2671aeb24a4a45964d2291a4"
+checksum = "5635ed884d090c978156444554934c2737b1f426443ebc19ddda54163a079255"
 dependencies = [
  "icu_collections",
  "icu_normalizer",
  "icu_properties",
  "icu_provider",
+ "icu_provider_adapters",
+ "icu_provider_blob",
  "once_cell",
- "zerovec",
 ]
 
 [[package]]
 name = "boa_interner"
-version = "0.17.0"
+version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b968bd467737cace9723a5d01a3d32fe95471526d36db9654a1779c4b766fb6"
+checksum = "071df42b38b332bd2c463526173ad28eaccb033ca78278fba71a4f4f01f05237"
 dependencies = [
  "boa_gc",
  "boa_macros",
@@ -848,9 +849,9 @@ dependencies = [
 
 [[package]]
 name = "boa_macros"
-version = "0.17.0"
+version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca3de43b7806061fccfba716fef51eea462d636de36803b62d10f902608ffef4"
+checksum = "b6e3945717b26eddf42a883d35d34da603501ce5377614f437623e830590090d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -860,9 +861,9 @@ dependencies = [
 
 [[package]]
 name = "boa_parser"
-version = "0.17.0"
+version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ff1108bda6d573049191b6452490844c5ba4b12f7bdcc512a33e5c3f5037196"
+checksum = "5703b29cd6b0d7da4e2a643dde0d752e4303e96e2cebaaa904b9be591a07582f"
 dependencies = [
  "bitflags 2.4.0",
  "boa_ast",
@@ -872,6 +873,7 @@ dependencies = [
  "boa_profiler",
  "fast-float",
  "icu_properties",
+ "icu_provider",
  "num-bigint",
  "num-traits",
  "once_cell",
@@ -881,9 +883,9 @@ dependencies = [
 
 [[package]]
 name = "boa_profiler"
-version = "0.17.0"
+version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a24f6aa1ecc56e797506437b1f9a172e4a5f207894e74196c682cb656d2c2d60"
+checksum = "bc50f19ebb5dd034b751bcdfd1137d53040d23cf1cb8211d0fe57cd425fd994a"
 
 [[package]]
 name = "boyer-moore-magiclen"
@@ -3211,6 +3213,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef8302d8dfd6044d3ddb3f807a5ef3d7bbca9a574959c6d6e4dc39aa7012d0d5"
 dependencies = [
  "displaydoc",
+ "serde",
  "yoke",
  "zerofrom",
  "zerovec",
@@ -3224,8 +3227,10 @@ checksum = "3003f85dccfc0e238ff567693248c59153a46f4e6125ba4020b973cef4d1d335"
 dependencies = [
  "displaydoc",
  "litemap",
+ "serde",
  "tinystr",
  "writeable",
+ "zerovec",
 ]
 
 [[package]]
@@ -3238,6 +3243,7 @@ dependencies = [
  "icu_collections",
  "icu_properties",
  "icu_provider",
+ "serde",
  "smallvec 1.11.0",
  "utf16_iter",
  "utf8_iter",
@@ -3254,6 +3260,7 @@ dependencies = [
  "displaydoc",
  "icu_collections",
  "icu_provider",
+ "serde",
  "tinystr",
  "zerovec",
 ]
@@ -3267,11 +3274,40 @@ dependencies = [
  "displaydoc",
  "icu_locid",
  "icu_provider_macros",
+ "postcard",
  "serde",
  "stable_deref_trait",
  "writeable",
  "yoke",
  "zerofrom",
+ "zerovec",
+]
+
+[[package]]
+name = "icu_provider_adapters"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4ae1e2bd0c41728b77e7c46e9afdec5e2127d1eedacc684724667d50c126bd3"
+dependencies = [
+ "icu_locid",
+ "icu_provider",
+ "serde",
+ "tinystr",
+ "yoke",
+ "zerovec",
+]
+
+[[package]]
+name = "icu_provider_blob"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd364c9a01f791a4bc04a74cf2a1d01d9f6926a40fd5ae1c28004e1e70d8338b"
+dependencies = [
+ "icu_provider",
+ "postcard",
+ "serde",
+ "writeable",
+ "yoke",
  "zerovec",
 ]
 
@@ -6024,15 +6060,12 @@ dependencies = [
  "boa_engine",
  "boa_gc",
  "hashbrown 0.14.0",
- "icu_collections",
- "icu_provider_macros",
  "reth-primitives",
  "reth-rpc-types",
  "revm",
  "serde",
  "serde_json",
  "thiserror",
- "tinystr",
  "tokio",
 ]
 
@@ -7630,6 +7663,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ac3f5b6856e931e15e07b478e98c8045239829a65f9156d4fa7e7788197a5ef"
 dependencies = [
  "displaydoc",
+ "serde",
  "zerovec",
 ]
 
@@ -8776,6 +8810,7 @@ version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "198f54134cd865f437820aa3b43d0ad518af4e68ee161b444cdd15d8e567c8ea"
 dependencies = [
+ "serde",
  "yoke",
  "zerofrom",
  "zerovec-derive",
