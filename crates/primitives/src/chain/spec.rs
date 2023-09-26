@@ -1127,10 +1127,9 @@ impl DepositContract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{b256, hex, DEV, GOERLI, H256, HOLESKY, MAINNET, SEPOLIA, U256};
+    use crate::{b256, hex, NamedChain, DEV, GOERLI, H256, HOLESKY, MAINNET, SEPOLIA, U256};
     use alloy_rlp::Encodable;
     use bytes::BytesMut;
-    use ethers_core::types::Chain as EthersChain;
     use std::str::FromStr;
 
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
@@ -1848,7 +1847,7 @@ Post-merge hard forks (timestamp based):
         let genesis = serde_json::from_str::<AllGenesisFormats>(hive_json).unwrap();
         let chainspec: ChainSpec = genesis.into();
         assert_eq!(chainspec.genesis_hash, None);
-        assert_eq!(chainspec.chain, Chain::Named(EthersChain::Optimism));
+        assert_eq!(chainspec.chain, Chain::Named(NamedChain::Optimism));
         let expected_state_root: H256 =
             hex!("9a6049ac535e3dc7436c189eaa81c73f35abd7f282ab67c32944ff0301d63360").into();
         assert_eq!(chainspec.genesis_header().state_root, expected_state_root);

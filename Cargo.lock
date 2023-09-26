@@ -6110,7 +6110,6 @@ dependencies = [
  "assert_matches",
  "async-trait",
  "bytes",
- "ethers-core",
  "futures",
  "http",
  "http-body",
