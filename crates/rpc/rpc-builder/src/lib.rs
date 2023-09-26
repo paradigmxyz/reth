@@ -109,8 +109,8 @@ use jsonrpsee::{
 use reth_ipc::server::IpcServer;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EvmEnvProvider, StateProviderFactory,
+    AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
+    ChangeSetReader, EvmEnvProvider, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{
