@@ -13,6 +13,9 @@ description = "revm inspector implementations used by reth"
 reth-primitives.workspace = true
 reth-rpc-types.workspace = true
 
+# eth
+alloy-sol-types.workspace = true
+
 revm.workspace = true
 # remove from reth and reexport from revm
 hashbrown = "0.14"

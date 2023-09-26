@@ -17,7 +17,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::non_canonical_clone_impl)]
 
-pub mod abi;
 mod account;
 pub mod basefee;
 mod block;

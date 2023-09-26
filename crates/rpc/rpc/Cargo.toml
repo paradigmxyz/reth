@@ -27,6 +27,7 @@ lazy_static = "*"
 
 # eth
 alloy-rlp.workspace = true
+alloy-sol-types.workspace = true
 revm = { workspace = true, features = [
     "optional_block_gas_limit",
     "optional_eip3607",
@@ -34,7 +35,7 @@ revm = { workspace = true, features = [
 ] }
 ethers-core = { workspace = true, features = ["eip712"] }
 revm-primitives = { workspace = true, features = ["serde"] }
-alloy-dyn-abi = {workspace = true, features = ["eip712"]}
+alloy-dyn-abi = { workspace = true, features = ["eip712"] }
 alloy-primitives.workspace = true
 # rpc
 jsonrpsee.workspace = true
