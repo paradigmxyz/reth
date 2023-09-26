@@ -105,11 +105,6 @@ pub use revm_primitives::{self, JumpMap};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use arbitrary;
 
-/// Various utilities
-pub mod utils {
-    pub use ethers_core::types::serde_helpers;
-}
-
 /// EIP-4844 + KZG helpers
 pub mod kzg {
     pub use c_kzg::*;
