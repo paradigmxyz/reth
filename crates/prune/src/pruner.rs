@@ -399,7 +399,8 @@ impl<DB: Database> Pruner<DB> {
         tip_block_number: BlockNumber,
     ) -> PrunerResult {
         // Contract log filtering removes every receipt possible except the ones in the list. So,
-        // for the other receipts it's as if they had a `PruneMode::Distance()` of 128.
+        // for the other receipts it's as if they had a `PruneMode::Distance()` of
+        // `MINIMUM_PRUNING_DISTANCE`.
         let to_block = PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)
             .prune_target_block(
                 tip_block_number,

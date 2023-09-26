@@ -91,7 +91,6 @@ mod tests {
                 PruneMode::Before(tip - MINIMUM_PRUNING_DISTANCE - 1),
                 Ok(Some(tip - MINIMUM_PRUNING_DISTANCE - 2)),
             ),
-            // MINIMUM_PRUNING_DISTANCE is 128
             (PruneMode::Before(tip - 1), Err(PrunePartError::Configuration(prune_part))),
         ];
 
