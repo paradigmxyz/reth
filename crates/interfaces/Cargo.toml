@@ -41,7 +41,7 @@ parking_lot.workspace = true
 clap = { version = "4", features = ["derive"], optional = true }
 
 [dev-dependencies]
-reth-db = { path = "../storage/db", features = ["test-utils"] }
+reth-db = { workspace = true, features = ["test-utils"] }
 tokio = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true, features = ["sync"] }
 arbitrary = { workspace = true, features = ["derive"] }

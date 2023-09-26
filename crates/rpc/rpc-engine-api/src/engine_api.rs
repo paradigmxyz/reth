@@ -389,7 +389,7 @@ where
         version: EngineApiMessageVersion,
         timestamp: u64,
     ) -> EngineApiResult<()> {
-        let is_cancun = self.inner.chain_spec.is_cancun_activated_at_timestamp(timestamp);
+        let is_cancun = self.inner.chain_spec.is_cancun_active_at_timestamp(timestamp);
         if version == EngineApiMessageVersion::V2 && is_cancun {
             // From the Engine API spec:
             //
