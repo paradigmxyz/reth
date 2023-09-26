@@ -302,7 +302,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     ///
     /// If blocks does not have parent [`BlockStatus::Disconnected`] would be returned, in which
     /// case it is buffered for future inclusion.
-    #[instrument(skip_all, fields(block = ?block.num_hash()), target = "blockchain_tree", ret)]
+    #[instrument(level = "trace", skip_all, fields(block = ?block.num_hash()), target = "blockchain_tree", ret)]
     fn try_insert_validated_block(
         &mut self,
         block: SealedBlockWithSenders,
@@ -372,7 +372,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// WARNING: this expects that the block extends the canonical chain: The block's parent is
     /// part of the canonical chain (e.g. the block's parent is the latest canonical hash). See also
     /// [Self::is_block_hash_canonical].
-    #[instrument(skip_all, target = "blockchain_tree")]
+    #[instrument(level = "trace", skip_all, target = "blockchain_tree")]
     fn try_append_canonical_chain(
         &mut self,
         block: SealedBlockWithSenders,
@@ -453,7 +453,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// Try inserting a block into the given side chain.
     ///
     /// WARNING: This expects a valid side chain id, see [BlockIndices::get_blocks_chain_id]
-    #[instrument(skip_all, target = "blockchain_tree")]
+    #[instrument(level = "trace", skip_all, target = "blockchain_tree")]
     fn try_insert_block_into_side_chain(
         &mut self,
         block: SealedBlockWithSenders,
@@ -923,7 +923,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     ///
     /// Returns `Ok` if the blocks were canonicalized, or if the blocks were already canonical.
     #[track_caller]
-    #[instrument(skip(self), target = "blockchain_tree")]
+    #[instrument(level = "trace", skip(self), target = "blockchain_tree")]
     pub fn make_canonical(&mut self, block_hash: &BlockHash) -> RethResult<CanonicalOutcome> {
         let old_block_indices = self.block_indices.clone();
         let old_buffered_blocks = self.buffered_blocks.parent_to_child.clone();
@@ -992,7 +992,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         // event about new canonical chain.
         let chain_notification;
-        info!(
+        debug!(
             target: "blockchain_tree",
             "Committing new canonical chain: {}", DisplayBlocksChain(new_canon_chain.blocks())
         );

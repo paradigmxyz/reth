@@ -6000,6 +6000,7 @@ dependencies = [
  "reth-provider",
  "reth-stages",
  "thiserror",
+ "tokio-stream",
  "tracing",
 ]
 

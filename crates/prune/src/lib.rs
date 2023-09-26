@@ -10,9 +10,11 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod error;
+mod event;
 mod metrics;
 mod pruner;
 
 use crate::metrics::Metrics;
 pub use error::PrunerError;
+pub use event::PrunerEvent;
 pub use pruner::{Pruner, PrunerResult, PrunerWithResult};
