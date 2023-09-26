@@ -1174,7 +1174,6 @@ where
         let block = match block_res {
             Ok(block) => block,
             Err(error) => {
-                // TODO: need to fix this to use the correct type
                 error!(target: "consensus::engine", ?error, "Invalid payload");
 
                 let mut latest_valid_hash = None;
