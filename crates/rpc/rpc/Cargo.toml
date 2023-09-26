@@ -34,7 +34,8 @@ revm = { workspace = true, features = [
 ] }
 ethers-core = { workspace = true, features = ["eip712"] }
 revm-primitives = { workspace = true, features = ["serde"] }
-
+alloy-dyn-abi = {workspace = true, features = ["eip712"]}
+alloy-primitives.workspace = true
 # rpc
 jsonrpsee.workspace = true
 http = "0.2.8"
