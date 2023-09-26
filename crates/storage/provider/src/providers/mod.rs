@@ -6,7 +6,7 @@ use crate::{
     ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox, StateProviderFactory,
     TransactionsProvider, WithdrawalsProvider,
 };
-use reth_db::{database::Database, models::StoredBlockBodyIndices, tables};
+use reth_db::{database::Database, models::StoredBlockBodyIndices};
 use reth_interfaces::{
     blockchain_tree::{BlockchainTreeEngine, BlockchainTreeViewer},
     consensus::ForkchoiceState,
@@ -811,11 +811,10 @@ where
     }
 }
 
-impl<DB, Tree> AccountReader for BlockchainProvider<DB, Tree> 
+impl<DB, Tree> AccountReader for BlockchainProvider<DB, Tree>
 where
     DB: Database + Sync + Send,
     Tree: Sync + Send,
-
 {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> RethResult<Option<Account>> {
