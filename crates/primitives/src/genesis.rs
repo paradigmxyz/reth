@@ -450,7 +450,7 @@ mod ethers_compat {
                 nonce: genesis.nonce.as_u64(),
                 timestamp: genesis.timestamp.as_u64(),
                 gas_limit: genesis.gas_limit.as_u64(),
-                difficulty: genesis.difficulty.into(),
+                difficulty: U256::from_limbs(genesis.difficulty.0),
                 mix_hash: genesis.mix_hash.0.into(),
                 coinbase: genesis.coinbase.0.into(),
                 extra_data: genesis.extra_data.0.into(),
@@ -466,7 +466,7 @@ mod ethers_compat {
     impl From<EthersGenesisAccount> for GenesisAccount {
         fn from(genesis_account: EthersGenesisAccount) -> Self {
             Self {
-                balance: genesis_account.balance.into(),
+                balance: U256::from_limbs(genesis_account.balance.0),
                 nonce: genesis_account.nonce,
                 code: genesis_account.code.as_ref().map(|code| code.0.clone().into()),
                 storage: genesis_account.storage.as_ref().map(|storage| {
@@ -526,7 +526,7 @@ mod ethers_compat {
                 merge_netsplit_block,
                 shanghai_time,
                 cancun_time,
-                terminal_total_difficulty: terminal_total_difficulty.map(Into::into),
+                terminal_total_difficulty: terminal_total_difficulty.map(|x| U256::from_limbs(x.0)),
                 terminal_total_difficulty_passed,
                 ethash: ethash.map(Into::into),
                 clique: clique.map(Into::into),
