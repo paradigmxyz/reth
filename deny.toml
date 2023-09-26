@@ -33,7 +33,7 @@ skip-tree = []
 
 [licenses]
 unlicensed = "deny"
-confidence-threshold = 0.9
+confidence-threshold = 0.8
 # copyleft = "deny"
 
 # List of explicitly allowed licenses

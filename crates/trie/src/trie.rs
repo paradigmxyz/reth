@@ -295,7 +295,7 @@ where
                 // We assume we can always calculate a storage root without
                 // OOMing. This opens us up to a potential DOS vector if
                 // a contract had too many storage entries and they were
-                // all buffered w/o us returning and committing our intermeditate
+                // all buffered w/o us returning and committing our intermediate
                 // progress.
                 // TODO: We can consider introducing the TrieProgress::Progress/Complete
                 // abstraction inside StorageRoot, but let's give it a try as-is for now.

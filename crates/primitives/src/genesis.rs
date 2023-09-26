@@ -1,14 +1,15 @@
 use crate::{
     keccak256,
-    proofs::{KeccakHasher, EMPTY_ROOT},
+    proofs::EMPTY_ROOT,
     serde_helper::{deserialize_json_u256, deserialize_json_u256_opt, deserialize_storage_map},
+    trie::{HashBuilder, Nibbles},
     utils::serde_helpers::{deserialize_stringified_u64, deserialize_stringified_u64_opt},
     Account, Address, Bytes, H256, KECCAK_EMPTY, U256,
 };
 use alloy_rlp::{encode_fixed_size, length_of_length, Encodable, Header as RlpHeader};
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use triehash::sec_trie_root;
 
 /// The genesis block specification.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -213,12 +214,20 @@ impl Encodable for GenesisAccount {
                 if storage.is_empty() {
                     return EMPTY_ROOT
                 }
-                let storage_values =
-                    storage.iter().filter(|(_k, &v)| v != H256::ZERO).map(|(&k, v)| {
-                        let value = U256::from_be_bytes(**v);
-                        (k, encode_fixed_size(&value))
-                    });
-                sec_trie_root::<KeccakHasher, _, _, _>(storage_values)
+
+                let storage_with_sorted_hashed_keys = storage
+                    .iter()
+                    .filter(|(_k, &v)| v != H256::ZERO)
+                    .map(|(slot, value)| (keccak256(slot), value))
+                    .sorted_by_key(|(key, _)| *key);
+
+                let mut hb = HashBuilder::default();
+                for (hashed_slot, value) in storage_with_sorted_hashed_keys {
+                    let encoded_value = encode_fixed_size(&U256::from_be_bytes(**value));
+                    hb.add_leaf(Nibbles::unpack(hashed_slot), &encoded_value);
+                }
+
+                hb.root()
             })
             .encode(out);
         self.code.as_ref().map_or(KECCAK_EMPTY, keccak256).encode(out);

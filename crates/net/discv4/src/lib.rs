@@ -21,8 +21,8 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
 )]
-#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
-#![deny(unused_must_use, rust_2018_idioms)]
+#![warn(missing_debug_implementations, missing_docs, rustdoc::all)]
+#![deny(unused_must_use, rust_2018_idioms, unreachable_pub, unused_crate_dependencies)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::{
@@ -67,7 +67,7 @@ use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tracing::{debug, trace, warn};
 
 pub mod error;
-mod proto;
+pub mod proto;
 
 mod config;
 pub use config::{Discv4Config, Discv4ConfigBuilder};

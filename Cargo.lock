@@ -5984,6 +5984,7 @@ dependencies = [
  "derive_more",
  "ethers-core",
  "hash-db",
+ "itertools 0.11.0",
  "modular-bitfield",
  "once_cell",
  "paste",
