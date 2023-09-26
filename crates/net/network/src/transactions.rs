@@ -75,9 +75,18 @@ impl TransactionsHandle {
         self.send(TransactionsCommand::PropagateHash(hash))
     }
 
-    /// Manually propagate the transaction that belongs to the hash to a specific peer.
+    /// Manually propagate the transaction hash to a specific peer.
+    ///
+    /// Note: this only propagates if the pool contains the transaction.
     pub fn propagate_hash_to(&self, hash: TxHash, peer: PeerId) {
-        self.send(TransactionsCommand::PropagateHashTo(hash, peer))
+        self.propagate_hashes_to(Some(hash), peer)
+    }
+
+    /// Manually propagate the transaction hashes to a specific peer.
+    ///
+    /// Note: this only propagates the transactions that are known to the pool.
+    pub fn propagate_hashes_to(&self, hash: impl IntoIterator<Item = TxHash>, peer: PeerId) {
+        self.send(TransactionsCommand::PropagateHashesTo(hash.into_iter().collect(), peer))
     }
 
     /// Request the active peer IDs from the [`TransactionsManager`].
@@ -335,19 +344,22 @@ where
         propagated
     }
 
-    /// Propagate the transactions to single peer as hashes
+    /// Propagate the transaction hashes to the given peer
+    ///
+    /// Note: This will only send the hashes for transactions that exist in the pool.
     fn propagate_hashes_to(&mut self, hashes: Vec<TxHash>, peer_id: PeerId) {
         trace!(target: "net::tx", "Start propagating transactions as hashes");
 
         // This fetches a transactions from the pool, including the blob transactions, which are
         // only ever sent as hashes.
         let propagated = {
+            let Some(peer) = self.peers.get_mut(&peer_id) else {
+                // no such peer
+                return
+            };
+
             let to_propagate: Vec<PropagateTransaction> =
                 self.pool.get_all(hashes).into_iter().map(PropagateTransaction::new).collect();
-            let peer = match self.peers.get_mut(&peer_id) {
-                Some(peer) => peer,
-                None => return,
-            };
 
             let mut propagated = PropagatedTransactions::default();
 
@@ -362,13 +374,16 @@ where
 
             let new_pooled_hashes = hashes.build();
 
-            if !new_pooled_hashes.is_empty() {
-                for hash in new_pooled_hashes.iter_hashes().copied() {
-                    propagated.0.entry(hash).or_default().push(PropagateKind::Hash(peer_id));
-                }
-                // send hashes of transactions
-                self.network.send_transactions_hashes(peer_id, new_pooled_hashes);
+            if new_pooled_hashes.is_empty() {
+                // nothing to propagate
+                return
             }
+
+            for hash in new_pooled_hashes.iter_hashes().copied() {
+                propagated.0.entry(hash).or_default().push(PropagateKind::Hash(peer_id));
+            }
+            // send hashes of transactions
+            self.network.send_transactions_hashes(peer_id, new_pooled_hashes);
 
             // Update propagated transactions metrics
             self.metrics.propagated_transactions.increment(propagated.0.len() as u64);
@@ -473,8 +488,8 @@ where
     fn on_command(&mut self, cmd: TransactionsCommand) {
         match cmd {
             TransactionsCommand::PropagateHash(hash) => self.on_new_transactions(vec![hash]),
-            TransactionsCommand::PropagateHashTo(hash, peer) => {
-                self.propagate_hashes_to(vec![hash], peer)
+            TransactionsCommand::PropagateHashesTo(hashes, peer) => {
+                self.propagate_hashes_to(hashes, peer)
             }
             TransactionsCommand::GetActivePeers => todo!(),
             TransactionsCommand::PropagateTransactionsTo(_txs, _peer) => todo!(),
@@ -907,8 +922,8 @@ struct Peer {
 enum TransactionsCommand {
     /// Propagate a transaction hash to the network.
     PropagateHash(H256),
-    /// Propagate a transaction hash to a specific peer.
-    PropagateHashTo(H256, PeerId),
+    /// Propagate transaction hashes to a specific peer.
+    PropagateHashesTo(Vec<H256>, PeerId),
     /// Request the list of active peer IDs from the [`TransactionsManager`].
     GetActivePeers,
     /// Propagate a collection of full transactions to a specific peer.
