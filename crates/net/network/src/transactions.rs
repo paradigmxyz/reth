@@ -333,6 +333,7 @@ where
         propagated: &mut PropagatedTransactions,
         send_full: bool,
     ) {
+        trace!(target: "net::tx", "Propagating transactions to peer");
         // filter all transactions unknown to the peer
         let mut hashes = PooledTransactionsHashesBuilder::new(peer.version);
         let mut full_transactions = FullTransactionsBuilder::default();
