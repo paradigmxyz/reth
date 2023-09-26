@@ -1,23 +1,23 @@
 //! [serde] utilities.
 
-use crate::H256;
+use crate::{H256, U64};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 mod storage;
 
-use serde::Serializer;
 pub use storage::*;
 
 mod jsonu256;
 pub use jsonu256::*;
 
 pub mod num;
+
 mod prune;
 pub use prune::deserialize_opt_prune_mode_with_min_blocks;
 
-/// serde functions for handling primitive `u64` as [U64](crate::U64)
+/// serde functions for handling primitive `u64` as [`U64`].
 pub mod u64_hex {
-    use crate::U64;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use super::*;
 
     /// Deserializes an `u64` from [U64] accepting a hex quantity string with optional 0x prefix
     pub fn deserialize<'de, D>(deserializer: D) -> Result<u64, D::Error>
@@ -35,7 +35,7 @@ pub mod u64_hex {
 
 /// Serialize a byte vec as a hex string _without_ the "0x" prefix.
 ///
-/// This behaves the same as `hex::encode`.
+/// This behaves the same as [`hex::encode`](crate::hex::encode).
 pub fn serialize_hex_string_no_prefix<S, T>(x: T, s: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
@@ -44,14 +44,12 @@ where
     s.serialize_str(&crate::hex::encode(x.as_ref()))
 }
 
-/// Serialize a byte vec as a hex string _without_ 0x prefix
+/// Serialize a [H256] as a hex string _without_ the "0x" prefix.
 pub fn serialize_h256_hex_string_no_prefix<S>(x: &H256, s: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
-    let val = format!("{:?}", x);
-    // skip the 0x prefix
-    s.serialize_str(&val.as_str()[2..])
+    s.serialize_str(&format!("{x:x}"))
 }
 
 #[cfg(test)]

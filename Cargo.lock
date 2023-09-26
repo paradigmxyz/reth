@@ -5987,6 +5987,7 @@ dependencies = [
  "hash-db",
  "itertools 0.11.0",
  "modular-bitfield",
+ "num_enum 0.7.0",
  "once_cell",
  "paste",
  "plain_hasher",

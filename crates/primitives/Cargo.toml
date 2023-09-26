@@ -17,7 +17,7 @@ revm-primitives = { workspace = true, features = ["serde"] }
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-sol-types.workspace = true
-ethers-core = { workspace = true, default-features = false }
+ethers-core = { workspace = true, default-features = false, optional = true }
 
 # crypto
 secp256k1 = { workspace = true, features = ["global-context", "recovery"] }
@@ -53,6 +53,7 @@ rayon = "1.7"
 tempfile = "3.3"
 sha2 = "0.10.7"
 itertools = "0.11"
+num_enum = "0.7"
 
 # `test-utils` feature
 plain_hasher = { version = "0.2", optional = true }
@@ -88,7 +89,7 @@ pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterio
 [features]
 default = []
 arbitrary = ["revm-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
-test-utils = ["dep:plain_hasher", "dep:hash-db"]
+test-utils = ["dep:plain_hasher", "dep:hash-db", "dep:ethers-core"]
 
 [[bench]]
 name = "recover_ecdsa_crit"
