@@ -15,7 +15,7 @@ pub mod num;
 mod prune;
 pub use prune::deserialize_opt_prune_mode_with_min_blocks;
 
-/// serde functions for handling primitive `u64` as [U64](crate::U64)
+/// serde functions for handling primitive `u64` as [`U64`].
 pub mod u64_hex {
     use super::*;
 
