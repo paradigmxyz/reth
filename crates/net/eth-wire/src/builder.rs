@@ -17,7 +17,7 @@ use reth_primitives::{Chain, ForkId, PeerId, H256, U256};
 /// // this is just an example status message!
 /// let status = Status::builder()
 ///     .version(EthVersion::Eth66.into())
-///     .chain(Chain::Named(NamedChain::Mainnet))
+///     .chain(Chain::mainnet())
 ///     .total_difficulty(U256::from(100))
 ///     .blockhash(H256::from(MAINNET_GENESIS))
 ///     .genesis(H256::from(MAINNET_GENESIS))
@@ -28,7 +28,7 @@ use reth_primitives::{Chain, ForkId, PeerId, H256, U256};
 ///     status,
 ///     Status {
 ///         version: EthVersion::Eth66.into(),
-///         chain: Chain::Named(NamedChain::Mainnet),
+///         chain: Chain::mainnet(),
 ///         total_difficulty: U256::from(100),
 ///         blockhash: H256::from(MAINNET_GENESIS),
 ///         genesis: H256::from(MAINNET_GENESIS),
