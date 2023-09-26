@@ -114,7 +114,7 @@ pub mod kzg {
     pub use c_kzg::*;
 }
 
-/// Hash a message according to [EIP-191] (version `0x01`).
+/// Hash a message according to [EIP-191] (version `0x01`)
 ///
 /// The final message is a UTF-8 string, encoded as follows:
 /// `"\x19Ethereum Signed Message:\n" + message.length + message`
