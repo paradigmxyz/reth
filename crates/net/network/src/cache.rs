@@ -52,6 +52,11 @@ impl<T: Hash + Eq> LruCache<T> {
     {
         self.inner.contains(value)
     }
+
+    /// Returns the linked_hash_set iterator type
+    pub fn iter(&self) -> linked_hash_set::Iter<'_, T> {
+        self.inner.iter()
+    }
 }
 
 impl<T> Extend<T> for LruCache<T>

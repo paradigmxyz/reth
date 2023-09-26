@@ -27,7 +27,7 @@ use reth_transaction_pool::{
     PropagatedTransactions, TransactionPool, ValidPoolTransaction,
 };
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry, HashMap, HashSet},
     num::NonZeroUsize,
     pin::Pin,
     sync::Arc,
@@ -478,13 +478,19 @@ where
         match cmd {
             TransactionsCommand::PropagateHash(hash) => self.on_new_transactions(vec![hash]),
             TransactionsCommand::PropagateHashTo(_hash, _peer) => todo!(),
-            TransactionsCommand::GetActivePeers => todo!(),
+            TransactionsCommand::GetActivePeers => {
+                self.get_active_peers();
+            }
             TransactionsCommand::PropagateTransactionsTo(_txs, _peer) => {
                 let propagated = self.propagate_transactions_to_peer(_txs, _peer);
                 self.pool.on_propagated(propagated);
             }
-            TransactionsCommand::GetTransactionHashes(_peers) => todo!(),
-            TransactionsCommand::GetPeerTransactionHashes(_peer) => todo!(),
+            TransactionsCommand::GetTransactionHashes(_peers) => {
+                self.get_transaction_hashes(_peers);
+            }
+            TransactionsCommand::GetPeerTransactionHashes(_peer) => {
+                self.get_peer_transaction_hashes(_peer);
+            }
         }
     }
 
@@ -536,6 +542,32 @@ where
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Return a list of all peer ids in the Peers hashmap
+    fn get_active_peers(&self) -> Vec<&PeerId> {
+        self.peers.keys().collect()
+    }
+
+    /// Return all the hashes known by given `peer_ids`
+    fn get_transaction_hashes(&self, peer_ids: Vec<PeerId>) -> Vec<&TxHash> {
+        let mut tx_set = HashSet::<&TxHash>::new();
+        peer_ids.into_iter().for_each(|id| {
+            self.get_peer_transaction_hashes(id).into_iter().for_each(|tx| {
+                tx_set.insert(tx);
+            })
+        });
+
+        tx_set.into_iter().collect()
+    }
+
+    /// Return all the transaction hashes know by the given peer
+    fn get_peer_transaction_hashes(&self, peer_id: PeerId) -> Vec<&TxHash> {
+        if let Some(peer) = self.peers.get(&peer_id) {
+            peer.transactions.iter().collect()
+        } else {
+            vec![]
         }
     }
 
