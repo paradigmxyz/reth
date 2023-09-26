@@ -397,6 +397,77 @@ where
         self.pool.on_propagated(propagated);
     }
 
+    /// Propagate the transactions to a peer either as full objects or hashes
+    ///
+    /// Note: EIP-4844 are disallowed from being broadcast in full and are only ever sent as hashes, see also <https://eips.ethereum.org/EIPS/eip-4844#networking>.
+    fn propagate_transactions_to(&mut self, txs: Vec<TxHash>, peer_id: PeerId) {
+        trace!(target: "net::tx", "Start propagating transactions to a peer");
+
+        // This fetches all transaction from the pool, including the blob transactions, which are
+        // only ever sent as hashes.
+        let propagated = {
+            let to_propagate: Vec<PropagateTransaction> =
+                self.pool.get_all(txs).into_iter().map(PropagateTransaction::new).collect();
+
+            let Some(peer) = self.peers.get_mut(&peer_id) else {
+                // no such peer
+                return
+            };
+
+            let mut propagated = PropagatedTransactions::default();
+
+            // filter all transactions unknown to the peer
+            let mut hashes = PooledTransactionsHashesBuilder::new(peer.version);
+            let mut full_transactions = FullTransactionsBuilder::default();
+
+            // Iterate through the transactions to propagate and fill the hashes and full
+            // transaction lists.
+            for tx in to_propagate.iter() {
+                if peer.transactions.insert(tx.hash()) {
+                    hashes.push(tx);
+
+                    // Do not send full 4844 transaction hashes to peers.
+                    //
+                    //  Nodes MUST NOT automatically broadcast blob transactions to their peers.
+                    //  Instead, those transactions are only announced using
+                    //  `NewPooledTransactionHashes` messages, and can then be manually requested
+                    //  via `GetPooledTransactions`.
+                    //
+                    // From: <https://eips.ethereum.org/EIPS/eip-4844#networking>
+                    if !tx.transaction.is_eip4844() {
+                        full_transactions.push(tx);
+                    }
+                }
+            }
+
+            // send hashes of transactions
+            let new_pooled_hashes = hashes.build();
+            if !new_pooled_hashes.is_empty() {
+                for hash in new_pooled_hashes.iter_hashes().copied() {
+                    propagated.0.entry(hash).or_default().push(PropagateKind::Hash(peer_id));
+                }
+                self.network.send_transactions_hashes(peer_id, new_pooled_hashes);
+            }
+
+            // send full transactions
+            let new_full_transactions = full_transactions.build();
+            if !new_full_transactions.is_empty() {
+                for tx in new_full_transactions.iter() {
+                    propagated.0.entry(tx.hash()).or_default().push(PropagateKind::Full(peer_id));
+                }
+                self.network.send_transactions(peer_id, new_full_transactions);
+            }
+
+            // Update propagated transactions metrics
+            self.metrics.propagated_transactions.increment(propagated.0.len() as u64);
+
+            propagated
+        };
+
+        // notify pool so events get fired
+        self.pool.on_propagated(propagated);
+    }
+
     /// Request handler for an incoming `NewPooledTransactionHashes`
     fn on_new_pooled_transaction_hashes(
         &mut self,
@@ -494,7 +565,9 @@ where
                 self.propagate_hashes_to(hashes, peer)
             }
             TransactionsCommand::GetActivePeers => todo!(),
-            TransactionsCommand::PropagateTransactionsTo(_txs, _peer) => todo!(),
+            TransactionsCommand::PropagateTransactionsTo(txs, peer) => {
+                self.propagate_transactions_to(txs, peer)
+            }
             TransactionsCommand::GetTransactionHashes(_peers) => todo!(),
             TransactionsCommand::GetPeerTransactionHashes(_peer) => todo!(),
         }
