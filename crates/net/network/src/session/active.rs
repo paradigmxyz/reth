@@ -38,7 +38,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
-use tracing::{debug, info, trace};
+use tracing::{debug, trace};
 
 /// Constants for timeout updating
 
