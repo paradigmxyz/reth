@@ -1,9 +1,8 @@
 use crate::{EthVersion, StatusBuilder};
-
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{
-    hex, Chain, ChainSpec, ForkId, Genesis, Hardfork, Head, H256, MAINNET, U256,
+    hex, Chain, ChainSpec, ForkId, Genesis, Hardfork, Head, NamedChain, H256, MAINNET, U256,
 };
 use std::fmt::{Debug, Display};
 
@@ -134,7 +133,7 @@ impl Default for Status {
         let mainnet_genesis = MAINNET.genesis_hash();
         Status {
             version: EthVersion::Eth68 as u8,
-            chain: Chain::Named(ethers_core::types::Chain::Mainnet),
+            chain: Chain::Named(NamedChain::Mainnet),
             total_difficulty: U256::from(17_179_869_184u64),
             blockhash: mainnet_genesis,
             genesis: mainnet_genesis,
@@ -149,10 +148,10 @@ impl Default for Status {
 mod tests {
     use crate::types::{EthVersion, Status};
     use alloy_rlp::{Decodable, Encodable};
-    use ethers_core::types::Chain as NamedChain;
     use rand::Rng;
     use reth_primitives::{
-        hex, Chain, ChainSpec, ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head, H256, U256,
+        hex, Chain, ChainSpec, ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head,
+        NamedChain, H256, U256,
     };
     use std::str::FromStr;
 

@@ -20,9 +20,6 @@ reth-discv4 = { path = "../discv4" }
 reth-metrics.workspace = true
 metrics.workspace = true
 
-# used for Chain and builders
-ethers-core = { workspace = true, default-features = false }
-
 bytes.workspace = true
 thiserror.workspace = true
 serde = { workspace = true, optional = true }

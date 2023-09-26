@@ -322,11 +322,10 @@ mod tests {
         types::{broadcast::BlockHashNumber, EthMessage, EthVersion, Status},
         EthStream, PassthroughCodec,
     };
-    use ethers_core::types::Chain;
     use futures::{SinkExt, StreamExt};
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use reth_ecies::{stream::ECIESStream, util::pk2id};
-    use reth_primitives::{ForkFilter, Head, H256, U256};
+    use reth_primitives::{ForkFilter, Head, NamedChain, H256, U256};
     use secp256k1::{SecretKey, SECP256K1};
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;
@@ -338,7 +337,7 @@ mod tests {
 
         let status = Status {
             version: EthVersion::Eth67 as u8,
-            chain: Chain::Mainnet.into(),
+            chain: NamedChain::Mainnet.into(),
             total_difficulty: U256::ZERO,
             blockhash: H256::random(),
             genesis,
@@ -385,7 +384,7 @@ mod tests {
 
         let status = Status {
             version: EthVersion::Eth67 as u8,
-            chain: Chain::Mainnet.into(),
+            chain: NamedChain::Mainnet.into(),
             total_difficulty: U256::from(2).pow(U256::from(100)) - U256::from(1),
             blockhash: H256::random(),
             genesis,
@@ -432,7 +431,7 @@ mod tests {
 
         let status = Status {
             version: EthVersion::Eth67 as u8,
-            chain: Chain::Mainnet.into(),
+            chain: NamedChain::Mainnet.into(),
             total_difficulty: U256::from(2).pow(U256::from(100)),
             blockhash: H256::random(),
             genesis,
@@ -573,7 +572,7 @@ mod tests {
 
         let status = Status {
             version: EthVersion::Eth67 as u8,
-            chain: Chain::Mainnet.into(),
+            chain: NamedChain::Mainnet.into(),
             total_difficulty: U256::ZERO,
             blockhash: H256::random(),
             genesis,
