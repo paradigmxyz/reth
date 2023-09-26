@@ -110,6 +110,11 @@ pub mod rpc {
         pub use reth_rpc::eth::*;
     }
 
+    /// Re-exported from `reth_rpc::rpc`.
+    pub mod result {
+        pub use reth_rpc::result::*;
+    }
+
     /// Re-exported from `reth_rpc::eth`.
     pub mod types_compat {
         pub use reth_rpc_types_compat::*;
