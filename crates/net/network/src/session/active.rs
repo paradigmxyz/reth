@@ -38,7 +38,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
-use tracing::{debug, info, trace};
+use tracing::{debug, trace};
 
 /// Constants for timeout updating
 
@@ -508,7 +508,12 @@ impl Future for ActiveSession {
                         progress = true;
                         match cmd {
                             SessionCommand::Disconnect { reason } => {
-                                info!(target: "net::session", ?reason, remote_peer_id=?this.remote_peer_id, "Received disconnect command for session");
+                                debug!(
+                                    target: "net::session",
+                                    ?reason,
+                                    remote_peer_id=?this.remote_peer_id,
+                                    "Received disconnect command for session"
+                                );
                                 let reason =
                                     reason.unwrap_or(DisconnectReason::DisconnectRequested);
 

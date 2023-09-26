@@ -257,19 +257,17 @@ pub fn convert_block_to_payload_input_v2(value: SealedBlock) -> ExecutionPayload
     }
 }
 
-/// Tries to create a new block from the given payload and optional parent beacon block root.
-/// Perform additional validation of `extra_data` and `base_fee_per_gas` fields.
+/// Tries to create a new block (without a block hash) from the given payload and optional parent
+/// beacon block root.
+/// Performs additional validation of `extra_data` and `base_fee_per_gas` fields.
 ///
 /// NOTE: The log bloom is assumed to be validated during serialization.
-/// NOTE: Empty ommers, nonce and difficulty values are validated upon computing block hash and
-/// comparing the value with `payload.block_hash`.
 ///
 /// See <https://github.com/ethereum/go-ethereum/blob/79a478bb6176425c2400e949890e668a3d9a3d05/core/beacon/types.go#L145>
-pub fn try_into_sealed_block(
+pub fn try_into_block(
     value: ExecutionPayload,
     parent_beacon_block_root: Option<H256>,
-) -> Result<SealedBlock, PayloadError> {
-    let block_hash = value.block_hash();
+) -> Result<Block, PayloadError> {
     let mut base_payload = match value {
         ExecutionPayload::V1(payload) => try_payload_v1_to_block(payload)?,
         ExecutionPayload::V2(payload) => try_payload_v2_to_block(payload)?,
@@ -278,12 +276,48 @@ pub fn try_into_sealed_block(
 
     base_payload.header.parent_beacon_block_root = parent_beacon_block_root;
 
-    let payload = base_payload.seal_slow();
+    Ok(base_payload)
+}
 
-    if block_hash != payload.hash() {
-        return Err(PayloadError::BlockHash { execution: payload.hash(), consensus: block_hash })
+/// Tries to create a new block from the given payload and optional parent beacon block root.
+///
+/// NOTE: Empty ommers, nonce and difficulty values are validated upon computing block hash and
+/// comparing the value with `payload.block_hash`.
+///
+/// Uses [try_into_block] to convert from the [ExecutionPayload] to [Block] and seals the block
+/// with its hash.
+///
+/// Uses [validate_block_hash] to validate the payload block hash and ultimately return the
+/// [SealedBlock].
+pub fn try_into_sealed_block(
+    payload: ExecutionPayload,
+    parent_beacon_block_root: Option<H256>,
+) -> Result<SealedBlock, PayloadError> {
+    let block_hash = payload.block_hash();
+    let base_payload = try_into_block(payload, parent_beacon_block_root)?;
+
+    // validate block hash and return
+    validate_block_hash(block_hash, base_payload)
+}
+
+/// Takes the expected block hash and [Block], validating the block and converting it into a
+/// [SealedBlock].
+///
+/// If the provided block hash does not match the block hash computed from the provided block, this
+/// returns [PayloadError::BlockHash].
+pub fn validate_block_hash(
+    expected_block_hash: H256,
+    block: Block,
+) -> Result<SealedBlock, PayloadError> {
+    let sealed_block = block.seal_slow();
+    if expected_block_hash != sealed_block.hash() {
+        return Err(PayloadError::BlockHash {
+            execution: sealed_block.hash(),
+            consensus: expected_block_hash,
+        })
     }
-    Ok(payload)
+
+    Ok(sealed_block)
 }
 
 /// Converts [Withdrawal] to [reth_rpc_types::engine::payload::Withdrawal]

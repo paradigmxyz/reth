@@ -415,7 +415,7 @@ impl HashBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{hex_literal::hex, proofs::KeccakHasher, H256, U256};
+    use crate::{hex_literal::hex, proofs::triehash::KeccakHasher, H256, U256};
     use proptest::prelude::*;
     use std::collections::{BTreeMap, HashMap};
 

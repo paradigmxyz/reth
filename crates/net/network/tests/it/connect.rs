@@ -11,9 +11,7 @@ use reth_interfaces::{
 };
 use reth_net_common::ban_list::BanList;
 use reth_network::{
-    test_utils::{
-        enr_to_peer_id, unused_tcp_udp, NetworkEventStream, PeerConfig, Testnet, GETH_TIMEOUT,
-    },
+    test_utils::{enr_to_peer_id, NetworkEventStream, PeerConfig, Testnet, GETH_TIMEOUT},
     NetworkConfigBuilder, NetworkEvent, NetworkManager, PeersConfig,
 };
 use reth_network_api::{NetworkInfo, Peers, PeersInfo};
@@ -328,10 +326,9 @@ async fn test_incoming_node_id_blacklist() {
         let ban_list = BanList::new(vec![geth_peer_id], HashSet::new());
         let peer_config = PeersConfig::default().with_ban_list(ban_list);
 
-        let (reth_p2p, reth_disc) = unused_tcp_udp();
         let config = NetworkConfigBuilder::new(secret_key)
-            .listener_addr(reth_p2p)
-            .discovery_addr(reth_disc)
+            .listener_port(0)
+            .disable_discovery()
             .peer_config(peer_config)
             .build(NoopProvider::default());
 
@@ -343,7 +340,7 @@ async fn test_incoming_node_id_blacklist() {
         tokio::task::spawn(network);
 
         // make geth connect to us
-        let our_enode = NodeRecord::new(reth_p2p, *handle.peer_id());
+        let our_enode = NodeRecord::new(handle.local_addr(), *handle.peer_id());
 
         provider.add_peer(our_enode.to_string()).await.unwrap();
 
@@ -378,10 +375,9 @@ async fn test_incoming_connect_with_single_geth() {
         // get the peer id we should be expecting
         let geth_peer_id = enr_to_peer_id(provider.node_info().await.unwrap().enr);
 
-        let (reth_p2p, reth_disc) = unused_tcp_udp();
         let config = NetworkConfigBuilder::new(secret_key)
-            .listener_addr(reth_p2p)
-            .discovery_addr(reth_disc)
+            .listener_port(0)
+            .disable_discovery()
             .build(NoopProvider::default());
 
         let network = NetworkManager::new(config).await.unwrap();
@@ -393,7 +389,7 @@ async fn test_incoming_connect_with_single_geth() {
         let mut event_stream = NetworkEventStream::new(events);
 
         // make geth connect to us
-        let our_enode = NodeRecord::new(reth_p2p, *handle.peer_id());
+        let our_enode = NodeRecord::new(handle.local_addr(), *handle.peer_id());
 
         provider.add_peer(our_enode.to_string()).await.unwrap();
 
@@ -413,10 +409,9 @@ async fn test_outgoing_connect_with_single_geth() {
     tokio::time::timeout(GETH_TIMEOUT, async move {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
-        let (reth_p2p, reth_disc) = unused_tcp_udp();
         let config = NetworkConfigBuilder::new(secret_key)
-            .listener_addr(reth_p2p)
-            .discovery_addr(reth_disc)
+            .listener_port(0)
+            .disable_discovery()
             .build(NoopProvider::default());
         let network = NetworkManager::new(config).await.unwrap();
 
