@@ -5,10 +5,8 @@ use crate::{
     Withdrawal, H256,
 };
 use bytes::{BufMut, BytesMut};
-use hash_db::Hasher;
 use hex_literal::hex;
 use itertools::Itertools;
-use plain_hasher::PlainHasher;
 use reth_rlp::Encodable;
 use std::collections::HashMap;
 
@@ -19,22 +17,6 @@ pub const EMPTY_LIST_HASH: H256 =
 /// Root hash of an empty trie.
 pub const EMPTY_ROOT: H256 =
     H256(hex!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"));
-
-/// A [Hasher] that calculates a keccak256 hash of the given data.
-#[derive(Default, Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct KeccakHasher;
-
-impl Hasher for KeccakHasher {
-    type Out = H256;
-    type StdHasher = PlainHasher;
-
-    const LENGTH: usize = 32;
-
-    fn hash(x: &[u8]) -> Self::Out {
-        keccak256(x)
-    }
-}
 
 /// Adjust the index of an item for rlp encoding.
 pub const fn adjust_index_for_rlp(i: usize, len: usize) -> usize {
@@ -142,6 +124,32 @@ pub fn genesis_state_root(genesis_alloc: &HashMap<Address, GenesisAccount>) -> H
     }
 
     hb.root()
+}
+
+/// Implementation of hasher using our keccak256 hashing function
+/// for compatibility with `triehash` crate.
+#[cfg(any(test, feature = "test-utils"))]
+pub mod triehash {
+    use super::{keccak256, H256};
+    use hash_db::Hasher;
+    use plain_hasher::PlainHasher;
+
+    /// A [Hasher] that calculates a keccak256 hash of the given data.
+    #[derive(Default, Debug, Clone, PartialEq, Eq)]
+    #[non_exhaustive]
+    pub struct KeccakHasher;
+
+    #[cfg(any(test, feature = "test-utils"))]
+    impl Hasher for KeccakHasher {
+        type Out = H256;
+        type StdHasher = PlainHasher;
+
+        const LENGTH: usize = 32;
+
+        fn hash(x: &[u8]) -> Self::Out {
+            keccak256(x)
+        }
+    }
 }
 
 #[cfg(test)]

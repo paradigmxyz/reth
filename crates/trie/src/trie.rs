@@ -552,7 +552,7 @@ mod tests {
     use reth_primitives::{
         hex_literal::hex,
         keccak256,
-        proofs::KeccakHasher,
+        proofs::triehash::KeccakHasher,
         trie::{BranchNodeCompact, TrieMask},
         Account, Address, H256, MAINNET, U256,
     };
