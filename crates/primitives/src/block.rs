@@ -60,6 +60,11 @@ impl Block {
         BlockWithSenders { block: self, senders }
     }
 
+    /// Returns only the blob transactions, if any, from the block body.
+    pub fn blob_transactions(&self) -> Vec<&TransactionSigned> {
+        self.body.iter().filter(|tx| tx.is_eip4844()).collect()
+    }
+
     /// Calculates a heuristic for the in-memory size of the [Block].
     #[inline]
     pub fn size(&self) -> usize {

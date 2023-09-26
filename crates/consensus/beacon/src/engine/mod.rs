@@ -1152,12 +1152,26 @@ where
         let parent_hash = payload.parent_hash();
 
         let block_hash = payload.block_hash();
-        let block = match try_into_block(
+        let block_res = match try_into_block(
             payload,
             cancun_fields.as_ref().map(|fields| fields.parent_beacon_block_root),
-        )
-        .and_then(|block| validate_block_hash(block_hash, block))
-        {
+        ) {
+            Ok(block) => {
+                // make sure there are no blob transactions in the payload if it is pre-cancun
+                // we perform this check before validating the block hash because INVALID_PARAMS
+                // must be returned over an INVALID response.
+                if !self.chain_spec().is_cancun_activated_at_timestamp(block.timestamp) {
+                    if block.blob_transactions().len() > 0 {
+                        return Err(BeaconOnNewPayloadError::PreCancunBlockWithBlobTransactions)
+                    }
+                }
+
+                validate_block_hash(block_hash, block)
+            }
+            Err(error) => Err(error),
+        };
+
+        let block = match block_res {
             Ok(block) => block,
             Err(error) => {
                 // TODO: need to fix this to use the correct type
@@ -1175,13 +1189,6 @@ where
                 return Ok(Err(PayloadStatus::new(status, latest_valid_hash)))
             }
         };
-
-        // make sure there are no blob transactions in the payload if it is pre-cancun
-        if !self.chain_spec().is_cancun_activated_at_timestamp(block.timestamp) {
-            if block.blob_transactions().len() > 0 {
-                return Err(BeaconOnNewPayloadError::PreCancunBlockWithBlobTransactions)
-            }
-        }
 
         let block_versioned_hashes = block
             .blob_transactions()
