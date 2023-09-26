@@ -264,7 +264,10 @@ pub fn convert_block_to_payload_input_v2(value: SealedBlock) -> ExecutionPayload
 /// NOTE: The log bloom is assumed to be validated during serialization.
 ///
 /// See <https://github.com/ethereum/go-ethereum/blob/79a478bb6176425c2400e949890e668a3d9a3d05/core/beacon/types.go#L145>
-pub fn try_into_block(value: ExecutionPaylod, parent_beacon_block_root: Option<H256>) -> Result<Block, PayloadError> {
+pub fn try_into_block(
+    value: ExecutionPayload,
+    parent_beacon_block_root: Option<H256>,
+) -> Result<Block, PayloadError> {
     let mut base_payload = match value {
         ExecutionPayload::V1(payload) => try_payload_v1_to_block(payload)?,
         ExecutionPayload::V2(payload) => try_payload_v2_to_block(payload)?,
@@ -308,7 +311,10 @@ pub fn validate_block_hash(
 ) -> Result<SealedBlock, PayloadError> {
     let sealed_block = block.seal_slow();
     if expected_block_hash != sealed_block.hash() {
-        return Err(PayloadError::BlockHash { execution: sealed_block.hash(), consensus: expected_block_hash })
+        return Err(PayloadError::BlockHash {
+            execution: sealed_block.hash(),
+            consensus: expected_block_hash,
+        })
     }
 
     Ok(sealed_block)
