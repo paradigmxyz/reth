@@ -40,7 +40,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tokio::sync::{
     mpsc,
@@ -656,16 +656,33 @@ where
 
         let start = Instant::now();
         let make_canonical_result = self.blockchain.make_canonical(&state.head_block_hash);
-        self.record_make_canonical_latency(start, &make_canonical_result);
+        let elapsed = self.record_make_canonical_latency(start, &make_canonical_result);
         let status = match make_canonical_result {
             Ok(outcome) => {
-                if !outcome.is_already_canonical() {
-                    debug!(target: "consensus::engine", hash=?state.head_block_hash, number=outcome.header().number, "canonicalized new head");
+                match outcome {
+                    CanonicalOutcome::AlreadyCanonical { ref header } => {
+                        debug!(
+                            target: "consensus::engine",
+                            fcu_head_num=?header.number,
+                            current_head_num=?self.blockchain.canonical_tip().number,
+                            "Ignoring beacon update to old head"
+                        );
+                    }
+                    CanonicalOutcome::Committed { ref head } => {
+                        debug!(
+                            target: "consensus::engine",
+                            hash=?state.head_block_hash,
+                            number=head.number,
+                            "Canonicalized new head"
+                        );
 
-                    // new VALID update that moved the canonical chain forward
-                    let _ = self.update_head(outcome.header().clone());
-                } else {
-                    debug!(target: "consensus::engine", fcu_head_num=?outcome.header().number, current_head_num=?self.blockchain.canonical_tip().number, "Ignoring beacon update to old head");
+                        // new VALID update that moved the canonical chain forward
+                        let _ = self.update_head(head.clone());
+                        self.listeners.notify(BeaconConsensusEngineEvent::CanonicalChainCommitted(
+                            head.clone(),
+                            elapsed,
+                        ));
+                    }
                 }
 
                 if let Some(attrs) = attrs {
@@ -721,7 +738,7 @@ where
         &self,
         start: Instant,
         outcome: &Result<CanonicalOutcome, RethError>,
-    ) {
+    ) -> Duration {
         let elapsed = start.elapsed();
         self.metrics.make_canonical_latency.record(elapsed);
         match outcome {
@@ -733,6 +750,8 @@ where
             }
             Err(_) => self.metrics.make_canonical_error_latency.record(elapsed),
         }
+
+        elapsed
     }
 
     /// Ensures that the given forkchoice state is consistent, assuming the head block has been
@@ -1469,10 +1488,20 @@ where
             // optimistically try to make the head of the current FCU target canonical, the sync
             // target might have changed since the block download request was issued
             // (new FCU received)
-            match self.blockchain.make_canonical(&target.head_block_hash) {
+            let start = Instant::now();
+            let make_canonical_result = self.blockchain.make_canonical(&target.head_block_hash);
+            let elapsed = self.record_make_canonical_latency(start, &make_canonical_result);
+            match make_canonical_result {
                 Ok(outcome) => {
+                    if let CanonicalOutcome::Committed { ref head } = outcome {
+                        self.listeners.notify(BeaconConsensusEngineEvent::CanonicalChainCommitted(
+                            head.clone(),
+                            elapsed,
+                        ));
+                    }
+
                     let new_head = outcome.into_header();
-                    debug!(target: "consensus::engine", hash=?new_head.hash, number=new_head.number, "canonicalized new head");
+                    debug!(target: "consensus::engine", hash=?new_head.hash, number=new_head.number, "Canonicalized new head");
 
                     // we can update the FCU blocks
                     let _ = self.update_canon_chain(new_head, &target);
