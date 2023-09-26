@@ -1080,6 +1080,7 @@ dependencies = [
  "glob",
  "hex",
  "libc",
+ "serde",
 ]
 
 [[package]]
@@ -5996,7 +5997,6 @@ dependencies = [
  "rayon",
  "reth-codecs",
  "revm-primitives",
- "ruint",
  "secp256k1",
  "serde",
  "serde_json",
@@ -6368,7 +6368,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "3.3.0"
-source = "git+https://github.com/Evalir/revm/?branch=reintroduce-alloy-rebased#ded453ea768a80dbcf27de56b0d35b68c92f140c"
+source = "git+https://github.com/Evalir/revm/?branch=reintroduce-alloy-rebased#28346646bdbb312a89c317079f84f9f1315b1f6a"
 dependencies = [
  "auto_impl",
  "revm-interpreter",
@@ -6378,17 +6378,15 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "1.1.2"
-source = "git+https://github.com/Evalir/revm/?branch=reintroduce-alloy-rebased#ded453ea768a80dbcf27de56b0d35b68c92f140c"
+source = "git+https://github.com/Evalir/revm/?branch=reintroduce-alloy-rebased#28346646bdbb312a89c317079f84f9f1315b1f6a"
 dependencies = [
- "derive_more",
- "enumn",
  "revm-primitives",
 ]
 
 [[package]]
 name = "revm-precompile"
 version = "2.0.3"
-source = "git+https://github.com/Evalir/revm/?branch=reintroduce-alloy-rebased#ded453ea768a80dbcf27de56b0d35b68c92f140c"
+source = "git+https://github.com/Evalir/revm/?branch=reintroduce-alloy-rebased#28346646bdbb312a89c317079f84f9f1315b1f6a"
 dependencies = [
  "c-kzg 0.1.0 (git+https://github.com/ethereum/c-kzg-4844)",
  "k256",
@@ -6398,31 +6396,24 @@ dependencies = [
  "ripemd",
  "secp256k1",
  "sha2",
- "sha3",
  "substrate-bn",
 ]
 
 [[package]]
 name = "revm-primitives"
 version = "1.1.2"
-source = "git+https://github.com/Evalir/revm/?branch=reintroduce-alloy-rebased#ded453ea768a80dbcf27de56b0d35b68c92f140c"
+source = "git+https://github.com/Evalir/revm/?branch=reintroduce-alloy-rebased#28346646bdbb312a89c317079f84f9f1315b1f6a"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
- "arbitrary",
  "auto_impl",
  "bitflags 2.4.0",
  "bitvec",
- "bytes",
  "c-kzg 0.1.0 (git+https://github.com/ethereum/c-kzg-4844)",
- "derive_more",
  "enumn",
  "hashbrown 0.14.0",
  "hex",
  "once_cell",
- "primitive-types",
- "proptest",
- "proptest-derive",
  "serde",
 ]
 
