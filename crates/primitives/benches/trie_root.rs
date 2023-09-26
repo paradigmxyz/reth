@@ -4,7 +4,7 @@ use proptest::{
     strategy::{Strategy, ValueTree},
     test_runner::TestRunner,
 };
-use reth_primitives::{proofs::KeccakHasher, ReceiptWithBloom, H256};
+use reth_primitives::{proofs::triehash::KeccakHasher, ReceiptWithBloom, H256};
 
 /// Benchmarks different implementations of the root calculation.
 pub fn trie_root_benchmark(c: &mut Criterion) {

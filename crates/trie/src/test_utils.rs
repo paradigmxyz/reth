@@ -1,5 +1,5 @@
 use crate::account::EthAccount;
-use reth_primitives::{proofs::KeccakHasher, Account, Address, H256, U256};
+use reth_primitives::{proofs::triehash::KeccakHasher, Account, Address, H256, U256};
 use reth_rlp::{encode_fixed_size, Encodable};
 
 /// Re-export of [triehash].
