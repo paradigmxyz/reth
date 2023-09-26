@@ -447,7 +447,7 @@ impl ChainSpec {
 
     /// Convenience method to check if [Hardfork::Shanghai] is active at a given timestamp.
     #[inline]
-    pub fn is_shanghai_activated_at_timestamp(&self, timestamp: u64) -> bool {
+    pub fn is_shanghai_active_at_timestamp(&self, timestamp: u64) -> bool {
         self.fork_timestamps
             .shanghai
             .map(|shanghai| timestamp >= shanghai)
@@ -456,7 +456,7 @@ impl ChainSpec {
 
     /// Convenience method to check if [Hardfork::Cancun] is active at a given timestamp.
     #[inline]
-    pub fn is_cancun_activated_at_timestamp(&self, timestamp: u64) -> bool {
+    pub fn is_cancun_active_at_timestamp(&self, timestamp: u64) -> bool {
         self.fork_timestamps
             .cancun
             .map(|cancun| timestamp >= cancun)
@@ -1203,8 +1203,8 @@ Post-merge hard forks (timestamp based):
             .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(1337))
             .build();
         assert_eq!(spec.fork_timestamps.shanghai, Some(1337));
-        assert!(spec.is_shanghai_activated_at_timestamp(1337));
-        assert!(!spec.is_shanghai_activated_at_timestamp(1336));
+        assert!(spec.is_shanghai_active_at_timestamp(1337));
+        assert!(!spec.is_shanghai_active_at_timestamp(1336));
     }
 
     // Tests that all predefined timestamps are correctly set up in the chainspecs

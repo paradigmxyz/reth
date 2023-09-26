@@ -1276,7 +1276,7 @@ impl<'this, TX: DbTx<'this>> WithdrawalsProvider for DatabaseProvider<'this, TX>
         id: BlockHashOrNumber,
         timestamp: u64,
     ) -> RethResult<Option<Vec<Withdrawal>>> {
-        if self.chain_spec.is_shanghai_activated_at_timestamp(timestamp) {
+        if self.chain_spec.is_shanghai_active_at_timestamp(timestamp) {
             if let Some(number) = self.convert_hash_or_number(id)? {
                 // If we are past shanghai, then all blocks should have a withdrawal list, even if
                 // empty
