@@ -5927,6 +5927,7 @@ dependencies = [
  "hex",
  "hex-literal",
  "impl-serde",
+ "itertools 0.11.0",
  "modular-bitfield",
  "once_cell",
  "paste",

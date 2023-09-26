@@ -63,9 +63,8 @@ paste = "1.0"
 rayon = "1.7"
 tempfile = "3.3"
 sha2 = "0.10.7"
+itertools = "0.11"
 
-# proof related
-triehash = "0.8"
 # See to replace hashers to simplify libraries
 plain_hasher = "0.2"
 hash-db = "~0.15"
@@ -87,6 +86,7 @@ proptest.workspace = true
 proptest-derive.workspace = true
 assert_matches.workspace = true
 toml = "0.7.4"
+triehash = "0.8"
 
 # necessary so we don't hit a "undeclared 'std'": 
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198 
@@ -105,4 +105,5 @@ harness = false
 
 [[bench]]
 name = "trie_root"
+required-features = ["arbitrary"]
 harness = false
