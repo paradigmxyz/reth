@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn test_chain_state_roots() {
         let expected_mainnet_state_root =
-            H256::from(hex!("d7f8974fb5ac78d9ac099b9ad5018bedc2ce0a72dad1827a1709da30580f0544"));
+            b256!("d7f8974fb5ac78d9ac099b9ad5018bedc2ce0a72dad1827a1709da30580f0544");
         let calculated_mainnet_state_root = genesis_state_root(&MAINNET.genesis.alloc);
         assert_eq!(
             expected_mainnet_state_root, calculated_mainnet_state_root,
@@ -252,7 +252,7 @@ mod tests {
         );
 
         let expected_goerli_state_root =
-            H256::from(hex!("5d6cded585e73c4e322c30c2f782a336316f17dd85a4863b9d838d2d4b8b3008"));
+            b256!("5d6cded585e73c4e322c30c2f782a336316f17dd85a4863b9d838d2d4b8b3008");
         let calculated_goerli_state_root = genesis_state_root(&GOERLI.genesis.alloc);
         assert_eq!(
             expected_goerli_state_root, calculated_goerli_state_root,
@@ -260,7 +260,7 @@ mod tests {
         );
 
         let expected_sepolia_state_root =
-            H256::from(hex!("5eb6e371a698b8d68f665192350ffcecbbbf322916f4b51bd79bb6887da3f494"));
+            b256!("5eb6e371a698b8d68f665192350ffcecbbbf322916f4b51bd79bb6887da3f494");
         let calculated_sepolia_state_root = genesis_state_root(&SEPOLIA.genesis.alloc);
         assert_eq!(
             expected_sepolia_state_root, calculated_sepolia_state_root,
@@ -268,7 +268,7 @@ mod tests {
         );
 
         let expected_holesky_state_root =
-            H256::from(hex!("69d8c9d72f6fa4ad42d4702b433707212f90db395eb54dc20bc85de253788783"));
+            b256!("69d8c9d72f6fa4ad42d4702b433707212f90db395eb54dc20bc85de253788783");
         let calculated_holesky_state_root = genesis_state_root(&HOLESKY.genesis.alloc);
         assert_eq!(
             expected_holesky_state_root, calculated_holesky_state_root,

@@ -1126,11 +1126,8 @@ impl DepositContract {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        constants::EMPTY_WITHDRAWALS, hex, Address, AllGenesisFormats, Chain, ChainSpec,
-        ChainSpecBuilder, DisplayHardforks, ForkCondition, ForkHash, ForkId, Genesis, Hardfork,
-        Head, DEV, GOERLI, H256, HOLESKY, MAINNET, SEPOLIA, U256,
-    };
+    use super::*;
+    use crate::{b256, hex, DEV, GOERLI, H256, HOLESKY, MAINNET, SEPOLIA, U256};
     use alloy_rlp::Encodable;
     use bytes::BytesMut;
     use ethers_core::types::Chain as EthersChain;
@@ -1926,7 +1923,7 @@ Post-merge hard forks (timestamp based):
         // check the genesis hash
         let genesis_hash = header.hash_slow();
         let expected_hash =
-            H256::from(hex!("16bb7c59613a5bad3f7c04a852fd056545ade2483968d9a25a1abb05af0c4d37"));
+            b256!("16bb7c59613a5bad3f7c04a852fd056545ade2483968d9a25a1abb05af0c4d37");
         assert_eq!(genesis_hash, expected_hash);
 
         // check that the forkhash is correct
