@@ -459,10 +459,9 @@ async fn test_geth_disconnect() {
     tokio::time::timeout(GETH_TIMEOUT, async move {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
-        let (reth_p2p, reth_disc) = unused_tcp_udp();
         let config = NetworkConfigBuilder::new(secret_key)
-            .listener_addr(reth_p2p)
-            .discovery_addr(reth_disc)
+            .listener_port(0)
+            .disable_discovery()
             .build(NoopProvider::default());
         let network = NetworkManager::new(config).await.unwrap();
 
