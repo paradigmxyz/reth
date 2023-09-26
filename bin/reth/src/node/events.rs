@@ -3,13 +3,14 @@
 use crate::node::cl_events::ConsensusLayerHealthEvent;
 use futures::Stream;
 use reth_beacon_consensus::BeaconConsensusEngineEvent;
-use reth_interfaces::consensus::ForkchoiceState;
+use reth_interfaces::{blockchain_tree::CanonicalOutcome, consensus::ForkchoiceState};
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     BlockNumber,
 };
+use reth_prune::PrunerEvent;
 use reth_stages::{ExecOutput, PipelineEvent};
 use std::{
     future::Future,
@@ -127,6 +128,14 @@ impl NodeState {
 
                 info!(number=block.number, hash=?block.hash, "Block added to canonical chain");
             }
+            BeaconConsensusEngineEvent::ChainCanonicalized(outcome, elapsed) => match outcome {
+                CanonicalOutcome::AlreadyCanonical { header } => {
+                    info!(number=header.number, header=?header.hash, ?elapsed, "Chain is already canonical");
+                }
+                CanonicalOutcome::Committed { head } => {
+                    info!(number=head.number, hash=?head.hash, ?elapsed, "Canonical chain committed");
+                }
+            },
             BeaconConsensusEngineEvent::ForkBlockAdded(block) => {
                 info!(number=block.number, hash=?block.hash, "Block added to fork chain");
             }
@@ -149,6 +158,20 @@ impl NodeState {
             }
         }
     }
+
+    fn handle_pruner_event(&self, event: PrunerEvent) {
+        match event {
+            PrunerEvent::Finished { tip_block_number, elapsed, done, parts_done } => {
+                info!(
+                    tip_block_number = tip_block_number,
+                    elapsed = ?elapsed,
+                    done = done,
+                    parts_done = ?parts_done,
+                    "Pruner finished"
+                );
+            }
+        }
+    }
 }
 
 /// A node event.
@@ -162,6 +185,8 @@ pub enum NodeEvent {
     ConsensusEngine(BeaconConsensusEngineEvent),
     /// A Consensus Layer health event.
     ConsensusLayerHealth(ConsensusLayerHealthEvent),
+    /// A pruner event
+    Pruner(PrunerEvent),
 }
 
 impl From<NetworkEvent> for NodeEvent {
@@ -185,6 +210,12 @@ impl From<BeaconConsensusEngineEvent> for NodeEvent {
 impl From<ConsensusLayerHealthEvent> for NodeEvent {
     fn from(event: ConsensusLayerHealthEvent) -> Self {
         NodeEvent::ConsensusLayerHealth(event)
+    }
+}
+
+impl From<PrunerEvent> for NodeEvent {
+    fn from(event: PrunerEvent) -> Self {
+        NodeEvent::Pruner(event)
     }
 }
 
@@ -259,6 +290,9 @@ where
                 }
                 NodeEvent::ConsensusLayerHealth(event) => {
                     this.state.handle_consensus_layer_health_event(event)
+                }
+                NodeEvent::Pruner(event) => {
+                    this.state.handle_pruner_event(event);
                 }
             }
         }

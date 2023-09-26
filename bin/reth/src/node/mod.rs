@@ -452,17 +452,21 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         let mut hooks = EngineHooks::new();
 
-        if let Some(prune_config) = prune_config {
+        let pruner_events = if let Some(prune_config) = prune_config {
             info!(target: "reth::cli", ?prune_config, "Pruner initialized");
-            let pruner = reth_prune::Pruner::new(
+            let mut pruner = reth_prune::Pruner::new(
                 db.clone(),
                 self.chain.clone(),
                 prune_config.block_interval,
                 prune_config.parts,
                 self.chain.prune_batch_sizes,
             );
+            let events = pruner.events();
             hooks.add(PruneHook::new(pruner, Box::new(ctx.task_executor.clone())));
-        }
+            Either::Left(events)
+        } else {
+            Either::Right(stream::empty())
+        };
 
         // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
@@ -493,7 +497,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 )
             } else {
                 Either::Right(stream::empty())
-            }
+            },
+            pruner_events.map(Into::into)
         );
         ctx.task_executor.spawn_critical(
             "events task",

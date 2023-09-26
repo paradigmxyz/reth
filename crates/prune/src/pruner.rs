@@ -1,6 +1,6 @@
 //! Support for pruning.
 
-use crate::{Metrics, PrunerError};
+use crate::{Metrics, PrunerError, PrunerEvent};
 use rayon::prelude::*;
 use reth_db::{
     abstraction::cursor::{DbCursorRO, DbCursorRW},
@@ -13,15 +13,16 @@ use reth_db::{
 };
 use reth_interfaces::RethResult;
 use reth_primitives::{
-    BlockNumber, ChainSpec, PruneBatchSizes, PruneCheckpoint, PruneMode, PruneModes, PrunePart,
-    TxNumber, MINIMUM_PRUNING_DISTANCE,
+    listener::EventListeners, BlockNumber, ChainSpec, PruneBatchSizes, PruneCheckpoint, PruneMode,
+    PruneModes, PrunePart, TxNumber, MINIMUM_PRUNING_DISTANCE,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
     TransactionsProvider,
 };
-use std::{collections::HashMap, ops::RangeInclusive, sync::Arc, time::Instant};
-use tracing::{debug, error, info, instrument, trace};
+use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc, time::Instant};
+use tokio_stream::wrappers::UnboundedReceiverStream;
+use tracing::{debug, error, instrument, trace};
 
 /// Result of [Pruner::run] execution.
 ///
@@ -46,6 +47,7 @@ pub struct Pruner<DB> {
     modes: PruneModes,
     /// Maximum entries to prune per block, per prune part.
     batch_sizes: PruneBatchSizes,
+    listeners: EventListeners<PrunerEvent>,
 }
 
 impl<DB: Database> Pruner<DB> {
@@ -64,7 +66,13 @@ impl<DB: Database> Pruner<DB> {
             last_pruned_block_number: None,
             modes,
             batch_sizes,
+            listeners: Default::default(),
         }
+    }
+
+    /// Listen for events on the prune.
+    pub fn events(&mut self) -> UnboundedReceiverStream<PrunerEvent> {
+        self.listeners.new_listener()
     }
 
     /// Run the pruner
@@ -83,7 +91,7 @@ impl<DB: Database> Pruner<DB> {
 
         let mut done = true;
 
-        let mut parts_done = HashMap::new();
+        let mut parts_done = BTreeMap::new();
 
         if let Some((to_block, prune_mode)) =
             self.modes.prune_target_block_receipts(tip_block_number)?
@@ -235,7 +243,7 @@ impl<DB: Database> Pruner<DB> {
         let elapsed = start.elapsed();
         self.metrics.duration_seconds.record(elapsed);
 
-        info!(
+        trace!(
             target: "pruner",
             %tip_block_number,
             ?elapsed,
@@ -243,6 +251,14 @@ impl<DB: Database> Pruner<DB> {
             ?parts_done,
             "Pruner finished"
         );
+
+        self.listeners.notify(PrunerEvent::Finished {
+            tip_block_number,
+            elapsed,
+            done,
+            parts_done,
+        });
+
         Ok(done)
     }
 
