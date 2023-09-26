@@ -4,9 +4,11 @@ use crate::{
     NodeRecord, U256, U64,
 };
 use alloy_rlp::{Decodable, Encodable};
+use num_enum::TryFromPrimitive;
 use reth_codecs::add_arbitrary_tests;
 use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
+use strum::{AsRefStr, EnumCount, EnumIter, EnumString, EnumVariantNames};
 
 // The chain spec module.
 mod spec;
@@ -19,7 +21,69 @@ pub use spec::{
 mod info;
 pub use info::ChainInfo;
 
-pub use ethers_core::types::Chain as NamedChain;
+/// An Ethereum EIP-155 chain.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    AsRefStr,         // AsRef<str>, fmt::Display
+    EnumVariantNames, // Chain::VARIANTS
+    EnumString,       // FromStr, TryFrom<&str>
+    EnumIter,         // Chain::iter
+    EnumCount,        // Chain::COUNT
+    TryFromPrimitive, // TryFrom<u64>
+    Deserialize,
+    Serialize,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+#[repr(u64)]
+#[allow(missing_docs)]
+pub enum NamedChain {
+    Mainnet = 1,
+    Morden = 2,
+    Ropsten = 3,
+    Rinkeby = 4,
+    Goerli = 5,
+    Kovan = 42,
+    Holesky = 17000,
+    Sepolia = 11155111,
+
+    Optimism = 10,
+    OptimismKovan = 69,
+    OptimismGoerli = 420,
+
+    Arbitrum = 42161,
+    ArbitrumTestnet = 421611,
+    ArbitrumGoerli = 421613,
+    ArbitrumNova = 42170,
+
+    #[serde(alias = "bsc")]
+    #[strum(to_string = "bsc")]
+    BinanceSmartChain = 56,
+    #[serde(alias = "bsc_testnet")]
+    #[strum(to_string = "bsc_testnet")]
+    BinanceSmartChainTestnet = 97,
+
+    Dev = 1337,
+}
+
+impl From<NamedChain> for u64 {
+    fn from(value: NamedChain) -> Self {
+        value as u64
+    }
+}
+
+impl fmt::Display for NamedChain {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
 
 /// Either a named or chain id or the actual id value
 #[add_arbitrary_tests(rlp)]
@@ -62,15 +126,6 @@ impl Chain {
         match self {
             Chain::Named(chain) => *chain as u64,
             Chain::Id(id) => *id,
-        }
-    }
-
-    /// Helper function for checking if a chainid corresponds to a legacy chainid
-    /// without eip1559
-    pub fn is_legacy(&self) -> bool {
-        match self {
-            Chain::Named(c) => c.is_legacy(),
-            Chain::Id(_) => false,
         }
     }
 
@@ -222,7 +277,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Chain {
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
-use strum::{EnumCount, IntoEnumIterator};
+use strum::IntoEnumIterator;
 
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::{
@@ -259,30 +314,6 @@ mod tests {
     fn test_named_id() {
         let chain = Chain::Named(NamedChain::Goerli);
         assert_eq!(chain.id(), 5);
-    }
-
-    #[test]
-    fn test_optimism_chain() {
-        let chain = Chain::Named(NamedChain::Optimism);
-        assert!(!chain.is_legacy());
-    }
-
-    #[test]
-    fn test_legacy_named_chain() {
-        let chain = Chain::Named(NamedChain::BinanceSmartChain);
-        assert!(chain.is_legacy());
-    }
-
-    #[test]
-    fn test_not_legacy_named_chain() {
-        let chain = Chain::Named(NamedChain::Mainnet);
-        assert!(!chain.is_legacy());
-    }
-
-    #[test]
-    fn test_not_legacy_id_chain() {
-        let chain = Chain::Id(1234);
-        assert!(!chain.is_legacy());
     }
 
     #[test]
