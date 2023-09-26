@@ -403,16 +403,16 @@ where
     fn propagate_transactions_to(&mut self, txs: Vec<TxHash>, peer_id: PeerId) {
         trace!(target: "net::tx", "Start propagating transactions to a peer");
 
-        // This fetches all transaction from the pool, including the blob transactions, which are
+        // This fetches all transactions from the pool, including the blob transactions, which are
         // only ever sent as hashes.
         let propagated = {
-            let to_propagate: Vec<PropagateTransaction> =
-                self.pool.get_all(txs).into_iter().map(PropagateTransaction::new).collect();
-
             let Some(peer) = self.peers.get_mut(&peer_id) else {
                 // no such peer
                 return
             };
+
+            let to_propagate: Vec<PropagateTransaction> =
+                self.pool.get_all(txs).into_iter().map(PropagateTransaction::new).collect();
 
             let mut propagated = PropagatedTransactions::default();
 
