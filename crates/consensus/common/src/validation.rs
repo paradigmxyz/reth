@@ -248,7 +248,7 @@ pub fn validate_block_standalone(
     }
 
     // EIP-4844: Shard Blob Transactions
-    if chain_spec.is_cancun_activated_at_timestamp(block.timestamp) {
+    if chain_spec.is_cancun_active_at_timestamp(block.timestamp) {
         // Check that the blob gas used in the header matches the sum of the blob gas used by each
         // blob tx
         let header_blob_gas_used = block.blob_gas_used.ok_or(ConsensusError::BlobGasUsedMissing)?;
