@@ -439,18 +439,12 @@ impl ChainSpec {
 
     /// Get the fork id for the given hardfork.
     pub fn hardfork_fork_id(&self, fork: Hardfork) -> Option<ForkId> {
-        match self.fork(fork) {
-            ForkCondition::Never => None,
-            _ => Some(self.fork_id(&self.fork(fork).satisfy())),
-        }
+        fork.fork_id(self)
     }
 
     /// Convenience method to get the fork id for [Hardfork::Shanghai] from a given chainspec.
     pub fn shanghai_fork_id(&self) -> Option<ForkId> {
-        match self.fork(Hardfork::Shanghai) {
-            ForkCondition::Never => None,
-            _ => Some(self.fork_id(&self.fork(Hardfork::Shanghai).satisfy())),
-        }
+        Hardfork::Shanghai.fork_id(self)
     }
 
     /// Get the fork condition for the given fork.
