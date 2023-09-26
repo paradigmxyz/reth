@@ -38,7 +38,7 @@ macro_rules! generate_snapshot_func {
                     tx: &impl DbTx<'tx>,
                     range: RangeInclusive<K>,
                     dict_compression_set: Option<Vec<impl Iterator<Item = Vec<u8>>>>,
-                    keys: Option<impl Iterator<Item = impl AsRef<[u8]> + Send + Sync + Clone + std::hash::Hash>>,
+                    keys: Option<impl Iterator<Item = Result<impl AsRef<[u8]> + Send + Sync + Clone + std::hash::Hash, Box<dyn std::error::Error>>>>,
                     row_count: usize,
                     nippy_jar: &mut NippyJar
                 ) -> RethResult<()>
@@ -62,12 +62,16 @@ macro_rules! generate_snapshot_func {
                         let [< $tbl _iter>] = [< $tbl _cursor>]
                             .walk_range(range.clone())?
                             .into_iter()
-                            .map(|row| row.map(|(_key, val)| val.take()).expect("exist in database"));
+                            .map(|row|
+                                row
+                                    .map(|(_key, val)| val.take())
+                                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+                            );
 
                     )+
 
                     // Create the snapshot from the data
-                    let col_iterators: Vec<Box<dyn Iterator<Item = Vec<u8>>>> = vec![
+                    let col_iterators: Vec<Box<dyn Iterator<Item = Result<Vec<u8>,_>>>> = vec![
                         $(Box::new([< $tbl _iter>]),)+
                     ];
 

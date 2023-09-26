@@ -4,6 +4,8 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum NippyJarError {
     #[error(transparent)]
+    Internal(#[from] Box<dyn std::error::Error>),
+    #[error(transparent)]
     Disconnect(#[from] std::io::Error),
     #[error(transparent)]
     Bincode(#[from] Box<bincode::ErrorKind>),
