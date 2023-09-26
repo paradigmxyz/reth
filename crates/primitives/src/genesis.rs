@@ -440,6 +440,7 @@ pub struct CliqueConfig {
     pub epoch: Option<u64>,
 }
 
+#[cfg(feature = "test-utils")]
 mod ethers_compat {
     use super::*;
     use ethers_core::utils::{
