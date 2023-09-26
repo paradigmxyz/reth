@@ -38,15 +38,15 @@ use reth_primitives::{
 };
 use reth_revm_primitives::{
     config::revm_spec,
-    db::states::bundle_state::BundleBuilder,
+    db::states::{bundle_state::BundleBuilder, PlainStorageChangeset},
     env::{fill_block_env, fill_cfg_and_block_env, fill_cfg_env},
-    into_revm_acc,
+    into_reth_acc, into_revm_acc,
     primitives::{BlockEnv, CfgEnv, HashMap as HashMapRevm, SpecId},
 };
 use reth_trie::{prefix_set::PrefixSetMut, StateRoot};
 use revm::primitives::{BlockEnv, CfgEnv, SpecId};
 use std::{
-    collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::Arc,
@@ -253,7 +253,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         // Double option around Account represent if Account state is know (first option) and
         // account is removed (Second Option)
 
-        let mut state = HashMap::new();
         let mut bundle_builder = BundleBuilder::new(range);
         // This is not working for blocks that are not at tip. as plain state is not the last
         // state of end range. We should rename the functions or add support to access
@@ -265,24 +264,11 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         // add account changeset changes
         for (block_number, account_before) in account_changeset.into_iter().rev() {
             let AccountBeforeTx { info: old_info, address } = account_before;
-            match state.entry(address) {
-                hash_map::Entry::Vacant(entry) => {
-                    let new_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
-                    entry.insert((old_info, new_info, HashMap::new()));
-                    bundle_builder = bundle_builder.state_original_account_info(
-                        address,
-                        into_revm_acc(old_info.unwrap_or_default()),
-                    );
-                    bundle_builder = bundle_builder.state_present_account_info(
-                        address,
-                        into_revm_acc(new_info.unwrap_or_default()),
-                    );
-                }
-                hash_map::Entry::Occupied(mut entry) => {
-                    // overwrite old account state.
-                    entry.get_mut().0 = old_info;
-                }
-            }
+            let new_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
+            bundle_builder = bundle_builder
+                .state_original_account_info(address, into_revm_acc(old_info.unwrap_or_default()));
+            bundle_builder = bundle_builder
+                .state_present_account_info(address, into_revm_acc(new_info.unwrap_or_default()));
             // insert old info into reverts.
             bundle_builder = bundle_builder.revert_account_info(
                 block_number,
@@ -298,44 +284,28 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         // add storage changeset changes
         for (block_and_address, old_storage) in storage_changeset.into_iter().rev() {
             let BlockNumberAddress((block_number, address)) = block_and_address;
-            // get account state or insert from plain state.
-            let account_state = match state.entry(address) {
-                hash_map::Entry::Vacant(entry) => {
-                    let present_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
-                    bundle_builder = bundle_builder.state_original_account_info(
-                        address,
-                        into_revm_acc(present_info.unwrap_or_default()),
-                    );
-                    bundle_builder = bundle_builder.state_present_account_info(
-                        address,
-                        into_revm_acc(present_info.unwrap_or_default()),
-                    );
-                    entry.insert((present_info, present_info, HashMap::new()))
-                }
-                hash_map::Entry::Occupied(entry) => entry.into_mut(),
-            };
+            let present_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
+            bundle_builder = bundle_builder.state_original_account_info(
+                address,
+                into_revm_acc(present_info.unwrap_or_default()),
+            );
+            bundle_builder = bundle_builder.state_present_account_info(
+                address,
+                into_revm_acc(present_info.unwrap_or_default()),
+            );
 
-            // match storage.
-            match account_state.2.entry(old_storage.key) {
-                hash_map::Entry::Vacant(entry) => {
-                    let new_storage = plain_storage_cursor
-                        .seek_by_key_subkey(address, old_storage.key)?
-                        .filter(|storage| storage.key == old_storage.key)
-                        .unwrap_or_default();
-                    entry.insert((old_storage.value, new_storage.value));
-                    bundle_builder = bundle_builder.state_storage(
-                        address,
-                        HashMapRevm::from([(
-                            U256::from_be_bytes(new_storage.key.0),
-                            (old_storage.value, new_storage.value),
-                        )]),
-                    );
-                }
-                hash_map::Entry::Occupied(mut entry) => {
-                    entry.get_mut().0 = old_storage.value;
-                }
-            };
-
+            let new_storage = plain_storage_cursor
+                .seek_by_key_subkey(address, old_storage.key)?
+                .filter(|storage| storage.key == old_storage.key)
+                .unwrap_or_default();
+            bundle_builder = bundle_builder.state_storage(
+                address,
+                HashMapRevm::from([(
+                    U256::from_be_bytes(new_storage.key.0),
+                    (old_storage.value, new_storage.value),
+                )]),
+            );
+            // insert old storage into reverts.
             bundle_builder = bundle_builder.revert_storage(
                 block_number,
                 address,
@@ -343,36 +313,40 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             );
         }
 
+        // build the `BundleState`
+        let bundle_state = bundle_builder.build();
+
         if UNWIND {
             // iterate over local plain state remove all account and all storages.
-            for (address, (old_account, new_account, storage)) in state.iter() {
-                // revert account if needed.
-                if old_account != new_account {
-                    let existing_entry = plain_accounts_cursor.seek_exact(*address)?;
-                    if let Some(account) = old_account {
-                        plain_accounts_cursor.upsert(*address, *account)?;
-                    } else if existing_entry.is_some() {
-                        plain_accounts_cursor.delete_current()?;
-                    }
+            let state_changeset = bundle_state.clone().into_plain_state(OriginalValuesKnown::No);
+            // revert account if needed.
+            for (address, account) in state_changeset.accounts {
+                let existing_entry = plain_accounts_cursor.seek_exact(address)?;
+                if let Some(account) = account {
+                    plain_accounts_cursor.upsert(address, into_reth_acc(account))?;
+                } else if existing_entry.is_some() {
+                    plain_accounts_cursor.delete_current()?;
                 }
+            }
 
-                // revert storages
-                for (storage_key, (old_storage_value, _new_storage_value)) in storage {
-                    let storage_entry =
-                        StorageEntry { key: *storage_key, value: *old_storage_value };
+            // revert storages
+            for storage_changeset in state_changeset.storage {
+                let PlainStorageChangeset { address, wipe_storage, storage } = storage_changeset;
+                for (key, value) in storage {
                     // delete previous value
                     // TODO: This does not use dupsort features
                     if plain_storage_cursor
-                        .seek_by_key_subkey(*address, *storage_key)?
-                        .filter(|s| s.key == *storage_key)
+                        .seek_by_key_subkey(address, key.into())?
+                        .filter(|s| s.key == key.into())
                         .is_some()
                     {
                         plain_storage_cursor.delete_current()?
                     }
+                    let storage_entry = StorageEntry { key: key.into(), value };
 
                     // insert value if needed
-                    if *old_storage_value != U256::ZERO {
-                        plain_storage_cursor.upsert(*address, storage_entry)?;
+                    if !wipe_storage {
+                        plain_storage_cursor.upsert(address, storage_entry)?;
                     }
                 }
             }
@@ -395,7 +369,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             receipts.push(block_receipts);
         }
 
-        Ok(BundleStateWithReceipts::new(bundle_builder.build(), receipts, start_block_number))
+        Ok(BundleStateWithReceipts::new(bundle_state, receipts, start_block_number))
     }
 
     /// Return list of entries from table
