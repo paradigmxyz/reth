@@ -672,6 +672,7 @@ impl From<HeadersDirection> for bool {
     }
 }
 
+#[cfg(feature = "test-utils")]
 mod ethers_compat {
     use super::*;
     use ethers_core::types::{Block, H256 as EthersH256};
