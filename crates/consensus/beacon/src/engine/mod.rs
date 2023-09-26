@@ -23,7 +23,7 @@ use reth_interfaces::{
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
     constants::EPOCH_SLOTS, listener::EventListeners, stage::StageId, BlockNumHash, BlockNumber,
-    Head, Header, SealedBlock, SealedHeader, H256, U256,
+    ChainSpec, Head, Header, SealedBlock, SealedHeader, H256, U256,
 };
 use reth_provider::{
     BlockIdReader, BlockReader, BlockSource, CanonChainTracker, ChainSpecProvider, ProviderError,
@@ -33,7 +33,7 @@ use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, PayloadAttributes, PayloadError, PayloadStatus,
     PayloadStatusEnum, PayloadValidationError,
 };
-use reth_rpc_types_compat::engine::payload::try_into_sealed_block;
+use reth_rpc_types_compat::payload::{try_into_block, validate_block_hash};
 use reth_stages::{ControlFlow, Pipeline, PipelineError};
 use reth_tasks::TaskSpawner;
 use std::{
@@ -1079,7 +1079,7 @@ where
         payload: ExecutionPayload,
         cancun_fields: Option<CancunPayloadFields>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
-        let block = match self.ensure_well_formed_payload(payload, cancun_fields) {
+        let block = match self.ensure_well_formed_payload(payload, cancun_fields)? {
             Ok(block) => block,
             Err(status) => return Ok(status),
         };
@@ -1143,16 +1143,35 @@ where
     ///    - incorrect hash
     ///    - the versioned hashes passed with the payload do not exactly match transaction
     ///    versioned hashes
+    ///    - the block does not contain blob transactions if it is pre-cancun
     fn ensure_well_formed_payload(
         &self,
         payload: ExecutionPayload,
         cancun_fields: Option<CancunPayloadFields>,
-    ) -> Result<SealedBlock, PayloadStatus> {
+    ) -> Result<Result<SealedBlock, PayloadStatus>, BeaconOnNewPayloadError> {
         let parent_hash = payload.parent_hash();
-        let block = match try_into_sealed_block(
+
+        let block_hash = payload.block_hash();
+        let block_res = match try_into_block(
             payload,
             cancun_fields.as_ref().map(|fields| fields.parent_beacon_block_root),
         ) {
+            Ok(block) => {
+                // make sure there are no blob transactions in the payload if it is pre-cancun
+                // we perform this check before validating the block hash because INVALID_PARAMS
+                // must be returned over an INVALID response.
+                if !self.chain_spec().is_cancun_active_at_timestamp(block.timestamp) &&
+                    block.has_blob_transactions()
+                {
+                    return Err(BeaconOnNewPayloadError::PreCancunBlockWithBlobTransactions)
+                }
+
+                validate_block_hash(block_hash, block)
+            }
+            Err(error) => Err(error),
+        };
+
+        let block = match block_res {
             Ok(block) => block,
             Err(error) => {
                 error!(target: "consensus::engine", ?error, "Invalid payload");
@@ -1166,7 +1185,7 @@ where
                 }
                 let status = PayloadStatusEnum::from(error);
 
-                return Err(PayloadStatus::new(status, latest_valid_hash))
+                return Ok(Err(PayloadStatus::new(status, latest_valid_hash)))
             }
         };
 
@@ -1177,9 +1196,18 @@ where
             .flatten()
             .collect::<Vec<_>>();
 
-        self.validate_versioned_hashes(parent_hash, block_versioned_hashes, cancun_fields)?;
+        if let Err(status) =
+            self.validate_versioned_hashes(parent_hash, block_versioned_hashes, cancun_fields)
+        {
+            return Ok(Err(status))
+        }
 
-        Ok(block)
+        Ok(Ok(block))
+    }
+
+    /// Returns the currently configured [ChainSpec].
+    fn chain_spec(&self) -> Arc<ChainSpec> {
+        self.blockchain.chain_spec()
     }
 
     /// Validates that the versioned hashes in the block match the versioned hashes passed in the
