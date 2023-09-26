@@ -1,3 +1,5 @@
+//! Discovery v4 protocol implementation.
+
 #![allow(missing_docs)]
 
 use crate::{error::DecodePacketError, EnrForkIdEntry, PeerId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
