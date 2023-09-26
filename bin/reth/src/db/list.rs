@@ -2,12 +2,12 @@ use super::tui::DbListTUI;
 use crate::utils::{DbTool, ListFilter};
 use clap::Parser;
 use eyre::WrapErr;
-use reth_primitives::hex;
 use reth_db::{
     database::Database,
     table::{DupSort, Table},
-    DatabaseEnvRO, TableType, TableViewer, Tables
+    DatabaseEnvRO, TableViewer, Tables,
 };
+use reth_primitives::hex;
 use std::cell::RefCell;
 use tracing::error;
 
@@ -43,21 +43,7 @@ pub struct Command {
 impl Command {
     /// Execute `db list` command
     pub fn execute(self, tool: &DbTool<'_, DatabaseEnvRO>) -> eyre::Result<()> {
-<<<<<<< HEAD
-<<<<<<< HEAD
         self.table.view(&ListTableViewer { tool, args: &self })
-=======
-        if self.table.table_type() == TableType::DupSort {
-            self.table.view_dupsort(&ListTableViewer { tool, args: &self })?;
-        } else {
-            self.table.view(&ListTableViewer { tool, args: &self })?;
-        }
-=======
-        self.table.view(&ListTableViewer { tool, args: &self })?;
->>>>>>> ad15a5c7 (Pass TableViewer view fn into macro)
-
-        Ok(())
->>>>>>> 5b1f48f2 (work in progress)
     }
 
     /// Generate [`ListFilter`] from command.
@@ -67,7 +53,7 @@ impl Command {
             .as_ref()
             .map(|search| {
                 if let Some(search) = search.strip_prefix("0x") {
-                    return hex::decode(search).unwrap()
+                    return hex::decode(search).unwrap();
                 }
                 search.as_bytes().to_vec()
             })
@@ -132,7 +118,7 @@ impl TableViewer<()> for ListTableViewer<'_> {
         Ok(())
     }
 
-    fn view_dupsort<T: Table + DupSort>(&self) -> Result<(), Self::Error> {
+    fn view_dupsort<T: DupSort>(&self) -> Result<(), Self::Error> {
         self.tool.db.view(|tx| {
             let table_db = tx.inner.open_db(Some(self.args.table.name())).wrap_err("Could not open db.")?;
             let stats = tx.inner.db_stat(&table_db).wrap_err(format!("Could not find table: {}", stringify!($table)))?;

@@ -40,7 +40,7 @@ impl Command {
         serde_json::from_str::<T::Key>(&self.key).map_err(|e| eyre::eyre!(e))
     }
     /// Get an instance of subkey for given dupsort table
-    fn table_subkey<T: Table + DupSort>(&self) -> Result<T::SubKey, eyre::Error> {
+    fn table_subkey<T: DupSort>(&self) -> Result<T::SubKey, eyre::Error> {
         assert_eq!(T::NAME, self.table.name());
         serde_json::from_str::<T::SubKey>(&self.subkey.clone().unwrap_or_default())
             .map_err(|e| eyre::eyre!(e))
@@ -69,8 +69,7 @@ impl<DB: Database> TableViewer<()> for GetValueViewer<'_, DB> {
         Ok(())
     }
 
-    fn view_dupsort<T: Table + DupSort>(&self) -> Result<(), Self::Error> {
-        // error here
+    fn view_dupsort<T: DupSort>(&self) -> Result<(), Self::Error> {
         // get a key for given table
         let key = self.args.table_key::<T>()?;
 

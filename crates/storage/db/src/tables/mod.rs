@@ -89,7 +89,7 @@ pub trait TableViewer<R> {
     fn view<T: Table>(&self) -> Result<R, Self::Error>;
 
     /// operate on dupsort table in generic way
-    fn view_dupsort<T: Table + DupSort>(&self) -> Result<R, Self::Error>;
+    fn view_dupsort<T: DupSort>(&self) -> Result<R, Self::Error>;
 }
 
 macro_rules! tables {

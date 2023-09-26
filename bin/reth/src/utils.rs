@@ -132,7 +132,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
                     let result = || {
                         if filter.only_count {
-                            return None
+                            return None;
                         }
                         Some((
                             <T as Table>::Key::decode(&key).unwrap(),
@@ -142,21 +142,16 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
                     match &*bmb {
                         Some(searcher) => {
-<<<<<<< HEAD
-                            if searcher.find_first_in(&value).is_some() ||
-                                searcher.find_first_in(&key).is_some()
-=======
-                            if searcher.find_first_in(v.raw_value()).is_some()
-                                || searcher.find_first_in(k.raw_key()).is_some()
->>>>>>> 5b1f48f2 (work in progress)
+                            if searcher.find_first_in(&value).is_some()
+                                || searcher.find_first_in(&key).is_some()
                             {
                                 hits += 1;
-                                return result()
+                                return result();
                             }
                         }
                         None => {
                             hits += 1;
-                            return result()
+                            return result();
                         }
                     }
                 }
