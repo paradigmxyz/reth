@@ -803,13 +803,13 @@ where
     let mut blob_gas_used = None;
 
     // only determine cancun fields when active
-    if chain_spec.is_cancun_activated_at_timestamp(attributes.timestamp) {
+    if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp) {
         // grab the blob sidecars from the executed txs
         blob_sidecars = pool.get_all_blobs_exact(
             executed_txs.iter().filter(|tx| tx.is_eip4844()).map(|tx| tx.hash).collect(),
         )?;
 
-        excess_blob_gas = if chain_spec.is_cancun_activated_at_timestamp(parent_block.timestamp) {
+        excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_block.timestamp) {
             let parent_excess_blob_gas = parent_block.excess_blob_gas.unwrap_or_default();
             let parent_blob_gas_used = parent_block.blob_gas_used.unwrap_or_default();
             Some(calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
@@ -969,7 +969,7 @@ fn commit_withdrawals<DB: Database<Error = RethError>>(
     timestamp: u64,
     withdrawals: Vec<Withdrawal>,
 ) -> RethResult<WithdrawalsOutcome> {
-    if !chain_spec.is_shanghai_activated_at_timestamp(timestamp) {
+    if !chain_spec.is_shanghai_active_at_timestamp(timestamp) {
         return Ok(WithdrawalsOutcome::pre_shanghai())
     }
 
