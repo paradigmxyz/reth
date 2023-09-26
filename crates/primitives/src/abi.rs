@@ -15,13 +15,13 @@ pub fn decode_revert_reason(out: &[u8]) -> Option<String> {
     }
 
     // Try to decode as a generic contract error.
-    if let Ok(error) = GenericContractError::decode(&out[SELECTOR_LEN..], true) {
+    if let Ok(error) = GenericContractError::decode(out, true) {
         return Some(error.to_string())
     }
 
     // If that fails, try to decode as a regular string.
-    if let Ok(decoded_string) = String::from_utf8(out[SELECTOR_LEN..].to_vec()) {
-        return Some(decoded_string)
+    if let Ok(decoded_string) = std::str::from_utf8(out) {
+        return Some(decoded_string.to_string())
     }
 
     // If both attempts fail, return None.
