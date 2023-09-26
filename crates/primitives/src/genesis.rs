@@ -6,6 +6,7 @@ use crate::{
     Account, Address, Bytes, H256, KECCAK_EMPTY, U256,
 };
 use reth_rlp::{encode_fixed_size, length_of_length, Encodable, Header as RlpHeader};
+use revm_primitives::B160;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use triehash::sec_trie_root;
@@ -428,6 +429,125 @@ pub struct CliqueConfig {
         deserialize_with = "deserialize_stringified_u64_opt"
     )]
     pub epoch: Option<u64>,
+}
+
+#[cfg(feature = "test-utils")]
+mod ethers_compat {
+    use super::*;
+    use ethers_core::utils::{
+        ChainConfig as EthersChainConfig, CliqueConfig as EthersCliqueConfig,
+        EthashConfig as EthersEthashConfig, GenesisAccount as EthersGenesisAccount,
+    };
+
+    impl From<ethers_core::utils::Genesis> for Genesis {
+        fn from(genesis: ethers_core::utils::Genesis) -> Genesis {
+            let alloc = genesis
+                .alloc
+                .iter()
+                .map(|(addr, account)| (addr.0.into(), account.clone().into()))
+                .collect::<HashMap<B160, GenesisAccount>>();
+
+            Genesis {
+                config: genesis.config.into(),
+                nonce: genesis.nonce.as_u64(),
+                timestamp: genesis.timestamp.as_u64(),
+                gas_limit: genesis.gas_limit.as_u64(),
+                difficulty: genesis.difficulty.into(),
+                mix_hash: genesis.mix_hash.0.into(),
+                coinbase: genesis.coinbase.0.into(),
+                extra_data: genesis.extra_data.0.into(),
+                base_fee_per_gas: genesis.base_fee_per_gas.map(|fee| fee.as_u64()),
+                // TODO: if/when ethers has cancun fields they should be added here
+                excess_blob_gas: None,
+                blob_gas_used: None,
+                alloc,
+            }
+        }
+    }
+
+    impl From<EthersGenesisAccount> for GenesisAccount {
+        fn from(genesis_account: EthersGenesisAccount) -> Self {
+            Self {
+                balance: genesis_account.balance.into(),
+                nonce: genesis_account.nonce,
+                code: genesis_account.code.as_ref().map(|code| code.0.clone().into()),
+                storage: genesis_account.storage.as_ref().map(|storage| {
+                    storage.clone().into_iter().map(|(k, v)| (k.0.into(), v.0.into())).collect()
+                }),
+            }
+        }
+    }
+
+    impl From<EthersChainConfig> for ChainConfig {
+        fn from(chain_config: EthersChainConfig) -> Self {
+            let EthersChainConfig {
+                chain_id,
+                homestead_block,
+                dao_fork_block,
+                dao_fork_support,
+                eip150_block,
+                eip150_hash,
+                eip155_block,
+                eip158_block,
+                byzantium_block,
+                constantinople_block,
+                petersburg_block,
+                istanbul_block,
+                muir_glacier_block,
+                berlin_block,
+                london_block,
+                arrow_glacier_block,
+                gray_glacier_block,
+                merge_netsplit_block,
+                shanghai_time,
+                cancun_time,
+                terminal_total_difficulty,
+                terminal_total_difficulty_passed,
+                ethash,
+                clique,
+            } = chain_config;
+
+            Self {
+                chain_id,
+                homestead_block,
+                dao_fork_block,
+                dao_fork_support,
+                eip150_block,
+                eip150_hash: eip150_hash.map(Into::into),
+                eip155_block,
+                eip158_block,
+                byzantium_block,
+                constantinople_block,
+                petersburg_block,
+                istanbul_block,
+                muir_glacier_block,
+                berlin_block,
+                london_block,
+                arrow_glacier_block,
+                gray_glacier_block,
+                merge_netsplit_block,
+                shanghai_time,
+                cancun_time,
+                terminal_total_difficulty: terminal_total_difficulty.map(Into::into),
+                terminal_total_difficulty_passed,
+                ethash: ethash.map(Into::into),
+                clique: clique.map(Into::into),
+            }
+        }
+    }
+
+    impl From<EthersEthashConfig> for EthashConfig {
+        fn from(_: EthersEthashConfig) -> Self {
+            EthashConfig {}
+        }
+    }
+
+    impl From<EthersCliqueConfig> for CliqueConfig {
+        fn from(clique_config: EthersCliqueConfig) -> Self {
+            let EthersCliqueConfig { period, epoch } = clique_config;
+            Self { period, epoch }
+        }
+    }
 }
 
 #[cfg(test)]

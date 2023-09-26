@@ -19,7 +19,7 @@ normal = [
 [dependencies]
 # reth
 reth-interfaces.workspace = true
-reth-primitives.workspace = true
+reth-primitives = { workspace = true, features = ["test-utils"] }
 reth-net-common = { path = "../common" }
 reth-network-api.workspace = true
 reth-discv4 = { path = "../discv4" }
