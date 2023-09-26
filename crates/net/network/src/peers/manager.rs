@@ -1201,6 +1201,12 @@ impl PeersConfig {
         self
     }
 
+    /// Maximum allowed concurrent outbound dials.
+    pub fn with_max_concurrent_dials(mut self, max_concurrent_outbound_dials: usize) -> Self {
+        self.connection_info.max_concurrent_outbound_dials = max_concurrent_outbound_dials;
+        self
+    }
+
     /// Nodes to always connect to.
     pub fn with_trusted_nodes(mut self, nodes: HashSet<NodeRecord>) -> Self {
         self.trusted_nodes = nodes;
