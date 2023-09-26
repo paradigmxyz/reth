@@ -52,7 +52,7 @@ jobs:
           mv testdata pr
 
       - name: Set main baseline
-        run: cargo bench --package reth-db --bench iai --manifest-path main/Cargo.toml
+        run: cargo bench --package reth-db --bench iai --features test-utils --manifest-path main/Cargo.toml
 
       - name: Compare PR benchmark
         shell: 'script -q -e -c "bash {0}"' # required to workaround /dev/tty not being available
