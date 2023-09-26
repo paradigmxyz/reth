@@ -42,6 +42,9 @@ use tracing::{debug, trace};
 ///
 /// InspectorStack are used for optional inspecting execution. And it contains
 /// various duration of parts of execution.
+// TODO: https://github.com/bluealloy/revm/pull/745
+// #[derive(Debug)]
+#[allow(missing_debug_implementations)]
 pub struct EVMProcessor<'a> {
     /// The configured chain-spec
     chain_spec: Arc<ChainSpec>,
@@ -623,7 +626,7 @@ mod tests {
     }
 
     impl StateRootProvider for StateProviderTest {
-        fn state_root(&self, _bundle_state: BundleStateWithReceipts) -> RethResult<H256> {
+        fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> RethResult<H256> {
             todo!()
         }
     }

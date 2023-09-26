@@ -22,6 +22,7 @@ pub const EMPTY_ROOT: H256 =
 
 /// A [Hasher] that calculates a keccak256 hash of the given data.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct KeccakHasher;
 
 impl Hasher for KeccakHasher {

@@ -13,7 +13,7 @@ use ffi::{
 };
 use libc::c_void;
 use parking_lot::Mutex;
-use std::{borrow::Cow, fmt, marker::PhantomData, mem, ptr, rc::Rc, result};
+use std::{borrow::Cow, fmt, marker::PhantomData, mem, ptr, rc::Rc};
 
 /// A cursor for navigating the items within a database.
 pub struct Cursor<'txn, K>
@@ -30,7 +30,7 @@ where
     K: TransactionKind,
 {
     pub(crate) fn new<E: EnvironmentKind>(
-        txn: &'txn Transaction<K, E>,
+        txn: &'txn Transaction<'_, K, E>,
         dbi: ffi::MDBX_dbi,
     ) -> Result<Self> {
         let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
@@ -467,7 +467,7 @@ impl<'txn, K> fmt::Debug for Cursor<'txn, K>
 where
     K: TransactionKind,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Cursor").finish()
     }
 }
@@ -733,7 +733,7 @@ where
     Key: TableObject<'txn>,
     Value: TableObject<'txn>,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("IterDup").finish()
     }
 }

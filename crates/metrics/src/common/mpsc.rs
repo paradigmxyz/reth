@@ -13,6 +13,7 @@ use tokio::sync::mpsc::{
     error::{SendError, TryRecvError, TrySendError},
     OwnedPermit,
 };
+use tokio_util::sync::{PollSendError, PollSender};
 
 /// Wrapper around [mpsc::unbounded_channel] that returns a new unbounded metered channel.
 pub fn metered_unbounded_channel<T>(
@@ -264,4 +265,66 @@ struct MeteredSenderMetrics {
 struct MeteredReceiverMetrics {
     /// Number of messages received
     messages_received: Counter,
+}
+
+/// A wrapper type around [PollSender] that updates metrics on send.
+#[derive(Debug)]
+pub struct MeteredPollSender<T> {
+    /// The [PollSender] that this wraps around.
+    sender: PollSender<T>,
+    /// Holds metrics for this type.
+    metrics: MeteredPollSenderMetrics,
+}
+
+impl<T: Send + 'static> MeteredPollSender<T> {
+    /// Creates a new [`MeteredPollSender`] wrapping around the provided [PollSender].
+    pub fn new(sender: PollSender<T>, scope: &'static str) -> Self {
+        Self { sender, metrics: MeteredPollSenderMetrics::new(scope) }
+    }
+
+    /// Returns the underlying [PollSender].
+    pub fn inner(&self) -> &PollSender<T> {
+        &self.sender
+    }
+
+    /// Calls the underlying [PollSender]'s `poll_reserve`, incrementing the appropriate
+    /// metrics depending on the result.
+    pub fn poll_reserve(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), PollSendError<T>>> {
+        match self.sender.poll_reserve(cx) {
+            Poll::Ready(Ok(permit)) => Poll::Ready(Ok(permit)),
+            Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
+            Poll::Pending => {
+                self.metrics.back_pressure.increment(1);
+                Poll::Pending
+            }
+        }
+    }
+
+    /// Calls the underlying [PollSender]'s `send_item`, incrementing the appropriate
+    /// metrics depending on the result.
+    pub fn send_item(&mut self, item: T) -> Result<(), PollSendError<T>> {
+        match self.sender.send_item(item) {
+            Ok(()) => {
+                self.metrics.messages_sent.increment(1);
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
+impl<T> Clone for MeteredPollSender<T> {
+    fn clone(&self) -> Self {
+        Self { sender: self.sender.clone(), metrics: self.metrics.clone() }
+    }
+}
+
+/// Throughput metrics for [MeteredPollSender]
+#[derive(Clone, Metrics)]
+#[metrics(dynamic = true)]
+struct MeteredPollSenderMetrics {
+    /// Number of messages sent
+    messages_sent: Counter,
+    /// Number of delayed message deliveries caused by a full channel
+    back_pressure: Counter,
 }

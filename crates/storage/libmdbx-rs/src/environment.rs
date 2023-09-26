@@ -15,7 +15,7 @@ use std::{
     mem,
     ops::{Bound, RangeBounds},
     path::Path,
-    ptr, result,
+    ptr,
     sync::mpsc::{sync_channel, SyncSender},
     thread::sleep,
     time::Duration,
@@ -35,8 +35,11 @@ pub trait EnvironmentKind: private::Sealed + Debug + 'static {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct NoWriteMap;
+
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct WriteMap;
 
 impl EnvironmentKind for NoWriteMap {
@@ -325,7 +328,7 @@ impl<E> fmt::Debug for Environment<E>
 where
     E: EnvironmentKind,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Environment").finish()
     }
 }

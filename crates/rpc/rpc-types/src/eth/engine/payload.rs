@@ -119,7 +119,7 @@ pub struct ExecutionPayloadEnvelopeV3 {
 ///
 /// See also: <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#executionpayloadv1>
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct ExecutionPayloadV1 {
     pub parent_hash: H256,
     pub fee_recipient: Address,

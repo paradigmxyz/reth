@@ -6,7 +6,7 @@
 use crate::{
     blobstore::BlobStoreError,
     error::PoolError,
-    traits::{GetPooledTransactionLimit, TransactionListenerKind},
+    traits::{GetPooledTransactionLimit, NewBlobSidecar, TransactionListenerKind},
     validate::ValidTransaction,
     AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPooledTransaction,
     NewTransactionEvent, PoolResult, PoolSize, PoolTransaction, PropagatedTransactions,
@@ -86,6 +86,10 @@ impl TransactionPool for NoopTransactionPool {
         &self,
         _kind: TransactionListenerKind,
     ) -> Receiver<TxHash> {
+        mpsc::channel(1).1
+    }
+
+    fn blob_transaction_sidecars_listener(&self) -> Receiver<NewBlobSidecar> {
         mpsc::channel(1).1
     }
 

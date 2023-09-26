@@ -34,6 +34,7 @@ use reth_rlp::Encodable;
 ///
 /// After traversing the path, the proof generator continues to restore the root node of the trie
 /// until completion. The root node is then inserted at the start of the proof.
+#[derive(Debug)]
 pub struct Proof<'a, 'b, TX, H> {
     /// A reference to the database transaction.
     tx: &'a TX,

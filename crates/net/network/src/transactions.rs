@@ -59,6 +59,7 @@ const GET_POOLED_TRANSACTION_SOFT_LIMIT_SIZE: GetPooledTransactionLimit =
 pub type PoolImportFuture = Pin<Box<dyn Future<Output = PoolResult<TxHash>> + Send + 'static>>;
 
 /// Api to interact with [`TransactionsManager`] task.
+#[derive(Debug)]
 pub struct TransactionsHandle {
     /// Command channel to the [`TransactionsManager`]
     manager_tx: mpsc::UnboundedSender<TransactionsCommand>,
@@ -117,6 +118,7 @@ impl TransactionsHandle {
 ///
 /// It is directly connected to the [`TransactionPool`] to retrieve requested transactions and
 /// propagate new transactions over the network.
+#[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
 pub struct TransactionsManager<Pool> {
     /// Access to the transaction pool.
@@ -844,6 +846,7 @@ impl Future for GetPooledTxRequestFut {
 }
 
 /// Tracks a single peer
+#[derive(Debug)]
 struct Peer {
     /// Keeps track of transactions that we know the peer has seen.
     transactions: LruCache<H256>,
@@ -857,6 +860,7 @@ struct Peer {
 }
 
 /// Commands to send to the [`TransactionsManager`]
+#[derive(Debug)]
 enum TransactionsCommand {
     /// Propagate a transaction hash to the network.
     PropagateHash(H256),

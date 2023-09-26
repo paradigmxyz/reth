@@ -89,7 +89,7 @@ Networking:
       --identity <IDENTITY>
           Custom node identity
           
-          [default: reth/v0.1.0-alpha.8-6016da7a1/aarch64-apple-darwin]
+          [default: reth/VERSION/PLATFORM]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.
@@ -299,7 +299,7 @@ Builder:
       --builder.extradata <EXTRADATA>
           Block extra data set by the payload builder
           
-          [default: reth/v0.1.0-alpha.8/macos]
+          [default: reth/VERSION/OS]
 
       --builder.gaslimit <GAS_LIMIT>
           Target gas ceiling for built blocks
