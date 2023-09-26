@@ -106,6 +106,7 @@ revm-primitives = { git = "https://github.com/Evalir/revm/", branch = "reintrodu
 ## eth
 alloy-primitives = "0.3"
 alloy-rlp = "0.3"
+alloy-sol-types = "0.3"
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
 ethers-signers = { version = "2.0", default-features = false }
@@ -180,3 +181,4 @@ serial_test = "2"
 # TODO
 [patch.crates-io]
 alloy-primitives = { git = "https://github.com/alloy-rs/core" }
+alloy-sol-types = { git = "https://github.com/alloy-rs/core", rev = "5733dc1b3987b0d2f2677d055de85fd5f721b2fd" }

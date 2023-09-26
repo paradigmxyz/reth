@@ -492,7 +492,7 @@ impl RevertError {
 impl std::fmt::Display for RevertError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("execution reverted")?;
-        if let Some(reason) = self.output.as_ref().and_then(decode_revert_reason) {
+        if let Some(reason) = self.output.as_ref().and_then(|bytes| decode_revert_reason(bytes)) {
             write!(f, ": {reason}")?;
         }
         Ok(())
