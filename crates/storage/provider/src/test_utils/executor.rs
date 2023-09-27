@@ -7,6 +7,7 @@ use reth_interfaces::executor::BlockExecutionError;
 use reth_primitives::{Address, Block, BlockNumber, ChainSpec, PruneModes, U256};
 use std::sync::Arc;
 /// Test executor with mocked result.
+#[derive(Debug)]
 pub struct TestExecutor(pub Option<BundleStateWithReceipts>);
 
 impl BlockExecutor for TestExecutor {

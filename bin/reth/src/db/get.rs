@@ -10,7 +10,6 @@ pub struct Command {
     /// The table name
     ///
     /// NOTE: The dupsort tables are not supported now.
-    #[arg()]
     pub table: Tables,
 
     /// The key to get content for   

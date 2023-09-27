@@ -25,7 +25,7 @@ pub struct LoadedPrefixSets {
 }
 
 /// A wrapper around a database transaction that loads prefix sets within a given block range.
-#[derive(Deref)]
+#[derive(Debug, Deref)]
 pub struct PrefixSetLoader<'a, TX>(&'a TX);
 
 impl<'a, TX> PrefixSetLoader<'a, TX> {

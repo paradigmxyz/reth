@@ -133,7 +133,7 @@ pub const BEACON_CONSENSUS_REORG_UNWIND_DEPTH: u64 = 3;
 pub const ALLOWED_FUTURE_BLOCK_TIME_SECONDS: u64 = 15;
 
 /// The address for the beacon roots contract defined in EIP-4788.
-pub const BEACON_ROOTS_ADDRESS: H160 = H160(hex!("bEac00dDB15f3B6d645C48263dC93862413A222D"));
+pub const BEACON_ROOTS_ADDRESS: H160 = H160(hex!("000F3df6D732807Ef1319fB7B8bB8522d0Beac02"));
 
 /// The caller to be used when calling the EIP-4788 beacon roots contract at the beginning of the
 /// block.

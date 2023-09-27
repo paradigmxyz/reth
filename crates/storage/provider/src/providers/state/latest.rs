@@ -14,6 +14,7 @@ use reth_primitives::{
 use std::marker::PhantomData;
 
 /// State provider over latest state that takes tx reference.
+#[derive(Debug)]
 pub struct LatestStateProviderRef<'a, 'b, TX: DbTx<'a>> {
     /// database transaction
     db: &'b TX,
@@ -60,7 +61,7 @@ impl<'a, 'b, TX: DbTx<'a>> BlockHashReader for LatestStateProviderRef<'a, 'b, TX
 }
 
 impl<'a, 'b, TX: DbTx<'a>> StateRootProvider for LatestStateProviderRef<'a, 'b, TX> {
-    fn state_root(&self, bundle_state: BundleStateWithReceipts) -> RethResult<H256> {
+    fn state_root(&self, bundle_state: &BundleStateWithReceipts) -> RethResult<H256> {
         bundle_state.state_root_slow(self.db).map_err(|err| RethError::Database(err.into()))
     }
 }
@@ -105,6 +106,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for LatestStateProviderRef<'a, 'b, TX> 
 }
 
 /// State provider for the latest state.
+#[derive(Debug)]
 pub struct LatestStateProvider<'a, TX: DbTx<'a>> {
     /// database transaction
     db: TX,

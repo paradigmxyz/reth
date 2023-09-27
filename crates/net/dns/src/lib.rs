@@ -1,22 +1,19 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![doc(
-    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
-    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
-)]
-#![warn(missing_docs, unreachable_pub, unused_crate_dependencies)]
-#![deny(unused_must_use, rust_2018_idioms)]
-#![doc(test(
-    no_crate_inject,
-    attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
-))]
-
 //! Implementation of [EIP-1459](https://eips.ethereum.org/EIPS/eip-1459) Node Discovery via DNS.
 //!
 //! ## Feature Flags
 //!
 //! - `serde` (default): Enable serde support
 //! - `test-utils`: Export utilities for testing
+
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+)]
+#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
+#![deny(unused_must_use, rust_2018_idioms)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+
 pub use crate::resolver::{DnsResolver, MapResolver, Resolver};
 use crate::{
     query::{QueryOutcome, QueryPool, ResolveEntryResult, ResolveRootResult},
@@ -60,7 +57,7 @@ mod sync;
 pub mod tree;
 
 /// [DnsDiscoveryService] front-end.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DnsDiscoveryHandle {
     /// Channel for sending commands to the service.
     to_service: UnboundedSender<DnsDiscoveryCommand>,
@@ -93,6 +90,7 @@ impl DnsDiscoveryHandle {
 
 /// A client that discovers nodes via DNS.
 #[must_use = "Service does nothing unless polled"]
+#[allow(missing_debug_implementations)]
 pub struct DnsDiscoveryService<R: Resolver = DnsResolver> {
     /// Copy of the sender half, so new [`DnsDiscoveryHandle`] can be created on demand.
     command_tx: UnboundedSender<DnsDiscoveryCommand>,

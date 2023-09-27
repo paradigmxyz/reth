@@ -10,6 +10,7 @@ use crate::{
 use futures_util::{future::FutureExt, StreamExt};
 use reth_rpc_types::engine::PayloadId;
 use std::{
+    fmt,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -150,6 +151,7 @@ impl PayloadBuilderHandle {
 ///
 /// By design, this type relies entirely on the [`PayloadJobGenerator`] to create new payloads and
 /// does know nothing about how to build them, it just drives their jobs to completion.
+#[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct PayloadBuilderService<Gen>
 where
@@ -330,4 +332,21 @@ enum PayloadServiceCommand {
     ),
     /// Resolve the payload and return the payload
     Resolve(PayloadId, oneshot::Sender<Option<PayloadFuture>>),
+}
+
+impl fmt::Debug for PayloadServiceCommand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PayloadServiceCommand::BuildNewPayload(f0, f1) => {
+                f.debug_tuple("BuildNewPayload").field(&f0).field(&f1).finish()
+            }
+            PayloadServiceCommand::BestPayload(f0, f1) => {
+                f.debug_tuple("BestPayload").field(&f0).field(&f1).finish()
+            }
+            PayloadServiceCommand::PayloadAttributes(f0, f1) => {
+                f.debug_tuple("PayloadAttributes").field(&f0).field(&f1).finish()
+            }
+            PayloadServiceCommand::Resolve(f0, _f1) => f.debug_tuple("Resolve").field(&f0).finish(),
+        }
+    }
 }

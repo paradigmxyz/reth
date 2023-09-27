@@ -110,7 +110,7 @@ pub struct CallRequest {
     #[serde(default, flatten)]
     pub input: CallInput,
     /// Nonce
-    pub nonce: Option<U256>,
+    pub nonce: Option<U64>,
     /// chain id
     pub chain_id: Option<U64>,
     /// AccessList
@@ -118,8 +118,8 @@ pub struct CallRequest {
     /// Max Fee per Blob gas for EIP-4844 transactions
     pub max_fee_per_blob_gas: Option<U256>,
     /// Blob Versioned Hashes for EIP-4844 transactions
-    #[serde(default)]
-    pub blob_versioned_hashes: Vec<H256>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blob_versioned_hashes: Option<Vec<H256>>,
     /// EIP-2718 type
     #[serde(rename = "type")]
     pub transaction_type: Option<U8>,
@@ -129,8 +129,15 @@ impl CallRequest {
     /// Returns the configured fee cap, if any.
     ///
     /// The returns `gas_price` (legacy) if set or `max_fee_per_gas` (EIP1559)
+    #[inline]
     pub fn fee_cap(&self) -> Option<U256> {
         self.gas_price.or(self.max_fee_per_gas)
+    }
+
+    /// Returns true if the request has a `blobVersionedHashes` field but it is empty.
+    #[inline]
+    pub fn has_empty_blob_hashes(&self) -> bool {
+        self.blob_versioned_hashes.as_ref().map(|blobs| blobs.is_empty()).unwrap_or(false)
     }
 }
 

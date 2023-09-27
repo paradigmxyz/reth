@@ -15,7 +15,10 @@ use reth_primitives::{
     H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
-use std::{ops::RangeBounds, sync::Arc};
+use std::{
+    ops::{RangeBounds, RangeInclusive},
+    sync::Arc,
+};
 use tracing::trace;
 
 mod provider;
@@ -246,6 +249,10 @@ impl<DB: Database> BlockReader for ProviderFactory<DB> {
 
     fn block_with_senders(&self, number: BlockNumber) -> RethResult<Option<BlockWithSenders>> {
         self.provider()?.block_with_senders(number)
+    }
+
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Block>> {
+        self.provider()?.block_range(range)
     }
 }
 

@@ -119,10 +119,38 @@ jobs:
           - sim: pyspec
             include: [cancun/eip1153]
             experimental: true
-          # TODO: uncomment once there are hive tests for EIP-7516
-          # - sim: pyspec
-          #   include: [cancun/eip7516]
-          #   experimental: true
+          - sim: pyspec
+            include: [cancun/eip7516]
+            experimental: true
+          # Pyspec shanghai jobs
+          - sim: pyspec
+            include: [shanghai/eip3651]
+            experimental: true
+          - sim: pyspec
+            include: [shanghai/eip3855]
+            experimental: true
+          - sim: pyspec
+            include: [shanghai/eip3860]
+            experimental: true
+          - sim: pyspec
+            include: [shanghai/eip4895]
+            experimental: true
+          # Pyspec merge and earlier jobs
+          - sim: pyspec
+            include: [merge/]
+            experimental: true
+          - sim: pyspec
+            include: [berlin/]
+            experimental: true
+          - sim: pyspec
+            include: [istanbul/]
+            experimental: true
+          - sim: pyspec
+            include: [homestead/]
+            experimental: true
+          - sim: pyspec
+            include: [frontier/]
+            experimental: true
       fail-fast: false
     needs: prepare
     name: run

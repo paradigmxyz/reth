@@ -210,7 +210,7 @@ impl AppendableChain {
         // check state root if the block extends the canonical chain.
         if block_kind.extends_canonical_head() {
             // check state root
-            let state_root = provider.state_root(bundle_state.clone())?;
+            let state_root = provider.state_root(&bundle_state)?;
             if block.state_root != state_root {
                 return Err(ConsensusError::BodyStateRootDiff {
                     got: state_root,

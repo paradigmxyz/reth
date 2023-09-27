@@ -164,10 +164,10 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         genesis: serde_json::from_str(include_str!("../../res/genesis/holesky.json"))
             .expect("Can't deserialize Holesky genesis json"),
         genesis_hash: Some(H256(hex!(
-            "fd91bb7c01ae3f608b4d176078ca72bc7846791fdc02324481ca315ede4c9246"
+            "b5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4"
         ))),
         paris_block_and_final_difficulty: Some((0, U256::from(1))),
-        fork_timestamps: ForkTimestamps::default().shanghai(1694790240),
+        fork_timestamps: ForkTimestamps::default().shanghai(1696000704),
         hardforks: BTreeMap::from([
             (Hardfork::Frontier, ForkCondition::Block(0)),
             (Hardfork::Homestead, ForkCondition::Block(0)),
@@ -183,9 +183,9 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::London, ForkCondition::Block(0)),
             (
                 Hardfork::Paris,
-                ForkCondition::TTD { fork_block: None, total_difficulty: U256::ZERO },
+                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
             ),
-            (Hardfork::Shanghai, ForkCondition::Timestamp(1694790240)),
+            (Hardfork::Shanghai, ForkCondition::Timestamp(1696000704)),
         ]),
         deposit_contract: Some(DepositContract::new(
             H160(hex!("4242424242424242424242424242424242424242")),
@@ -447,7 +447,7 @@ impl ChainSpec {
 
     /// Convenience method to check if [Hardfork::Shanghai] is active at a given timestamp.
     #[inline]
-    pub fn is_shanghai_activated_at_timestamp(&self, timestamp: u64) -> bool {
+    pub fn is_shanghai_active_at_timestamp(&self, timestamp: u64) -> bool {
         self.fork_timestamps
             .shanghai
             .map(|shanghai| timestamp >= shanghai)
@@ -456,7 +456,7 @@ impl ChainSpec {
 
     /// Convenience method to check if [Hardfork::Cancun] is active at a given timestamp.
     #[inline]
-    pub fn is_cancun_activated_at_timestamp(&self, timestamp: u64) -> bool {
+    pub fn is_cancun_active_at_timestamp(&self, timestamp: u64) -> bool {
         self.fork_timestamps
             .cancun
             .map(|cancun| timestamp >= cancun)
@@ -839,7 +839,7 @@ pub enum ForkCondition {
         /// The block number at which TTD is reached, if it is known.
         ///
         /// This should **NOT** be set unless you want this block advertised as [EIP-2124][eip2124]
-        /// `FORK_NEXT`. This is currently only the case for Sepolia.
+        /// `FORK_NEXT`. This is currently only the case for Sepolia and Holesky.
         ///
         /// [eip2124]: https://eips.ethereum.org/EIPS/eip-2124
         fork_block: Option<BlockNumber>,
@@ -1151,7 +1151,7 @@ mod tests {
     fn test_hardfork_list_display_mainnet() {
         assert_eq!(
             DisplayHardforks::from(MAINNET.hardforks().clone()).to_string(),
-            r##"Pre-merge hard forks (block based):
+            "Pre-merge hard forks (block based):
 - Frontier                         @0
 - Homestead                        @1150000
 - Dao                              @1920000
@@ -1171,7 +1171,7 @@ Merge hard forks:
 
 Post-merge hard forks (timestamp based):
 - Shanghai                         @1681338455
-"##
+"
         );
     }
 
@@ -1185,9 +1185,9 @@ Post-merge hard forks (timestamp based):
             .build();
         assert_eq!(
             DisplayHardforks::from(spec.hardforks().clone()).to_string(),
-            r##"Pre-merge hard forks (block based):
+            "Pre-merge hard forks (block based):
 - Frontier                         @0
-"##
+"
         );
     }
 
@@ -1203,8 +1203,8 @@ Post-merge hard forks (timestamp based):
             .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(1337))
             .build();
         assert_eq!(spec.fork_timestamps.shanghai, Some(1337));
-        assert!(spec.is_shanghai_activated_at_timestamp(1337));
-        assert!(!spec.is_shanghai_activated_at_timestamp(1336));
+        assert!(spec.is_shanghai_active_at_timestamp(1337));
+        assert!(!spec.is_shanghai_active_at_timestamp(1336));
     }
 
     // Tests that all predefined timestamps are correctly set up in the chainspecs

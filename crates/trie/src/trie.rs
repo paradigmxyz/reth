@@ -22,6 +22,7 @@ use std::{
 };
 
 /// StateRoot is used to compute the root node of a state trie.
+#[derive(Debug)]
 pub struct StateRoot<'a, 'b, TX, H> {
     /// A reference to the database transaction.
     pub tx: &'a TX,
@@ -294,7 +295,7 @@ where
                 // We assume we can always calculate a storage root without
                 // OOMing. This opens us up to a potential DOS vector if
                 // a contract had too many storage entries and they were
-                // all buffered w/o us returning and committing our intermeditate
+                // all buffered w/o us returning and committing our intermediate
                 // progress.
                 // TODO: We can consider introducing the TrieProgress::Progress/Complete
                 // abstraction inside StorageRoot, but let's give it a try as-is for now.
@@ -368,6 +369,7 @@ where
 }
 
 /// StorageRoot is used to compute the root node of an account storage trie.
+#[derive(Debug)]
 pub struct StorageRoot<'a, 'b, TX, H> {
     /// A reference to the database transaction.
     pub tx: &'a TX,
@@ -550,7 +552,7 @@ mod tests {
     use reth_primitives::{
         hex_literal::hex,
         keccak256,
-        proofs::KeccakHasher,
+        proofs::triehash::KeccakHasher,
         trie::{BranchNodeCompact, TrieMask},
         Account, Address, H256, MAINNET, U256,
     };

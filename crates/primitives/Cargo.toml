@@ -63,12 +63,11 @@ paste = "1.0"
 rayon = "1.7"
 tempfile = "3.3"
 sha2 = "0.10.7"
+itertools = "0.11"
 
-# proof related
-triehash = "0.8"
-# See to replace hashers to simplify libraries
-plain_hasher = "0.2"
-hash-db = "~0.15"
+# `test-utils` feature
+plain_hasher = { version = "0.2", optional = true }
+hash-db = { version = "~0.15", optional = true }
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -87,6 +86,10 @@ proptest.workspace = true
 proptest-derive.workspace = true
 assert_matches.workspace = true
 toml = "0.7.4"
+triehash = "0.8"
+
+plain_hasher = "0.2"
+hash-db = "~0.15"
 
 # necessary so we don't hit a "undeclared 'std'": 
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198 
@@ -97,7 +100,7 @@ pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterio
 [features]
 default = []
 arbitrary = ["revm-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
-test-utils = []
+test-utils = ["dep:plain_hasher", "dep:hash-db"]
 
 [[bench]]
 name = "recover_ecdsa_crit"
@@ -105,4 +108,5 @@ harness = false
 
 [[bench]]
 name = "trie_root"
+required-features = ["arbitrary", "test-utils"]
 harness = false

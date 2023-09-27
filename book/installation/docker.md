@@ -61,7 +61,7 @@ To run Reth with Docker, run:
 
 ```bash
 docker run \
-    -v rethdata:/root/.local/share/reth/db \
+    -v rethdata:/root/.local/share/reth/mainnet/db \
     -d \
     -p 9001:9001 \
     -p 30303:30303 \

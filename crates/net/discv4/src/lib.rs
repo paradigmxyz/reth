@@ -1,16 +1,3 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![doc(
-    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
-    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
-)]
-#![warn(missing_docs, unused_crate_dependencies)]
-#![deny(unused_must_use, rust_2018_idioms)]
-#![doc(test(
-    no_crate_inject,
-    attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
-))]
-
 //! Discovery v4 implementation: <https://github.com/ethereum/devp2p/blob/master/discv4.md>
 //!
 //! Discv4 employs a kademlia-like routing table to store and manage discovered peers and topics.
@@ -28,6 +15,16 @@
 //!
 //! - `serde` (default): Enable serde support
 //! - `test-utils`: Export utilities for testing
+
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+)]
+#![warn(missing_debug_implementations, missing_docs, rustdoc::all)]
+#![deny(unused_must_use, rust_2018_idioms, unreachable_pub, unused_crate_dependencies)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+
 use crate::{
     error::{DecodePacketError, Discv4Error},
     proto::{FindNode, Message, Neighbours, Packet, Ping, Pong},
@@ -70,7 +67,7 @@ use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tracing::{debug, trace, warn};
 
 pub mod error;
-mod proto;
+pub mod proto;
 
 mod config;
 pub use config::{Discv4Config, Discv4ConfigBuilder};
@@ -383,6 +380,7 @@ impl Discv4 {
 
 /// Manages discv4 peer discovery over UDP.
 #[must_use = "Stream does nothing unless polled"]
+#[allow(missing_debug_implementations)]
 pub struct Discv4Service {
     /// Local address of the UDP socket.
     local_address: SocketAddr,

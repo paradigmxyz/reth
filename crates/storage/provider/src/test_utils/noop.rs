@@ -16,7 +16,10 @@ use reth_primitives::{
     TxNumber, H256, KECCAK_EMPTY, MAINNET, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
-use std::{ops::RangeBounds, sync::Arc};
+use std::{
+    ops::{RangeBounds, RangeInclusive},
+    sync::Arc,
+};
 
 /// Supports various api interfaces for testing purposes.
 #[derive(Debug, Clone, Default, Copy)]
@@ -92,6 +95,10 @@ impl BlockReader for NoopProvider {
         _number: BlockNumber,
     ) -> RethResult<Option<reth_primitives::BlockWithSenders>> {
         Ok(None)
+    }
+
+    fn block_range(&self, _range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Block>> {
+        Ok(vec![])
     }
 }
 
@@ -253,7 +260,7 @@ impl ChangeSetReader for NoopProvider {
 }
 
 impl StateRootProvider for NoopProvider {
-    fn state_root(&self, _state: BundleStateWithReceipts) -> RethResult<H256> {
+    fn state_root(&self, _state: &BundleStateWithReceipts) -> RethResult<H256> {
         todo!()
     }
 }

@@ -41,6 +41,7 @@ members = [
     "crates/storage/libmdbx-rs",
     "crates/storage/libmdbx-rs/mdbx-sys",
     "crates/storage/provider",
+    "crates/storage/nippy-jar",
     "crates/tracing",
     "crates/tasks",
     "crates/transaction-pool",
@@ -50,6 +51,7 @@ members = [
     "examples",
     "examples/additional-rpc-namespace-in-cli",
     "examples/rpc-db",
+    "examples/manual-p2p",
 ]
 default-members = ["bin/reth"]
 
@@ -58,9 +60,9 @@ default-members = ["bin/reth"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 edition = "2021"
-rust-version = "1.70" # Remember to update .clippy.toml and README.md
+rust-version = "1.70" # Remember to update clippy.toml and README.md
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
@@ -97,10 +99,13 @@ reth-tasks = { path = "./crates/tasks" }
 reth-network = { path = "./crates/net/network" }
 reth-network-api = { path = "./crates/net/network-api" }
 reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat" }
+reth-discv4 = { path = "./crates/net/discv4" }
+reth-eth-wire = { path = "./crates/net/eth-wire" }
+reth-ecies = { path = "./crates/net/ecies" }
 
 # revm
-revm = { git = "https://github.com/bluealloy/revm" }
-revm-primitives = { git = "https://github.com/bluealloy/revm" }
+revm = { git = "https://github.com/bluealloy/revm", rev = "516f62cc" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "516f62cc" }
 
 ## eth
 ethers-core = { version = "2.0", default-features = false }
