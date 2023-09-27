@@ -45,7 +45,7 @@ where
 }
 
 /// Serialize a [B256] as a hex string _without_ the "0x" prefix.
-pub fn serialize_B256_hex_string_no_prefix<S>(x: &B256, s: S) -> Result<S::Ok, S::Error>
+pub fn serialize_b256_hex_string_no_prefix<S>(x: &B256, s: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {

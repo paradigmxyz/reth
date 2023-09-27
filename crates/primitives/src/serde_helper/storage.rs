@@ -56,7 +56,7 @@ impl From<JsonStorageKey> for String {
 
 /// Converts a Bytes value into a B256, accepting inputs that are less than 32 bytes long. These
 /// inputs will be left padded with zeros.
-pub fn from_bytes_to_B256<'de, D>(bytes: Bytes) -> Result<B256, D::Error>
+pub fn from_bytes_to_b256<'de, D>(bytes: Bytes) -> Result<B256, D::Error>
 where
     D: Deserializer<'de>,
 {
