@@ -5336,6 +5336,7 @@ dependencies = [
  "reth-net-nat",
  "reth-network",
  "reth-network-api",
+ "reth-nippy-jar",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",

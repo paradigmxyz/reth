@@ -84,4 +84,4 @@ macro_rules! generate_snapshot_func {
     };
 }
 
-generate_snapshot_func!((T1), (T1, T2), (T1, T2, T3), (T1, T2, T3, T4),);
+generate_snapshot_func!((T1), (T1, T2), (T1, T2, T3), (T1, T2, T3, T4),(T1, T2, T3, T4, T5),);

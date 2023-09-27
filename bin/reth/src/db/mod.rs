@@ -24,6 +24,7 @@ mod clear;
 mod diff;
 mod get;
 mod list;
+mod snap;
 /// DB List TUI
 mod tui;
 
@@ -84,6 +85,8 @@ pub enum Subcommands {
     },
     /// Deletes all table entries
     Clear(clear::Command),
+    /// Snapshots tables from database
+    Snapshot(snap::Command),
     /// Lists current and local database versions
     Version,
     /// Returns the full database path
@@ -208,6 +211,11 @@ impl Command {
             Subcommands::Clear(command) => {
                 let db = open_db(&db_path, self.db.log_level)?;
                 command.execute(&db)?;
+            }
+            Subcommands::Snapshot(command) => {
+                let db = open_db_read_only(&db_path, self.db.log_level)?;
+                let tool = DbTool::new(&db, self.chain.clone())?;
+                command.execute(&tool)?;
             }
             Subcommands::Version => {
                 let local_db_version = match get_db_version(&db_path) {
