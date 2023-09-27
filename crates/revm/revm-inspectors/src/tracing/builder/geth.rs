@@ -196,7 +196,7 @@ impl GethTraceBuilder {
                     addr,
                     AccountState {
                         balance: Some(db_acc.balance),
-                        nonce: Some(U256::from(db_acc.nonce)),
+                        nonce: Some(db_acc.nonce),
                         code: db_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
                         storage: None,
                     },
@@ -210,13 +210,13 @@ impl GethTraceBuilder {
                 let db_acc = db.basic(addr)?.unwrap_or_default();
                 let pre_state = AccountState {
                     balance: Some(db_acc.balance),
-                    nonce: Some(U256::from(db_acc.nonce)),
+                    nonce: Some(db_acc.nonce),
                     code: db_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
                     storage: None,
                 };
                 let post_state = AccountState {
                     balance: Some(changed_acc.balance),
-                    nonce: Some(U256::from(changed_acc.nonce)),
+                    nonce: Some(changed_acc.nonce),
                     code: changed_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
                     storage: None,
                 };
