@@ -42,6 +42,9 @@ use tracing::{debug, trace};
 ///
 /// InspectorStack are used for optional inspecting execution. And it contains
 /// various duration of parts of execution.
+// TODO: https://github.com/bluealloy/revm/pull/745
+// #[derive(Debug)]
+#[allow(missing_debug_implementations)]
 pub struct EVMProcessor<'a> {
     /// The configured chain-spec
     chain_spec: Arc<ChainSpec>,

@@ -4,7 +4,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
 )]
-#![warn(unreachable_pub)]
+#![warn(unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use)]
 #![doc(test(
     no_crate_inject,

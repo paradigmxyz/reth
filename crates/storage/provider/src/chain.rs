@@ -235,6 +235,7 @@ impl Chain {
 }
 
 /// Wrapper type for `blocks` display in `Chain`
+#[derive(Debug)]
 pub struct DisplayBlocksChain<'a>(pub &'a BTreeMap<BlockNumber, SealedBlockWithSenders>);
 
 impl<'a> fmt::Display for DisplayBlocksChain<'a> {

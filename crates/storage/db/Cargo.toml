@@ -61,7 +61,6 @@ pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterio
 criterion = "0.5"
 iai = "0.1.1"
 tokio = { workspace = true, features = ["full"] }
-reth-db = { path = ".", features = ["test-utils", "bench"] }
 
 # needed for test-fuzz to work properly, see https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
 secp256k1.workspace = true
@@ -97,12 +96,15 @@ arbitrary = [
 
 [[bench]]
 name = "hash_keys"
+required-features = ["test-utils"]
 harness = false
 
 [[bench]]
 name = "criterion"
+required-features = ["test-utils"]
 harness = false
 
 [[bench]]
 name = "iai"
+required-features = ["test-utils"]
 harness = false

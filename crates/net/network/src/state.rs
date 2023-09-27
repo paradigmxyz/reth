@@ -44,6 +44,7 @@ const PEER_BLOCK_CACHE_LIMIT: usize = 512;
 ///     then send to the session of the peer.
 ///
 /// This type is also responsible for responding for received request.
+#[derive(Debug)]
 pub struct NetworkState<C> {
     /// All active peers and their state.
     active_peers: HashMap<PeerId, ActivePeer>,
@@ -465,6 +466,7 @@ where
 /// Tracks the state of a Peer with an active Session.
 ///
 /// For example known blocks,so we can decide what to announce.
+#[derive(Debug)]
 pub(crate) struct ActivePeer {
     /// Best block of the peer.
     pub(crate) best_hash: H256,
@@ -480,6 +482,7 @@ pub(crate) struct ActivePeer {
 }
 
 /// Message variants triggered by the [`NetworkState`]
+#[derive(Debug)]
 pub(crate) enum StateAction {
     /// Dispatch a `NewBlock` message to the peer
     NewBlock {

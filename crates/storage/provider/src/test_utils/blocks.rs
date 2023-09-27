@@ -49,6 +49,7 @@ pub fn assert_genesis_block<DB: Database>(provider: &DatabaseProviderRW<'_, DB>,
 
 /// Test chain with genesis, blocks, execution results
 /// that have valid changesets.
+#[derive(Debug)]
 pub struct BlockChainTestData {
     /// Genesis
     pub genesis: SealedBlock,

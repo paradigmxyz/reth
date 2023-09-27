@@ -23,8 +23,8 @@ use tokio_stream::wrappers::ReceiverStream;
 /// An abstraction over the configured discovery protocol.
 ///
 /// Listens for new discovered nodes and emits events for discovered nodes and their
-/// address.#[derive(Debug, Clone)]
-
+/// address.
+#[derive(Debug)]
 pub struct Discovery {
     /// All nodes discovered via discovery protocol.
     ///

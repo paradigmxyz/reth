@@ -432,7 +432,7 @@ impl Transaction {
     }
 
     /// Returns the [TxEip2930] variant if the transaction is an EIP-2930 transaction.
-    pub fn as_eip2830(&self) -> Option<&TxEip2930> {
+    pub fn as_eip2930(&self) -> Option<&TxEip2930> {
         match self {
             Transaction::Eip2930(tx) => Some(tx),
             _ => None,

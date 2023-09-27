@@ -60,6 +60,11 @@ impl Block {
         BlockWithSenders { block: self, senders }
     }
 
+    /// Returns whether or not the block contains any blob transactions.
+    pub fn has_blob_transactions(&self) -> bool {
+        self.body.iter().any(|tx| tx.is_eip4844())
+    }
+
     /// Calculates a heuristic for the in-memory size of the [Block].
     #[inline]
     pub fn size(&self) -> usize {

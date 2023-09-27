@@ -3,6 +3,7 @@
 use futures::Stream;
 use reth_provider::CanonChainTracker;
 use std::{
+    fmt,
     pin::Pin,
     task::{ready, Context, Poll},
     time::Duration,
@@ -22,6 +23,12 @@ const NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD: Duration = Duration::from_secs(120);
 pub struct ConsensusLayerHealthEvents {
     interval: Interval,
     canon_chain: Box<dyn CanonChainTracker>,
+}
+
+impl fmt::Debug for ConsensusLayerHealthEvents {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConsensusLayerHealthEvents").field("interval", &self.interval).finish()
+    }
 }
 
 impl ConsensusLayerHealthEvents {
@@ -78,7 +85,7 @@ impl Stream for ConsensusLayerHealthEvents {
 
 /// Event that is triggered when Consensus Layer health is degraded from the
 /// Execution Layer point of view.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum ConsensusLayerHealthEvent {
     /// Consensus Layer client was never seen.
     NeverSeen,
