@@ -250,6 +250,33 @@ where
     }
 
     /// Returns all traces for the given transaction hash
+    pub async fn trace_filter(
+        &self,
+        filter: TraceFilter,
+    ) -> EthResult<Vec<LocalizedTransactionTrace>> {
+        let TraceFilter { from_block, to_block, from_address, to_address, after, count } = filter;
+        let start = from_block.unwrap_or(0);
+        let end = if let Some(to_block) = to_block {
+            to_block
+        } else {
+            self.provider().best_block_number()?
+        };
+
+        // ensure that the range is not too large, since we need to fetch all blocks in the range
+        let distance = end.saturating_sub(start);
+        if distance > 100 {
+            return Err(
+                EthApiError::InvalidParams("Block range too large; currently limited to 100 blocks".to_string())
+            )
+        }
+
+        self.provider().block_ran
+
+
+        todo!()
+    }
+
+    /// Returns all traces for the given transaction hash
     pub async fn trace_transaction(
         &self,
         hash: H256,
@@ -532,8 +559,13 @@ where
     }
 
     /// Handler for `trace_filter`
-    async fn trace_filter(&self, _filter: TraceFilter) -> Result<Vec<LocalizedTransactionTrace>> {
-        Err(internal_rpc_err("unimplemented"))
+    ///
+    /// This is similar to `eth_getLogs` but for traces.
+    ///
+    /// # Limitations
+    /// This currently requires block filter fields, since reth does not have address indices yet.
+    async fn trace_filter(&self, filter: TraceFilter) -> Result<Vec<LocalizedTransactionTrace>> {
+        Ok(TraceApi::trace_filter(self, filter).await?)
     }
 
     /// Returns transaction trace at given index.
