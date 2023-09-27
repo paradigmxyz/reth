@@ -343,7 +343,7 @@ where
         bundles: Vec<Bundle>,
         state_context: Option<StateContext>,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> EthResult<Vec<GethTrace>> {
+    ) -> EthResult<Vec<Vec<GethTrace>>> {
         if bundles.is_empty() {
             return Err(EthApiError::InvalidParams(String::from("bundles are empty.")))
         }
@@ -378,7 +378,8 @@ where
         self.inner
             .eth_api
             .spawn_with_state_at_block(at.into(), move |state| {
-                let mut results = Vec::with_capacity(bundles.len());
+                // the outer vec for the bundles
+                let mut all_bundles = Vec::with_capacity(bundles.len());
                 let mut db = SubState::new(StateProviderDatabase::new(state));
 
                 if replay_block_txs {
@@ -399,7 +400,7 @@ where
                 // Trace all bundles
                 let mut bundles = bundles.into_iter().peekable();
                 while let Some(bundle) = bundles.next() {
-                    //let mut result = Vec::with_capacity(bundle.len());
+                    let mut results = Vec::with_capacity(bundle.transactions.len());
                     let Bundle { transactions, block_override } = bundle;
 
                     let block_overrides = block_override.map(Box::new);
@@ -433,8 +434,10 @@ where
                         }
                         results.push(trace);
                     }
+
+                    all_bundles.push(results);
                 }
-                Ok(results)
+                Ok(all_bundles)
             })
             .await
     }
@@ -984,7 +987,7 @@ where
         bundles: Vec<Bundle>,
         state_context: Option<StateContext>,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<Vec<GethTrace>> {
+    ) -> RpcResult<Vec<Vec<GethTrace>>> {
         let _permit = self.acquire_trace_permit().await;
         Ok(DebugApi::debug_trace_call_many(self, bundles, state_context, opts).await?)
     }
