@@ -12,8 +12,8 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     Address, Block, BlockNumber, Bloom, ChainSpec, Hardfork, Header, PruneMode, PruneModes,
-    PrunePartError, Receipt, ReceiptWithBloom, TransactionSigned, H256, MINIMUM_PRUNING_DISTANCE,
-    U256,
+    PrunePartError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, H256,
+    MINIMUM_PRUNING_DISTANCE, U256,
 };
 use reth_provider::{
     BlockExecutor, BlockExecutorStats, BundleStateWithReceipts, PrunableBlockExecutor,
@@ -57,7 +57,7 @@ pub struct EVMProcessor<'a> {
     /// The inner vector stores receipts ordered by transaction number.
     ///
     /// If receipt is None it means it is pruned.
-    receipts: Vec<Vec<Option<Receipt>>>,
+    receipts: Receipts,
     /// First block will be initialized to `None`
     /// and be set to the block number of first block executed.
     first_block: Option<BlockNumber>,
@@ -86,7 +86,7 @@ impl<'a> EVMProcessor<'a> {
             chain_spec,
             evm,
             stack: InspectorStack::new(InspectorStackConfig::default()),
-            receipts: Vec::new(),
+            receipts: Receipts::new(),
             first_block: None,
             tip: None,
             prune_modes: PruneModes::none(),
@@ -119,7 +119,7 @@ impl<'a> EVMProcessor<'a> {
             chain_spec,
             evm,
             stack: InspectorStack::new(InspectorStackConfig::default()),
-            receipts: Vec::new(),
+            receipts: Receipts::new(),
             first_block: None,
             tip: None,
             prune_modes: PruneModes::none(),
@@ -352,24 +352,7 @@ impl<'a> EVMProcessor<'a> {
             return Err(BlockValidationError::BlockGasUsed {
                 got: cumulative_gas_used,
                 expected: block.gas_used,
-                gas_spent_by_tx: self
-                    .receipts
-                    .last()
-                    .map(|block_r| {
-                        block_r
-                            .iter()
-                            .enumerate()
-                            .map(|(id, tx_r)| {
-                                (
-                                    id as u64,
-                                    tx_r.as_ref()
-                                        .expect("receipts have not been pruned")
-                                        .cumulative_gas_used,
-                                )
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default(),
+                gas_spent_by_tx: self.receipts.gas_spent_by_tx()?,
             }
             .into())
         }
