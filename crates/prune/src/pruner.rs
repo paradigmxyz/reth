@@ -21,14 +21,9 @@ use reth_provider::{
     TransactionsProvider,
 };
 use reth_snapshot::HighestSnapshotsTracker;
-use std::{
-    collections::{BTreeMap, HashMap},
-    ops::RangeInclusive,
-    sync::Arc,
-    time::Instant,
-};
+use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc, time::Instant};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, error, info, instrument, trace};
+use tracing::{debug, error, instrument, trace};
 
 /// Result of [Pruner::run] execution.
 ///
@@ -54,6 +49,7 @@ pub struct Pruner<DB> {
     /// Maximum entries to prune per block, per prune part.
     batch_sizes: PruneBatchSizes,
     listeners: EventListeners<PrunerEvent>,
+    #[allow(dead_code)]
     highest_snapshots_tracker: HighestSnapshotsTracker,
 }
 
@@ -98,25 +94,15 @@ impl<DB: Database> Pruner<DB> {
 
         let provider = self.provider_factory.provider_rw()?;
 
-        let highest_snapshots = *self.highest_snapshots_tracker.borrow();
-
         let mut done = true;
         let mut parts_done = BTreeMap::new();
 
-        if let Some((to_block, prune_mode)) = highest_snapshots.map_or(
-            // If highest snapshots data is not available, just use the tip
-            self.modes.prune_target_block_receipts(tip_block_number),
-            |snapshots| {
-                // If highest snapshots data is available, require receipts to be snapshotted and
-                // use highest snapshotted block number
-                snapshots
-                    .receipts
-                    .and_then(|block_number| {
-                        self.modes.prune_target_block_receipts(block_number).transpose()
-                    })
-                    .transpose()
-            },
-        )? {
+        // TODO(alexey): prune snapshot parts of data (headers, transactions)
+        // let highest_snapshots = *self.highest_snapshots_tracker.borrow();
+
+        if let Some((to_block, prune_mode)) =
+            self.modes.prune_target_block_receipts(tip_block_number)?
+        {
             trace!(
                 target: "pruner",
                 prune_part = ?PrunePart::Receipts,
@@ -286,36 +272,17 @@ impl<DB: Database> Pruner<DB> {
     /// Returns `true` if the pruning is needed at the provided tip block number.
     /// This determined by the check against minimum pruning interval and last pruned block number.
     pub fn is_pruning_needed(&self, tip_block_number: BlockNumber) -> bool {
-        let highest_snapshots = *self.highest_snapshots_tracker.borrow();
-
-        let target_block_number = if let Some(highest_snapshots) = highest_snapshots {
-            // Highest snapshots data is available, use maximum snapshotted block number as a target
-            // for determining if pruning is needed.
-            let Some(highest_snapshotted_block_number) = highest_snapshots.max_block_number()
-            else {
-                return false
-            };
-            debug_assert!(highest_snapshotted_block_number <= tip_block_number);
-
-            highest_snapshotted_block_number
-        } else {
-            // Highest snapshots data is not available, use provided block number.
-            tip_block_number
-        };
-
         if self.last_pruned_block_number.map_or(true, |last_pruned_block_number| {
             // Saturating subtraction is needed for the case when the chain was reverted, meaning
             // current block number might be less than the previously pruned block number. If
             // that's the case, no pruning is needed as outdated data is also reverted.
-            target_block_number.saturating_sub(last_pruned_block_number) >=
+            tip_block_number.saturating_sub(last_pruned_block_number) >=
                 self.min_block_interval as u64
         }) {
             debug!(
                 target: "pruner",
                 last_pruned_block_number = ?self.last_pruned_block_number,
                 %tip_block_number,
-                ?highest_snapshots,
-                %target_block_number,
                 "Minimum pruning interval reached"
             );
             true
@@ -987,8 +954,7 @@ mod tests {
         BlockNumber, PruneBatchSizes, PruneCheckpoint, PruneMode, PruneModes, PrunePart,
         ReceiptsLogPruneConfig, TxNumber, H256, MAINNET,
     };
-    use reth_provider::{PruneCheckpointReader, TransactionsProvider};
-    use reth_snapshot::HighestSnapshots;
+    use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::TestTransaction;
     use std::{collections::BTreeMap, ops::AddAssign};
     use tokio::sync::watch;
@@ -996,14 +962,13 @@ mod tests {
     #[test]
     fn is_pruning_needed() {
         let db = create_test_rw_db();
-        let (highest_snapshots_tx, highest_snapshots_rx) = watch::channel(None);
         let mut pruner = Pruner::new(
             db,
             MAINNET.clone(),
             5,
             PruneModes::none(),
             PruneBatchSizes::default(),
-            highest_snapshots_rx,
+            watch::channel(None).1,
         );
 
         // No last pruned block number was set before
@@ -1012,38 +977,13 @@ mod tests {
         pruner.last_pruned_block_number = Some(first_block_number);
 
         // Tip block number delta is >= than min block interval
-        // Highest snapshotted block number is not set, hence ignored
         let second_block_number = first_block_number + pruner.min_block_interval as u64;
         assert!(pruner.is_pruning_needed(second_block_number));
         pruner.last_pruned_block_number = Some(second_block_number);
 
         // Tip block number delta is < than min block interval
-        // Highest snapshotted block number is not set, hence ignored
         let third_block_number = second_block_number;
         assert!(!pruner.is_pruning_needed(third_block_number));
-
-        // Highest snapshotted block number is set and its delta is < than min block interval
-        // Tip block number is ignored
-        highest_snapshots_tx
-            .send(Some(HighestSnapshots {
-                headers: Some(third_block_number),
-                receipts: Some(second_block_number),
-                transactions: None,
-            }))
-            .expect("send to channel");
-        let fourth_block_number = third_block_number + pruner.min_block_interval as u64;
-        assert!(!pruner.is_pruning_needed(fourth_block_number));
-
-        // Highest snapshotted block number is set and its delta is >= than min block interval
-        // Tip block number is ignored
-        highest_snapshots_tx
-            .send(Some(HighestSnapshots {
-                headers: Some(fourth_block_number),
-                receipts: Some(third_block_number),
-                transactions: Some(second_block_number),
-            }))
-            .expect("send to channel");
-        assert!(pruner.is_pruning_needed(fourth_block_number));
     }
 
     #[test]
