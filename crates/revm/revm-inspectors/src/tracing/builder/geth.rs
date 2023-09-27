@@ -4,7 +4,7 @@ use crate::tracing::{
     types::{CallTraceNode, CallTraceStepStackItem},
     TracingInspectorConfig,
 };
-use reth_primitives::{Address, Bytes, H256, U256};
+use reth_primitives::{Address, Bytes, B256, U256};
 use reth_rpc_types::trace::geth::{
     AccountState, CallConfig, CallFrame, DefaultFrame, DiffMode, GethDefaultTracingOptions,
     PreStateConfig, PreStateFrame, PreStateMode, StructLog,
@@ -33,7 +33,7 @@ impl GethTraceBuilder {
         &self,
         main_trace_node: &CallTraceNode,
         opts: &GethDefaultTracingOptions,
-        storage: &mut HashMap<Address, BTreeMap<H256, H256>>,
+        storage: &mut HashMap<Address, BTreeMap<B256, B256>>,
         struct_logs: &mut Vec<StructLog>,
     ) {
         // A stack with all the steps of the trace and all its children's steps.

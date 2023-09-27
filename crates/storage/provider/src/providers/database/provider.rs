@@ -34,7 +34,7 @@ use reth_primitives::{
     ChainInfo, ChainSpec, Hardfork, Head, Header, PruneCheckpoint, PruneModes, PrunePart, Receipt,
     SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber,
-    Withdrawal, H256, U256,
+    Withdrawal, B256, U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
@@ -930,7 +930,7 @@ impl<'this, TX: DbTx<'this>> HeaderProvider for DatabaseProvider<'this, TX> {
 }
 
 impl<'this, TX: DbTx<'this>> BlockHashReader for DatabaseProvider<'this, TX> {
-    fn block_hash(&self, number: u64) -> RethResult<Option<H256>> {
+    fn block_hash(&self, number: u64) -> RethResult<Option<B256>> {
         Ok(self.tx.get::<tables::CanonicalHeaders>(number)?)
     }
 
@@ -938,7 +938,7 @@ impl<'this, TX: DbTx<'this>> BlockHashReader for DatabaseProvider<'this, TX> {
         &self,
         start: BlockNumber,
         end: BlockNumber,
-    ) -> RethResult<Vec<H256>> {
+    ) -> RethResult<Vec<B256>> {
         let range = start..end;
         let mut cursor = self.tx.cursor_read::<tables::CanonicalHeaders>()?;
         cursor
@@ -966,13 +966,13 @@ impl<'this, TX: DbTx<'this>> BlockNumReader for DatabaseProvider<'this, TX> {
         Ok(self.tx.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default().0)
     }
 
-    fn block_number(&self, hash: H256) -> RethResult<Option<BlockNumber>> {
+    fn block_number(&self, hash: B256) -> RethResult<Option<BlockNumber>> {
         Ok(self.tx.get::<tables::HeaderNumbers>(hash)?)
     }
 }
 
 impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
-    fn find_block_by_hash(&self, hash: H256, source: BlockSource) -> RethResult<Option<Block>> {
+    fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> RethResult<Option<Block>> {
         if source.is_database() {
             self.block(hash.into())
         } else {
@@ -1416,7 +1416,7 @@ impl<'this, TX: DbTxMut<'this>> StageCheckpointWriter for DatabaseProvider<'this
 impl<'this, TX: DbTx<'this>> StorageReader for DatabaseProvider<'this, TX> {
     fn plainstate_storages(
         &self,
-        addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = H256>)>,
+        addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = B256>)>,
     ) -> RethResult<Vec<(Address, Vec<StorageEntry>)>> {
         let mut plain_storage = self.tx.cursor_dup_read::<tables::PlainStorageState>()?;
 
@@ -1440,13 +1440,13 @@ impl<'this, TX: DbTx<'this>> StorageReader for DatabaseProvider<'this, TX> {
     fn changed_storages_with_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> RethResult<BTreeMap<Address, BTreeSet<H256>>> {
+    ) -> RethResult<BTreeMap<Address, BTreeSet<B256>>> {
         self.tx
             .cursor_read::<tables::StorageChangeSet>()?
             .walk_range(BlockNumberAddress::range(range))?
             // fold all storages and save its old state so we can remove it from HashedStorage
             // it is needed as it is dup table.
-            .try_fold(BTreeMap::new(), |mut accounts: BTreeMap<Address, BTreeSet<H256>>, entry| {
+            .try_fold(BTreeMap::new(), |mut accounts: BTreeMap<Address, BTreeSet<B256>>, entry| {
                 let (BlockNumberAddress((_, address)), storage_entry) = entry?;
                 accounts.entry(address).or_default().insert(storage_entry.key);
                 Ok(accounts)
@@ -1456,13 +1456,13 @@ impl<'this, TX: DbTx<'this>> StorageReader for DatabaseProvider<'this, TX> {
     fn changed_storages_and_blocks_with_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> RethResult<BTreeMap<(Address, H256), Vec<u64>>> {
+    ) -> RethResult<BTreeMap<(Address, B256), Vec<u64>>> {
         let mut changeset_cursor = self.tx.cursor_read::<tables::StorageChangeSet>()?;
 
         let storage_changeset_lists =
             changeset_cursor.walk_range(BlockNumberAddress::range(range))?.try_fold(
                 BTreeMap::new(),
-                |mut storages: BTreeMap<(Address, H256), Vec<u64>>, entry| -> RethResult<_> {
+                |mut storages: BTreeMap<(Address, B256), Vec<u64>>, entry| -> RethResult<_> {
                     let (index, storage) = entry?;
                     storages
                         .entry((index.address(), storage.key))
@@ -1480,12 +1480,12 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
     fn insert_hashes(
         &self,
         range: RangeInclusive<BlockNumber>,
-        end_block_hash: H256,
-        expected_state_root: H256,
+        end_block_hash: B256,
+        expected_state_root: B256,
     ) -> RethResult<()> {
         // Initialize prefix sets.
         let mut account_prefix_set = PrefixSetMut::default();
-        let mut storage_prefix_set: HashMap<H256, PrefixSetMut> = HashMap::default();
+        let mut storage_prefix_set: HashMap<B256, PrefixSetMut> = HashMap::default();
         let mut destroyed_accounts = HashSet::default();
 
         // storage hashing stage
@@ -1546,7 +1546,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
     fn unwind_storage_hashing(
         &self,
         range: Range<BlockNumberAddress>,
-    ) -> RethResult<HashMap<H256, BTreeSet<H256>>> {
+    ) -> RethResult<HashMap<B256, BTreeSet<B256>>> {
         let mut hashed_storage = self.tx.cursor_dup_write::<tables::HashedStorage>()?;
 
         // Aggregate all block changesets and make list of accounts that have been changed.
@@ -1560,7 +1560,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
             // fold all account to get the old balance/nonces and account that needs to be removed
             .fold(
                 BTreeMap::new(),
-                |mut accounts: BTreeMap<(Address, H256), U256>,
+                |mut accounts: BTreeMap<(Address, B256), U256>,
                  (BlockNumberAddress((_, address)), storage_entry)| {
                     accounts.insert((address, storage_entry.key), storage_entry.value);
                     accounts
@@ -1572,7 +1572,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
             .map(|((address, key), value)| ((keccak256(address), keccak256(key)), value))
             .collect::<BTreeMap<_, _>>();
 
-        let mut hashed_storage_keys: HashMap<H256, BTreeSet<H256>> = HashMap::default();
+        let mut hashed_storage_keys: HashMap<B256, BTreeSet<B256>> = HashMap::default();
         for (hashed_address, hashed_slot) in hashed_storages.keys() {
             hashed_storage_keys.entry(*hashed_address).or_default().insert(*hashed_slot);
         }
@@ -1601,7 +1601,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
     fn insert_storage_for_hashing(
         &self,
         storages: impl IntoIterator<Item = (Address, impl IntoIterator<Item = StorageEntry>)>,
-    ) -> RethResult<HashMap<H256, BTreeSet<H256>>> {
+    ) -> RethResult<HashMap<B256, BTreeSet<B256>>> {
         // hash values
         let hashed_storages =
             storages.into_iter().fold(BTreeMap::new(), |mut map, (address, storage)| {
@@ -1644,7 +1644,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
     fn unwind_account_hashing(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> RethResult<BTreeMap<H256, Option<Account>>> {
+    ) -> RethResult<BTreeMap<B256, Option<Account>>> {
         let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccount>()?;
 
         // Aggregate all block changesets and make a list of accounts that have been changed.
@@ -1687,12 +1687,12 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
     fn insert_account_for_hashing(
         &self,
         accounts: impl IntoIterator<Item = (Address, Option<Account>)>,
-    ) -> RethResult<BTreeMap<H256, Option<Account>>> {
+    ) -> RethResult<BTreeMap<B256, Option<Account>>> {
         let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccount>()?;
 
         let hashed_accounts = accounts.into_iter().fold(
             BTreeMap::new(),
-            |mut map: BTreeMap<H256, Option<Account>>, (address, account)| {
+            |mut map: BTreeMap<B256, Option<Account>>, (address, account)| {
                 map.insert(keccak256(address), account);
                 map
             },
@@ -1730,7 +1730,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
 
     fn insert_storage_history_index(
         &self,
-        storage_transitions: BTreeMap<(Address, H256), Vec<u64>>,
+        storage_transitions: BTreeMap<(Address, B256), Vec<u64>>,
     ) -> RethResult<()> {
         self.append_history_index::<_, tables::StorageHistory>(
             storage_transitions,
@@ -1765,7 +1765,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
             // fold all storages and get last block number
             .fold(
                 BTreeMap::new(),
-                |mut accounts: BTreeMap<(Address, H256), u64>, (index, storage)| {
+                |mut accounts: BTreeMap<(Address, B256), u64>, (index, storage)| {
                     // we just need address and lowest block number.
                     accounts.insert((index.address(), storage.key), index.block_number());
                     accounts
@@ -1855,7 +1855,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockExecutionWriter for DatabaseP
 
             // Initialize prefix sets.
             let mut account_prefix_set = PrefixSetMut::default();
-            let mut storage_prefix_set: HashMap<H256, PrefixSetMut> = HashMap::default();
+            let mut storage_prefix_set: HashMap<B256, PrefixSetMut> = HashMap::default();
             let mut destroyed_accounts = HashSet::default();
 
             // Unwind account hashes. Add changed accounts to account prefix set.

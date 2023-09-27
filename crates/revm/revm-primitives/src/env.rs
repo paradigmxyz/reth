@@ -4,7 +4,7 @@ use reth_primitives::{
     recover_signer,
     revm_primitives::{AnalysisKind, BlockEnv, CfgEnv, Env, SpecId, TransactTo, TxEnv},
     Address, Bytes, Chain, ChainSpec, Head, Header, Transaction, TransactionKind,
-    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxLegacy, H256, U256,
+    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxLegacy, B256, U256,
 };
 
 /// Convenience function to call both [fill_cfg_env] and [fill_block_env]
@@ -128,7 +128,7 @@ pub fn tx_env_with_recovered(transaction: &TransactionSignedEcRecovered) -> TxEn
 ///  * the call does not follow the EIP-1559 burn semantics - no value should be transferred as
 ///  part of the call
 ///  * if no code exists at `BEACON_ROOTS_ADDRESS`, the call must fail silently
-pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_block_root: H256) {
+pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_block_root: B256) {
     env.tx = TxEnv {
         caller: SYSTEM_ADDRESS,
         transact_to: TransactTo::Call(BEACON_ROOTS_ADDRESS),

@@ -12,7 +12,7 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     Address, Block, BlockNumber, Bloom, ChainSpec, Hardfork, Header, PruneMode, PruneModes,
-    PrunePartError, Receipt, ReceiptWithBloom, TransactionSigned, H256, MINIMUM_PRUNING_DISTANCE,
+    PrunePartError, Receipt, ReceiptWithBloom, TransactionSigned, B256, MINIMUM_PRUNING_DISTANCE,
     U256,
 };
 use reth_provider::{
@@ -528,7 +528,7 @@ impl<'a> PrunableBlockExecutor for EVMProcessor<'a> {
 
 /// Verify receipts
 pub fn verify_receipt<'a>(
-    expected_receipts_root: H256,
+    expected_receipts_root: B256,
     expected_logs_bloom: Bloom,
     receipts: impl Iterator<Item = &'a Receipt> + Clone,
 ) -> Result<(), BlockExecutionError> {
@@ -574,8 +574,8 @@ mod tests {
     #[derive(Debug, Default, Clone, Eq, PartialEq)]
     struct StateProviderTest {
         accounts: HashMap<Address, (HashMap<StorageKey, U256>, Account)>,
-        contracts: HashMap<H256, Bytecode>,
-        block_hash: HashMap<u64, H256>,
+        contracts: HashMap<B256, Bytecode>,
+        block_hash: HashMap<u64, B256>,
     }
 
     impl StateProviderTest {
@@ -604,7 +604,7 @@ mod tests {
     }
 
     impl BlockHashReader for StateProviderTest {
-        fn block_hash(&self, number: u64) -> RethResult<Option<H256>> {
+        fn block_hash(&self, number: u64) -> RethResult<Option<B256>> {
             Ok(self.block_hash.get(&number).cloned())
         }
 
@@ -612,7 +612,7 @@ mod tests {
             &self,
             start: BlockNumber,
             end: BlockNumber,
-        ) -> RethResult<Vec<H256>> {
+        ) -> RethResult<Vec<B256>> {
             let range = start..end;
             Ok(self
                 .block_hash
@@ -623,7 +623,7 @@ mod tests {
     }
 
     impl StateRootProvider for StateProviderTest {
-        fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> RethResult<H256> {
+        fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> RethResult<B256> {
             todo!()
         }
     }
@@ -640,15 +640,15 @@ mod tests {
                 .and_then(|(storage, _)| storage.get(&storage_key).cloned()))
         }
 
-        fn bytecode_by_hash(&self, code_hash: H256) -> RethResult<Option<Bytecode>> {
+        fn bytecode_by_hash(&self, code_hash: B256) -> RethResult<Option<Bytecode>> {
             Ok(self.contracts.get(&code_hash).cloned())
         }
 
         fn proof(
             &self,
             _address: Address,
-            _keys: &[H256],
-        ) -> RethResult<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
+            _keys: &[B256],
+        ) -> RethResult<(Vec<Bytes>, B256, Vec<Vec<Bytes>>)> {
             todo!()
         }
     }
@@ -699,7 +699,7 @@ mod tests {
         );
 
         // fix header, set a gas limit
-        header.parent_beacon_block_root = Some(H256::with_last_byte(0x69));
+        header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
 
         // Now execute a block with the fixed header, ensure that it does not fail
         executor
@@ -740,7 +740,7 @@ mod tests {
         let header = Header {
             timestamp: 1,
             number: 1,
-            parent_beacon_block_root: Some(H256::with_last_byte(0x69)),
+            parent_beacon_block_root: Some(B256::with_last_byte(0x69)),
             excess_blob_gas: Some(0),
             ..Header::default()
         };
@@ -811,7 +811,7 @@ mod tests {
         let header = Header {
             timestamp: 1,
             number: 1,
-            parent_beacon_block_root: Some(H256::with_last_byte(0x69)),
+            parent_beacon_block_root: Some(B256::with_last_byte(0x69)),
             excess_blob_gas: Some(0),
             ..Header::default()
         };
@@ -865,7 +865,7 @@ mod tests {
         executor.init_env(&header, U256::ZERO);
 
         // attempt to execute the genesis block with non-zero parent beacon block root, expect err
-        header.parent_beacon_block_root = Some(H256::with_last_byte(0x69));
+        header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
         let _err = executor
             .execute_and_verify_receipt(
                 &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
@@ -877,7 +877,7 @@ mod tests {
             );
 
         // fix header
-        header.parent_beacon_block_root = Some(H256::ZERO);
+        header.parent_beacon_block_root = Some(B256::ZERO);
 
         // now try to process the genesis block again, this time ensuring that a system contract
         // call does not occur
@@ -908,7 +908,7 @@ mod tests {
         let header = Header {
             timestamp: 1,
             number: 1,
-            parent_beacon_block_root: Some(H256::with_last_byte(0x69)),
+            parent_beacon_block_root: Some(B256::with_last_byte(0x69)),
             base_fee_per_gas: Some(u64::MAX),
             excess_blob_gas: Some(0),
             ..Header::default()

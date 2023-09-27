@@ -325,21 +325,21 @@ mod tests {
     use futures::{SinkExt, StreamExt};
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use reth_ecies::{stream::ECIESStream, util::pk2id};
-    use reth_primitives::{ForkFilter, Head, NamedChain, H256, U256};
+    use reth_primitives::{ForkFilter, Head, NamedChain, B256, U256};
     use secp256k1::{SecretKey, SECP256K1};
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;
 
     #[tokio::test]
     async fn can_handshake() {
-        let genesis = H256::random();
+        let genesis = B256::random();
         let fork_filter = ForkFilter::new(Head::default(), genesis, 0, Vec::new());
 
         let status = Status {
             version: EthVersion::Eth67 as u8,
             chain: NamedChain::Mainnet.into(),
             total_difficulty: U256::ZERO,
-            blockhash: H256::random(),
+            blockhash: B256::random(),
             genesis,
             // Pass the current fork id.
             forkid: fork_filter.current(),
@@ -379,14 +379,14 @@ mod tests {
 
     #[tokio::test]
     async fn pass_handshake_on_low_td_bitlen() {
-        let genesis = H256::random();
+        let genesis = B256::random();
         let fork_filter = ForkFilter::new(Head::default(), genesis, 0, Vec::new());
 
         let status = Status {
             version: EthVersion::Eth67 as u8,
             chain: NamedChain::Mainnet.into(),
             total_difficulty: U256::from(2).pow(U256::from(100)) - U256::from(1),
-            blockhash: H256::random(),
+            blockhash: B256::random(),
             genesis,
             // Pass the current fork id.
             forkid: fork_filter.current(),
@@ -426,14 +426,14 @@ mod tests {
 
     #[tokio::test]
     async fn fail_handshake_on_high_td_bitlen() {
-        let genesis = H256::random();
+        let genesis = B256::random();
         let fork_filter = ForkFilter::new(Head::default(), genesis, 0, Vec::new());
 
         let status = Status {
             version: EthVersion::Eth67 as u8,
             chain: NamedChain::Mainnet.into(),
             total_difficulty: U256::from(2).pow(U256::from(100)),
-            blockhash: H256::random(),
+            blockhash: B256::random(),
             genesis,
             // Pass the current fork id.
             forkid: fork_filter.current(),
@@ -484,8 +484,8 @@ mod tests {
         let local_addr = listener.local_addr().unwrap();
         let test_msg = EthMessage::NewBlockHashes(
             vec![
-                BlockHashNumber { hash: H256::random(), number: 5 },
-                BlockHashNumber { hash: H256::random(), number: 6 },
+                BlockHashNumber { hash: B256::random(), number: 5 },
+                BlockHashNumber { hash: B256::random(), number: 6 },
             ]
             .into(),
         );
@@ -519,8 +519,8 @@ mod tests {
         let server_key = SecretKey::new(&mut rand::thread_rng());
         let test_msg = EthMessage::NewBlockHashes(
             vec![
-                BlockHashNumber { hash: H256::random(), number: 5 },
-                BlockHashNumber { hash: H256::random(), number: 6 },
+                BlockHashNumber { hash: B256::random(), number: 5 },
+                BlockHashNumber { hash: B256::random(), number: 6 },
             ]
             .into(),
         );
@@ -561,20 +561,20 @@ mod tests {
         let server_key = SecretKey::new(&mut rand::thread_rng());
         let test_msg = EthMessage::NewBlockHashes(
             vec![
-                BlockHashNumber { hash: H256::random(), number: 5 },
-                BlockHashNumber { hash: H256::random(), number: 6 },
+                BlockHashNumber { hash: B256::random(), number: 5 },
+                BlockHashNumber { hash: B256::random(), number: 6 },
             ]
             .into(),
         );
 
-        let genesis = H256::random();
+        let genesis = B256::random();
         let fork_filter = ForkFilter::new(Head::default(), genesis, 0, Vec::new());
 
         let status = Status {
             version: EthVersion::Eth67 as u8,
             chain: NamedChain::Mainnet.into(),
             total_difficulty: U256::ZERO,
-            blockhash: H256::random(),
+            blockhash: B256::random(),
             genesis,
             // Pass the current fork id.
             forkid: fork_filter.current(),

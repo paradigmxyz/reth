@@ -16,7 +16,7 @@ use boa_engine::{
     Context, JsArgs, JsError, JsNativeError, JsObject, JsResult, JsValue,
 };
 use boa_gc::{empty_trace, Finalize, Gc, Trace};
-use reth_primitives::{Account, Address, Bytes, H256, KECCAK_EMPTY, U256};
+use reth_primitives::{Account, Address, Bytes, B256, KECCAK_EMPTY, U256};
 use revm::{
     interpreter::{
         opcode::{PUSH0, PUSH32},
@@ -491,9 +491,9 @@ pub(crate) struct EvmContext {
     pub(crate) output: Bytes,
     /// Number, block number
     pub(crate) time: String,
-    pub(crate) block_hash: Option<H256>,
+    pub(crate) block_hash: Option<B256>,
     pub(crate) tx_index: Option<usize>,
-    pub(crate) tx_hash: Option<H256>,
+    pub(crate) tx_hash: Option<B256>,
 }
 
 impl EvmContext {
@@ -744,7 +744,7 @@ impl EvmDBInner {
                 ))))
             }
         };
-        let value: H256 = value.into();
+        let value: B256 = value.into();
         to_buf(value.as_slice().to_vec(), ctx)
     }
 }

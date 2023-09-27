@@ -4,7 +4,7 @@ use proptest::{
     strategy::{Strategy, ValueTree},
     test_runner::TestRunner,
 };
-use reth_primitives::{proofs::triehash::KeccakHasher, ReceiptWithBloom, H256};
+use reth_primitives::{proofs::triehash::KeccakHasher, ReceiptWithBloom, B256};
 
 /// Benchmarks different implementations of the root calculation.
 pub fn trie_root_benchmark(c: &mut Criterion) {
@@ -50,7 +50,7 @@ mod implementations {
         trie::{HashBuilder, Nibbles},
     };
 
-    pub fn trie_hash_ordered_trie_root(receipts: &[ReceiptWithBloom]) -> H256 {
+    pub fn trie_hash_ordered_trie_root(receipts: &[ReceiptWithBloom]) -> B256 {
         triehash::ordered_trie_root::<KeccakHasher, _>(receipts.iter().map(|receipt| {
             let mut receipt_rlp = Vec::new();
             receipt.encode_inner(&mut receipt_rlp, false);
@@ -58,7 +58,7 @@ mod implementations {
         }))
     }
 
-    pub fn hash_builder_root(receipts: &[ReceiptWithBloom]) -> H256 {
+    pub fn hash_builder_root(receipts: &[ReceiptWithBloom]) -> B256 {
         let mut index_buffer = BytesMut::new();
         let mut value_buffer = BytesMut::new();
 

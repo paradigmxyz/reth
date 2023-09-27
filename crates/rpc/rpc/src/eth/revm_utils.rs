@@ -2,7 +2,7 @@
 
 use crate::eth::error::{EthApiError, EthResult, RpcInvalidTransactionError};
 use reth_primitives::{
-    AccessList, Address, Bytes, TransactionSigned, TransactionSignedEcRecovered, TxHash, H256, U256,
+    AccessList, Address, Bytes, TransactionSigned, TransactionSignedEcRecovered, TxHash, B256, U256,
 };
 use reth_revm::env::{fill_tx_env, fill_tx_env_with_recovered};
 use reth_rpc_types::{
@@ -155,7 +155,7 @@ pub(crate) fn replay_transactions_until<DB, I, Tx>(
     cfg: CfgEnv,
     block_env: BlockEnv,
     transactions: I,
-    target_tx_hash: H256,
+    target_tx_hash: B256,
 ) -> EthResult<()>
 where
     DB: DatabaseRef,
@@ -394,7 +394,7 @@ impl CallFees {
         call_max_fee: Option<U256>,
         call_priority_fee: Option<U256>,
         block_base_fee: U256,
-        blob_versioned_hashes: Option<&[H256]>,
+        blob_versioned_hashes: Option<&[B256]>,
         max_fee_per_blob_gas: Option<U256>,
         block_blob_fee: Option<U256>,
     ) -> EthResult<CallFees> {
@@ -617,7 +617,7 @@ mod tests {
             None,
             None,
             U256::from(99),
-            Some(&[H256::from(U256::ZERO)]),
+            Some(&[B256::from(U256::ZERO)]),
             None,
             Some(U256::from(99)),
         )

@@ -2,7 +2,7 @@
 
 use alloy_rlp::Encodable;
 use reth_primitives::{
-    Address, BlobTransactionSidecar, ChainSpec, Header, SealedBlock, Withdrawal, H256, U256,
+    Address, BlobTransactionSidecar, ChainSpec, Header, SealedBlock, Withdrawal, B256, U256,
 };
 use reth_revm_primitives::config::revm_spec_by_timestamp_after_merge;
 use reth_rpc_types::engine::{
@@ -122,17 +122,17 @@ pub struct PayloadBuilderAttributes {
     /// Id of the payload
     pub id: PayloadId,
     /// Parent block to build the payload on top
-    pub parent: H256,
+    pub parent: B256,
     /// Timestamp for the generated payload
     pub timestamp: u64,
     /// Address of the recipient for collecting transaction fee
     pub suggested_fee_recipient: Address,
     /// Randomness value for the generated payload
-    pub prev_randao: H256,
+    pub prev_randao: B256,
     /// Withdrawals for the generated payload
     pub withdrawals: Vec<Withdrawal>,
     /// Root of the parent beacon block
-    pub parent_beacon_block_root: Option<H256>,
+    pub parent_beacon_block_root: Option<B256>,
 }
 
 // === impl PayloadBuilderAttributes ===
@@ -141,7 +141,7 @@ impl PayloadBuilderAttributes {
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
     /// Derives the unique [PayloadId] for the given parent and attributes
-    pub fn new(parent: H256, attributes: PayloadAttributes) -> Self {
+    pub fn new(parent: B256, attributes: PayloadAttributes) -> Self {
         let id = payload_id(&parent, &attributes);
 
         let withdraw = attributes.withdrawals.map(
@@ -225,7 +225,7 @@ impl PayloadBuilderAttributes {
 /// Generates the payload id for the configured payload
 ///
 /// Returns an 8-byte identifier by hashing the payload components with sha256 hash.
-pub(crate) fn payload_id(parent: &H256, attributes: &PayloadAttributes) -> PayloadId {
+pub(crate) fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> PayloadId {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
     hasher.update(parent.as_slice());

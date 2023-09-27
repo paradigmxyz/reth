@@ -1349,7 +1349,7 @@ mod test {
     };
     use reth_net_common::ban_list::BanList;
     use reth_network_api::ReputationChangeKind;
-    use reth_primitives::{PeerId, H512};
+    use reth_primitives::{PeerId, B512};
     use std::{
         collections::HashSet,
         future::{poll_fn, Future},
@@ -2002,7 +2002,7 @@ mod test {
         let ban_list = BanList::new(HashSet::new(), vec![ip]);
         let config = PeersConfig::default().with_ban_list(ban_list);
         let mut peer_manager = PeersManager::new(config);
-        peer_manager.add_peer(H512::default(), socket_addr, None);
+        peer_manager.add_peer(B512::default(), socket_addr, None);
 
         assert!(peer_manager.peers.is_empty());
     }

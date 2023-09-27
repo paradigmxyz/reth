@@ -12,7 +12,7 @@ use reth_primitives::{
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
     ChainSpec, Header, PruneCheckpoint, PrunePart, Receipt, SealedBlock, SealedHeader,
     TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal,
-    H256, U256,
+    B256, U256,
 };
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{ops::RangeBounds, sync::Arc};
@@ -184,7 +184,7 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
 }
 
 impl<DB: Database> BlockHashReader for ProviderFactory<DB> {
-    fn block_hash(&self, number: u64) -> RethResult<Option<H256>> {
+    fn block_hash(&self, number: u64) -> RethResult<Option<B256>> {
         self.provider()?.block_hash(number)
     }
 
@@ -192,7 +192,7 @@ impl<DB: Database> BlockHashReader for ProviderFactory<DB> {
         &self,
         start: BlockNumber,
         end: BlockNumber,
-    ) -> RethResult<Vec<H256>> {
+    ) -> RethResult<Vec<B256>> {
         self.provider()?.canonical_hashes_range(start, end)
     }
 }
@@ -210,13 +210,13 @@ impl<DB: Database> BlockNumReader for ProviderFactory<DB> {
         self.provider()?.last_block_number()
     }
 
-    fn block_number(&self, hash: H256) -> RethResult<Option<BlockNumber>> {
+    fn block_number(&self, hash: B256) -> RethResult<Option<BlockNumber>> {
         self.provider()?.block_number(hash)
     }
 }
 
 impl<DB: Database> BlockReader for ProviderFactory<DB> {
-    fn find_block_by_hash(&self, hash: H256, source: BlockSource) -> RethResult<Option<Block>> {
+    fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> RethResult<Option<Block>> {
         self.provider()?.find_block_by_hash(hash, source)
     }
 
@@ -415,7 +415,7 @@ mod tests {
     };
     use reth_interfaces::test_utils::{generators, generators::random_block};
     use reth_primitives::{
-        hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, TxNumber, H256,
+        hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, TxNumber, B256,
     };
     use std::{ops::RangeInclusive, sync::Arc};
 
@@ -436,7 +436,7 @@ mod tests {
 
         let chain_info = provider.chain_info().expect("should be ok");
         assert_eq!(chain_info.best_number, 0);
-        assert_eq!(chain_info.best_hash, H256::ZERO);
+        assert_eq!(chain_info.best_hash, B256::ZERO);
     }
 
     #[test]

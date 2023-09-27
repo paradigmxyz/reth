@@ -120,7 +120,7 @@ mod tests {
         generators,
         generators::{random_block_range, random_changeset_range, random_contract_account_range},
     };
-    use reth_primitives::{address, Address, BlockNumber, PruneMode, H256, MAINNET};
+    use reth_primitives::{address, Address, BlockNumber, PruneMode, B256, MAINNET};
     use reth_provider::ProviderFactory;
     use std::collections::BTreeMap;
 
@@ -497,7 +497,7 @@ mod tests {
                 .into_iter()
                 .collect::<BTreeMap<_, _>>();
 
-            let blocks = random_block_range(&mut rng, start..=end, H256::ZERO, 0..3);
+            let blocks = random_block_range(&mut rng, start..=end, B256::ZERO, 0..3);
 
             let (transitions, _) = random_changeset_range(
                 &mut rng,

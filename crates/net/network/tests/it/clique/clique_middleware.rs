@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use enr::k256::ecdsa::SigningKey;
 use ethers_core::{
-    types::{transaction::eip2718::TypedTransaction, Address, Block, BlockNumber, H256},
+    types::{transaction::eip2718::TypedTransaction, Address, Block, BlockNumber, B256},
     utils::secret_key_to_address,
 };
 use ethers_middleware::SignerMiddleware;
@@ -92,7 +92,7 @@ pub trait CliqueMiddleware: Send + Sync + Middleware {
 
     /// Returns the genesis block of the [`Geth`](ethers_core::utils::Geth) instance by calling
     /// geth's `eth_getBlock`.
-    async fn remote_genesis_block(&self) -> Result<Block<H256>, CliqueMiddlewareError<Self>> {
+    async fn remote_genesis_block(&self) -> Result<Block<B256>, CliqueMiddlewareError<Self>> {
         self.get_block(BlockNumber::Earliest).await?.ok_or(CliqueError::NoGenesis)
     }
 

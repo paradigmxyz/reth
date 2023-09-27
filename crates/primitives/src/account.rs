@@ -1,4 +1,4 @@
-use crate::{H256, KECCAK_EMPTY, U256};
+use crate::{B256, KECCAK_EMPTY, U256};
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::Buf;
 use reth_codecs::{main_codec, Compact};
@@ -15,7 +15,7 @@ pub struct Account {
     /// Account balance.
     pub balance: U256,
     /// Hash of the account's bytecode.
-    pub bytecode_hash: Option<H256>,
+    pub bytecode_hash: Option<B256>,
 }
 
 impl Account {
@@ -37,7 +37,7 @@ impl Account {
 
     /// Returns an account bytecode's hash.
     /// In case of no bytecode, returns [`KECCAK_EMPTY`].
-    pub fn get_bytecode_hash(&self) -> H256 {
+    pub fn get_bytecode_hash(&self) -> B256 {
         match self.bytecode_hash {
             Some(hash) => hash,
             None => KECCAK_EMPTY,

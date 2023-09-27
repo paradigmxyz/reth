@@ -1,7 +1,7 @@
 //! Implements the `GetNodeData` and `NodeData` message types.
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{Bytes, H256};
+use reth_primitives::{Bytes, B256};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 #[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct GetNodeData(pub Vec<H256>);
+pub struct GetNodeData(pub Vec<B256>);
 
 /// The response to [`GetNodeData`], containing the state tree nodes or contract bytecode
 /// corresponding to the requested hashes.

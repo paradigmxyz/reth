@@ -26,7 +26,7 @@ use reth_primitives::{
         EMPTY_WITHDRAWALS, ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
     },
     proofs, Block, BlockNumberOrTag, Bytes, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
-    SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
+    SealedBlock, Withdrawal, B256, EMPTY_OMMER_ROOT, U256,
 };
 use reth_provider::{BlockReaderIdExt, BlockSource, BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::{
@@ -944,7 +944,7 @@ where
 #[derive(Default)]
 struct WithdrawalsOutcome {
     withdrawals: Option<Vec<Withdrawal>>,
-    withdrawals_root: Option<H256>,
+    withdrawals_root: Option<B256>,
 }
 
 impl WithdrawalsOutcome {

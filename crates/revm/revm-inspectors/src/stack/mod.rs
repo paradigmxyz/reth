@@ -1,4 +1,4 @@
-use reth_primitives::{Address, Bytes, TxHash, H256, U256};
+use reth_primitives::{Address, Bytes, TxHash, B256, U256};
 use revm::{
     inspectors::CustomPrintTracer,
     interpreter::{CallInputs, CreateInputs, Gas, InstructionResult, Interpreter},
@@ -138,7 +138,7 @@ where
         &mut self,
         evm_data: &mut EVMData<'_, DB>,
         address: &Address,
-        topics: &[H256],
+        topics: &[B256],
         data: &Bytes,
     ) {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {

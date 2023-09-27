@@ -9,7 +9,7 @@ use reth_interfaces::p2p::{
     priority::Priority,
 };
 use reth_network_api::ReputationChangeKind;
-use reth_primitives::{BlockBody, Header, PeerId, H256};
+use reth_primitives::{BlockBody, Header, PeerId, B256};
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
@@ -37,7 +37,7 @@ pub struct StateFetcher {
         HashMap<PeerId, Request<HeadersRequest, PeerRequestResult<Vec<Header>>>>,
     /// Currently active [`GetBlockBodies`] requests
     inflight_bodies_requests:
-        HashMap<PeerId, Request<Vec<H256>, PeerRequestResult<Vec<BlockBody>>>>,
+        HashMap<PeerId, Request<Vec<B256>, PeerRequestResult<Vec<BlockBody>>>>,
     /// The list of _available_ peers for requests.
     peers: HashMap<PeerId, Peer>,
     /// The handle to the peers manager
@@ -73,7 +73,7 @@ impl StateFetcher {
     pub(crate) fn new_active_peer(
         &mut self,
         peer_id: PeerId,
-        best_hash: H256,
+        best_hash: B256,
         best_number: u64,
         timeout: Arc<AtomicU64>,
     ) {
@@ -100,7 +100,7 @@ impl StateFetcher {
     /// Updates the block information for the peer.
     ///
     /// Returns `true` if this a newer block
-    pub(crate) fn update_peer_block(&mut self, peer_id: &PeerId, hash: H256, number: u64) -> bool {
+    pub(crate) fn update_peer_block(&mut self, peer_id: &PeerId, hash: B256, number: u64) -> bool {
         if let Some(peer) = self.peers.get_mut(peer_id) {
             if number > peer.best_number {
                 peer.best_hash = hash;
@@ -302,7 +302,7 @@ struct Peer {
     /// The state this peer currently resides in.
     state: PeerState,
     /// Best known hash that the peer has
-    best_hash: H256,
+    best_hash: B256,
     /// Tracks the best number of the peer.
     best_number: u64,
     /// Tracks the current timeout value we use for the peer.
@@ -372,7 +372,7 @@ pub(crate) enum DownloadRequest {
     },
     /// Download the requested headers and send response through channel
     GetBlockBodies {
-        request: Vec<H256>,
+        request: Vec<B256>,
         response: oneshot::Sender<PeerRequestResult<Vec<BlockBody>>>,
         priority: Priority,
     },
@@ -429,7 +429,7 @@ pub(crate) enum BlockResponseOutcome {
 mod tests {
     use super::*;
     use crate::{peers::PeersManager, PeersConfig};
-    use reth_primitives::{SealedHeader, H256, H512};
+    use reth_primitives::{SealedHeader, B256, B512};
     use std::future::poll_fn;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -457,10 +457,10 @@ mod tests {
         let manager = PeersManager::new(PeersConfig::default());
         let mut fetcher = StateFetcher::new(manager.handle(), Default::default());
         // Add a few random peers
-        let peer1 = H512::random();
-        let peer2 = H512::random();
-        fetcher.new_active_peer(peer1, H256::random(), 1, Arc::new(AtomicU64::new(1)));
-        fetcher.new_active_peer(peer2, H256::random(), 2, Arc::new(AtomicU64::new(1)));
+        let peer1 = B512::random();
+        let peer2 = B512::random();
+        fetcher.new_active_peer(peer1, B256::random(), 1, Arc::new(AtomicU64::new(1)));
+        fetcher.new_active_peer(peer2, B256::random(), 2, Arc::new(AtomicU64::new(1)));
 
         let first_peer = fetcher.next_peer().unwrap();
         assert!(first_peer == peer1 || first_peer == peer2);
@@ -480,15 +480,15 @@ mod tests {
         let manager = PeersManager::new(PeersConfig::default());
         let mut fetcher = StateFetcher::new(manager.handle(), Default::default());
         // Add a few random peers
-        let peer1 = H512::random();
-        let peer2 = H512::random();
-        let peer3 = H512::random();
+        let peer1 = B512::random();
+        let peer2 = B512::random();
+        let peer3 = B512::random();
 
         let peer2_timeout = Arc::new(AtomicU64::new(300));
 
-        fetcher.new_active_peer(peer1, H256::random(), 1, Arc::new(AtomicU64::new(30)));
-        fetcher.new_active_peer(peer2, H256::random(), 2, Arc::clone(&peer2_timeout));
-        fetcher.new_active_peer(peer3, H256::random(), 3, Arc::new(AtomicU64::new(50)));
+        fetcher.new_active_peer(peer1, B256::random(), 1, Arc::new(AtomicU64::new(30)));
+        fetcher.new_active_peer(peer2, B256::random(), 2, Arc::clone(&peer2_timeout));
+        fetcher.new_active_peer(peer3, B256::random(), 3, Arc::new(AtomicU64::new(50)));
 
         // Must always get peer1 (lowest timeout)
         assert_eq!(fetcher.next_peer(), Some(peer1));
@@ -504,7 +504,7 @@ mod tests {
     async fn test_on_block_headers_response() {
         let manager = PeersManager::new(PeersConfig::default());
         let mut fetcher = StateFetcher::new(manager.handle(), Default::default());
-        let peer_id = H512::random();
+        let peer_id = B512::random();
 
         assert_eq!(fetcher.on_block_headers_response(peer_id, Ok(vec![Header::default()])), None);
 
@@ -534,7 +534,7 @@ mod tests {
     async fn test_header_response_outcome() {
         let manager = PeersManager::new(PeersConfig::default());
         let mut fetcher = StateFetcher::new(manager.handle(), Default::default());
-        let peer_id = H512::random();
+        let peer_id = B512::random();
 
         let request_pair = || {
             let (tx, _rx) = oneshot::channel();

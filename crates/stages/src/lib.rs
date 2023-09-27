@@ -19,7 +19,7 @@
 //! # use reth_interfaces::consensus::Consensus;
 //! # use reth_interfaces::test_utils::{TestBodiesClient, TestConsensus, TestHeadersClient};
 //! # use reth_revm::Factory;
-//! # use reth_primitives::{PeerId, MAINNET, H256};
+//! # use reth_primitives::{PeerId, MAINNET, B256};
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::DefaultStages;
 //! # use reth_stages::stages::HeaderSyncMode;
@@ -35,7 +35,7 @@
 //! #    consensus.clone(),
 //! #    db.clone()
 //! # );
-//! # let (tip_tx, tip_rx) = watch::channel(H256::default());
+//! # let (tip_tx, tip_rx) = watch::channel(B256::default());
 //! # let factory = Factory::new(MAINNET.clone());
 //! // Create a pipeline that can fully sync
 //! # let pipeline =

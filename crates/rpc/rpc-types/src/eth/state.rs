@@ -1,6 +1,6 @@
 //! bindings for state overrides in eth_call
 
-use reth_primitives::{Address, Bytes, H256, U256, U64};
+use reth_primitives::{Address, Bytes, B256, U256, U64};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -24,11 +24,11 @@ pub struct AccountOverride {
     /// Fake key-value mapping to override all slots in the account storage before executing the
     /// call.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub state: Option<HashMap<H256, U256>>,
+    pub state: Option<HashMap<B256, U256>>,
     /// Fake key-value mapping to override individual slots in the account storage before executing
     /// the call.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub state_diff: Option<HashMap<H256, U256>>,
+    pub state_diff: Option<HashMap<B256, U256>>,
 }
 
 #[cfg(test)]

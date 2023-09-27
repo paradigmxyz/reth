@@ -75,7 +75,7 @@ impl<'a> StructHandler<'a> {
         let set_len_method = format_ident!("set_{name}_len");
         let len = format_ident!("{name}_len");
 
-        // H256 with #[maybe_zero] attribute for example
+        // B256 with #[maybe_zero] attribute for example
         if *is_compact && !is_flag_type(ftype) {
             let itype = format_ident!("{ftype}");
             let set_bool_method = format_ident!("set_{name}");
@@ -147,7 +147,7 @@ impl<'a> StructHandler<'a> {
         } else {
             let ident_type = format_ident!("{ftype}");
             if !is_flag_type(ftype) {
-                // It's a type that handles its own length requirements. (h256, Custom, ...)
+                // It's a type that handles its own length requirements. (B256, Custom, ...)
                 self.lines.push(quote! {
                     let (#name, new_buf) = #ident_type::#from_compact_ident(buf, buf.len());
                 })

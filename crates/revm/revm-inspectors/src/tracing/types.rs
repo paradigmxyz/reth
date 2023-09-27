@@ -2,7 +2,7 @@
 
 use crate::tracing::{config::TraceStyle, utils::convert_memory};
 use alloy_sol_types::decode_revert_reason;
-use reth_primitives::{Address, Bytes, H256, U256, U64};
+use reth_primitives::{Address, Bytes, B256, U256, U64};
 use reth_rpc_types::trace::{
     geth::{AccountState, CallFrame, CallLogFrame, GethDefaultTracingOptions, StructLog},
     parity::{
@@ -311,18 +311,18 @@ impl CallTraceNode {
         // iterate over all storage diffs
         for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
             let StorageChange { key, value, had_value } = change;
-            let h256_value = H256::from(value);
+            let B256_value = B256::from(value);
             match acc.storage.entry(key.into()) {
                 Entry::Vacant(entry) => {
                     if let Some(had_value) = had_value {
                         if value != had_value {
                             entry.insert(Delta::Changed(ChangedType {
                                 from: had_value.into(),
-                                to: h256_value,
+                                to: B256_value,
                             }));
                         }
                     } else {
-                        entry.insert(Delta::Added(h256_value));
+                        entry.insert(Delta::Added(B256_value));
                     }
                 }
                 Entry::Occupied(mut entry) => {
@@ -332,29 +332,29 @@ impl CallTraceNode {
                                 if value != had_value {
                                     Delta::Changed(ChangedType {
                                         from: had_value.into(),
-                                        to: h256_value,
+                                        to: B256_value,
                                     })
                                 } else {
                                     Delta::Unchanged
                                 }
                             } else {
-                                Delta::Added(h256_value)
+                                Delta::Added(B256_value)
                             }
                         }
                         Delta::Added(added) => {
-                            if added == &h256_value {
+                            if added == &B256_value {
                                 Delta::Added(*added)
                             } else {
-                                Delta::Changed(ChangedType { from: *added, to: h256_value })
+                                Delta::Changed(ChangedType { from: *added, to: B256_value })
                             }
                         }
-                        Delta::Removed(_) => Delta::Added(h256_value),
+                        Delta::Removed(_) => Delta::Added(B256_value),
                         Delta::Changed(c) => {
-                            if c.from == h256_value {
+                            if c.from == B256_value {
                                 // remains unchanged if the value is the same
                                 Delta::Unchanged
                             } else {
-                                Delta::Changed(ChangedType { from: c.from, to: h256_value })
+                                Delta::Changed(ChangedType { from: c.from, to: B256_value })
                             }
                         }
                     };
@@ -520,10 +520,10 @@ impl CallTraceNode {
             let StorageChange { key, value, had_value } = change;
             let storage_map = acc_state.storage.get_or_insert_with(BTreeMap::new);
             let value_to_insert = if post_value {
-                H256::from(value)
+                B256::from(value)
             } else {
                 match had_value {
-                    Some(had_value) => H256::from(had_value),
+                    Some(had_value) => B256::from(had_value),
                     None => continue,
                 }
             };
@@ -555,7 +555,7 @@ pub(crate) enum LogCallOrder {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RawLog {
     /// Indexed event params are represented as log topics.
-    pub(crate) topics: Vec<H256>,
+    pub(crate) topics: Vec<B256>,
     /// Others are just plain data.
     pub(crate) data: Bytes,
 }

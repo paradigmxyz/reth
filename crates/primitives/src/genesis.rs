@@ -6,7 +6,7 @@ use crate::{
         num::{u64_hex_or_decimal, u64_hex_or_decimal_opt},
     },
     trie::{HashBuilder, Nibbles},
-    Account, Address, Bytes, H256, KECCAK_EMPTY, U256,
+    Account, Address, Bytes, B256, KECCAK_EMPTY, U256,
 };
 use alloy_rlp::{encode_fixed_size, length_of_length, Encodable, Header as RlpHeader};
 use itertools::Itertools;
@@ -35,7 +35,7 @@ pub struct Genesis {
     #[serde(deserialize_with = "deserialize_json_u256")]
     pub difficulty: U256,
     /// The genesis header mix hash.
-    pub mix_hash: H256,
+    pub mix_hash: B256,
     /// The genesis header coinbase address.
     pub coinbase: Address,
     /// The initial state of accounts in the genesis block.
@@ -89,7 +89,7 @@ impl Genesis {
     }
 
     /// Set the mix hash of the header.
-    pub fn with_mix_hash(mut self, mix_hash: H256) -> Self {
+    pub fn with_mix_hash(mut self, mix_hash: B256) -> Self {
         self.mix_hash = mix_hash;
         self
     }
@@ -148,7 +148,7 @@ pub struct GenesisAccount {
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_storage_map"
     )]
-    pub storage: Option<HashMap<H256, H256>>,
+    pub storage: Option<HashMap<B256, B256>>,
 }
 
 impl GenesisAccount {
@@ -184,7 +184,7 @@ impl GenesisAccount {
     }
 
     /// Set the storage.
-    pub fn with_storage(mut self, storage: Option<HashMap<H256, H256>>) -> Self {
+    pub fn with_storage(mut self, storage: Option<HashMap<B256, B256>>) -> Self {
         self.storage = storage;
         self
     }
@@ -206,7 +206,7 @@ impl Encodable for GenesisAccount {
 
                 let storage_with_sorted_hashed_keys = storage
                     .iter()
-                    .filter(|(_k, &v)| v != H256::ZERO)
+                    .filter(|(_k, &v)| v != B256::ZERO)
                     .map(|(slot, value)| (keccak256(slot), value))
                     .sorted_by_key(|(key, _)| *key);
 
@@ -269,7 +269,7 @@ pub struct ChainConfig {
 
     /// The EIP-150 hard fork hash.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub eip150_hash: Option<H256>,
+    pub eip150_hash: Option<B256>,
 
     /// The EIP-155 hard fork block.
     #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
@@ -1008,21 +1008,21 @@ mod tests {
         let storage = alloc_entry.storage.as_ref().expect("missing storage for parsed genesis");
         let expected_storage = HashMap::from_iter(vec![
             (
-                H256::from_str(
+                B256::from_str(
                     "0x0000000000000000000000000000000000000000000000000000000000000000",
                 )
                 .unwrap(),
-                H256::from_str(
+                B256::from_str(
                     "0x0000000000000000000000000000000000000000000000000000000000001234",
                 )
                 .unwrap(),
             ),
             (
-                H256::from_str(
+                B256::from_str(
                     "0x6661e9d6d8b923d5bbaab1b96e1dd51ff6ea2a93520fdc9eb75d059238b8c5e9",
                 )
                 .unwrap(),
-                H256::from_str(
+                B256::from_str(
                     "0x0000000000000000000000000000000000000000000000000000000000000001",
                 )
                 .unwrap(),
@@ -1102,7 +1102,7 @@ mod tests {
             Genesis {
                 nonce: 0x0000000000000042,
                 difficulty: U256::from(0x2123456),
-                mix_hash: H256::from_str(
+                mix_hash: B256::from_str(
                     "0x123456789abcdef123456789abcdef123456789abcdef123456789abcdef1234",
                 )
                 .unwrap(),
@@ -1142,9 +1142,9 @@ mod tests {
                         storage: Some(HashMap::from_iter(vec![
                             (
 
-    H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000001").
+    B256::from_str("0x0000000000000000000000000000000000000000000000000000000000000001").
     unwrap(),
-    H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000022").
+    B256::from_str("0x0000000000000000000000000000000000000000000000000000000000000022").
     unwrap(),                         ),
                         ])),
                     },

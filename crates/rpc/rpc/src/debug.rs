@@ -14,7 +14,7 @@ use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
-    Account, Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H256,
+    Account, Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, B256,
 };
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderBox};
 use reth_revm::{
@@ -169,7 +169,7 @@ where
     /// Ref: <https://geth.ethereum.org/docs/developers/evm-tracing/built-in-tracers>
     pub async fn debug_trace_transaction(
         &self,
-        tx_hash: H256,
+        tx_hash: B256,
         opts: GethDebugTracingOptions,
     ) -> EthResult<GethTrace> {
         let (transaction, block) = match self.inner.eth_api.transaction_and_block(tx_hash).await? {
@@ -727,8 +727,8 @@ where
 
     async fn debug_get_modified_accounts_by_hash(
         &self,
-        _start_hash: H256,
-        _end_hash: H256,
+        _start_hash: B256,
+        _end_hash: B256,
     ) -> RpcResult<()> {
         Ok(())
     }
@@ -747,7 +747,7 @@ where
 
     async fn debug_intermediate_roots(
         &self,
-        _block_hash: H256,
+        _block_hash: B256,
         _opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<()> {
         Ok(())
@@ -761,7 +761,7 @@ where
         Ok(())
     }
 
-    async fn debug_preimage(&self, _hash: H256) -> RpcResult<()> {
+    async fn debug_preimage(&self, _hash: B256) -> RpcResult<()> {
         Ok(())
     }
 
@@ -769,7 +769,7 @@ where
         Ok(())
     }
 
-    async fn debug_seed_hash(&self, _number: u64) -> RpcResult<H256> {
+    async fn debug_seed_hash(&self, _number: u64) -> RpcResult<B256> {
         Ok(Default::default())
     }
 
@@ -831,10 +831,10 @@ where
 
     async fn debug_storage_range_at(
         &self,
-        _block_hash: H256,
+        _block_hash: B256,
         _tx_idx: usize,
         _contract_address: Address,
-        _key_start: H256,
+        _key_start: B256,
         _max_result: u64,
     ) -> RpcResult<()> {
         Ok(())
@@ -842,7 +842,7 @@ where
 
     async fn debug_trace_bad_block(
         &self,
-        _block_hash: H256,
+        _block_hash: B256,
         _opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<()> {
         Ok(())
@@ -886,7 +886,7 @@ where
 
     /// Handler for `debug_getRawTransaction`
     /// Returns the bytes of the transaction for the given hash.
-    async fn raw_transaction(&self, hash: H256) -> RpcResult<Bytes> {
+    async fn raw_transaction(&self, hash: B256) -> RpcResult<Bytes> {
         let tx = self.inner.eth_api.transaction_by_hash(hash).await?;
 
         let mut res = Vec::new();
@@ -940,7 +940,7 @@ where
     /// Handler for `debug_traceBlockByHash`
     async fn debug_trace_block_by_hash(
         &self,
-        block: H256,
+        block: B256,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
         let _permit = self.acquire_trace_permit().await;
@@ -960,7 +960,7 @@ where
     /// Handler for `debug_traceTransaction`
     async fn debug_trace_transaction(
         &self,
-        tx_hash: H256,
+        tx_hash: B256,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<GethTrace> {
         let _permit = self.acquire_trace_permit().await;

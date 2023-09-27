@@ -9,7 +9,7 @@ use alloy_rlp::{
 use enr::{Enr, EnrKey};
 use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
-    keccak256, ForkId, NodeRecord, H256,
+    keccak256, ForkId, NodeRecord, B256,
 };
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
@@ -77,13 +77,13 @@ impl Message {
     ///
     /// The datagram is `header || payload`
     /// where header is `hash || signature || packet-type`
-    pub fn encode(&self, secret_key: &SecretKey) -> (Bytes, H256) {
+    pub fn encode(&self, secret_key: &SecretKey) -> (Bytes, B256) {
         // allocate max packet size
         let mut datagram = BytesMut::with_capacity(MAX_PACKET_SIZE);
 
         // since signature has fixed len, we can split and fill the datagram buffer at fixed
         // positions, this way we can encode the message directly in the datagram buffer
-        let mut sig_bytes = datagram.split_off(H256::len_bytes());
+        let mut sig_bytes = datagram.split_off(B256::len_bytes());
         let mut payload = sig_bytes.split_off(secp256k1::constants::COMPACT_SIGNATURE_SIZE + 1);
 
         match self {
@@ -145,7 +145,7 @@ impl Message {
         // signature = sign(packet-type || packet-data)
 
         let header_hash = keccak256(&packet[32..]);
-        let data_hash = H256::from_slice(&packet[..32]);
+        let data_hash = B256::from_slice(&packet[..32]);
         if data_hash != header_hash {
             return Err(DecodePacketError::HashMismatch)
         }
@@ -181,7 +181,7 @@ impl Message {
 pub struct Packet {
     pub msg: Message,
     pub node_id: PeerId,
-    pub hash: H256,
+    pub hash: B256,
 }
 
 /// Represents the `from`, `to` fields in the packets
@@ -295,7 +295,7 @@ pub struct EnrRequest {
 /// A [ENRResponse packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#enrresponse-packet-0x06).
 #[derive(Clone, Debug, Eq, PartialEq, RlpEncodable)]
 pub struct EnrResponse {
-    pub request_hash: H256,
+    pub request_hash: B256,
     pub enr: EnrWrapper<SecretKey>,
 }
 
@@ -425,7 +425,7 @@ impl Decodable for Ping {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Pong {
     pub to: NodeEndpoint,
-    pub echo: H256,
+    pub echo: B256,
     pub expire: u64,
     /// Optional enr_seq for <https://eips.ethereum.org/EIPS/eip-868>
     pub enr_sq: Option<u64>,
@@ -436,7 +436,7 @@ impl Encodable for Pong {
         #[derive(RlpEncodable)]
         struct PongMessageEIP868<'a> {
             to: &'a NodeEndpoint,
-            echo: &'a H256,
+            echo: &'a B256,
             expire: u64,
             enr_seq: u64,
         }
@@ -444,7 +444,7 @@ impl Encodable for Pong {
         #[derive(RlpEncodable)]
         struct PongMessage<'a> {
             to: &'a NodeEndpoint,
-            echo: &'a H256,
+            echo: &'a B256,
             expire: u64,
         }
 
