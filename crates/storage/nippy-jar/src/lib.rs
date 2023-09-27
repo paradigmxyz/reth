@@ -13,8 +13,8 @@
 use serde::{Deserialize, Serialize};
 use std::{
     clone::Clone,
+    error::Error as StdError,
     fs::File,
-    hash::Hash,
     io::{Seek, Write},
     marker::Sync,
     path::{Path, PathBuf},
@@ -32,6 +32,7 @@ pub mod compression;
 use compression::{Compression, Compressors};
 
 pub mod phf;
+pub use phf::PHFKey;
 use phf::{Fmph, Functions, GoFmph, PerfectHashingFunction};
 
 mod error;
@@ -44,6 +45,9 @@ const NIPPY_JAR_VERSION: usize = 1;
 
 /// A [`Row`] is a list of its selected column values.
 type Row = Vec<Vec<u8>>;
+
+/// Alias type for a column value wrapped in `Result`
+pub type ColumnResult<T> = Result<T, Box<dyn StdError + Send + Sync>>;
 
 /// `NippyJar` is a specialized storage format designed for immutable data.
 ///
@@ -105,6 +109,11 @@ impl NippyJar<()> {
     /// Loads the file configuration and returns [`Self`] on a jar without user-defined header data.
     pub fn load_without_header(path: &Path) -> Result<Self, NippyJarError> {
         NippyJar::<()>::load(path)
+    }
+
+    /// Whether this [`NippyJar`] uses a [`InclusionFilters`] and [`Functions`].
+    pub fn uses_filters(&self) -> bool {
+        self.filter.is_some() && self.phf.is_some()
     }
 }
 
@@ -210,19 +219,23 @@ where
     /// Prepares beforehand the offsets index for querying rows based on `values` (eg. transaction
     /// hash). Expects `values` to be sorted in the same way as the data that is going to be
     /// later on inserted.
-    pub fn prepare_index<T: AsRef<[u8]> + Sync + Clone + Hash>(
+    ///
+    /// Currently collecting all items before acting on them.
+    pub fn prepare_index<T: PHFKey>(
         &mut self,
-        values: &[T],
+        values: impl IntoIterator<Item = ColumnResult<T>>,
+        row_count: usize,
     ) -> Result<(), NippyJarError> {
-        let mut offsets_index = vec![0; values.len()];
+        let values = values.into_iter().collect::<Result<Vec<_>, _>>()?;
+        let mut offsets_index = vec![0; row_count];
 
         // Builds perfect hashing function from the values
         if let Some(phf) = self.phf.as_mut() {
-            phf.set_keys(values)?;
+            phf.set_keys(&values)?;
         }
 
         if self.filter.is_some() || self.phf.is_some() {
-            for (row_num, v) in values.iter().enumerate() {
+            for (row_num, v) in values.into_iter().enumerate() {
                 if let Some(filter) = self.filter.as_mut() {
                     filter.add(v.as_ref())?;
                 }
@@ -242,7 +255,7 @@ where
     /// Writes all data and configuration to a file and the offset index to another.
     pub fn freeze(
         &mut self,
-        columns: Vec<impl IntoIterator<Item = Vec<u8>>>,
+        columns: Vec<impl IntoIterator<Item = ColumnResult<Vec<u8>>>>,
         total_rows: u64,
     ) -> Result<(), NippyJarError> {
         let mut file = self.freeze_check(&columns)?;
@@ -275,7 +288,7 @@ where
                 offsets.push(file.stream_position()? as usize);
 
                 match column_iter.next() {
-                    Some(value) => {
+                    Some(Ok(value)) => {
                         if let Some(compression) = &self.compressor {
                             // Special zstd case with dictionaries
                             if let (Some(dict_compressors), Compressors::Zstd(_)) =
@@ -300,6 +313,7 @@ where
                             column_number as u64,
                         ))
                     }
+                    Some(Err(err)) => return Err(err.into()),
                 }
 
                 iterators.push(column_iter);
@@ -339,7 +353,7 @@ where
     /// Safety checks before creating and returning a [`File`] handle to write data to.
     fn freeze_check(
         &mut self,
-        columns: &Vec<impl IntoIterator<Item = Vec<u8>>>,
+        columns: &Vec<impl IntoIterator<Item = ColumnResult<Vec<u8>>>>,
     ) -> Result<File, NippyJarError> {
         if columns.len() != self.columns {
             return Err(NippyJarError::ColumnLenMismatch(self.columns, columns.len()))
@@ -384,10 +398,7 @@ impl<H> PerfectHashingFunction for NippyJar<H>
 where
     H: Send + Sync + Serialize + for<'a> Deserialize<'a>,
 {
-    fn set_keys<T: AsRef<[u8]> + Sync + Clone + Hash>(
-        &mut self,
-        keys: &[T],
-    ) -> Result<(), NippyJarError> {
+    fn set_keys<T: PHFKey>(&mut self, keys: &[T]) -> Result<(), NippyJarError> {
         self.phf.as_mut().ok_or(NippyJarError::PHFMissing)?.set_keys(keys)
     }
 
@@ -402,6 +413,7 @@ mod tests {
     use rand::{rngs::SmallRng, seq::SliceRandom, RngCore, SeedableRng};
     use std::collections::HashSet;
 
+    type ColumnResults<T> = Vec<ColumnResult<T>>;
     type ColumnValues = Vec<Vec<u8>>;
 
     fn test_data(seed: Option<u64>) -> (ColumnValues, ColumnValues) {
@@ -421,6 +433,10 @@ mod tests {
         };
 
         (gen(), gen())
+    }
+
+    fn clone_with_result(col: &ColumnValues) -> ColumnResults<Vec<u8>> {
+        col.iter().map(|v| Ok(v.clone())).collect()
     }
 
     #[test]
@@ -455,8 +471,10 @@ mod tests {
             assert_eq!(indexes, collect_indexes(nippy));
 
             // Ensure that loaded phf provides the same function outputs
-            nippy.prepare_index(&col1).unwrap();
-            nippy.freeze(vec![col1.clone(), col2.clone()], num_rows).unwrap();
+            nippy.prepare_index(clone_with_result(&col1), col1.len()).unwrap();
+            nippy
+                .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
+                .unwrap();
             let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
             assert_eq!(indexes, collect_indexes(&loaded_nippy));
         };
@@ -504,7 +522,7 @@ mod tests {
             Err(NippyJarError::FilterMaxCapacity)
         ));
 
-        nippy.freeze(vec![col1.clone(), col2.clone()], num_rows).unwrap();
+        nippy.freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows).unwrap();
         let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
 
         assert_eq!(nippy, loaded_nippy);
@@ -540,16 +558,14 @@ mod tests {
             ));
         }
 
-        let data = vec![col1.clone(), col2.clone()];
-
         // If ZSTD is enabled, do not write to the file unless the column dictionaries have been
         // calculated.
         assert!(matches!(
-            nippy.freeze(data.clone(), num_rows),
+            nippy.freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows),
             Err(NippyJarError::CompressorNotReady)
         ));
 
-        nippy.prepare_compression(data.clone()).unwrap();
+        nippy.prepare_compression(vec![col1.clone(), col2.clone()]).unwrap();
 
         if let Some(Compressors::Zstd(zstd)) = &nippy.compressor {
             assert!(matches!(
@@ -558,7 +574,7 @@ mod tests {
             ));
         }
 
-        nippy.freeze(data.clone(), num_rows).unwrap();
+        nippy.freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows).unwrap();
 
         let mut loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
         assert_eq!(nippy, loaded_nippy);
@@ -578,7 +594,7 @@ mod tests {
             // Iterate over compressed values and compare
             let mut row_index = 0usize;
             while let Some(row) = cursor.next_row().unwrap() {
-                assert_eq!((&row[0], &row[1]), (&data[0][row_index], &data[1][row_index]));
+                assert_eq!((&row[0], &row[1]), (&col1[row_index], &col2[row_index]));
                 row_index += 1;
             }
         }
@@ -598,9 +614,7 @@ mod tests {
             NippyJar::new_without_header(num_columns, file_path.path()).with_zstd(false, 5000);
         assert!(nippy.compressor.is_some());
 
-        let data = vec![col1.clone(), col2.clone()];
-
-        nippy.freeze(data.clone(), num_rows).unwrap();
+        nippy.freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows).unwrap();
 
         let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
         assert_eq!(nippy, loaded_nippy);
@@ -613,7 +627,7 @@ mod tests {
             // Iterate over compressed values and compare
             let mut row_index = 0usize;
             while let Some(row) = cursor.next_row().unwrap() {
-                assert_eq!((&row[0], &row[1]), (&data[0][row_index], &data[1][row_index]));
+                assert_eq!((&row[0], &row[1]), (&col1[row_index], &col2[row_index]));
                 row_index += 1;
             }
         } else {
@@ -629,6 +643,7 @@ mod tests {
         let num_columns = 2;
         let file_path = tempfile::NamedTempFile::new().unwrap();
         let data = vec![col1.clone(), col2.clone()];
+
         let block_start = 500;
 
         #[derive(Serialize, Deserialize, Debug)]
@@ -645,8 +660,10 @@ mod tests {
                     .with_mphf();
 
             nippy.prepare_compression(data.clone()).unwrap();
-            nippy.prepare_index(&col1).unwrap();
-            nippy.freeze(data.clone(), num_rows).unwrap();
+            nippy.prepare_index(clone_with_result(&col1), col1.len()).unwrap();
+            nippy
+                .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
+                .unwrap();
         }
 
         // Read file
@@ -710,8 +727,10 @@ mod tests {
                 .with_mphf();
 
             nippy.prepare_compression(data.clone()).unwrap();
-            nippy.prepare_index(&col1).unwrap();
-            nippy.freeze(data.clone(), num_rows).unwrap();
+            nippy.prepare_index(clone_with_result(&col1), col1.len()).unwrap();
+            nippy
+                .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
+                .unwrap();
         }
 
         // Read file

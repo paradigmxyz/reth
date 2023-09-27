@@ -35,6 +35,8 @@ use tracing::trace;
 mod bundle_state_provider;
 mod chain_info;
 mod database;
+mod snapshot;
+pub use snapshot::SnapshotProvider;
 mod state;
 use crate::{providers::chain_info::ChainInfoTracker, traits::BlockSource};
 pub use bundle_state_provider::BundleStateProvider;
