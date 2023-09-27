@@ -311,18 +311,18 @@ impl CallTraceNode {
         // iterate over all storage diffs
         for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
             let StorageChange { key, value, had_value } = change;
-            let B256_value = B256::from(value);
+            let b256_value = B256::from(value);
             match acc.storage.entry(key.into()) {
                 Entry::Vacant(entry) => {
                     if let Some(had_value) = had_value {
                         if value != had_value {
                             entry.insert(Delta::Changed(ChangedType {
                                 from: had_value.into(),
-                                to: B256_value,
+                                to: b256_value,
                             }));
                         }
                     } else {
-                        entry.insert(Delta::Added(B256_value));
+                        entry.insert(Delta::Added(b256_value));
                     }
                 }
                 Entry::Occupied(mut entry) => {
@@ -332,29 +332,29 @@ impl CallTraceNode {
                                 if value != had_value {
                                     Delta::Changed(ChangedType {
                                         from: had_value.into(),
-                                        to: B256_value,
+                                        to: b256_value,
                                     })
                                 } else {
                                     Delta::Unchanged
                                 }
                             } else {
-                                Delta::Added(B256_value)
+                                Delta::Added(b256_value)
                             }
                         }
                         Delta::Added(added) => {
-                            if added == &B256_value {
+                            if added == &b256_value {
                                 Delta::Added(*added)
                             } else {
-                                Delta::Changed(ChangedType { from: *added, to: B256_value })
+                                Delta::Changed(ChangedType { from: *added, to: b256_value })
                             }
                         }
-                        Delta::Removed(_) => Delta::Added(B256_value),
+                        Delta::Removed(_) => Delta::Added(b256_value),
                         Delta::Changed(c) => {
                             if c.from == B256_value {
                                 // remains unchanged if the value is the same
                                 Delta::Unchanged
                             } else {
-                                Delta::Changed(ChangedType { from: c.from, to: B256_value })
+                                Delta::Changed(ChangedType { from: c.from, to: b256_value })
                             }
                         }
                     };
