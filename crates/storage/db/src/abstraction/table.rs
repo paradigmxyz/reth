@@ -35,6 +35,11 @@ pub trait Compress: Send + Sync + Sized + Debug {
 pub trait Decompress: Send + Sync + Sized + Debug {
     /// Decompresses data coming from the database.
     fn decompress<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError>;
+
+    /// Decompresses owned data coming from the database.
+    fn decompress_owned(value: Vec<u8>) -> Result<Self, DatabaseError> {
+        Self::decompress(value)
+    }
 }
 
 /// Trait that will transform the data to be saved in the DB.

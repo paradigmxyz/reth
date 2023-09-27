@@ -13,8 +13,9 @@ description = "Reth storage provider."
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-revm-primitives = { path = "../../revm/revm-primitives" }
-reth-db = { path = "../db" }
+reth-db.workspace = true
 reth-trie = { path = "../../trie" }
+reth-nippy-jar = { path = "../nippy-jar" }
 
 # async
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
@@ -36,7 +37,7 @@ reth-rlp = { workspace = true, optional = true }
 rayon = "1.7"
 
 [dev-dependencies]
-reth-db = { path = "../db", features = ["test-utils"] }
+reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
 reth-rlp.workspace = true
 revm.workspace = true
@@ -45,6 +46,7 @@ reth-interfaces = { workspace = true, features = ["test-utils"] }
 parking_lot.workspace = true
 tempfile = "3.3"
 assert_matches.workspace = true
+rand.workspace = true
 
 [features]
 test-utils = ["reth-rlp"]

@@ -14,6 +14,7 @@ reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-codecs = { path = "../codecs" }
 reth-libmdbx = { path = "../libmdbx-rs", optional = true, features = ["return-borrowed"] }
+reth-nippy-jar = { path = "../nippy-jar" }
 
 # codecs
 serde = { workspace = true, default-features = false }
@@ -42,6 +43,7 @@ tempfile = { version = "3.3.0", optional = true }
 parking_lot.workspace = true
 derive_more = "0.99"
 eyre = "0.6.8"
+paste = "1.0"
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -61,7 +63,6 @@ pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterio
 criterion = "0.5"
 iai = "0.1.1"
 tokio = { workspace = true, features = ["full"] }
-reth-db = { path = ".", features = ["test-utils", "bench"] }
 
 # needed for test-fuzz to work properly, see https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
 secp256k1.workspace = true
@@ -97,12 +98,15 @@ arbitrary = [
 
 [[bench]]
 name = "hash_keys"
+required-features = ["test-utils"]
 harness = false
 
 [[bench]]
 name = "criterion"
+required-features = ["test-utils"]
 harness = false
 
 [[bench]]
 name = "iai"
+required-features = ["test-utils"]
 harness = false

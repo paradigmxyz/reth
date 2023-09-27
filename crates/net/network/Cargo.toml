@@ -70,6 +70,7 @@ tempfile = { version = "3.3", optional = true }
 # reth
 reth-discv4 = { path = "../discv4", features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-primitives = { workspace = true, features = ["test-utils"] }
 
 # we need to enable the test-utils feature in our own crate to use utils in
 # integration tests

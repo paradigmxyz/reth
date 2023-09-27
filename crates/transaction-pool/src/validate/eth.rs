@@ -338,11 +338,11 @@ where
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
         // update all forks
-        if self.chain_spec.is_cancun_activated_at_timestamp(new_tip_block.timestamp) {
+        if self.chain_spec.is_cancun_active_at_timestamp(new_tip_block.timestamp) {
             self.fork_tracker.cancun.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
-        if self.chain_spec.is_shanghai_activated_at_timestamp(new_tip_block.timestamp) {
+        if self.chain_spec.is_shanghai_active_at_timestamp(new_tip_block.timestamp) {
             self.fork_tracker.shanghai.store(true, std::sync::atomic::Ordering::Relaxed);
         }
     }
@@ -381,7 +381,7 @@ impl EthTransactionValidatorBuilder {
     /// Creates a new builder for the given [ChainSpec]
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         // If cancun is enabled at genesis, enable it
-        let cancun = chain_spec.is_cancun_activated_at_timestamp(chain_spec.genesis_timestamp());
+        let cancun = chain_spec.is_cancun_active_at_timestamp(chain_spec.genesis_timestamp());
 
         Self {
             chain_spec,

@@ -1,12 +1,18 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
+//! Compact codec.
+
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
 )]
+#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
+#![deny(unused_must_use, rust_2018_idioms)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+
 use bytes::{Buf, Bytes};
-pub use codecs_derive::*;
 use revm_primitives::{B160 as H160, B256 as H256, U256};
+
+pub use codecs_derive::*;
 
 /// Trait that implements the `Compact` codec.
 ///
@@ -344,9 +350,7 @@ fn decode_varuint(mut buf: &[u8]) -> (usize, &[u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use revm_primitives::B160;
-
-    pub type Address = B160;
+    use revm_primitives::Address;
 
     #[test]
     fn compact_bytes() {
@@ -490,7 +494,7 @@ mod tests {
 
     #[main_codec]
     #[derive(Debug, PartialEq, Clone)]
-    pub struct TestStruct {
+    struct TestStruct {
         f_u64: u64,
         f_u256: U256,
         f_bool_t: bool,
@@ -542,7 +546,7 @@ mod tests {
 
     #[main_codec]
     #[derive(Debug, PartialEq, Clone, Default)]
-    pub enum TestEnum {
+    enum TestEnum {
         #[default]
         Var0,
         Var1(TestStruct),

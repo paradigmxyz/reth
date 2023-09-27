@@ -4,8 +4,8 @@ use crate::SnapshotterError;
 use reth_db::database::Database;
 use reth_interfaces::{RethError, RethResult};
 use reth_primitives::{BlockNumber, ChainSpec, TxNumber};
-use reth_provider::{BlockReader, ProviderFactory};
-use std::{ops::RangeInclusive, sync::Arc};
+use reth_provider::{BlockReader, DatabaseProviderRO, ProviderFactory};
+use std::{collections::HashMap, ops::RangeInclusive, sync::Arc};
 use tokio::sync::watch;
 use tracing::warn;
 
@@ -146,8 +146,8 @@ impl<DB: Database> Snapshotter<DB> {
         Ok(targets)
     }
 
-    /// Returns a snapshot targets at the provided finalized block number.
-    /// This determined by the check against last snapshots.
+    /// Returns a snapshot targets at the provided finalized block number, respecting the block
+    /// interval. The target is determined by the check against last snapshots.
     pub fn get_snapshot_targets(
         &self,
         finalized_block_number: BlockNumber,
@@ -160,52 +160,28 @@ impl<DB: Database> Snapshotter<DB> {
             (finalized_block_number + 1) % self.block_interval,
         );
 
-        let to_tx_number = provider
-            .block_body_indices(to_block_number)?
-            .ok_or(RethError::Custom(
-                "Block body indices for current block number not found".to_string(),
-            ))?
-            .last_tx_num();
-
         // Calculate block ranges to snapshot
         let headers_block_range =
-            self.highest_snapshots.headers.map_or(0, |block_number| block_number + 1)..=
-                to_block_number;
+            self.get_snapshot_target_block_range(to_block_number, self.highest_snapshots.headers);
         let receipts_block_range =
-            self.highest_snapshots.receipts.map_or(0, |block_number| block_number + 1)..=
-                to_block_number;
-        let transactions_block_range =
-            self.highest_snapshots.transactions.map_or(0, |block_number| block_number + 1)..=
-                to_block_number;
+            self.get_snapshot_target_block_range(to_block_number, self.highest_snapshots.receipts);
+        let transactions_block_range = self
+            .get_snapshot_target_block_range(to_block_number, self.highest_snapshots.transactions);
 
         // Calculate transaction ranges to snapshot
-        let receipts_from_tx_number =
-            if let Some(previous_block_number) = self.highest_snapshots.receipts {
-                provider
-                    .block_body_indices(previous_block_number)?
-                    .ok_or(RethError::Custom(
-                        "Block body indices for previous block number not found".to_string(),
-                    ))?
-                    .next_tx_num()
-            } else {
-                0
-            };
-        let receipts_tx_range = receipts_from_tx_number..=to_tx_number;
-
-        let transactions_from_tx_number =
-            if self.highest_snapshots.transactions == self.highest_snapshots.receipts {
-                receipts_from_tx_number
-            } else if let Some(previous_block_number) = self.highest_snapshots.transactions {
-                provider
-                    .block_body_indices(previous_block_number)?
-                    .ok_or(RethError::Custom(
-                        "Block body indices for previous block number not found".to_string(),
-                    ))?
-                    .next_tx_num()
-            } else {
-                0
-            };
-        let transactions_tx_range = transactions_from_tx_number..=to_tx_number;
+        let mut block_to_tx_number_cache = HashMap::default();
+        let receipts_tx_range = self.get_snapshot_target_tx_range(
+            &provider,
+            &mut block_to_tx_number_cache,
+            self.highest_snapshots.receipts,
+            &receipts_block_range,
+        )?;
+        let transactions_tx_range = self.get_snapshot_target_tx_range(
+            &provider,
+            &mut block_to_tx_number_cache,
+            self.highest_snapshots.transactions,
+            &transactions_block_range,
+        )?;
 
         Ok(SnapshotTargets {
             headers: headers_block_range
@@ -227,6 +203,46 @@ impl<DB: Database> Snapshotter<DB> {
                 .ge(&(self.block_interval as usize))
                 .then_some((transactions_block_range, transactions_tx_range)),
         })
+    }
+
+    fn get_snapshot_target_block_range(
+        &self,
+        to_block_number: BlockNumber,
+        highest_snapshot: Option<BlockNumber>,
+    ) -> RangeInclusive<BlockNumber> {
+        let highest_snapshot = highest_snapshot.map_or(0, |block_number| block_number + 1);
+        highest_snapshot..=(highest_snapshot + self.block_interval - 1).min(to_block_number)
+    }
+
+    fn get_snapshot_target_tx_range(
+        &self,
+        provider: &DatabaseProviderRO<'_, DB>,
+        block_to_tx_number_cache: &mut HashMap<BlockNumber, TxNumber>,
+        highest_snapshot: Option<BlockNumber>,
+        block_range: &RangeInclusive<BlockNumber>,
+    ) -> RethResult<RangeInclusive<TxNumber>> {
+        let from_tx_number = if let Some(block_number) = highest_snapshot {
+            *block_to_tx_number_cache.entry(block_number).or_insert(
+                provider
+                    .block_body_indices(block_number)?
+                    .ok_or(RethError::Custom(
+                        "Block body indices for highest snapshot not found".to_string(),
+                    ))?
+                    .next_tx_num(),
+            )
+        } else {
+            0
+        };
+
+        let to_tx_number = *block_to_tx_number_cache.entry(*block_range.end()).or_insert(
+            provider
+                .block_body_indices(*block_range.end())?
+                .ok_or(RethError::Custom(
+                    "Block body indices for block range end not found".to_string(),
+                ))?
+                .last_tx_num(),
+        );
+        Ok(from_tx_number..=to_tx_number)
     }
 }
 
@@ -264,10 +280,8 @@ mod tests {
         let mut snapshotter =
             Snapshotter::new(tx.inner_raw(), MAINNET.clone(), 2, watch::channel(None).0);
 
-        // Block body indices not found
-        assert_matches!(snapshotter.get_snapshot_targets(5), Err(RethError::Custom(_)));
-
-        // Snapshot targets has data per part up to the passed finalized block number
+        // Snapshot targets has data per part up to the passed finalized block number,
+        // respecting the block interval
         let targets = snapshotter.get_snapshot_targets(1).expect("get snapshot targets");
         assert_eq!(
             targets,
@@ -288,8 +302,9 @@ mod tests {
             Ok(SnapshotTargets { headers: None, receipts: None, transactions: None })
         );
 
-        // Snapshot targets has data per part up to the passed finalized block number
-        let targets = snapshotter.get_snapshot_targets(3).expect("get snapshot targets");
+        // Snapshot targets has data per part up to the passed finalized block number,
+        // respecting the block interval
+        let targets = snapshotter.get_snapshot_targets(5).expect("get snapshot targets");
         assert_eq!(
             targets,
             SnapshotTargets {
@@ -300,5 +315,10 @@ mod tests {
         );
         assert!(targets.is_multiple_of_block_interval(snapshotter.block_interval));
         assert!(targets.is_contiguous_to_highest_snapshots(snapshotter.highest_snapshots));
+        // Imitate snapshotter run according to the targets which updates the last snapshots state
+        snapshotter.set_highest_snapshots_from_targets(&targets);
+
+        // Block body indices not found
+        assert_matches!(snapshotter.get_snapshot_targets(5), Err(RethError::Custom(_)));
     }
 }

@@ -1,6 +1,6 @@
 //! Support for pruning.
 
-use crate::{Metrics, PrunerError};
+use crate::{Metrics, PrunerError, PrunerEvent};
 use rayon::prelude::*;
 use reth_db::{
     abstraction::cursor::{DbCursorRO, DbCursorRW},
@@ -13,15 +13,21 @@ use reth_db::{
 };
 use reth_interfaces::RethResult;
 use reth_primitives::{
-    BlockNumber, ChainSpec, PruneBatchSizes, PruneCheckpoint, PruneMode, PruneModes, PrunePart,
-    TxNumber, MINIMUM_PRUNING_DISTANCE,
+    listener::EventListeners, BlockNumber, ChainSpec, PruneBatchSizes, PruneCheckpoint, PruneMode,
+    PruneModes, PrunePart, TxNumber, MINIMUM_PRUNING_DISTANCE,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
     TransactionsProvider,
 };
 use reth_snapshot::HighestSnapshotsTracker;
-use std::{collections::HashMap, ops::RangeInclusive, sync::Arc, time::Instant};
+use std::{
+    collections::{BTreeMap, HashMap},
+    ops::RangeInclusive,
+    sync::Arc,
+    time::Instant,
+};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, info, instrument, trace};
 
 /// Result of [Pruner::run] execution.
@@ -34,6 +40,7 @@ pub type PrunerResult = Result<bool, PrunerError>;
 pub type PrunerWithResult<DB> = (Pruner<DB>, PrunerResult);
 
 /// Pruning routine. Main pruning logic happens in [Pruner::run].
+#[derive(Debug)]
 pub struct Pruner<DB> {
     metrics: Metrics,
     provider_factory: ProviderFactory<DB>,
@@ -46,6 +53,7 @@ pub struct Pruner<DB> {
     modes: PruneModes,
     /// Maximum entries to prune per block, per prune part.
     batch_sizes: PruneBatchSizes,
+    listeners: EventListeners<PrunerEvent>,
     highest_snapshots_tracker: HighestSnapshotsTracker,
 }
 
@@ -66,8 +74,14 @@ impl<DB: Database> Pruner<DB> {
             last_pruned_block_number: None,
             modes,
             batch_sizes,
+            listeners: Default::default(),
             highest_snapshots_tracker,
         }
+    }
+
+    /// Listen for events on the prune.
+    pub fn events(&mut self) -> UnboundedReceiverStream<PrunerEvent> {
+        self.listeners.new_listener()
     }
 
     /// Run the pruner
@@ -87,7 +101,7 @@ impl<DB: Database> Pruner<DB> {
         let highest_snapshots = *self.highest_snapshots_tracker.borrow();
 
         let mut done = true;
-        let mut parts_done = HashMap::new();
+        let mut parts_done = BTreeMap::new();
 
         if let Some((to_block, prune_mode)) = highest_snapshots.map_or(
             // If highest snapshots data is not available, just use the tip
@@ -250,7 +264,7 @@ impl<DB: Database> Pruner<DB> {
         let elapsed = start.elapsed();
         self.metrics.duration_seconds.record(elapsed);
 
-        info!(
+        trace!(
             target: "pruner",
             %tip_block_number,
             ?elapsed,
@@ -258,6 +272,14 @@ impl<DB: Database> Pruner<DB> {
             ?parts_done,
             "Pruner finished"
         );
+
+        self.listeners.notify(PrunerEvent::Finished {
+            tip_block_number,
+            elapsed,
+            done,
+            parts_done,
+        });
+
         Ok(done)
     }
 

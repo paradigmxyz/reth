@@ -26,7 +26,7 @@ pub use state::{
 };
 use std::{
     collections::{BTreeMap, HashSet},
-    ops::RangeBounds,
+    ops::{RangeBounds, RangeInclusive},
     sync::Arc,
     time::Instant,
 };
@@ -35,6 +35,8 @@ use tracing::trace;
 mod bundle_state_provider;
 mod chain_info;
 mod database;
+mod snapshot;
+pub use snapshot::SnapshotProvider;
 mod state;
 use crate::{providers::chain_info::ChainInfoTracker, traits::BlockSource};
 pub use bundle_state_provider::BundleStateProvider;
@@ -49,7 +51,7 @@ use reth_interfaces::blockchain_tree::{
 /// This type serves as the main entry point for interacting with the blockchain and provides data
 /// from database storage and from the blockchain tree (pending state etc.) It is a simple wrapper
 /// type that holds an instance of the database and the blockchain tree.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BlockchainProvider<DB, Tree> {
     /// Provider type used to access the database.
     database: ProviderFactory<DB>,
@@ -265,6 +267,10 @@ where
     /// Returns `None` if block is not found.
     fn block_with_senders(&self, number: BlockNumber) -> RethResult<Option<BlockWithSenders>> {
         self.database.provider()?.block_with_senders(number)
+    }
+
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Block>> {
+        self.database.provider()?.block_range(range)
     }
 }
 

@@ -1,17 +1,13 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
+//! A basic payload generator for reth.
+
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
 )]
-#![warn(missing_docs, unreachable_pub)]
+#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
-#![doc(test(
-    no_crate_inject,
-    attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
-))]
-
-//! A basic payload generator for reth.
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::metrics::PayloadBuilderMetrics;
 use futures_core::ready;
@@ -63,6 +59,7 @@ use tracing::{debug, trace};
 mod metrics;
 
 /// The [`PayloadJobGenerator`] that creates [`BasicPayloadJob`]s.
+#[derive(Debug)]
 pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder = ()> {
     /// The client that can interact with the chain.
     client: Client,
@@ -185,7 +182,7 @@ where
 }
 
 /// Restricts how many generator tasks can be executed at once.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct PayloadTaskGuard(Arc<Semaphore>);
 
 // === impl PayloadTaskGuard ===
@@ -270,6 +267,7 @@ impl Default for BasicPayloadJobGeneratorConfig {
 }
 
 /// A basic payload job that continuously builds a payload with the best transactions from the pool.
+#[derive(Debug)]
 pub struct BasicPayloadJob<Client, Pool, Tasks, Builder> {
     /// The configuration for how the payload will be created.
     config: PayloadConfig,
@@ -534,7 +532,7 @@ impl Drop for Cancelled {
 }
 
 /// Static config for how to build a payload.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct PayloadConfig {
     /// Pre-configured block environment.
     initialized_block_env: BlockEnv,
@@ -576,6 +574,7 @@ pub enum BuildOutcome {
 /// This struct encapsulates the essential components and configuration required for the payload
 /// building process. It holds references to the Ethereum client, transaction pool, cached reads,
 /// payload configuration, cancellation status, and the best payload achieved so far.
+#[derive(Debug)]
 pub struct BuildArguments<Pool, Client> {
     client: Client,
     pool: Pool,
@@ -793,7 +792,7 @@ where
     let logs_bloom = bundle.block_logs_bloom(block_number).expect("Number is in range");
 
     // calculate the state root
-    let state_root = state_provider.state_root(bundle)?;
+    let state_root = state_provider.state_root(&bundle)?;
 
     // create the block header
     let transactions_root = proofs::calculate_transaction_root(&executed_txs);
@@ -804,13 +803,13 @@ where
     let mut blob_gas_used = None;
 
     // only determine cancun fields when active
-    if chain_spec.is_cancun_activated_at_timestamp(attributes.timestamp) {
+    if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp) {
         // grab the blob sidecars from the executed txs
         blob_sidecars = pool.get_all_blobs_exact(
             executed_txs.iter().filter(|tx| tx.is_eip4844()).map(|tx| tx.hash).collect(),
         )?;
 
-        excess_blob_gas = if chain_spec.is_cancun_activated_at_timestamp(parent_block.timestamp) {
+        excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_block.timestamp) {
             let parent_excess_blob_gas = parent_block.excess_blob_gas.unwrap_or_default();
             let parent_blob_gas_used = parent_block.blob_gas_used.unwrap_or_default();
             Some(calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
@@ -909,7 +908,7 @@ where
 
     // calculate the state root
     let bundle_state = BundleStateWithReceipts::new(db.take_bundle(), vec![], block_number);
-    let state_root = state.state_root(bundle_state)?;
+    let state_root = state.state_root(&bundle_state)?;
 
     let header = Header {
         parent_hash: parent_block.hash,
@@ -970,7 +969,7 @@ fn commit_withdrawals<DB: Database<Error = RethError>>(
     timestamp: u64,
     withdrawals: Vec<Withdrawal>,
 ) -> RethResult<WithdrawalsOutcome> {
-    if !chain_spec.is_shanghai_activated_at_timestamp(timestamp) {
+    if !chain_spec.is_shanghai_active_at_timestamp(timestamp) {
         return Ok(WithdrawalsOutcome::pre_shanghai())
     }
 

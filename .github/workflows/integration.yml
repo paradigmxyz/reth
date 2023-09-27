@@ -22,6 +22,7 @@ jobs:
     strategy:
       matrix:
         partition: [1, 2]
+    timeout-minutes: 60
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -71,6 +72,7 @@ jobs:
       group: Reth
     env:
       RUST_LOG: info,sync=error
+    timeout-minutes: 60
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -99,6 +101,7 @@ jobs:
     runs-on:
       group: Reth
     needs: [test]
+    timeout-minutes: 60
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@release/v1

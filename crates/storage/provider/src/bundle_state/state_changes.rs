@@ -12,7 +12,7 @@ use reth_revm_primitives::{
 };
 
 /// A change to the state of the world.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct StateChanges(pub StateChangeset);
 
 impl From<StateChangeset> for StateChanges {

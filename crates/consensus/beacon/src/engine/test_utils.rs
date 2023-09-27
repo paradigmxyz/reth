@@ -50,6 +50,7 @@ type TestBeaconConsensusEngine<Client> = BeaconConsensusEngine<
     Arc<EitherDownloader<Client, NoopFullBlockClient>>,
 >;
 
+#[derive(Debug)]
 pub struct TestEnv<DB> {
     pub db: DB,
     // Keep the tip receiver around, so it's not dropped.
@@ -116,7 +117,7 @@ impl<DB> TestEnv<DB> {
 // TODO: add with_consensus in case we want to use the TestConsensus purposeful failure - this
 // would require similar patterns to how we use with_client and the EitherDownloader
 /// Represents either a real consensus engine, or a test consensus engine.
-#[derive(Default)]
+#[derive(Debug, Default)]
 enum TestConsensusConfig {
     /// Test consensus engine
     #[default]
@@ -126,6 +127,7 @@ enum TestConsensusConfig {
 }
 
 /// Represents either test pipeline outputs, or real pipeline configuration.
+#[derive(Debug)]
 enum TestPipelineConfig {
     /// Test pipeline outputs.
     Test(VecDeque<Result<ExecOutput, StageError>>),
@@ -140,6 +142,7 @@ impl Default for TestPipelineConfig {
 }
 
 /// Represents either test executor results, or real executor configuration.
+#[derive(Debug)]
 enum TestExecutorConfig {
     /// Test executor results.
     Test(Vec<BundleStateWithReceipts>),
@@ -271,6 +274,7 @@ where
 
 /// The basic configuration for a `TestConsensusEngine`, without generics for the client or
 /// consensus engine.
+#[derive(Debug)]
 pub struct TestConsensusEngineBuilder {
     chain_spec: Arc<ChainSpec>,
     pipeline_config: TestPipelineConfig,
@@ -362,6 +366,7 @@ impl TestConsensusEngineBuilder {
 /// mocked executor results.
 ///
 /// This optionally includes a client for network operations.
+#[derive(Debug)]
 pub struct NetworkedTestConsensusEngineBuilder<Client> {
     base_config: TestConsensusEngineBuilder,
     client: Option<Client>,

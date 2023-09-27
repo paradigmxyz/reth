@@ -23,7 +23,7 @@ use reth_interfaces::{
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
     constants::EPOCH_SLOTS, listener::EventListeners, stage::StageId, BlockNumHash, BlockNumber,
-    Head, Header, SealedBlock, SealedHeader, H256, U256,
+    ChainSpec, Head, Header, SealedBlock, SealedHeader, H256, U256,
 };
 use reth_provider::{
     BlockIdReader, BlockReader, BlockSource, CanonChainTracker, ChainSpecProvider, ProviderError,
@@ -33,14 +33,14 @@ use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, PayloadAttributes, PayloadError, PayloadStatus,
     PayloadStatusEnum, PayloadValidationError,
 };
-use reth_rpc_types_compat::engine::payload::try_into_sealed_block;
+use reth_rpc_types_compat::payload::{try_into_block, validate_block_hash};
 use reth_stages::{ControlFlow, Pipeline, PipelineError};
 use reth_tasks::TaskSpawner;
 use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tokio::sync::{
     mpsc,
@@ -160,6 +160,7 @@ pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 ///
 /// If the future is polled more than once. Leads to undefined state.
 #[must_use = "Future does nothing unless polled"]
+#[allow(missing_debug_implementations)]
 pub struct BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database,
@@ -655,16 +656,33 @@ where
 
         let start = Instant::now();
         let make_canonical_result = self.blockchain.make_canonical(&state.head_block_hash);
-        self.record_make_canonical_latency(start, &make_canonical_result);
+        let elapsed = self.record_make_canonical_latency(start, &make_canonical_result);
         let status = match make_canonical_result {
             Ok(outcome) => {
-                if !outcome.is_already_canonical() {
-                    debug!(target: "consensus::engine", hash=?state.head_block_hash, number=outcome.header().number, "canonicalized new head");
+                match outcome {
+                    CanonicalOutcome::AlreadyCanonical { ref header } => {
+                        debug!(
+                            target: "consensus::engine",
+                            fcu_head_num=?header.number,
+                            current_head_num=?self.blockchain.canonical_tip().number,
+                            "Ignoring beacon update to old head"
+                        );
+                    }
+                    CanonicalOutcome::Committed { ref head } => {
+                        debug!(
+                            target: "consensus::engine",
+                            hash=?state.head_block_hash,
+                            number=head.number,
+                            "Canonicalized new head"
+                        );
 
-                    // new VALID update that moved the canonical chain forward
-                    let _ = self.update_head(outcome.header().clone());
-                } else {
-                    debug!(target: "consensus::engine", fcu_head_num=?outcome.header().number, current_head_num=?self.blockchain.canonical_tip().number, "Ignoring beacon update to old head");
+                        // new VALID update that moved the canonical chain forward
+                        let _ = self.update_head(head.clone());
+                        self.listeners.notify(BeaconConsensusEngineEvent::CanonicalChainCommitted(
+                            head.clone(),
+                            elapsed,
+                        ));
+                    }
                 }
 
                 if let Some(attrs) = attrs {
@@ -720,7 +738,7 @@ where
         &self,
         start: Instant,
         outcome: &Result<CanonicalOutcome, RethError>,
-    ) {
+    ) -> Duration {
         let elapsed = start.elapsed();
         self.metrics.make_canonical_latency.record(elapsed);
         match outcome {
@@ -732,6 +750,8 @@ where
             }
             Err(_) => self.metrics.make_canonical_error_latency.record(elapsed),
         }
+
+        elapsed
     }
 
     /// Ensures that the given forkchoice state is consistent, assuming the head block has been
@@ -1059,7 +1079,7 @@ where
         payload: ExecutionPayload,
         cancun_fields: Option<CancunPayloadFields>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
-        let block = match self.ensure_well_formed_payload(payload, cancun_fields) {
+        let block = match self.ensure_well_formed_payload(payload, cancun_fields)? {
             Ok(block) => block,
             Err(status) => return Ok(status),
         };
@@ -1123,16 +1143,35 @@ where
     ///    - incorrect hash
     ///    - the versioned hashes passed with the payload do not exactly match transaction
     ///    versioned hashes
+    ///    - the block does not contain blob transactions if it is pre-cancun
     fn ensure_well_formed_payload(
         &self,
         payload: ExecutionPayload,
         cancun_fields: Option<CancunPayloadFields>,
-    ) -> Result<SealedBlock, PayloadStatus> {
+    ) -> Result<Result<SealedBlock, PayloadStatus>, BeaconOnNewPayloadError> {
         let parent_hash = payload.parent_hash();
-        let block = match try_into_sealed_block(
+
+        let block_hash = payload.block_hash();
+        let block_res = match try_into_block(
             payload,
             cancun_fields.as_ref().map(|fields| fields.parent_beacon_block_root),
         ) {
+            Ok(block) => {
+                // make sure there are no blob transactions in the payload if it is pre-cancun
+                // we perform this check before validating the block hash because INVALID_PARAMS
+                // must be returned over an INVALID response.
+                if !self.chain_spec().is_cancun_active_at_timestamp(block.timestamp) &&
+                    block.has_blob_transactions()
+                {
+                    return Err(BeaconOnNewPayloadError::PreCancunBlockWithBlobTransactions)
+                }
+
+                validate_block_hash(block_hash, block)
+            }
+            Err(error) => Err(error),
+        };
+
+        let block = match block_res {
             Ok(block) => block,
             Err(error) => {
                 error!(target: "consensus::engine", ?error, "Invalid payload");
@@ -1146,7 +1185,7 @@ where
                 }
                 let status = PayloadStatusEnum::from(error);
 
-                return Err(PayloadStatus::new(status, latest_valid_hash))
+                return Ok(Err(PayloadStatus::new(status, latest_valid_hash)))
             }
         };
 
@@ -1157,9 +1196,18 @@ where
             .flatten()
             .collect::<Vec<_>>();
 
-        self.validate_versioned_hashes(parent_hash, block_versioned_hashes, cancun_fields)?;
+        if let Err(status) =
+            self.validate_versioned_hashes(parent_hash, block_versioned_hashes, cancun_fields)
+        {
+            return Ok(Err(status))
+        }
 
-        Ok(block)
+        Ok(Ok(block))
+    }
+
+    /// Returns the currently configured [ChainSpec].
+    fn chain_spec(&self) -> Arc<ChainSpec> {
+        self.blockchain.chain_spec()
     }
 
     /// Validates that the versioned hashes in the block match the versioned hashes passed in the
@@ -1468,10 +1516,20 @@ where
             // optimistically try to make the head of the current FCU target canonical, the sync
             // target might have changed since the block download request was issued
             // (new FCU received)
-            match self.blockchain.make_canonical(&target.head_block_hash) {
+            let start = Instant::now();
+            let make_canonical_result = self.blockchain.make_canonical(&target.head_block_hash);
+            let elapsed = self.record_make_canonical_latency(start, &make_canonical_result);
+            match make_canonical_result {
                 Ok(outcome) => {
+                    if let CanonicalOutcome::Committed { ref head } = outcome {
+                        self.listeners.notify(BeaconConsensusEngineEvent::CanonicalChainCommitted(
+                            head.clone(),
+                            elapsed,
+                        ));
+                    }
+
                     let new_head = outcome.into_header();
-                    debug!(target: "consensus::engine", hash=?new_head.hash, number=new_head.number, "canonicalized new head");
+                    debug!(target: "consensus::engine", hash=?new_head.hash, number=new_head.number, "Canonicalized new head");
 
                     // we can update the FCU blocks
                     let _ = self.update_canon_chain(new_head, &target);
