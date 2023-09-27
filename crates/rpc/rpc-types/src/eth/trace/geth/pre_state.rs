@@ -53,6 +53,7 @@ pub struct DiffMode {
     pub pre: BTreeMap<Address, AccountState>,
 }
 
+/// Represents the state of an account
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountState {
     #[serde(
@@ -65,8 +66,24 @@ pub struct AccountState {
     pub code: Option<Bytes>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nonce: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub storage: Option<BTreeMap<H256, H256>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub storage: BTreeMap<H256, H256>,
+}
+
+impl AccountState {
+    /// Creates a new `AccountState` with the given account info.
+    ///
+    /// If balance is zero, it will be omitted.
+    /// If nonce is zero, it will be omitted.
+    /// If code is empty, it will be omitted.
+    pub fn from_account_info(nonce: u64, balance: U256, code: Option<Bytes>) -> Self {
+        Self {
+            balance: (balance != U256::ZERO).then_some(balance),
+            code: code.filter(|code| !code.is_empty()),
+            nonce: (nonce != 0).then_some(nonce),
+            storage: Default::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
