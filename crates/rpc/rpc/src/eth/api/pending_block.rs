@@ -4,8 +4,8 @@ use crate::eth::error::{EthApiError, EthResult};
 use core::fmt::Debug;
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
-    proofs, Block, ChainSpec, Header, IntoRecoveredTransaction, Receipt, SealedBlock, SealedHeader,
-    EMPTY_OMMER_ROOT, H256, U256,
+    proofs, Block, ChainSpec, Header, IntoRecoveredTransaction, Receipt, Receipts, SealedBlock,
+    SealedHeader, EMPTY_OMMER_ROOT, H256, U256,
 };
 use reth_provider::{BundleStateWithReceipts, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
@@ -187,7 +187,11 @@ impl PendingBlockEnv {
         // merge all transitions into bundle state.
         db.merge_transitions(BundleRetention::PlainState);
 
-        let bundle = BundleStateWithReceipts::new(db.take_bundle(), vec![receipts], block_number);
+        let bundle = BundleStateWithReceipts::new(
+            db.take_bundle(),
+            Receipts::from_vec(vec![receipts]),
+            block_number,
+        );
 
         let receipts_root = bundle.receipts_root_slow(block_number).expect("Block is present");
         let logs_bloom = bundle.block_logs_bloom(block_number).expect("Block is present");

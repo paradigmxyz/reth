@@ -5,8 +5,8 @@ use reth_db::{
 };
 use reth_interfaces::db::DatabaseError;
 use reth_primitives::{
-    bloom::logs_bloom, keccak256, proofs::calculate_receipt_root_ref, Account, Address,
-    BlockNumber, Bloom, Bytecode, Log, Receipt, StorageEntry, H256, U256,
+    bloom::logs_bloom, keccak256, Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt,
+    Receipts, StorageEntry, H256, U256,
 };
 use reth_revm_primitives::{
     db::states::BundleState, into_reth_acc, into_revm_acc, primitives::AccountInfo,
@@ -30,8 +30,8 @@ pub struct BundleStateWithReceipts {
     /// Outer vector stores receipts for each block sequentially.
     /// The inner vector stores receipts ordered by transaction number.
     ///
-    /// If receipt is None it means it is pruned.  
-    receipts: Vec<Vec<Option<Receipt>>>,
+    /// If receipt is None it means it is pruned.
+    receipts: Receipts,
     /// First block of bundle state.
     first_block: BlockNumber,
 }
@@ -48,11 +48,7 @@ pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>
 
 impl BundleStateWithReceipts {
     /// Create Bundle State.
-    pub fn new(
-        bundle: BundleState,
-        receipts: Vec<Vec<Option<Receipt>>>,
-        first_block: BlockNumber,
-    ) -> Self {
+    pub fn new(bundle: BundleState, receipts: Receipts, first_block: BlockNumber) -> Self {
         Self { bundle, receipts, first_block }
     }
 
@@ -61,7 +57,7 @@ impl BundleStateWithReceipts {
         state_init: BundleStateInit,
         revert_init: RevertsInit,
         contracts_init: Vec<(H256, Bytecode)>,
-        receipts: Vec<Vec<Option<Receipt>>>,
+        receipts: Receipts,
         first_block: BlockNumber,
     ) -> Self {
         // sort reverts by block number
@@ -167,7 +163,7 @@ impl BundleStateWithReceipts {
     /// # Example
     ///
     /// ```
-    /// use reth_primitives::{Account, U256};
+    /// use reth_primitives::{Account, U256, Receipts};
     /// use reth_provider::BundleStateWithReceipts;
     /// use reth_db::{test_utils::create_test_rw_db, database::Database};
     /// use std::collections::HashMap;
@@ -187,7 +183,7 @@ impl BundleStateWithReceipts {
     ///     )]),
     ///     HashMap::from([]),
     ///     vec![],
-    ///     vec![],
+    ///     Receipts::new(),
     ///     0,
     /// );
     ///
@@ -240,14 +236,11 @@ impl BundleStateWithReceipts {
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
     /// of receipt. This is a expensive operation.
     pub fn receipts_root_slow(&self, block_number: BlockNumber) -> Option<H256> {
-        let index = self.block_number_to_index(block_number)?;
-        let block_receipts =
-            self.receipts[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?;
-        Some(calculate_receipt_root_ref(&block_receipts))
+        self.receipts.root_slow(self.block_number_to_index(block_number)?)
     }
 
     /// Return reference to receipts.
-    pub fn receipts(&self) -> &Vec<Vec<Option<Receipt>>> {
+    pub fn receipts(&self) -> &Receipts {
         &self.receipts
     }
 
@@ -325,7 +318,7 @@ impl BundleStateWithReceipts {
         // split is done as [0, num) and [num, len]
         let (_, this) = self.receipts.split_at(num_of_detached_block as usize);
 
-        self.receipts = this.to_vec().clone();
+        self.receipts = Receipts::from_vec(this.to_vec().clone());
         self.bundle.take_n_reverts(num_of_detached_block as usize);
 
         self.first_block = block_number + 1;
@@ -340,7 +333,7 @@ impl BundleStateWithReceipts {
     /// In most cases this would be true.
     pub fn extend(&mut self, other: Self) {
         self.bundle.extend(other.bundle);
-        self.receipts.extend(other.receipts);
+        self.receipts.extend(other.receipts.receipt_vec);
     }
 
     /// Write bundle state to database.
@@ -393,7 +386,7 @@ mod tests {
         transaction::DbTx,
         DatabaseEnv,
     };
-    use reth_primitives::{Address, Receipt, StorageEntry, H256, MAINNET, U256};
+    use reth_primitives::{Address, Receipt, Receipts, StorageEntry, H256, MAINNET, U256};
     use reth_revm_primitives::{into_reth_acc, primitives::HashMap};
     use revm::{
         db::{
@@ -612,7 +605,7 @@ mod tests {
 
         state.merge_transitions(BundleRetention::Reverts);
 
-        BundleStateWithReceipts::new(state.take_bundle(), Vec::new(), 1)
+        BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 1)
             .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
@@ -712,7 +705,7 @@ mod tests {
         )]));
 
         state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(state.take_bundle(), Vec::new(), 2)
+        BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 2)
             .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
@@ -779,7 +772,7 @@ mod tests {
             },
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(init_state.take_bundle(), Vec::new(), 0)
+        BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::new(), 0)
             .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
@@ -926,7 +919,7 @@ mod tests {
 
         let bundle = state.take_bundle();
 
-        BundleStateWithReceipts::new(bundle, Vec::new(), 1)
+        BundleStateWithReceipts::new(bundle, Receipts::new(), 1)
             .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
@@ -1092,7 +1085,7 @@ mod tests {
             },
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(init_state.take_bundle(), Vec::new(), 0)
+        BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::new(), 0)
             .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
@@ -1139,7 +1132,7 @@ mod tests {
 
         // Commit block #1 changes to the database.
         state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(state.take_bundle(), Vec::new(), 1)
+        BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 1)
             .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
@@ -1171,7 +1164,7 @@ mod tests {
     fn revert_to_indices() {
         let base = BundleStateWithReceipts {
             bundle: BundleState::default(),
-            receipts: vec![vec![Some(Receipt::default()); 2]; 7],
+            receipts: Receipts::from_vec(vec![vec![Some(Receipt::default()); 2]; 7]),
             first_block: 10,
         };
 

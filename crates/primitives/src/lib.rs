@@ -83,7 +83,7 @@ pub use prune::{
     PruneBatchSizes, PruneCheckpoint, PruneMode, PruneModes, PrunePart, PrunePartError,
     ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE,
 };
-pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef};
+pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts};
 pub use revm_primitives::JumpMap;
 pub use serde_helper::JsonU256;
 pub use storage::StorageEntry;
