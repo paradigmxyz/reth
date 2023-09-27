@@ -72,7 +72,7 @@ where
     Ok(B256::from_slice(&padded))
 }
 
-/// Deserializes the input into an Option<HashMap<B256, B256>>, using [from_bytes_to_B256] which
+/// Deserializes the input into an Option<HashMap<B256, B256>>, using [from_bytes_to_b256] which
 /// allows cropped values:
 ///
 /// ```json
@@ -91,8 +91,8 @@ where
         Some(mut map) => {
             let mut res_map = HashMap::with_capacity(map.len());
             for (k, v) in map.drain() {
-                let k_deserialized = from_bytes_to_B256::<'de, D>(k)?;
-                let v_deserialized = from_bytes_to_B256::<'de, D>(v)?;
+                let k_deserialized = from_bytes_to_b256::<'de, D>(k)?;
+                let v_deserialized = from_bytes_to_b256::<'de, D>(v)?;
                 res_map.insert(k_deserialized, v_deserialized);
             }
             Ok(Some(res_map))
