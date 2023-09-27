@@ -517,7 +517,6 @@ impl CallTraceNode {
         let acc_state = account_states.entry(addr).or_default();
         for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
             let StorageChange { key, value, had_value } = change;
-            let storage_map = acc_state.storage.get_or_insert_with(BTreeMap::new);
             let value_to_insert = if post_value {
                 H256::from(value)
             } else {
@@ -526,7 +525,7 @@ impl CallTraceNode {
                     None => continue,
                 }
             };
-            storage_map.insert(key.into(), value_to_insert);
+            acc_state.storage.insert(key.into(), value_to_insert);
         }
     }
 }
