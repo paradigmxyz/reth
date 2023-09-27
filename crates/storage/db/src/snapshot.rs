@@ -65,7 +65,7 @@ macro_rules! generate_snapshot_func {
                             .map(|row|
                                 row
                                     .map(|(_key, val)| val.into_value())
-                                    .map_err(|e| Box::new(e) as Box<dyn StdError>)
+                                    .map_err(|e| Box::new(e) as Box<dyn StdError + Send + Sync>)
                             );
 
                     )+

@@ -4,7 +4,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum NippyJarError {
     #[error(transparent)]
-    Internal(#[from] Box<dyn std::error::Error>),
+    Internal(#[from] Box<dyn std::error::Error + Send + Sync>),
     #[error(transparent)]
     Disconnect(#[from] std::io::Error),
     #[error(transparent)]

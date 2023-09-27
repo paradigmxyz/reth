@@ -47,7 +47,7 @@ const NIPPY_JAR_VERSION: usize = 1;
 type Row = Vec<Vec<u8>>;
 
 /// Alias type for a column value wrapped in `Result`
-pub type ColumnResult<T> = Result<T, Box<dyn StdError>>;
+pub type ColumnResult<T> = Result<T, Box<dyn StdError + Send + Sync>>;
 
 /// `NippyJar` is a specialized storage format designed for immutable data.
 ///
