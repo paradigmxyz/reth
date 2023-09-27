@@ -23,7 +23,8 @@ bytes = "1.5"
 cuckoofilter = { version = "0.5.0", features = ["serde_support", "serde_bytes"] }
 tempfile = "3.4"
 sucds = "~0.8"
-
+tracing = "0.1.0"
+tracing-appender = "0.2"
 anyhow = "1.0"
 
 

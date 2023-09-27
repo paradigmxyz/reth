@@ -8,6 +8,7 @@ use crate::{
 };
 use reth_interfaces::RethResult;
 use reth_nippy_jar::{ColumnResult, NippyJar, PHFKey};
+use reth_tracing::tracing::*;
 use std::{error::Error as StdError, ops::RangeInclusive};
 
 /// Macro that generates snapshot creation functions that take an arbitratry number of [`Table`] and
@@ -46,16 +47,22 @@ macro_rules! generate_snapshot_func {
                 ) -> RethResult<()>
                     where K: Key + Copy
                 {
+                    debug!(target: "reth::snapshot", ?range, "Creating snapshot {:?} and {} more columns.", vec![$($tbl::NAME,)+], additional.len());
+
                     let range: RangeInclusive<RawKey<K>> = RawKey::new(*range.start())..=RawKey::new(*range.end());
 
                     // Create PHF and Filter if required
                     if let Some(keys) = keys {
+                        debug!(target: "reth::snapshot", "Calculating Filter, PHF and offset index list");
                         nippy_jar.prepare_index(keys, row_count)?;
+                        debug!(target: "reth::snapshot", "Filter, PHF and offset index list calculated.");
                     }
 
                     // Create compression dictionaries if required
                     if let Some(data_sets) = dict_compression_set {
+                        debug!(target: "reth::snapshot", "Creating compression dictionaries.");
                         nippy_jar.prepare_compression(data_sets)?;
+                        debug!(target: "reth::snapshot", "Compression dictionaries created.");
                     }
 
                     // Creates the cursors for the columns
@@ -77,7 +84,12 @@ macro_rules! generate_snapshot_func {
                         $(Box::new([< $tbl _iter>]),)+
                     ];
 
+
+                    debug!(target: "reth::snapshot", jar=?nippy_jar, "Generating snapshot file.");
+
                     nippy_jar.freeze(col_iterators.into_iter().chain(additional).collect(), row_count as u64)?;
+
+                    debug!(target: "reth::snapshot", jar=?nippy_jar, "Snapshot file generated.");
 
                     Ok(())
                 }

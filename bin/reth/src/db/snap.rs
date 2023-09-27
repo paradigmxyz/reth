@@ -1,22 +1,16 @@
-use super::tui::DbListTUI;
-use crate::utils::{DbTool, ListFilter};
+use crate::utils::DbTool;
 use clap::{clap_derive::ValueEnum, Parser};
 use eyre::WrapErr;
 use reth_db::{
-    database::Database,
-    snapshot::{create_snapshot_T1_T2, create_snapshot_T1_T2_T3_T4_T5},
-    table::Table,
-    tables,
-    transaction::DbTx,
-    DatabaseEnvRO, TableType, TableViewer, Tables,
+    database::Database, snapshot::create_snapshot_T1_T2, table::Table, tables, transaction::DbTx,
+    DatabaseEnvRO, TableViewer,
 };
 use reth_nippy_jar::NippyJar;
 use reth_primitives::BlockNumber;
-use std::{cell::RefCell, path::PathBuf};
-use tracing::error;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, ValueEnum)]
-pub enum Snapshots {
+pub(crate) enum Snapshots {
     Blocks,
     Transactions,
     Receipts,
@@ -64,7 +58,7 @@ impl Command {
         }
 
         if with_filter {
-            nippy_jar = nippy_jar.with_cuckoo_filter(row_count as usize + 10).with_mphf();
+            nippy_jar = nippy_jar.with_cuckoo_filter(row_count + 10).with_mphf();
         }
 
         tool.db.view(|tx| {
@@ -77,6 +71,7 @@ impl Command {
             let hashes = cursor
                 .walk(None)
                 .unwrap()
+                .take(row_count)
                 .map(|row| row.map(|(_key, value)| value.into_value()).map_err(|e| e.into()));
 
             // Hacky type inference. TODO fix

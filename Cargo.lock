@@ -5530,6 +5530,7 @@ dependencies = [
  "reth-metrics",
  "reth-nippy-jar",
  "reth-primitives",
+ "reth-tracing",
  "secp256k1",
  "serde",
  "serde_json",
@@ -5887,6 +5888,8 @@ dependencies = [
  "sucds 0.8.0",
  "tempfile",
  "thiserror",
+ "tracing",
+ "tracing-appender",
  "zstd",
 ]
 

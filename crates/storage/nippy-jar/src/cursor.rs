@@ -26,7 +26,7 @@ pub struct NippyJarCursor<'a, H = ()> {
     row: u64,
 }
 
-impl<'a, H> std::fmt::Debug for NippyJarCursor<'a, H>
+impl<'a, H: std::fmt::Debug> std::fmt::Debug for NippyJarCursor<'a, H>
 where
     H: Send + Sync + Serialize + for<'b> Deserialize<'b> + core::fmt::Debug,
 {
@@ -37,7 +37,7 @@ where
 
 impl<'a, H> NippyJarCursor<'a, H>
 where
-    H: Send + Sync + Serialize + for<'b> Deserialize<'b>,
+    H: Send + Sync + Serialize + for<'b> Deserialize<'b> + std::fmt::Debug,
 {
     pub fn new(
         jar: &'a NippyJar<H>,

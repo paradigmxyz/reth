@@ -4,6 +4,7 @@ use std::{
     fs::File,
     io::{Read, Write},
 };
+use tracing::*;
 use zstd::{
     bulk::{Compressor, Decompressor},
     dict::DecoderDictionary,
@@ -87,6 +88,8 @@ impl Zstd {
 
                 let mut compressors = None;
                 if let Some(dictionaries) = &self.raw_dictionaries {
+                    debug!(target: "nippy-jar", count=?dictionaries.len(), "Generating ZSTD compressor dictionaries.");
+
                     let mut cmp = Vec::with_capacity(dictionaries.len());
 
                     for dict in dictionaries {

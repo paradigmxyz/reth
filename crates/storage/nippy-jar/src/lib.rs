@@ -24,6 +24,7 @@ use sucds::{
     mii_sequences::{EliasFano, EliasFanoBuilder},
     Serializable,
 };
+use tracing::*;
 
 pub mod filter;
 use filter::{Cuckoo, InclusionFilter, InclusionFilters};
@@ -73,7 +74,7 @@ pub type ColumnResult<T> = Result<T, Box<dyn StdError + Send + Sync>>;
 ///
 /// Ultimately, the `freeze` function yields two files: a data file containing both the data and its
 /// configuration, and an index file that houses the offsets and offsets_index.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct NippyJar<H = ()> {
     /// The version of the NippyJar format.
@@ -100,6 +101,24 @@ pub struct NippyJar<H = ()> {
     path: Option<PathBuf>,
 }
 
+impl<H: std::fmt::Debug> std::fmt::Debug for NippyJar<H> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NippyJar")
+            .field("version", &self.version)
+            .field("user_header", &self.user_header)
+            .field("columns", &self.columns)
+            .field("compressor", &self.compressor)
+            .field("filter", &self.filter)
+            .field("phf", &self.phf)
+            .field("offsets_index (len)", &self.offsets_index.len())
+            .field("offsets_index (size in bytes)", &self.offsets_index.size_in_bytes())
+            .field("offsets (len)", &self.offsets.len())
+            .field("offsets (size in bytes)", &self.offsets.size_in_bytes())
+            .field("path", &self.path)
+            .finish_non_exhaustive()
+    }
+}
+
 impl NippyJar<()> {
     /// Creates a new [`NippyJar`] without an user-defined header data.
     pub fn new_without_header(columns: usize, path: &Path) -> Self {
@@ -119,7 +138,7 @@ impl NippyJar<()> {
 
 impl<H> NippyJar<H>
 where
-    H: Send + Sync + Serialize + for<'a> Deserialize<'a>,
+    H: Send + Sync + Serialize + for<'a> Deserialize<'a> + std::fmt::Debug,
 {
     /// Creates a new [`NippyJar`] with a user-defined header data.
     pub fn new(columns: usize, path: &Path, user_header: H) -> Self {
@@ -211,6 +230,7 @@ where
     ) -> Result<(), NippyJarError> {
         // Makes any necessary preparations for the compressors
         if let Some(compression) = &mut self.compressor {
+            debug!(target: "nippy-jar", columns=columns.len(), "Preparing compression.");
             compression.prepare_compression(columns)?;
         }
         Ok(())
@@ -226,15 +246,27 @@ where
         values: impl IntoIterator<Item = ColumnResult<T>>,
         row_count: usize,
     ) -> Result<(), NippyJarError> {
+        debug!(target: "nippy-jar", ?row_count, "Preparing index.");
+
         let values = values.into_iter().collect::<Result<Vec<_>, _>>()?;
+
+        debug_assert!(
+            row_count == values.len(),
+            "Row count ({row_count}) differs from value list count ({}).",
+            values.len()
+        );
+
         let mut offsets_index = vec![0; row_count];
 
         // Builds perfect hashing function from the values
         if let Some(phf) = self.phf.as_mut() {
+            debug!(target: "nippy-jar", ?row_count, values_count = ?values.len(), "Setting keys for perfect hashing function.");
             phf.set_keys(&values)?;
         }
 
         if self.filter.is_some() || self.phf.is_some() {
+            debug!(target: "nippy-jar", ?row_count, "Creating filter and offsets_index.");
+
             for (row_num, v) in values.into_iter().enumerate() {
                 if let Some(filter) = self.filter.as_mut() {
                     filter.add(v.as_ref())?;
@@ -248,6 +280,7 @@ where
             }
         }
 
+        debug!(target: "nippy-jar", ?row_count, "Encoding offsets index list.");
         self.offsets_index = PrefixSummedEliasFano::from_slice(&offsets_index)?;
         Ok(())
     }
@@ -278,6 +311,8 @@ where
         let mut offsets = Vec::with_capacity(total_rows as usize * self.columns);
         let mut column_iterators =
             columns.into_iter().map(|v| v.into_iter()).collect::<Vec<_>>().into_iter();
+
+        debug!(target: "nippy-jar", compressor=?self.compressor, "Writing rows.");
 
         loop {
             let mut iterators = Vec::with_capacity(self.columns);
@@ -330,12 +365,16 @@ where
         // Write offsets and offset index to file
         self.freeze_offsets(offsets)?;
 
+        debug!(target: "nippy-jar", jar=?self, "Finished.");
+
         Ok(())
     }
 
     /// Freezes offsets and its own index.
     fn freeze_offsets(&mut self, offsets: Vec<usize>) -> Result<(), NippyJarError> {
         if !offsets.is_empty() {
+            debug!(target: "nippy-jar", "Encoding offsets list.");
+
             let mut builder =
                 EliasFanoBuilder::new(*offsets.last().expect("qed") + 1, offsets.len())?;
 
@@ -344,6 +383,9 @@ where
             }
             self.offsets = builder.build().enable_rank();
         }
+
+        debug!(target: "nippy-jar", path=?self.index_path(), "Writing offsets and offsets index to file.");
+
         let mut file = File::create(self.index_path())?;
         self.offsets.serialize_into(&mut file)?;
         self.offsets_index.serialize_into(file)?;
@@ -369,6 +411,8 @@ where
         if let Some(phf) = &self.phf {
             let _ = phf.get_index(&[])?;
         }
+
+        debug!(target: "nippy-jar", path=?self.data_path(), "Opening data file.");
 
         Ok(File::create(self.data_path())?)
     }
