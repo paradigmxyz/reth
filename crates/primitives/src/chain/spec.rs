@@ -1151,7 +1151,7 @@ mod tests {
     fn test_hardfork_list_display_mainnet() {
         assert_eq!(
             DisplayHardforks::from(MAINNET.hardforks().clone()).to_string(),
-            r##"Pre-merge hard forks (block based):
+            "Pre-merge hard forks (block based):
 - Frontier                         @0
 - Homestead                        @1150000
 - Dao                              @1920000
@@ -1171,7 +1171,7 @@ Merge hard forks:
 
 Post-merge hard forks (timestamp based):
 - Shanghai                         @1681338455
-"##
+"
         );
     }
 
@@ -1185,9 +1185,9 @@ Post-merge hard forks (timestamp based):
             .build();
         assert_eq!(
             DisplayHardforks::from(spec.hardforks().clone()).to_string(),
-            r##"Pre-merge hard forks (block based):
+            "Pre-merge hard forks (block based):
 - Frontier                         @0
-"##
+"
         );
     }
 
