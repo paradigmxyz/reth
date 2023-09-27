@@ -1086,6 +1086,17 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
 
         Ok(Some(Block { header, body, ommers, withdrawals }.with_senders(senders)))
     }
+
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Block>> {
+        let mut blocks = Vec::with_capacity(range.end().saturating_sub(*range.start()) as usize);
+        // TODO: this can be optimized by using cursors
+        for num in range {
+            if let Some(block) = self.block_by_number(num)? {
+                blocks.push(block);
+            }
+        }
+        Ok(blocks)
+    }
 }
 
 impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX> {
