@@ -161,7 +161,7 @@ mod test {
             let hashes = cursor
                 .walk(None)
                 .unwrap()
-                .map(|row| row.map(|(_key, value)| value.take()).map_err(|e| e.into()));
+                .map(|row| row.map(|(_key, value)| value.into_value()).map_err(|e| e.into()));
 
             create_snapshot_T1_T2::<Headers, HeaderTD, BlockNumber>(
                 &tx,

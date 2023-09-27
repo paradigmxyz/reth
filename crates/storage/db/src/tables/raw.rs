@@ -54,13 +54,20 @@ impl<K: Key> RawKey<K> {
     pub fn new(key: K) -> Self {
         Self { key: K::encode(key).as_ref().to_vec(), _phantom: std::marker::PhantomData }
     }
+
     /// Returns the decoded value.
     pub fn key(&self) -> Result<K, DatabaseError> {
         K::decode(&self.key)
     }
+
     /// Returns the raw key as seen on the database.
     pub fn raw_key(&self) -> &Vec<u8> {
         &self.key
+    }
+
+    /// Consumes [`Self`] and returns the inner raw key.
+    pub fn into_key(self) -> Vec<u8> {
+        self.key
     }
 }
 
@@ -112,12 +119,12 @@ impl<V: Value> RawValue<V> {
     }
 
     /// Returns the raw value as seen on the database.
-    pub fn raw_value(&self) -> &Vec<u8> {
+    pub fn raw_value(&self) -> &[u8] {
         &self.value
     }
 
     /// Consumes [`Self`] and returns the inner raw value.
-    pub fn take(self) -> Vec<u8> {
+    pub fn into_value(self) -> Vec<u8> {
         self.value
     }
 }

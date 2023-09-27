@@ -64,7 +64,7 @@ macro_rules! generate_snapshot_func {
                             .into_iter()
                             .map(|row|
                                 row
-                                    .map(|(_key, val)| val.take())
+                                    .map(|(_key, val)| val.into_value())
                                     .map_err(|e| Box::new(e) as Box<dyn StdError>)
                             );
 
