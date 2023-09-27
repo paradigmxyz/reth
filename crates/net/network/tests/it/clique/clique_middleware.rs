@@ -92,7 +92,7 @@ pub trait CliqueMiddleware: Send + Sync + Middleware {
 
     /// Returns the genesis block of the [`Geth`](ethers_core::utils::Geth) instance by calling
     /// geth's `eth_getBlock`.
-    async fn remote_genesis_block(&self) -> Result<Block<B256>, CliqueMiddlewareError<Self>> {
+    async fn remote_genesis_block(&self) -> Result<Block<H256>, CliqueMiddlewareError<Self>> {
         self.get_block(BlockNumber::Earliest).await?.ok_or(CliqueError::NoGenesis)
     }
 
