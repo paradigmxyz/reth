@@ -7,7 +7,7 @@ use crate::{
     RawKey, RawTable,
 };
 use reth_interfaces::RethResult;
-use reth_nippy_jar::{ColumnResultValue, NippyJar, PHFKey};
+use reth_nippy_jar::{ColumnResult, NippyJar, PHFKey};
 use std::{error::Error as StdError, ops::RangeInclusive};
 
 /// Macro that generates snapshot creation functions that take an arbitratry number of [`Table`] and
@@ -38,7 +38,7 @@ macro_rules! generate_snapshot_func {
                     tx: &impl DbTx<'tx>,
                     range: RangeInclusive<K>,
                     dict_compression_set: Option<Vec<impl Iterator<Item = Vec<u8>>>>,
-                    keys: Option<impl Iterator<Item = ColumnResultValue<impl PHFKey>>>,
+                    keys: Option<impl Iterator<Item = ColumnResult<impl PHFKey>>>,
                     row_count: usize,
                     nippy_jar: &mut NippyJar
                 ) -> RethResult<()>
