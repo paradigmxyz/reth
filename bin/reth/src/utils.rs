@@ -6,7 +6,7 @@ use reth_consensus_common::validation::validate_block_standalone;
 use reth_db::{
     cursor::DbCursorRO,
     database::Database,
-    table::{Table, TableRow},
+    table::{Decode, Decompress, Table, TableRow},
     transaction::{DbTx, DbTxMut},
     DatabaseError, RawTable, TableRawRow,
 };
@@ -128,16 +128,22 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
             let map_filter = |row: Result<TableRawRow<T>, _>| {
                 if let Ok((k, v)) = row {
+                    let (key, value) = (k.into_key(), v.into_value());
+
                     let result = || {
                         if filter.only_count {
                             return None
                         }
-                        Some((k.key().unwrap(), v.value().unwrap()))
+                        Some((
+                            <T as Table>::Key::decode(&key).unwrap(),
+                            <T as Table>::Value::decompress(&value).unwrap(),
+                        ))
                     };
+
                     match &*bmb {
                         Some(searcher) => {
-                            if searcher.find_first_in(v.raw_value()).is_some() ||
-                                searcher.find_first_in(k.raw_key()).is_some()
+                            if searcher.find_first_in(&value).is_some() ||
+                                searcher.find_first_in(&key).is_some()
                             {
                                 hits += 1;
                                 return result()
