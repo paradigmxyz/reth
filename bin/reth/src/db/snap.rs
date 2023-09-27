@@ -4,7 +4,7 @@ use clap::{clap_derive::ValueEnum, Parser};
 use eyre::WrapErr;
 use reth_db::{
     database::Database,
-    snapshot::{create_snapshot_T1_T2_T3_T4_T5},
+    snapshot::{create_snapshot_T1_T2, create_snapshot_T1_T2_T3_T4_T5},
     table::Table,
     tables,
     transaction::DbTx,
@@ -57,7 +57,7 @@ impl Command {
         let with_compression = true;
         let with_filter = true;
 
-        let mut nippy_jar = NippyJar::new_without_header(5, snap_file.as_path());
+        let mut nippy_jar = NippyJar::new_without_header(2, snap_file.as_path());
 
         if with_compression {
             nippy_jar = nippy_jar.with_zstd(false, 0);
@@ -84,18 +84,15 @@ impl Command {
             let _ = none_vec.take();
 
             match &self.modes {
-                Snapshots::Blocks => {
-                    create_snapshot_T1_T2_T3_T4_T5::<
-                        HeaderTD,
-                        Headers,
-                        BlockBodyIndices,
-                        BlockOmmers,
-                        BlockWithdrawals,
-                        BlockNumber,
-                    >(
-                        tx, 0..=(500_000 - 1), none_vec, Some(hashes), row_count, &mut nippy_jar
-                    )
-                }
+                Snapshots::Blocks => create_snapshot_T1_T2::<HeaderTD, Headers, BlockNumber>(
+                    tx,
+                    0..=(500_000 - 1),
+                    vec![],
+                    none_vec,
+                    Some(hashes),
+                    row_count,
+                    &mut nippy_jar,
+                ),
                 Snapshots::Transactions => todo!(),
                 Snapshots::Receipts => todo!(),
             }
