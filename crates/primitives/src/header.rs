@@ -675,10 +675,10 @@ impl From<HeadersDirection> for bool {
 #[cfg(feature = "test-utils")]
 mod ethers_compat {
     use super::*;
-    use ethers_core::types::{Block, H256 as EthersH256};
+    use ethers_core::types::{Block, H256};
 
-    impl From<&Block<EthersH256>> for Header {
-        fn from(block: &Block<EthersH256>) -> Self {
+    impl From<&Block<H256>> for Header {
+        fn from(block: &Block<H256>) -> Self {
             Header {
                 parent_hash: block.parent_hash.0.into(),
                 number: block.number.unwrap().as_u64(),
@@ -704,8 +704,8 @@ mod ethers_compat {
         }
     }
 
-    impl From<&Block<EthersH256>> for SealedHeader {
-        fn from(block: &Block<EthersH256>) -> Self {
+    impl From<&Block<H256>> for SealedHeader {
+        fn from(block: &Block<H256>) -> Self {
             let header = Header::from(block);
             match block.hash {
                 Some(hash) => header.seal(hash.0.into()),
