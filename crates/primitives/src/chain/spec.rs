@@ -1007,18 +1007,6 @@ impl ForkCondition {
         }
     }
 
-    /// An internal helper function that gives a value that satisfies this condition.
-    pub(crate) fn satisfy(&self) -> Head {
-        match *self {
-            ForkCondition::Block(number) => Head { number, ..Default::default() },
-            ForkCondition::Timestamp(timestamp) => Head { timestamp, ..Default::default() },
-            ForkCondition::TTD { total_difficulty, .. } => {
-                Head { total_difficulty, ..Default::default() }
-            }
-            ForkCondition::Never => unreachable!(),
-        }
-    }
-
     /// Returns the timestamp of the fork condition, if it is timestamp based.
     pub fn as_timestamp(&self) -> Option<u64> {
         match self {
