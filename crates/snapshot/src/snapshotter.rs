@@ -41,14 +41,6 @@ pub struct HighestSnapshots {
     pub transactions: Option<BlockNumber>,
 }
 
-impl HighestSnapshots {
-    /// Returns maximum snapshotted block number over all data parts.
-    /// If [`None`], no snapshots are available.
-    pub fn max_block_number(&self) -> Option<BlockNumber> {
-        self.headers.max(self.receipts).max(self.transactions)
-    }
-}
-
 /// Snapshot targets, per data part, measured in [`BlockNumber`] and [`TxNumber`], if applicable.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct SnapshotTargets {

@@ -954,7 +954,7 @@ mod tests {
         BlockNumber, PruneBatchSizes, PruneCheckpoint, PruneMode, PruneModes, PrunePart,
         ReceiptsLogPruneConfig, TxNumber, H256, MAINNET,
     };
-    use reth_provider::PruneCheckpointReader;
+    use reth_provider::{PruneCheckpointReader, TransactionsProvider};
     use reth_stages::test_utils::TestTransaction;
     use std::{collections::BTreeMap, ops::AddAssign};
     use tokio::sync::watch;

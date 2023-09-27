@@ -450,7 +450,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             None
         };
 
-        let (_highest_snapshots_tx, highest_snapshots_rx) = watch::channel(None);
+        let (highest_snapshots_tx, highest_snapshots_rx) = watch::channel(None);
 
         let mut hooks = EngineHooks::new();
 
@@ -470,6 +470,13 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         } else {
             Either::Right(stream::empty())
         };
+
+        let _snapshotter = reth_snapshot::Snapshotter::new(
+            db,
+            self.chain.clone(),
+            self.chain.snapshot_block_interval,
+            highest_snapshots_tx,
+        );
 
         // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
