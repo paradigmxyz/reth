@@ -17,7 +17,7 @@ use revm::{
         return_revert, CallInputs, CallScheme, CreateInputs, Gas, InstructionResult, Interpreter,
     },
     precompile::Precompiles,
-    primitives::{Env, ExecutionResult, Output, ResultAndState, TransactTo, B256},
+    primitives::{Env, ExecutionResult, Output, ResultAndState, TransactTo},
     Database, EVMData, Inspector,
 };
 use tokio::sync::mpsc;
