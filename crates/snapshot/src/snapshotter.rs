@@ -14,6 +14,7 @@ pub type SnapshotterResult = Result<SnapshotTargets, SnapshotterError>;
 pub type SnapshotterWithResult<DB> = (Snapshotter<DB>, SnapshotterResult);
 
 /// Snapshotting routine. Main snapshotting logic happens in [Snapshotter::run].
+#[derive(Debug)]
 pub struct Snapshotter<DB> {
     provider_factory: ProviderFactory<DB>,
     highest_snapshots: HighestSnapshots,

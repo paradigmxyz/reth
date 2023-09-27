@@ -18,6 +18,7 @@ use tokio::sync::oneshot;
 /// Manages snapshotting under the control of the engine.
 ///
 /// This type controls the [Snapshotter].
+#[derive(Debug)]
 pub struct SnapshotHook<DB> {
     /// The current state of the snapshotter.
     state: SnapshotterState<DB>,
@@ -147,6 +148,7 @@ impl<DB: Database + 'static> EngineHook for SnapshotHook<DB> {
 ///
 /// [SnapshotterState::Idle] means that the snapshotter is currently idle.
 /// [SnapshotterState::Running] means that the snapshotter is currently running.
+#[derive(Debug)]
 enum SnapshotterState<DB> {
     /// Snapshotter is idle.
     Idle(Option<Snapshotter<DB>>),
