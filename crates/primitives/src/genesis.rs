@@ -8,7 +8,6 @@ use crate::{
 };
 use itertools::Itertools;
 use reth_rlp::{encode_fixed_size, length_of_length, Encodable, Header as RlpHeader};
-use revm_primitives::B160;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -454,7 +453,7 @@ mod ethers_compat {
                 .alloc
                 .iter()
                 .map(|(addr, account)| (addr.0.into(), account.clone().into()))
-                .collect::<HashMap<B160, GenesisAccount>>();
+                .collect::<HashMap<Address, GenesisAccount>>();
 
             Genesis {
                 config: genesis.config.into(),
