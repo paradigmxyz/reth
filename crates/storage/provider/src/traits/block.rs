@@ -106,6 +106,11 @@ pub trait BlockReader:
     ///
     /// Returns `None` if block is not found.
     fn block_with_senders(&self, number: BlockNumber) -> RethResult<Option<BlockWithSenders>>;
+
+    /// Returns all blocks in the given inclusive range.
+    ///
+    /// Note: returns only available blocks
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Block>>;
 }
 
 /// Trait extension for `BlockReader`, for types that implement `BlockId` conversion.
