@@ -1088,6 +1088,10 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Block>> {
+        if range.is_empty() {
+            return Ok(Vec::new())
+        }
+
         let len = range.end().saturating_sub(*range.start()) as usize;
         let mut blocks = Vec::with_capacity(len);
 
