@@ -580,7 +580,7 @@ impl ChainSpec {
                 match next_cond {
                     ForkCondition::TTD { fork_block, .. } => {
                         // handle Sepolia merge netsplit case
-                        if let Some(_) = fork_block {
+                        if fork_block.is_some() {
                             return *fork_block
                         }
                         // ensure curr_cond is indeed ForkCondition::Block and return block_num
