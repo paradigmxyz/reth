@@ -9,7 +9,7 @@ use sucds::int_vectors::Access;
 use zstd::bulk::Decompressor;
 
 /// Simple cursor implementation to retrieve data from [`NippyJar`].
-pub struct NippyJarCursor<'a, H> {
+pub struct NippyJarCursor<'a, H = ()> {
     /// [`NippyJar`] which holds most of the required configuration to read from the file.
     jar: &'a NippyJar<H>,
     /// Optional dictionary decompressors.

@@ -774,7 +774,7 @@ mod tests {
         ctx.register_global_property("bigint", big_int, Attribute::all()).unwrap();
 
         let obj = contract.clone().into_js_object(&mut ctx).unwrap();
-        let s = r"({
+        let s = "({
                 call: function(contract) { return contract.getCaller(); },
                 value: function(contract) { return contract.getValue(); },
                 input: function(contract) { return contract.getInput(); }

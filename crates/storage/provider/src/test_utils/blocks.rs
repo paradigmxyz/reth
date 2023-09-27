@@ -4,7 +4,7 @@ use crate::{BundleStateWithReceipts, DatabaseProviderRW};
 use alloy_rlp::Decodable;
 use reth_db::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_primitives::{
-    b256, hex_literal::hex, Account, Address, BlockNumber, Bytes, Header, Log, Receipt,
+    b256, hex_literal::hex, Account, Address, BlockNumber, Bytes, Header, Log, Receipt, Receipts,
     SealedBlock, SealedBlockWithSenders, StorageEntry, TxType, Withdrawal, B256, U256,
 };
 use std::collections::HashMap;
@@ -128,7 +128,7 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
             ]),
         )]),
         vec![],
-        vec![vec![Some(Receipt {
+        Receipts::from_vec(vec![vec![Some(Receipt {
             tx_type: TxType::EIP2930,
             success: true,
             cumulative_gas_used: 300,
@@ -137,7 +137,7 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
                 topics: vec![B256::with_last_byte(1), B256::with_last_byte(2)],
                 data: Bytes::default(),
             }],
-        })]],
+        })]]),
         number,
     );
 
@@ -183,7 +183,7 @@ fn block2(
             )]),
         )]),
         vec![],
-        vec![vec![Some(Receipt {
+        Receipts::from_vec(vec![vec![Some(Receipt {
             tx_type: TxType::EIP1559,
             success: false,
             cumulative_gas_used: 400,
@@ -192,7 +192,7 @@ fn block2(
                 topics: vec![B256::with_last_byte(3), B256::with_last_byte(4)],
                 data: Bytes::default(),
             }],
-        })]],
+        })]]),
         number,
     );
     (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, bundle)

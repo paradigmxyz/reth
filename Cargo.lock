@@ -1063,20 +1063,6 @@ dependencies = [
 [[package]]
 name = "c-kzg"
 version = "0.1.0"
-source = "git+https://github.com/ethereum/c-kzg-4844?rev=fbef59a3f9e8fa998bdb5069d212daf83d586aa5#fbef59a3f9e8fa998bdb5069d212daf83d586aa5"
-dependencies = [
- "bindgen 0.66.1",
- "blst",
- "cc",
- "glob",
- "hex",
- "libc",
- "serde",
-]
-
-[[package]]
-name = "c-kzg"
-version = "0.1.0"
 source = "git+https://github.com/ethereum/c-kzg-4844#fbef59a3f9e8fa998bdb5069d212daf83d586aa5"
 dependencies = [
  "bindgen 0.66.1",
@@ -5639,6 +5625,7 @@ dependencies = [
  "reth-interfaces",
  "reth-libmdbx",
  "reth-metrics",
+ "reth-nippy-jar",
  "reth-primitives",
  "secp256k1",
  "serde",
@@ -5803,6 +5790,7 @@ dependencies = [
  "reth-db",
  "reth-eth-wire",
  "reth-network-api",
+ "reth-nippy-jar",
  "reth-primitives",
  "reth-rpc-types",
  "revm-primitives",
@@ -6025,7 +6013,7 @@ dependencies = [
  "assert_matches",
  "byteorder",
  "bytes",
- "c-kzg 0.1.0 (git+https://github.com/ethereum/c-kzg-4844?rev=fbef59a3f9e8fa998bdb5069d212daf83d586aa5)",
+ "c-kzg",
  "crc",
  "criterion",
  "derive_more",
@@ -6073,9 +6061,11 @@ dependencies = [
  "itertools 0.11.0",
  "parking_lot 0.12.1",
  "pin-project",
+ "rand 0.8.5",
  "rayon",
  "reth-db",
  "reth-interfaces",
+ "reth-nippy-jar",
  "reth-primitives",
  "reth-revm-primitives",
  "reth-trie",
@@ -6437,7 +6427,7 @@ name = "revm-precompile"
 version = "2.0.3"
 source = "git+https://github.com/Evalir/revm/?branch=reintroduce-alloy-rebased#28346646bdbb312a89c317079f84f9f1315b1f6a"
 dependencies = [
- "c-kzg 0.1.0 (git+https://github.com/ethereum/c-kzg-4844)",
+ "c-kzg",
  "k256",
  "num",
  "once_cell",
@@ -6458,7 +6448,7 @@ dependencies = [
  "auto_impl",
  "bitflags 2.4.0",
  "bitvec",
- "c-kzg 0.1.0 (git+https://github.com/ethereum/c-kzg-4844)",
+ "c-kzg",
  "enumn",
  "hashbrown 0.14.0",
  "hex",

@@ -68,6 +68,7 @@
 pub mod abstraction;
 
 mod implementation;
+pub mod snapshot;
 pub mod tables;
 mod utils;
 pub mod version;

@@ -22,7 +22,7 @@ use reth_primitives::{
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
     collections::{BTreeMap, HashSet},
-    ops::RangeBounds,
+    ops::{RangeBounds, RangeInclusive},
     sync::Arc,
     time::Instant,
 };
@@ -36,6 +36,8 @@ pub use state::{
 mod bundle_state_provider;
 mod chain_info;
 mod database;
+mod snapshot;
+pub use snapshot::SnapshotProvider;
 mod state;
 use crate::{providers::chain_info::ChainInfoTracker, traits::BlockSource};
 pub use bundle_state_provider::BundleStateProvider;
@@ -266,6 +268,10 @@ where
     /// Returns `None` if block is not found.
     fn block_with_senders(&self, number: BlockNumber) -> RethResult<Option<BlockWithSenders>> {
         self.database.provider()?.block_with_senders(number)
+    }
+
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Block>> {
+        self.database.provider()?.block_range(range)
     }
 }
 

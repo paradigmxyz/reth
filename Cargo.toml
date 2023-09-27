@@ -164,7 +164,7 @@ secp256k1 = { version = "0.27.0", default-features = false, features = [
 ] }
 enr = { version = "0.9", default-features = false, features = ["k256"] }
 # for eip-4844
-c-kzg = { git = "https://github.com/ethereum/c-kzg-4844", rev = "fbef59a3f9e8fa998bdb5069d212daf83d586aa5" }
+c-kzg = { git = "https://github.com/ethereum/c-kzg-4844" }
 
 ## config
 confy = "0.5"
