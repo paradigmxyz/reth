@@ -198,7 +198,7 @@ impl GethTraceBuilder {
                     AccountState::from_account_info(
                         db_acc.nonce,
                         db_acc.balance,
-                        db_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
+                        db_acc.code.as_ref().map(|code| code.original_bytes()),
                     ),
                 );
             }
@@ -211,12 +211,12 @@ impl GethTraceBuilder {
                 let pre_state = AccountState::from_account_info(
                     db_acc.nonce,
                     db_acc.balance,
-                    db_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
+                    db_acc.code.as_ref().map(|code| code.original_bytes()),
                 );
                 let post_state = AccountState::from_account_info(
                     changed_acc.nonce,
                     changed_acc.balance,
-                    changed_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
+                    changed_acc.code.as_ref().map(|code| code.original_bytes()),
                 );
                 state_diff.pre.insert(addr, pre_state);
                 state_diff.post.insert(addr, post_state);
