@@ -103,24 +103,28 @@ pub trait DebugApi {
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<GethTrace>;
 
-    /// The `debug_traceCallMany` method lets you run an `eth_callmany` within the context of the
+    /// The `debug_traceCallMany` method lets you run an `eth_callMany` within the context of the
     /// given block execution using the final state of parent block as the base followed by n
-    /// transactions
+    /// transactions.
     ///
     /// The first argument is a list of bundles. Each bundle can overwrite the block headers. This
     /// will affect all transaction in that bundle.
-    /// BlockNumber and transaction_index are optinal. Transaction_index
-    /// specifys the number of tx in the block to replay and -1 means all transactions should be
+    /// BlockNumber and transaction_index are optional. Transaction_index
+    /// specifies the number of tx in the block to replay and -1 means all transactions should be
     /// replayed.
     /// The trace can be configured similar to `debug_traceTransaction`.
     /// State override apply to all bundles.
+    ///
+    /// This methods is similar to many `eth_callMany`, hence this returns nested lists of traces.
+    /// Where the length of the outer list is the number of bundles and the length of the inner list
+    /// (`Vec<GethTrace>`) is the number of transactions in the bundle.
     #[method(name = "traceCallMany")]
     async fn debug_trace_call_many(
         &self,
         bundles: Vec<Bundle>,
         state_context: Option<StateContext>,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<Vec<GethTrace>>;
+    ) -> RpcResult<Vec<Vec<GethTrace>>>;
 
     /// Sets the logging backtrace location. When a backtrace location is set and a log message is
     /// emitted at that location,  the stack of the goroutine executing the log statement will
