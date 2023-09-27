@@ -215,6 +215,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                     if cnt1 % N1 == 0 {
                         let record = executor.get_revm_metric_record();
                         println!("");
+                        println!("block_number = {:?}", block_number);
                         println!("revm_record = {:?}", record.0);
                         println!("cachedb_size = {:?}", record.1);
                         println!("");
