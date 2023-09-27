@@ -350,7 +350,7 @@ impl CallTraceNode {
                         }
                         Delta::Removed(_) => Delta::Added(b256_value),
                         Delta::Changed(c) => {
-                            if c.from == B256_value {
+                            if c.from == b256_value {
                                 // remains unchanged if the value is the same
                                 Delta::Unchanged
                             } else {

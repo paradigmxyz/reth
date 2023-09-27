@@ -384,7 +384,7 @@ mod tests {
     }
 
     #[test]
-    fn compact_B256() {
+    fn compact_b256() {
         let mut buf = vec![];
         assert_eq!(B256::ZERO.to_compact(&mut buf), 32);
         assert_eq!(buf, vec![0; 32]);
