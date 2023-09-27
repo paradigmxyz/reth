@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use enr::k256::ecdsa::SigningKey;
 use ethers_core::{
-    types::{transaction::eip2718::TypedTransaction, Address, Block, BlockNumber, B256},
+    types::{transaction::eip2718::TypedTransaction, Address, Block, BlockNumber, H256},
     utils::secret_key_to_address,
 };
 use ethers_middleware::SignerMiddleware;
