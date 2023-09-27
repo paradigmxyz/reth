@@ -48,7 +48,7 @@ impl Hardfork {
     pub fn fork_id(&self, spec: &ChainSpec) -> Option<ForkId> {
         match spec.fork(*self) {
             ForkCondition::Never => None,
-            _ => Some(spec.fork_id(&spec.fork(*self).satisfy())),
+            _ => Some(spec.fork_id(&spec.satisfy(spec.fork(*self)))),
         }
     }
 

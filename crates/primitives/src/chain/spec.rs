@@ -509,17 +509,7 @@ impl ChainSpec {
             if let ForkCondition::Block(block) |
             ForkCondition::TTD { fork_block: Some(block), .. } = cond
             {
-                // the timestamp check here is a bit brittle as its tied to the self.satisfy() impl
-                // returning a non-0 head.timestamp for ForkCondition::Timestamp, and a 0
-                // timestamp for the other ForkCondition types
-                // this check is required though - without it, we will drop into the else block and
-                // shortcircuit for heads valid during timestamp-based forks, leading to an
-                // incorrect ForkId for Shanghai, Cancun etc. An alternative fix
-                // here would be to modify the Head returned in self.satisfy() to
-                // include a valid blocknum for ForkCondition::Timestamp, thus not
-                // excercising the else block, and calculating an incorrect fork_hash
                 if cond.active_at_head(head) {
-                    //|| head.timestamp > 0 {
                     if block != current_applied {
                         forkhash += block;
                         current_applied = block;
@@ -553,6 +543,62 @@ impl ChainSpec {
         }
 
         ForkId { hash: forkhash, next: 0 }
+    }
+
+    /// An internal helper function that returns a head block that satisfies a given Fork condition.
+    pub(crate) fn satisfy(&self, cond: ForkCondition) -> Head {
+        match cond {
+            ForkCondition::Block(number) => Head { number, ..Default::default() },
+            ForkCondition::Timestamp(timestamp) => {
+                // to satisfy every timestamp ForkCondition, we find the last ForkCondition::Block
+                // if one exists, and include its block_num in the returned Head
+                if let Some(last_block_num) = self.last_block_fork_before_merge_or_timestamp() {
+                    return Head { timestamp, number: last_block_num, ..Default::default() }
+                }
+                Head { timestamp, ..Default::default() }
+            }
+            ForkCondition::TTD { total_difficulty, .. } => {
+                Head { total_difficulty, ..Default::default() }
+            }
+            ForkCondition::Never => unreachable!(),
+        }
+    }
+
+    /// An internal helper function that returns the block number of the last block-based
+    /// fork that occurs before any existing TTD (merge)/timestamp based forks.
+    ///
+    /// Note: this returns None if the ChainSpec is not configured with a TTD/Timestamp fork.
+    pub(crate) fn last_block_fork_before_merge_or_timestamp(&self) -> Option<u64> {
+        let mut hardforks_iter = self.forks_iter().peekable();
+        while let Some((_, curr_cond)) = hardforks_iter.next() {
+            if let Some((_, next_cond)) = hardforks_iter.peek() {
+                // peek and find the first occurence of ForkCondition::TTD (merge) , or in
+                // custom ChainSpecs, the first occurence of
+                // ForkCondition::Timestamp. If curr_cond is ForkCondition::Block at
+                // this point, which it should be in most "normal" ChainSpecs,
+                // return its block_num
+                match next_cond {
+                    ForkCondition::TTD { fork_block, .. } => {
+                        // handle Sepolia merge netsplit case
+                        if let Some(_) = fork_block {
+                            return *fork_block
+                        }
+                        // ensure curr_cond is indeed ForkCondition::Block and return block_num
+                        if let ForkCondition::Block(block_num) = curr_cond {
+                            return Some(block_num)
+                        }
+                    }
+                    ForkCondition::Timestamp(_) => {
+                        // ensure curr_cond is indeed ForkCondition::Block and return block_num
+                        if let ForkCondition::Block(block_num) = curr_cond {
+                            return Some(block_num)
+                        }
+                    }
+                    ForkCondition::Block(_) | ForkCondition::Never => continue,
+                }
+            }
+        }
+        None
     }
 
     /// Build a chainspec using [`ChainSpecBuilder`]
