@@ -13,7 +13,7 @@ use jsonrpsee::core::RpcResult as Result;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     serde_helper::{num::U64HexOrNumber, JsonStorageKey},
-    AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes, H256, H64, U256, U64,
+    AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
 };
 use reth_provider::{
     BlockIdReader, BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider,
@@ -82,7 +82,7 @@ where
     }
 
     /// Handler for: `eth_getBlockByHash`
-    async fn block_by_hash(&self, hash: H256, full: bool) -> Result<Option<RichBlock>> {
+    async fn block_by_hash(&self, hash: B256, full: bool) -> Result<Option<RichBlock>> {
         trace!(target: "rpc::eth", ?hash, ?full, "Serving eth_getBlockByHash");
         Ok(EthApi::rpc_block(self, hash, full).await?)
     }
@@ -98,7 +98,7 @@ where
     }
 
     /// Handler for: `eth_getBlockTransactionCountByHash`
-    async fn block_transaction_count_by_hash(&self, hash: H256) -> Result<Option<U256>> {
+    async fn block_transaction_count_by_hash(&self, hash: B256) -> Result<Option<U256>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getBlockTransactionCountByHash");
         Ok(EthApi::block_transaction_count(self, hash).await?.map(U256::from))
     }
@@ -113,7 +113,7 @@ where
     }
 
     /// Handler for: `eth_getUncleCountByBlockHash`
-    async fn block_uncles_count_by_hash(&self, hash: H256) -> Result<Option<U256>> {
+    async fn block_uncles_count_by_hash(&self, hash: B256) -> Result<Option<U256>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getUncleCountByBlockHash");
         Ok(EthApi::ommers(self, hash)?.map(|ommers| U256::from(ommers.len())))
     }
@@ -136,7 +136,7 @@ where
     /// Handler for: `eth_getUncleByBlockHashAndIndex`
     async fn uncle_by_block_hash_and_index(
         &self,
-        hash: H256,
+        hash: B256,
         index: Index,
     ) -> Result<Option<RichBlock>> {
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getUncleByBlockHashAndIndex");
@@ -154,7 +154,7 @@ where
     }
 
     /// Handler for: `eth_getTransactionByHash`
-    async fn transaction_by_hash(&self, hash: H256) -> Result<Option<reth_rpc_types::Transaction>> {
+    async fn transaction_by_hash(&self, hash: B256) -> Result<Option<reth_rpc_types::Transaction>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionByHash");
         Ok(EthTransactions::transaction_by_hash(self, hash).await?.map(Into::into))
     }
@@ -162,7 +162,7 @@ where
     /// Handler for: `eth_getTransactionByBlockHashAndIndex`
     async fn transaction_by_block_hash_and_index(
         &self,
-        hash: H256,
+        hash: B256,
         index: Index,
     ) -> Result<Option<reth_rpc_types::Transaction>> {
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getTransactionByBlockHashAndIndex");
@@ -180,7 +180,7 @@ where
     }
 
     /// Handler for: `eth_getTransactionReceipt`
-    async fn transaction_receipt(&self, hash: H256) -> Result<Option<TransactionReceipt>> {
+    async fn transaction_receipt(&self, hash: B256) -> Result<Option<TransactionReceipt>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionReceipt");
         Ok(EthTransactions::transaction_receipt(self, hash).await?)
     }
@@ -197,7 +197,7 @@ where
         address: Address,
         index: JsonStorageKey,
         block_number: Option<BlockId>,
-    ) -> Result<H256> {
+    ) -> Result<B256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getStorageAt");
         Ok(self
             .on_blocking_task(|this| async move { this.storage_at(address, index, block_number) })
@@ -329,23 +329,23 @@ where
     }
 
     /// Handler for: `eth_submitHashrate`
-    async fn submit_hashrate(&self, _hashrate: U256, _id: H256) -> Result<bool> {
+    async fn submit_hashrate(&self, _hashrate: U256, _id: B256) -> Result<bool> {
         Ok(false)
     }
 
     /// Handler for: `eth_submitWork`
-    async fn submit_work(&self, _nonce: H64, _pow_hash: H256, _mix_digest: H256) -> Result<bool> {
+    async fn submit_work(&self, _nonce: B64, _pow_hash: B256, _mix_digest: B256) -> Result<bool> {
         Err(internal_rpc_err("unimplemented"))
     }
 
     /// Handler for: `eth_sendTransaction`
-    async fn send_transaction(&self, request: TransactionRequest) -> Result<H256> {
+    async fn send_transaction(&self, request: TransactionRequest) -> Result<B256> {
         trace!(target: "rpc::eth", ?request, "Serving eth_sendTransaction");
         Ok(EthTransactions::send_transaction(self, request).await?)
     }
 
     /// Handler for: `eth_sendRawTransaction`
-    async fn send_raw_transaction(&self, tx: Bytes) -> Result<H256> {
+    async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256> {
         trace!(target: "rpc::eth", ?tx, "Serving eth_sendRawTransaction");
         Ok(EthTransactions::send_raw_transaction(self, tx).await?)
     }

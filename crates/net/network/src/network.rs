@@ -11,7 +11,7 @@ use reth_network_api::{
     NetworkError, NetworkInfo, PeerInfo, PeerKind, Peers, PeersInfo, Reputation,
     ReputationChangeKind,
 };
-use reth_primitives::{Head, NodeRecord, PeerId, TransactionSigned, H256};
+use reth_primitives::{Head, NodeRecord, PeerId, TransactionSigned, B256};
 use reth_rpc_types::NetworkStatus;
 use std::{
     net::SocketAddr,
@@ -135,7 +135,7 @@ impl NetworkHandle {
     /// Caution: in PoS this is a noop, since new block are no longer announced over devp2p, but are
     /// instead sent to node node by the CL. However, they can still be requested over devp2p, but
     /// broadcasting them is a considered a protocol violation..
-    pub fn announce_block(&self, block: NewBlock, hash: H256) {
+    pub fn announce_block(&self, block: NewBlock, hash: B256) {
         self.send_message(NetworkHandleMessage::AnnounceBlock(block, hash))
     }
 
@@ -332,7 +332,7 @@ pub(crate) enum NetworkHandleMessage {
     /// Add a new listener for [`NetworkEvent`].
     EventListener(UnboundedSender<NetworkEvent>),
     /// Broadcast event to announce a new block to all nodes.
-    AnnounceBlock(NewBlock, H256),
+    AnnounceBlock(NewBlock, B256),
     /// Sends the list of transactions to the given peer.
     SendTransaction { peer_id: PeerId, msg: SharedTransactions },
     /// Sends the list of transactions hashes to the given peer.

@@ -5,7 +5,7 @@ use crate::{
     EthApi,
 };
 use reth_primitives::{
-    serde_helper::JsonStorageKey, Address, BlockId, BlockNumberOrTag, Bytes, H256, KECCAK_EMPTY,
+    serde_helper::JsonStorageKey, Address, BlockId, BlockNumberOrTag, Bytes, B256, KECCAK_EMPTY,
     U256, U64,
 };
 use reth_provider::{
@@ -78,10 +78,10 @@ where
         address: Address,
         index: JsonStorageKey,
         block_id: Option<BlockId>,
-    ) -> EthResult<H256> {
+    ) -> EthResult<B256> {
         let state = self.state_at_block_id_or_latest(block_id)?;
         let value = state.storage(address, index.0)?.unwrap_or_default();
-        Ok(H256::new(value.to_be_bytes()))
+        Ok(B256::new(value.to_be_bytes()))
     }
 
     #[allow(unused)]

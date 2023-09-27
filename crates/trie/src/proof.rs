@@ -14,7 +14,7 @@ use reth_primitives::{
         nodes::{rlp_hash, BranchNode, LeafNode, CHILD_INDEX_RANGE},
         BranchNodeCompact, HashBuilder, Nibbles,
     },
-    Address, Bytes, H256,
+    Address, Bytes, B256,
 };
 
 /// A struct for generating merkle proofs.
@@ -102,7 +102,7 @@ where
         &self,
         trie_cursor: &mut AccountTrieCursor<T>,
         proof_restorer: &mut ProofRestorer<'a, 'b, TX, H>,
-        hashed_address: H256,
+        hashed_address: B256,
     ) -> Result<Vec<Bytes>, ProofError> {
         let mut intermediate_proofs = Vec::new();
 
@@ -202,7 +202,7 @@ where
                 child_key_to_seek.resize(32, 0);
 
                 let leaf_node_rlp =
-                    self.restore_leaf_node(H256::from_slice(&child_key_to_seek), child_key.len())?;
+                    self.restore_leaf_node(B256::from_slice(&child_key_to_seek), child_key.len())?;
                 branch_node_stack.push(leaf_node_rlp.to_vec());
             }
         }
@@ -214,7 +214,7 @@ where
 
     /// Restore leaf node.
     /// The leaf nodes are always encoded as `RLP(node) or RLP(keccak(RLP(node)))`.
-    fn restore_leaf_node(&mut self, seek_key: H256, slice_at: usize) -> Result<Bytes, ProofError> {
+    fn restore_leaf_node(&mut self, seek_key: B256, slice_at: usize) -> Result<Bytes, ProofError> {
         let (hashed_address, account) = self
             .hashed_account_cursor
             .seek(seek_key)?
@@ -240,7 +240,7 @@ where
     /// The target node might be missing from the trie.
     fn restore_target_leaf_node(
         &mut self,
-        seek_key: H256,
+        seek_key: B256,
         slice_at: usize,
     ) -> Result<Option<Bytes>, ProofError> {
         let (hashed_address, account) = match self.hashed_account_cursor.seek(seek_key)? {

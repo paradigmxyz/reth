@@ -4,7 +4,7 @@ use alloy_rlp::Decodable;
 use reth_primitives::{
     constants::{MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
     proofs::{self, EMPTY_LIST_HASH},
-    Block, Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawal, H256, U256, U64,
+    Block, Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawal, B256, U256, U64,
 };
 use reth_rpc_types::engine::{
     payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
@@ -266,7 +266,7 @@ pub fn convert_block_to_payload_input_v2(value: SealedBlock) -> ExecutionPayload
 /// See <https://github.com/ethereum/go-ethereum/blob/79a478bb6176425c2400e949890e668a3d9a3d05/core/beacon/types.go#L145>
 pub fn try_into_block(
     value: ExecutionPayload,
-    parent_beacon_block_root: Option<H256>,
+    parent_beacon_block_root: Option<B256>,
 ) -> Result<Block, PayloadError> {
     let mut base_payload = match value {
         ExecutionPayload::V1(payload) => try_payload_v1_to_block(payload)?,
@@ -291,7 +291,7 @@ pub fn try_into_block(
 /// [SealedBlock].
 pub fn try_into_sealed_block(
     payload: ExecutionPayload,
-    parent_beacon_block_root: Option<H256>,
+    parent_beacon_block_root: Option<B256>,
 ) -> Result<SealedBlock, PayloadError> {
     let block_hash = payload.block_hash();
     let base_payload = try_into_block(payload, parent_beacon_block_root)?;
@@ -306,7 +306,7 @@ pub fn try_into_sealed_block(
 /// If the provided block hash does not match the block hash computed from the provided block, this
 /// returns [PayloadError::BlockHash].
 pub fn validate_block_hash(
-    expected_block_hash: H256,
+    expected_block_hash: B256,
     block: Block,
 ) -> Result<SealedBlock, PayloadError> {
     let sealed_block = block.seal_slow();

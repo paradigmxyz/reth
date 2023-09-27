@@ -43,7 +43,7 @@ use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse, EnrWrapper};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
-    hex, ForkId, PeerId, H256,
+    hex, ForkId, PeerId, B256,
 };
 use secp256k1::SecretKey;
 use std::{
@@ -929,7 +929,7 @@ impl Discv4Service {
     }
 
     /// Encodes the packet, sends it and returns the hash.
-    pub(crate) fn send_packet(&mut self, msg: Message, to: SocketAddr) -> H256 {
+    pub(crate) fn send_packet(&mut self, msg: Message, to: SocketAddr) -> B256 {
         let (payload, hash) = msg.encode(&self.secret_key);
         trace!(target : "discv4",  r#type=?msg.msg_type(), ?to, ?hash, "sending packet");
         let _ = self.egress.try_send((payload, to)).map_err(|err| {
@@ -943,7 +943,7 @@ impl Discv4Service {
     }
 
     /// Message handler for an incoming `Ping`
-    fn on_ping(&mut self, ping: Ping, remote_addr: SocketAddr, remote_id: PeerId, hash: H256) {
+    fn on_ping(&mut self, ping: Ping, remote_addr: SocketAddr, remote_id: PeerId, hash: B256) {
         if self.is_expired(ping.expire) {
             // ping's expiration timestamp is in the past
             return
@@ -1067,7 +1067,7 @@ impl Discv4Service {
     /// Sends a ping message to the node's UDP address.
     ///
     /// Returns the echo hash of the ping message.
-    pub(crate) fn send_ping(&mut self, node: NodeRecord, reason: PingReason) -> H256 {
+    pub(crate) fn send_ping(&mut self, node: NodeRecord, reason: PingReason) -> B256 {
         let remote_addr = node.udp_addr();
         let id = node.id;
         let ping = Ping {
@@ -1200,7 +1200,7 @@ impl Discv4Service {
         msg: EnrRequest,
         remote_addr: SocketAddr,
         id: PeerId,
-        request_hash: H256,
+        request_hash: B256,
     ) {
         if !self.config.enable_eip868 || self.is_expired(msg.expire) {
             return
@@ -1720,7 +1720,7 @@ struct PingRequest {
     // Node to which the request was sent.
     node: NodeRecord,
     // Hash sent in the Ping request
-    echo_hash: H256,
+    echo_hash: B256,
     /// Why this ping was sent.
     reason: PingReason,
 }
@@ -1929,7 +1929,7 @@ struct EnrRequestState {
     // Timestamp when the request was sent.
     sent_at: Instant,
     // Hash sent in the Ping request
-    echo_hash: H256,
+    echo_hash: B256,
 }
 
 /// Stored node info.

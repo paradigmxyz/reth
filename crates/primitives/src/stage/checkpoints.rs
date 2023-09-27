@@ -1,6 +1,6 @@
 use crate::{
     trie::{hash_builder::HashBuilderState, StoredSubNode},
-    Address, BlockNumber, H256,
+    Address, BlockNumber, B256,
 };
 use bytes::{Buf, BufMut};
 use reth_codecs::{derive_arbitrary, main_codec, Compact};
@@ -16,7 +16,7 @@ pub struct MerkleCheckpoint {
     /// The target block number.
     pub target_block: BlockNumber,
     /// The last hashed account key processed.
-    pub last_account_key: H256,
+    pub last_account_key: B256,
     /// The last walker key processed.
     pub last_walker_key: Vec<u8>,
     /// Previously recorded walker stack.
@@ -29,7 +29,7 @@ impl MerkleCheckpoint {
     /// Creates a new Merkle checkpoint.
     pub fn new(
         target_block: BlockNumber,
-        last_account_key: H256,
+        last_account_key: B256,
         last_walker_key: Vec<u8>,
         walker_stack: Vec<StoredSubNode>,
         state: HashBuilderState,
@@ -71,7 +71,7 @@ impl Compact for MerkleCheckpoint {
     {
         let target_block = buf.get_u64();
 
-        let last_account_key = H256::from_slice(&buf[..32]);
+        let last_account_key = B256::from_slice(&buf[..32]);
         buf.advance(32);
 
         let last_walker_key_len = buf.get_u16() as usize;
@@ -119,7 +119,7 @@ pub struct StorageHashingCheckpoint {
     /// The next account to start hashing from.
     pub address: Option<Address>,
     /// The next storage slot to start hashing from.
-    pub storage: Option<H256>,
+    pub storage: Option<B256>,
     /// Block range which this checkpoint is valid for.
     pub block_range: CheckpointBlockRange,
     /// Progress measured in storage slots.
@@ -396,9 +396,9 @@ mod tests {
         let checkpoint = MerkleCheckpoint {
             target_block: rng.gen(),
             last_account_key: rng.gen(),
-            last_walker_key: H256::random_with(&mut rng).to_vec(),
+            last_walker_key: B256::random_with(&mut rng).to_vec(),
             walker_stack: vec![StoredSubNode {
-                key: H256::random_with(&mut rng).to_vec(),
+                key: B256::random_with(&mut rng).to_vec(),
                 nibble: Some(rng.gen()),
                 node: None,
             }],

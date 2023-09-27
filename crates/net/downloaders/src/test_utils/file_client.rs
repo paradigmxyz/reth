@@ -13,7 +13,7 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId,
-    H256,
+    B256,
 };
 use std::{
     collections::HashMap,
@@ -115,7 +115,7 @@ impl FileClient {
     }
 
     /// Get the tip hash of the chain.
-    pub fn tip(&self) -> Option<H256> {
+    pub fn tip(&self) -> Option<B256> {
         self.headers.get(&(self.headers.len() as u64)).map(|h| h.hash_slow())
     }
 
@@ -213,7 +213,7 @@ impl BodiesClient for FileClient {
 
     fn get_block_bodies_with_priority(
         &self,
-        hashes: Vec<H256>,
+        hashes: Vec<B256>,
         _priority: Priority,
     ) -> Self::Output {
         // this just searches the buffer, and fails if it can't find the block

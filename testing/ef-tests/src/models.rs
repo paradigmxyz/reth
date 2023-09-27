@@ -8,8 +8,8 @@ use reth_db::{
 };
 use reth_primitives::{
     keccak256, Account as RethAccount, Address, Bloom, Bytecode, Bytes, ChainSpec,
-    ChainSpecBuilder, Header as RethHeader, JsonU256, SealedHeader, StorageEntry, Withdrawal, H256,
-    H64, U256,
+    ChainSpecBuilder, Header as RethHeader, JsonU256, SealedHeader, StorageEntry, Withdrawal, B256,
+    B64, U256,
 };
 use serde::{self, Deserialize};
 use std::{collections::BTreeMap, ops::Deref};
@@ -30,7 +30,7 @@ pub struct BlockchainTest {
     /// The test pre-state.
     pub pre: State,
     /// Hash of the best block.
-    pub lastblockhash: H256,
+    pub lastblockhash: B256,
     /// Network spec.
     pub network: ForkSpec,
     #[serde(default)]
@@ -55,35 +55,35 @@ pub struct Header {
     /// Gas used.
     pub gas_used: JsonU256,
     /// Block Hash.
-    pub hash: H256,
+    pub hash: B256,
     /// Mix hash.
-    pub mix_hash: H256,
+    pub mix_hash: B256,
     /// Seal nonce.
-    pub nonce: H64,
+    pub nonce: B64,
     /// Block number.
     pub number: JsonU256,
     /// Parent hash.
-    pub parent_hash: H256,
+    pub parent_hash: B256,
     /// Receipt trie.
-    pub receipt_trie: H256,
+    pub receipt_trie: B256,
     /// State root.
-    pub state_root: H256,
+    pub state_root: B256,
     /// Timestamp.
     pub timestamp: JsonU256,
     /// Transactions trie.
-    pub transactions_trie: H256,
+    pub transactions_trie: B256,
     /// Uncle hash.
-    pub uncle_hash: H256,
+    pub uncle_hash: B256,
     /// Base fee per gas.
     pub base_fee_per_gas: Option<JsonU256>,
     /// Withdrawals root.
-    pub withdrawals_root: Option<H256>,
+    pub withdrawals_root: Option<B256>,
     /// Blob gas used.
     pub blob_gas_used: Option<JsonU256>,
     /// Excess blob gas.
     pub excess_blob_gas: Option<JsonU256>,
     /// Parent beacon block root.
-    pub parent_beacon_block_root: Option<H256>,
+    pub parent_beacon_block_root: Option<B256>,
 }
 
 impl From<Header> for SealedHeader {
@@ -169,7 +169,7 @@ impl State {
             account.storage.iter().try_for_each(|(k, v)| {
                 tx.put::<tables::PlainStorageState>(
                     address,
-                    StorageEntry { key: H256::from_slice(&k.0.to_be_bytes::<32>()), value: v.0 },
+                    StorageEntry { key: B256::from_slice(&k.0.to_be_bytes::<32>()), value: v.0 },
                 )
             })?;
         }
@@ -191,7 +191,7 @@ impl Deref for State {
 #[serde(untagged)]
 pub enum RootOrState {
     /// If state is too big, only state root is present
-    Root(H256),
+    Root(B256),
     /// State
     State(BTreeMap<Address, Account>),
 }
@@ -238,7 +238,7 @@ impl Account {
         let mut storage_cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
         for (slot, value) in self.storage.iter() {
             if let Some(entry) =
-                storage_cursor.seek_by_key_subkey(address, H256::new(slot.0.to_be_bytes()))?
+                storage_cursor.seek_by_key_subkey(address, B256::new(slot.0.to_be_bytes()))?
             {
                 if U256::from_be_bytes(entry.key.0) == slot.0 {
                     assert_equal(
@@ -396,7 +396,7 @@ pub struct Transaction {
     /// Max priority fee per gas
     pub max_priority_fee_per_gas: Option<JsonU256>,
     /// Transaction hash.
-    pub hash: Option<H256>,
+    pub hash: Option<B256>,
 }
 
 /// Access list item
@@ -406,7 +406,7 @@ pub struct AccessListItem {
     /// Account address
     pub address: Address,
     /// Storage key.
-    pub storage_keys: Vec<H256>,
+    pub storage_keys: Vec<B256>,
 }
 
 /// Access list.

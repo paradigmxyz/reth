@@ -11,7 +11,7 @@ use reth_interfaces::p2p::{
     priority::Priority,
 };
 use reth_network_api::ReputationChangeKind;
-use reth_primitives::{Header, PeerId, H256};
+use reth_primitives::{Header, PeerId, B256};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
@@ -108,7 +108,7 @@ impl BodiesClient for FetchClient {
     /// Sends a `GetBlockBodies` request to an available peer.
     fn get_block_bodies_with_priority(
         &self,
-        request: Vec<H256>,
+        request: Vec<B256>,
         priority: Priority,
     ) -> Self::Output {
         let (response, rx) = oneshot::channel();

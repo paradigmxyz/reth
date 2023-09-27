@@ -97,10 +97,25 @@ pub use self::ruint::UintTryTo;
 pub use alloy_primitives::{
     self, address, b256, bloom, bytes, eip191_hash_message, hex, hex_literal, keccak256, ruint,
     Address, BlockHash, BlockNumber, Bloom, BloomInput, Bytes, ChainId, Selector, StorageKey,
-    StorageValue, TxHash, TxIndex, TxNumber, B128 as H128, B256 as H256, B512 as H512, B64 as H64,
-    U128, U256, U64, U8,
+    StorageValue, TxHash, TxIndex, TxNumber, B128, B256, B512, B64, U128, U256, U64, U8,
 };
 pub use revm_primitives::{self, JumpMap};
+
+#[doc(hidden)]
+#[deprecated = "use B128 instead"]
+pub type H128 = B128;
+
+#[doc(hidden)]
+#[deprecated = "use B256 instead"]
+pub type H256 = B256;
+
+#[doc(hidden)]
+#[deprecated = "use B512 instead"]
+pub type H512 = B512;
+
+#[doc(hidden)]
+#[deprecated = "use B64 instead"]
+pub type H64 = B64;
 
 #[cfg(any(test, feature = "arbitrary"))]
 pub use arbitrary;

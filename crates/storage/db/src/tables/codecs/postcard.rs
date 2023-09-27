@@ -40,4 +40,4 @@ macro_rules! impl_postcard {
 type VecU8 = Vec<u8>;
 
 //#[cfg(feature = "bench-postcard")]
-//impl_postcard!(VecU8, Receipt, H256, U256, Address, u8, u16, u64, Header, Account, Log, TxType);
+//impl_postcard!(VecU8, Receipt, B256, U256, Address, u8, u16, u64, Header, Account, Log, TxType);

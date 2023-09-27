@@ -1,4 +1,4 @@
-use crate::{transaction::util::secp256k1, Address, H256, U256};
+use crate::{transaction::util::secp256k1, Address, B256, U256};
 use alloy_primitives::Bytes;
 use alloy_rlp::{Decodable, Encodable, Error as RlpError};
 use bytes::Buf;
@@ -115,7 +115,7 @@ impl Signature {
     }
 
     /// Recover signer address from message hash.
-    pub fn recover_signer(&self, hash: H256) -> Option<Address> {
+    pub fn recover_signer(&self, hash: B256) -> Option<Address> {
         let mut sig: [u8; 65] = [0; 65];
 
         sig[0..32].copy_from_slice(&self.r.to_be_bytes::<32>());
@@ -152,7 +152,7 @@ impl Signature {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Address, Signature, H256, U256};
+    use crate::{Address, Signature, B256, U256};
     use bytes::BytesMut;
     use std::str::FromStr;
 
@@ -226,7 +226,7 @@ mod tests {
             odd_y_parity: false,
         };
         let hash =
-            H256::from_str("daf5a779ae972f972197303d7b574746c7ef83eadac0f2791ad23db92e4c8e53")
+            B256::from_str("daf5a779ae972f972197303d7b574746c7ef83eadac0f2791ad23db92e4c8e53")
                 .unwrap();
         let signer = signature.recover_signer(hash).unwrap();
         let expected = Address::from_str("0x9d8a62f656a8d1615c1294fd71e9cfb3e4855a4f").unwrap();

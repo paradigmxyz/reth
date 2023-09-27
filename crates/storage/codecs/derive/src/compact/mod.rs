@@ -24,7 +24,7 @@ type FieldType = String;
 /// `Compact` has alternative functions that can be used as a workaround for type
 /// specialization of fixed sized types.
 ///
-/// Example: `Vec<H256>` vs `Vec<U256>`. The first does not
+/// Example: `Vec<B256>` vs `Vec<U256>`. The first does not
 /// require the len of the element, while the latter one does.
 type UseAlternative = bool;
 // Helper Alias type
@@ -133,7 +133,7 @@ fn load_field(field: &syn::Field, fields: &mut FieldList, is_enum: bool) {
 }
 
 /// Since there's no impl specialization in rust stable atm, once we find we have a
-/// Vec/Option we try to find out if it's a Vec/Option of a fixed size data type, e.g. `Vec<H256>`.
+/// Vec/Option we try to find out if it's a Vec/Option of a fixed size data type, e.g. `Vec<B256>`.
 ///
 /// If so, we use another impl to code/decode its data.
 fn should_use_alt_impl(ftype: &String, segment: &syn::PathSegment) -> bool {
@@ -143,7 +143,7 @@ fn should_use_alt_impl(ftype: &String, segment: &syn::PathSegment) -> bool {
                 if let (Some(path), 1) =
                     (arg_path.path.segments.first(), arg_path.path.segments.len())
                 {
-                    if ["H256", "Address", "Address", "Bloom", "TxHash"]
+                    if ["B256", "Address", "Address", "Bloom", "TxHash"]
                         .contains(&path.ident.to_string().as_str())
                     {
                         return true
@@ -190,7 +190,7 @@ mod tests {
                 f_bool_t: bool,
                 f_bool_f: bool,
                 f_option_none: Option<U256>,
-                f_option_some: Option<H256>,
+                f_option_some: Option<B256>,
                 f_option_some_u64: Option<u64>,
                 f_vec_empty: Vec<U256>,
                 f_vec_some: Vec<Address>,

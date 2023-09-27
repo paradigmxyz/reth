@@ -3,7 +3,7 @@
 use crate::eth::error::SignError;
 use alloy_dyn_abi::TypedData;
 use reth_primitives::{
-    eip191_hash_message, sign_message, Address, Signature, TransactionSigned, H256,
+    eip191_hash_message, sign_message, Address, Signature, TransactionSigned, B256,
 };
 use reth_rpc_types::TypedTransactionRequest;
 
@@ -48,9 +48,9 @@ impl DevSigner {
         self.accounts.get(&account).ok_or(SignError::NoAccount)
     }
 
-    fn sign_hash(&self, hash: H256, account: Address) -> Result<Signature> {
+    fn sign_hash(&self, hash: B256, account: Address) -> Result<Signature> {
         let secret = self.get_key(account)?;
-        let signature = sign_message(H256::from_slice(secret.as_ref()), hash);
+        let signature = sign_message(B256::from_slice(secret.as_ref()), hash);
         signature.map_err(|_| SignError::CouldNotSign)
     }
 }

@@ -1,4 +1,4 @@
-use crate::{Address, Bloom, Bytes, H256};
+use crate::{Address, Bloom, Bytes, B256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::{main_codec, Compact};
 
@@ -12,10 +12,10 @@ pub struct Log {
     #[cfg_attr(
         any(test, feature = "arbitrary"),
         proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<H256>(), 0..=5)"
+            strategy = "proptest::collection::vec(proptest::arbitrary::any::<B256>(), 0..=5)"
         )
     )]
-    pub topics: Vec<H256>,
+    pub topics: Vec<B256>,
     /// Arbitrary length data.
     pub data: Bytes,
 }

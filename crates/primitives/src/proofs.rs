@@ -4,7 +4,7 @@ use crate::{
     b256, keccak256,
     trie::{HashBuilder, Nibbles},
     Address, GenesisAccount, Header, Log, ReceiptWithBloom, ReceiptWithBloomRef, TransactionSigned,
-    Withdrawal, H256,
+    Withdrawal, B256,
 };
 use alloy_rlp::Encodable;
 use bytes::{BufMut, BytesMut};
@@ -12,11 +12,11 @@ use itertools::Itertools;
 use std::collections::HashMap;
 
 /// Keccak-256 hash of the RLP of an empty list, KEC("\xc0").
-pub const EMPTY_LIST_HASH: H256 =
+pub const EMPTY_LIST_HASH: B256 =
     b256!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347");
 
 /// Root hash of an empty trie.
-pub const EMPTY_ROOT: H256 =
+pub const EMPTY_ROOT: B256 =
     b256!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421");
 
 /// Adjust the index of an item for rlp encoding.
@@ -31,12 +31,12 @@ pub const fn adjust_index_for_rlp(i: usize, len: usize) -> usize {
 }
 
 /// Compute a trie root of the collection of rlp encodable items.
-pub fn ordered_trie_root<T: Encodable>(items: &[T]) -> H256 {
+pub fn ordered_trie_root<T: Encodable>(items: &[T]) -> B256 {
     ordered_trie_root_with_encoder(items, |item, buf| item.encode(buf))
 }
 
 /// Compute a trie root of the collection of items with a custom encoder.
-pub fn ordered_trie_root_with_encoder<T, F>(items: &[T], mut encode: F) -> H256
+pub fn ordered_trie_root_with_encoder<T, F>(items: &[T], mut encode: F) -> B256
 where
     F: FnMut(&T, &mut dyn BufMut),
 {
@@ -63,7 +63,7 @@ where
 /// Calculate a transaction root.
 ///
 /// `(rlp(index), encoded(tx))` pairs.
-pub fn calculate_transaction_root<T>(transactions: &[T]) -> H256
+pub fn calculate_transaction_root<T>(transactions: &[T]) -> B256
 where
     T: AsRef<TransactionSigned>,
 {
@@ -71,19 +71,19 @@ where
 }
 
 /// Calculates the root hash of the withdrawals.
-pub fn calculate_withdrawals_root(withdrawals: &[Withdrawal]) -> H256 {
+pub fn calculate_withdrawals_root(withdrawals: &[Withdrawal]) -> B256 {
     ordered_trie_root(withdrawals)
 }
 
 /// Calculates the receipt root for a header.
-pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> H256 {
+pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> B256 {
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
 }
 
 /// Calculates the receipt root for a header for the reference type of [ReceiptWithBloom].
 ///
 /// NOTE: Prefer [calculate_receipt_root] if you have log blooms memoized.
-pub fn calculate_receipt_root_ref<T>(receipts: &[&T]) -> H256
+pub fn calculate_receipt_root_ref<T>(receipts: &[&T]) -> B256
 where
     for<'a> ReceiptWithBloomRef<'a>: From<&'a T>,
 {
@@ -93,7 +93,7 @@ where
 }
 
 /// Calculates the log root for headers.
-pub fn calculate_log_root(logs: &[Log]) -> H256 {
+pub fn calculate_log_root(logs: &[Log]) -> B256 {
     //https://github.com/ethereum/go-ethereum/blob/356bbe343a30789e77bb38f25983c8f2f2bfbb47/cmd/evm/internal/t8ntool/execution.go#L255
     let mut logs_rlp = Vec::new();
     alloy_rlp::encode_list(logs, &mut logs_rlp);
@@ -101,7 +101,7 @@ pub fn calculate_log_root(logs: &[Log]) -> H256 {
 }
 
 /// Calculates the root hash for ommer/uncle headers.
-pub fn calculate_ommers_root(ommers: &[Header]) -> H256 {
+pub fn calculate_ommers_root(ommers: &[Header]) -> B256 {
     // RLP Encode
     let mut ommers_rlp = Vec::new();
     alloy_rlp::encode_list(ommers, &mut ommers_rlp);
@@ -110,7 +110,7 @@ pub fn calculate_ommers_root(ommers: &[Header]) -> H256 {
 
 /// Calculates the root hash for the state, this corresponds to [geth's
 /// `deriveHash`](https://github.com/ethereum/go-ethereum/blob/6c149fd4ad063f7c24d726a73bc0546badd1bc73/core/genesis.go#L119).
-pub fn genesis_state_root(genesis_alloc: &HashMap<Address, GenesisAccount>) -> H256 {
+pub fn genesis_state_root(genesis_alloc: &HashMap<Address, GenesisAccount>) -> B256 {
     let accounts_with_sorted_hashed_keys = genesis_alloc
         .iter()
         .map(|(address, account)| (keccak256(address), account))
@@ -131,7 +131,7 @@ pub fn genesis_state_root(genesis_alloc: &HashMap<Address, GenesisAccount>) -> H
 /// for compatibility with `triehash` crate.
 #[cfg(any(test, feature = "test-utils"))]
 pub mod triehash {
-    use super::{keccak256, H256};
+    use super::{keccak256, B256};
     use hash_db::Hasher;
     use plain_hasher::PlainHasher;
 
@@ -142,7 +142,7 @@ pub mod triehash {
 
     #[cfg(any(test, feature = "test-utils"))]
     impl Hasher for KeccakHasher {
-        type Out = H256;
+        type Out = B256;
         type StdHasher = PlainHasher;
 
         const LENGTH: usize = 32;
@@ -157,7 +157,7 @@ pub mod triehash {
 mod tests {
     use super::*;
     use crate::{
-        bloom, hex, Block, Receipt, TxType, GOERLI, H256, HOLESKY, MAINNET, SEPOLIA, U256,
+        bloom, hex, Block, Receipt, TxType, B256, GOERLI, HOLESKY, MAINNET, SEPOLIA, U256,
     };
     use alloy_rlp::Decodable;
 
@@ -225,7 +225,7 @@ mod tests {
         // with a maximum balance, and is the only account in the state.
         // these test cases are generated by using geth with a custom genesis.json (with a single
         // account that has max balance)
-        let fixtures: Vec<(Address, H256)> = vec![
+        let fixtures: Vec<(Address, B256)> = vec![
             (
                 hex!("9fe4abd71ad081f091bd06dd1c16f7e92927561e").into(),
                 hex!("4b35be4231841d212ce2fa43aedbddeadd6eb7d420195664f9f0d55629db8c32").into(),

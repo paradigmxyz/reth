@@ -20,7 +20,7 @@ use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{Peers, ReputationChangeKind};
 use reth_primitives::{
     FromRecoveredPooledTransaction, IntoRecoveredTransaction, PeerId, PooledTransactionsElement,
-    TransactionSigned, TxHash, H256,
+    TransactionSigned, TxHash, B256,
 };
 use reth_transaction_pool::{
     error::PoolResult, GetPooledTransactionLimit, PoolTransaction, PropagateKind,
@@ -911,7 +911,7 @@ impl Future for GetPooledTxRequestFut {
 #[derive(Debug)]
 struct Peer {
     /// Keeps track of transactions that we know the peer has seen.
-    transactions: LruCache<H256>,
+    transactions: LruCache<B256>,
     /// A communication channel directly to the peer's session task.
     request_tx: PeerRequestSender,
     /// negotiated version of the session.
@@ -925,9 +925,9 @@ struct Peer {
 #[derive(Debug)]
 enum TransactionsCommand {
     /// Propagate a transaction hash to the network.
-    PropagateHash(H256),
+    PropagateHash(B256),
     /// Propagate transaction hashes to a specific peer.
-    PropagateHashesTo(Vec<H256>, PeerId),
+    PropagateHashesTo(Vec<B256>, PeerId),
     /// Request the list of active peer IDs from the [`TransactionsManager`].
     GetActivePeers,
     /// Propagate a collection of full transactions to a specific peer.

@@ -2,7 +2,7 @@
 //! response to `GetPooledTransactions`.
 use crate::{
     Address, BlobTransaction, Bytes, Signature, Transaction, TransactionSigned,
-    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxHash, TxLegacy, EIP4844_TX_TYPE_ID, H256,
+    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxHash, TxLegacy, B256, EIP4844_TX_TYPE_ID,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE};
 use bytes::Buf;
@@ -59,7 +59,7 @@ impl PooledTransactionsElement {
 
     /// Heavy operation that return signature hash over rlp encoded transaction.
     /// It is only for signature signing or signer recovery.
-    pub fn signature_hash(&self) -> H256 {
+    pub fn signature_hash(&self) -> B256 {
         match self {
             Self::Legacy { transaction, .. } => transaction.signature_hash(),
             Self::Eip2930 { transaction, .. } => transaction.signature_hash(),

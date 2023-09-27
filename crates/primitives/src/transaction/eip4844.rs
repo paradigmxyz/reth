@@ -7,7 +7,7 @@ use crate::{
         BYTES_PER_COMMITMENT, BYTES_PER_PROOF,
     },
     kzg_to_versioned_hash, Bytes, ChainId, Signature, Transaction, TransactionKind,
-    TransactionSigned, TxHash, TxType, EIP4844_TX_TYPE_ID, H256,
+    TransactionSigned, TxHash, TxType, B256, EIP4844_TX_TYPE_ID,
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable, Error as RlpError, Header};
 use bytes::BytesMut;
@@ -71,7 +71,7 @@ pub struct TxEip4844 {
     pub access_list: AccessList,
 
     /// It contains a vector of fixed size hash(32 bytes)
-    pub blob_versioned_hashes: Vec<H256>,
+    pub blob_versioned_hashes: Vec<B256>,
 
     /// Max fee per data gas
     ///
@@ -250,7 +250,7 @@ impl TxEip4844 {
         mem::size_of::<u128>() + // value
         self.access_list.size() + // access_list
         self.input.len() +  // input
-        self.blob_versioned_hashes.capacity() * mem::size_of::<H256>() + // blob hashes size
+        self.blob_versioned_hashes.capacity() * mem::size_of::<B256>() + // blob hashes size
         mem::size_of::<u128>() // max_fee_per_data_gas
     }
 
@@ -306,7 +306,7 @@ impl TxEip4844 {
 
     /// Outputs the signature hash of the transaction by first encoding without a signature, then
     /// hashing.
-    pub(crate) fn signature_hash(&self) -> H256 {
+    pub(crate) fn signature_hash(&self) -> B256 {
         let mut buf = BytesMut::with_capacity(self.payload_len_for_signature());
         self.encode_for_signing(&mut buf);
         keccak256(&buf)

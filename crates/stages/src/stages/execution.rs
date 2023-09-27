@@ -518,7 +518,7 @@ mod tests {
     use reth_db::{models::AccountBeforeTx, test_utils::create_test_rw_db};
     use reth_primitives::{
         address, hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Bytecode,
-        ChainSpecBuilder, PruneModes, SealedBlock, StorageEntry, H256, MAINNET, U256,
+        ChainSpecBuilder, PruneModes, SealedBlock, StorageEntry, B256, MAINNET, U256,
     };
     use reth_provider::{AccountReader, BlockWriter, ProviderFactory, ReceiptProvider};
     use reth_revm::Factory;
@@ -764,7 +764,7 @@ mod tests {
         // Get on dupsort would return only first value. This is good enough for this test.
         assert_eq!(
             provider.tx_ref().get::<tables::PlainStorageState>(account1),
-            Ok(Some(StorageEntry { key: H256::with_last_byte(1), value: U256::from(2) })),
+            Ok(Some(StorageEntry { key: B256::with_last_byte(1), value: U256::from(2) })),
             "Post changed of a account"
         );
     }
@@ -890,14 +890,14 @@ mod tests {
             .tx_ref()
             .put::<tables::PlainStorageState>(
                 destroyed_address,
-                StorageEntry { key: H256::ZERO, value: U256::ZERO },
+                StorageEntry { key: B256::ZERO, value: U256::ZERO },
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::PlainStorageState>(
                 destroyed_address,
-                StorageEntry { key: H256::with_last_byte(1), value: U256::from(1u64) },
+                StorageEntry { key: B256::with_last_byte(1), value: U256::from(1u64) },
             )
             .unwrap();
 
@@ -969,11 +969,11 @@ mod tests {
             vec![
                 (
                     (block.number, destroyed_address).into(),
-                    StorageEntry { key: H256::ZERO, value: U256::ZERO }
+                    StorageEntry { key: B256::ZERO, value: U256::ZERO }
                 ),
                 (
                     (block.number, destroyed_address).into(),
-                    StorageEntry { key: H256::with_last_byte(1), value: U256::from(1u64) }
+                    StorageEntry { key: B256::with_last_byte(1), value: U256::from(1u64) }
                 )
             ]
         );

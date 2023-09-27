@@ -18,7 +18,7 @@ use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
     IntoRecoveredTransaction, Receipt, SealedBlock,
     TransactionKind::{Call, Create},
-    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, H256, U128, U256, U64,
+    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, B256, U128, U256, U64,
 };
 use reth_rpc_types_compat::from_recovered_with_block_context;
 
@@ -82,7 +82,7 @@ pub trait EthTransactions: Send + Sync {
     /// Get all transactions in the block with the given hash.
     ///
     /// Returns `None` if block does not exist.
-    async fn transactions_by_block(&self, block: H256)
+    async fn transactions_by_block(&self, block: B256)
         -> EthResult<Option<Vec<TransactionSigned>>>;
 
     /// Get the entire block for the given id.
@@ -103,36 +103,36 @@ pub trait EthTransactions: Send + Sync {
     /// Checks the pool and state.
     ///
     /// Returns `Ok(None)` if no matching transaction was found.
-    async fn transaction_by_hash(&self, hash: H256) -> EthResult<Option<TransactionSource>>;
+    async fn transaction_by_hash(&self, hash: B256) -> EthResult<Option<TransactionSource>>;
 
     /// Returns the transaction by including its corresponding [BlockId]
     ///
     /// Note: this supports pending transactions
     async fn transaction_by_hash_at(
         &self,
-        hash: H256,
+        hash: B256,
     ) -> EthResult<Option<(TransactionSource, BlockId)>>;
 
     /// Returns the _historical_ transaction and the block it was mined in
     async fn historical_transaction_by_hash_at(
         &self,
-        hash: H256,
-    ) -> EthResult<Option<(TransactionSource, H256)>>;
+        hash: B256,
+    ) -> EthResult<Option<(TransactionSource, B256)>>;
 
     /// Returns the transaction receipt for the given hash.
     ///
     /// Returns None if the transaction does not exist or is pending
     /// Note: The tx receipt is not available for pending transactions.
-    async fn transaction_receipt(&self, hash: H256) -> EthResult<Option<TransactionReceipt>>;
+    async fn transaction_receipt(&self, hash: B256) -> EthResult<Option<TransactionReceipt>>;
 
     /// Decodes and recovers the transaction and submits it to the pool.
     ///
     /// Returns the hash of the transaction.
-    async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256>;
+    async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<B256>;
 
     /// Signs transaction with a matching signer, if any and submits the transaction to the pool.
     /// Returns the hash of the signed transaction.
-    async fn send_transaction(&self, request: TransactionRequest) -> EthResult<H256>;
+    async fn send_transaction(&self, request: TransactionRequest) -> EthResult<B256>;
 
     /// Prepares the state and env for the given [CallRequest] at the given [BlockId] and executes
     /// the closure on a new task returning the result of the closure.
@@ -207,7 +207,7 @@ pub trait EthTransactions: Send + Sync {
     /// Fetches the transaction and the transaction's block
     async fn transaction_and_block(
         &self,
-        hash: H256,
+        hash: B256,
     ) -> EthResult<Option<(TransactionSource, SealedBlock)>>;
 
     /// Retrieves the transaction if it exists and returns its trace.
@@ -221,7 +221,7 @@ pub trait EthTransactions: Send + Sync {
     /// [TracingCallPool](crate::tracing_call::TracingCallPool).
     async fn spawn_trace_transaction_in_block<F, R>(
         &self,
-        hash: H256,
+        hash: B256,
         config: TracingInspectorConfig,
         f: F,
     ) -> EthResult<Option<R>>
@@ -304,7 +304,7 @@ where
 
     async fn transactions_by_block(
         &self,
-        block: H256,
+        block: B256,
     ) -> EthResult<Option<Vec<TransactionSigned>>> {
         Ok(self.cache().get_block_transactions(block).await?)
     }
@@ -320,7 +320,7 @@ where
         self.block_by_id(block).await.map(|block| block.map(|block| block.body))
     }
 
-    async fn transaction_by_hash(&self, hash: H256) -> EthResult<Option<TransactionSource>> {
+    async fn transaction_by_hash(&self, hash: B256) -> EthResult<Option<TransactionSource>> {
         // Try to find the transaction on disk
         let mut resp = self
             .on_blocking_task(|this| async move {
@@ -358,7 +358,7 @@ where
 
     async fn transaction_by_hash_at(
         &self,
-        transaction_hash: H256,
+        transaction_hash: B256,
     ) -> EthResult<Option<(TransactionSource, BlockId)>> {
         match self.transaction_by_hash(transaction_hash).await? {
             None => return Ok(None),
@@ -392,15 +392,15 @@ where
 
     async fn historical_transaction_by_hash_at(
         &self,
-        hash: H256,
-    ) -> EthResult<Option<(TransactionSource, H256)>> {
+        hash: B256,
+    ) -> EthResult<Option<(TransactionSource, B256)>> {
         match self.transaction_by_hash_at(hash).await? {
             None => Ok(None),
             Some((tx, at)) => Ok(at.as_block_hash().map(|hash| (tx, hash))),
         }
     }
 
-    async fn transaction_receipt(&self, hash: H256) -> EthResult<Option<TransactionReceipt>> {
+    async fn transaction_receipt(&self, hash: B256) -> EthResult<Option<TransactionReceipt>> {
         let result = self
             .on_blocking_task(|this| async move {
                 let (tx, meta) = match this.provider().transaction_by_hash_with_meta(hash)? {
@@ -425,7 +425,7 @@ where
         self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
     }
 
-    async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256> {
+    async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<B256> {
         let recovered = recover_raw_transaction(tx)?;
 
         let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered);
@@ -436,7 +436,7 @@ where
         Ok(hash)
     }
 
-    async fn send_transaction(&self, mut request: TransactionRequest) -> EthResult<H256> {
+    async fn send_transaction(&self, mut request: TransactionRequest) -> EthResult<B256> {
         let from = match request.from {
             Some(from) => from,
             None => return Err(SignError::NoAccount.into()),
@@ -618,7 +618,7 @@ where
 
     async fn transaction_and_block(
         &self,
-        hash: H256,
+        hash: B256,
     ) -> EthResult<Option<(TransactionSource, SealedBlock)>> {
         let (transaction, at) = match self.transaction_by_hash_at(hash).await? {
             None => return Ok(None),
@@ -636,7 +636,7 @@ where
 
     async fn spawn_trace_transaction_in_block<F, R>(
         &self,
-        hash: H256,
+        hash: B256,
         config: TracingInspectorConfig,
         f: F,
     ) -> EthResult<Option<R>>
@@ -773,7 +773,7 @@ pub enum TransactionSource {
         /// Index of the transaction in the block
         index: u64,
         /// Hash of the block.
-        block_hash: H256,
+        block_hash: B256,
         /// Number of the block.
         block_number: u64,
         /// base fee of the block.

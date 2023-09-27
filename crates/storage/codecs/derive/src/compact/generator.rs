@@ -52,7 +52,7 @@ pub fn generate_from_to(ident: &Ident, fields: &FieldList, is_zstd: bool) -> Tok
 /// Generates code to implement the `Compact` trait method `to_compact`.
 fn generate_from_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> TokenStream2 {
     let mut lines = vec![];
-    let mut known_types = vec!["H256", "B256", "H160", "B160", "Address", "Bloom", "Vec", "TxHash"];
+    let mut known_types = vec!["B256", "B256", "H160", "B160", "Address", "Bloom", "Vec", "TxHash"];
 
     // Only types without `Bytes` should be added here. It's currently manually added, since
     // it's hard to figure out with derive_macro which types have Bytes fields.

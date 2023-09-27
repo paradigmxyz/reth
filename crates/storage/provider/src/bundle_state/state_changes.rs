@@ -60,7 +60,7 @@ impl StateChanges {
             if wipe_storage && storages_cursor.seek_exact(address)?.is_some() {
                 storages_cursor.delete_current_duplicates()?;
             }
-            // cast storages to H256.
+            // cast storages to B256.
             let mut storage = storage
                 .into_iter()
                 .map(|(k, value)| StorageEntry { key: k.into(), value })

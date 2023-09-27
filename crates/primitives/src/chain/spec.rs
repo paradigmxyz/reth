@@ -7,7 +7,7 @@ use crate::{
     header::Head,
     proofs::genesis_state_root,
     Address, BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, Hardfork, Header,
-    PruneBatchSizes, SealedHeader, EMPTY_OMMER_ROOT, H256, U256,
+    PruneBatchSizes, SealedHeader, B256, EMPTY_OMMER_ROOT, U256,
 };
 use once_cell::sync::Lazy;
 use revm_primitives::{address, b256};
@@ -273,7 +273,7 @@ pub struct ChainSpec {
     /// This acts as a small cache for known chains. If the chain is known, then the genesis hash
     /// is also known ahead of time, and this will be `Some`.
     #[serde(skip, default)]
-    pub genesis_hash: Option<H256>,
+    pub genesis_hash: Option<B256>,
 
     /// The genesis block
     pub genesis: Genesis,
@@ -353,13 +353,13 @@ impl ChainSpec {
             if self.fork(Hardfork::Cancun).active_at_timestamp(self.genesis.timestamp) {
                 let blob_gas_used = self.genesis.blob_gas_used.unwrap_or(0);
                 let excess_blob_gas = self.genesis.excess_blob_gas.unwrap_or(0);
-                (Some(H256::ZERO), Some(blob_gas_used), Some(excess_blob_gas))
+                (Some(B256::ZERO), Some(blob_gas_used), Some(excess_blob_gas))
             } else {
                 (None, None, None)
             };
 
         Header {
-            parent_hash: H256::ZERO,
+            parent_hash: B256::ZERO,
             number: 0,
             transactions_root: EMPTY_TRANSACTIONS,
             ommers_hash: EMPTY_OMMER_ROOT,
@@ -397,7 +397,7 @@ impl ChainSpec {
     }
 
     /// Get the hash of the genesis block.
-    pub fn genesis_hash(&self) -> H256 {
+    pub fn genesis_hash(&self) -> B256 {
         if let Some(hash) = self.genesis_hash {
             hash
         } else {
@@ -1115,11 +1115,11 @@ pub struct DepositContract {
     /// Deployment Block
     pub block: BlockNumber,
     /// `DepositEvent` event signature
-    pub topic: H256,
+    pub topic: B256,
 }
 
 impl DepositContract {
-    fn new(address: Address, block: BlockNumber, topic: H256) -> Self {
+    fn new(address: Address, block: BlockNumber, topic: B256) -> Self {
         DepositContract { address, block, topic }
     }
 }
@@ -1127,7 +1127,7 @@ impl DepositContract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{b256, hex, NamedChain, DEV, GOERLI, H256, HOLESKY, MAINNET, SEPOLIA, U256};
+    use crate::{b256, hex, NamedChain, B256, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA, U256};
     use alloy_rlp::Encodable;
     use bytes::BytesMut;
     use std::str::FromStr;
@@ -1147,7 +1147,7 @@ mod tests {
     fn test_hardfork_list_display_mainnet() {
         assert_eq!(
             DisplayHardforks::from(MAINNET.hardforks().clone()).to_string(),
-            r##"Pre-merge hard forks (block based):
+            r"Pre-merge hard forks (block based):
 - Frontier                         @0
 - Homestead                        @1150000
 - Dao                              @1920000
@@ -1167,7 +1167,7 @@ Merge hard forks:
 
 Post-merge hard forks (timestamp based):
 - Shanghai                         @1681338455
-"##
+"
         );
     }
 
@@ -1181,9 +1181,9 @@ Post-merge hard forks (timestamp based):
             .build();
         assert_eq!(
             DisplayHardforks::from(spec.hardforks().clone()).to_string(),
-            r##"Pre-merge hard forks (block based):
+            r"Pre-merge hard forks (block based):
 - Frontier                         @0
-"##
+"
         );
     }
 
@@ -1771,15 +1771,15 @@ Post-merge hard forks (timestamp based):
         }
 
         assert_eq!(chainspec.genesis_hash, None);
-        let expected_state_root: H256 =
+        let expected_state_root: B256 =
             hex!("078dc6061b1d8eaa8493384b59c9c65ceb917201221d08b80c4de6770b6ec7e7").into();
         assert_eq!(chainspec.genesis_header().state_root, expected_state_root);
 
-        let expected_withdrawals_hash: H256 =
+        let expected_withdrawals_hash: B256 =
             hex!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421").into();
         assert_eq!(chainspec.genesis_header().withdrawals_root, Some(expected_withdrawals_hash));
 
-        let expected_hash: H256 =
+        let expected_hash: B256 =
             hex!("1fc027d65f820d3eef441ebeec139ebe09e471cf98516dce7b5643ccb27f418c").into();
         let hash = chainspec.genesis_hash();
         assert_eq!(hash, expected_hash);
@@ -1848,7 +1848,7 @@ Post-merge hard forks (timestamp based):
         let chainspec: ChainSpec = genesis.into();
         assert_eq!(chainspec.genesis_hash, None);
         assert_eq!(chainspec.chain, Chain::Named(NamedChain::Optimism));
-        let expected_state_root: H256 =
+        let expected_state_root: B256 =
             hex!("9a6049ac535e3dc7436c189eaa81c73f35abd7f282ab67c32944ff0301d63360").into();
         assert_eq!(chainspec.genesis_header().state_root, expected_state_root);
         let hard_forks = vec![
@@ -1862,7 +1862,7 @@ Post-merge hard forks (timestamp based):
             assert_eq!(chainspec.hardforks.get(fork).unwrap(), &ForkCondition::Block(0));
         }
 
-        let expected_hash: H256 =
+        let expected_hash: B256 =
             hex!("5ae31c6522bd5856129f66be3d582b842e4e9faaa87f21cce547128339a9db3c").into();
         let hash = chainspec.genesis_header().hash_slow();
         assert_eq!(hash, expected_hash);
@@ -1906,7 +1906,7 @@ Post-merge hard forks (timestamp based):
 
         // set the state root to the same as in the hive test the hash was pulled from
         header.state_root =
-            H256::from_str("0x62e2595e017f0ca23e08d17221010721a71c3ae932f4ea3cb12117786bb392d4")
+            B256::from_str("0x62e2595e017f0ca23e08d17221010721a71c3ae932f4ea3cb12117786bb392d4")
                 .unwrap();
 
         // shanghai is activated so we should have a withdrawals root
@@ -1914,7 +1914,7 @@ Post-merge hard forks (timestamp based):
 
         // cancun is activated so we should have a zero parent beacon block root, zero blob gas
         // used, and zero excess blob gas
-        assert_eq!(header.parent_beacon_block_root, Some(H256::ZERO));
+        assert_eq!(header.parent_beacon_block_root, Some(B256::ZERO));
         assert_eq!(header.blob_gas_used, Some(0));
         assert_eq!(header.excess_blob_gas, Some(0));
         println!("header: {:?}", header);

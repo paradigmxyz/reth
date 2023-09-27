@@ -1,6 +1,6 @@
 use crate::{
     compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR},
-    keccak256, Address, Bytes, TxHash, H256,
+    keccak256, Address, Bytes, TxHash, B256,
 };
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
@@ -101,7 +101,7 @@ pub enum Transaction {
 impl Transaction {
     /// Heavy operation that return signature hash over rlp encoded transaction.
     /// It is only for signature signing or signer recovery.
-    pub fn signature_hash(&self) -> H256 {
+    pub fn signature_hash(&self) -> B256 {
         match self {
             Transaction::Legacy(tx) => tx.signature_hash(),
             Transaction::Eip2930(tx) => tx.signature_hash(),
@@ -644,7 +644,7 @@ pub struct TransactionSignedNoHash {
 impl TransactionSignedNoHash {
     /// Calculates the transaction hash. If used more than once, it's better to convert it to
     /// [`TransactionSigned`] first.
-    pub fn hash(&self) -> H256 {
+    pub fn hash(&self) -> B256 {
         let mut buf = Vec::new();
         self.transaction.encode_with_signature(&self.signature, &mut buf, false);
         keccak256(&buf)
@@ -878,7 +878,7 @@ impl TransactionSigned {
 
     /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
     /// tx type.
-    pub fn recalculate_hash(&self) -> H256 {
+    pub fn recalculate_hash(&self) -> B256 {
         let mut buf = Vec::new();
         self.encode_inner(&mut buf, false);
         keccak256(&buf)
@@ -1190,7 +1190,7 @@ mod tests {
             signature::Signature, TransactionKind, TxEip1559, TxLegacy,
             PARALLEL_SENDER_RECOVERY_THRESHOLD,
         },
-        Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered, H256, U256,
+        Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered, B256, U256,
     };
     use alloy_primitives::{b256, bytes};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
@@ -1346,7 +1346,7 @@ mod tests {
         bytes: &[u8],
         transaction: Transaction,
         signature: Signature,
-        hash: Option<H256>,
+        hash: Option<B256>,
     ) {
         let expected = TransactionSigned::from_transaction_and_signature(transaction, signature);
         if let Some(hash) = hash {
@@ -1367,7 +1367,7 @@ mod tests {
         use crate::hex_literal::hex;
         // transaction is from ropsten
 
-        let hash: H256 =
+        let hash: B256 =
             hex!("559fb34c4a7f115db26cbf8505389475caaab3df45f5c7a0faa4abfa3835306c").into();
         let signer: Address = hex!("641c5d790f862a58ec7abcfd644c0442e9c201b3").into();
         let raw =hex!("f88b8212b085028fa6ae00830f424094aad593da0c8116ef7d2d594dd6a63241bccfc26c80a48318b64b000000000000000000000000641c5d790f862a58ec7abcfd644c0442e9c201b32aa0a6ef9e170bca5ffb7ac05433b13b7043de667fbb0b4a5e45d3b54fb2d6efcc63a0037ec2c05c3d60c5f5f78244ce0a3859e3a18a36c61efb061b383507d3ce19d2");
@@ -1444,7 +1444,7 @@ mod tests {
                 let key_pair = KeyPair::new(&secp, &mut rng);
 
                 let signature =
-                    sign_message(H256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
+                    sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
 
                 TransactionSigned::from_transaction_and_signature(tx, signature)
             }).collect();

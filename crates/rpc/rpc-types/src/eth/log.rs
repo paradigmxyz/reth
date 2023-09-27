@@ -1,4 +1,4 @@
-use reth_primitives::{Address, Bytes, H256, U256};
+use reth_primitives::{Address, Bytes, B256, U256};
 use serde::{Deserialize, Serialize};
 
 /// Ethereum Log emitted by a transaction
@@ -8,15 +8,15 @@ pub struct Log {
     /// Address
     pub address: Address,
     /// All topics of the log
-    pub topics: Vec<H256>,
+    pub topics: Vec<B256>,
     /// Additional data fields of the log
     pub data: Bytes,
     /// Hash of the block the transaction that emitted this log was mined in
-    pub block_hash: Option<H256>,
+    pub block_hash: Option<B256>,
     /// Number of the block the transaction that emitted this log was mined in
     pub block_number: Option<U256>,
     /// Transaction Hash
-    pub transaction_hash: Option<H256>,
+    pub transaction_hash: Option<B256>,
     /// Index of the Transaction in the block
     pub transaction_index: Option<U256>,
     /// Log Index in Block
@@ -51,11 +51,11 @@ mod tests {
     fn serde_log() {
         let log = Log {
             address: Address::with_last_byte(0x69),
-            topics: vec![H256::with_last_byte(0x69)],
+            topics: vec![B256::with_last_byte(0x69)],
             data: Bytes::from_static(&[0x69]),
-            block_hash: Some(H256::with_last_byte(0x69)),
+            block_hash: Some(B256::with_last_byte(0x69)),
             block_number: Some(U256::from(0x69)),
-            transaction_hash: Some(H256::with_last_byte(0x69)),
+            transaction_hash: Some(B256::with_last_byte(0x69)),
             transaction_index: Some(U256::from(0x69)),
             log_index: Some(U256::from(0x69)),
             removed: false,

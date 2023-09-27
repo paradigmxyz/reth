@@ -1,7 +1,7 @@
 use crate::Log as RpcLog;
 use itertools::{EitherOrBoth::*, Itertools};
 use reth_primitives::{
-    keccak256, Address, BlockNumberOrTag, Bloom, BloomInput, Log, H256, U256, U64,
+    keccak256, Address, BlockNumberOrTag, Bloom, BloomInput, Log, B256, U256, U64,
 };
 use serde::{
     de::{DeserializeOwned, MapAccess, Visitor},
@@ -115,11 +115,11 @@ impl<T: Clone + Eq + Hash> FilterSet<T> {
 }
 
 /// A single topic
-pub type Topic = FilterSet<H256>;
+pub type Topic = FilterSet<B256>;
 
 impl From<U256> for Topic {
     fn from(src: U256) -> Self {
-        Into::<H256>::into(src).into()
+        Into::<B256>::into(src).into()
     }
 }
 
@@ -136,7 +136,7 @@ pub enum FilterBlockOption {
         to_block: Option<BlockNumberOrTag>,
     },
     /// The hash of the block if the filter only targets a single block
-    AtBlockHash(H256),
+    AtBlockHash(B256),
 }
 
 impl FilterBlockOption {
@@ -208,8 +208,8 @@ impl<T: Into<BlockNumberOrTag>> From<RangeFrom<T>> for FilterBlockOption {
     }
 }
 
-impl From<H256> for FilterBlockOption {
-    fn from(hash: H256) -> Self {
+impl From<B256> for FilterBlockOption {
+    fn from(hash: B256) -> Self {
         FilterBlockOption::AtBlockHash(hash)
     }
 }
@@ -241,7 +241,7 @@ impl FilterBlockOption {
 
     /// Pins the block hash this filter should target.
     #[must_use]
-    pub fn set_hash(&self, hash: H256) -> Self {
+    pub fn set_hash(&self, hash: B256) -> Self {
         FilterBlockOption::AtBlockHash(hash)
     }
 }
@@ -294,10 +294,10 @@ impl Filter {
     /// Match a block by its hash
     ///
     /// ```rust
-    /// # use reth_primitives::H256;
+    /// # use reth_primitives::B256;
     /// # use reth_rpc_types::Filter;
     /// # fn main() {
-    /// let filter = Filter::new().select(H256::ZERO);
+    /// let filter = Filter::new().select(B256::ZERO);
     /// # }
     /// ```
     /// This is the same as `at_block_hash`
@@ -352,7 +352,7 @@ impl Filter {
 
     /// Pins the block hash for the filter
     #[must_use]
-    pub fn at_block_hash<T: Into<H256>>(mut self, hash: T) -> Self {
+    pub fn at_block_hash<T: Into<B256>>(mut self, hash: T) -> Self {
         self.block_option = self.block_option.set_hash(hash.into());
         self
     }
@@ -447,7 +447,7 @@ impl Filter {
     }
 
     /// Returns the numeric value of the `fromBlock` field
-    pub fn get_block_hash(&self) -> Option<H256> {
+    pub fn get_block_hash(&self) -> Option<B256> {
         match self.block_option {
             FilterBlockOption::AtBlockHash(hash) => Some(hash),
             FilterBlockOption::Range { .. } => None,
@@ -500,7 +500,7 @@ impl Serialize for Filter {
 }
 
 type RawAddressFilter = ValueOrArray<Option<Address>>;
-type RawTopicsFilter = Vec<Option<ValueOrArray<Option<H256>>>>;
+type RawTopicsFilter = Vec<Option<ValueOrArray<Option<B256>>>>;
 
 impl<'de> Deserialize<'de> for Filter {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -522,7 +522,7 @@ impl<'de> Deserialize<'de> for Filter {
             {
                 let mut from_block: Option<Option<BlockNumberOrTag>> = None;
                 let mut to_block: Option<Option<BlockNumberOrTag>> = None;
-                let mut block_hash: Option<Option<H256>> = None;
+                let mut block_hash: Option<Option<B256>> = None;
                 let mut address: Option<Option<RawAddressFilter>> = None;
                 let mut topics: Option<Option<RawTopicsFilter>> = None;
 
@@ -638,8 +638,8 @@ impl From<Vec<Address>> for ValueOrArray<Address> {
     }
 }
 
-impl From<Vec<H256>> for ValueOrArray<H256> {
-    fn from(src: Vec<H256>) -> Self {
+impl From<Vec<B256>> for ValueOrArray<B256> {
+    fn from(src: Vec<B256>) -> Self {
         ValueOrArray::Array(src)
     }
 }
@@ -713,7 +713,7 @@ impl FilteredParams {
     }
 
     /// Returns the [BloomFilter] for the given topics
-    pub fn topics_filter(topics: &[FilterSet<H256>]) -> Vec<BloomFilter> {
+    pub fn topics_filter(topics: &[FilterSet<B256>]) -> Vec<BloomFilter> {
         topics.iter().map(|t| t.to_bloom_filter()).collect()
     }
 
@@ -771,7 +771,7 @@ impl FilteredParams {
     }
 
     /// Returns `true` if the filter matches the given block hash.
-    pub fn filter_block_hash(&self, block_hash: H256) -> bool {
+    pub fn filter_block_hash(&self, block_hash: B256) -> bool {
         if let Some(h) = self.filter.as_ref().and_then(|f| f.get_block_hash()) {
             if h != block_hash {
                 return false
@@ -821,7 +821,7 @@ pub enum FilterChanges {
     /// New logs.
     Logs(Vec<RpcLog>),
     /// New hashes (block or transactions)
-    Hashes(Vec<H256>),
+    Hashes(Vec<B256>),
     /// Empty result,
     Empty,
 }
@@ -848,7 +848,7 @@ impl<'de> Deserialize<'de> for FilterChanges {
         #[serde(untagged)]
         enum Changes {
             Logs(Vec<RpcLog>),
-            Hashes(Vec<H256>),
+            Hashes(Vec<B256>),
         }
 
         let changes = Changes::deserialize(deserializer)?;
@@ -921,12 +921,12 @@ mod tests {
             filter.topics,
             [
                 "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"
-                    .parse::<H256>()
+                    .parse::<B256>()
                     .unwrap()
                     .into(),
                 Default::default(),
                 "0x0000000000000000000000000c17e776cd218252adfca8d4e761d3fe757e9778"
-                    .parse::<H256>()
+                    .parse::<B256>()
                     .unwrap()
                     .into(),
                 Default::default(),
@@ -942,7 +942,7 @@ mod tests {
             filter.topics,
             [
                 "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"
-                    .parse::<H256>()
+                    .parse::<B256>()
                     .unwrap()
                     .into(),
                 Default::default(),
@@ -973,13 +973,13 @@ mod tests {
     #[test]
     fn filter_serialization_test() {
         let t1 = "0000000000000000000000009729a6fbefefc8f6005933898b13dc45c3a2c8b7"
-            .parse::<H256>()
+            .parse::<B256>()
             .unwrap();
-        let t2 = H256::from([0; 32]);
+        let t2 = B256::from([0; 32]);
         let t3 = U256::from(123);
 
         let t1_padded = t1;
-        let t3_padded = H256::from({
+        let t3_padded = B256::from({
             let mut x = [0; 32];
             x[31] = 123;
             x
@@ -1033,7 +1033,7 @@ mod tests {
         assert_eq!(ser, json!({ "address" : addr, "topics": [t0, t1_padded, t2, t3_padded]}));
     }
 
-    fn build_bloom(address: Address, topic1: H256, topic2: H256) -> Bloom {
+    fn build_bloom(address: Address, topic1: B256, topic2: B256) -> Bloom {
         let mut block_bloom = Bloom::default();
         block_bloom.accrue(BloomInput::Raw(&address[..]));
         block_bloom.accrue(BloomInput::Raw(&topic1[..]));
@@ -1041,7 +1041,7 @@ mod tests {
         block_bloom
     }
 
-    fn topic_filter(topic1: H256, topic2: H256, topic3: H256) -> Filter {
+    fn topic_filter(topic1: B256, topic2: B256, topic3: B256) -> Filter {
         Filter {
             block_option: Default::default(),
             address: Default::default(),
@@ -1056,23 +1056,23 @@ mod tests {
 
     #[test]
     fn can_detect_different_topics() {
-        let topic1 = H256::random();
-        let topic2 = H256::random();
-        let topic3 = H256::random();
+        let topic1 = B256::random();
+        let topic2 = B256::random();
+        let topic3 = B256::random();
 
         let topics = topic_filter(topic1, topic2, topic3).topics;
         let topics_bloom = FilteredParams::topics_filter(&topics);
         assert!(!FilteredParams::matches_topics(
-            build_bloom(Address::random(), H256::random(), H256::random()),
+            build_bloom(Address::random(), B256::random(), B256::random()),
             &topics_bloom
         ));
     }
 
     #[test]
     fn can_match_topic() {
-        let topic1 = H256::random();
-        let topic2 = H256::random();
-        let topic3 = H256::random();
+        let topic1 = B256::random();
+        let topic2 = B256::random();
+        let topic3 = B256::random();
 
         let topics = topic_filter(topic1, topic2, topic3).topics;
         let _topics_bloom = FilteredParams::topics_filter(&topics);
@@ -1095,7 +1095,7 @@ mod tests {
 
         let topics_bloom = FilteredParams::topics_filter(&topics);
         assert!(FilteredParams::matches_topics(
-            build_bloom(Address::random(), H256::random(), H256::random()),
+            build_bloom(Address::random(), B256::random(), B256::random()),
             &topics_bloom
         ));
     }
@@ -1103,9 +1103,9 @@ mod tests {
     #[test]
     fn can_match_address_and_topics() {
         let rng_address = Address::random();
-        let topic1 = H256::random();
-        let topic2 = H256::random();
-        let topic3 = H256::random();
+        let topic1 = B256::random();
+        let topic2 = B256::random();
+        let topic3 = B256::random();
 
         let filter = Filter {
             block_option: Default::default(),
@@ -1134,9 +1134,9 @@ mod tests {
 
     #[test]
     fn can_match_topics_wildcard() {
-        let topic1 = H256::random();
-        let topic2 = H256::random();
-        let topic3 = H256::random();
+        let topic1 = B256::random();
+        let topic2 = B256::random();
+        let topic3 = B256::random();
 
         let filter = Filter {
             block_option: Default::default(),
@@ -1164,7 +1164,7 @@ mod tests {
             address: Default::default(),
             topics: [
                 Default::default(),
-                vec![H256::random(), H256::random()].into(),
+                vec![B256::random(), B256::random()].into(),
                 Default::default(),
                 Default::default(),
             ],
@@ -1173,7 +1173,7 @@ mod tests {
 
         let topics_bloom = FilteredParams::topics_filter(&topics_input);
         assert!(!FilteredParams::matches_topics(
-            build_bloom(Address::random(), H256::random(), H256::random()),
+            build_bloom(Address::random(), B256::random(), B256::random()),
             &topics_bloom
         ));
     }
@@ -1188,7 +1188,7 @@ mod tests {
         };
         let address_bloom = FilteredParams::address_filter(&filter.address);
         assert!(FilteredParams::matches_address(
-            build_bloom(rng_address, H256::random(), H256::random(),),
+            build_bloom(rng_address, B256::random(), B256::random(),),
             &address_bloom
         ));
     }
@@ -1204,7 +1204,7 @@ mod tests {
         };
         let address_bloom = FilteredParams::address_filter(&filter.address);
         assert!(!FilteredParams::matches_address(
-            build_bloom(bloom_address, H256::random(), H256::random(),),
+            build_bloom(bloom_address, B256::random(), B256::random(),),
             &address_bloom
         ));
     }
@@ -1238,15 +1238,15 @@ mod tests {
                     .into(),
                 topics: [
                     "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
-                        .parse::<H256>()
+                        .parse::<B256>()
                         .unwrap()
                         .into(),
                     "0x00000000000000000000000000b46c2526e227482e2ebb8f4c69e4674d262e75"
-                        .parse::<H256>()
+                        .parse::<B256>()
                         .unwrap()
                         .into(),
                     "0x00000000000000000000000054a2d42a40f51259dedd1978f6c118a0f0eff078"
-                        .parse::<H256>()
+                        .parse::<B256>()
                         .unwrap()
                         .into(),
                     Default::default(),

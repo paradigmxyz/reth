@@ -11,13 +11,13 @@ use crate::tracing::{
     utils::get_create_address,
 };
 use boa_engine::{Context, JsError, JsObject, JsResult, JsValue, Source};
-use reth_primitives::{Account, Address, Bytes, H256, U256};
+use reth_primitives::{Account, Address, Bytes, B256, U256};
 use revm::{
     interpreter::{
         return_revert, CallInputs, CallScheme, CreateInputs, Gas, InstructionResult, Interpreter,
     },
     precompile::Precompiles,
-    primitives::{Env, ExecutionResult, Output, ResultAndState, TransactTo, B256},
+    primitives::{Env, ExecutionResult, Output, ResultAndState, TransactTo},
     Database, EVMData, Inspector,
 };
 use tokio::sync::mpsc;
@@ -491,7 +491,7 @@ pub enum JsDbRequest {
     /// Bindings for [Database::code_by_hash]
     Code {
         /// The code hash of the code to be loaded
-        code_hash: H256,
+        code_hash: B256,
         /// The response channel
         resp: std::sync::mpsc::Sender<Result<Bytes, String>>,
     },

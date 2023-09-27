@@ -360,7 +360,7 @@ pub enum ChainSplit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{Address, H256};
+    use reth_primitives::{Address, B256};
     use revm::{
         db::BundleState,
         primitives::{AccountInfo, HashMap},
@@ -369,10 +369,10 @@ mod tests {
     #[test]
     fn chain_append() {
         let block = SealedBlockWithSenders::default();
-        let block1_hash = H256::new([0x01; 32]);
-        let block2_hash = H256::new([0x02; 32]);
-        let block3_hash = H256::new([0x03; 32]);
-        let block4_hash = H256::new([0x04; 32]);
+        let block1_hash = B256::new([0x01; 32]);
+        let block2_hash = B256::new([0x02; 32]);
+        let block3_hash = B256::new([0x03; 32]);
+        let block4_hash = B256::new([0x04; 32]);
 
         let mut block1 = block.clone();
         let mut block2 = block.clone();
@@ -431,13 +431,13 @@ mod tests {
         );
 
         let mut block1 = SealedBlockWithSenders::default();
-        let block1_hash = H256::new([15; 32]);
+        let block1_hash = B256::new([15; 32]);
         block1.number = 1;
         block1.hash = block1_hash;
         block1.senders.push(Address::new([4; 20]));
 
         let mut block2 = SealedBlockWithSenders::default();
-        let block2_hash = H256::new([16; 32]);
+        let block2_hash = B256::new([16; 32]);
         block2.number = 2;
         block2.hash = block2_hash;
         block2.senders.push(Address::new([4; 20]));
@@ -470,7 +470,7 @@ mod tests {
 
         // split at unknown block hash
         assert_eq!(
-            chain.clone().split(SplitAt::Hash(H256::new([100; 32]))),
+            chain.clone().split(SplitAt::Hash(B256::new([100; 32]))),
             ChainSplit::NoSplitPending(chain.clone())
         );
 

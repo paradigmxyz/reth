@@ -14,7 +14,7 @@ use educe::Educe;
 use rand::{thread_rng, Rng};
 use reth_primitives::{
     bytes::{BufMut, Bytes, BytesMut},
-    H128, H256, H512 as PeerId,
+    B128, B256, B512 as PeerId,
 };
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
@@ -31,12 +31,12 @@ const PROTOCOL_VERSION: usize = 4;
 ///
 /// This uses the given remote public key and local (ephemeral) secret key to [compute a shared
 /// secp256k1 point](secp256k1::ecdh::shared_secret_point) and slices off the y coordinate from the
-/// returned pair, returning only the bytes of the x coordinate as a [`H256`].
-fn ecdh_x(public_key: &PublicKey, secret_key: &SecretKey) -> H256 {
-    H256::from_slice(&secp256k1::ecdh::shared_secret_point(public_key, secret_key)[..32])
+/// returned pair, returning only the bytes of the x coordinate as a [`B256`].
+fn ecdh_x(public_key: &PublicKey, secret_key: &SecretKey) -> B256 {
+    B256::from_slice(&secp256k1::ecdh::shared_secret_point(public_key, secret_key)[..32])
 }
 
-fn kdf(secret: H256, s1: &[u8], dest: &mut [u8]) {
+fn kdf(secret: B256, s1: &[u8], dest: &mut [u8]) {
     // SEC/ISO/Shoup specify counter size SHOULD be equivalent
     // to size of hash output, however, it also notes that
     // the 4 bytes is okay. NIST specifies 4 bytes.
@@ -68,11 +68,11 @@ pub struct ECIES {
     #[educe(Debug(ignore))]
     ephemeral_secret_key: SecretKey,
     ephemeral_public_key: PublicKey,
-    ephemeral_shared_secret: Option<H256>,
+    ephemeral_shared_secret: Option<B256>,
     remote_ephemeral_public_key: Option<PublicKey>,
 
-    nonce: H256,
-    remote_nonce: Option<H256>,
+    nonce: B256,
+    remote_nonce: Option<B256>,
 
     #[educe(Debug(ignore))]
     ingress_aes: Option<Ctr64BE<Aes256>>,
@@ -100,7 +100,7 @@ impl ECIES {
     fn new_static_client(
         secret_key: SecretKey,
         remote_id: PeerId,
-        nonce: H256,
+        nonce: B256,
         ephemeral_secret_key: SecretKey,
     ) -> Result<Self, ECIESError> {
         let public_key = PublicKey::from_secret_key(SECP256K1, &secret_key);
@@ -143,7 +143,7 @@ impl ECIES {
     /// key.
     pub fn new_static_server(
         secret_key: SecretKey,
-        nonce: H256,
+        nonce: B256,
         ephemeral_secret_key: SecretKey,
     ) -> Result<Self, ECIESError> {
         let public_key = PublicKey::from_secret_key(SECP256K1, &secret_key);
@@ -200,10 +200,10 @@ impl ECIES {
         let mut key = [0u8; 32];
         kdf(x, &[], &mut key);
 
-        let enc_key = H128::from_slice(&key[..16]);
+        let enc_key = B128::from_slice(&key[..16]);
         let mac_key = sha256(&key[16..32]);
 
-        let iv: H128 = rng.gen();
+        let iv: B128 = rng.gen();
         let mut encryptor = Ctr64BE::<Aes128>::new((&enc_key.0).into(), (&iv.0).into());
 
         let mut encrypted = data.to_vec();
@@ -225,12 +225,12 @@ impl ECIES {
         let public_key = PublicKey::from_slice(pubkey_bytes)?;
         let (data_iv, tag_bytes) = split_at_mut(encrypted, encrypted.len() - 32)?;
         let (iv, encrypted_data) = split_at_mut(data_iv, 16)?;
-        let tag = H256::from_slice(tag_bytes);
+        let tag = B256::from_slice(tag_bytes);
 
         let x = ecdh_x(&public_key, &self.secret_key);
         let mut key = [0u8; 32];
         kdf(x, &[], &mut key);
-        let enc_key = H128::from_slice(&key[..16]);
+        let enc_key = B128::from_slice(&key[..16]);
         let mac_key = sha256(&key[16..32]);
 
         let check_tag = hmac_sha256(mac_key.as_ref(), &[iv, encrypted_data], auth_data);
@@ -266,7 +266,7 @@ impl ECIES {
         struct S<'a> {
             sig_bytes: &'a [u8; 65],
             id: &'a PeerId,
-            nonce: &'a H256,
+            nonce: &'a B256,
             protocol_version: u8,
         }
 
@@ -348,7 +348,7 @@ impl ECIES {
         #[derive(RlpEncodable, RlpMaxEncodedLen)]
         struct S {
             id: PeerId,
-            nonce: H256,
+            nonce: B256,
             protocol_version: u8,
         }
 
@@ -427,30 +427,30 @@ impl ECIES {
         } {
             hasher.update(el);
         }
-        let h_nonce = H256::from(hasher.finalize().as_ref());
+        let h_nonce = B256::from(hasher.finalize().as_ref());
 
-        let iv = H128::default();
-        let shared_secret: H256 = {
+        let iv = B128::default();
+        let shared_secret: B256 = {
             let mut hasher = Keccak256::new();
             hasher.update(self.ephemeral_shared_secret.unwrap().0.as_ref());
             hasher.update(h_nonce.0.as_ref());
-            H256::from(hasher.finalize().as_ref())
+            B256::from(hasher.finalize().as_ref())
         };
 
-        let aes_secret: H256 = {
+        let aes_secret: B256 = {
             let mut hasher = Keccak256::new();
             hasher.update(self.ephemeral_shared_secret.unwrap().0.as_ref());
             hasher.update(shared_secret.0.as_ref());
-            H256::from(hasher.finalize().as_ref())
+            B256::from(hasher.finalize().as_ref())
         };
         self.ingress_aes = Some(Ctr64BE::<Aes256>::new((&aes_secret.0).into(), (&iv.0).into()));
         self.egress_aes = Some(Ctr64BE::<Aes256>::new((&aes_secret.0).into(), (&iv.0).into()));
 
-        let mac_secret: H256 = {
+        let mac_secret: B256 = {
             let mut hasher = Keccak256::new();
             hasher.update(self.ephemeral_shared_secret.unwrap().0.as_ref());
             hasher.update(aes_secret.0.as_ref());
-            H256::from(hasher.finalize().as_ref())
+            B256::from(hasher.finalize().as_ref())
         };
         self.ingress_mac = Some(MAC::new(mac_secret));
         self.ingress_mac.as_mut().unwrap().update((mac_secret ^ self.nonce).as_ref());
@@ -490,7 +490,7 @@ impl ECIES {
     pub fn read_header(&mut self, data: &mut [u8]) -> Result<usize, ECIESError> {
         let (header_bytes, mac_bytes) = split_at_mut(data, 16)?;
         let header = HeaderBytes::from_mut_slice(header_bytes);
-        let mac = H128::from_slice(&mac_bytes[..16]);
+        let mac = B128::from_slice(&mac_bytes[..16]);
 
         self.ingress_mac.as_mut().unwrap().update_header(header);
         let check_mac = self.ingress_mac.as_mut().unwrap().digest();
@@ -543,7 +543,7 @@ impl ECIES {
 
     pub fn read_body<'a>(&mut self, data: &'a mut [u8]) -> Result<&'a mut [u8], ECIESError> {
         let (body, mac_bytes) = split_at_mut(data, data.len() - 16)?;
-        let mac = H128::from_slice(mac_bytes);
+        let mac = B128::from_slice(mac_bytes);
         self.ingress_mac.as_mut().unwrap().update_body(body);
         let check_mac = self.ingress_mac.as_mut().unwrap().digest();
         if check_mac != mac {

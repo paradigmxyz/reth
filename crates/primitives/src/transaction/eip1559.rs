@@ -1,5 +1,5 @@
 use super::access_list::AccessList;
-use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, H256};
+use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, B256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
@@ -206,7 +206,7 @@ impl TxEip1559 {
 
     /// Outputs the signature hash of the transaction by first encoding without a signature, then
     /// hashing.
-    pub(crate) fn signature_hash(&self) -> H256 {
+    pub(crate) fn signature_hash(&self) -> B256 {
         let mut buf = BytesMut::with_capacity(self.payload_len_for_signature());
         self.encode_for_signing(&mut buf);
         keccak256(&buf)
@@ -218,7 +218,7 @@ mod tests {
     use super::TxEip1559;
     use crate::{
         transaction::{signature::Signature, TransactionKind},
-        AccessList, Address, Transaction, TransactionSigned, H256, U256,
+        AccessList, Address, Transaction, TransactionSigned, B256, U256,
     };
     use std::str::FromStr;
 
@@ -227,7 +227,7 @@ mod tests {
         use crate::hex_literal::hex;
 
         let signer: Address = hex!("dd6b8b3dc6b7ad97db52f08a275ff4483e024cea").into();
-        let hash: H256 =
+        let hash: B256 =
             hex!("0ec0b6a2df4d87424e5f6ad2a654e27aaeb7dac20ae9e8385cc09087ad532ee0").into();
 
         let tx = Transaction::Eip1559( TxEip1559 {

@@ -1,6 +1,6 @@
 //! [serde] utilities.
 
-use crate::{H256, U64};
+use crate::{B256, U64};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 mod storage;
@@ -44,8 +44,8 @@ where
     s.serialize_str(&crate::hex::encode(x.as_ref()))
 }
 
-/// Serialize a [H256] as a hex string _without_ the "0x" prefix.
-pub fn serialize_h256_hex_string_no_prefix<S>(x: &H256, s: S) -> Result<S::Ok, S::Error>
+/// Serialize a [B256] as a hex string _without_ the "0x" prefix.
+pub fn serialize_b256_hex_string_no_prefix<S>(x: &B256, s: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {

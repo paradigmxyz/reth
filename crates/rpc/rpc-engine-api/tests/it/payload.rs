@@ -7,7 +7,7 @@ use reth_interfaces::test_utils::generators::{
 };
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
-    proofs, Block, SealedBlock, TransactionSigned, H256, U256,
+    proofs, Block, SealedBlock, TransactionSigned, B256, U256,
 };
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadV1, PayloadError,
@@ -34,7 +34,7 @@ fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> Executi
 #[test]
 fn payload_body_roundtrip() {
     let mut rng = generators::rng();
-    for block in random_block_range(&mut rng, 0..=99, H256::default(), 0..2) {
+    for block in random_block_range(&mut rng, 0..=99, B256::default(), 0..2) {
         let unsealed = block.clone().unseal();
         let payload_body: ExecutionPayloadBodyV1 = convert_to_payload_body_v1(unsealed);
 

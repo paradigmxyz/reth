@@ -1,7 +1,7 @@
 //! Implements the `GetReceipts` and `Receipts` message types.
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{ReceiptWithBloom, H256};
+use reth_primitives::{ReceiptWithBloom, B256};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GetReceipts(
     /// The block hashes to request receipts for.
-    pub Vec<H256>,
+    pub Vec<B256>,
 );
 
 /// The response to [`GetReceipts`], containing receipt lists that correspond to each block

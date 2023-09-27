@@ -1,5 +1,5 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{Address, BlockHash, BlockId, BlockNumberOrTag, Bytes, H256, U256, U64};
+use reth_primitives::{Address, BlockHash, BlockId, BlockNumberOrTag, Bytes, B256, U256, U64};
 use reth_rpc_types::{
     engine::{
         ExecutionPayloadBodiesV1, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
@@ -29,8 +29,8 @@ pub trait EngineApi {
     async fn new_payload_v3(
         &self,
         payload: ExecutionPayloadV3,
-        versioned_hashes: Vec<H256>,
-        parent_beacon_block_root: H256,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>
@@ -170,7 +170,7 @@ pub trait EngineEthApi {
 
     /// Returns information about a block by hash.
     #[method(name = "getBlockByHash")]
-    async fn block_by_hash(&self, hash: H256, full: bool) -> RpcResult<Option<RichBlock>>;
+    async fn block_by_hash(&self, hash: B256, full: bool) -> RpcResult<Option<RichBlock>>;
 
     /// Returns information about a block by number.
     #[method(name = "getBlockByNumber")]
@@ -182,7 +182,7 @@ pub trait EngineEthApi {
 
     /// Sends signed transaction, returning its hash.
     #[method(name = "sendRawTransaction")]
-    async fn send_raw_transaction(&self, bytes: Bytes) -> RpcResult<H256>;
+    async fn send_raw_transaction(&self, bytes: Bytes) -> RpcResult<B256>;
 
     /// Returns logs matching given filter object.
     #[method(name = "getLogs")]
