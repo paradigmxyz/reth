@@ -26,7 +26,7 @@ pub use state::{
 };
 use std::{
     collections::{BTreeMap, HashSet},
-    ops::RangeBounds,
+    ops::{RangeBounds, RangeInclusive},
     sync::Arc,
     time::Instant,
 };
@@ -265,6 +265,10 @@ where
     /// Returns `None` if block is not found.
     fn block_with_senders(&self, number: BlockNumber) -> RethResult<Option<BlockWithSenders>> {
         self.database.provider()?.block_with_senders(number)
+    }
+
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Block>> {
+        self.database.provider()?.block_range(range)
     }
 }
 
