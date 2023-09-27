@@ -88,7 +88,6 @@ pub struct TxPool<T: TransactionOrdering> {
     /// be moved to pending if the base fee changes in their favor (decreases) in future blocks.
     basefee_pool: ParkedPool<BasefeeOrd<T::Transaction>>,
     /// All blob transactions in the pool
-    #[allow(unused)]
     blob_transactions: BlobTransactions<T::Transaction>,
     /// All transactions in the pool.
     all_transactions: AllTransactions<T::Transaction>,
@@ -269,6 +268,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             SubPool::Queued => self.queued_pool.contains(id),
             SubPool::Pending => self.pending_pool.contains(id),
             SubPool::BaseFee => self.basefee_pool.contains(id),
+            SubPool::Blob => self.blob_transactions.contains(id),
         }
     }
 
@@ -561,6 +561,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             SubPool::Queued => self.queued_pool.remove_transaction(tx),
             SubPool::Pending => self.pending_pool.remove_transaction(tx),
             SubPool::BaseFee => self.basefee_pool.remove_transaction(tx),
+            SubPool::Blob => self.blob_transactions.remove_transaction(tx),
         }
     }
 
@@ -572,9 +573,10 @@ impl<T: TransactionOrdering> TxPool<T> {
         tx: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         match pool {
-            SubPool::Queued => self.queued_pool.remove_transaction(tx),
             SubPool::Pending => self.pending_pool.prune_transaction(tx),
+            SubPool::Queued => self.queued_pool.remove_transaction(tx),
             SubPool::BaseFee => self.basefee_pool.remove_transaction(tx),
+            SubPool::Blob => self.blob_transactions.remove_transaction(tx),
         }
     }
 
@@ -618,6 +620,9 @@ impl<T: TransactionOrdering> TxPool<T> {
             }
             SubPool::BaseFee => {
                 self.basefee_pool.add_transaction(tx);
+            }
+            SubPool::Blob => {
+                self.blob_transactions.add_transaction(tx);
             }
         }
     }
@@ -1324,6 +1329,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
         // before attempting to insert a blob transaction, we need to ensure that additional
         // constraints are met that only apply to blob transactions
         if transaction.is_eip4844() {
+            state.insert(TxState::BLOB_TRANSACTION);
+
             transaction =
                 self.ensure_valid_blob_transaction(transaction, on_chain_balance, ancestor)?;
             let blob_fee_cap = transaction.transaction.max_fee_per_blob_gas().unwrap_or_default();
