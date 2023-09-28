@@ -39,6 +39,7 @@ Options:
           - mainnet
           - goerli
           - sepolia
+          - holesky
           
           [default: mainnet]
 

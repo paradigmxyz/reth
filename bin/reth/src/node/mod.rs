@@ -113,6 +113,7 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     /// - mainnet
     /// - goerli
     /// - sepolia
+    /// - holesky
     /// - dev
     #[arg(
         long,
