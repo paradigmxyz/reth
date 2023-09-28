@@ -138,8 +138,8 @@ impl NodeState {
     }
 
     fn handle_consensus_layer_health_event(&self, event: ConsensusLayerHealthEvent) {
-        // If pipeline is running, consensus layer messages are expected to be neither received nor
-        // processed. So we need to report about CL health only when pipeline is idle.
+        // If pipeline is running, no consensus layer messages are expected to be received.
+        // So we need to report about CL health only when pipeline is idle.
         if self.current_stage.is_none() {
             match event {
                 ConsensusLayerHealthEvent::NeverSeen => {
