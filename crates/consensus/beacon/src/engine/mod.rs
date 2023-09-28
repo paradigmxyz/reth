@@ -1796,7 +1796,10 @@ where
             // any engine messages until it's finished.
             if let Poll::Ready(result) = this.hooks.poll_running_hook_with_db_write(
                 cx,
-                EngineContext { tip_block_number: this.blockchain.canonical_tip().number },
+                EngineContext {
+                    tip_block_number: this.blockchain.canonical_tip().number,
+                    finalized_block_number: this.blockchain.finalized_block_number()?,
+                },
             )? {
                 this.on_hook_result(result)?;
             }
@@ -1856,7 +1859,10 @@ where
             if !this.forkchoice_state_tracker.is_latest_invalid() {
                 if let Poll::Ready(result) = this.hooks.poll_next_hook(
                     cx,
-                    EngineContext { tip_block_number: this.blockchain.canonical_tip().number },
+                    EngineContext {
+                        tip_block_number: this.blockchain.canonical_tip().number,
+                        finalized_block_number: this.blockchain.finalized_block_number()?,
+                    },
                     this.sync.is_pipeline_active(),
                 )? {
                     this.on_hook_result(result)?;

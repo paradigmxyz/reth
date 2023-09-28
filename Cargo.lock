@@ -5523,6 +5523,7 @@ dependencies = [
  "reth-revm",
  "reth-rpc-types",
  "reth-rpc-types-compat",
+ "reth-snapshot",
  "reth-stages",
  "reth-tasks",
  "reth-tracing",
@@ -6287,6 +6288,19 @@ dependencies = [
  "alloy-rlp",
  "reth-primitives",
  "reth-rpc-types",
+]
+
+[[package]]
+name = "reth-snapshot"
+version = "0.1.0-alpha.10"
+dependencies = [
+ "assert_matches",
+ "reth-db",
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-provider",
+ "reth-stages",
+ "thiserror",
 ]
 
 [[package]]
