@@ -334,6 +334,9 @@ pub enum PayloadError {
     /// Invalid payload excess blob gas.
     #[error("Invalid payload excess blob gas: {0}")]
     ExcessBlobGas(U256),
+    /// Pre-cancun Payload has blob transactions.
+    #[error("Invalid payload, pre-Cancun payload has blob transactions")]
+    PreCancunBlockWithBlobTransactions,
     /// Invalid payload block hash.
     #[error("blockhash mismatch, want {consensus}, got {execution}")]
     BlockHash {
