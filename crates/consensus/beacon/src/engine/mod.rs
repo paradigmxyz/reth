@@ -1194,11 +1194,7 @@ where
             .flatten()
             .collect::<Vec<_>>();
 
-        if let Err(status) =
-            self.validate_versioned_hashes(parent_hash, block_versioned_hashes, cancun_fields)
-        {
-            return Err(status)
-        }
+        self.validate_versioned_hashes(parent_hash, block_versioned_hashes, cancun_fields)?;
 
         Ok(block)
     }
