@@ -416,7 +416,8 @@ impl<DB: Database> Pruner<DB> {
         tip_block_number: BlockNumber,
     ) -> PrunerResult {
         // Contract log filtering removes every receipt possible except the ones in the list. So,
-        // for the other receipts it's as if they had a `PruneMode::Distance()` of 128.
+        // for the other receipts it's as if they had a `PruneMode::Distance()` of
+        // `MINIMUM_PRUNING_DISTANCE`.
         let to_block = PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)
             .prune_target_block(
                 tip_block_number,
@@ -1523,15 +1524,19 @@ mod tests {
         let tx = TestTransaction::default();
         let mut rng = generators::rng();
 
-        let tip = 300;
-        let blocks = random_block_range(&mut rng, 0..=tip, B256::ZERO, 1..5);
+        let tip = 20000;
+        let blocks = [
+            random_block_range(&mut rng, 0..=100, B256::ZERO, 1..5),
+            random_block_range(&mut rng, (100 + 1)..=(tip - 100), B256::ZERO, 0..1),
+            random_block_range(&mut rng, (tip - 100 + 1)..=tip, B256::ZERO, 1..5),
+        ]
+        .concat();
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let mut receipts = Vec::new();
 
         let (deposit_contract_addr, _) = random_eoa_account(&mut rng);
         for block in &blocks {
-            assert!(!block.body.is_empty());
             for (txi, transaction) in block.body.iter().enumerate() {
                 let mut receipt = random_receipt(&mut rng, transaction, Some(1));
                 receipt.logs.push(random_log(
@@ -1569,7 +1574,7 @@ mod tests {
                     ..Default::default()
                 },
                 // Less than total amount of blocks to prune to test the batching logic
-                PruneBatchSizes::default().with_storage_history(10),
+                PruneBatchSizes::default().with_receipts(10),
             );
 
             let result = pruner.prune_receipts_by_logs(&provider, tip);
