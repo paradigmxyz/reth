@@ -102,6 +102,7 @@ macro_rules! impl_to_rpc_result {
     };
 }
 
+impl_to_rpc_result!(PayloadError);
 impl_to_rpc_result!(reth_interfaces::RethError);
 impl_to_rpc_result!(reth_network_api::NetworkError);
 
@@ -121,28 +122,6 @@ impl ToRpcResultExt for RethResult<Option<Block>> {
     fn map_ok_or_rpc_err(self) -> RpcResult<<Self as ToRpcResultExt>::Ok> {
         match self {
             Ok(block) => block.ok_or_else(|| EthApiError::UnknownBlockNumber.into()),
-            Err(err) => Err(internal_rpc_err(err.to_string())),
-        }
-    }
-}
-
-impl ToRpcResultExt for RethResult<()> {
-    type Ok = ();
-
-    fn map_ok_or_rpc_err(self) -> RpcResult<<Self as ToRpcResultExt>::Ok> {
-        match self {
-            Ok(()) => Ok(()),
-            Err(err) => Err(internal_rpc_err(err.to_string())),
-        }
-    }
-}
-
-impl ToRpcResultExt for Result<SealedBlock, PayloadError> {
-    type Ok = SealedBlock;
-
-    fn map_ok_or_rpc_err(self) -> RpcResult<<Self as ToRpcResultExt>::Ok> {
-        match self {
-            Ok(block) => Ok(block),
             Err(err) => Err(internal_rpc_err(err.to_string())),
         }
     }
