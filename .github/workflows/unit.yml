@@ -69,7 +69,7 @@ jobs:
           repository: ethereum/tests
           path: testing/ef-tests/ethereum-tests
           submodules: recursive
-          depth: 1
+          fetch-depth: 1
 
       - name: Install toolchain
         uses: actions-rs/toolchain@v1
