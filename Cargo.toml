@@ -72,6 +72,12 @@ exclude = [".github/"]
 inherits = "release"
 debug = true
 
+# Meant for testing - all optimizations, but with debug assertions and overflow
+# checks
+[profile.hivetests]
+inherits = "test"
+opt-level = 3
+
 [profile.maxperf]
 inherits = "release"
 lto = "fat"
