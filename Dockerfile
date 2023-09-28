@@ -26,8 +26,8 @@ RUN cargo chef cook --profile $BUILD_PROFILE --recipe-path recipe.json
 COPY . .
 RUN cargo build --profile $BUILD_PROFILE --locked --bin reth
 
-# ARG is not resolve in COPY so we have to hack around it by copying the binary
-# to a temporary location
+# ARG is not resolved in COPY so we have to hack around it by copying the
+# binary to a temporary location
 RUN cp /app/target/$BUILD_PROFILE/reth /app/reth
 
 # Use Ubuntu as the release image
