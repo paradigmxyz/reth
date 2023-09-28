@@ -246,15 +246,6 @@ pub enum ConsensusError {
     #[error("Unexpected withdrawals root")]
     WithdrawalsRootUnexpected,
 
-    /// Error when the withdrawal index is invalid.
-    #[error("Withdrawal index #{got} is invalid. Expected: #{expected}.")]
-    WithdrawalIndexInvalid {
-        /// The actual withdrawal index.
-        got: u64,
-        /// The expected withdrawal index.
-        expected: u64,
-    },
-
     /// Error when withdrawals are missing.
     #[error("Missing withdrawals")]
     BodyWithdrawalsMissing,
