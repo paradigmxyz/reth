@@ -1,7 +1,4 @@
 on:
-  push:
-    branches:
-      - dan/add-hivetests-profile
   schedule:
     # every day
     - cron: '0 0 * * *'
