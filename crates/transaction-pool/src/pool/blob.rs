@@ -1,6 +1,7 @@
 #![allow(dead_code, unused)]
 use crate::{
-    identifier::TransactionId, pool::size::SizeTracker, PoolTransaction, ValidPoolTransaction,
+    identifier::TransactionId, pool::size::SizeTracker, traits::BestTransactionsAttributes,
+    PoolTransaction, ValidPoolTransaction,
 };
 use std::{
     cmp::Ordering,
@@ -76,12 +77,12 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         Some(tx)
     }
 
+    /// Returns all transactions that satisfy the given basefee and blob_fee.
     pub(crate) fn satisfy_attributes(
         &self,
-        basefee: u64,
-        blob_fee: Option<u64>,
+        best_transactions_attributes: BestTransactionsAttributes,
     ) -> Vec<Arc<ValidPoolTransaction<T>>> {
-        unreachable!()
+        Vec::new()
     }
 
     fn next_id(&mut self) -> u64 {

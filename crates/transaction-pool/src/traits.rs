@@ -241,8 +241,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Consumer: Block production
     fn best_transactions_with_attributes(
         &self,
-        base_fee: u64,
-        blob_fee: Option<u64>,
+        best_transactions_attributes: BestTransactionsAttributes,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
 
     /// Returns all transactions that can be included in the next block.
@@ -1067,4 +1066,13 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
             }
         }
     }
+}
+
+/// A Helper type that bundles best transactions attributes together
+#[derive(Debug)]
+pub struct BestTransactionsAttributes {
+    /// The base fee attribute for best transactions
+    pub basefee: u64,
+    /// The blob fee attribute for best transactions
+    pub blob_fee: Option<u64>,
 }

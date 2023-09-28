@@ -74,8 +74,8 @@ use crate::{
         txpool::{SenderInfo, TxPool},
     },
     traits::{
-        AllPoolTransactions, BlockInfo, NewTransactionEvent, PoolSize, PoolTransaction,
-        PropagatedTransactions, TransactionOrigin,
+        AllPoolTransactions, BestTransactionsAttributes, BlockInfo, NewTransactionEvent, PoolSize,
+        PoolTransaction, PropagatedTransactions, TransactionOrigin,
     },
     validate::{TransactionValidationOutcome, ValidPoolTransaction},
     CanonicalStateUpdate, ChangedAccount, PoolConfig, TransactionOrdering, TransactionValidator,
@@ -668,11 +668,10 @@ where
     /// the given base fee and optional blob fee attributes.
     pub(crate) fn best_transactions_with_attributes(
         &self,
-        base_fee: u64,
-        blob_fee: Option<u64>,
+        best_transactions_attributes: BestTransactionsAttributes,
     ) -> Box<dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T::Transaction>>>>
     {
-        self.pool.read().best_transactions_with_attributes(base_fee, blob_fee)
+        self.pool.read().best_transactions_with_attributes(best_transactions_attributes)
     }
 
     /// Returns all transactions from the pending sub-pool
