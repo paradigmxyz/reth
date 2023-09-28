@@ -69,14 +69,7 @@ impl<DB: Database + 'static> PruneHook<DB> {
 
                 match result {
                     Ok(_) => EngineHookEvent::Finished(Ok(())),
-                    Err(err) => EngineHookEvent::Finished(Err(match err {
-                        PrunerError::PrunePart(_) | PrunerError::InconsistentData(_) => {
-                            EngineHookError::Internal(Box::new(err))
-                        }
-                        PrunerError::Interface(err) => err.into(),
-                        PrunerError::Database(err) => RethError::Database(err).into(),
-                        PrunerError::Provider(err) => RethError::Provider(err).into(),
-                    })),
+                    Err(err) => EngineHookEvent::Finished(Err(err.into())),
                 }
             }
             Err(_) => {
@@ -176,4 +169,17 @@ enum PrunerState<DB> {
 struct Metrics {
     /// The number of times the pruner was run.
     runs: Counter,
+}
+
+impl From<PrunerError> for EngineHookError {
+    fn from(err: PrunerError) -> Self {
+        match err {
+            PrunerError::PrunePart(_) | PrunerError::InconsistentData(_) => {
+                EngineHookError::Internal(Box::new(err))
+            }
+            PrunerError::Interface(err) => err.into(),
+            PrunerError::Database(err) => RethError::Database(err).into(),
+            PrunerError::Provider(err) => RethError::Provider(err).into(),
+        }
+    }
 }

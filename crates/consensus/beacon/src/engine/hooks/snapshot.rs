@@ -52,14 +52,7 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
 
                 match result {
                     Ok(_) => EngineHookEvent::Finished(Ok(())),
-                    Err(err) => EngineHookEvent::Finished(Err(match err {
-                        SnapshotterError::InconsistentData(_) => {
-                            EngineHookError::Internal(Box::new(err))
-                        }
-                        SnapshotterError::Interface(err) => err.into(),
-                        SnapshotterError::Database(err) => RethError::Database(err).into(),
-                        SnapshotterError::Provider(err) => RethError::Provider(err).into(),
-                    })),
+                    Err(err) => EngineHookEvent::Finished(Err(err.into())),
                 }
             }
             Err(_) => {
@@ -154,4 +147,15 @@ enum SnapshotterState<DB> {
     Idle(Option<Snapshotter<DB>>),
     /// Snapshotter is running and waiting for a response
     Running(oneshot::Receiver<SnapshotterWithResult<DB>>),
+}
+
+impl From<SnapshotterError> for EngineHookError {
+    fn from(err: SnapshotterError) -> Self {
+        match err {
+            SnapshotterError::InconsistentData(_) => EngineHookError::Internal(Box::new(err)),
+            SnapshotterError::Interface(err) => err.into(),
+            SnapshotterError::Database(err) => RethError::Database(err).into(),
+            SnapshotterError::Provider(err) => RethError::Provider(err).into(),
+        }
+    }
 }
