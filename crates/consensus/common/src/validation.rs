@@ -230,21 +230,6 @@ pub fn validate_block_standalone(
                 expected: *header_withdrawals_root,
             })
         }
-
-        // Validate that withdrawal index is monotonically increasing within a block.
-        if let Some(first) = withdrawals.first() {
-            let mut prev_index = first.index;
-            for withdrawal in withdrawals.iter().skip(1) {
-                let expected = prev_index + 1;
-                if expected != withdrawal.index {
-                    return Err(ConsensusError::WithdrawalIndexInvalid {
-                        got: withdrawal.index,
-                        expected,
-                    })
-                }
-                prev_index = withdrawal.index;
-            }
-        }
     }
 
     // EIP-4844: Shard Blob Transactions
@@ -350,7 +335,6 @@ pub fn validate_header_regarding_parent(
 /// Checks:
 ///  If we already know the block.
 ///  If parent is known
-///  If withdrawals are valid
 ///
 /// Returns parent block header
 pub fn validate_block_regarding_chain<PROV: HeaderProvider + WithdrawalsProvider>(
@@ -368,33 +352,6 @@ pub fn validate_block_regarding_chain<PROV: HeaderProvider + WithdrawalsProvider
     let parent = provider
         .header(&block.parent_hash)?
         .ok_or(ConsensusError::ParentUnknown { hash: block.parent_hash })?;
-
-    // Check if withdrawals are valid.
-    if let Some(withdrawals) = &block.withdrawals {
-        if !withdrawals.is_empty() {
-            let latest_withdrawal = provider.latest_withdrawal()?;
-            match latest_withdrawal {
-                Some(withdrawal) => {
-                    if withdrawal.index + 1 != withdrawals.first().unwrap().index {
-                        return Err(ConsensusError::WithdrawalIndexInvalid {
-                            got: withdrawals.first().unwrap().index,
-                            expected: withdrawal.index + 1,
-                        }
-                        .into())
-                    }
-                }
-                None => {
-                    if withdrawals.first().unwrap().index != 0 {
-                        return Err(ConsensusError::WithdrawalIndexInvalid {
-                            got: withdrawals.first().unwrap().index,
-                            expected: 0,
-                        }
-                        .into())
-                    }
-                }
-            }
-        }
-    }
 
     // Return parent header.
     Ok(parent.seal(block.parent_hash))
@@ -501,11 +458,9 @@ pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), Cons
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assert_matches::assert_matches;
     use mockall::mock;
     use reth_interfaces::{
         test_utils::generators::{self, Rng},
-        RethError::Consensus,
         RethResult,
     };
     use reth_primitives::{
@@ -800,43 +755,14 @@ mod tests {
         let block = create_block_with_withdrawals(&[5, 6, 7, 8, 9]);
         assert_eq!(validate_block_standalone(&block, &chain_spec), Ok(()));
 
-        // Invalid withdrawal index
-        let block = create_block_with_withdrawals(&[100, 102]);
-        assert_matches!(
-            validate_block_standalone(&block, &chain_spec),
-            Err(ConsensusError::WithdrawalIndexInvalid { .. })
-        );
-        let block = create_block_with_withdrawals(&[5, 6, 7, 9]);
-        assert_matches!(
-            validate_block_standalone(&block, &chain_spec),
-            Err(ConsensusError::WithdrawalIndexInvalid { .. })
-        );
-
         let (_, parent) = mock_block();
-        let mut provider = Provider::new(Some(parent.clone()));
-        // Withdrawal index should be 0 if there are no withdrawals in the chain
-        let block = create_block_with_withdrawals(&[1, 2, 3]);
-        provider.withdrawals_provider.expect_latest_withdrawal().return_const(Ok(None));
-        assert_matches!(
-            validate_block_regarding_chain(&block, &provider),
-            Err(Consensus(ConsensusError::WithdrawalIndexInvalid { got: 1, expected: 0 }))
-        );
+        let provider = Provider::new(Some(parent.clone()));
         let block = create_block_with_withdrawals(&[0, 1, 2]);
         let res = validate_block_regarding_chain(&block, &provider);
         assert!(res.is_ok());
 
         // Withdrawal index should be the last withdrawal index + 1
         let mut provider = Provider::new(Some(parent));
-        let block = create_block_with_withdrawals(&[4, 5, 6]);
-        provider
-            .withdrawals_provider
-            .expect_latest_withdrawal()
-            .return_const(Ok(Some(Withdrawal { index: 2, ..Default::default() })));
-        assert_matches!(
-            validate_block_regarding_chain(&block, &provider),
-            Err(Consensus(ConsensusError::WithdrawalIndexInvalid { got: 4, expected: 3 }))
-        );
-
         let block = create_block_with_withdrawals(&[3, 4, 5]);
         provider
             .withdrawals_provider
