@@ -1743,6 +1743,10 @@ where
                     self.sync_state_updater.update_sync_state(SyncState::Syncing)
                 }
                 EngineHookEvent::Finished(_) => {
+                    // Hook with read-write access to the database has finished running, so engine
+                    // can process new FCU/payload messages from CL again. It's safe to
+                    // return `false` on `eth_syncing` request.
+                    self.sync_state_updater.update_sync_state(SyncState::Idle);
                     // If the hook had read-write access to the database, it means that the engine
                     // may have accumulated some buffered blocks.
                     if let Err(error) =
