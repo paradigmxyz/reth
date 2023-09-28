@@ -1,5 +1,5 @@
 #![allow(missing_docs)]
-use reth_primitives::{serde_helper::JsonStorageKey, Address, Bytes, H256, H512, U256, U64};
+use reth_primitives::{serde_helper::JsonStorageKey, Address, Bytes, B256, B512, U256, U64};
 use serde::{Deserialize, Serialize};
 
 /// Account information.
@@ -27,9 +27,9 @@ pub struct StorageProof {
 pub struct EIP1186AccountProofResponse {
     pub address: Address,
     pub balance: U256,
-    pub code_hash: H256,
+    pub code_hash: B256,
     pub nonce: U64,
-    pub storage_hash: H256,
+    pub storage_hash: B256,
     pub account_proof: Vec<Bytes>,
     pub storage_proof: Vec<StorageProof>,
 }
@@ -55,7 +55,7 @@ pub struct RecoveredAccount {
     /// address of the recovered account
     pub address: Address,
     /// public key of the recovered account
-    pub public_key: H512,
+    pub public_key: B512,
     /// If the signature contains chain replay protection,
     /// And the chain_id encoded within the signature
     /// matches the current chain this would be true, otherwise false.

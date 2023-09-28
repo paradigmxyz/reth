@@ -1,12 +1,13 @@
 //! Implementation specific Errors for the `eth_` namespace.
 
 use crate::result::{internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code};
+use alloy_sol_types::decode_revert_reason;
 use jsonrpsee::{
     core::Error as RpcError,
     types::{error::CALL_EXECUTION_FAILED_CODE, ErrorObject},
 };
 use reth_interfaces::RethError;
-use reth_primitives::{abi::decode_revert_reason, Address, Bytes, U256};
+use reth_primitives::{Address, Bytes, U256};
 use reth_revm::tracing::js::JsInspectorError;
 use reth_rpc_types::{error::EthRpcErrorCode, BlockError, CallInputError};
 use reth_transaction_pool::error::{
@@ -467,7 +468,7 @@ pub struct RevertError {
     /// The transaction output data
     ///
     /// Note: this is `None` if output was empty
-    output: Option<bytes::Bytes>,
+    output: Option<Bytes>,
 }
 
 // === impl RevertError ==
@@ -476,7 +477,7 @@ impl RevertError {
     /// Wraps the output bytes
     ///
     /// Note: this is intended to wrap an revm output
-    pub fn new(output: bytes::Bytes) -> Self {
+    pub fn new(output: Bytes) -> Self {
         if output.is_empty() {
             Self { output: None }
         } else {
@@ -492,7 +493,7 @@ impl RevertError {
 impl std::fmt::Display for RevertError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("execution reverted")?;
-        if let Some(reason) = self.output.as_ref().and_then(decode_revert_reason) {
+        if let Some(reason) = self.output.as_ref().and_then(|bytes| decode_revert_reason(bytes)) {
             write!(f, ": {reason}")?;
         }
         Ok(())
@@ -616,7 +617,7 @@ pub enum SignError {
 /// [ExecutionResult::Success].
 pub(crate) fn ensure_success(result: ExecutionResult) -> EthResult<Bytes> {
     match result {
-        ExecutionResult::Success { output, .. } => Ok(output.into_data().into()),
+        ExecutionResult::Success { output, .. } => Ok(output.into_data()),
         ExecutionResult::Revert { output, .. } => {
             Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into())
         }

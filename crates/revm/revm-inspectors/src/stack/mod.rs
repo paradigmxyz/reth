@@ -1,12 +1,11 @@
-use std::fmt::Debug;
-
-use reth_primitives::{bytes::Bytes, Address, TxHash, H256, U256};
+use reth_primitives::{Address, Bytes, TxHash, B256, U256};
 use revm::{
     inspectors::CustomPrintTracer,
     interpreter::{CallInputs, CreateInputs, Gas, InstructionResult, Interpreter},
     primitives::Env,
     Database, EVMData, Inspector,
 };
+use std::fmt::Debug;
 
 /// A wrapped [Inspector] that can be reused in the stack
 mod maybe_owned;
@@ -139,7 +138,7 @@ where
         &mut self,
         evm_data: &mut EVMData<'_, DB>,
         address: &Address,
-        topics: &[H256],
+        topics: &[B256],
         data: &Bytes,
     ) {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {

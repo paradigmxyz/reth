@@ -389,7 +389,7 @@ pub enum DnsDiscoveryEvent {
 
 /// Converts an [Enr] into a [NodeRecord]
 fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> {
-    use reth_rlp::Decodable;
+    use alloy_rlp::Decodable;
 
     let node_record = NodeRecord {
         address: enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))?,
@@ -409,9 +409,9 @@ fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> 
 mod tests {
     use super::*;
     use crate::tree::TreeRootEntry;
+    use alloy_rlp::Encodable;
     use enr::{EnrBuilder, EnrKey};
     use reth_primitives::{Chain, Hardfork, MAINNET};
-    use reth_rlp::Encodable;
     use secp256k1::rand::thread_rng;
     use std::{future::poll_fn, net::Ipv4Addr};
     use tokio_stream::StreamExt;

@@ -360,8 +360,8 @@ pub enum ChainSplit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{Receipts, H160, H256};
-    use reth_revm_primitives::{
+    use reth_primitives::{Address, Receipts, B256};
+    use revm::{
         db::BundleState,
         primitives::{AccountInfo, HashMap},
     };
@@ -369,10 +369,10 @@ mod tests {
     #[test]
     fn chain_append() {
         let block = SealedBlockWithSenders::default();
-        let block1_hash = H256([0x01; 32]);
-        let block2_hash = H256([0x02; 32]);
-        let block3_hash = H256([0x03; 32]);
-        let block4_hash = H256([0x04; 32]);
+        let block1_hash = B256::new([0x01; 32]);
+        let block2_hash = B256::new([0x02; 32]);
+        let block3_hash = B256::new([0x03; 32]);
+        let block4_hash = B256::new([0x04; 32]);
 
         let mut block1 = block.clone();
         let mut block2 = block.clone();
@@ -402,8 +402,13 @@ mod tests {
     fn test_number_split() {
         let block_state1 = BundleStateWithReceipts::new(
             BundleState::new(
-                vec![(H160([2; 20]), None, Some(AccountInfo::default()), HashMap::default())],
-                vec![vec![(H160([2; 20]), None, vec![])]],
+                vec![(
+                    Address::new([2; 20]),
+                    None,
+                    Some(AccountInfo::default()),
+                    HashMap::default(),
+                )],
+                vec![vec![(Address::new([2; 20]), None, vec![])]],
                 vec![],
             ),
             Receipts::from_vec(vec![vec![]]),
@@ -412,8 +417,13 @@ mod tests {
 
         let block_state2 = BundleStateWithReceipts::new(
             BundleState::new(
-                vec![(H160([3; 20]), None, Some(AccountInfo::default()), HashMap::default())],
-                vec![vec![(H160([3; 20]), None, vec![])]],
+                vec![(
+                    Address::new([3; 20]),
+                    None,
+                    Some(AccountInfo::default()),
+                    HashMap::default(),
+                )],
+                vec![vec![(Address::new([3; 20]), None, vec![])]],
                 vec![],
             ),
             Receipts::from_vec(vec![vec![]]),
@@ -421,16 +431,16 @@ mod tests {
         );
 
         let mut block1 = SealedBlockWithSenders::default();
-        let block1_hash = H256([15; 32]);
+        let block1_hash = B256::new([15; 32]);
         block1.number = 1;
         block1.hash = block1_hash;
-        block1.senders.push(H160([4; 20]));
+        block1.senders.push(Address::new([4; 20]));
 
         let mut block2 = SealedBlockWithSenders::default();
-        let block2_hash = H256([16; 32]);
+        let block2_hash = B256::new([16; 32]);
         block2.number = 2;
         block2.hash = block2_hash;
-        block2.senders.push(H160([4; 20]));
+        block2.senders.push(Address::new([4; 20]));
 
         let mut block_state_extended = block_state1.clone();
         block_state_extended.extend(block_state2.clone());
@@ -460,7 +470,7 @@ mod tests {
 
         // split at unknown block hash
         assert_eq!(
-            chain.clone().split(SplitAt::Hash(H256([100; 32]))),
+            chain.clone().split(SplitAt::Hash(B256::new([100; 32]))),
             ChainSplit::NoSplitPending(chain.clone())
         );
 

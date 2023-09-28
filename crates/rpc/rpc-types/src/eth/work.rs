@@ -1,4 +1,4 @@
-use reth_primitives::{H256, U256};
+use reth_primitives::{B256, U256};
 use serde::{
     de::{Error, SeqAccess, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
@@ -9,11 +9,11 @@ use std::fmt;
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Work {
     /// The proof-of-work hash.
-    pub pow_hash: H256,
+    pub pow_hash: B256,
     /// The seed hash.
-    pub seed_hash: H256,
+    pub seed_hash: B256,
     /// The target.
-    pub target: H256,
+    pub target: B256,
     /// The block number: this isn't always stored.
     pub number: Option<u64>,
 }
@@ -51,13 +51,13 @@ impl<'a> Deserialize<'a> for Work {
                 A: SeqAccess<'a>,
             {
                 let pow_hash = seq
-                    .next_element::<H256>()?
+                    .next_element::<B256>()?
                     .ok_or_else(|| A::Error::custom("missing pow hash"))?;
                 let seed_hash = seq
-                    .next_element::<H256>()?
+                    .next_element::<B256>()?
                     .ok_or_else(|| A::Error::custom("missing seed hash"))?;
                 let target = seq
-                    .next_element::<H256>()?
+                    .next_element::<B256>()?
                     .ok_or_else(|| A::Error::custom("missing target"))?;
                 let number = seq.next_element::<u64>()?;
                 Ok(Work { pow_hash, seed_hash, target, number })

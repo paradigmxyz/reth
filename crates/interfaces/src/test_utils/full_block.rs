@@ -8,7 +8,7 @@ use crate::p2p::{
 use parking_lot::Mutex;
 use reth_primitives::{
     BlockBody, BlockHashOrNumber, BlockNumHash, Header, HeadersDirection, PeerId, SealedBlock,
-    SealedHeader, WithPeerId, H256,
+    SealedHeader, WithPeerId, B256,
 };
 use std::{collections::HashMap, sync::Arc};
 
@@ -30,7 +30,7 @@ impl BodiesClient for NoopFullBlockClient {
 
     fn get_block_bodies_with_priority(
         &self,
-        _hashes: Vec<H256>,
+        _hashes: Vec<B256>,
         _priority: Priority,
     ) -> Self::Output {
         futures::future::ready(Ok(WithPeerId::new(PeerId::random(), vec![])))
@@ -55,8 +55,8 @@ impl HeadersClient for NoopFullBlockClient {
 /// This full block client can be [Clone]d and shared between multiple tasks.
 #[derive(Clone, Debug)]
 pub struct TestFullBlockClient {
-    headers: Arc<Mutex<HashMap<H256, Header>>>,
-    bodies: Arc<Mutex<HashMap<H256, BlockBody>>>,
+    headers: Arc<Mutex<HashMap<B256, Header>>>,
+    bodies: Arc<Mutex<HashMap<B256, BlockBody>>>,
     // soft response limit, max number of bodies to respond with
     soft_limit: usize,
 }
@@ -147,7 +147,7 @@ impl BodiesClient for TestFullBlockClient {
 
     fn get_block_bodies_with_priority(
         &self,
-        hashes: Vec<H256>,
+        hashes: Vec<B256>,
         _priority: Priority,
     ) -> Self::Output {
         let bodies = self.bodies.lock();

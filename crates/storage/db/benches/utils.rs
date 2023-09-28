@@ -6,20 +6,20 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DatabaseEnv,
 };
-use reth_primitives::fs;
+use reth_primitives::{fs, Bytes};
 use std::{path::Path, sync::Arc};
 
 /// Path where the DB is initialized for benchmarks.
-#[allow(unused)]
+#[allow(dead_code)]
 const BENCH_DB_PATH: &str = "/tmp/reth-benches";
 
 /// Used for RandomRead and RandomWrite benchmarks.
-#[allow(unused)]
+#[allow(dead_code)]
 const RANDOM_INDEXES: [usize; 10] = [23, 2, 42, 5, 3, 99, 54, 0, 33, 64];
 
 /// Returns bench vectors in the format: `Vec<(Key, EncodedKey, Value, CompressedValue)>`.
-#[allow(unused)]
-fn load_vectors<T: reth_db::table::Table>() -> Vec<(T::Key, bytes::Bytes, T::Value, bytes::Bytes)>
+#[allow(dead_code)]
+fn load_vectors<T: reth_db::table::Table>() -> Vec<(T::Key, Bytes, T::Value, Bytes)>
 where
     T: Default,
     T::Key: Default + Clone + for<'de> serde::Deserialize<'de>,
@@ -39,9 +39,9 @@ where
         .map(|(k, v)| {
             (
                 k.clone(),
-                bytes::Bytes::copy_from_slice(k.encode().as_ref()),
+                Bytes::copy_from_slice(k.encode().as_ref()),
                 v.clone(),
-                bytes::Bytes::copy_from_slice(v.compress().as_ref()),
+                Bytes::copy_from_slice(v.compress().as_ref()),
             )
         })
         .collect::<Vec<_>>()
@@ -49,10 +49,10 @@ where
 
 /// Sets up a clear database at `bench_db_path`.
 #[allow(clippy::ptr_arg)]
-#[allow(unused)]
+#[allow(dead_code)]
 fn set_up_db<T>(
     bench_db_path: &Path,
-    pair: &Vec<(<T as Table>::Key, bytes::Bytes, <T as Table>::Value, bytes::Bytes)>,
+    pair: &Vec<(<T as Table>::Key, Bytes, <T as Table>::Value, Bytes)>,
 ) -> DatabaseEnv
 where
     T: Table + Default,

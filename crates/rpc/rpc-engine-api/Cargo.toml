@@ -30,7 +30,7 @@ jsonrpsee-core.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-reth-rlp.workspace = true
+alloy-rlp.workspace = true
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-payload-builder = { workspace = true, features = ["test-utils"] }

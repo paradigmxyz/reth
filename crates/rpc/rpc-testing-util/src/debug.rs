@@ -1,6 +1,6 @@
 //! Helpers for testing debug trace calls.
 
-use reth_primitives::H256;
+use reth_primitives::B256;
 use reth_rpc_api::clients::DebugApiClient;
 use reth_rpc_types::trace::geth::{GethDebugTracerType, GethDebugTracingOptions};
 
@@ -16,7 +16,7 @@ pub trait DebugApiExt {
     /// Same as [DebugApiClient::debug_trace_transaction] but returns the result as json.
     async fn debug_trace_transaction_json(
         &self,
-        hash: H256,
+        hash: B256,
         opts: GethDebugTracingOptions,
     ) -> Result<serde_json::Value, jsonrpsee::core::Error>;
 }
@@ -27,7 +27,7 @@ impl<T: DebugApiClient + Sync> DebugApiExt for T {
 
     async fn debug_trace_transaction_json(
         &self,
-        hash: H256,
+        hash: B256,
         opts: GethDebugTracingOptions,
     ) -> Result<serde_json::Value, jsonrpsee::core::Error> {
         let mut params = jsonrpsee::core::params::ArrayParams::new();

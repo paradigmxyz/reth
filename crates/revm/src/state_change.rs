@@ -1,10 +1,10 @@
 use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
-    constants::SYSTEM_ADDRESS, Address, ChainSpec, Header, Withdrawal, H256, U256,
+    constants::SYSTEM_ADDRESS, Address, ChainSpec, Header, Withdrawal, B256, U256,
 };
-use reth_revm_primitives::{env::fill_tx_env_with_beacon_root_contract_call, Database};
-use revm::{primitives::ResultAndState, DatabaseCommit, EVM};
+use reth_revm_primitives::env::fill_tx_env_with_beacon_root_contract_call;
+use revm::{primitives::ResultAndState, Database, DatabaseCommit, EVM};
 use std::{collections::HashMap, fmt::Debug};
 
 /// Collect all balance changes at the end of the block.
@@ -61,7 +61,7 @@ pub fn apply_beacon_root_contract_call<DB: Database + DatabaseCommit>(
     chain_spec: &ChainSpec,
     block_timestamp: u64,
     block_number: u64,
-    block_parent_beacon_block_root: Option<H256>,
+    block_parent_beacon_block_root: Option<B256>,
     evm: &mut EVM<DB>,
 ) -> Result<(), BlockExecutionError>
 where
@@ -71,7 +71,7 @@ where
         // if the block number is zero (genesis block) then the parent beacon block root must
         // be 0x0 and no system transaction may occur as per EIP-4788
         if block_number == 0 {
-            if block_parent_beacon_block_root != Some(H256::zero()) {
+            if block_parent_beacon_block_root != Some(B256::ZERO) {
                 return Err(BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero.into())
             }
         } else {

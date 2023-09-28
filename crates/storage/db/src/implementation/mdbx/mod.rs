@@ -169,7 +169,7 @@ mod tests {
     };
     use reth_interfaces::db::DatabaseWriteOperation;
     use reth_libmdbx::{NoWriteMap, WriteMap};
-    use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, H160, H256, U256};
+    use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, B256, U256};
     use std::{path::Path, str::FromStr, sync::Arc};
     use tempfile::TempDir;
 
@@ -255,7 +255,7 @@ mod tests {
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         vec![0, 1, 2, 3]
             .into_iter()
-            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, B256::ZERO))
             .expect(ERROR_PUT);
         tx.commit().expect(ERROR_COMMIT);
 
@@ -264,49 +264,49 @@ mod tests {
 
         // [1, 3)
         let mut walker = cursor.walk_range(1..3).unwrap();
-        assert_eq!(walker.next(), Some(Ok((1, H256::zero()))));
-        assert_eq!(walker.next(), Some(Ok((2, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((1, B256::ZERO))));
+        assert_eq!(walker.next(), Some(Ok((2, B256::ZERO))));
         assert_eq!(walker.next(), None);
         // next() returns None after walker is done
         assert_eq!(walker.next(), None);
 
         // [1, 2]
         let mut walker = cursor.walk_range(1..=2).unwrap();
-        assert_eq!(walker.next(), Some(Ok((1, H256::zero()))));
-        assert_eq!(walker.next(), Some(Ok((2, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((1, B256::ZERO))));
+        assert_eq!(walker.next(), Some(Ok((2, B256::ZERO))));
         // next() returns None after walker is done
         assert_eq!(walker.next(), None);
 
         // [1, ∞)
         let mut walker = cursor.walk_range(1..).unwrap();
-        assert_eq!(walker.next(), Some(Ok((1, H256::zero()))));
-        assert_eq!(walker.next(), Some(Ok((2, H256::zero()))));
-        assert_eq!(walker.next(), Some(Ok((3, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((1, B256::ZERO))));
+        assert_eq!(walker.next(), Some(Ok((2, B256::ZERO))));
+        assert_eq!(walker.next(), Some(Ok((3, B256::ZERO))));
         // next() returns None after walker is done
         assert_eq!(walker.next(), None);
 
         // [2, 4)
         let mut walker = cursor.walk_range(2..4).unwrap();
-        assert_eq!(walker.next(), Some(Ok((2, H256::zero()))));
-        assert_eq!(walker.next(), Some(Ok((3, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((2, B256::ZERO))));
+        assert_eq!(walker.next(), Some(Ok((3, B256::ZERO))));
         assert_eq!(walker.next(), None);
         // next() returns None after walker is done
         assert_eq!(walker.next(), None);
 
         // (∞, 3)
         let mut walker = cursor.walk_range(..3).unwrap();
-        assert_eq!(walker.next(), Some(Ok((0, H256::zero()))));
-        assert_eq!(walker.next(), Some(Ok((1, H256::zero()))));
-        assert_eq!(walker.next(), Some(Ok((2, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((0, B256::ZERO))));
+        assert_eq!(walker.next(), Some(Ok((1, B256::ZERO))));
+        assert_eq!(walker.next(), Some(Ok((2, B256::ZERO))));
         // next() returns None after walker is done
         assert_eq!(walker.next(), None);
 
         // (∞, ∞)
         let mut walker = cursor.walk_range(..).unwrap();
-        assert_eq!(walker.next(), Some(Ok((0, H256::zero()))));
-        assert_eq!(walker.next(), Some(Ok((1, H256::zero()))));
-        assert_eq!(walker.next(), Some(Ok((2, H256::zero()))));
-        assert_eq!(walker.next(), Some(Ok((3, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((0, B256::ZERO))));
+        assert_eq!(walker.next(), Some(Ok((1, B256::ZERO))));
+        assert_eq!(walker.next(), Some(Ok((2, B256::ZERO))));
+        assert_eq!(walker.next(), Some(Ok((3, B256::ZERO))));
         // next() returns None after walker is done
         assert_eq!(walker.next(), None);
     }
@@ -315,9 +315,9 @@ mod tests {
     fn db_cursor_walk_range_on_dup_table() {
         let db: Arc<Env<WriteMap>> = create_test_db(EnvKind::RW);
 
-        let address0 = Address::zero();
-        let address1 = Address::from_low_u64_be(1);
-        let address2 = Address::from_low_u64_be(2);
+        let address0 = Address::ZERO;
+        let address1 = Address::with_last_byte(1);
+        let address2 = Address::with_last_byte(2);
 
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         tx.put::<AccountChangeSet>(0, AccountBeforeTx { address: address0, info: None })
@@ -361,7 +361,7 @@ mod tests {
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         vec![0, 1, 2, 3]
             .into_iter()
-            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, B256::ZERO))
             .expect(ERROR_PUT);
         tx.commit().expect(ERROR_COMMIT);
 
@@ -389,7 +389,7 @@ mod tests {
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         vec![0, 1, 3]
             .into_iter()
-            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, B256::ZERO))
             .expect(ERROR_PUT);
         tx.commit().expect(ERROR_COMMIT);
 
@@ -398,16 +398,16 @@ mod tests {
 
         let mut walker = Walker::new(&mut cursor, None);
 
-        assert_eq!(walker.next(), Some(Ok((0, H256::zero()))));
-        assert_eq!(walker.next(), Some(Ok((1, H256::zero()))));
-        assert_eq!(walker.next(), Some(Ok((3, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((0, B256::ZERO))));
+        assert_eq!(walker.next(), Some(Ok((1, B256::ZERO))));
+        assert_eq!(walker.next(), Some(Ok((3, B256::ZERO))));
         assert_eq!(walker.next(), None);
 
         // transform to ReverseWalker
         let mut reverse_walker = walker.rev();
-        assert_eq!(reverse_walker.next(), Some(Ok((3, H256::zero()))));
-        assert_eq!(reverse_walker.next(), Some(Ok((1, H256::zero()))));
-        assert_eq!(reverse_walker.next(), Some(Ok((0, H256::zero()))));
+        assert_eq!(reverse_walker.next(), Some(Ok((3, B256::ZERO))));
+        assert_eq!(reverse_walker.next(), Some(Ok((1, B256::ZERO))));
+        assert_eq!(reverse_walker.next(), Some(Ok((0, B256::ZERO))));
         assert_eq!(reverse_walker.next(), None);
     }
 
@@ -419,7 +419,7 @@ mod tests {
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         vec![0, 1, 3]
             .into_iter()
-            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, B256::ZERO))
             .expect(ERROR_PUT);
         tx.commit().expect(ERROR_COMMIT);
 
@@ -428,16 +428,16 @@ mod tests {
 
         let mut reverse_walker = ReverseWalker::new(&mut cursor, None);
 
-        assert_eq!(reverse_walker.next(), Some(Ok((3, H256::zero()))));
-        assert_eq!(reverse_walker.next(), Some(Ok((1, H256::zero()))));
-        assert_eq!(reverse_walker.next(), Some(Ok((0, H256::zero()))));
+        assert_eq!(reverse_walker.next(), Some(Ok((3, B256::ZERO))));
+        assert_eq!(reverse_walker.next(), Some(Ok((1, B256::ZERO))));
+        assert_eq!(reverse_walker.next(), Some(Ok((0, B256::ZERO))));
         assert_eq!(reverse_walker.next(), None);
 
         // transform to Walker
         let mut walker = reverse_walker.forward();
-        assert_eq!(walker.next(), Some(Ok((0, H256::zero()))));
-        assert_eq!(walker.next(), Some(Ok((1, H256::zero()))));
-        assert_eq!(walker.next(), Some(Ok((3, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((0, B256::ZERO))));
+        assert_eq!(walker.next(), Some(Ok((1, B256::ZERO))));
+        assert_eq!(walker.next(), Some(Ok((3, B256::ZERO))));
         assert_eq!(walker.next(), None);
     }
 
@@ -449,7 +449,7 @@ mod tests {
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         vec![0, 1, 3]
             .into_iter()
-            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, B256::ZERO))
             .expect(ERROR_PUT);
         tx.commit().expect(ERROR_COMMIT);
 
@@ -457,26 +457,26 @@ mod tests {
         let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
 
         let mut reverse_walker = cursor.walk_back(Some(1)).unwrap();
-        assert_eq!(reverse_walker.next(), Some(Ok((1, H256::zero()))));
-        assert_eq!(reverse_walker.next(), Some(Ok((0, H256::zero()))));
+        assert_eq!(reverse_walker.next(), Some(Ok((1, B256::ZERO))));
+        assert_eq!(reverse_walker.next(), Some(Ok((0, B256::ZERO))));
         assert_eq!(reverse_walker.next(), None);
 
         let mut reverse_walker = cursor.walk_back(Some(2)).unwrap();
-        assert_eq!(reverse_walker.next(), Some(Ok((3, H256::zero()))));
-        assert_eq!(reverse_walker.next(), Some(Ok((1, H256::zero()))));
-        assert_eq!(reverse_walker.next(), Some(Ok((0, H256::zero()))));
+        assert_eq!(reverse_walker.next(), Some(Ok((3, B256::ZERO))));
+        assert_eq!(reverse_walker.next(), Some(Ok((1, B256::ZERO))));
+        assert_eq!(reverse_walker.next(), Some(Ok((0, B256::ZERO))));
         assert_eq!(reverse_walker.next(), None);
 
         let mut reverse_walker = cursor.walk_back(Some(4)).unwrap();
-        assert_eq!(reverse_walker.next(), Some(Ok((3, H256::zero()))));
-        assert_eq!(reverse_walker.next(), Some(Ok((1, H256::zero()))));
-        assert_eq!(reverse_walker.next(), Some(Ok((0, H256::zero()))));
+        assert_eq!(reverse_walker.next(), Some(Ok((3, B256::ZERO))));
+        assert_eq!(reverse_walker.next(), Some(Ok((1, B256::ZERO))));
+        assert_eq!(reverse_walker.next(), Some(Ok((0, B256::ZERO))));
         assert_eq!(reverse_walker.next(), None);
 
         let mut reverse_walker = cursor.walk_back(None).unwrap();
-        assert_eq!(reverse_walker.next(), Some(Ok((3, H256::zero()))));
-        assert_eq!(reverse_walker.next(), Some(Ok((1, H256::zero()))));
-        assert_eq!(reverse_walker.next(), Some(Ok((0, H256::zero()))));
+        assert_eq!(reverse_walker.next(), Some(Ok((3, B256::ZERO))));
+        assert_eq!(reverse_walker.next(), Some(Ok((1, B256::ZERO))));
+        assert_eq!(reverse_walker.next(), Some(Ok((0, B256::ZERO))));
         assert_eq!(reverse_walker.next(), None);
     }
 
@@ -488,7 +488,7 @@ mod tests {
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         vec![0, 1, 3]
             .into_iter()
-            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, B256::ZERO))
             .expect(ERROR_PUT);
         tx.commit().expect(ERROR_COMMIT);
 
@@ -501,9 +501,9 @@ mod tests {
         // Seek exact
         let exact = cursor.seek_exact(missing_key).unwrap();
         assert_eq!(exact, None);
-        assert_eq!(cursor.current(), Ok(Some((missing_key + 1, H256::zero()))));
-        assert_eq!(cursor.prev(), Ok(Some((missing_key - 1, H256::zero()))));
-        assert_eq!(cursor.prev(), Ok(Some((missing_key - 2, H256::zero()))));
+        assert_eq!(cursor.current(), Ok(Some((missing_key + 1, B256::ZERO))));
+        assert_eq!(cursor.prev(), Ok(Some((missing_key - 1, B256::ZERO))));
+        assert_eq!(cursor.prev(), Ok(Some((missing_key - 2, B256::ZERO))));
     }
 
     #[test]
@@ -514,7 +514,7 @@ mod tests {
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         vec![0, 1, 3, 4, 5]
             .into_iter()
-            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, B256::ZERO))
             .expect(ERROR_PUT);
         tx.commit().expect(ERROR_COMMIT);
 
@@ -523,12 +523,12 @@ mod tests {
         let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
 
         // INSERT
-        assert_eq!(cursor.insert(key_to_insert, H256::zero()), Ok(()));
-        assert_eq!(cursor.current(), Ok(Some((key_to_insert, H256::zero()))));
+        assert_eq!(cursor.insert(key_to_insert, B256::ZERO), Ok(()));
+        assert_eq!(cursor.current(), Ok(Some((key_to_insert, B256::ZERO))));
 
         // INSERT (failure)
         assert_eq!(
-            cursor.insert(key_to_insert, H256::zero()),
+            cursor.insert(key_to_insert, B256::ZERO),
             Err(DatabaseError::Write {
                 code: -30799,
                 operation: DatabaseWriteOperation::CursorInsert,
@@ -536,7 +536,7 @@ mod tests {
                 key: Box::from(key_to_insert.encode().as_ref())
             })
         );
-        assert_eq!(cursor.current(), Ok(Some((key_to_insert, H256::zero()))));
+        assert_eq!(cursor.current(), Ok(Some((key_to_insert, B256::ZERO))));
 
         tx.commit().expect(ERROR_COMMIT);
 
@@ -555,8 +555,8 @@ mod tests {
 
         let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
         let key = Address::random();
-        let subkey1 = H256::random();
-        let subkey2 = H256::random();
+        let subkey1 = B256::random();
+        let subkey2 = B256::random();
 
         let entry1 = StorageEntry { key: subkey1, value: U256::ZERO };
         assert!(dup_cursor.insert(key, entry1).is_ok());
@@ -571,9 +571,9 @@ mod tests {
         let db: Arc<Env<WriteMap>> = create_test_db(EnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
-        let key1 = Address::from_low_u64_be(1);
-        let key2 = Address::from_low_u64_be(2);
-        let key3 = Address::from_low_u64_be(3);
+        let key1 = Address::with_last_byte(1);
+        let key2 = Address::with_last_byte(2);
+        let key3 = Address::with_last_byte(3);
         let mut cursor = tx.cursor_write::<PlainAccountState>().unwrap();
 
         assert!(cursor.insert(key1, Account::default()).is_ok());
@@ -602,7 +602,7 @@ mod tests {
         // PUT
         vec![0, 1, 3, 5, 7, 9]
             .into_iter()
-            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, B256::ZERO))
             .expect(ERROR_PUT);
         tx.commit().expect(ERROR_COMMIT);
 
@@ -611,11 +611,11 @@ mod tests {
 
         // INSERT (cursor starts at last)
         cursor.last().unwrap();
-        assert_eq!(cursor.current(), Ok(Some((9, H256::zero()))));
+        assert_eq!(cursor.current(), Ok(Some((9, B256::ZERO))));
 
         for pos in (2..=8).step_by(2) {
-            assert_eq!(cursor.insert(pos, H256::zero()), Ok(()));
-            assert_eq!(cursor.current(), Ok(Some((pos, H256::zero()))));
+            assert_eq!(cursor.insert(pos, B256::ZERO), Ok(()));
+            assert_eq!(cursor.current(), Ok(Some((pos, B256::ZERO))));
         }
         tx.commit().expect(ERROR_COMMIT);
 
@@ -635,7 +635,7 @@ mod tests {
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         vec![0, 1, 2, 3, 4]
             .into_iter()
-            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, B256::ZERO))
             .expect(ERROR_PUT);
         tx.commit().expect(ERROR_COMMIT);
 
@@ -643,7 +643,7 @@ mod tests {
         let key_to_append = 5;
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
-        assert_eq!(cursor.append(key_to_append, H256::zero()), Ok(()));
+        assert_eq!(cursor.append(key_to_append, B256::ZERO), Ok(()));
         tx.commit().expect(ERROR_COMMIT);
 
         // Confirm the result
@@ -662,7 +662,7 @@ mod tests {
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         vec![0, 1, 3, 4, 5]
             .into_iter()
-            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, B256::ZERO))
             .expect(ERROR_PUT);
         tx.commit().expect(ERROR_COMMIT);
 
@@ -671,7 +671,7 @@ mod tests {
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
         assert_eq!(
-            cursor.append(key_to_append, H256::zero()),
+            cursor.append(key_to_append, B256::ZERO),
             Err(DatabaseError::Write {
                 code: -30418,
                 operation: DatabaseWriteOperation::CursorAppend,
@@ -679,7 +679,7 @@ mod tests {
                 key: Box::from(key_to_append.encode().as_ref())
             })
         );
-        assert_eq!(cursor.current(), Ok(Some((5, H256::zero())))); // the end of table
+        assert_eq!(cursor.current(), Ok(Some((5, B256::ZERO)))); // the end of table
         tx.commit().expect(ERROR_COMMIT);
 
         // Confirm the result
@@ -711,7 +711,7 @@ mod tests {
         assert_eq!(cursor.seek_exact(key), Ok(Some((key, account))));
 
         let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
-        let subkey = H256::random();
+        let subkey = B256::random();
 
         let value = U256::from(1);
         let entry1 = StorageEntry { key: subkey, value };
@@ -738,7 +738,7 @@ mod tests {
             .try_for_each(|val| {
                 cursor.append(
                     transition_id,
-                    AccountBeforeTx { address: Address::from_low_u64_be(val), info: None },
+                    AccountBeforeTx { address: Address::with_last_byte(val), info: None },
                 )
             })
             .expect(ERROR_APPEND);
@@ -751,7 +751,7 @@ mod tests {
         assert_eq!(
             cursor.append_dup(
                 transition_id,
-                AccountBeforeTx { address: Address::from_low_u64_be(subkey_to_append), info: None }
+                AccountBeforeTx { address: Address::with_last_byte(subkey_to_append), info: None }
             ),
             Err(DatabaseError::Write {
                 code: -30418,
@@ -763,7 +763,7 @@ mod tests {
         assert_eq!(
             cursor.append(
                 transition_id - 1,
-                AccountBeforeTx { address: Address::from_low_u64_be(subkey_to_append), info: None }
+                AccountBeforeTx { address: Address::with_last_byte(subkey_to_append), info: None }
             ),
             Err(DatabaseError::Write {
                 code: -30418,
@@ -775,7 +775,7 @@ mod tests {
         assert_eq!(
             cursor.append(
                 transition_id,
-                AccountBeforeTx { address: Address::from_low_u64_be(subkey_to_append), info: None }
+                AccountBeforeTx { address: Address::with_last_byte(subkey_to_append), info: None }
             ),
             Ok(())
         );
@@ -787,7 +787,7 @@ mod tests {
 
         let value = Account {
             nonce: 18446744073709551615,
-            bytecode_hash: Some(H256::random()),
+            bytecode_hash: Some(B256::random()),
             balance: U256::MAX,
         };
         let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
@@ -824,11 +824,11 @@ mod tests {
         env.update(|tx| tx.put::<PlainStorageState>(key, value00).expect(ERROR_PUT)).unwrap();
 
         // PUT (2,2)
-        let value22 = StorageEntry { key: H256::from_low_u64_be(2), value: U256::from(2) };
+        let value22 = StorageEntry { key: B256::with_last_byte(2), value: U256::from(2) };
         env.update(|tx| tx.put::<PlainStorageState>(key, value22).expect(ERROR_PUT)).unwrap();
 
         // PUT (1,1)
-        let value11 = StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(1) };
+        let value11 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(1) };
         env.update(|tx| tx.put::<PlainStorageState>(key, value11).expect(ERROR_PUT)).unwrap();
 
         // Iterate with cursor
@@ -846,7 +846,7 @@ mod tests {
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
             let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
-            let mut walker = cursor.walk_dup(Some(key), Some(H256::from_low_u64_be(1))).unwrap();
+            let mut walker = cursor.walk_dup(Some(key), Some(B256::with_last_byte(1))).unwrap();
             assert_eq!(
                 (key, value11),
                 walker
@@ -870,11 +870,11 @@ mod tests {
         env.update(|tx| tx.put::<PlainStorageState>(key1, value00).expect(ERROR_PUT)).unwrap();
 
         // PUT key1 (1,1)
-        let value11 = StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(1) };
+        let value11 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(1) };
         env.update(|tx| tx.put::<PlainStorageState>(key1, value11).expect(ERROR_PUT)).unwrap();
 
         // PUT key2 (2,2)
-        let value22 = StorageEntry { key: H256::from_low_u64_be(2), value: U256::from(2) };
+        let value22 = StorageEntry { key: B256::with_last_byte(2), value: U256::from(2) };
         env.update(|tx| tx.put::<PlainStorageState>(key2, value22).expect(ERROR_PUT)).unwrap();
 
         // Iterate with walk_dup
@@ -906,11 +906,11 @@ mod tests {
     #[test]
     fn dup_value_with_same_subkey() {
         let env = create_test_db::<NoWriteMap>(EnvKind::RW);
-        let key1 = H160([0x11; 20]);
-        let key2 = H160([0x22; 20]);
+        let key1 = Address::new([0x11; 20]);
+        let key2 = Address::new([0x22; 20]);
 
         // PUT key1 (0,1)
-        let value01 = StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(1) };
+        let value01 = StorageEntry { key: B256::with_last_byte(0), value: U256::from(1) };
         env.update(|tx| tx.put::<PlainStorageState>(key1, value01).expect(ERROR_PUT)).unwrap();
 
         // PUT key1 (0,0)
@@ -918,7 +918,7 @@ mod tests {
         env.update(|tx| tx.put::<PlainStorageState>(key1, value00).expect(ERROR_PUT)).unwrap();
 
         // PUT key2 (2,2)
-        let value22 = StorageEntry { key: H256::from_low_u64_be(2), value: U256::from(2) };
+        let value22 = StorageEntry { key: B256::with_last_byte(2), value: U256::from(2) };
         env.update(|tx| tx.put::<PlainStorageState>(key2, value22).expect(ERROR_PUT)).unwrap();
 
         // Iterate with walk
