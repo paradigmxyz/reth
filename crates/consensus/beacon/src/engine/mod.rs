@@ -1079,7 +1079,7 @@ where
         payload: ExecutionPayload,
         cancun_fields: Option<CancunPayloadFields>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
-        let block = match self.ensure_well_formed_payload(payload, cancun_fields)? {
+        let block = match self.ensure_well_formed_payload(payload, cancun_fields) {
             Ok(block) => block,
             Err(status) => return Ok(status),
         };
@@ -1148,7 +1148,7 @@ where
         &self,
         payload: ExecutionPayload,
         cancun_fields: Option<CancunPayloadFields>,
-    ) -> Result<Result<SealedBlock, PayloadStatus>, BeaconOnNewPayloadError> {
+    ) -> Result<SealedBlock, PayloadStatus> {
         let parent_hash = payload.parent_hash();
 
         let block_hash = payload.block_hash();
@@ -1158,15 +1158,13 @@ where
         ) {
             Ok(block) => {
                 // make sure there are no blob transactions in the payload if it is pre-cancun
-                // we perform this check before validating the block hash because INVALID_PARAMS
-                // must be returned over an INVALID response.
                 if !self.chain_spec().is_cancun_active_at_timestamp(block.timestamp) &&
                     block.has_blob_transactions()
                 {
-                    return Err(BeaconOnNewPayloadError::PreCancunBlockWithBlobTransactions)
+                    Err(PayloadError::PreCancunBlockWithBlobTransactions)
+                } else {
+                    validate_block_hash(block_hash, block)
                 }
-
-                validate_block_hash(block_hash, block)
             }
             Err(error) => Err(error),
         };
@@ -1185,7 +1183,7 @@ where
                 }
                 let status = PayloadStatusEnum::from(error);
 
-                return Ok(Err(PayloadStatus::new(status, latest_valid_hash)))
+                return Err(PayloadStatus::new(status, latest_valid_hash))
             }
         };
 
@@ -1196,13 +1194,9 @@ where
             .flatten()
             .collect::<Vec<_>>();
 
-        if let Err(status) =
-            self.validate_versioned_hashes(parent_hash, block_versioned_hashes, cancun_fields)
-        {
-            return Ok(Err(status))
-        }
+        self.validate_versioned_hashes(parent_hash, block_versioned_hashes, cancun_fields)?;
 
-        Ok(Ok(block))
+        Ok(block)
     }
 
     /// Returns the currently configured [ChainSpec].
