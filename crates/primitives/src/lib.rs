@@ -17,12 +17,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::non_canonical_clone_impl)]
 
-pub mod abi;
 mod account;
 pub mod basefee;
-mod bits;
 mod block;
-pub mod bloom;
 mod chain;
 mod compression;
 pub mod constants;
@@ -33,33 +30,31 @@ pub mod fs;
 mod genesis;
 mod hardfork;
 mod header;
-mod hex_bytes;
 mod integer_list;
 pub mod listener;
 mod log;
 mod net;
 mod peer;
+pub mod proofs;
 mod prune;
 mod receipt;
+pub mod serde_helper;
 pub mod stage;
 mod storage;
 mod transaction;
 pub mod trie;
 mod withdrawal;
 
-/// Helper function for calculating Merkle proofs and hashes
-pub mod proofs;
-
 pub use account::{Account, Bytecode};
-pub use bits::H512;
 pub use block::{
     Block, BlockBody, BlockBodyRoots, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
     BlockWithSenders, ForkBlock, SealedBlock, SealedBlockWithSenders,
 };
-pub use bloom::Bloom;
+pub use bytes::{Buf, BufMut, BytesMut};
 pub use chain::{
     AllGenesisFormats, BaseFeeParams, Chain, ChainInfo, ChainSpec, ChainSpecBuilder,
-    DisplayHardforks, ForkCondition, ForkTimestamps, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
+    DisplayHardforks, ForkCondition, ForkTimestamps, NamedChain, DEV, GOERLI, HOLESKY, MAINNET,
+    SEPOLIA,
 };
 pub use compression::*;
 pub use constants::{
@@ -71,9 +66,8 @@ pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
 pub use genesis::{Genesis, GenesisAccount};
 pub use hardfork::Hardfork;
 pub use header::{Head, Header, HeadersDirection, SealedHeader};
-pub use hex_bytes::Bytes;
 pub use integer_list::IntegerList;
-pub use log::Log;
+pub use log::{logs_bloom, Log};
 pub use net::{
     goerli_nodes, holesky_nodes, mainnet_nodes, sepolia_nodes, NodeRecord, GOERLI_BOOTNODES,
     HOLESKY_BOOTNODES, MAINNET_BOOTNODES, SEPOLIA_BOOTNODES,
@@ -84,7 +78,6 @@ pub use prune::{
     ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE,
 };
 pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts};
-pub use revm_primitives::JumpMap;
 pub use serde_helper::JsonU256;
 pub use storage::StorageEntry;
 pub use transaction::{
@@ -99,73 +92,35 @@ pub use transaction::{
 };
 pub use withdrawal::Withdrawal;
 
-/// A block hash.
-pub type BlockHash = H256;
-/// A block number.
-pub type BlockNumber = u64;
-/// An Ethereum address.
-pub type Address = H160;
-/// A transaction hash is a kecack hash of an RLP encoded signed transaction.
-pub type TxHash = H256;
-/// The sequence number of all existing transactions.
-pub type TxNumber = u64;
-/// The index of transaction in a block.
-pub type TxIndex = u64;
-/// Chain identifier type (introduced in EIP-155).
-pub type ChainId = u64;
-/// An account storage key.
-pub type StorageKey = H256;
-/// An account storage value.
-pub type StorageValue = U256;
-/// Solidity contract functions are addressed using the first four byte of the Keccak-256 hash of
-/// their signature
-pub type Selector = [u8; 4];
-
-pub use ethers_core::{
-    types::{BigEndianHash, H128, H64, U64},
-    utils as rpc_utils,
+// Re-exports
+pub use self::ruint::UintTryTo;
+pub use alloy_primitives::{
+    self, address, b256, bloom, bytes, eip191_hash_message, hex, hex_literal, keccak256, ruint,
+    Address, BlockHash, BlockNumber, Bloom, BloomInput, Bytes, ChainId, Selector, StorageKey,
+    StorageValue, TxHash, TxIndex, TxNumber, B128, B256, B512, B64, U128, U256, U64, U8,
 };
-pub use revm_primitives::{B160 as H160, B256 as H256, U256};
-pub use ruint::{
-    aliases::{U128, U8},
-    UintTryTo,
-};
+pub use revm_primitives::{self, JumpMap};
 
 #[doc(hidden)]
-mod __reexport {
-    pub use bytes;
-    pub use hex;
-    pub use hex_literal;
-    pub use tiny_keccak;
-}
+#[deprecated = "use B128 instead"]
+pub type H128 = B128;
 
-// Useful reexports
-pub use __reexport::*;
+#[doc(hidden)]
+#[deprecated = "use B256 instead"]
+pub type H256 = B256;
 
-/// Various utilities
-pub mod utils {
-    pub use ethers_core::types::serde_helpers;
-}
+#[doc(hidden)]
+#[deprecated = "use B512 instead"]
+pub type H512 = B512;
+
+#[doc(hidden)]
+#[deprecated = "use B64 instead"]
+pub type H64 = B64;
+
+#[cfg(any(test, feature = "arbitrary"))]
+pub use arbitrary;
 
 /// EIP-4844 + KZG helpers
 pub mod kzg {
     pub use c_kzg::*;
 }
-
-/// Helpers for working with serde
-pub mod serde_helper;
-
-/// Returns the keccak256 hash for the given data.
-#[inline]
-pub fn keccak256(data: impl AsRef<[u8]>) -> H256 {
-    use tiny_keccak::{Hasher, Keccak};
-
-    let mut buf = [0u8; 32];
-    let mut hasher = Keccak::v256();
-    hasher.update(data.as_ref());
-    hasher.finalize(&mut buf);
-    buf.into()
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-pub use arbitrary;

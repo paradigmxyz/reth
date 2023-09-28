@@ -132,7 +132,7 @@ Following a successful `BodyStage`, the `SenderRecoveryStage` starts to execute.
 
 [File: crates/primitives/src/transaction/signature.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/primitives/src/transaction/signature.rs)
 ```rust,ignore
-pub(crate) fn recover_signer(&self, hash: H256) -> Option<Address> {
+pub(crate) fn recover_signer(&self, hash: B256) -> Option<Address> {
     let mut sig: [u8; 65] = [0; 65];
 
     sig[0..32].copy_from_slice(&self.r.to_be_bytes::<32>());

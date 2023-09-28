@@ -1,3 +1,4 @@
+use crate::{StateChanges, StateReverts};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     tables,
@@ -5,21 +6,18 @@ use reth_db::{
 };
 use reth_interfaces::db::DatabaseError;
 use reth_primitives::{
-    bloom::logs_bloom, keccak256, Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt,
-    Receipts, StorageEntry, H256, U256,
+    keccak256, logs_bloom, Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts,
+    StorageEntry, B256, U256,
 };
-use reth_revm_primitives::{
-    db::states::BundleState, into_reth_acc, into_revm_acc, primitives::AccountInfo,
-};
+use reth_revm_primitives::{into_reth_acc, into_revm_acc};
 use reth_trie::{
     hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
     StateRoot, StateRootError,
 };
+use revm::{db::states::BundleState, primitives::AccountInfo};
 use std::collections::HashMap;
 
-pub use reth_revm_primitives::db::states::OriginalValuesKnown;
-
-use crate::{StateChanges, StateReverts};
+pub use revm::db::states::OriginalValuesKnown;
 
 /// Bundle state of post execution changes and reverts
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -38,7 +36,7 @@ pub struct BundleStateWithReceipts {
 
 /// Type used to initialize revms bundle state.
 pub type BundleStateInit =
-    HashMap<Address, (Option<Account>, Option<Account>, HashMap<H256, (U256, U256)>)>;
+    HashMap<Address, (Option<Account>, Option<Account>, HashMap<B256, (U256, U256)>)>;
 
 /// Types used inside RevertsInit to initialize revms reverts.
 pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
@@ -56,7 +54,7 @@ impl BundleStateWithReceipts {
     pub fn new_init(
         state_init: BundleStateInit,
         revert_init: RevertsInit,
-        contracts_init: Vec<(H256, Bytecode)>,
+        contracts_init: Vec<(B256, Bytecode)>,
         receipts: Receipts,
         first_block: BlockNumber,
     ) -> Self {
@@ -118,7 +116,7 @@ impl BundleStateWithReceipts {
     }
 
     /// Return bytecode if known.
-    pub fn bytecode(&self, code_hash: &H256) -> Option<Bytecode> {
+    pub fn bytecode(&self, code_hash: &B256) -> Option<Bytecode> {
         self.bundle.bytecode(code_hash).map(Bytecode)
     }
 
@@ -143,7 +141,7 @@ impl BundleStateWithReceipts {
             let mut hashed_storage = HashedStorage::new(account.status.was_destroyed());
 
             for (key, value) in account.storage.iter() {
-                let hashed_key = keccak256(H256(key.to_be_bytes()));
+                let hashed_key = keccak256(B256::new(key.to_be_bytes()));
                 if value.present_value == U256::ZERO {
                     hashed_storage.insert_zero_valued_slot(hashed_key);
                 } else {
@@ -198,7 +196,7 @@ impl BundleStateWithReceipts {
     pub fn state_root_slow<'a, 'tx, TX: DbTx<'tx>>(
         &self,
         tx: &'a TX,
-    ) -> Result<H256, StateRootError> {
+    ) -> Result<B256, StateRootError> {
         let hashed_post_state = self.hash_state_slow();
         let (account_prefix_set, storage_prefix_set) = hashed_post_state.construct_prefix_sets();
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, &hashed_post_state);
@@ -235,7 +233,7 @@ impl BundleStateWithReceipts {
     /// Returns the receipt root for all recorded receipts.
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
     /// of receipt. This is a expensive operation.
-    pub fn receipts_root_slow(&self, block_number: BlockNumber) -> Option<H256> {
+    pub fn receipts_root_slow(&self, block_number: BlockNumber) -> Option<B256> {
         self.receipts.root_slow(self.block_number_to_index(block_number)?)
     }
 
@@ -376,7 +374,7 @@ impl BundleStateWithReceipts {
 
 #[cfg(test)]
 mod tests {
-    use super::{StateChanges, StateReverts};
+    use super::*;
     use crate::{AccountReader, BundleStateWithReceipts, ProviderFactory};
     use reth_db::{
         cursor::{DbCursorRO, DbDupCursorRO},
@@ -386,8 +384,8 @@ mod tests {
         transaction::DbTx,
         DatabaseEnv,
     };
-    use reth_primitives::{Address, Receipt, Receipts, StorageEntry, H256, MAINNET, U256};
-    use reth_revm_primitives::{into_reth_acc, primitives::HashMap};
+    use reth_primitives::{Address, Receipt, Receipts, StorageEntry, B256, MAINNET, U256};
+    use reth_revm_primitives::into_reth_acc;
     use revm::{
         db::{
             states::{
@@ -397,7 +395,9 @@ mod tests {
             },
             BundleState,
         },
-        primitives::{Account, AccountInfo as RevmAccountInfo, AccountStatus, StorageSlot},
+        primitives::{
+            Account, AccountInfo as RevmAccountInfo, AccountStatus, HashMap, StorageSlot,
+        },
         CacheState, DatabaseCommit, State,
     };
     use std::sync::Arc;
@@ -408,7 +408,7 @@ mod tests {
         let factory = ProviderFactory::new(db, MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
-        let address_a = Address::zero();
+        let address_a = Address::ZERO;
         let address_b = Address::repeat_byte(0xff);
 
         let account_a = RevmAccountInfo { balance: U256::from(1), nonce: 1, ..Default::default() };
@@ -551,7 +551,7 @@ mod tests {
         let factory = ProviderFactory::new(db, MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
-        let address_a = Address::zero();
+        let address_a = Address::ZERO;
         let address_b = Address::repeat_byte(0xff);
 
         let account_b = RevmAccountInfo { balance: U256::from(2), nonce: 2, ..Default::default() };
@@ -617,14 +617,14 @@ mod tests {
 
         assert_eq!(
             storage_cursor.seek_exact(address_a).unwrap(),
-            Some((address_a, StorageEntry { key: H256::zero(), value: U256::from(1) })),
+            Some((address_a, StorageEntry { key: B256::ZERO, value: U256::from(1) })),
             "Slot 0 for account A should be 1"
         );
         assert_eq!(
             storage_cursor.next_dup().unwrap(),
             Some((
                 address_a,
-                StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(2) }
+                StorageEntry { key: B256::from(U256::from(1).to_be_bytes()), value: U256::from(2) }
             )),
             "Slot 1 for account A should be 2"
         );
@@ -638,7 +638,7 @@ mod tests {
             storage_cursor.seek_exact(address_b).unwrap(),
             Some((
                 address_b,
-                StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(2) }
+                StorageEntry { key: B256::from(U256::from(1).to_be_bytes()), value: U256::from(2) }
             )),
             "Slot 1 for account B should be 2"
         );
@@ -657,7 +657,7 @@ mod tests {
             changeset_cursor.seek_exact(BlockNumberAddress((1, address_a))).unwrap(),
             Some((
                 BlockNumberAddress((1, address_a)),
-                StorageEntry { key: H256::zero(), value: U256::from(0) }
+                StorageEntry { key: B256::ZERO, value: U256::from(0) }
             )),
             "Slot 0 for account A should have changed from 0"
         );
@@ -665,7 +665,7 @@ mod tests {
             changeset_cursor.next_dup().unwrap(),
             Some((
                 BlockNumberAddress((1, address_a)),
-                StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(0) }
+                StorageEntry { key: B256::from(U256::from(1).to_be_bytes()), value: U256::from(0) }
             )),
             "Slot 1 for account A should have changed from 0"
         );
@@ -679,7 +679,7 @@ mod tests {
             changeset_cursor.seek_exact(BlockNumberAddress((1, address_b))).unwrap(),
             Some((
                 BlockNumberAddress((1, address_b)),
-                StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(1) }
+                StorageEntry { key: B256::from(U256::from(1).to_be_bytes()), value: U256::from(1) }
             )),
             "Slot 1 for account B should have changed from 1"
         );
@@ -719,7 +719,7 @@ mod tests {
             changeset_cursor.seek_exact(BlockNumberAddress((2, address_a))).unwrap(),
             Some((
                 BlockNumberAddress((2, address_a)),
-                StorageEntry { key: H256::zero(), value: U256::from(1) }
+                StorageEntry { key: B256::ZERO, value: U256::from(1) }
             )),
             "Slot 0 for account A should have changed from 1 on deletion"
         );
@@ -727,7 +727,7 @@ mod tests {
             changeset_cursor.next_dup().unwrap(),
             Some((
                 BlockNumberAddress((2, address_a)),
-                StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(2) }
+                StorageEntry { key: B256::from(U256::from(1).to_be_bytes()), value: U256::from(2) }
             )),
             "Slot 1 for account A should have changed from 2 on deletion"
         );
@@ -942,14 +942,14 @@ mod tests {
             storage_changes.next(),
             Some(Ok((
                 BlockNumberAddress((0, address1)),
-                StorageEntry { key: H256::from_low_u64_be(0), value: U256::ZERO }
+                StorageEntry { key: B256::with_last_byte(0), value: U256::ZERO }
             )))
         );
         assert_eq!(
             storage_changes.next(),
             Some(Ok((
                 BlockNumberAddress((0, address1)),
-                StorageEntry { key: H256::from_low_u64_be(1), value: U256::ZERO }
+                StorageEntry { key: B256::with_last_byte(1), value: U256::ZERO }
             )))
         );
 
@@ -959,7 +959,7 @@ mod tests {
             storage_changes.next(),
             Some(Ok((
                 BlockNumberAddress((1, address1)),
-                StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(1) }
+                StorageEntry { key: B256::with_last_byte(0), value: U256::from(1) }
             )))
         );
 
@@ -970,14 +970,14 @@ mod tests {
             storage_changes.next(),
             Some(Ok((
                 BlockNumberAddress((2, address1)),
-                StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(2) }
+                StorageEntry { key: B256::with_last_byte(0), value: U256::from(2) }
             )))
         );
         assert_eq!(
             storage_changes.next(),
             Some(Ok((
                 BlockNumberAddress((2, address1)),
-                StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(2) }
+                StorageEntry { key: B256::with_last_byte(1), value: U256::from(2) }
             )))
         );
 
@@ -992,21 +992,21 @@ mod tests {
             storage_changes.next(),
             Some(Ok((
                 BlockNumberAddress((4, address1)),
-                StorageEntry { key: H256::from_low_u64_be(0), value: U256::ZERO }
+                StorageEntry { key: B256::with_last_byte(0), value: U256::ZERO }
             )))
         );
         assert_eq!(
             storage_changes.next(),
             Some(Ok((
                 BlockNumberAddress((4, address1)),
-                StorageEntry { key: H256::from_low_u64_be(2), value: U256::ZERO }
+                StorageEntry { key: B256::with_last_byte(2), value: U256::ZERO }
             )))
         );
         assert_eq!(
             storage_changes.next(),
             Some(Ok((
                 BlockNumberAddress((4, address1)),
-                StorageEntry { key: H256::from_low_u64_be(6), value: U256::ZERO }
+                StorageEntry { key: B256::with_last_byte(6), value: U256::ZERO }
             )))
         );
 
@@ -1018,21 +1018,21 @@ mod tests {
             storage_changes.next(),
             Some(Ok((
                 BlockNumberAddress((5, address1)),
-                StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(2) }
+                StorageEntry { key: B256::with_last_byte(0), value: U256::from(2) }
             )))
         );
         assert_eq!(
             storage_changes.next(),
             Some(Ok((
                 BlockNumberAddress((5, address1)),
-                StorageEntry { key: H256::from_low_u64_be(2), value: U256::from(4) }
+                StorageEntry { key: B256::with_last_byte(2), value: U256::from(4) }
             )))
         );
         assert_eq!(
             storage_changes.next(),
             Some(Ok((
                 BlockNumberAddress((5, address1)),
-                StorageEntry { key: H256::from_low_u64_be(6), value: U256::from(6) }
+                StorageEntry { key: B256::with_last_byte(6), value: U256::from(6) }
             )))
         );
 
@@ -1045,7 +1045,7 @@ mod tests {
             storage_changes.next(),
             Some(Ok((
                 BlockNumberAddress((7, address1)),
-                StorageEntry { key: H256::from_low_u64_be(0), value: U256::ZERO }
+                StorageEntry { key: B256::with_last_byte(0), value: U256::ZERO }
             )))
         );
         assert_eq!(storage_changes.next(), None);
@@ -1147,14 +1147,14 @@ mod tests {
             storage_changes.next(),
             Some(Ok((
                 BlockNumberAddress((1, address1)),
-                StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(1) }
+                StorageEntry { key: B256::with_last_byte(0), value: U256::from(1) }
             )))
         );
         assert_eq!(
             storage_changes.next(),
             Some(Ok((
                 BlockNumberAddress((1, address1)),
-                StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(2) }
+                StorageEntry { key: B256::with_last_byte(1), value: U256::from(2) }
             )))
         );
         assert_eq!(storage_changes.next(), None);

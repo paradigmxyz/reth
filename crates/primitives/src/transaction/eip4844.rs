@@ -7,11 +7,11 @@ use crate::{
         BYTES_PER_COMMITMENT, BYTES_PER_PROOF,
     },
     kzg_to_versioned_hash, Bytes, ChainId, Signature, Transaction, TransactionKind,
-    TransactionSigned, TxHash, TxType, EIP4844_TX_TYPE_ID, H256,
+    TransactionSigned, TxHash, TxType, B256, EIP4844_TX_TYPE_ID,
 };
+use alloy_rlp::{length_of_length, Decodable, Encodable, Error as RlpError, Header};
 use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header};
 use serde::{Deserialize, Serialize};
 use std::{mem, ops::Deref};
 
@@ -71,7 +71,7 @@ pub struct TxEip4844 {
     pub access_list: AccessList,
 
     /// It contains a vector of fixed size hash(32 bytes)
-    pub blob_versioned_hashes: Vec<H256>,
+    pub blob_versioned_hashes: Vec<B256>,
 
     /// Max fee per data gas
     ///
@@ -190,7 +190,7 @@ impl TxEip4844 {
     /// - `access_list`
     /// - `max_fee_per_blob_gas`
     /// - `blob_versioned_hashes`
-    pub fn decode_inner(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    pub fn decode_inner(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         Ok(Self {
             chain_id: Decodable::decode(buf)?,
             nonce: Decodable::decode(buf)?,
@@ -199,7 +199,7 @@ impl TxEip4844 {
             gas_limit: Decodable::decode(buf)?,
             to: Decodable::decode(buf)?,
             value: Decodable::decode(buf)?,
-            input: Bytes(Decodable::decode(buf)?),
+            input: Decodable::decode(buf)?,
             access_list: Decodable::decode(buf)?,
             max_fee_per_blob_gas: Decodable::decode(buf)?,
             blob_versioned_hashes: Decodable::decode(buf)?,
@@ -250,7 +250,7 @@ impl TxEip4844 {
         mem::size_of::<u128>() + // value
         self.access_list.size() + // access_list
         self.input.len() +  // input
-        self.blob_versioned_hashes.capacity() * mem::size_of::<H256>() + // blob hashes size
+        self.blob_versioned_hashes.capacity() * mem::size_of::<B256>() + // blob hashes size
         mem::size_of::<u128>() // max_fee_per_data_gas
     }
 
@@ -306,7 +306,7 @@ impl TxEip4844 {
 
     /// Outputs the signature hash of the transaction by first encoding without a signature, then
     /// hashing.
-    pub(crate) fn signature_hash(&self) -> H256 {
+    pub(crate) fn signature_hash(&self) -> B256 {
         let mut buf = BytesMut::with_capacity(self.payload_len_for_signature());
         self.encode_for_signing(&mut buf);
         keccak256(&buf)
@@ -517,11 +517,11 @@ impl BlobTransaction {
     ///
     /// Note: this should be used only when implementing other RLP decoding methods, and does not
     /// represent the full RLP decoding of the `PooledTransactionsElement` type.
-    pub(crate) fn decode_inner(data: &mut &[u8]) -> Result<Self, DecodeError> {
+    pub(crate) fn decode_inner(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
         // decode the _first_ list header for the rest of the transaction
         let header = Header::decode(data)?;
         if !header.list {
-            return Err(DecodeError::Custom("PooledTransactions blob tx must be encoded as a list"))
+            return Err(RlpError::Custom("PooledTransactions blob tx must be encoded as a list"))
         }
 
         // Now we need to decode the inner 4844 transaction and its signature:
@@ -529,7 +529,7 @@ impl BlobTransaction {
         // `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
         let header = Header::decode(data)?;
         if !header.list {
-            return Err(DecodeError::Custom(
+            return Err(RlpError::Custom(
                 "PooledTransactions inner blob tx must be encoded as a list",
             ))
         }
@@ -569,6 +569,7 @@ impl BlobTransaction {
 
 /// This represents a set of blobs, and its corresponding commitments and proofs.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[repr(C)]
 pub struct BlobTransactionSidecar {
     /// The blob data.
     pub blobs: Vec<Blob>,
@@ -586,10 +587,7 @@ impl BlobTransactionSidecar {
     /// - `commitments`
     /// - `proofs`
     pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut) {
-        // Encode the blobs, commitments, and proofs
-        self.blobs.encode(out);
-        self.commitments.encode(out);
-        self.proofs.encode(out);
+        BlobTransactionSidecarRlp::wrap_ref(self).encode(out);
     }
 
     /// Outputs the RLP length of the [BlobTransactionSidecar] fields, without a RLP header.
@@ -603,12 +601,8 @@ impl BlobTransactionSidecar {
     /// - `blobs`
     /// - `commitments`
     /// - `proofs`
-    pub(crate) fn decode_inner(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        Ok(Self {
-            blobs: Decodable::decode(buf)?,
-            commitments: Decodable::decode(buf)?,
-            proofs: Decodable::decode(buf)?,
-        })
+    pub(crate) fn decode_inner(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        Ok(BlobTransactionSidecarRlp::decode(buf)?.unwrap())
     }
 
     /// Calculates a size heuristic for the in-memory size of the [BlobTransactionSidecar].
@@ -617,5 +611,43 @@ impl BlobTransactionSidecar {
         self.blobs.len() * BYTES_PER_BLOB + // blobs
         self.commitments.len() * BYTES_PER_COMMITMENT + // commitments
         self.proofs.len() * BYTES_PER_PROOF // proofs
+    }
+}
+
+// Wrapper for c-kzg rlp
+#[repr(C)]
+struct BlobTransactionSidecarRlp {
+    blobs: Vec<[u8; c_kzg::BYTES_PER_BLOB]>,
+    commitments: Vec<[u8; 48]>,
+    proofs: Vec<[u8; 48]>,
+}
+
+const _: [(); std::mem::size_of::<BlobTransactionSidecar>()] =
+    [(); std::mem::size_of::<BlobTransactionSidecarRlp>()];
+
+impl BlobTransactionSidecarRlp {
+    fn wrap_ref(other: &BlobTransactionSidecar) -> &Self {
+        // SAFETY: Same repr and size
+        unsafe { &*(other as *const BlobTransactionSidecar).cast::<Self>() }
+    }
+
+    fn unwrap(self) -> BlobTransactionSidecar {
+        // SAFETY: Same repr and size
+        unsafe { std::mem::transmute(self) }
+    }
+
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
+        // Encode the blobs, commitments, and proofs
+        self.blobs.encode(out);
+        self.commitments.encode(out);
+        self.proofs.encode(out);
+    }
+
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        Ok(Self {
+            blobs: Decodable::decode(buf)?,
+            commitments: Decodable::decode(buf)?,
+            proofs: Decodable::decode(buf)?,
+        })
     }
 }

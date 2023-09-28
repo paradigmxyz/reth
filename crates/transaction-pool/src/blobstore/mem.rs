@@ -1,6 +1,6 @@
 use crate::blobstore::{BlobStore, BlobStoreError, BlobTransactionSidecar};
 use parking_lot::RwLock;
-use reth_primitives::H256;
+use reth_primitives::B256;
 use std::{
     collections::HashMap,
     sync::{atomic::AtomicUsize, Arc},
@@ -15,7 +15,7 @@ pub struct InMemoryBlobStore {
 #[derive(Debug, Default)]
 struct InMemoryBlobStoreInner {
     /// Storage for all blob data.
-    store: RwLock<HashMap<H256, BlobTransactionSidecar>>,
+    store: RwLock<HashMap<B256, BlobTransactionSidecar>>,
     data_size: AtomicUsize,
     num_blobs: AtomicUsize,
 }
@@ -37,14 +37,14 @@ impl InMemoryBlobStoreInner {
 }
 
 impl BlobStore for InMemoryBlobStore {
-    fn insert(&self, tx: H256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError> {
+    fn insert(&self, tx: B256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError> {
         let mut store = self.inner.store.write();
         self.inner.add_size(insert_size(&mut store, tx, data));
         self.inner.update_len(store.len());
         Ok(())
     }
 
-    fn insert_all(&self, txs: Vec<(H256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError> {
+    fn insert_all(&self, txs: Vec<(B256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError> {
         if txs.is_empty() {
             return Ok(())
         }
@@ -59,7 +59,7 @@ impl BlobStore for InMemoryBlobStore {
         Ok(())
     }
 
-    fn delete(&self, tx: H256) -> Result<(), BlobStoreError> {
+    fn delete(&self, tx: B256) -> Result<(), BlobStoreError> {
         let mut store = self.inner.store.write();
         let sub = remove_size(&mut store, &tx);
         self.inner.sub_size(sub);
@@ -67,7 +67,7 @@ impl BlobStore for InMemoryBlobStore {
         Ok(())
     }
 
-    fn delete_all(&self, txs: Vec<H256>) -> Result<(), BlobStoreError> {
+    fn delete_all(&self, txs: Vec<B256>) -> Result<(), BlobStoreError> {
         if txs.is_empty() {
             return Ok(())
         }
@@ -82,15 +82,15 @@ impl BlobStore for InMemoryBlobStore {
     }
 
     // Retrieves the decoded blob data for the given transaction hash.
-    fn get(&self, tx: H256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
+    fn get(&self, tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
         let store = self.inner.store.read();
         Ok(store.get(&tx).cloned())
     }
 
     fn get_all(
         &self,
-        txs: Vec<H256>,
-    ) -> Result<Vec<(H256, BlobTransactionSidecar)>, BlobStoreError> {
+        txs: Vec<B256>,
+    ) -> Result<Vec<(B256, BlobTransactionSidecar)>, BlobStoreError> {
         let mut items = Vec::with_capacity(txs.len());
         let store = self.inner.store.read();
         for tx in txs {
@@ -102,7 +102,7 @@ impl BlobStore for InMemoryBlobStore {
         Ok(items)
     }
 
-    fn get_exact(&self, txs: Vec<H256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
+    fn get_exact(&self, txs: Vec<B256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
         let mut items = Vec::with_capacity(txs.len());
         let store = self.inner.store.read();
         for tx in txs {
@@ -127,7 +127,7 @@ impl BlobStore for InMemoryBlobStore {
 
 /// Removes the given blob from the store and returns the size of the blob that was removed.
 #[inline]
-fn remove_size(store: &mut HashMap<H256, BlobTransactionSidecar>, tx: &H256) -> usize {
+fn remove_size(store: &mut HashMap<B256, BlobTransactionSidecar>, tx: &B256) -> usize {
     store.remove(tx).map(|rem| rem.size()).unwrap_or_default()
 }
 
@@ -136,8 +136,8 @@ fn remove_size(store: &mut HashMap<H256, BlobTransactionSidecar>, tx: &H256) -> 
 /// We don't need to handle the size updates for replacements because transactions are unique.
 #[inline]
 fn insert_size(
-    store: &mut HashMap<H256, BlobTransactionSidecar>,
-    tx: H256,
+    store: &mut HashMap<B256, BlobTransactionSidecar>,
+    tx: B256,
     blob: BlobTransactionSidecar,
 ) -> usize {
     let add = blob.size();

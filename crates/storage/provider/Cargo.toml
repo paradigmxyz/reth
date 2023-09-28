@@ -17,6 +17,8 @@ reth-db.workspace = true
 reth-trie = { path = "../../trie" }
 reth-nippy-jar = { path = "../nippy-jar" }
 
+revm.workspace = true
+
 # async
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 tokio-stream = { workspace = true, features = ["sync"] }
@@ -31,7 +33,7 @@ pin-project.workspace = true
 parking_lot.workspace = true
 
 # test-utils
-reth-rlp = { workspace = true, optional = true }
+alloy-rlp = { workspace = true, optional = true }
 
 # parallel utils
 rayon = "1.7"
@@ -39,14 +41,14 @@ rayon = "1.7"
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
-reth-rlp.workspace = true
-revm.workspace = true
 reth-trie = { path = "../../trie", features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
+
+alloy-rlp.workspace = true
 parking_lot.workspace = true
 tempfile = "3.3"
 assert_matches.workspace = true
 rand.workspace = true
 
 [features]
-test-utils = ["reth-rlp"]
+test-utils = ["alloy-rlp"]

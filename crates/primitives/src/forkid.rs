@@ -4,10 +4,10 @@
 
 #![deny(missing_docs)]
 
-use crate::{BlockNumber, Head, H256};
+use crate::{hex, BlockNumber, Head, B256};
+use alloy_rlp::*;
 use crc::*;
 use reth_codecs::derive_arbitrary;
-use reth_rlp::*;
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
@@ -41,8 +41,8 @@ impl fmt::Debug for ForkHash {
     }
 }
 
-impl From<H256> for ForkHash {
-    fn from(genesis: H256) -> Self {
+impl From<B256> for ForkHash {
+    fn from(genesis: B256) -> Self {
         Self(CRC_32_IEEE.checksum(&genesis[..]).to_be_bytes())
     }
 }
@@ -174,7 +174,7 @@ pub struct ForkFilter {
 impl ForkFilter {
     /// Create the filter from provided head, genesis block hash, past forks and expected future
     /// forks.
-    pub fn new<F>(head: Head, genesis_hash: H256, genesis_timestamp: u64, forks: F) -> Self
+    pub fn new<F>(head: Head, genesis_hash: B256, genesis_timestamp: u64, forks: F) -> Self
     where
         F: IntoIterator<Item = ForkFilterKey>,
     {
@@ -379,9 +379,11 @@ impl Cache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hex_literal::hex;
-    const GENESIS_HASH: H256 =
-        H256(hex!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"));
+    use crate::hex_literal::hex;
+    use revm_primitives::b256;
+
+    const GENESIS_HASH: B256 =
+        b256!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3");
 
     // EIP test vectors.
     #[test]

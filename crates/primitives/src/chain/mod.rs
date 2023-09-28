@@ -3,10 +3,12 @@ use crate::{
     net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
     NodeRecord, U256, U64,
 };
+use alloy_rlp::{Decodable, Encodable};
+use num_enum::TryFromPrimitive;
 use reth_codecs::add_arbitrary_tests;
-use reth_rlp::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
+use strum::{AsRefStr, EnumCount, EnumIter, EnumString, EnumVariantNames};
 
 // The chain spec module.
 mod spec;
@@ -19,12 +21,76 @@ pub use spec::{
 mod info;
 pub use info::ChainInfo;
 
+/// An Ethereum EIP-155 chain.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    AsRefStr,         // AsRef<str>, fmt::Display
+    EnumVariantNames, // Chain::VARIANTS
+    EnumString,       // FromStr, TryFrom<&str>
+    EnumIter,         // Chain::iter
+    EnumCount,        // Chain::COUNT
+    TryFromPrimitive, // TryFrom<u64>
+    Deserialize,
+    Serialize,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+#[repr(u64)]
+#[allow(missing_docs)]
+pub enum NamedChain {
+    Mainnet = 1,
+    Morden = 2,
+    Ropsten = 3,
+    Rinkeby = 4,
+    Goerli = 5,
+    Kovan = 42,
+    Holesky = 17000,
+    Sepolia = 11155111,
+
+    Optimism = 10,
+    OptimismKovan = 69,
+    OptimismGoerli = 420,
+
+    Arbitrum = 42161,
+    ArbitrumTestnet = 421611,
+    ArbitrumGoerli = 421613,
+    ArbitrumNova = 42170,
+
+    #[serde(alias = "bsc")]
+    #[strum(to_string = "bsc")]
+    BinanceSmartChain = 56,
+    #[serde(alias = "bsc_testnet")]
+    #[strum(to_string = "bsc_testnet")]
+    BinanceSmartChainTestnet = 97,
+
+    Dev = 1337,
+}
+
+impl From<NamedChain> for u64 {
+    fn from(value: NamedChain) -> Self {
+        value as u64
+    }
+}
+
+impl fmt::Display for NamedChain {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
 /// Either a named or chain id or the actual id value
 #[add_arbitrary_tests(rlp)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Chain {
     /// Contains a known chain
-    Named(ethers_core::types::Chain),
+    Named(NamedChain),
     /// Contains the id of a chain
     Id(u64),
 }
@@ -32,27 +98,27 @@ pub enum Chain {
 impl Chain {
     /// Returns the mainnet chain.
     pub const fn mainnet() -> Self {
-        Chain::Named(ethers_core::types::Chain::Mainnet)
+        Chain::Named(NamedChain::Mainnet)
     }
 
     /// Returns the goerli chain.
     pub const fn goerli() -> Self {
-        Chain::Named(ethers_core::types::Chain::Goerli)
+        Chain::Named(NamedChain::Goerli)
     }
 
     /// Returns the sepolia chain.
     pub const fn sepolia() -> Self {
-        Chain::Named(ethers_core::types::Chain::Sepolia)
+        Chain::Named(NamedChain::Sepolia)
     }
 
     /// Returns the holesky chain.
     pub const fn holesky() -> Self {
-        Chain::Named(ethers_core::types::Chain::Holesky)
+        Chain::Named(NamedChain::Holesky)
     }
 
     /// Returns the dev chain.
     pub const fn dev() -> Self {
-        Chain::Named(ethers_core::types::Chain::Dev)
+        Chain::Named(NamedChain::Dev)
     }
 
     /// The id of the chain
@@ -63,25 +129,16 @@ impl Chain {
         }
     }
 
-    /// Helper function for checking if a chainid corresponds to a legacy chainid
-    /// without eip1559
-    pub fn is_legacy(&self) -> bool {
-        match self {
-            Chain::Named(c) => c.is_legacy(),
-            Chain::Id(_) => false,
-        }
-    }
-
     /// Returns the address of the public DNS node list for the given chain.
     ///
     /// See also <https://github.com/ethereum/discv4-dns-lists>
     pub fn public_dns_network_protocol(self) -> Option<String> {
-        use ethers_core::types::Chain::*;
+        use NamedChain as C;
         const DNS_PREFIX: &str = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@";
 
-        let named: ethers_core::types::Chain = self.try_into().ok()?;
+        let named: NamedChain = self.try_into().ok()?;
 
-        if matches!(named, Mainnet | Goerli | Sepolia | Ropsten | Rinkeby) {
+        if matches!(named, C::Mainnet | C::Goerli | C::Sepolia | C::Ropsten | C::Rinkeby) {
             return Some(format!("{DNS_PREFIX}all.{}.ethdisco.net", named.as_ref().to_lowercase()))
         }
         None
@@ -89,12 +146,12 @@ impl Chain {
 
     /// Returns bootnodes for the given chain.
     pub fn bootnodes(self) -> Option<Vec<NodeRecord>> {
-        use ethers_core::types::Chain::*;
+        use NamedChain as C;
         match self.try_into().ok()? {
-            Mainnet => Some(mainnet_nodes()),
-            Goerli => Some(goerli_nodes()),
-            Sepolia => Some(sepolia_nodes()),
-            Holesky => Some(holesky_nodes()),
+            C::Mainnet => Some(mainnet_nodes()),
+            C::Goerli => Some(goerli_nodes()),
+            C::Sepolia => Some(sepolia_nodes()),
+            C::Holesky => Some(holesky_nodes()),
             _ => None,
         }
     }
@@ -105,7 +162,7 @@ impl fmt::Display for Chain {
         match self {
             Chain::Named(chain) => chain.fmt(f),
             Chain::Id(id) => {
-                if let Ok(chain) = ethers_core::types::Chain::try_from(*id) {
+                if let Ok(chain) = NamedChain::try_from(*id) {
                     chain.fmt(f)
                 } else {
                     id.fmt(f)
@@ -115,15 +172,15 @@ impl fmt::Display for Chain {
     }
 }
 
-impl From<ethers_core::types::Chain> for Chain {
-    fn from(id: ethers_core::types::Chain) -> Self {
+impl From<NamedChain> for Chain {
+    fn from(id: NamedChain) -> Self {
         Chain::Named(id)
     }
 }
 
 impl From<u64> for Chain {
     fn from(id: u64) -> Self {
-        ethers_core::types::Chain::try_from(id).map(Chain::Named).unwrap_or_else(|_| Chain::Id(id))
+        NamedChain::try_from(id).map(Chain::Named).unwrap_or_else(|_| Chain::Id(id))
     }
 }
 
@@ -144,7 +201,7 @@ impl From<Chain> for u64 {
 
 impl From<Chain> for U64 {
     fn from(c: Chain) -> Self {
-        u64::from(c).into()
+        U64::from(u64::from(c))
     }
 }
 
@@ -154,8 +211,8 @@ impl From<Chain> for U256 {
     }
 }
 
-impl TryFrom<Chain> for ethers_core::types::Chain {
-    type Error = <ethers_core::types::Chain as TryFrom<u64>>::Error;
+impl TryFrom<Chain> for NamedChain {
+    type Error = <NamedChain as TryFrom<u64>>::Error;
 
     fn try_from(chain: Chain) -> Result<Self, Self::Error> {
         match chain {
@@ -169,7 +226,7 @@ impl FromStr for Chain {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Ok(chain) = ethers_core::types::Chain::from_str(s) {
+        if let Ok(chain) = NamedChain::from_str(s) {
             Ok(Chain::Named(chain))
         } else {
             s.parse::<u64>()
@@ -180,7 +237,7 @@ impl FromStr for Chain {
 }
 
 impl Encodable for Chain {
-    fn encode(&self, out: &mut dyn reth_rlp::BufMut) {
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         match self {
             Self::Named(chain) => u64::from(*chain).encode(out),
             Self::Id(id) => id.encode(out),
@@ -195,14 +252,14 @@ impl Encodable for Chain {
 }
 
 impl Decodable for Chain {
-    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         Ok(u64::decode(buf)?.into())
     }
 }
 
 impl Default for Chain {
     fn default() -> Self {
-        ethers_core::types::Chain::Mainnet.into()
+        NamedChain::Mainnet.into()
     }
 }
 
@@ -210,9 +267,9 @@ impl Default for Chain {
 impl<'a> arbitrary::Arbitrary<'a> for Chain {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         if u.ratio(1, 2)? {
-            let chain = u.int_in_range(0..=(ethers_core::types::Chain::COUNT - 1))?;
+            let chain = u.int_in_range(0..=(NamedChain::COUNT - 1))?;
 
-            return Ok(Chain::Named(ethers_core::types::Chain::iter().nth(chain).expect("in range")))
+            return Ok(Chain::Named(NamedChain::iter().nth(chain).expect("in range")))
         }
 
         Ok(Self::Id(u64::arbitrary(u)?))
@@ -220,7 +277,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Chain {
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
-use strum::{EnumCount, IntoEnumIterator};
+use strum::IntoEnumIterator;
 
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::{
@@ -234,8 +291,8 @@ use proptest::{
 impl proptest::arbitrary::Arbitrary for Chain {
     type Parameters = ParamsFor<u32>;
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        let named = any::<Selector>()
-            .prop_map(move |sel| Chain::Named(sel.select(ethers_core::types::Chain::iter())));
+        let named =
+            any::<Selector>().prop_map(move |sel| Chain::Named(sel.select(NamedChain::iter())));
         let id = any::<u64>().prop_map(Chain::from);
         proptest::strategy::Union::new_weighted(vec![(50, named.boxed()), (50, id.boxed())]).boxed()
     }
@@ -255,37 +312,13 @@ mod tests {
 
     #[test]
     fn test_named_id() {
-        let chain = Chain::Named(ethers_core::types::Chain::Goerli);
+        let chain = Chain::Named(NamedChain::Goerli);
         assert_eq!(chain.id(), 5);
     }
 
     #[test]
-    fn test_optimism_chain() {
-        let chain = Chain::Named(ethers_core::types::Chain::Optimism);
-        assert!(!chain.is_legacy());
-    }
-
-    #[test]
-    fn test_legacy_named_chain() {
-        let chain = Chain::Named(ethers_core::types::Chain::BinanceSmartChain);
-        assert!(chain.is_legacy());
-    }
-
-    #[test]
-    fn test_not_legacy_named_chain() {
-        let chain = Chain::Named(ethers_core::types::Chain::Mainnet);
-        assert!(!chain.is_legacy());
-    }
-
-    #[test]
-    fn test_not_legacy_id_chain() {
-        let chain = Chain::Id(1234);
-        assert!(!chain.is_legacy());
-    }
-
-    #[test]
     fn test_display_named_chain() {
-        let chain = Chain::Named(ethers_core::types::Chain::Mainnet);
+        let chain = Chain::Named(NamedChain::Mainnet);
         assert_eq!(format!("{chain}"), "mainnet");
     }
 
@@ -306,7 +339,7 @@ mod tests {
 
     #[test]
     fn test_into_u256() {
-        let chain = Chain::Named(ethers_core::types::Chain::Goerli);
+        let chain = Chain::Named(NamedChain::Goerli);
         let n: U256 = chain.into();
         let expected = U256::from(5);
 
@@ -316,7 +349,7 @@ mod tests {
     #[test]
     #[allow(non_snake_case)]
     fn test_into_U64() {
-        let chain = Chain::Named(ethers_core::types::Chain::Goerli);
+        let chain = Chain::Named(NamedChain::Goerli);
         let n: U64 = chain.into();
         let expected = U64::from(5);
 
@@ -326,7 +359,7 @@ mod tests {
     #[test]
     fn test_from_str_named_chain() {
         let result = Chain::from_str("mainnet");
-        let expected = Chain::Named(ethers_core::types::Chain::Mainnet);
+        let expected = Chain::Named(NamedChain::Mainnet);
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), expected);
@@ -351,7 +384,7 @@ mod tests {
     #[test]
     fn test_default() {
         let default = Chain::default();
-        let expected = Chain::Named(ethers_core::types::Chain::Mainnet);
+        let expected = Chain::Named(NamedChain::Mainnet);
 
         assert_eq!(default, expected);
     }
@@ -366,7 +399,7 @@ mod tests {
     #[test]
     fn test_dns_network() {
         let s = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.mainnet.ethdisco.net";
-        let chain: Chain = ethers_core::types::Chain::Mainnet.into();
+        let chain: Chain = NamedChain::Mainnet.into();
         assert_eq!(s, chain.public_dns_network_protocol().unwrap().as_str());
     }
 }

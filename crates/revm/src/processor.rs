@@ -12,7 +12,7 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     Address, Block, BlockNumber, Bloom, ChainSpec, Hardfork, Header, PruneMode, PruneModes,
-    PrunePartError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, H256,
+    PrunePartError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, B256,
     MINIMUM_PRUNING_DISTANCE, U256,
 };
 use reth_provider::{
@@ -511,7 +511,7 @@ impl<'a> PrunableBlockExecutor for EVMProcessor<'a> {
 
 /// Verify receipts
 pub fn verify_receipt<'a>(
-    expected_receipts_root: H256,
+    expected_receipts_root: B256,
     expected_logs_bloom: Bloom,
     receipts: impl Iterator<Item = &'a Receipt> + Clone,
 ) -> Result<(), BlockExecutionError> {
@@ -527,7 +527,7 @@ pub fn verify_receipt<'a>(
     }
 
     // Create header log bloom.
-    let logs_bloom = receipts_with_bloom.iter().fold(Bloom::zero(), |bloom, r| bloom | r.bloom);
+    let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
     if logs_bloom != expected_logs_bloom {
         return Err(BlockValidationError::BloomLogDiff {
             expected: Box::new(expected_logs_bloom),
@@ -541,27 +541,24 @@ pub fn verify_receipt<'a>(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use reth_interfaces::RethResult;
     use reth_primitives::{
+        bytes,
         constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
-        hex_literal::hex,
         keccak256, Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, MAINNET,
     };
     use reth_provider::{AccountReader, BlockHashReader, StateRootProvider};
-    use reth_revm_primitives::TransitionState;
-    use revm::Database;
+    use revm::{Database, TransitionState};
     use std::collections::HashMap;
 
-    use super::*;
-
-    const BEACON_ROOT_CONTRACT_CODE: [u8; 97] =
-        hex!("3373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f35801560495762001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500");
+    static BEACON_ROOT_CONTRACT_CODE: Bytes = bytes!("3373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f35801560495762001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500");
 
     #[derive(Debug, Default, Clone, Eq, PartialEq)]
     struct StateProviderTest {
         accounts: HashMap<Address, (HashMap<StorageKey, U256>, Account)>,
-        contracts: HashMap<H256, Bytecode>,
-        block_hash: HashMap<u64, H256>,
+        contracts: HashMap<B256, Bytecode>,
+        block_hash: HashMap<u64, B256>,
     }
 
     impl StateProviderTest {
@@ -576,7 +573,7 @@ mod tests {
             if let Some(bytecode) = bytecode {
                 let hash = keccak256(&bytecode);
                 account.bytecode_hash = Some(hash);
-                self.contracts.insert(hash, Bytecode::new_raw(bytecode.into()));
+                self.contracts.insert(hash, Bytecode::new_raw(bytecode));
             }
             self.accounts.insert(address, (storage, account));
         }
@@ -590,7 +587,7 @@ mod tests {
     }
 
     impl BlockHashReader for StateProviderTest {
-        fn block_hash(&self, number: u64) -> RethResult<Option<H256>> {
+        fn block_hash(&self, number: u64) -> RethResult<Option<B256>> {
             Ok(self.block_hash.get(&number).cloned())
         }
 
@@ -598,7 +595,7 @@ mod tests {
             &self,
             start: BlockNumber,
             end: BlockNumber,
-        ) -> RethResult<Vec<H256>> {
+        ) -> RethResult<Vec<B256>> {
             let range = start..end;
             Ok(self
                 .block_hash
@@ -609,7 +606,7 @@ mod tests {
     }
 
     impl StateRootProvider for StateProviderTest {
-        fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> RethResult<H256> {
+        fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> RethResult<B256> {
             todo!()
         }
     }
@@ -626,15 +623,15 @@ mod tests {
                 .and_then(|(storage, _)| storage.get(&storage_key).cloned()))
         }
 
-        fn bytecode_by_hash(&self, code_hash: H256) -> RethResult<Option<Bytecode>> {
+        fn bytecode_by_hash(&self, code_hash: B256) -> RethResult<Option<Bytecode>> {
             Ok(self.contracts.get(&code_hash).cloned())
         }
 
         fn proof(
             &self,
             _address: Address,
-            _keys: &[H256],
-        ) -> RethResult<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
+            _keys: &[B256],
+        ) -> RethResult<(Vec<Bytes>, B256, Vec<Vec<Bytes>>)> {
             todo!()
         }
     }
@@ -646,18 +643,16 @@ mod tests {
 
         let mut db = StateProviderTest::default();
 
-        let beacon_root_contract_code = Bytes::from(BEACON_ROOT_CONTRACT_CODE);
-
         let beacon_root_contract_account = Account {
             balance: U256::ZERO,
-            bytecode_hash: Some(keccak256(beacon_root_contract_code.clone())),
+            bytecode_hash: Some(keccak256(BEACON_ROOT_CONTRACT_CODE.clone())),
             nonce: 1,
         };
 
         db.insert_account(
             BEACON_ROOTS_ADDRESS,
             beacon_root_contract_account,
-            Some(beacon_root_contract_code),
+            Some(BEACON_ROOT_CONTRACT_CODE.clone()),
             HashMap::new(),
         );
 
@@ -687,7 +682,7 @@ mod tests {
         );
 
         // fix header, set a gas limit
-        header.parent_beacon_block_root = Some(H256::from_low_u64_be(0x1337));
+        header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
 
         // Now execute a block with the fixed header, ensure that it does not fail
         executor
@@ -718,7 +713,7 @@ mod tests {
             .db_mut()
             .storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index))
             .expect("storage value should exist");
-        assert_eq!(parent_beacon_block_root_storage, U256::from(0x1337));
+        assert_eq!(parent_beacon_block_root_storage, U256::from(0x69));
     }
 
     #[test]
@@ -728,7 +723,7 @@ mod tests {
         let header = Header {
             timestamp: 1,
             number: 1,
-            parent_beacon_block_root: Some(H256::from_low_u64_be(0x1337)),
+            parent_beacon_block_root: Some(B256::with_last_byte(0x69)),
             excess_blob_gas: Some(0),
             ..Header::default()
         };
@@ -770,18 +765,16 @@ mod tests {
         // during the pre-block call
         let mut db = StateProviderTest::default();
 
-        let beacon_root_contract_code = Bytes::from(BEACON_ROOT_CONTRACT_CODE);
-
         let beacon_root_contract_account = Account {
             balance: U256::ZERO,
-            bytecode_hash: Some(keccak256(beacon_root_contract_code.clone())),
+            bytecode_hash: Some(keccak256(BEACON_ROOT_CONTRACT_CODE.clone())),
             nonce: 1,
         };
 
         db.insert_account(
             BEACON_ROOTS_ADDRESS,
             beacon_root_contract_account,
-            Some(beacon_root_contract_code),
+            Some(BEACON_ROOT_CONTRACT_CODE.clone()),
             HashMap::new(),
         );
 
@@ -801,7 +794,7 @@ mod tests {
         let header = Header {
             timestamp: 1,
             number: 1,
-            parent_beacon_block_root: Some(H256::from_low_u64_be(0x1337)),
+            parent_beacon_block_root: Some(B256::with_last_byte(0x69)),
             excess_blob_gas: Some(0),
             ..Header::default()
         };
@@ -828,18 +821,16 @@ mod tests {
     fn eip_4788_genesis_call() {
         let mut db = StateProviderTest::default();
 
-        let beacon_root_contract_code = Bytes::from(BEACON_ROOT_CONTRACT_CODE);
-
         let beacon_root_contract_account = Account {
             balance: U256::ZERO,
-            bytecode_hash: Some(keccak256(beacon_root_contract_code.clone())),
+            bytecode_hash: Some(keccak256(BEACON_ROOT_CONTRACT_CODE.clone())),
             nonce: 1,
         };
 
         db.insert_account(
             BEACON_ROOTS_ADDRESS,
             beacon_root_contract_account,
-            Some(beacon_root_contract_code),
+            Some(BEACON_ROOT_CONTRACT_CODE.clone()),
             HashMap::new(),
         );
 
@@ -857,7 +848,7 @@ mod tests {
         executor.init_env(&header, U256::ZERO);
 
         // attempt to execute the genesis block with non-zero parent beacon block root, expect err
-        header.parent_beacon_block_root = Some(H256::from_low_u64_be(0x1337));
+        header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
         let _err = executor
             .execute_and_verify_receipt(
                 &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
@@ -869,7 +860,7 @@ mod tests {
             );
 
         // fix header
-        header.parent_beacon_block_root = Some(H256::zero());
+        header.parent_beacon_block_root = Some(B256::ZERO);
 
         // now try to process the genesis block again, this time ensuring that a system contract
         // call does not occur
@@ -900,7 +891,7 @@ mod tests {
         let header = Header {
             timestamp: 1,
             number: 1,
-            parent_beacon_block_root: Some(H256::from_low_u64_be(0x1337)),
+            parent_beacon_block_root: Some(B256::with_last_byte(0x69)),
             base_fee_per_gas: Some(u64::MAX),
             excess_blob_gas: Some(0),
             ..Header::default()
@@ -908,18 +899,16 @@ mod tests {
 
         let mut db = StateProviderTest::default();
 
-        let beacon_root_contract_code = Bytes::from(BEACON_ROOT_CONTRACT_CODE);
-
         let beacon_root_contract_account = Account {
             balance: U256::ZERO,
-            bytecode_hash: Some(keccak256(beacon_root_contract_code.clone())),
+            bytecode_hash: Some(keccak256(BEACON_ROOT_CONTRACT_CODE.clone())),
             nonce: 1,
         };
 
         db.insert_account(
             BEACON_ROOTS_ADDRESS,
             beacon_root_contract_account,
-            Some(beacon_root_contract_code),
+            Some(BEACON_ROOT_CONTRACT_CODE.clone()),
             HashMap::new(),
         );
 
@@ -966,6 +955,6 @@ mod tests {
             .db_mut()
             .storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index))
             .unwrap();
-        assert_eq!(parent_beacon_block_root_storage, U256::from(0x1337));
+        assert_eq!(parent_beacon_block_root_storage, U256::from(0x69));
     }
 }

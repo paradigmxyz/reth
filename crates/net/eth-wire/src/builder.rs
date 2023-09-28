@@ -4,23 +4,23 @@ use crate::{
     capability::Capability, hello::HelloMessage, p2pstream::ProtocolVersion, EthVersion, Status,
 };
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
-use reth_primitives::{Chain, ForkId, PeerId, H256, U256};
+use reth_primitives::{Chain, ForkId, PeerId, B256, U256};
 
 /// Builder for [`Status`] messages.
 ///
 /// # Example
 /// ```
 /// use reth_eth_wire::EthVersion;
-/// use reth_primitives::{Chain, U256, H256, MAINNET_GENESIS, MAINNET, Hardfork};
+/// use reth_primitives::{Chain, U256, B256, MAINNET_GENESIS, MAINNET, Hardfork};
 /// use reth_eth_wire::types::Status;
 ///
 /// // this is just an example status message!
 /// let status = Status::builder()
 ///     .version(EthVersion::Eth66.into())
-///     .chain(Chain::Named(ethers_core::types::Chain::Mainnet))
+///     .chain(Chain::mainnet())
 ///     .total_difficulty(U256::from(100))
-///     .blockhash(H256::from(MAINNET_GENESIS))
-///     .genesis(H256::from(MAINNET_GENESIS))
+///     .blockhash(B256::from(MAINNET_GENESIS))
+///     .genesis(B256::from(MAINNET_GENESIS))
 ///     .forkid(Hardfork::Paris.fork_id(&MAINNET).unwrap())
 ///     .build();
 ///
@@ -28,10 +28,10 @@ use reth_primitives::{Chain, ForkId, PeerId, H256, U256};
 ///     status,
 ///     Status {
 ///         version: EthVersion::Eth66.into(),
-///         chain: Chain::Named(ethers_core::types::Chain::Mainnet),
+///         chain: Chain::mainnet(),
 ///         total_difficulty: U256::from(100),
-///         blockhash: H256::from(MAINNET_GENESIS),
-///         genesis: H256::from(MAINNET_GENESIS),
+///         blockhash: B256::from(MAINNET_GENESIS),
+///         genesis: B256::from(MAINNET_GENESIS),
 ///         forkid: Hardfork::Paris.fork_id(&MAINNET).unwrap(),
 ///     }
 /// );
@@ -66,13 +66,13 @@ impl StatusBuilder {
     }
 
     /// Sets the block hash.
-    pub fn blockhash(mut self, blockhash: H256) -> Self {
+    pub fn blockhash(mut self, blockhash: B256) -> Self {
         self.status.blockhash = blockhash;
         self
     }
 
     /// Sets the genesis hash.
-    pub fn genesis(mut self, genesis: H256) -> Self {
+    pub fn genesis(mut self, genesis: B256) -> Self {
         self.status.genesis = genesis;
         self
     }

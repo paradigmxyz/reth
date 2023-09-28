@@ -97,9 +97,6 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
 
 #[cfg(test)]
 mod tests {
-    use reth_provider::ProviderFactory;
-    use std::collections::BTreeMap;
-
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
@@ -122,14 +119,16 @@ mod tests {
         generators::{random_block_range, random_changeset_range, random_contract_account_range},
     };
     use reth_primitives::{
-        hex_literal::hex, Address, BlockNumber, PruneMode, StorageEntry, H160, H256, MAINNET, U256,
+        address, b256, Address, BlockNumber, PruneMode, StorageEntry, B256, MAINNET, U256,
     };
+    use reth_provider::ProviderFactory;
+    use std::collections::BTreeMap;
 
-    const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));
-    const STORAGE_KEY: H256 =
-        H256(hex!("0000000000000000000000000000000000000000000000000000000000000001"));
+    const ADDRESS: Address = address!("0000000000000000000000000000000000000001");
+    const STORAGE_KEY: B256 =
+        b256!("0000000000000000000000000000000000000000000000000000000000000001");
 
-    fn storage(key: H256) -> StorageEntry {
+    fn storage(key: B256) -> StorageEntry {
         // Value is not used in indexing stage.
         StorageEntry { key, value: U256::ZERO }
     }
@@ -511,7 +510,7 @@ mod tests {
                 .into_iter()
                 .collect::<BTreeMap<_, _>>();
 
-            let blocks = random_block_range(&mut rng, start..=end, H256::zero(), 0..3);
+            let blocks = random_block_range(&mut rng, start..=end, B256::ZERO, 0..3);
 
             let (transitions, _) = random_changeset_range(
                 &mut rng,
@@ -552,7 +551,7 @@ mod tests {
                     .walk_range(BlockNumberAddress::range(start_block..=end_block))?
                     .try_fold(
                         BTreeMap::new(),
-                        |mut storages: BTreeMap<(Address, H256), Vec<u64>>,
+                        |mut storages: BTreeMap<(Address, B256), Vec<u64>>,
                          entry|
                          -> Result<_, TestRunnerError> {
                             let (index, storage) = entry?;

@@ -478,7 +478,7 @@ mod tests {
                 TestConsensus,
             },
         };
-        use reth_primitives::{BlockBody, BlockNumber, SealedBlock, SealedHeader, TxNumber, H256};
+        use reth_primitives::{BlockBody, BlockNumber, SealedBlock, SealedHeader, TxNumber, B256};
         use std::{
             collections::{HashMap, VecDeque},
             ops::RangeInclusive,
@@ -488,10 +488,10 @@ mod tests {
         };
 
         /// The block hash of the genesis block.
-        pub(crate) const GENESIS_HASH: H256 = H256::zero();
+        pub(crate) const GENESIS_HASH: B256 = B256::ZERO;
 
         /// A helper to create a collection of block bodies keyed by their hash.
-        pub(crate) fn body_by_hash(block: &SealedBlock) -> (H256, BlockBody) {
+        pub(crate) fn body_by_hash(block: &SealedBlock) -> (B256, BlockBody) {
             (
                 block.hash(),
                 BlockBody {
@@ -505,7 +505,7 @@ mod tests {
         /// A helper struct for running the [BodyStage].
         pub(crate) struct BodyTestRunner {
             pub(crate) consensus: Arc<TestConsensus>,
-            responses: HashMap<H256, BlockBody>,
+            responses: HashMap<B256, BlockBody>,
             tx: TestTransaction,
             batch_size: u64,
         }
@@ -526,7 +526,7 @@ mod tests {
                 self.batch_size = batch_size;
             }
 
-            pub(crate) fn set_responses(&mut self, responses: HashMap<H256, BlockBody>) {
+            pub(crate) fn set_responses(&mut self, responses: HashMap<B256, BlockBody>) {
                 self.responses = responses;
             }
         }
@@ -730,7 +730,7 @@ mod tests {
 
             fn get_block_bodies_with_priority(
                 &self,
-                _hashes: Vec<H256>,
+                _hashes: Vec<B256>,
                 _priority: Priority,
             ) -> Self::Output {
                 panic!("Noop client should not be called")
@@ -741,7 +741,7 @@ mod tests {
         #[derive(Debug)]
         pub(crate) struct TestBodyDownloader {
             db: Arc<DatabaseEnv>,
-            responses: HashMap<H256, BlockBody>,
+            responses: HashMap<B256, BlockBody>,
             headers: VecDeque<SealedHeader>,
             batch_size: u64,
         }
@@ -749,7 +749,7 @@ mod tests {
         impl TestBodyDownloader {
             pub(crate) fn new(
                 db: Arc<DatabaseEnv>,
-                responses: HashMap<H256, BlockBody>,
+                responses: HashMap<B256, BlockBody>,
                 batch_size: u64,
             ) -> Self {
                 Self { db, responses, headers: VecDeque::default(), batch_size }

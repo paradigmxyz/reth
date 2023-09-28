@@ -33,5 +33,5 @@ pub use reth_rpc_api::EngineApiServer;
 #[allow(unused_imports)]
 mod tests {
     // silence unused import warning
-    use reth_rlp as _;
+    use alloy_rlp as _;
 }

@@ -2,7 +2,7 @@
 
 pub use mem::InMemoryBlobStore;
 pub use noop::NoopBlobStore;
-use reth_primitives::{BlobTransactionSidecar, H256};
+use reth_primitives::{BlobTransactionSidecar, B256};
 use std::fmt;
 pub use tracker::{BlobStoreCanonTracker, BlobStoreUpdates};
 
@@ -18,19 +18,19 @@ mod tracker;
 /// Note: this is Clone because it is expected to be wrapped in an Arc.
 pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     /// Inserts the blob sidecar into the store
-    fn insert(&self, tx: H256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError>;
+    fn insert(&self, tx: B256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError>;
 
     /// Inserts multiple blob sidecars into the store
-    fn insert_all(&self, txs: Vec<(H256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError>;
+    fn insert_all(&self, txs: Vec<(B256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError>;
 
     /// Deletes the blob sidecar from the store
-    fn delete(&self, tx: H256) -> Result<(), BlobStoreError>;
+    fn delete(&self, tx: B256) -> Result<(), BlobStoreError>;
 
     /// Deletes multiple blob sidecars from the store
-    fn delete_all(&self, txs: Vec<H256>) -> Result<(), BlobStoreError>;
+    fn delete_all(&self, txs: Vec<B256>) -> Result<(), BlobStoreError>;
 
     /// Retrieves the decoded blob data for the given transaction hash.
-    fn get(&self, tx: H256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError>;
+    fn get(&self, tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError>;
 
     /// Retrieves all decoded blob data for the given transaction hashes.
     ///
@@ -38,14 +38,14 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     /// If there's no blob it will not be returned.
     fn get_all(
         &self,
-        txs: Vec<H256>,
-    ) -> Result<Vec<(H256, BlobTransactionSidecar)>, BlobStoreError>;
+        txs: Vec<B256>,
+    ) -> Result<Vec<(B256, BlobTransactionSidecar)>, BlobStoreError>;
 
     /// Returns the exact [BlobTransactionSidecar] for the given transaction hashes in the order
     /// they were requested.
     ///
     /// Returns an error if any of the blobs are not found in the blob store.
-    fn get_exact(&self, txs: Vec<H256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError>;
+    fn get_exact(&self, txs: Vec<B256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError>;
 
     /// Data size of all transactions in the blob store.
     fn data_size_hint(&self) -> Option<usize>;
@@ -59,10 +59,10 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
 pub enum BlobStoreError {
     /// Thrown if the blob sidecar is not found for a given transaction hash but was required.
     #[error("blob sidecar not found for transaction {0:?}")]
-    MissingSidecar(H256),
+    MissingSidecar(B256),
     /// Failed to decode the stored blob data.
     #[error("failed to decode blob data: {0}")]
-    DecodeError(#[from] reth_rlp::DecodeError),
+    DecodeError(#[from] alloy_rlp::Error),
     /// Other implementation specific error.
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync>),

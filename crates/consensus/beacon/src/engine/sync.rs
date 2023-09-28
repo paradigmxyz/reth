@@ -8,7 +8,7 @@ use reth_interfaces::p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     headers::client::HeadersClient,
 };
-use reth_primitives::{BlockNumber, ChainSpec, SealedBlock, H256};
+use reth_primitives::{BlockNumber, ChainSpec, SealedBlock, B256};
 use reth_stages::{ControlFlow, Pipeline, PipelineError, PipelineWithResult};
 use reth_tasks::TaskSpawner;
 use std::{
@@ -40,7 +40,7 @@ where
     /// The pipeline is used for large ranges.
     pipeline_state: PipelineState<DB>,
     /// Pending target block for the pipeline to sync
-    pending_pipeline_target: Option<H256>,
+    pending_pipeline_target: Option<B256>,
     /// In-flight full block requests in progress.
     inflight_full_block_requests: Vec<FetchFullBlockFuture<Client>>,
     /// In-flight full block _range_ requests in progress.
@@ -109,7 +109,7 @@ where
     }
 
     /// Cancels the full block request with the given hash.
-    pub(crate) fn cancel_full_block_request(&mut self, hash: H256) {
+    pub(crate) fn cancel_full_block_request(&mut self, hash: B256) {
         self.inflight_full_block_requests.retain(|req| *req.hash() != hash);
         self.update_block_download_metrics();
     }
@@ -136,7 +136,7 @@ where
     }
 
     /// Returns true if there's already a request for the given hash.
-    pub(crate) fn is_inflight_request(&self, hash: H256) -> bool {
+    pub(crate) fn is_inflight_request(&self, hash: B256) -> bool {
         self.inflight_full_block_requests.iter().any(|req| *req.hash() == hash)
     }
 
@@ -144,7 +144,7 @@ where
     ///
     /// If the `count` is 1, this will use the `download_full_block` method instead, because it
     /// downloads headers and bodies for the block concurrently.
-    pub(crate) fn download_block_range(&mut self, hash: H256, count: u64) {
+    pub(crate) fn download_block_range(&mut self, hash: B256, count: u64) {
         if count == 1 {
             self.download_full_block(hash);
         } else {
@@ -167,7 +167,7 @@ where
     ///
     /// Returns `true` if the request was started, `false` if there's already a request for the
     /// given hash.
-    pub(crate) fn download_full_block(&mut self, hash: H256) -> bool {
+    pub(crate) fn download_full_block(&mut self, hash: B256) -> bool {
         if self.is_inflight_request(hash) {
             return false
         }
@@ -185,7 +185,7 @@ where
     }
 
     /// Sets a new target to sync the pipeline to.
-    pub(crate) fn set_pipeline_sync_target(&mut self, target: H256) {
+    pub(crate) fn set_pipeline_sync_target(&mut self, target: B256) {
         self.pending_pipeline_target = Some(target);
     }
 
@@ -349,7 +349,7 @@ pub(crate) enum EngineSyncEvent {
     /// Pipeline started syncing
     ///
     /// This is none if the pipeline is triggered without a specific target.
-    PipelineStarted(Option<H256>),
+    PipelineStarted(Option<B256>),
     /// Pipeline finished
     ///
     /// If this is returned, the pipeline is idle.
@@ -457,7 +457,7 @@ mod tests {
             executor_factory.extend(self.executor_results);
 
             // Setup pipeline
-            let (tip_tx, _tip_rx) = watch::channel(H256::default());
+            let (tip_tx, _tip_rx) = watch::channel(B256::default());
             let mut pipeline = Pipeline::builder()
                 .add_stages(TestStages::new(self.pipeline_exec_outputs, Default::default()))
                 .with_tip_sender(tip_tx);

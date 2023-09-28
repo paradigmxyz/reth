@@ -8,7 +8,7 @@ use crate::{
     IngressReceiver, PeerId, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
 };
 use rand::{thread_rng, Rng, RngCore};
-use reth_primitives::{hex_literal::hex, ForkHash, ForkId, NodeRecord, H256};
+use reth_primitives::{hex, ForkHash, ForkId, NodeRecord, B256};
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
     collections::{HashMap, HashSet},
@@ -113,7 +113,7 @@ impl MockDiscovery {
     }
 
     /// Encodes the packet, sends it and returns the hash.
-    fn send_packet(&mut self, msg: Message, to: SocketAddr) -> H256 {
+    fn send_packet(&mut self, msg: Message, to: SocketAddr) -> B256 {
         let (payload, hash) = msg.encode(&self.secret_key);
         let _ = self.egress.try_send((payload, to));
         hash
@@ -236,21 +236,21 @@ pub fn rng_endpoint(rng: &mut impl Rng) -> NodeEndpoint {
 
 pub fn rng_record(rng: &mut impl RngCore) -> NodeRecord {
     let NodeEndpoint { address, udp_port, tcp_port } = rng_endpoint(rng);
-    NodeRecord { address, tcp_port, udp_port, id: PeerId::random() }
+    NodeRecord { address, tcp_port, udp_port, id: rng.gen() }
 }
 
 pub fn rng_ipv6_record(rng: &mut impl RngCore) -> NodeRecord {
     let mut ip = [0u8; 16];
     rng.fill_bytes(&mut ip);
     let address = IpAddr::V6(ip.into());
-    NodeRecord { address, tcp_port: rng.gen(), udp_port: rng.gen(), id: PeerId::random() }
+    NodeRecord { address, tcp_port: rng.gen(), udp_port: rng.gen(), id: rng.gen() }
 }
 
 pub fn rng_ipv4_record(rng: &mut impl RngCore) -> NodeRecord {
     let mut ip = [0u8; 4];
     rng.fill_bytes(&mut ip);
     let address = IpAddr::V4(ip.into());
-    NodeRecord { address, tcp_port: rng.gen(), udp_port: rng.gen(), id: PeerId::random() }
+    NodeRecord { address, tcp_port: rng.gen(), udp_port: rng.gen(), id: rng.gen() }
 }
 
 pub fn rng_message(rng: &mut impl RngCore) -> Message {
@@ -263,11 +263,11 @@ pub fn rng_message(rng: &mut impl RngCore) -> Message {
         }),
         2 => Message::Pong(Pong {
             to: rng_endpoint(rng),
-            echo: H256::random(),
+            echo: rng.gen(),
             expire: rng.gen(),
             enr_sq: None,
         }),
-        3 => Message::FindNode(FindNode { id: PeerId::random(), expire: rng.gen() }),
+        3 => Message::FindNode(FindNode { id: rng.gen(), expire: rng.gen() }),
         4 => {
             let num: usize = rng.gen_range(1..=SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS);
             Message::Neighbours(Neighbours {

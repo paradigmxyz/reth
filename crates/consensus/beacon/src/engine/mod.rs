@@ -23,7 +23,7 @@ use reth_interfaces::{
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
     constants::EPOCH_SLOTS, listener::EventListeners, stage::StageId, BlockNumHash, BlockNumber,
-    ChainSpec, Head, Header, SealedBlock, SealedHeader, H256, U256,
+    ChainSpec, Head, Header, SealedBlock, SealedHeader, B256, U256,
 };
 use reth_provider::{
     BlockIdReader, BlockReader, BlockSource, CanonChainTracker, ChainSpecProvider, ProviderError,
@@ -230,7 +230,7 @@ where
         max_block: Option<BlockNumber>,
         run_pipeline_continuously: bool,
         payload_builder: PayloadBuilderHandle,
-        target: Option<H256>,
+        target: Option<B256>,
         pipeline_run_threshold: u64,
         hooks: EngineHooks,
     ) -> RethResult<(Self, BeaconConsensusEngineHandle)> {
@@ -274,7 +274,7 @@ where
         max_block: Option<BlockNumber>,
         run_pipeline_continuously: bool,
         payload_builder: PayloadBuilderHandle,
-        target: Option<H256>,
+        target: Option<B256>,
         pipeline_run_threshold: u64,
         to_engine: UnboundedSender<BeaconEngineMessage>,
         rx: UnboundedReceiver<BeaconEngineMessage>,
@@ -328,7 +328,7 @@ where
     /// # Returns
     ///
     /// A target block hash if the pipeline is inconsistent, otherwise `None`.
-    fn check_pipeline_consistency(&self) -> RethResult<Option<H256>> {
+    fn check_pipeline_consistency(&self) -> RethResult<Option<B256>> {
         // If no target was provided, check if the stages are congruent - check if the
         // checkpoint of the last stage matches the checkpoint of the first.
         let first_stage_checkpoint = self
@@ -388,7 +388,7 @@ where
         canonical_tip_num: u64,
         target_block_number: u64,
         downloaded_block: Option<BlockNumHash>,
-    ) -> Option<H256> {
+    ) -> Option<B256> {
         let sync_target_state = self.forkchoice_state_tracker.sync_target_state();
 
         // check if the distance exceeds the threshold for pipeline sync
@@ -465,12 +465,12 @@ where
     ///    the above conditions.
     fn latest_valid_hash_for_invalid_payload(
         &self,
-        parent_hash: H256,
+        parent_hash: B256,
         insert_err: Option<&InsertBlockErrorKind>,
-    ) -> Option<H256> {
+    ) -> Option<B256> {
         // check pre merge block error
         if insert_err.map(|err| err.is_block_pre_merge()).unwrap_or_default() {
-            return Some(H256::zero())
+            return Some(B256::ZERO)
         }
 
         // If this is sent from new payload then the parent hash could be in a side chain, and is
@@ -485,7 +485,7 @@ where
             // we need to check if the parent block is the last POW block, if so then the payload is
             // the first POS. The engine API spec mandates a zero hash to be returned: <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_newpayloadv1>
             if parent_header.difficulty != U256::ZERO {
-                return Some(H256::zero())
+                return Some(B256::ZERO)
             }
 
             // parent is canonical POS block
@@ -496,12 +496,12 @@ where
     /// Prepares the invalid payload response for the given hash, checking the
     /// database for the parent hash and populating the payload status with the latest valid hash
     /// according to the engine api spec.
-    fn prepare_invalid_response(&self, mut parent_hash: H256) -> PayloadStatus {
+    fn prepare_invalid_response(&self, mut parent_hash: B256) -> PayloadStatus {
         // Edge case: the `latestValid` field is the zero hash if the parent block is the terminal
         // PoW block, which we need to identify by looking at the parent's block difficulty
         if let Ok(Some(parent)) = self.blockchain.header_by_hash_or_number(parent_hash.into()) {
             if parent.difficulty != U256::ZERO {
-                parent_hash = H256::zero();
+                parent_hash = B256::ZERO;
             }
         }
 
@@ -518,8 +518,8 @@ where
     /// be invalid.
     fn check_invalid_ancestor_with_head(
         &mut self,
-        check: H256,
-        head: H256,
+        check: B256,
+        head: B256,
     ) -> Option<PayloadStatus> {
         // check if the check hash was previously marked as invalid
         let header = self.invalid_headers.get(&check)?;
@@ -535,7 +535,7 @@ where
 
     /// Checks if the given `head` points to an invalid header, which requires a specific response
     /// to a forkchoice update.
-    fn check_invalid_ancestor(&mut self, head: H256) -> Option<PayloadStatus> {
+    fn check_invalid_ancestor(&mut self, head: B256) -> Option<PayloadStatus> {
         let parent_hash = {
             // check if the head was previously marked as invalid
             let header = self.invalid_headers.get(&head)?;
@@ -879,7 +879,7 @@ where
     ///
     /// Returns an error if the block is not found.
     #[inline]
-    fn update_safe_block(&self, safe_block_hash: H256) -> RethResult<()> {
+    fn update_safe_block(&self, safe_block_hash: B256) -> RethResult<()> {
         if !safe_block_hash.is_zero() {
             if self.blockchain.safe_block_hash()? == Some(safe_block_hash) {
                 // nothing to update
@@ -899,7 +899,7 @@ where
     ///
     /// Returns an error if the block is not found.
     #[inline]
-    fn update_finalized_block(&self, finalized_block_hash: H256) -> RethResult<()> {
+    fn update_finalized_block(&self, finalized_block_hash: B256) -> RethResult<()> {
         if !finalized_block_hash.is_zero() {
             if self.blockchain.finalized_block_hash()? == Some(finalized_block_hash) {
                 // nothing to update
@@ -949,7 +949,7 @@ where
                 return PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                     validation_error: error.to_string(),
                 })
-                .with_latest_valid_hash(H256::zero())
+                .with_latest_valid_hash(B256::ZERO)
             }
             RethError::BlockchainTree(BlockchainTreeError::BlockHashNotFoundInChain { .. }) => {
                 // This just means we couldn't find the block when attempting to make it canonical,
@@ -1008,7 +1008,7 @@ where
     ///
     /// Returns the parent hash of the block itself if the block is buffered and has no other
     /// buffered ancestors.
-    fn lowest_buffered_ancestor_or(&self, hash: H256) -> H256 {
+    fn lowest_buffered_ancestor_or(&self, hash: B256) -> B256 {
         self.blockchain
             .lowest_buffered_ancestor(hash)
             .map(|block| block.parent_hash)
@@ -1030,7 +1030,7 @@ where
         //    client software MUST respond with -38003: `Invalid payload attributes` and MUST NOT
         //    begin a payload build process. In such an event, the forkchoiceState update MUST NOT
         //    be rolled back.
-        if attrs.timestamp <= head.timestamp.into() {
+        if attrs.timestamp.to::<u64>() <= head.timestamp {
             return OnForkChoiceUpdated::invalid_payload_attributes()
         }
 
@@ -1219,8 +1219,8 @@ where
     /// <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification>
     fn validate_versioned_hashes(
         &self,
-        parent_hash: H256,
-        block_versioned_hashes: Vec<&H256>,
+        parent_hash: B256,
+        block_versioned_hashes: Vec<&B256>,
         cancun_fields: Option<CancunPayloadFields>,
     ) -> Result<(), PayloadStatus> {
         // This validates the following engine API rule:
@@ -1371,7 +1371,7 @@ where
     ///
     /// If the given block is missing from the database, this will return `false`. Otherwise, `true`
     /// is returned: the database contains the hash and the tree was updated.
-    fn update_tree_on_finished_pipeline(&mut self, block_hash: H256) -> RethResult<bool> {
+    fn update_tree_on_finished_pipeline(&mut self, block_hash: B256) -> RethResult<bool> {
         let synced_to_finalized = match self.blockchain.block_number(block_hash)? {
             Some(number) => {
                 // Attempt to restore the tree.
@@ -1893,7 +1893,8 @@ mod tests {
         BeaconForkChoiceUpdateError,
     };
     use assert_matches::assert_matches;
-    use reth_primitives::{stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, H256, MAINNET};
+    use reth_interfaces::test_utils::generators::{self, Rng};
+    use reth_primitives::{stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, B256, MAINNET};
     use reth_provider::{BlockWriter, ProviderFactory};
     use reth_rpc_types::engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use reth_rpc_types_compat::engine::payload::try_block_to_payload_v1;
@@ -1904,6 +1905,7 @@ mod tests {
     // Pipeline error is propagated.
     #[tokio::test]
     async fn pipeline_error_is_propagated() {
+        let mut rng = generators::rng();
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
@@ -1922,7 +1924,7 @@ mod tests {
 
         let _ = env
             .send_forkchoice_updated(ForkchoiceState {
-                head_block_hash: H256::random(),
+                head_block_hash: rng.gen(),
                 ..Default::default()
             })
             .await;
@@ -1935,6 +1937,7 @@ mod tests {
     // Test that the consensus engine is idle until first forkchoice updated is received.
     #[tokio::test]
     async fn is_idle_until_forkchoice_is_set() {
+        let mut rng = generators::rng();
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
@@ -1963,7 +1966,7 @@ mod tests {
         // consensus engine is still idle because pruning is running
         let _ = env
             .send_forkchoice_updated(ForkchoiceState {
-                head_block_hash: H256::random(),
+                head_block_hash: rng.gen(),
                 ..Default::default()
             })
             .await;
@@ -1983,7 +1986,7 @@ mod tests {
                 Err(TryRecvError::Empty) => {
                     let _ = env
                         .send_forkchoice_updated(ForkchoiceState {
-                            head_block_hash: H256::random(),
+                            head_block_hash: rng.gen(),
                             ..Default::default()
                         })
                         .await;
@@ -1998,6 +2001,7 @@ mod tests {
     // for the second time.
     #[tokio::test]
     async fn runs_pipeline_again_if_tree_not_restored() {
+        let mut rng = generators::rng();
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
@@ -2019,7 +2023,7 @@ mod tests {
 
         let _ = env
             .send_forkchoice_updated(ForkchoiceState {
-                head_block_hash: H256::random(),
+                head_block_hash: rng.gen(),
                 ..Default::default()
             })
             .await;
@@ -2032,6 +2036,7 @@ mod tests {
 
     #[tokio::test]
     async fn terminates_upon_reaching_max_block() {
+        let mut rng = generators::rng();
         let max_block = 1000;
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
@@ -2054,7 +2059,7 @@ mod tests {
 
         let _ = env
             .send_forkchoice_updated(ForkchoiceState {
-                head_block_hash: H256::random(),
+                head_block_hash: rng.gen(),
                 ..Default::default()
             })
             .await;
@@ -2077,8 +2082,9 @@ mod tests {
     mod fork_choice_updated {
         use super::*;
         use reth_db::{tables, transaction::DbTxMut};
-        use reth_interfaces::test_utils::{generators, generators::random_block};
+        use reth_interfaces::test_utils::generators::random_block;
         use reth_rpc_types::engine::ForkchoiceUpdateError;
+
         #[tokio::test]
         async fn empty_head() {
             let chain_spec = Arc::new(
@@ -2235,7 +2241,7 @@ mod tests {
 
             let res = env
                 .send_forkchoice_updated(ForkchoiceState {
-                    head_block_hash: H256::random(),
+                    head_block_hash: rng.gen(),
                     finalized_block_hash: block1.hash,
                     ..Default::default()
                 })
@@ -2295,7 +2301,7 @@ mod tests {
             assert_matches!(res, Ok(result) => {
                 let ForkchoiceUpdated { payload_status, .. } = result;
                 assert_matches!(payload_status.status, PayloadStatusEnum::Invalid { .. });
-                assert_eq!(payload_status.latest_valid_hash, Some(H256::zero()));
+                assert_eq!(payload_status.latest_valid_hash, Some(B256::ZERO));
             });
         }
 
@@ -2335,7 +2341,7 @@ mod tests {
                 validation_error: BlockValidationError::BlockPreMerge { hash: block1.hash }
                     .to_string(),
             })
-            .with_latest_valid_hash(H256::zero());
+            .with_latest_valid_hash(B256::ZERO);
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
         }
     }
@@ -2537,7 +2543,8 @@ mod tests {
             assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
 
             // Send new payload
-            let block = random_block(&mut rng, 2, Some(H256::random()), None, Some(0));
+            let parent = rng.gen();
+            let block = random_block(&mut rng, 2, Some(parent), None, Some(0));
             let res = env.send_new_payload(try_block_to_payload_v1(block), None).await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
@@ -2596,7 +2603,7 @@ mod tests {
                 validation_error: BlockValidationError::BlockPreMerge { hash: block1.hash }
                     .to_string(),
             })
-            .with_latest_valid_hash(H256::zero());
+            .with_latest_valid_hash(B256::ZERO);
             assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
 
             // Send new payload
@@ -2609,7 +2616,7 @@ mod tests {
                 validation_error: BlockValidationError::BlockPreMerge { hash: block2.hash }
                     .to_string(),
             })
-            .with_latest_valid_hash(H256::zero());
+            .with_latest_valid_hash(B256::ZERO);
             assert_eq!(result, expected_result);
 
             assert_matches!(engine_rx.try_recv(), Err(TryRecvError::Empty));

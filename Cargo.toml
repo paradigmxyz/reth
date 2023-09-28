@@ -25,8 +25,6 @@ members = [
     "crates/revm",
     "crates/revm/revm-primitives",
     "crates/revm/revm-inspectors",
-    "crates/rlp",
-    "crates/rlp/rlp-derive",
     "crates/rpc/ipc",
     "crates/rpc/rpc",
     "crates/rpc/rpc-api",
@@ -91,7 +89,6 @@ reth-primitives = { path = "./crates/primitives" }
 reth-interfaces = { path = "./crates/interfaces" }
 reth-provider = { path = "./crates/storage/provider" }
 reth-db = { path = "./crates/storage/db" }
-reth-rlp = { path = "./crates/rlp" }
 reth-rpc-types = { path = "./crates/rpc/rpc-types" }
 reth-rpc-builder = { path = "./crates/rpc/rpc-builder" }
 reth-blockchain-tree = { path = "./crates/blockchain-tree" }
@@ -109,15 +106,19 @@ reth-eth-wire = { path = "./crates/net/eth-wire" }
 reth-ecies = { path = "./crates/net/ecies" }
 
 # revm
-revm = { git = "https://github.com/bluealloy/revm", rev = "516f62cc" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "516f62cc" }
+# TODO: Switch back to bluealloy/revm once #724 lands
+revm = { git = "https://github.com/Danipopes/revm/", branch = "alloy-rebase2" }
+revm-primitives = { git = "https://github.com/Danipopes/revm/", branch = "alloy-rebase2" }
 
 ## eth
+alloy-primitives = "0.3"
+alloy-dyn-abi = "0.3"
+alloy-sol-types = "0.3"
+alloy-rlp = "0.3"
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
 ethers-signers = { version = "2.0", default-features = false }
 ethers-middleware = { version = "2.0", default-features = false }
-
 discv5 = { git = "https://github.com/sigp/discv5", rev = "d2e30e04ee62418b9e57278cee907c02b99d5bd1" }
 igd = { git = "https://github.com/stevefan1999-personal/rust-igd", rev = "c2d1f83eb1612a462962453cb0703bc93258b173" }
 
@@ -183,3 +184,13 @@ assert_matches = "1.5.0"
 proptest = "1.0"
 proptest-derive = "0.4"
 serial_test = "2"
+
+# TODO: Use Alloy 0.4 once it's released
+[patch.crates-io]
+alloy-dyn-abi = { git = "https://github.com/alloy-rs/core", rev = "cd4985caf45f4ac6b2aee91d1f06fcdeb665415a" }
+alloy-json-abi = { git = "https://github.com/alloy-rs/core", rev = "cd4985caf45f4ac6b2aee91d1f06fcdeb665415a" }
+alloy-primitives = { git = "https://github.com/alloy-rs/core", rev = "cd4985caf45f4ac6b2aee91d1f06fcdeb665415a" }
+alloy-sol-macro = { git = "https://github.com/alloy-rs/core", rev = "cd4985caf45f4ac6b2aee91d1f06fcdeb665415a" }
+alloy-sol-type-parser = { git = "https://github.com/alloy-rs/core", rev = "cd4985caf45f4ac6b2aee91d1f06fcdeb665415a" }
+alloy-sol-types = { git = "https://github.com/alloy-rs/core", rev = "cd4985caf45f4ac6b2aee91d1f06fcdeb665415a" }
+syn-solidity = { git = "https://github.com/alloy-rs/core", rev = "cd4985caf45f4ac6b2aee91d1f06fcdeb665415a" }

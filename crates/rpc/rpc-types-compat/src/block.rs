@@ -1,8 +1,8 @@
 //! Compatibility functions for rpc `Block` type.
 
 use crate::transaction::from_recovered_with_block_context;
-use reth_primitives::{Block as PrimitiveBlock, Header as PrimitiveHeader, H256, U256};
-use reth_rlp::Encodable;
+use alloy_rlp::Encodable;
+use reth_primitives::{Block as PrimitiveBlock, Header as PrimitiveHeader, B256, U256};
 use reth_rpc_types::{Block, BlockError, BlockTransactions, BlockTransactionsKind, Header};
 
 /// Converts the given primitive block into a [Block] response with the given
@@ -13,7 +13,7 @@ pub fn from_block(
     block: PrimitiveBlock,
     total_difficulty: U256,
     kind: BlockTransactionsKind,
-    block_hash: Option<H256>,
+    block_hash: Option<B256>,
 ) -> Result<Block, BlockError> {
     match kind {
         BlockTransactionsKind::Hashes => {
@@ -31,7 +31,7 @@ pub fn from_block(
 pub fn from_block_with_tx_hashes(
     block: PrimitiveBlock,
     total_difficulty: U256,
-    block_hash: Option<H256>,
+    block_hash: Option<B256>,
 ) -> Block {
     let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
     let transactions = block.body.iter().map(|tx| tx.hash()).collect();
@@ -52,7 +52,7 @@ pub fn from_block_with_tx_hashes(
 pub fn from_block_full(
     block: PrimitiveBlock,
     total_difficulty: U256,
-    block_hash: Option<H256>,
+    block_hash: Option<B256>,
 ) -> Result<Block, BlockError> {
     let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
     let block_number = block.number;
@@ -77,7 +77,7 @@ pub fn from_block_full(
 }
 
 fn from_block_with_transactions(
-    block_hash: H256,
+    block_hash: B256,
     block: PrimitiveBlock,
     total_difficulty: U256,
     transactions: BlockTransactions,
