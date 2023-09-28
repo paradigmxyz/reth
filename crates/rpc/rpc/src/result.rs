@@ -3,7 +3,7 @@
 use crate::eth::error::EthApiError;
 use jsonrpsee::core::RpcResult;
 use reth_interfaces::RethResult;
-use reth_primitives::{Block, SealedBlock};
+use reth_primitives::Block;
 use reth_rpc_types::engine::PayloadError;
 use std::fmt::Display;
 
