@@ -100,9 +100,6 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
 
 #[cfg(test)]
 mod tests {
-    use reth_provider::ProviderFactory;
-    use std::collections::BTreeMap;
-
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
@@ -123,16 +120,18 @@ mod tests {
         generators,
         generators::{random_block_range, random_changeset_range, random_contract_account_range},
     };
-    use reth_primitives::{hex_literal::hex, Address, BlockNumber, PruneMode, H160, H256, MAINNET};
+    use reth_primitives::{address, Address, BlockNumber, PruneMode, B256, MAINNET};
+    use reth_provider::ProviderFactory;
+    use std::collections::BTreeMap;
 
-    const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));
+    const ADDRESS: Address = address!("0000000000000000000000000000000000000001");
 
     fn acc() -> AccountBeforeTx {
         AccountBeforeTx { address: ADDRESS, info: None }
     }
 
     /// Shard for account
-    fn shard(shard_index: u64) -> ShardedKey<H160> {
+    fn shard(shard_index: u64) -> ShardedKey<Address> {
         ShardedKey { key: ADDRESS, highest_block_number: shard_index }
     }
 
@@ -141,8 +140,8 @@ mod tests {
     }
 
     fn cast(
-        table: Vec<(ShardedKey<H160>, BlockNumberList)>,
-    ) -> BTreeMap<ShardedKey<H160>, Vec<usize>> {
+        table: Vec<(ShardedKey<Address>, BlockNumberList)>,
+    ) -> BTreeMap<ShardedKey<Address>, Vec<usize>> {
         table
             .into_iter()
             .map(|(k, v)| {
@@ -498,7 +497,7 @@ mod tests {
                 .into_iter()
                 .collect::<BTreeMap<_, _>>();
 
-            let blocks = random_block_range(&mut rng, start..=end, H256::zero(), 0..3);
+            let blocks = random_block_range(&mut rng, start..=end, B256::ZERO, 0..3);
 
             let (transitions, _) = random_changeset_range(
                 &mut rng,
@@ -564,14 +563,14 @@ mod tests {
                                 address,
                                 *list.last().expect("Chuck does not return empty list")
                                     as BlockNumber,
-                            ) as ShardedKey<H160>,
+                            ) as ShardedKey<Address>,
                             list,
                         );
                     });
 
                     if let Some(last_list) = last_chunk {
                         result.insert(
-                            ShardedKey::new(address, u64::MAX) as ShardedKey<H160>,
+                            ShardedKey::new(address, u64::MAX) as ShardedKey<Address>,
                             last_list,
                         );
                     };

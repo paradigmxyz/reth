@@ -16,7 +16,7 @@ use futures::{future, Future, FutureExt, Stream, StreamExt};
 use reth_eth_wire::BlockHeaders;
 use reth_primitives::{
     BlockHash, BlockNumber, Head, Header, HeadersDirection, PeerId, SealedBlock, SealedHeader,
-    WithPeerId, H256, U256,
+    WithPeerId, B256, U256,
 };
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{

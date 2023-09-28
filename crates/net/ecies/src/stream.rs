@@ -6,7 +6,7 @@ use futures::{ready, Sink, SinkExt};
 use reth_net_common::stream::HasRemoteAddr;
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
-    H512 as PeerId,
+    B512 as PeerId,
 };
 use secp256k1::SecretKey;
 use std::{

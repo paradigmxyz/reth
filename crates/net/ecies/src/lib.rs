@@ -21,7 +21,7 @@ mod codec;
 
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
-    H512 as PeerId,
+    B512 as PeerId,
 };
 
 /// Raw egress values for an ECIES protocol

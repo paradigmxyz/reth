@@ -10,6 +10,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::metrics::PayloadBuilderMetrics;
+use alloy_rlp::Encodable;
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_interfaces::{RethError, RethResult};
@@ -18,14 +19,14 @@ use reth_payload_builder::{
     PayloadBuilderAttributes, PayloadJob, PayloadJobGenerator,
 };
 use reth_primitives::{
-    bytes::{Bytes, BytesMut},
+    bytes::BytesMut,
     calculate_excess_blob_gas,
     constants::{
         eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
         EMPTY_WITHDRAWALS, ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
     },
-    proofs, Block, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
-    Receipts, SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
+    proofs, Block, BlockNumberOrTag, Bytes, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
+    Receipts, SealedBlock, Withdrawal, B256, EMPTY_OMMER_ROOT, U256,
 };
 use reth_provider::{BlockReaderIdExt, BlockSource, BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::{
@@ -34,7 +35,6 @@ use reth_revm::{
     into_reth_log,
     state_change::{apply_beacon_root_contract_call, post_block_withdrawals_balance_increments},
 };
-use reth_rlp::Encodable;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::{
@@ -256,7 +256,7 @@ impl Default for BasicPayloadJobGeneratorConfig {
         let mut extradata = BytesMut::new();
         RETH_CLIENT_VERSION.as_bytes().encode(&mut extradata);
         Self {
-            extradata: extradata.freeze(),
+            extradata: extradata.freeze().into(),
             max_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             interval: Duration::from_secs(1),
             // 12s slot time
@@ -843,7 +843,7 @@ where
         gas_limit: block_gas_limit,
         difficulty: U256::ZERO,
         gas_used: cumulative_gas_used,
-        extra_data: extra_data.into(),
+        extra_data,
         parent_beacon_block_root: attributes.parent_beacon_block_root,
         blob_gas_used,
         excess_blob_gas,
@@ -934,7 +934,7 @@ where
         gas_used: 0,
         blob_gas_used: None,
         excess_blob_gas: None,
-        extra_data: extra_data.into(),
+        extra_data,
         parent_beacon_block_root: attributes.parent_beacon_block_root,
     };
 
@@ -949,7 +949,7 @@ where
 #[derive(Default)]
 struct WithdrawalsOutcome {
     withdrawals: Option<Vec<Withdrawal>>,
-    withdrawals_root: Option<H256>,
+    withdrawals_root: Option<B256>,
 }
 
 impl WithdrawalsOutcome {

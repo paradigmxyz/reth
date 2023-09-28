@@ -2,7 +2,7 @@ use crate::{
     identifier::TransactionId, pool::pending::PendingTransaction, PoolTransaction,
     TransactionOrdering, ValidPoolTransaction,
 };
-use reth_primitives::H256 as TxHash;
+use reth_primitives::B256 as TxHash;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     sync::Arc,

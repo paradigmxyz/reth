@@ -3,7 +3,7 @@ use reth_interfaces::p2p::{
     download::DownloadClient,
     priority::Priority,
 };
-use reth_primitives::{BlockBody, PeerId, H256};
+use reth_primitives::{BlockBody, PeerId, B256};
 use std::{
     collections::HashMap,
     fmt::Debug,
@@ -18,14 +18,14 @@ use tokio::sync::Mutex;
 /// A [BodiesClient] for testing.
 #[derive(Debug, Default)]
 pub struct TestBodiesClient {
-    bodies: Arc<Mutex<HashMap<H256, BlockBody>>>,
+    bodies: Arc<Mutex<HashMap<B256, BlockBody>>>,
     should_delay: bool,
     max_batch_size: Option<usize>,
     times_requested: AtomicU64,
 }
 
 impl TestBodiesClient {
-    pub(crate) fn with_bodies(mut self, bodies: HashMap<H256, BlockBody>) -> Self {
+    pub(crate) fn with_bodies(mut self, bodies: HashMap<B256, BlockBody>) -> Self {
         self.bodies = Arc::new(Mutex::new(bodies));
         self
     }
@@ -60,7 +60,7 @@ impl BodiesClient for TestBodiesClient {
 
     fn get_block_bodies_with_priority(
         &self,
-        hashes: Vec<H256>,
+        hashes: Vec<B256>,
         _priority: Priority,
     ) -> Self::Output {
         let should_delay = self.should_delay;
@@ -71,7 +71,7 @@ impl BodiesClient for TestBodiesClient {
 
         Box::pin(async move {
             if should_delay {
-                tokio::time::sleep(Duration::from_millis(hashes[0].to_low_u64_be() % 100)).await;
+                tokio::time::sleep(Duration::from_millis((hashes[0][0] % 100) as u64)).await;
             }
 
             let bodies = &mut *bodies.lock().await;

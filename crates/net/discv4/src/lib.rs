@@ -29,6 +29,7 @@ use crate::{
     error::{DecodePacketError, Discv4Error},
     proto::{FindNode, Message, Neighbours, Packet, Ping, Pong},
 };
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 use discv5::{
     kbucket,
     kbucket::{
@@ -42,9 +43,8 @@ use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse, EnrWrapper};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
-    ForkId, PeerId, H256,
+    hex, ForkId, PeerId, B256,
 };
-use reth_rlp::{RlpDecodable, RlpEncodable};
 use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
@@ -352,7 +352,7 @@ impl Discv4 {
     /// Sets the pair in the EIP-868 [`Enr`] of the node.
     ///
     /// If the key already exists, this will update it.
-    pub fn set_eip868_rlp(&self, key: Vec<u8>, value: impl reth_rlp::Encodable) {
+    pub fn set_eip868_rlp(&self, key: Vec<u8>, value: impl alloy_rlp::Encodable) {
         let mut buf = BytesMut::new();
         value.encode(&mut buf);
         self.set_eip868_rlp_pair(key, buf.freeze())
@@ -929,7 +929,7 @@ impl Discv4Service {
     }
 
     /// Encodes the packet, sends it and returns the hash.
-    pub(crate) fn send_packet(&mut self, msg: Message, to: SocketAddr) -> H256 {
+    pub(crate) fn send_packet(&mut self, msg: Message, to: SocketAddr) -> B256 {
         let (payload, hash) = msg.encode(&self.secret_key);
         trace!(target : "discv4",  r#type=?msg.msg_type(), ?to, ?hash, "sending packet");
         let _ = self.egress.try_send((payload, to)).map_err(|err| {
@@ -943,7 +943,7 @@ impl Discv4Service {
     }
 
     /// Message handler for an incoming `Ping`
-    fn on_ping(&mut self, ping: Ping, remote_addr: SocketAddr, remote_id: PeerId, hash: H256) {
+    fn on_ping(&mut self, ping: Ping, remote_addr: SocketAddr, remote_id: PeerId, hash: B256) {
         if self.is_expired(ping.expire) {
             // ping's expiration timestamp is in the past
             return
@@ -1067,7 +1067,7 @@ impl Discv4Service {
     /// Sends a ping message to the node's UDP address.
     ///
     /// Returns the echo hash of the ping message.
-    pub(crate) fn send_ping(&mut self, node: NodeRecord, reason: PingReason) -> H256 {
+    pub(crate) fn send_ping(&mut self, node: NodeRecord, reason: PingReason) -> B256 {
         let remote_addr = node.udp_addr();
         let id = node.id;
         let ping = Ping {
@@ -1200,7 +1200,7 @@ impl Discv4Service {
         msg: EnrRequest,
         remote_addr: SocketAddr,
         id: PeerId,
-        request_hash: H256,
+        request_hash: B256,
     ) {
         if !self.config.enable_eip868 || self.is_expired(msg.expire) {
             return
@@ -1720,7 +1720,7 @@ struct PingRequest {
     // Node to which the request was sent.
     node: NodeRecord,
     // Hash sent in the Ping request
-    echo_hash: H256,
+    echo_hash: B256,
     /// Why this ping was sent.
     reason: PingReason,
 }
@@ -1929,7 +1929,7 @@ struct EnrRequestState {
     // Timestamp when the request was sent.
     sent_at: Instant,
     // Hash sent in the Ping request
-    echo_hash: H256,
+    echo_hash: B256,
 }
 
 /// Stored node info.
@@ -2057,9 +2057,9 @@ impl From<ForkId> for EnrForkIdEntry {
 mod tests {
     use super::*;
     use crate::test_utils::{create_discv4, create_discv4_with_config, rng_endpoint, rng_record};
+    use alloy_rlp::{Decodable, Encodable};
     use rand::{thread_rng, Rng};
-    use reth_primitives::{hex_literal::hex, mainnet_nodes, ForkHash};
-    use reth_rlp::{Decodable, Encodable};
+    use reth_primitives::{hex, mainnet_nodes, ForkHash};
     use std::{future::poll_fn, net::Ipv4Addr};
 
     #[tokio::test]
@@ -2191,8 +2191,8 @@ mod tests {
             enr_sq: Some(rng.gen()),
         };
 
-        let id = PeerId::random();
-        service.on_ping(ping, addr, id, H256::random());
+        let id = PeerId::random_with(&mut rng);
+        service.on_ping(ping, addr, id, rng.gen());
 
         let key = kad_key(id);
         match service.kbuckets.entry(&key) {
@@ -2223,8 +2223,8 @@ mod tests {
             enr_sq: Some(rng.gen()),
         };
 
-        let id = PeerId::random();
-        service.on_ping(ping, addr, id, H256::random());
+        let id = PeerId::random_with(&mut rng);
+        service.on_ping(ping, addr, id, rng.gen());
 
         let key = kad_key(id);
         match service.kbuckets.entry(&key) {

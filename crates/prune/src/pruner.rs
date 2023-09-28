@@ -946,7 +946,7 @@ mod tests {
     };
     use reth_primitives::{
         BlockNumber, PruneBatchSizes, PruneCheckpoint, PruneMode, PruneModes, PrunePart,
-        ReceiptsLogPruneConfig, TxNumber, H256, MAINNET,
+        ReceiptsLogPruneConfig, TxNumber, B256, MAINNET,
     };
     use reth_provider::{PruneCheckpointReader, TransactionsProvider};
     use reth_stages::test_utils::TestTransaction;
@@ -976,7 +976,7 @@ mod tests {
         let tx = TestTransaction::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=100, H256::zero(), 0..10);
+        let blocks = random_block_range(&mut rng, 0..=100, B256::ZERO, 0..10);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let mut receipts = Vec::new();
@@ -1071,7 +1071,7 @@ mod tests {
         let tx = TestTransaction::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=100, H256::zero(), 0..10);
+        let blocks = random_block_range(&mut rng, 0..=100, B256::ZERO, 0..10);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let mut tx_hash_numbers = Vec::new();
@@ -1165,7 +1165,7 @@ mod tests {
         let tx = TestTransaction::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=100, H256::zero(), 0..10);
+        let blocks = random_block_range(&mut rng, 0..=100, B256::ZERO, 0..10);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let mut transaction_senders = Vec::new();
@@ -1262,7 +1262,7 @@ mod tests {
         let tx = TestTransaction::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=7000, H256::zero(), 0..1);
+        let blocks = random_block_range(&mut rng, 0..=7000, B256::ZERO, 0..1);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let accounts =
@@ -1392,7 +1392,7 @@ mod tests {
         let tx = TestTransaction::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=7000, H256::zero(), 0..1);
+        let blocks = random_block_range(&mut rng, 0..=7000, B256::ZERO, 0..1);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let accounts =
@@ -1526,9 +1526,9 @@ mod tests {
 
         let tip = 20000;
         let blocks = [
-            random_block_range(&mut rng, 0..=100, H256::zero(), 1..5),
-            random_block_range(&mut rng, (100 + 1)..=(tip - 100), H256::zero(), 0..1),
-            random_block_range(&mut rng, (tip - 100 + 1)..=tip, H256::zero(), 1..5),
+            random_block_range(&mut rng, 0..=100, B256::ZERO, 1..5),
+            random_block_range(&mut rng, (100 + 1)..=(tip - 100), B256::ZERO, 0..1),
+            random_block_range(&mut rng, (tip - 100 + 1)..=tip, B256::ZERO, 1..5),
         ]
         .concat();
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");

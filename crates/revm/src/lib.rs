@@ -30,7 +30,7 @@ pub use reth_revm_inspectors::*;
 pub use reth_revm_primitives::*;
 
 /// Re-export everything
-pub use revm;
+pub use revm::{self, *};
 
 /// Ethereum DAO hardfork state change data.
 pub mod eth_dao_fork;

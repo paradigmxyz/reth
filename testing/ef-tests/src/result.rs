@@ -46,7 +46,7 @@ pub enum Error {
     RethError(#[from] RethError),
     /// An error occurred while decoding RLP.
     #[error("An error occurred deserializing RLP")]
-    RlpDecodeError(#[from] reth_rlp::DecodeError),
+    RlpDecodeError(#[from] alloy_rlp::Error),
 }
 
 /// The result of running a test.
