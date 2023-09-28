@@ -116,7 +116,7 @@ pub mod rpc {
     }
 
     /// Re-exported from `reth_rpc::eth`.
-    pub mod types_compat {
+    pub mod compat {
         pub use reth_rpc_types_compat::*;
     }
 }
