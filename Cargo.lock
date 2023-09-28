@@ -6117,15 +6117,12 @@ dependencies = [
  "boa_engine",
  "boa_gc",
  "hashbrown 0.14.0",
- "icu_collections",
- "icu_provider_macros",
  "reth-primitives",
  "reth-rpc-types",
  "revm",
  "serde",
  "serde_json",
  "thiserror",
- "tinystr",
  "tokio",
 ]
 
@@ -7081,9 +7078,9 @@ dependencies = [
 
 [[package]]
 name = "sharded-slab"
-version = "0.1.4"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "900fba806f70c630b0a382d0d825e17a0f19fcd059a2ade1ff237bcddf446b31"
+checksum = "c1b21f559e07218024e7e9f90f96f601825397de0e25420135f7f952453fed0b"
 dependencies = [
  "lazy_static",
 ]
@@ -7654,9 +7651,9 @@ dependencies = [
 
 [[package]]
 name = "tinystr"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ac3f5b6856e931e15e07b478e98c8045239829a65f9156d4fa7e7788197a5ef"
+checksum = "8faa444297615a4e020acb64146b0603c9c395c03a97c17fd9028816d3b4d63e"
 dependencies = [
  "displaydoc",
  "serde",

@@ -11,7 +11,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
 )]
 #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
-#![deny(unused_must_use, rust_2018_idioms)]
+#![deny(unused_must_use, rust_2018_idioms, unused_crate_dependencies)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 /// An inspector implementation for an EIP2930 Accesslist
