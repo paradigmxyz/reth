@@ -13,6 +13,9 @@ description = "revm inspector implementations used by reth"
 reth-primitives.workspace = true
 reth-rpc-types.workspace = true
 
+# eth
+alloy-sol-types.workspace = true
+
 revm.workspace = true
 # remove from reth and reexport from revm
 hashbrown = "0.14"
@@ -24,10 +27,6 @@ serde_json = { workspace = true, optional = true }
 # js-tracing-inspector
 boa_engine = { workspace = true, optional = true }
 boa_gc = { workspace = true, optional = true }
-# pin this until https://github.com/boa-dev/boa/issues/3299 is mitigated
-icu_collections = "=1.2.0"
-icu_provider_macros = "=1.2.0"
-tinystr = "=0.7.1"
 
 tokio = { version = "1", features = ["sync"], optional = true }
 

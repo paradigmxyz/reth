@@ -1,8 +1,8 @@
 use super::access_list::AccessList;
-use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, H256};
+use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, B256};
+use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header};
 use std::mem;
 
 /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
@@ -98,7 +98,7 @@ impl TxEip1559 {
     /// - `value`
     /// - `data` (`input`)
     /// - `access_list`
-    pub(crate) fn decode_inner(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    pub(crate) fn decode_inner(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         Ok(Self {
             chain_id: Decodable::decode(buf)?,
             nonce: Decodable::decode(buf)?,
@@ -107,7 +107,7 @@ impl TxEip1559 {
             gas_limit: Decodable::decode(buf)?,
             to: Decodable::decode(buf)?,
             value: Decodable::decode(buf)?,
-            input: Bytes(Decodable::decode(buf)?),
+            input: Decodable::decode(buf)?,
             access_list: Decodable::decode(buf)?,
         })
     }
@@ -206,7 +206,7 @@ impl TxEip1559 {
 
     /// Outputs the signature hash of the transaction by first encoding without a signature, then
     /// hashing.
-    pub(crate) fn signature_hash(&self) -> H256 {
+    pub(crate) fn signature_hash(&self) -> B256 {
         let mut buf = BytesMut::with_capacity(self.payload_len_for_signature());
         self.encode_for_signing(&mut buf);
         keccak256(&buf)
@@ -218,7 +218,7 @@ mod tests {
     use super::TxEip1559;
     use crate::{
         transaction::{signature::Signature, TransactionKind},
-        AccessList, Address, Transaction, TransactionSigned, H256, U256,
+        AccessList, Address, Transaction, TransactionSigned, B256, U256,
     };
     use std::str::FromStr;
 
@@ -227,7 +227,7 @@ mod tests {
         use crate::hex_literal::hex;
 
         let signer: Address = hex!("dd6b8b3dc6b7ad97db52f08a275ff4483e024cea").into();
-        let hash: H256 =
+        let hash: B256 =
             hex!("0ec0b6a2df4d87424e5f6ad2a654e27aaeb7dac20ae9e8385cc09087ad532ee0").into();
 
         let tx = Transaction::Eip1559( TxEip1559 {

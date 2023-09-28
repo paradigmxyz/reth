@@ -11,7 +11,7 @@ use crate::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_consensus_common::calc::{base_block_reward, block_reward};
-use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, SealedHeader, H256, U256};
+use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, SealedHeader, B256, U256};
 use reth_provider::{
     BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
 };
@@ -195,7 +195,7 @@ where
     /// Replays a transaction, returning the traces.
     pub async fn replay_transaction(
         &self,
-        hash: H256,
+        hash: B256,
         trace_types: HashSet<TraceType>,
     ) -> EthResult<TraceResults> {
         let config = tracing_config(&trace_types);
@@ -222,7 +222,7 @@ where
     /// This returns `None` if `indices` is empty
     pub async fn trace_get(
         &self,
-        hash: H256,
+        hash: B256,
         indices: Vec<usize>,
     ) -> EthResult<Option<LocalizedTransactionTrace>> {
         if indices.len() != 1 {
@@ -237,7 +237,7 @@ where
     /// Returns `None` if the trace object at that index does not exist
     pub async fn trace_get_index(
         &self,
-        hash: H256,
+        hash: B256,
         index: usize,
     ) -> EthResult<Option<LocalizedTransactionTrace>> {
         match self.trace_transaction(hash).await? {
@@ -252,7 +252,7 @@ where
     /// Returns all traces for the given transaction hash
     pub async fn trace_transaction(
         &self,
-        hash: H256,
+        hash: B256,
     ) -> EthResult<Option<Vec<LocalizedTransactionTrace>>> {
         self.inner
             .eth_api
@@ -515,7 +515,7 @@ where
     /// Handler for `trace_replayTransaction`
     async fn replay_transaction(
         &self,
-        transaction: H256,
+        transaction: B256,
         trace_types: HashSet<TraceType>,
     ) -> Result<TraceResults> {
         let _permit = self.acquire_trace_permit().await;
@@ -540,7 +540,7 @@ where
     /// Handler for `trace_get`
     async fn trace_get(
         &self,
-        hash: H256,
+        hash: B256,
         indices: Vec<Index>,
     ) -> Result<Option<LocalizedTransactionTrace>> {
         let _permit = self.acquire_trace_permit().await;
@@ -550,7 +550,7 @@ where
     /// Handler for `trace_transaction`
     async fn trace_transaction(
         &self,
-        hash: H256,
+        hash: B256,
     ) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
         let _permit = self.acquire_trace_permit().await;
         Ok(TraceApi::trace_transaction(self, hash).await?)

@@ -1,6 +1,6 @@
 use super::BlockHashReader;
 use reth_interfaces::{provider::ProviderError, RethResult};
-use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, ChainInfo, H256};
+use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, ChainInfo, B256};
 
 /// Client trait for getting important block numbers (such as the latest block number), converting
 /// block hashes to numbers, and fetching a block hash from its block number.
@@ -18,7 +18,7 @@ pub trait BlockNumReader: BlockHashReader + Send + Sync {
     fn last_block_number(&self) -> RethResult<BlockNumber>;
 
     /// Gets the `BlockNumber` for the given hash. Returns `None` if no block with this hash exists.
-    fn block_number(&self, hash: H256) -> RethResult<Option<BlockNumber>>;
+    fn block_number(&self, hash: B256) -> RethResult<Option<BlockNumber>>;
 
     /// Gets the block number for the given `BlockHashOrNumber`. Returns `None` if no block with
     /// this hash exists. If the `BlockHashOrNumber` is a `Number`, it is returned as is.
@@ -31,7 +31,7 @@ pub trait BlockNumReader: BlockHashReader + Send + Sync {
 
     /// Gets the block hash for the given `BlockHashOrNumber`. Returns `None` if no block with this
     /// number exists. If the `BlockHashOrNumber` is a `Hash`, it is returned as is.
-    fn convert_number(&self, id: BlockHashOrNumber) -> RethResult<Option<H256>> {
+    fn convert_number(&self, id: BlockHashOrNumber) -> RethResult<Option<B256>> {
         match id {
             BlockHashOrNumber::Hash(hash) => Ok(Some(hash)),
             BlockHashOrNumber::Number(num) => self.block_hash(num),
@@ -74,7 +74,7 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
     }
 
     /// Get the hash of the block by matching the given id.
-    fn block_hash_for_id(&self, block_id: BlockId) -> RethResult<Option<H256>> {
+    fn block_hash_for_id(&self, block_id: BlockId) -> RethResult<Option<B256>> {
         match block_id {
             BlockId::Hash(hash) => Ok(Some(hash.into())),
             BlockId::Number(num) => {
@@ -124,12 +124,12 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
     }
 
     /// Get the safe block hash.
-    fn safe_block_hash(&self) -> RethResult<Option<H256>> {
+    fn safe_block_hash(&self) -> RethResult<Option<B256>> {
         self.safe_block_num_hash().map(|res_opt| res_opt.map(|num_hash| num_hash.hash))
     }
 
     /// Get the finalized block hash.
-    fn finalized_block_hash(&self) -> RethResult<Option<H256>> {
+    fn finalized_block_hash(&self) -> RethResult<Option<B256>> {
         self.finalized_block_num_hash().map(|res_opt| res_opt.map(|num_hash| num_hash.hash))
     }
 }

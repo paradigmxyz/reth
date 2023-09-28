@@ -1,4 +1,4 @@
-use reth_primitives::H256;
+use reth_primitives::B256;
 use reth_rpc_types::engine::{ForkchoiceState, PayloadStatusEnum};
 
 /// The struct that keeps track of the received forkchoice state and their status.
@@ -65,13 +65,13 @@ impl ForkchoiceStateTracker {
 
     /// Returns the last valid head hash.
     #[allow(unused)]
-    pub(crate) fn last_valid_head(&self) -> Option<H256> {
+    pub(crate) fn last_valid_head(&self) -> Option<B256> {
         self.last_valid.as_ref().map(|s| s.head_block_hash)
     }
 
     /// Returns the head hash of the latest received FCU to which we need to sync.
     #[allow(unused)]
-    pub(crate) fn sync_target(&self) -> Option<H256> {
+    pub(crate) fn sync_target(&self) -> Option<B256> {
         self.last_syncing.as_ref().map(|s| s.head_block_hash)
     }
 
@@ -141,14 +141,14 @@ impl From<PayloadStatusEnum> for ForkchoiceStatus {
 /// A helper type to check represent hashes of a [ForkchoiceState]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ForkchoiceStateHash {
-    Head(H256),
-    Safe(H256),
-    Finalized(H256),
+    Head(B256),
+    Safe(B256),
+    Finalized(B256),
 }
 
 impl ForkchoiceStateHash {
     /// Tries to find a matching hash in the given [ForkchoiceState].
-    pub(crate) fn find(state: &ForkchoiceState, hash: H256) -> Option<Self> {
+    pub(crate) fn find(state: &ForkchoiceState, hash: B256) -> Option<Self> {
         if state.head_block_hash == hash {
             Some(ForkchoiceStateHash::Head(hash))
         } else if state.safe_block_hash == hash {
@@ -166,8 +166,8 @@ impl ForkchoiceStateHash {
     }
 }
 
-impl AsRef<H256> for ForkchoiceStateHash {
-    fn as_ref(&self) -> &H256 {
+impl AsRef<B256> for ForkchoiceStateHash {
+    fn as_ref(&self) -> &B256 {
         match self {
             ForkchoiceStateHash::Head(h) => h,
             ForkchoiceStateHash::Safe(h) => h,

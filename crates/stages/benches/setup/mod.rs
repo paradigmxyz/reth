@@ -12,7 +12,7 @@ use reth_interfaces::test_utils::{
         random_eoa_account_range,
     },
 };
-use reth_primitives::{Account, Address, SealedBlock, H256, MAINNET};
+use reth_primitives::{Account, Address, SealedBlock, B256, MAINNET};
 use reth_provider::ProviderFactory;
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
@@ -117,7 +117,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         .into_iter()
         .collect();
 
-        let mut blocks = random_block_range(&mut rng, 0..=num_blocks, H256::zero(), txs_range);
+        let mut blocks = random_block_range(&mut rng, 0..=num_blocks, B256::ZERO, txs_range);
 
         let (transitions, start_state) = random_changeset_range(
             &mut rng,

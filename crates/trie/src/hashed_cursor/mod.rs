@@ -1,4 +1,4 @@
-use reth_primitives::{Account, StorageEntry, H256};
+use reth_primitives::{Account, StorageEntry, B256};
 
 /// Default implementation of the hashed state cursor traits.
 mod default;
@@ -28,22 +28,22 @@ pub trait HashedCursorFactory<'a> {
 /// The cursor for iterating over hashed accounts.
 pub trait HashedAccountCursor {
     /// Seek an entry greater or equal to the given key and position the cursor there.
-    fn seek(&mut self, key: H256) -> Result<Option<(H256, Account)>, reth_db::DatabaseError>;
+    fn seek(&mut self, key: B256) -> Result<Option<(B256, Account)>, reth_db::DatabaseError>;
 
     /// Move the cursor to the next entry and return it.
-    fn next(&mut self) -> Result<Option<(H256, Account)>, reth_db::DatabaseError>;
+    fn next(&mut self) -> Result<Option<(B256, Account)>, reth_db::DatabaseError>;
 }
 
 /// The cursor for iterating over hashed storage entries.
 pub trait HashedStorageCursor {
     /// Returns `true` if there are no entries for a given key.
-    fn is_storage_empty(&mut self, key: H256) -> Result<bool, reth_db::DatabaseError>;
+    fn is_storage_empty(&mut self, key: B256) -> Result<bool, reth_db::DatabaseError>;
 
     /// Seek an entry greater or equal to the given key/subkey and position the cursor there.
     fn seek(
         &mut self,
-        key: H256,
-        subkey: H256,
+        key: B256,
+        subkey: B256,
     ) -> Result<Option<StorageEntry>, reth_db::DatabaseError>;
 
     /// Move the cursor to the next entry and return it.

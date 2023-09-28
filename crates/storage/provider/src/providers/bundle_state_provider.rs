@@ -3,7 +3,7 @@ use crate::{
     StateProvider, StateRootProvider,
 };
 use reth_interfaces::{provider::ProviderError, RethResult};
-use reth_primitives::{Account, Address, BlockNumber, Bytecode, Bytes, H256};
+use reth_primitives::{Account, Address, BlockNumber, Bytecode, Bytes, B256};
 
 /// A state provider that either resolves to data in a wrapped [`crate::BundleStateWithReceipts`],
 /// or an underlying state provider.
@@ -27,7 +27,7 @@ impl<SP: StateProvider, BSDP: BundleStateDataProvider> BundleStateProvider<SP, B
 impl<SP: StateProvider, BSDP: BundleStateDataProvider> BlockHashReader
     for BundleStateProvider<SP, BSDP>
 {
-    fn block_hash(&self, block_number: BlockNumber) -> RethResult<Option<H256>> {
+    fn block_hash(&self, block_number: BlockNumber) -> RethResult<Option<B256>> {
         let block_hash = self.post_state_data_provider.block_hash(block_number);
         if block_hash.is_some() {
             return Ok(block_hash)
@@ -39,7 +39,7 @@ impl<SP: StateProvider, BSDP: BundleStateDataProvider> BlockHashReader
         &self,
         _start: BlockNumber,
         _end: BlockNumber,
-    ) -> RethResult<Vec<H256>> {
+    ) -> RethResult<Vec<B256>> {
         unimplemented!()
     }
 }
@@ -59,7 +59,7 @@ impl<SP: StateProvider, BSDP: BundleStateDataProvider> AccountReader
 impl<SP: StateProvider, BSDP: BundleStateDataProvider> StateRootProvider
     for BundleStateProvider<SP, BSDP>
 {
-    fn state_root(&self, post_state: &BundleStateWithReceipts) -> RethResult<H256> {
+    fn state_root(&self, post_state: &BundleStateWithReceipts) -> RethResult<B256> {
         let mut state = self.post_state_data_provider.state().clone();
         state.extend(post_state.clone());
         self.state_provider.state_root(&state)
@@ -84,7 +84,7 @@ impl<SP: StateProvider, BSDP: BundleStateDataProvider> StateProvider
         self.state_provider.storage(account, storage_key)
     }
 
-    fn bytecode_by_hash(&self, code_hash: H256) -> RethResult<Option<Bytecode>> {
+    fn bytecode_by_hash(&self, code_hash: B256) -> RethResult<Option<Bytecode>> {
         if let Some(bytecode) = self.post_state_data_provider.state().bytecode(&code_hash) {
             return Ok(Some(bytecode))
         }
@@ -95,8 +95,8 @@ impl<SP: StateProvider, BSDP: BundleStateDataProvider> StateProvider
     fn proof(
         &self,
         _address: Address,
-        _keys: &[H256],
-    ) -> RethResult<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
+        _keys: &[B256],
+    ) -> RethResult<(Vec<Bytes>, B256, Vec<Vec<Bytes>>)> {
         Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
     }
 }

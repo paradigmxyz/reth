@@ -1,7 +1,6 @@
-use reth_primitives::{AccessList, Address, BlockId, Bytes, H256, U256, U64, U8};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
 use crate::BlockOverrides;
+use reth_primitives::{AccessList, Address, BlockId, Bytes, B256, U256, U64, U8};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Bundle of transactions
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -119,7 +118,7 @@ pub struct CallRequest {
     pub max_fee_per_blob_gas: Option<U256>,
     /// Blob Versioned Hashes for EIP-4844 transactions
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub blob_versioned_hashes: Option<Vec<H256>>,
+    pub blob_versioned_hashes: Option<Vec<B256>>,
     /// EIP-2718 type
     #[serde(rename = "type")]
     pub transaction_type: Option<U8>,

@@ -3,7 +3,7 @@ use crate::tracing::{
     utils::get_create_address,
 };
 pub use arena::CallTraceArena;
-use reth_primitives::{bytes::Bytes, Address, H256, U256};
+use reth_primitives::{Address, Bytes, B256, U256};
 use revm::{
     inspectors::GasInspector,
     interpreter::{
@@ -396,7 +396,7 @@ where
         &mut self,
         evm_data: &mut EVMData<'_, DB>,
         address: &Address,
-        topics: &[H256],
+        topics: &[B256],
         data: &Bytes,
     ) {
         self.gas_inspector.log(evm_data, address, topics, data);

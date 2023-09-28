@@ -31,10 +31,10 @@ Below, you can see the table design that implements this scheme:
 erDiagram
 CanonicalHeaders {
     u64 BlockNumber "PK"
-    H256 HeaderHash "Value for CanonicalHeaders"
+    B256 HeaderHash "Value for CanonicalHeaders"
 }
 HeaderNumbers {
-    H256 BlockHash "PK"
+    B256 BlockHash "PK"
     u64 BlockNumber
 }
 Headers {
@@ -59,7 +59,7 @@ Transactions {
     TransactionSignedNoHash Data
 }
 TxHashNumber {
-    H256 TxHash "PK"
+    B256 TxHash "PK"
     u64 TxNumber
 }
 TransactionBlock {
@@ -71,7 +71,7 @@ Receipts {
     Receipt Data
 }
 Bytecodes {
-    H256 CodeHash "PK"
+    B256 CodeHash "PK"
     Bytes Code
 }
 PlainAccountState {
@@ -80,36 +80,36 @@ PlainAccountState {
 }
 PlainStorageState {
     Address Account "PK"
-    H256 StorageKey "PK"
+    B256 StorageKey "PK"
     U256 StorageValue
 }
 AccountHistory {
-    H256 Account "PK"
+    B256 Account "PK"
     BlockNumberList BlockNumberList "List of transitions where account was changed"
 }
 StorageHistory {
-    H256 Account "PK"
-    H256 StorageKey "PK"
+    B256 Account "PK"
+    B256 StorageKey "PK"
     BlockNumberList BlockNumberList "List of transitions where account storage entry was changed"
 }
 AccountChangeSet {
     u64 BlockNumber "PK"
-    H256 Account "PK"
+    B256 Account "PK"
     ChangeSet AccountChangeSet "Account before transition"
 }
 StorageChangeSet {
     u64 BlockNumber "PK"
-    H256 Account "PK"
-    H256 StorageKey "PK"
+    B256 Account "PK"
+    B256 StorageKey "PK"
     ChangeSet StorageChangeSet "Storage entry before transition"
 }
 HashedAccount {
-    H256 HashedAddress "PK"
+    B256 HashedAddress "PK"
     Account Data
 }
 HashedStorage {
-    H256 HashedAddress "PK"
-    H256 HashedStorageKey "PK"
+    B256 HashedAddress "PK"
+    B256 HashedStorageKey "PK"
     U256 StorageValue
 }
 AccountsTrie {
@@ -117,7 +117,7 @@ AccountsTrie {
     BranchNodeCompact Node
 }
 StoragesTrie {
-    H256 HashedAddress "PK"
+    B256 HashedAddress "PK"
     StoredNibblesSubKey NibblesSubKey "PK"
     StorageTrieEntry Node
 }

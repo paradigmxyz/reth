@@ -1,6 +1,6 @@
 use super::{PayloadStatus, PayloadStatusEnum};
 use crate::engine::PayloadId;
-use reth_primitives::H256;
+use reth_primitives::B256;
 use serde::{Deserialize, Serialize};
 
 /// invalid forkchoice state error code.
@@ -23,11 +23,11 @@ pub type ForkChoiceUpdateResult = Result<ForkchoiceUpdated, ForkchoiceUpdateErro
 #[serde(rename_all = "camelCase")]
 pub struct ForkchoiceState {
     /// Hash of the head block.
-    pub head_block_hash: H256,
+    pub head_block_hash: B256,
     /// Hash of the safe block.
-    pub safe_block_hash: H256,
+    pub safe_block_hash: B256,
     /// Hash of finalized block.
-    pub finalized_block_hash: H256,
+    pub finalized_block_hash: B256,
 }
 
 /// A standalone forkchoice update errors for RPC.
@@ -97,7 +97,7 @@ impl ForkchoiceUpdated {
         Self { payload_status: PayloadStatus::from_status(status), payload_id: None }
     }
 
-    pub fn with_latest_valid_hash(mut self, hash: H256) -> Self {
+    pub fn with_latest_valid_hash(mut self, hash: B256) -> Self {
         self.payload_status.latest_valid_hash = Some(hash);
         self
     }

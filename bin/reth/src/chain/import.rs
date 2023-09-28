@@ -18,7 +18,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::FileClient,
 };
 use reth_interfaces::consensus::Consensus;
-use reth_primitives::{stage::StageId, ChainSpec, H256};
+use reth_primitives::{stage::StageId, ChainSpec, B256};
 use reth_stages::{
     prelude::*,
     stages::{
@@ -156,7 +156,7 @@ impl ImportCommand {
             .build(file_client.clone(), consensus.clone(), db.clone())
             .into_task();
 
-        let (tip_tx, tip_rx) = watch::channel(H256::zero());
+        let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         let factory = reth_revm::Factory::new(self.chain.clone());
 
         let max_block = file_client.max_block().unwrap_or(0);

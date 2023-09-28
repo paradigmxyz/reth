@@ -54,7 +54,7 @@ use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     kzg::KzgSettings,
     stage::StageId,
-    BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head, SealedHeader, H256,
+    BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head, SealedHeader, B256,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
@@ -705,7 +705,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         &self,
         db: DB,
         client: Client,
-        tip: H256,
+        tip: B256,
     ) -> RethResult<u64>
     where
         DB: Database,
@@ -811,7 +811,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             builder = builder.with_max_block(max_block)
         }
 
-        let (tip_tx, tip_rx) = watch::channel(H256::zero());
+        let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         use reth_revm_inspectors::stack::InspectorStackConfig;
         let factory = reth_revm::Factory::new(self.chain.clone());
 
