@@ -45,7 +45,6 @@ impl SnapshotTargets {
     }
 
     /// Returns `true` if all targets are either [`None`] or multiple of `block_interval`.
-    #[cfg(debug_assertions)]
     fn is_multiple_of_block_interval(&self, block_interval: u64) -> bool {
         [
             self.headers.as_ref(),
@@ -58,7 +57,6 @@ impl SnapshotTargets {
 
     // Returns `true` if all targets are either [`None`] or has beginning of the range equal to the
     // highest snapshot.
-    #[cfg(debug_assertions)]
     fn is_contiguous_to_highest_snapshots(&self, snapshots: HighestSnapshots) -> bool {
         [
             (self.headers.as_ref(), snapshots.headers),
