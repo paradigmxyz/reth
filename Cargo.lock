@@ -1062,20 +1062,6 @@ dependencies = [
 
 [[package]]
 name = "c-kzg"
-version = "0.1.0"
-source = "git+https://github.com/ethereum/c-kzg-4844#fbef59a3f9e8fa998bdb5069d212daf83d586aa5"
-dependencies = [
- "bindgen 0.66.1",
- "blst",
- "cc",
- "glob",
- "hex",
- "libc",
- "serde",
-]
-
-[[package]]
-name = "c-kzg"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac926d808fb72fe09ebf471a091d6d72918876ccf0b4989766093d2d0d24a0ef"
@@ -6028,7 +6014,7 @@ dependencies = [
  "assert_matches",
  "byteorder",
  "bytes",
- "c-kzg 0.1.0",
+ "c-kzg",
  "crc",
  "criterion",
  "derive_more",
@@ -6439,7 +6425,7 @@ name = "revm-precompile"
 version = "2.0.3"
 source = "git+https://github.com/Danipopes/revm/?branch=alloy-rebase2#bbe05037c3ced9400dfabe14e6ab814c1a67b3c8"
 dependencies = [
- "c-kzg 0.1.1",
+ "c-kzg",
  "k256",
  "num",
  "once_cell",
@@ -6460,7 +6446,7 @@ dependencies = [
  "auto_impl",
  "bitflags 2.4.0",
  "bitvec",
- "c-kzg 0.1.1",
+ "c-kzg",
  "enumn",
  "hashbrown 0.14.0",
  "hex",
