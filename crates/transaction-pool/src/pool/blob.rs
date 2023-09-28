@@ -76,6 +76,14 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         Some(tx)
     }
 
+    pub(crate) fn satisfy_attributes(
+        &self,
+        basefee: u64,
+        blob_fee: Option<u64>,
+    ) -> Vec<Arc<ValidPoolTransaction<T>>> {
+        unreachable!()
+    }
+
     fn next_id(&mut self) -> u64 {
         let id = self.submission_id;
         self.submission_id = self.submission_id.wrapping_add(1);

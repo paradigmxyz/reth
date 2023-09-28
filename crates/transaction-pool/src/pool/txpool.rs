@@ -245,6 +245,39 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
+    /// Returns an iterator that yields transactions that are ready to be included in the block with
+    /// the given base fee and optional blob fee.
+    pub(crate) fn best_transactions_with_attributes(
+        &self,
+        basefee: u64,
+        blob_fee: Option<u64>,
+    ) -> Box<dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T::Transaction>>>>
+    {
+        match basefee.cmp(&self.all_transactions.pending_basefee) {
+            Ordering::Equal => {
+                // fee unchanged, nothing to shift
+                Box::new(self.best_transactions())
+            }
+            Ordering::Greater => {
+                // base fee increased, we only need to enforce this on the pending pool
+                Box::new(self.pending_pool.best_with_basefee(basefee))
+            }
+            Ordering::Less => {
+                // base fee decreased, we need to move transactions from the basefee pool to the
+                // pending pool and satisfy blob fee transactions as well
+                let unlocked_with_blob =
+                    self.blob_transactions.satisfy_attributes(basefee, blob_fee);
+
+                Box::new(
+                    self.pending_pool.best_with_unlocked(
+                        unlocked_with_blob,
+                        self.all_transactions.pending_basefee,
+                    ),
+                )
+            }
+        }
+    }
+
     /// Returns all transactions from the pending sub-pool
     pub(crate) fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.pending_pool.all().collect()
