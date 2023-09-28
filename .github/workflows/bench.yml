@@ -62,7 +62,7 @@ jobs:
   bench-success:
     if: always()
     name: bench success
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
       # Note: This check is a dummy because we don't have any bench checks enabled.
       - run: echo OK.

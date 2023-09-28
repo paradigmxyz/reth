@@ -17,6 +17,8 @@ jobs:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
       - run: cargo clippy --workspace --all-targets --all-features
         env:
           RUSTFLAGS: -D warnings
@@ -29,6 +31,8 @@ jobs:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
       - run: cargo docs --document-private-items
         env:
           # Keep in sync with ./book.yml:jobs.build
