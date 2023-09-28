@@ -69,6 +69,8 @@ jobs:
           echo $(pwd)/mdbook-template >> $GITHUB_PATH
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
 
       - name: Build book
         run: mdbook build
