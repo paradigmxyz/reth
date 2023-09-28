@@ -1,12 +1,12 @@
 use crate::{
-    bloom::logs_bloom,
     compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR},
+    logs_bloom,
     proofs::calculate_receipt_root_ref,
-    Bloom, Log, PrunePartError, TxType, H256,
+    Bloom, Log, PrunePartError, TxType, B256,
 };
+use alloy_rlp::{length_of_length, Decodable, Encodable};
 use bytes::{Buf, BufMut, BytesMut};
 use reth_codecs::{main_codec, Compact, CompactZstd};
-use reth_rlp::{length_of_length, Decodable, Encodable};
 use std::{
     cmp::Ordering,
     ops::{Deref, DerefMut},
@@ -82,7 +82,7 @@ impl Receipts {
     }
 
     /// Retrieves the receipt root for all recorded receipts from index.
-    pub fn root_slow(&self, index: usize) -> Option<H256> {
+    pub fn root_slow(&self, index: usize) -> Option<B256> {
         Some(calculate_receipt_root_ref(
             &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
         ))
@@ -183,23 +183,23 @@ impl ReceiptWithBloom {
     }
 
     /// Decodes the receipt payload
-    fn decode_receipt(buf: &mut &[u8], tx_type: TxType) -> Result<Self, reth_rlp::DecodeError> {
+    fn decode_receipt(buf: &mut &[u8], tx_type: TxType) -> alloy_rlp::Result<Self> {
         let b = &mut &**buf;
-        let rlp_head = reth_rlp::Header::decode(b)?;
+        let rlp_head = alloy_rlp::Header::decode(b)?;
         if !rlp_head.list {
-            return Err(reth_rlp::DecodeError::UnexpectedString)
+            return Err(alloy_rlp::Error::UnexpectedString)
         }
         let started_len = b.len();
 
-        let success = reth_rlp::Decodable::decode(b)?;
-        let cumulative_gas_used = reth_rlp::Decodable::decode(b)?;
+        let success = alloy_rlp::Decodable::decode(b)?;
+        let cumulative_gas_used = alloy_rlp::Decodable::decode(b)?;
         let bloom = Decodable::decode(b)?;
-        let logs = reth_rlp::Decodable::decode(b)?;
+        let logs = alloy_rlp::Decodable::decode(b)?;
 
         let this = Self { receipt: Receipt { tx_type, success, cumulative_gas_used, logs }, bloom };
         let consumed = started_len - b.len();
         if consumed != rlp_head.payload_length {
-            return Err(reth_rlp::DecodeError::ListLengthMismatch {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
             })
@@ -219,19 +219,19 @@ impl Encodable for ReceiptWithBloom {
 }
 
 impl Decodable for ReceiptWithBloom {
-    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         // a receipt is either encoded as a string (non legacy) or a list (legacy).
         // We should not consume the buffer if we are decoding a legacy receipt, so let's
         // check if the first byte is between 0x80 and 0xbf.
         let rlp_type = *buf
             .first()
-            .ok_or(reth_rlp::DecodeError::Custom("cannot decode a receipt from empty bytes"))?;
+            .ok_or(alloy_rlp::Error::Custom("cannot decode a receipt from empty bytes"))?;
 
-        match rlp_type.cmp(&reth_rlp::EMPTY_LIST_CODE) {
+        match rlp_type.cmp(&alloy_rlp::EMPTY_LIST_CODE) {
             Ordering::Less => {
                 // strip out the string header
-                let _header = reth_rlp::Header::decode(buf)?;
-                let receipt_type = *buf.first().ok_or(reth_rlp::DecodeError::Custom(
+                let _header = alloy_rlp::Header::decode(buf)?;
+                let receipt_type = *buf.first().ok_or(alloy_rlp::Error::Custom(
                     "typed receipt cannot be decoded from an empty slice",
                 ))?;
                 if receipt_type == 0x01 {
@@ -244,11 +244,11 @@ impl Decodable for ReceiptWithBloom {
                     buf.advance(1);
                     Self::decode_receipt(buf, TxType::EIP4844)
                 } else {
-                    Err(reth_rlp::DecodeError::Custom("invalid receipt type"))
+                    Err(alloy_rlp::Error::Custom("invalid receipt type"))
                 }
             }
             Ordering::Equal => {
-                Err(reth_rlp::DecodeError::Custom("an empty list is not a valid receipt encoding"))
+                Err(alloy_rlp::Error::Custom("an empty list is not a valid receipt encoding"))
             }
             Ordering::Greater => Self::decode_receipt(buf, TxType::Legacy),
         }
@@ -304,8 +304,8 @@ struct ReceiptWithBloomEncoder<'a> {
 
 impl<'a> ReceiptWithBloomEncoder<'a> {
     /// Returns the rlp header for the receipt payload.
-    fn receipt_rlp_header(&self) -> reth_rlp::Header {
-        let mut rlp_head = reth_rlp::Header { list: true, payload_length: 0 };
+    fn receipt_rlp_header(&self) -> alloy_rlp::Header {
+        let mut rlp_head = alloy_rlp::Header { list: true, payload_length: 0 };
 
         rlp_head.payload_length += self.receipt.success.length();
         rlp_head.payload_length += self.receipt.cumulative_gas_used.length();
@@ -336,7 +336,7 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
 
         if with_header {
             let payload_length = payload.len() + 1;
-            let header = reth_rlp::Header { list: false, payload_length };
+            let header = alloy_rlp::Header { list: false, payload_length };
             header.encode(out);
         }
 
@@ -382,13 +382,12 @@ impl<'a> Encodable for ReceiptWithBloomEncoder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{hex_literal::hex, Address, H256};
-    use ethers_core::types::Bytes;
-    use reth_rlp::{Decodable, Encodable};
-    use std::str::FromStr;
+    use crate::hex_literal::hex;
+    use alloy_primitives::{address, b256, bytes, Bytes};
+    use alloy_rlp::{Decodable, Encodable};
 
-    #[test]
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
+    #[test]
     fn encode_legacy_receipt() {
         let expected = hex!("f901668001b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85ff85d940000000000000000000000000000000000000011f842a0000000000000000000000000000000000000000000000000000000000000deada0000000000000000000000000000000000000000000000000000000000000beef830100ff");
 
@@ -398,18 +397,12 @@ mod tests {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 0x1u64,
                 logs: vec![Log {
-                    address: Address::from_str("0000000000000000000000000000000000000011").unwrap(),
+                    address: address!("0000000000000000000000000000000000000011"),
                     topics: vec![
-                        H256::from_str(
-                            "000000000000000000000000000000000000000000000000000000000000dead",
-                        )
-                        .unwrap(),
-                        H256::from_str(
-                            "000000000000000000000000000000000000000000000000000000000000beef",
-                        )
-                        .unwrap(),
+                        b256!("000000000000000000000000000000000000000000000000000000000000dead"),
+                        b256!("000000000000000000000000000000000000000000000000000000000000beef"),
                     ],
-                    data: Bytes::from_str("0100ff").unwrap().0.into(),
+                    data: bytes!("0100ff"),
                 }],
                 success: false,
             },
@@ -423,8 +416,8 @@ mod tests {
         assert_eq!(data, expected);
     }
 
-    #[test]
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
+    #[test]
     fn decode_legacy_receipt() {
         let data = hex!("f901668001b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85ff85d940000000000000000000000000000000000000011f842a0000000000000000000000000000000000000000000000000000000000000deada0000000000000000000000000000000000000000000000000000000000000beef830100ff");
 
@@ -434,18 +427,12 @@ mod tests {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 0x1u64,
                 logs: vec![Log {
-                    address: Address::from_str("0000000000000000000000000000000000000011").unwrap(),
+                    address: address!("0000000000000000000000000000000000000011"),
                     topics: vec![
-                        H256::from_str(
-                            "000000000000000000000000000000000000000000000000000000000000dead",
-                        )
-                        .unwrap(),
-                        H256::from_str(
-                            "000000000000000000000000000000000000000000000000000000000000beef",
-                        )
-                        .unwrap(),
+                        b256!("000000000000000000000000000000000000000000000000000000000000dead"),
+                        b256!("000000000000000000000000000000000000000000000000000000000000beef"),
                     ],
-                    data: Bytes::from_str("0100ff").unwrap().0.into(),
+                    data: bytes!("0100ff"),
                 }],
                 success: false,
             },
@@ -464,22 +451,18 @@ mod tests {
             tx_type: TxType::Legacy,
             logs: vec![
                 Log {
-                    address: Address::from_str("0x4bf56695415f725e43c3e04354b604bcfb6dfb6e")
-                        .unwrap(),
-                    topics: vec![H256::from_str(
-                        "0xc69dc3d7ebff79e41f525be431d5cd3cc08f80eaf0f7819054a726eeb7086eb9",
-                    )
-                    .unwrap()],
-                    data: crate::Bytes::from(vec![1; 0xffffff]),
+                    address: address!("4bf56695415f725e43c3e04354b604bcfb6dfb6e"),
+                    topics: vec![b256!(
+                        "c69dc3d7ebff79e41f525be431d5cd3cc08f80eaf0f7819054a726eeb7086eb9"
+                    )],
+                    data: Bytes::from(vec![1; 0xffffff]),
                 },
                 Log {
-                    address: Address::from_str("0xfaca325c86bf9c2d5b413cd7b90b209be92229c2")
-                        .unwrap(),
-                    topics: vec![H256::from_str(
-                        "0x8cca58667b1e9ffa004720ac99a3d61a138181963b294d270d91c53d36402ae2",
-                    )
-                    .unwrap()],
-                    data: crate::Bytes::from(vec![1; 0xffffff]),
+                    address: address!("faca325c86bf9c2d5b413cd7b90b209be92229c2"),
+                    topics: vec![b256!(
+                        "8cca58667b1e9ffa004720ac99a3d61a138181963b294d270d91c53d36402ae2"
+                    )],
+                    data: Bytes::from(vec![1; 0xffffff]),
                 },
             ],
         };

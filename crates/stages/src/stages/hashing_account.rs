@@ -87,12 +87,12 @@ impl AccountHashingStage {
             generators,
             generators::{random_block_range, random_eoa_account_range},
         };
-        use reth_primitives::{Account, H256, U256};
+        use reth_primitives::{Account, B256, U256};
         use reth_provider::BlockWriter;
 
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, opts.blocks.clone(), H256::zero(), opts.txs);
+        let blocks = random_block_range(&mut rng, opts.blocks.clone(), B256::ZERO, opts.txs);
 
         for block in blocks {
             provider.insert_block(block, None, None).unwrap();

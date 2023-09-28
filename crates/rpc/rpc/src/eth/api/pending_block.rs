@@ -5,7 +5,7 @@ use core::fmt::Debug;
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
     proofs, Block, ChainSpec, Header, IntoRecoveredTransaction, Receipt, Receipts, SealedBlock,
-    SealedHeader, EMPTY_OMMER_ROOT, H256, U256,
+    SealedHeader, B256, EMPTY_OMMER_ROOT, U256,
 };
 use reth_provider::{BundleStateWithReceipts, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
@@ -250,7 +250,7 @@ fn pre_block_beacon_root_contract_call<DB>(
     block_number: u64,
     initialized_cfg: &CfgEnv,
     initialized_block_env: &BlockEnv,
-    parent_beacon_block_root: Option<H256>,
+    parent_beacon_block_root: Option<B256>,
 ) -> EthResult<()>
 where
     DB: Database + DatabaseCommit,
@@ -302,7 +302,7 @@ impl PendingBlockEnvOrigin {
     }
 
     /// Returns the hash of the pending block should be built on
-    fn build_target_hash(&self) -> H256 {
+    fn build_target_hash(&self) -> B256 {
         match self {
             PendingBlockEnvOrigin::ActualPending(block) => block.parent_hash,
             PendingBlockEnvOrigin::DerivedFromLatest(header) => header.hash,

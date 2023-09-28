@@ -1,8 +1,8 @@
 use super::{super::TrieMask, rlp_node, CHILD_INDEX_RANGE};
-use crate::H256;
+use crate::B256;
+use alloy_rlp::{BufMut, EMPTY_STRING_CODE};
 use bytes::Buf;
 use reth_codecs::Compact;
-use reth_rlp::{BufMut, EMPTY_STRING_CODE};
 use serde::{Deserialize, Serialize};
 
 /// A Branch node is only a pointer to the stack of nodes and is used to
@@ -26,7 +26,7 @@ impl<'a> BranchNode<'a> {
         &self,
         state_mask: TrieMask,
         hash_mask: TrieMask,
-    ) -> impl Iterator<Item = H256> + '_ {
+    ) -> impl Iterator<Item = B256> + '_ {
         let mut index = self.stack.len() - state_mask.count_ones() as usize;
         CHILD_INDEX_RANGE.filter_map(move |digit| {
             let mut child = None;
@@ -36,7 +36,7 @@ impl<'a> BranchNode<'a> {
                 }
                 index += 1;
             }
-            child.map(|child| H256::from_slice(&child[1..]))
+            child.map(|child| B256::from_slice(&child[1..]))
         })
     }
 
@@ -47,7 +47,7 @@ impl<'a> BranchNode<'a> {
         // Create the RLP header from the mask elements present.
         let mut i = first_child_idx;
         let header = CHILD_INDEX_RANGE.fold(
-            reth_rlp::Header { list: true, payload_length: 1 },
+            alloy_rlp::Header { list: true, payload_length: 1 },
             |mut header, digit| {
                 if state_mask.is_bit_set(digit) {
                     header.payload_length += self.stack[i].len();
@@ -107,9 +107,9 @@ pub struct BranchNodeCompact {
     pub hash_mask: TrieMask,
     /// Collection of hashes associated with the children of the branch node.
     /// Each child hash is calculated by hashing two consecutive sub-branch roots.
-    pub hashes: Vec<H256>,
+    pub hashes: Vec<B256>,
     /// An optional root hash of the subtree rooted at this branch node.
-    pub root_hash: Option<H256>,
+    pub root_hash: Option<B256>,
 }
 
 impl BranchNodeCompact {
@@ -118,8 +118,8 @@ impl BranchNodeCompact {
         state_mask: impl Into<TrieMask>,
         tree_mask: impl Into<TrieMask>,
         hash_mask: impl Into<TrieMask>,
-        hashes: Vec<H256>,
-        root_hash: Option<H256>,
+        hashes: Vec<B256>,
+        root_hash: Option<B256>,
     ) -> Self {
         let (state_mask, tree_mask, hash_mask) =
             (state_mask.into(), tree_mask.into(), hash_mask.into());
@@ -130,7 +130,7 @@ impl BranchNodeCompact {
     }
 
     /// Returns the hash associated with the given nibble.
-    pub fn hash_for_nibble(&self, nibble: u8) -> H256 {
+    pub fn hash_for_nibble(&self, nibble: u8) -> B256 {
         let mask = *TrieMask::from_nibble(nibble) - 1;
         let index = (*self.hash_mask & mask).count_ones();
         self.hashes[index as usize]
@@ -151,13 +151,13 @@ impl Compact for BranchNodeCompact {
         buf_size += hash_mask.to_compact(buf);
 
         if let Some(root_hash) = root_hash {
-            buf_size += H256::len_bytes();
-            buf.put_slice(root_hash.as_bytes());
+            buf_size += B256::len_bytes();
+            buf.put_slice(root_hash.as_slice());
         }
 
         for hash in &hashes {
-            buf_size += H256::len_bytes();
-            buf.put_slice(hash.as_bytes());
+            buf_size += B256::len_bytes();
+            buf.put_slice(hash.as_slice());
         }
 
         buf_size
@@ -167,7 +167,7 @@ impl Compact for BranchNodeCompact {
     where
         Self: Sized,
     {
-        let hash_len = H256::len_bytes();
+        let hash_len = B256::len_bytes();
 
         // Assert the buffer is long enough to contain the masks and the hashes.
         assert_eq!(buf.len() % hash_len, 6);
@@ -183,15 +183,15 @@ impl Compact for BranchNodeCompact {
 
         // Check if the root hash is present
         if hash_mask.count_ones() as usize + 1 == num_hashes {
-            root_hash = Some(H256::from_slice(&buf[..hash_len]));
+            root_hash = Some(B256::from_slice(&buf[..hash_len]));
             buf.advance(hash_len);
             num_hashes -= 1;
         }
 
         // Consume all remaining hashes.
-        let mut hashes = Vec::<H256>::with_capacity(num_hashes);
+        let mut hashes = Vec::<B256>::with_capacity(num_hashes);
         for _ in 0..num_hashes {
-            hashes.push(H256::from_slice(&buf[..hash_len]));
+            hashes.push(B256::from_slice(&buf[..hash_len]));
             buf.advance(hash_len);
         }
 
@@ -202,7 +202,7 @@ impl Compact for BranchNodeCompact {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hex_literal::hex;
+    use crate::hex_literal::hex;
 
     #[test]
     fn node_encoding() {

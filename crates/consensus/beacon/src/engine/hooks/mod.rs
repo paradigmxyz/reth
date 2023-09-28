@@ -1,4 +1,4 @@
-use reth_interfaces::RethError;
+use reth_interfaces::{RethError, RethResult};
 use reth_primitives::BlockNumber;
 use std::{
     fmt,
@@ -10,6 +10,9 @@ pub(crate) use controller::{EngineHooksController, PolledHook};
 
 mod prune;
 pub use prune::PruneHook;
+
+mod snapshot;
+pub use snapshot::SnapshotHook;
 
 /// Collection of [engine hooks][`EngineHook`].
 #[derive(Default)]
@@ -47,7 +50,7 @@ pub trait EngineHook: Send + Sync + 'static {
         &mut self,
         cx: &mut Context<'_>,
         ctx: EngineContext,
-    ) -> Poll<(EngineHookEvent, Option<EngineHookAction>)>;
+    ) -> Poll<RethResult<(EngineHookEvent, Option<EngineHookAction>)>>;
 
     /// Returns [db access level][`EngineHookDBAccessLevel`] the hook needs.
     fn db_access_level(&self) -> EngineHookDBAccessLevel;
@@ -58,6 +61,8 @@ pub trait EngineHook: Send + Sync + 'static {
 pub struct EngineContext {
     /// Tip block number.
     pub tip_block_number: BlockNumber,
+    /// Finalized block number, if known.
+    pub finalized_block_number: Option<BlockNumber>,
 }
 
 /// An event emitted when [hook][`EngineHook`] is polled.

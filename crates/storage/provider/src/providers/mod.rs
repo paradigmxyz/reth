@@ -17,13 +17,9 @@ use reth_primitives::{
     Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
     BlockNumberOrTag, BlockWithSenders, ChainInfo, ChainSpec, Header, PruneCheckpoint, PrunePart,
     Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256, U256,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, B256, U256,
 };
-use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
-pub use state::{
-    historical::{HistoricalStateProvider, HistoricalStateProviderRef},
-    latest::{LatestStateProvider, LatestStateProviderRef},
-};
+use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
     collections::{BTreeMap, HashSet},
     ops::{RangeBounds, RangeInclusive},
@@ -31,6 +27,11 @@ use std::{
     time::Instant,
 };
 use tracing::trace;
+
+pub use state::{
+    historical::{HistoricalStateProvider, HistoricalStateProviderRef},
+    latest::{LatestStateProvider, LatestStateProviderRef},
+};
 
 mod bundle_state_provider;
 mod chain_info;
@@ -156,7 +157,7 @@ where
     DB: Database,
     Tree: Send + Sync,
 {
-    fn block_hash(&self, number: u64) -> RethResult<Option<H256>> {
+    fn block_hash(&self, number: u64) -> RethResult<Option<B256>> {
         self.database.provider()?.block_hash(number)
     }
 
@@ -164,7 +165,7 @@ where
         &self,
         start: BlockNumber,
         end: BlockNumber,
-    ) -> RethResult<Vec<H256>> {
+    ) -> RethResult<Vec<B256>> {
         self.database.provider()?.canonical_hashes_range(start, end)
     }
 }
@@ -186,7 +187,7 @@ where
         self.database.provider()?.last_block_number()
     }
 
-    fn block_number(&self, hash: H256) -> RethResult<Option<BlockNumber>> {
+    fn block_number(&self, hash: B256) -> RethResult<Option<BlockNumber>> {
         self.database.provider()?.block_number(hash)
     }
 }
@@ -214,7 +215,7 @@ where
     DB: Database,
     Tree: BlockchainTreeViewer + Send + Sync,
 {
-    fn find_block_by_hash(&self, hash: H256, source: BlockSource) -> RethResult<Option<Block>> {
+    fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> RethResult<Option<Block>> {
         let block = match source {
             BlockSource::Any => {
                 // check database first
@@ -531,7 +532,7 @@ where
         self.latest()
     }
 
-    fn pending_state_by_hash(&self, block_hash: H256) -> RethResult<Option<StateProviderBox<'_>>> {
+    fn pending_state_by_hash(&self, block_hash: B256) -> RethResult<Option<StateProviderBox<'_>>> {
         if let Some(state) = self.tree.find_pending_state_provider(block_hash) {
             return Ok(Some(self.pending_with_provider(state)?))
         }

@@ -84,7 +84,7 @@ use best::BestTransactions;
 use parking_lot::{Mutex, RwLock};
 use reth_primitives::{
     Address, BlobTransaction, BlobTransactionSidecar, IntoRecoveredTransaction,
-    PooledTransactionsElement, TransactionSigned, TxHash, H256,
+    PooledTransactionsElement, TransactionSigned, TxHash, B256,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -106,8 +106,8 @@ use crate::{
     traits::{GetPooledTransactionLimit, NewBlobSidecar, TransactionListenerKind},
     validate::ValidTransaction,
 };
+use alloy_rlp::Encodable;
 pub use listener::{AllTransactionsEvents, TransactionEvents};
-use reth_rlp::Encodable;
 
 mod best;
 mod blob;
@@ -857,7 +857,7 @@ impl<T: PoolTransaction> AddedPendingTransaction<T> {
     pub(crate) fn pending_transactions(
         &self,
         kind: TransactionListenerKind,
-    ) -> impl Iterator<Item = H256> + '_ {
+    ) -> impl Iterator<Item = B256> + '_ {
         let iter = std::iter::once(&self.transaction).chain(self.promoted.iter());
         PendingTransactionIter { kind, iter }
     }
@@ -878,7 +878,7 @@ where
     Iter: Iterator<Item = &'a Arc<ValidPoolTransaction<T>>>,
     T: PoolTransaction + 'a,
 {
-    type Item = H256;
+    type Item = B256;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -934,7 +934,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 
     /// Returns the hash of the replaced transaction if it is a blob transaction.
-    pub(crate) fn replaced_blob_transaction(&self) -> Option<H256> {
+    pub(crate) fn replaced_blob_transaction(&self) -> Option<B256> {
         self.replaced().filter(|tx| tx.transaction.is_eip4844()).map(|tx| *tx.transaction.hash())
     }
 
@@ -981,7 +981,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
 #[derive(Debug)]
 pub(crate) struct OnNewCanonicalStateOutcome<T: PoolTransaction> {
     /// Hash of the block.
-    pub(crate) block_hash: H256,
+    pub(crate) block_hash: B256,
     /// All mined transactions.
     pub(crate) mined: Vec<TxHash>,
     /// Transactions promoted to the ready queue.
@@ -999,7 +999,7 @@ impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
     pub(crate) fn pending_transactions(
         &self,
         kind: TransactionListenerKind,
-    ) -> impl Iterator<Item = H256> + '_ {
+    ) -> impl Iterator<Item = B256> + '_ {
         let iter = self.promoted.iter();
         PendingTransactionIter { kind, iter }
     }

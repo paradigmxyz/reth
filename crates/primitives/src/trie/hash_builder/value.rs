@@ -1,4 +1,4 @@
-use crate::H256;
+use crate::B256;
 use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
 
@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub enum HashBuilderValue {
     /// Value of the leaf node.
-    Hash(H256),
+    Hash(B256),
     /// Hash of adjacent nodes.
     Bytes(Vec<u8>),
 }
@@ -35,7 +35,7 @@ impl Compact for HashBuilderValue {
     {
         match buf[0] {
             0 => {
-                let (hash, buf) = H256::from_compact(&buf[1..], 32);
+                let (hash, buf) = B256::from_compact(&buf[1..], 32);
                 (Self::Hash(hash), buf)
             }
             1 => {
@@ -50,7 +50,7 @@ impl Compact for HashBuilderValue {
 impl std::fmt::Debug for HashBuilderValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Bytes(bytes) => write!(f, "Bytes({:?})", hex::encode(bytes)),
+            Self::Bytes(bytes) => write!(f, "Bytes({:?})", crate::hex::encode(bytes)),
             Self::Hash(hash) => write!(f, "Hash({:?})", hash),
         }
     }
@@ -68,8 +68,8 @@ impl From<&[u8]> for HashBuilderValue {
     }
 }
 
-impl From<H256> for HashBuilderValue {
-    fn from(value: H256) -> Self {
+impl From<B256> for HashBuilderValue {
+    fn from(value: B256) -> Self {
         Self::Hash(value)
     }
 }

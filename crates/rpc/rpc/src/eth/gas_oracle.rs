@@ -4,7 +4,7 @@ use crate::eth::{
     cache::EthStateCache,
     error::{EthApiError, EthResult, RpcInvalidTransactionError},
 };
-use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag, H256, U256};
+use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag, B256, U256};
 use reth_provider::BlockReaderIdExt;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -197,9 +197,9 @@ where
     /// This method also returns the parent hash for the given block.
     async fn get_block_values(
         &self,
-        block_hash: H256,
+        block_hash: B256,
         limit: usize,
-    ) -> EthResult<Option<(H256, Vec<U256>)>> {
+    ) -> EthResult<Option<(B256, Vec<U256>)>> {
         // check the cache (this will hit the disk if the block is not cached)
         let block = match self.cache.get_block(block_hash).await? {
             Some(block) => block,
@@ -253,14 +253,14 @@ where
 #[derive(Debug, Clone)]
 pub struct GasPriceOracleResult {
     /// The block hash that the oracle used to calculate the price
-    pub block_hash: H256,
+    pub block_hash: B256,
     /// The price that the oracle calculated
     pub price: U256,
 }
 
 impl Default for GasPriceOracleResult {
     fn default() -> Self {
-        Self { block_hash: H256::zero(), price: U256::from(GWEI_TO_WEI) }
+        Self { block_hash: B256::ZERO, price: U256::from(GWEI_TO_WEI) }
     }
 }
 

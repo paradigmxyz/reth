@@ -168,7 +168,8 @@ pub struct MockSimulatorConfig {
 impl MockSimulatorConfig {
     /// Generates a set of random addresses
     pub fn addresses(&self, rng: &mut impl rand::Rng) -> Vec<Address> {
-        std::iter::repeat_with(|| Address::random_using(rng)).take(self.num_senders).collect()
+        let _ = rng.gen::<bool>(); // TODO(dani): ::random_with
+        std::iter::repeat_with(Address::random).take(self.num_senders).collect()
     }
 }
 
