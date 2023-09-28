@@ -754,9 +754,9 @@ dependencies = [
 
 [[package]]
 name = "boa_ast"
-version = "0.17.1"
+version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4db68af1129d6f3121a5acfc0274e5830fa7634f831d51c7097b211df387cf02"
+checksum = "73498e9b2f0aa7db74977afa4d594657611e90587abf0dd564c0b55b4a130163"
 dependencies = [
  "bitflags 2.4.0",
  "boa_interner",
@@ -768,9 +768,9 @@ dependencies = [
 
 [[package]]
 name = "boa_engine"
-version = "0.17.1"
+version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2aa20501c447c16298d47b498e063644679ad41a3e23030739b2d88fce91c16f"
+checksum = "16377479d5d6d33896e7acdd1cc698d04a8f72004025bbbddf47558cd29146a6"
 dependencies = [
  "bitflags 2.4.0",
  "boa_ast",
@@ -807,9 +807,9 @@ dependencies = [
 
 [[package]]
 name = "boa_gc"
-version = "0.17.1"
+version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec4e0898b1fc586a634f383f0968c7b1c26135c819322d4d2e077e892f1501a4"
+checksum = "c97b44beaef9d4452342d117d94607fdfa8d474280f1ba0fd97853834e3a49b2"
 dependencies = [
  "boa_macros",
  "boa_profiler",
@@ -818,9 +818,9 @@ dependencies = [
 
 [[package]]
 name = "boa_icu_provider"
-version = "0.17.1"
+version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5635ed884d090c978156444554934c2737b1f426443ebc19ddda54163a079255"
+checksum = "b30e52e34e451dd0bfc2c654a9a43ed34b0073dbd4ae3394b40313edda8627aa"
 dependencies = [
  "icu_collections",
  "icu_normalizer",
@@ -833,9 +833,9 @@ dependencies = [
 
 [[package]]
 name = "boa_interner"
-version = "0.17.1"
+version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "071df42b38b332bd2c463526173ad28eaccb033ca78278fba71a4f4f01f05237"
+checksum = "f3e5afa991908cfbe79bd3109b824e473a1dc5f74f31fab91bb44c9e245daa77"
 dependencies = [
  "boa_gc",
  "boa_macros",
@@ -849,9 +849,9 @@ dependencies = [
 
 [[package]]
 name = "boa_macros"
-version = "0.17.1"
+version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6e3945717b26eddf42a883d35d34da603501ce5377614f437623e830590090d"
+checksum = "005fa0c5bd20805466dda55eb34cd709bb31a2592bb26927b47714eeed6914d8"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -861,9 +861,9 @@ dependencies = [
 
 [[package]]
 name = "boa_parser"
-version = "0.17.1"
+version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5703b29cd6b0d7da4e2a643dde0d752e4303e96e2cebaaa904b9be591a07582f"
+checksum = "9e09afb035377a9044443b598187a7d34cd13164617182a4d7c348522ee3f052"
 dependencies = [
  "bitflags 2.4.0",
  "boa_ast",
@@ -872,20 +872,23 @@ dependencies = [
  "boa_macros",
  "boa_profiler",
  "fast-float",
+ "icu_locid",
  "icu_properties",
  "icu_provider",
+ "icu_provider_macros",
  "num-bigint",
  "num-traits",
  "once_cell",
  "regress",
  "rustc-hash",
+ "tinystr",
 ]
 
 [[package]]
 name = "boa_profiler"
-version = "0.17.1"
+version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc50f19ebb5dd034b751bcdfd1137d53040d23cf1cb8211d0fe57cd425fd994a"
+checksum = "3190f92dfe48224adc92881c620f08ccf37ff62b91a094bb357fe53bd5e84647"
 
 [[package]]
 name = "boyer-moore-magiclen"
