@@ -46,18 +46,27 @@ impl PerformanceDashboardMetricHandler {
                     let delta_mgas = snapshot.total_mgas_used - pre_snapshot.total_mgas_used;
                     let mgas_ps = delta_mgas.mul(1000_000_000 as f64).div(elapsed_ns as f64);
 
-                    info!(target: "performance_dashboard_metrics.sync_stage.execution", "tps =====> {:?}, mGas/s =====> {:?}", tps, mgas_ps);
+                    info!(target: "performance_dashboard_metrics.sync_stage.execution", "tps =====> {:?}", tps);
+                    info!(target: "performance_dashboard_metrics.sync_stage.execution", "mGas/s =====> {:?}", mgas_ps);
                     self.cnt += 1;
 
                     // 3. total
                     let read_block_info_time = snapshot.read_block_info_time;
-                    info!(target: "performance_dashboard_metrics.sync_stage.execution", "total read block info time =====> {:?}", read_block_info_time);
+                    if read_block_info_time != 0 {
+                        info!(target: "performance_dashboard_metrics.sync_stage.execution", "total read block info time =====> {:?}", read_block_info_time);
+                    }
                     let revm_execute_time = snapshot.revm_execute_time;
-                    info!(target: "performance_dashboard_metrics.sync_stage.execution", "total revm execute time =====> {:?}", revm_execute_time);
+                    if revm_execute_time != 0 {
+                        info!(target: "performance_dashboard_metrics.sync_stage.execution", "total revm execute time =====> {:?}", revm_execute_time);
+                    }
                     let post_process_time = snapshot.post_process_time;
-                    info!(target: "performance_dashboard_metrics.sync_stage.execution", "total post process time =====> {:?}", post_process_time);
+                    if post_process_time != 0 {
+                        info!(target: "performance_dashboard_metrics.sync_stage.execution", "total post process time =====> {:?}", post_process_time);
+                    }
                     let write_to_db_time = snapshot.write_to_db_time;
-                    info!(target: "performance_dashboard_metrics.sync_stage.execution", "total post process time =====> {:?}", write_to_db_time);
+                    if write_to_db_time != 0 {
+                        info!(target: "performance_dashboard_metrics.sync_stage.execution", "total write to db time =====> {:?}", write_to_db_time);
+                    }
                 }
 
                 self.record(snapshot);

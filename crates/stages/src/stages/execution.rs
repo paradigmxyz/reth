@@ -191,7 +191,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
                 #[cfg(feature = "open_performance_dashboard")]
                 {
-                    if cnt % N == 1 {
+                    if cnt % N == 0 {
                         let _ = metrics_tx.send(MetricEvent::ExecutionStageGas { gas: total_gas });
                         let _ = metrics_tx.send(MetricEvent::ExecutionStageTxs { txs: total_txs });
 
