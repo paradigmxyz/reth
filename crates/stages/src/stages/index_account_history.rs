@@ -424,7 +424,7 @@ mod tests {
         .unwrap();
 
         // run
-        let input = ExecInput { target: Some(100), ..Default::default() };
+        let input = ExecInput { target: Some(20000), ..Default::default() };
         let mut stage = IndexAccountHistoryStage {
             prune_modes: PruneModes {
                 account_history: Some(PruneMode::Before(36)),
@@ -435,7 +435,7 @@ mod tests {
         let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
         let out = stage.execute(&provider, input).await.unwrap();
-        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(100), done: true });
+        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(20000), done: true });
         provider.commit().unwrap();
 
         // verify
@@ -443,7 +443,7 @@ mod tests {
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![36, 100])]));
 
         // unwind
-        unwind(&tx, 100, 0).await;
+        unwind(&tx, 20000, 0).await;
 
         // verify initial state
         let table = tx.table::<tables::AccountHistory>().unwrap();
