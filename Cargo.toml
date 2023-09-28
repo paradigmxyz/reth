@@ -100,6 +100,7 @@ reth-eth-wire = { path = "./crates/net/eth-wire" }
 reth-ecies = { path = "./crates/net/ecies" }
 
 # revm
+# TODO: Switch back to bluealloy/revm once #724 lands
 revm = { git = "https://github.com/Evalir/revm/", branch = "reintroduce-alloy-rebased" }
 revm-primitives = { git = "https://github.com/Evalir/revm/", branch = "reintroduce-alloy-rebased" }
 
@@ -178,12 +179,12 @@ proptest = "1.0"
 proptest-derive = "0.4"
 serial_test = "2"
 
-# TODO: Alloy 0.4
+# TODO: Use Alloy 0.4 once it's released
 [patch.crates-io]
-alloy-dyn-abi = { git = "https://github.com/alloy-rs/core", rev = "e79fe576a2aea713370e9d96297ec5a458963c39" }
-alloy-json-abi = { git = "https://github.com/alloy-rs/core", rev = "e79fe576a2aea713370e9d96297ec5a458963c39" }
-alloy-primitives = { git = "https://github.com/alloy-rs/core", rev = "e79fe576a2aea713370e9d96297ec5a458963c39" }
-alloy-sol-macro = { git = "https://github.com/alloy-rs/core", rev = "e79fe576a2aea713370e9d96297ec5a458963c39" }
-alloy-sol-type-parser = { git = "https://github.com/alloy-rs/core", rev = "e79fe576a2aea713370e9d96297ec5a458963c39" }
-alloy-sol-types = { git = "https://github.com/alloy-rs/core", rev = "e79fe576a2aea713370e9d96297ec5a458963c39" }
-syn-solidity = { git = "https://github.com/alloy-rs/core", rev = "e79fe576a2aea713370e9d96297ec5a458963c39" }
+alloy-dyn-abi = { git = "https://github.com/alloy-rs/core", rev = "cd4985caf45f4ac6b2aee91d1f06fcdeb665415a" }
+alloy-json-abi = { git = "https://github.com/alloy-rs/core", rev = "cd4985caf45f4ac6b2aee91d1f06fcdeb665415a" }
+alloy-primitives = { git = "https://github.com/alloy-rs/core", rev = "cd4985caf45f4ac6b2aee91d1f06fcdeb665415a" }
+alloy-sol-macro = { git = "https://github.com/alloy-rs/core", rev = "cd4985caf45f4ac6b2aee91d1f06fcdeb665415a" }
+alloy-sol-type-parser = { git = "https://github.com/alloy-rs/core", rev = "cd4985caf45f4ac6b2aee91d1f06fcdeb665415a" }
+alloy-sol-types = { git = "https://github.com/alloy-rs/core", rev = "cd4985caf45f4ac6b2aee91d1f06fcdeb665415a" }
+syn-solidity = { git = "https://github.com/alloy-rs/core", rev = "cd4985caf45f4ac6b2aee91d1f06fcdeb665415a" }
