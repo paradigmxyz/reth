@@ -5,61 +5,57 @@ on:
     branches: [main]
 
 env:
-  RUSTFLAGS: -D warnings
   CARGO_TERM_COLOR: always
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
 
 name: ci
 jobs:
-  lint:
-    name: code lint
-    runs-on: ubuntu-20.04
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v3
-      - name: Install toolchain
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt, clippy
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@clippy
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+      - run: cargo clippy --workspace --all-targets --all-features
+        env:
+          RUSTFLAGS: -D warnings
 
-      - name: cargo check
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-          args: --all --all-features --benches --tests
-
-      - name: cargo fmt
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all --check
-
-      - name: cargo clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --all --all-features --benches --tests
-
-  doc-lint:
-    name: doc lint
-    runs-on: ubuntu-20.04
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v3
-      - name: Install toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
-      - name: Check if documentation builds
-        run: RUSTDOCFLAGS="-D warnings" cargo doc --all --no-deps --all-features --document-private-items
+        with:
+          cache-on-failure: true
+      - run: cargo docs --document-private-items
+        env:
+          # Keep in sync with ./book.yml:jobs.build
+          # This should only add `-D warnings`
+          RUSTDOCFLAGS:
+            --cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page
+            -Zunstable-options -D warnings
+
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
 
   grafana-lint:
     name: grafana lint
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v3
       - name: Check dashboard JSON with jq
@@ -70,8 +66,9 @@ jobs:
   lint-success:
     if: always()
     name: lint success
-    runs-on: ubuntu-20.04
-    needs: [lint, doc-lint, grafana-lint]
+    runs-on: ubuntu-latest
+    needs: [clippy, docs, fmt, grafana-lint]
+    timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@release/v1

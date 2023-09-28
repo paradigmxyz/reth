@@ -1,12 +1,16 @@
 use crate::{
     bloom::logs_bloom,
     compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR},
-    Bloom, Log, TxType,
+    proofs::calculate_receipt_root_ref,
+    Bloom, Log, PrunePartError, TxType, H256,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use reth_codecs::{main_codec, Compact, CompactZstd};
 use reth_rlp::{length_of_length, Decodable, Encodable};
-use std::cmp::Ordering;
+use std::{
+    cmp::Ordering,
+    ops::{Deref, DerefMut},
+};
 
 /// Receipt containing result of transaction execution.
 #[main_codec(zstd)]
@@ -41,6 +45,95 @@ impl Receipt {
     /// type.
     pub fn with_bloom(self) -> ReceiptWithBloom {
         self.into()
+    }
+}
+
+/// A collection of receipts organized as a two-dimensional vector.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct Receipts {
+    /// A two-dimensional vector of optional `Receipt` instances.
+    pub receipt_vec: Vec<Vec<Option<Receipt>>>,
+}
+
+impl Receipts {
+    /// Create a new `Receipts` instance with an empty vector.
+    pub fn new() -> Self {
+        Self { receipt_vec: vec![] }
+    }
+
+    /// Create a new `Receipts` instance from an existing vector.
+    pub fn from_vec(vec: Vec<Vec<Option<Receipt>>>) -> Self {
+        Self { receipt_vec: vec }
+    }
+
+    /// Returns the length of the `Receipts` vector.
+    pub fn len(&self) -> usize {
+        self.receipt_vec.len()
+    }
+
+    /// Returns `true` if the `Receipts` vector is empty.
+    pub fn is_empty(&self) -> bool {
+        self.receipt_vec.is_empty()
+    }
+
+    /// Push a new vector of receipts into the `Receipts` collection.
+    pub fn push(&mut self, receipts: Vec<Option<Receipt>>) {
+        self.receipt_vec.push(receipts);
+    }
+
+    /// Retrieves the receipt root for all recorded receipts from index.
+    pub fn root_slow(&self, index: usize) -> Option<H256> {
+        Some(calculate_receipt_root_ref(
+            &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
+        ))
+    }
+
+    /// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
+    pub fn gas_spent_by_tx(&self) -> Result<Vec<(u64, u64)>, PrunePartError> {
+        self.last()
+            .map(|block_r| {
+                block_r
+                    .iter()
+                    .enumerate()
+                    .map(|(id, tx_r)| {
+                        if let Some(receipt) = tx_r.as_ref() {
+                            Ok((id as u64, receipt.cumulative_gas_used))
+                        } else {
+                            Err(PrunePartError::ReceiptsPruned)
+                        }
+                    })
+                    .collect::<Result<Vec<_>, PrunePartError>>()
+            })
+            .unwrap_or(Ok(vec![]))
+    }
+}
+
+impl Deref for Receipts {
+    type Target = Vec<Vec<Option<Receipt>>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.receipt_vec
+    }
+}
+
+impl DerefMut for Receipts {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.receipt_vec
+    }
+}
+
+impl IntoIterator for Receipts {
+    type Item = Vec<Option<Receipt>>;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.receipt_vec.into_iter()
+    }
+}
+
+impl FromIterator<Vec<Option<Receipt>>> for Receipts {
+    fn from_iter<I: IntoIterator<Item = Vec<Option<Receipt>>>>(iter: I) -> Self {
+        Self::from_vec(iter.into_iter().collect())
     }
 }
 

@@ -754,9 +754,9 @@ dependencies = [
 
 [[package]]
 name = "boa_ast"
-version = "0.17.0"
+version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7c261398db3b2f9ba05f76872721d6a8a142d10ae6c0a58d3ddc5c2853cc02d"
+checksum = "73498e9b2f0aa7db74977afa4d594657611e90587abf0dd564c0b55b4a130163"
 dependencies = [
  "bitflags 2.4.0",
  "boa_interner",
@@ -768,9 +768,9 @@ dependencies = [
 
 [[package]]
 name = "boa_engine"
-version = "0.17.0"
+version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f31e7a37b855625f1615a07414fb341361475950e57bb9396afe1389bbc2ccdc"
+checksum = "16377479d5d6d33896e7acdd1cc698d04a8f72004025bbbddf47558cd29146a6"
 dependencies = [
  "bitflags 2.4.0",
  "boa_ast",
@@ -807,9 +807,9 @@ dependencies = [
 
 [[package]]
 name = "boa_gc"
-version = "0.17.0"
+version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2346f8ac7b736236de0608a7c75a9a32bac0a1137b98574cfebde6343e4ff6b7"
+checksum = "c97b44beaef9d4452342d117d94607fdfa8d474280f1ba0fd97853834e3a49b2"
 dependencies = [
  "boa_macros",
  "boa_profiler",
@@ -818,23 +818,24 @@ dependencies = [
 
 [[package]]
 name = "boa_icu_provider"
-version = "0.17.0"
+version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07652c6f1ca97bbe16bd2ab1ebc39313ac81568d2671aeb24a4a45964d2291a4"
+checksum = "b30e52e34e451dd0bfc2c654a9a43ed34b0073dbd4ae3394b40313edda8627aa"
 dependencies = [
  "icu_collections",
  "icu_normalizer",
  "icu_properties",
  "icu_provider",
+ "icu_provider_adapters",
+ "icu_provider_blob",
  "once_cell",
- "zerovec",
 ]
 
 [[package]]
 name = "boa_interner"
-version = "0.17.0"
+version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b968bd467737cace9723a5d01a3d32fe95471526d36db9654a1779c4b766fb6"
+checksum = "f3e5afa991908cfbe79bd3109b824e473a1dc5f74f31fab91bb44c9e245daa77"
 dependencies = [
  "boa_gc",
  "boa_macros",
@@ -848,9 +849,9 @@ dependencies = [
 
 [[package]]
 name = "boa_macros"
-version = "0.17.0"
+version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca3de43b7806061fccfba716fef51eea462d636de36803b62d10f902608ffef4"
+checksum = "005fa0c5bd20805466dda55eb34cd709bb31a2592bb26927b47714eeed6914d8"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -860,9 +861,9 @@ dependencies = [
 
 [[package]]
 name = "boa_parser"
-version = "0.17.0"
+version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ff1108bda6d573049191b6452490844c5ba4b12f7bdcc512a33e5c3f5037196"
+checksum = "9e09afb035377a9044443b598187a7d34cd13164617182a4d7c348522ee3f052"
 dependencies = [
  "bitflags 2.4.0",
  "boa_ast",
@@ -871,19 +872,23 @@ dependencies = [
  "boa_macros",
  "boa_profiler",
  "fast-float",
+ "icu_locid",
  "icu_properties",
+ "icu_provider",
+ "icu_provider_macros",
  "num-bigint",
  "num-traits",
  "once_cell",
  "regress",
  "rustc-hash",
+ "tinystr",
 ]
 
 [[package]]
 name = "boa_profiler"
-version = "0.17.0"
+version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a24f6aa1ecc56e797506437b1f9a172e4a5f207894e74196c682cb656d2c2d60"
+checksum = "3190f92dfe48224adc92881c620f08ccf37ff62b91a094bb357fe53bd5e84647"
 
 [[package]]
 name = "boyer-moore-magiclen"
@@ -972,20 +977,6 @@ dependencies = [
 [[package]]
 name = "c-kzg"
 version = "0.1.0"
-source = "git+https://github.com/ethereum/c-kzg-4844?rev=f5f6f863d475847876a2bd5ee252058d37c3a15d#f5f6f863d475847876a2bd5ee252058d37c3a15d"
-dependencies = [
- "bindgen 0.66.1",
- "blst",
- "cc",
- "glob",
- "hex",
- "libc",
- "serde",
-]
-
-[[package]]
-name = "c-kzg"
-version = "0.1.0"
 source = "git+https://github.com/ethereum/c-kzg-4844#fbef59a3f9e8fa998bdb5069d212daf83d586aa5"
 dependencies = [
  "bindgen 0.66.1",
@@ -994,6 +985,7 @@ dependencies = [
  "glob",
  "hex",
  "libc",
+ "serde",
 ]
 
 [[package]]
@@ -1199,7 +1191,7 @@ checksum = "67ba02a97a2bd10f4b59b25c7973101c79642302776489e030cd13cdab09ed15"
 
 [[package]]
 name = "codecs-derive"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "convert_case 0.6.0",
  "parity-scale-codec",
@@ -2048,7 +2040,7 @@ dependencies = [
 
 [[package]]
 name = "ef-tests"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "reth-db",
  "reth-interfaces",
@@ -3211,6 +3203,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef8302d8dfd6044d3ddb3f807a5ef3d7bbca9a574959c6d6e4dc39aa7012d0d5"
 dependencies = [
  "displaydoc",
+ "serde",
  "yoke",
  "zerofrom",
  "zerovec",
@@ -3224,8 +3217,10 @@ checksum = "3003f85dccfc0e238ff567693248c59153a46f4e6125ba4020b973cef4d1d335"
 dependencies = [
  "displaydoc",
  "litemap",
+ "serde",
  "tinystr",
  "writeable",
+ "zerovec",
 ]
 
 [[package]]
@@ -3238,6 +3233,7 @@ dependencies = [
  "icu_collections",
  "icu_properties",
  "icu_provider",
+ "serde",
  "smallvec 1.11.0",
  "utf16_iter",
  "utf8_iter",
@@ -3254,6 +3250,7 @@ dependencies = [
  "displaydoc",
  "icu_collections",
  "icu_provider",
+ "serde",
  "tinystr",
  "zerovec",
 ]
@@ -3267,11 +3264,40 @@ dependencies = [
  "displaydoc",
  "icu_locid",
  "icu_provider_macros",
+ "postcard",
  "serde",
  "stable_deref_trait",
  "writeable",
  "yoke",
  "zerofrom",
+ "zerovec",
+]
+
+[[package]]
+name = "icu_provider_adapters"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4ae1e2bd0c41728b77e7c46e9afdec5e2127d1eedacc684724667d50c126bd3"
+dependencies = [
+ "icu_locid",
+ "icu_provider",
+ "serde",
+ "tinystr",
+ "yoke",
+ "zerovec",
+]
+
+[[package]]
+name = "icu_provider_blob"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd364c9a01f791a4bc04a74cf2a1d01d9f6926a40fd5ae1c28004e1e70d8338b"
+dependencies = [
+ "icu_provider",
+ "postcard",
+ "serde",
+ "writeable",
+ "yoke",
  "zerovec",
 ]
 
@@ -3919,6 +3945,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d0d1830bcd151a6fc4aea1369af235b36c1528fe976b8ff678683c9995eade8"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "manual-p2p"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "futures",
+ "once_cell",
+ "reth-discv4",
+ "reth-ecies",
+ "reth-eth-wire",
+ "reth-network",
+ "reth-primitives",
+ "secp256k1",
+ "tokio",
 ]
 
 [[package]]
@@ -5279,7 +5321,7 @@ dependencies = [
 
 [[package]]
 name = "reth"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "aquamarine",
  "backon",
@@ -5352,7 +5394,7 @@ dependencies = [
 
 [[package]]
 name = "reth-auto-seal-consensus"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "futures-util",
  "reth-beacon-consensus",
@@ -5369,7 +5411,7 @@ dependencies = [
 
 [[package]]
 name = "reth-basic-payload-builder"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "futures-core",
  "futures-util",
@@ -5390,7 +5432,7 @@ dependencies = [
 
 [[package]]
 name = "reth-beacon-consensus"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "assert_matches",
  "futures",
@@ -5420,7 +5462,7 @@ dependencies = [
 
 [[package]]
 name = "reth-blockchain-tree"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "aquamarine",
  "assert_matches",
@@ -5440,7 +5482,7 @@ dependencies = [
 
 [[package]]
 name = "reth-codecs"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "arbitrary",
  "bytes",
@@ -5455,7 +5497,7 @@ dependencies = [
 
 [[package]]
 name = "reth-config"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "confy",
  "reth-discv4",
@@ -5473,7 +5515,7 @@ dependencies = [
 
 [[package]]
 name = "reth-consensus-common"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "assert_matches",
  "mockall",
@@ -5484,7 +5526,7 @@ dependencies = [
 
 [[package]]
 name = "reth-db"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "arbitrary",
  "assert_matches",
@@ -5508,10 +5550,10 @@ dependencies = [
  "proptest-derive",
  "rand 0.8.5",
  "reth-codecs",
- "reth-db",
  "reth-interfaces",
  "reth-libmdbx",
  "reth-metrics",
+ "reth-nippy-jar",
  "reth-primitives",
  "secp256k1",
  "serde",
@@ -5526,7 +5568,7 @@ dependencies = [
 
 [[package]]
 name = "reth-discv4"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "discv5",
  "enr",
@@ -5550,7 +5592,7 @@ dependencies = [
 
 [[package]]
 name = "reth-dns-discovery"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "async-trait",
  "data-encoding",
@@ -5574,7 +5616,7 @@ dependencies = [
 
 [[package]]
 name = "reth-downloaders"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "assert_matches",
  "futures",
@@ -5600,7 +5642,7 @@ dependencies = [
 
 [[package]]
 name = "reth-ecies"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "aes 0.8.3",
  "block-padding",
@@ -5631,7 +5673,7 @@ dependencies = [
 
 [[package]]
 name = "reth-eth-wire"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "arbitrary",
  "async-trait",
@@ -5666,7 +5708,7 @@ dependencies = [
 
 [[package]]
 name = "reth-interfaces"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "arbitrary",
  "async-trait",
@@ -5682,6 +5724,7 @@ dependencies = [
  "reth-db",
  "reth-eth-wire",
  "reth-network-api",
+ "reth-nippy-jar",
  "reth-primitives",
  "reth-rpc-types",
  "revm-primitives",
@@ -5694,7 +5737,7 @@ dependencies = [
 
 [[package]]
 name = "reth-ipc"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "async-trait",
  "bytes",
@@ -5713,7 +5756,7 @@ dependencies = [
 
 [[package]]
 name = "reth-libmdbx"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "bitflags 2.4.0",
  "byteorder",
@@ -5733,7 +5776,7 @@ dependencies = [
 
 [[package]]
 name = "reth-mdbx-sys"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "bindgen 0.68.1",
  "cc",
@@ -5742,17 +5785,18 @@ dependencies = [
 
 [[package]]
 name = "reth-metrics"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "futures",
  "metrics",
  "reth-metrics-derive",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
 name = "reth-metrics-derive"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "metrics",
  "once_cell",
@@ -5766,7 +5810,7 @@ dependencies = [
 
 [[package]]
 name = "reth-net-common"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "pin-project",
  "reth-primitives",
@@ -5775,7 +5819,7 @@ dependencies = [
 
 [[package]]
 name = "reth-net-nat"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "igd",
  "pin-project-lite",
@@ -5789,7 +5833,7 @@ dependencies = [
 
 [[package]]
 name = "reth-network"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "aquamarine",
  "async-trait",
@@ -5840,7 +5884,7 @@ dependencies = [
 
 [[package]]
 name = "reth-network-api"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "async-trait",
  "reth-discv4",
@@ -5854,7 +5898,7 @@ dependencies = [
 
 [[package]]
 name = "reth-nippy-jar"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "anyhow",
  "bincode",
@@ -5873,7 +5917,7 @@ dependencies = [
 
 [[package]]
 name = "reth-payload-builder"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "futures-util",
  "metrics",
@@ -5895,12 +5939,12 @@ dependencies = [
 
 [[package]]
 name = "reth-primitives"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "arbitrary",
  "assert_matches",
  "bytes",
- "c-kzg 0.1.0 (git+https://github.com/ethereum/c-kzg-4844?rev=f5f6f863d475847876a2bd5ee252058d37c3a15d)",
+ "c-kzg",
  "crc",
  "criterion",
  "crunchy",
@@ -5911,6 +5955,7 @@ dependencies = [
  "hex",
  "hex-literal",
  "impl-serde",
+ "itertools 0.11.0",
  "modular-bitfield",
  "once_cell",
  "paste",
@@ -5947,16 +5992,18 @@ dependencies = [
 
 [[package]]
 name = "reth-provider"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "assert_matches",
  "auto_impl",
  "itertools 0.11.0",
  "parking_lot 0.12.1",
  "pin-project",
+ "rand 0.8.5",
  "rayon",
  "reth-db",
  "reth-interfaces",
+ "reth-nippy-jar",
  "reth-primitives",
  "reth-revm-primitives",
  "reth-rlp",
@@ -5970,7 +6017,7 @@ dependencies = [
 
 [[package]]
 name = "reth-prune"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "assert_matches",
  "itertools 0.11.0",
@@ -5983,12 +6030,13 @@ dependencies = [
  "reth-provider",
  "reth-stages",
  "thiserror",
+ "tokio-stream",
  "tracing",
 ]
 
 [[package]]
 name = "reth-revm"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "reth-consensus-common",
  "reth-interfaces",
@@ -6002,7 +6050,7 @@ dependencies = [
 
 [[package]]
 name = "reth-revm-inspectors"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "boa_engine",
  "boa_gc",
@@ -6018,7 +6066,7 @@ dependencies = [
 
 [[package]]
 name = "reth-revm-primitives"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "reth-primitives",
  "revm",
@@ -6026,12 +6074,12 @@ dependencies = [
 
 [[package]]
 name = "reth-rlp"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "arrayvec",
  "auto_impl",
  "bytes",
- "c-kzg 0.1.0 (git+https://github.com/ethereum/c-kzg-4844?rev=f5f6f863d475847876a2bd5ee252058d37c3a15d)",
+ "c-kzg",
  "criterion",
  "ethereum-types",
  "ethnum",
@@ -6045,7 +6093,7 @@ dependencies = [
 
 [[package]]
 name = "reth-rlp-derive"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6054,7 +6102,7 @@ dependencies = [
 
 [[package]]
 name = "reth-rpc"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "assert_matches",
  "async-trait",
@@ -6104,7 +6152,7 @@ dependencies = [
 
 [[package]]
 name = "reth-rpc-api"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "jsonrpsee",
  "reth-primitives",
@@ -6114,7 +6162,7 @@ dependencies = [
 
 [[package]]
 name = "reth-rpc-api-testing-util"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "async-trait",
  "futures",
@@ -6128,7 +6176,7 @@ dependencies = [
 
 [[package]]
 name = "reth-rpc-builder"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "hyper",
  "jsonrpsee",
@@ -6161,7 +6209,7 @@ dependencies = [
 
 [[package]]
 name = "reth-rpc-engine-api"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "assert_matches",
  "async-trait",
@@ -6184,7 +6232,7 @@ dependencies = [
 
 [[package]]
 name = "reth-rpc-types"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "itertools 0.11.0",
  "jsonrpsee-types",
@@ -6199,7 +6247,7 @@ dependencies = [
 
 [[package]]
 name = "reth-rpc-types-compat"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "reth-primitives",
  "reth-rlp",
@@ -6208,7 +6256,7 @@ dependencies = [
 
 [[package]]
 name = "reth-stages"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "aquamarine",
  "assert_matches",
@@ -6246,7 +6294,7 @@ dependencies = [
 
 [[package]]
 name = "reth-tasks"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "dyn-clone",
  "futures-util",
@@ -6260,7 +6308,7 @@ dependencies = [
 
 [[package]]
 name = "reth-tracing"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "rolling-file",
  "tracing",
@@ -6271,7 +6319,7 @@ dependencies = [
 
 [[package]]
 name = "reth-transaction-pool"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "aquamarine",
  "assert_matches",
@@ -6301,7 +6349,7 @@ dependencies = [
 
 [[package]]
 name = "reth-trie"
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 dependencies = [
  "criterion",
  "derive_more",
@@ -6346,7 +6394,7 @@ name = "revm-precompile"
 version = "2.0.3"
 source = "git+https://github.com/bluealloy/revm?rev=516f62cc#516f62ccc1c5f2a62e5fc58115213fe04c7f7a8c"
 dependencies = [
- "c-kzg 0.1.0 (git+https://github.com/ethereum/c-kzg-4844)",
+ "c-kzg",
  "hex",
  "k256",
  "num",
@@ -6369,7 +6417,7 @@ dependencies = [
  "bitflags 2.4.0",
  "bitvec",
  "bytes",
- "c-kzg 0.1.0 (git+https://github.com/ethereum/c-kzg-4844)",
+ "c-kzg",
  "derive_more",
  "enumn",
  "fixed-hash",
@@ -7610,6 +7658,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ac3f5b6856e931e15e07b478e98c8045239829a65f9156d4fa7e7788197a5ef"
 dependencies = [
  "displaydoc",
+ "serde",
  "zerovec",
 ]
 
@@ -8756,6 +8805,7 @@ version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "198f54134cd865f437820aa3b43d0ad518af4e68ee161b444cdd15d8e567c8ea"
 dependencies = [
+ "serde",
  "yoke",
  "zerofrom",
  "zerovec-derive",

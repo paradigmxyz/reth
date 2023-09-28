@@ -52,7 +52,7 @@ jobs:
           mv testdata pr
 
       - name: Set main baseline
-        run: cargo bench --package reth-db --bench iai --manifest-path main/Cargo.toml
+        run: cargo bench --package reth-db --bench iai --features test-utils --manifest-path main/Cargo.toml
 
       - name: Compare PR benchmark
         shell: 'script -q -e -c "bash {0}"' # required to workaround /dev/tty not being available
@@ -62,7 +62,7 @@ jobs:
   bench-success:
     if: always()
     name: bench success
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
       # Note: This check is a dummy because we don't have any bench checks enabled.
       - run: echo OK.

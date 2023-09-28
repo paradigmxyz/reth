@@ -12,8 +12,8 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     Address, Block, BlockNumber, Bloom, ChainSpec, Hardfork, Header, PruneMode, PruneModes,
-    PrunePartError, Receipt, ReceiptWithBloom, TransactionSigned, H256, MINIMUM_PRUNING_DISTANCE,
-    U256,
+    PrunePartError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, H256,
+    MINIMUM_PRUNING_DISTANCE, U256,
 };
 use reth_provider::{
     BlockExecutor, BlockExecutorStats, BundleStateWithReceipts, PrunableBlockExecutor,
@@ -42,6 +42,9 @@ use tracing::{debug, trace};
 ///
 /// InspectorStack are used for optional inspecting execution. And it contains
 /// various duration of parts of execution.
+// TODO: https://github.com/bluealloy/revm/pull/745
+// #[derive(Debug)]
+#[allow(missing_debug_implementations)]
 pub struct EVMProcessor<'a> {
     /// The configured chain-spec
     chain_spec: Arc<ChainSpec>,
@@ -54,7 +57,7 @@ pub struct EVMProcessor<'a> {
     /// The inner vector stores receipts ordered by transaction number.
     ///
     /// If receipt is None it means it is pruned.
-    receipts: Vec<Vec<Option<Receipt>>>,
+    receipts: Receipts,
     /// First block will be initialized to `None`
     /// and be set to the block number of first block executed.
     first_block: Option<BlockNumber>,
@@ -83,7 +86,7 @@ impl<'a> EVMProcessor<'a> {
             chain_spec,
             evm,
             stack: InspectorStack::new(InspectorStackConfig::default()),
-            receipts: Vec::new(),
+            receipts: Receipts::new(),
             first_block: None,
             tip: None,
             prune_modes: PruneModes::none(),
@@ -116,7 +119,7 @@ impl<'a> EVMProcessor<'a> {
             chain_spec,
             evm,
             stack: InspectorStack::new(InspectorStackConfig::default()),
-            receipts: Vec::new(),
+            receipts: Receipts::new(),
             first_block: None,
             tip: None,
             prune_modes: PruneModes::none(),
@@ -349,24 +352,7 @@ impl<'a> EVMProcessor<'a> {
             return Err(BlockValidationError::BlockGasUsed {
                 got: cumulative_gas_used,
                 expected: block.gas_used,
-                gas_spent_by_tx: self
-                    .receipts
-                    .last()
-                    .map(|block_r| {
-                        block_r
-                            .iter()
-                            .enumerate()
-                            .map(|(id, tx_r)| {
-                                (
-                                    id as u64,
-                                    tx_r.as_ref()
-                                        .expect("receipts have not been pruned")
-                                        .cumulative_gas_used,
-                                )
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default(),
+                gas_spent_by_tx: self.receipts.gas_spent_by_tx()?,
             }
             .into())
         }
@@ -623,7 +609,7 @@ mod tests {
     }
 
     impl StateRootProvider for StateProviderTest {
-        fn state_root(&self, _bundle_state: BundleStateWithReceipts) -> RethResult<H256> {
+        fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> RethResult<H256> {
             todo!()
         }
     }

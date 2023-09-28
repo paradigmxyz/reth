@@ -81,7 +81,8 @@ impl PeersHandle {
 /// From this type, connections to peers are established or disconnected, see [`PeerAction`].
 ///
 /// The [`PeersManager`] will be notified on peer related changes
-pub(crate) struct PeersManager {
+#[derive(Debug)]
+pub struct PeersManager {
     /// All peers known to the network
     peers: HashMap<PeerId, Peer>,
     /// Copy of the sender half, so new [`PeersHandle`] can be created on demand.
@@ -117,7 +118,7 @@ pub(crate) struct PeersManager {
 
 impl PeersManager {
     /// Create a new instance with the given config
-    pub(crate) fn new(config: PeersConfig) -> Self {
+    pub fn new(config: PeersConfig) -> Self {
         let PeersConfig {
             refill_slots_interval,
             connection_info,
@@ -1020,6 +1021,7 @@ impl PeerConnectionState {
 }
 
 /// Commands the [`PeersManager`] listens for.
+#[derive(Debug)]
 pub(crate) enum PeerCommand {
     /// Command for manually add
     Add(PeerId, SocketAddr),
@@ -1046,28 +1048,47 @@ pub enum PeerAction {
         remote_addr: SocketAddr,
     },
     /// Disconnect an existing connection.
-    Disconnect { peer_id: PeerId, reason: Option<DisconnectReason> },
+    Disconnect {
+        /// The peer ID of the established connection.
+        peer_id: PeerId,
+        /// An optional reason for the disconnect.
+        reason: Option<DisconnectReason>,
+    },
     /// Disconnect an existing incoming connection, because the peers reputation is below the
     /// banned threshold or is on the [`BanList`]
     DisconnectBannedIncoming {
-        /// Peer id of the established connection.
+        /// The peer ID of the established connection.
         peer_id: PeerId,
     },
     /// Ban the peer in discovery.
-    DiscoveryBanPeerId { peer_id: PeerId, ip_addr: IpAddr },
+    DiscoveryBanPeerId {
+        /// The peer ID.
+        peer_id: PeerId,
+        /// The IP address.
+        ip_addr: IpAddr,
+    },
     /// Ban the IP in discovery.
-    DiscoveryBanIp { ip_addr: IpAddr },
+    DiscoveryBanIp {
+        /// The IP address.
+        ip_addr: IpAddr,
+    },
     /// Ban the peer temporarily
-    BanPeer { peer_id: PeerId },
+    BanPeer {
+        /// The peer ID.
+        peer_id: PeerId,
+    },
     /// Unban the peer temporarily
-    UnBanPeer { peer_id: PeerId },
+    UnBanPeer {
+        /// The peer ID.
+        peer_id: PeerId,
+    },
     /// Emit peerAdded event
     PeerAdded(PeerId),
     /// Emit peerRemoved event
     PeerRemoved(PeerId),
 }
 
-/// Config type for initiating a [`PeersManager`] instance
+/// Config type for initiating a [`PeersManager`] instance.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
@@ -1134,6 +1155,12 @@ impl PeersConfig {
         self
     }
 
+    /// Configure how long to ban bad peers
+    pub fn with_ban_duration(mut self, ban_duration: Duration) -> Self {
+        self.ban_duration = ban_duration;
+        self
+    }
+
     /// Maximum occupied slots for outbound connections.
     pub fn with_max_pending_outbound(mut self, num_outbound: usize) -> Self {
         self.connection_info.num_outbound = num_outbound;
@@ -1174,6 +1201,12 @@ impl PeersConfig {
         self
     }
 
+    /// Maximum allowed concurrent outbound dials.
+    pub fn with_max_concurrent_dials(mut self, max_concurrent_outbound_dials: usize) -> Self {
+        self.connection_info.max_concurrent_outbound_dials = max_concurrent_outbound_dials;
+        self
+    }
+
     /// Nodes to always connect to.
     pub fn with_trusted_nodes(mut self, nodes: HashSet<NodeRecord>) -> Self {
         self.trusted_nodes = nodes;
@@ -1195,6 +1228,18 @@ impl PeersConfig {
     /// Configures the max allowed backoff count.
     pub fn with_max_backoff_count(mut self, max_backoff_count: u32) -> Self {
         self.max_backoff_count = max_backoff_count;
+        self
+    }
+
+    /// Configures how to weigh reputation changes.
+    pub fn with_reputation_weights(mut self, reputation_weights: ReputationChangeWeights) -> Self {
+        self.reputation_weights = reputation_weights;
+        self
+    }
+
+    /// Configures how long to backoff peers that are we failed to connect to for non-fatal reasons
+    pub fn with_backoff_durations(mut self, backoff_durations: PeerBackoffDurations) -> Self {
+        self.backoff_durations = backoff_durations;
         self
     }
 

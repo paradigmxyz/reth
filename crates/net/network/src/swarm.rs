@@ -61,6 +61,7 @@ use tracing::{debug, trace};
 ///   fetchRequest --> |request Headers, Bodies| StateFetch
 ///   State --> |poll pending requests| StateFetch
 /// ```
+#[derive(Debug)]
 #[must_use = "Swarm does nothing unless polled"]
 pub(crate) struct Swarm<C> {
     /// Listens for new incoming connections.
@@ -428,7 +429,7 @@ pub(crate) enum SwarmEvent {
 
 /// Represents the state of the connection of the node. If shutting down,
 /// new connections won't be established.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) enum NetworkConnectionState {
     #[default]
     Active,

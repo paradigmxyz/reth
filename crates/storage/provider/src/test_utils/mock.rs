@@ -18,7 +18,7 @@ use reth_primitives::{
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::{
     collections::{BTreeMap, HashMap},
-    ops::RangeBounds,
+    ops::{RangeBounds, RangeInclusive},
     sync::Arc,
 };
 
@@ -440,6 +440,10 @@ impl BlockReader for MockEthProvider {
     fn block_with_senders(&self, _number: BlockNumber) -> RethResult<Option<BlockWithSenders>> {
         Ok(None)
     }
+
+    fn block_range(&self, _range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Block>> {
+        Ok(vec![])
+    }
 }
 
 impl BlockReaderIdExt for MockEthProvider {
@@ -476,7 +480,7 @@ impl AccountReader for MockEthProvider {
 }
 
 impl StateRootProvider for MockEthProvider {
-    fn state_root(&self, _state: BundleStateWithReceipts) -> RethResult<H256> {
+    fn state_root(&self, _state: &BundleStateWithReceipts) -> RethResult<H256> {
         todo!()
     }
 }

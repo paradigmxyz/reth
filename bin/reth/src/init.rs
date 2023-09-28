@@ -6,7 +6,9 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::{db::DatabaseError, RethError};
-use reth_primitives::{stage::StageId, Account, Bytecode, ChainSpec, StorageEntry, H256, U256};
+use reth_primitives::{
+    stage::StageId, Account, Bytecode, ChainSpec, Receipts, StorageEntry, H256, U256,
+};
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
     BundleStateWithReceipts, DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown,
@@ -145,7 +147,7 @@ pub fn insert_genesis_state<DB: Database>(
         state_init,
         all_reverts_init,
         contracts.into_iter().collect(),
-        vec![],
+        Receipts::new(),
         0,
     );
 

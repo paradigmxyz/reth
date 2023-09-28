@@ -112,6 +112,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             },
             EngineApiError::NewPayload(ref err) => match err {
                 BeaconOnNewPayloadError::Internal(_) |
+                BeaconOnNewPayloadError::PreCancunBlockWithBlobTransactions => INVALID_PARAMS_CODE,
                 BeaconOnNewPayloadError::EngineUnavailable => INTERNAL_ERROR_CODE,
             },
             // Any other server error

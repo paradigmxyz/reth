@@ -85,6 +85,7 @@ use tracing::{debug, error, trace, warn};
 ///   ethrequest <--> |ETH request handing| NetworkManager
 ///   discovery --> |Discovered peers| NetworkManager
 /// ```
+#[derive(Debug)]
 #[must_use = "The NetworkManager does nothing unless polled"]
 pub struct NetworkManager<C> {
     /// The type that manages the actual network part, which includes connections.

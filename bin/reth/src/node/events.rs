@@ -10,6 +10,7 @@ use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     BlockNumber,
 };
+use reth_prune::PrunerEvent;
 use reth_stages::{ExecOutput, PipelineEvent};
 use std::{
     future::Future,
@@ -127,6 +128,9 @@ impl NodeState {
 
                 info!(number=block.number, hash=?block.hash, "Block added to canonical chain");
             }
+            BeaconConsensusEngineEvent::CanonicalChainCommitted(head, elapsed) => {
+                info!(number=head.number, hash=?head.hash, ?elapsed, "Canonical chain committed");
+            }
             BeaconConsensusEngineEvent::ForkBlockAdded(block) => {
                 info!(number=block.number, hash=?block.hash, "Block added to fork chain");
             }
@@ -134,18 +138,36 @@ impl NodeState {
     }
 
     fn handle_consensus_layer_health_event(&self, event: ConsensusLayerHealthEvent) {
+        // If pipeline is running, it's fine to not receive any messages from the CL.
+        // So we need to report about CL health only when pipeline is idle.
+        if self.current_stage.is_none() {
+            match event {
+                ConsensusLayerHealthEvent::NeverSeen => {
+                    warn!("Post-merge network, but never seen beacon client. Please launch one to follow the chain!")
+                }
+                ConsensusLayerHealthEvent::HasNotBeenSeenForAWhile(period) => {
+                    warn!(?period, "Post-merge network, but no beacon client seen for a while. Please launch one to follow the chain!")
+                }
+                ConsensusLayerHealthEvent::NeverReceivedUpdates => {
+                    warn!("Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!")
+                }
+                ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(period) => {
+                    warn!(?period, "Beacon client online, but no consensus updates received for a while. Please fix your beacon client to follow the chain!")
+                }
+            }
+        }
+    }
+
+    fn handle_pruner_event(&self, event: PrunerEvent) {
         match event {
-            ConsensusLayerHealthEvent::NeverSeen => {
-                warn!("Post-merge network, but never seen beacon client. Please launch one to follow the chain!")
-            }
-            ConsensusLayerHealthEvent::HasNotBeenSeenForAWhile(period) => {
-                warn!(?period, "Post-merge network, but no beacon client seen for a while. Please launch one to follow the chain!")
-            }
-            ConsensusLayerHealthEvent::NeverReceivedUpdates => {
-                warn!("Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!")
-            }
-            ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(period) => {
-                warn!(?period, "Beacon client online, but no consensus updates received for a while. Please fix your beacon client to follow the chain!")
+            PrunerEvent::Finished { tip_block_number, elapsed, done, parts_done } => {
+                info!(
+                    tip_block_number = tip_block_number,
+                    elapsed = ?elapsed,
+                    done = done,
+                    parts_done = ?parts_done,
+                    "Pruner finished"
+                );
             }
         }
     }
@@ -162,6 +184,8 @@ pub enum NodeEvent {
     ConsensusEngine(BeaconConsensusEngineEvent),
     /// A Consensus Layer health event.
     ConsensusLayerHealth(ConsensusLayerHealthEvent),
+    /// A pruner event
+    Pruner(PrunerEvent),
 }
 
 impl From<NetworkEvent> for NodeEvent {
@@ -185,6 +209,12 @@ impl From<BeaconConsensusEngineEvent> for NodeEvent {
 impl From<ConsensusLayerHealthEvent> for NodeEvent {
     fn from(event: ConsensusLayerHealthEvent) -> Self {
         NodeEvent::ConsensusLayerHealth(event)
+    }
+}
+
+impl From<PrunerEvent> for NodeEvent {
+    fn from(event: PrunerEvent) -> Self {
+        NodeEvent::Pruner(event)
     }
 }
 
@@ -259,6 +289,9 @@ where
                 }
                 NodeEvent::ConsensusLayerHealth(event) => {
                     this.state.handle_consensus_layer_health_event(event)
+                }
+                NodeEvent::Pruner(event) => {
+                    this.state.handle_pruner_event(event);
                 }
             }
         }

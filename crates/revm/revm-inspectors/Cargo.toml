@@ -24,6 +24,7 @@ serde_json = { workspace = true, optional = true }
 # js-tracing-inspector
 boa_engine = { workspace = true, optional = true }
 boa_gc = { workspace = true, optional = true }
+
 tokio = { version = "1", features = ["sync"], optional = true }
 
 [features]

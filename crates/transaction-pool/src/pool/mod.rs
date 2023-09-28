@@ -103,7 +103,7 @@ use crate::{
     blobstore::BlobStore,
     metrics::BlobStoreMetrics,
     pool::txpool::UpdateOutcome,
-    traits::{GetPooledTransactionLimit, TransactionListenerKind},
+    traits::{GetPooledTransactionLimit, NewBlobSidecar, TransactionListenerKind},
     validate::ValidTransaction,
 };
 pub use listener::{AllTransactionsEvents, TransactionEvents};
@@ -117,6 +117,10 @@ pub(crate) mod size;
 pub(crate) mod state;
 pub mod txpool;
 mod update;
+
+const PENDING_TX_LISTENER_BUFFER_SIZE: usize = 2048;
+const NEW_TX_LISTENER_BUFFER_SIZE: usize = 1024;
+const BLOB_SIDECAR_LISTENER_BUFFER_SIZE: usize = 512;
 
 /// Transaction pool internals.
 pub struct PoolInner<V, T, S>
@@ -139,6 +143,8 @@ where
     pending_transaction_listener: Mutex<Vec<PendingTransactionListener>>,
     /// Listeners for new transactions added to the pool.
     transaction_listener: Mutex<Vec<TransactionListener<T::Transaction>>>,
+    /// Listener for new blob transaction sidecars added to the pool.
+    blob_transaction_sidecar_listener: Mutex<Vec<BlobTransactionSidecarListener>>,
     /// Metrics for the blob store
     blob_store_metrics: BlobStoreMetrics,
 }
@@ -160,6 +166,7 @@ where
             pool: RwLock::new(TxPool::new(ordering, config.clone())),
             pending_transaction_listener: Default::default(),
             transaction_listener: Default::default(),
+            blob_transaction_sidecar_listener: Default::default(),
             config,
             blob_store,
             blob_store_metrics: Default::default(),
@@ -224,8 +231,7 @@ where
     /// Adds a new transaction listener to the pool that gets notified about every new _pending_
     /// transaction inserted into the pool
     pub fn add_pending_listener(&self, kind: TransactionListenerKind) -> mpsc::Receiver<TxHash> {
-        const TX_LISTENER_BUFFER_SIZE: usize = 2048;
-        let (sender, rx) = mpsc::channel(TX_LISTENER_BUFFER_SIZE);
+        let (sender, rx) = mpsc::channel(PENDING_TX_LISTENER_BUFFER_SIZE);
         let listener = PendingTransactionListener { sender, kind };
         self.pending_transaction_listener.lock().push(listener);
         rx
@@ -236,10 +242,17 @@ where
         &self,
         kind: TransactionListenerKind,
     ) -> mpsc::Receiver<NewTransactionEvent<T::Transaction>> {
-        const TX_LISTENER_BUFFER_SIZE: usize = 1024;
-        let (sender, rx) = mpsc::channel(TX_LISTENER_BUFFER_SIZE);
+        let (sender, rx) = mpsc::channel(NEW_TX_LISTENER_BUFFER_SIZE);
         let listener = TransactionListener { sender, kind };
         self.transaction_listener.lock().push(listener);
+        rx
+    }
+    /// Adds a new blob sidecar listener to the pool that gets notified about every new
+    /// eip4844 transaction's blob sidecar.
+    pub fn add_blob_sidecar_listener(&self) -> mpsc::Receiver<NewBlobSidecar> {
+        let (sender, rx) = mpsc::channel(BLOB_SIDECAR_LISTENER_BUFFER_SIZE);
+        let listener = BlobTransactionSidecarListener { sender };
+        self.blob_transaction_sidecar_listener.lock().push(listener);
         rx
     }
 
@@ -407,6 +420,8 @@ where
 
                 // transaction was successfully inserted into the pool
                 if let Some(sidecar) = maybe_sidecar {
+                    // notify blob sidecar listeners
+                    self.on_new_blob_sidecar(&hash, &sidecar);
                     // store the sidecar in the blob store
                     self.insert_blob(hash, sidecar);
                 }
@@ -551,6 +566,29 @@ where
                 }
             }
         });
+    }
+
+    /// Notify all listeners about a blob sidecar for a newly inserted blob (eip4844) transaction.
+    fn on_new_blob_sidecar(&self, tx_hash: &TxHash, sidecar: &BlobTransactionSidecar) {
+        let mut sidecar_listeners = self.blob_transaction_sidecar_listener.lock();
+        sidecar_listeners.retain_mut(|listener| {
+            let new_blob_event = NewBlobSidecar { tx_hash: *tx_hash, sidecar: sidecar.clone() };
+            match listener.sender.try_send(new_blob_event) {
+                Ok(()) => true,
+                Err(err) => {
+                    if matches!(err, mpsc::error::TrySendError::Full(_)) {
+                        debug!(
+                            target: "txpool",
+                            "[{:?}] failed to send blob sidecar; channel full",
+                            sidecar,
+                        );
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+        })
     }
 
     /// Notifies transaction listeners about changes after a block was processed.
@@ -789,6 +827,12 @@ struct TransactionListener<T: PoolTransaction> {
     sender: mpsc::Sender<NewTransactionEvent<T>>,
     /// Whether to include transactions that should not be propagated over the network.
     kind: TransactionListenerKind,
+}
+
+/// An active listener for new blobs
+#[derive(Debug)]
+struct BlobTransactionSidecarListener {
+    sender: mpsc::Sender<NewBlobSidecar>,
 }
 
 /// Tracks an added transaction and all graph changes caused by adding it.

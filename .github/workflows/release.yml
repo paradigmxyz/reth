@@ -15,38 +15,42 @@ env:
 jobs:
   extract-version:
     name: extract version
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
       - name: Extract version
         run: echo "VERSION=$(echo ${GITHUB_REF#refs/tags/})" >> $GITHUB_OUTPUT
         id: extract_version
     outputs:
       VERSION: ${{ steps.extract_version.outputs.VERSION }}
+
   build:
     name: build release
     strategy:
       matrix:
-        arch: [aarch64-unknown-linux-gnu,
-               x86_64-unknown-linux-gnu,
-               x86_64-apple-darwin,
-               aarch64-apple-darwin,
-               x86_64-pc-windows-gnu]
+        arch:
+          [
+            aarch64-unknown-linux-gnu,
+            x86_64-unknown-linux-gnu,
+            x86_64-apple-darwin,
+            aarch64-apple-darwin,
+            x86_64-pc-windows-gnu,
+          ]
         include:
-          -   arch: aarch64-unknown-linux-gnu
-              platform: ubuntu-20.04
-              profile: maxperf
-          -   arch: x86_64-unknown-linux-gnu
-              platform: ubuntu-20.04
-              profile: maxperf
-          -   arch: x86_64-apple-darwin
-              platform: macos-latest
-              profile: maxperf
-          -   arch: aarch64-apple-darwin
-              platform: macos-latest
-              profile: maxperf
-          -   arch: x86_64-pc-windows-gnu
-              platform: ubuntu-20.04
-              profile: maxperf
+          - arch: aarch64-unknown-linux-gnu
+            platform: ubuntu-20.04
+            profile: maxperf
+          - arch: x86_64-unknown-linux-gnu
+            platform: ubuntu-20.04
+            profile: maxperf
+          - arch: x86_64-apple-darwin
+            platform: macos-latest
+            profile: maxperf
+          - arch: aarch64-apple-darwin
+            platform: macos-latest
+            profile: maxperf
+          - arch: x86_64-pc-windows-gnu
+            platform: ubuntu-20.04
+            profile: maxperf
 
     runs-on: ${{ matrix.platform }}
     needs: extract-version
@@ -76,18 +80,18 @@ jobs:
       # ==============================
 
       - name: Build reth for ${{ matrix.arch }}
-        run:  |
+        run: |
           cargo install cross
           env PROFILE=${{ matrix.profile }} make build-${{ matrix.arch }}
 
       - name: Move cross-compiled binary
-        if:   matrix.arch != 'x86_64-pc-windows-gnu'
+        if: matrix.arch != 'x86_64-pc-windows-gnu'
         run: |
           mkdir artifacts
           mv target/${{ matrix.arch }}/${{ matrix.profile }}/reth ./artifacts
 
       - name: Move cross-compiled binary (Windows)
-        if:   matrix.arch == 'x86_64-pc-windows-gnu'
+        if: matrix.arch == 'x86_64-pc-windows-gnu'
         run: |
           mkdir artifacts
           mv target/${{ matrix.arch }}/${{ matrix.profile }}/reth.exe ./artifacts
@@ -113,8 +117,8 @@ jobs:
       # Upload artifacts
       # This is required to share artifacts between different jobs
       # =======================================================================
-      - name:  Upload artifact
-        uses:  actions/upload-artifact@v3
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
         with:
           name: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz
           path: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz
@@ -127,10 +131,10 @@ jobs:
 
   draft-release:
     name: draft release
-    needs:  [build, extract-version]
-    runs-on: ubuntu-20.04
+    needs: [build, extract-version]
+    runs-on: ubuntu-latest
     env:
-      VERSION:  ${{ needs.extract-version.outputs.VERSION }}
+      VERSION: ${{ needs.extract-version.outputs.VERSION }}
     permissions:
       # Required to post the release
       contents: write
@@ -162,54 +166,55 @@ jobs:
           GITHUB_USER: ${{ github.repository_owner }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-        # The formatting here is borrowed from Lighthouse (which is borrowed from OpenEthereum): https://github.com/openethereum/openethereum/blob/main/.github/workflows/build.yml
+        # The formatting here is borrowed from Lighthouse (which is borrowed from OpenEthereum):
+        # https://github.com/openethereum/openethereum/blob/main/.github/workflows/build.yml
         run: |
           body=$(cat <<- "ENDBODY"
           <Release Name>
-          
+
           ## Testing Checklist (DELETE ME)
-          
+
           - [ ] Run on testnet for 1-3 days.
           - [ ] Resync a mainnet node.
           - [ ] Ensure all CI checks pass.
-          
+
           ## Release Checklist (DELETE ME)
-          
+
           - [ ] Ensure all crates have had their versions bumped.
           - [ ] Write the summary.
           - [ ] Fill out the update priority.
           - [ ] Ensure all binaries have been added.
           - [ ] Prepare release posts (Twitter, ...).
-          
+
           ## Summary
-          
+
           Add a summary, including:
-          
+
           - Critical bug fixes
           - New features
           - Any breaking changes (and what to expect)
-          
+
           ## Update Priority
-          
+
           This table provides priorities for which classes of users should update particular components.
-  
+
           | User Class           | Priority        |
           |----------------------|-----------------|
           | Payload Builders     | <TODO> |
           | Non-Payload Builders | <TODO>    |
-          
+
           *See [Update Priorities](https://paradigmxyz.github.io/reth/installation/priorities.html) for more information about this table.*
-          
+
           ## All Changes
-          
+
           ${{ steps.changelog.outputs.CHANGELOG }}
-          
+
           ## Binaries
-          
+
           [See pre-built binaries documentation.](https://paradigmxyz.github.io/reth/installation/binaries.html)
-          
+
           The binaries are signed with the PGP key: `A3AE 097C 8909 3A12 4049  DF1F 5391 A3C4 1005 30B4`
-          
+
           | System | Architecture | Binary | PGP Signature |
           |:---:|:---:|:---:|:---|
           | <img src="https://simpleicons.org/icons/linux.svg" style="width: 32px;"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz.asc) |

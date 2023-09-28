@@ -1,4 +1,6 @@
 //! Task Executor Metrics
+use core::fmt;
+
 use reth_metrics::{metrics::Counter, Metrics};
 
 /// Task Executor Metrics
@@ -27,6 +29,12 @@ impl TaskExecutorMetrics {
 
 /// Helper type for increasing counters even if a task fails.
 pub struct IncCounterOnDrop(Counter);
+
+impl fmt::Debug for IncCounterOnDrop {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("IncCounterOnDrop").finish()
+    }
+}
 
 impl IncCounterOnDrop {
     /// Create a new `IncCounterOnDrop`.

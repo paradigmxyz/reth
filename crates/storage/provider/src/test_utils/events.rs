@@ -4,7 +4,7 @@ use tokio::sync::broadcast::{self, Sender};
 use crate::{CanonStateNotification, CanonStateNotifications, CanonStateSubscriptions, Chain};
 
 /// A test ChainEventSubscriptions
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct TestCanonStateSubscriptions {
     canon_notif_tx: Arc<Mutex<Vec<Sender<CanonStateNotification>>>>,
 }

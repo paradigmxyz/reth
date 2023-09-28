@@ -50,6 +50,7 @@ members = [
     "examples",
     "examples/additional-rpc-namespace-in-cli",
     "examples/rpc-db",
+    "examples/manual-p2p",
 ]
 default-members = ["bin/reth"]
 
@@ -58,9 +59,9 @@ default-members = ["bin/reth"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.10"
 edition = "2021"
-rust-version = "1.70" # Remember to update .clippy.toml and README.md
+rust-version = "1.70" # Remember to update clippy.toml and README.md
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
@@ -97,6 +98,9 @@ reth-tasks = { path = "./crates/tasks" }
 reth-network = { path = "./crates/net/network" }
 reth-network-api = { path = "./crates/net/network-api" }
 reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat" }
+reth-discv4 = { path = "./crates/net/discv4" }
+reth-eth-wire = { path = "./crates/net/eth-wire" }
+reth-ecies = { path = "./crates/net/ecies" }
 
 # revm
 revm = { git = "https://github.com/bluealloy/revm", rev = "516f62cc" }
@@ -129,7 +133,7 @@ strum = "0.25"
 rayon = "1.7"
 itertools = "0.11"
 parking_lot = "0.12"
-metrics = "0.21.1"                                    # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
+metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
 hex-literal = "0.4"
 
 ### proc-macros
@@ -160,7 +164,7 @@ secp256k1 = { version = "0.27.0", default-features = false, features = [
 ] }
 enr = { version = "0.9", default-features = false, features = ["k256"] }
 # for eip-4844
-c-kzg = { git = "https://github.com/ethereum/c-kzg-4844", rev = "f5f6f863d475847876a2bd5ee252058d37c3a15d" }
+c-kzg = { git = "https://github.com/ethereum/c-kzg-4844" }
 
 ## config
 confy = "0.5"
