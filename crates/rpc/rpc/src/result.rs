@@ -107,7 +107,7 @@ impl_to_rpc_result!(reth_interfaces::RethError);
 impl_to_rpc_result!(reth_network_api::NetworkError);
 
 /// An extension to used to apply error conversions to various result types
-pub trait ToRpcResultExt {
+pub(crate) trait ToRpcResultExt {
     /// The `Ok` variant of the [RpcResult]
     type Ok;
 
