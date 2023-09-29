@@ -154,6 +154,7 @@ use std::{
 };
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
+use traits::BestTransactionsAttributes;
 
 pub use crate::{
     blobstore::{BlobStore, BlobStoreError},
@@ -417,6 +418,13 @@ where
         base_fee: u64,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
         self.pool.best_transactions_with_base_fee(base_fee)
+    }
+
+    fn best_transactions_with_attributes(
+        &self,
+        best_transactions_attributes: BestTransactionsAttributes,
+    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
+        self.pool.best_transactions_with_attributes(best_transactions_attributes)
     }
 
     fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
