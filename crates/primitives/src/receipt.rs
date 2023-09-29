@@ -2,7 +2,7 @@ use crate::{
     compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR},
     logs_bloom,
     proofs::calculate_receipt_root_ref,
-    Bloom, Log, PrunePartError, TxType, B256,
+    Bloom, Log, TxType, B256,
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable};
 use bytes::{Buf, BufMut, BytesMut};
