@@ -47,6 +47,7 @@ reth-payload-builder.workspace = true
 reth-basic-payload-builder = { path = "../../crates/payload/basic" }
 reth-discv4 = { path = "../../crates/net/discv4" }
 reth-prune = { path = "../../crates/prune" }
+reth-snapshot = { path = "../../crates/snapshot" }
 reth-trie = { path = "../../crates/trie" }
 
 # crypto
