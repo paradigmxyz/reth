@@ -88,8 +88,8 @@ impl BlockchainTreeViewer for NoopBlockchainTree {
         None
     }
 
-    fn is_canonical(&self, _hash: BlockHash) -> RethResult<bool> {
-        Ok(false)
+    fn is_canonical(&self, block_hash: BlockHash) -> RethResult<bool> {
+        Err(BlockchainTreeError::BlockHashNotFoundInChain { block_hash }.into())
     }
 
     fn lowest_buffered_ancestor(&self, _hash: BlockHash) -> Option<SealedBlockWithSenders> {
