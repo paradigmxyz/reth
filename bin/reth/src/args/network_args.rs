@@ -58,11 +58,11 @@ pub struct NetworkArgs {
     #[arg(long, default_value = "any")]
     pub nat: NatResolver,
 
-    /// Network listening address. default: 0.0.0.0
+    /// Network listening address
     #[arg(long = "addr", value_name = "ADDR", default_value_t = DEFAULT_DISCOVERY_ADDR)]
     pub addr: Ipv4Addr,
 
-    /// Network listening port. default: 30303
+    /// Network listening port
     #[arg(long = "port", value_name = "PORT", default_value_t = DEFAULT_DISCOVERY_PORT)]
     pub port: u16,
 
@@ -138,11 +138,11 @@ pub struct DiscoveryArgs {
     #[arg(long, conflicts_with = "disable_discovery")]
     pub disable_discv4_discovery: bool,
 
-    /// The UDP address to use for P2P discovery/networking. default: 0.0.0.0
+    /// The UDP address to use for P2P discovery/networking
     #[arg(long = "discovery.addr", name = "discovery.addr", value_name = "DISCOVERY_ADDR", default_value_t = DEFAULT_DISCOVERY_ADDR)]
     pub addr: Ipv4Addr,
 
-    /// The UDP port to use for P2P discovery/networking. default: 30303
+    /// The UDP port to use for P2P discovery/networking
     #[arg(long = "discovery.port", name = "discovery.port", value_name = "DISCOVERY_PORT", default_value_t = DEFAULT_DISCOVERY_PORT)]
     pub port: u16,
 }
