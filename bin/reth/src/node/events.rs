@@ -273,7 +273,7 @@ where
                 info!(
                     target: "reth::cli",
                     connected_peers = this.state.num_connected_peers(),
-                    latest_block = ?this.state.latest_block,
+                    latest_block = this.state.latest_block.unwrap_or(this.state.current_checkpoint.block_number),
                     "Status"
                 );
             }
