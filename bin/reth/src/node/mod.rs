@@ -956,6 +956,21 @@ mod tests {
     }
 
     #[test]
+    fn parse_discovery_addr() {
+        let cmd = NodeCommand::<()>::try_parse_from(["reth", "--discovery.addr", "127.0.0.1"]).unwrap();
+        assert_eq!(cmd.network.discovery.addr, Ipv4Addr::LOCALHOST);
+    }
+
+    #[test]
+    fn parse_addr() {
+        let cmd =
+            NodeCommand::<()>::try_parse_from(["reth", "--discovery.addr", "127.0.0.1", "--addr", "127.0.0.1"])
+                .unwrap();
+        assert_eq!(cmd.network.discovery.addr, Ipv4Addr::LOCALHOST);
+        assert_eq!(cmd.network.addr, Ipv4Addr::LOCALHOST);
+    }
+
+    #[test]
     fn parse_discovery_port() {
         let cmd = NodeCommand::<()>::try_parse_from(["reth", "--discovery.port", "300"]).unwrap();
         assert_eq!(cmd.network.discovery.port, 300);
