@@ -12,7 +12,6 @@ use futures::{stream::select as stream_select, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_db::{database::Database, init_db, DatabaseEnv};
-use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -169,11 +168,11 @@ impl Command {
             .with_task_executor(Box::new(task_executor))
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(
                 self.network.addr,
-                self.network.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
+                self.network.port,
             )))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
                 self.network.discovery.addr,
-                self.network.discovery.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
+                self.network.discovery.port,
             )))
             .build(ProviderFactory::new(db, self.chain.clone()))
             .start_network()

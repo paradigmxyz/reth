@@ -3,6 +3,7 @@
 use crate::version::P2P_CLIENT_VERSION;
 use clap::Args;
 use reth_config::Config;
+use reth_discv4::{DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_net_nat::NatResolver;
 use reth_network::{HelloMessage, NetworkConfigBuilder};
 use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
@@ -58,12 +59,12 @@ pub struct NetworkArgs {
     pub nat: NatResolver,
 
     /// Network listening address. default: 0.0.0.0
-    #[arg(long = "addr", value_name = "ADDR", default_value_t = Ipv4Addr::UNSPECIFIED)]
+    #[arg(long = "addr", value_name = "ADDR", default_value_t = DEFAULT_DISCOVERY_ADDR)]
     pub addr: Ipv4Addr,
 
     /// Network listening port. default: 30303
-    #[arg(long = "port", value_name = "PORT")]
-    pub port: Option<u16>,
+    #[arg(long = "port", value_name = "PORT", default_value_t = DEFAULT_DISCOVERY_PORT)]
+    pub port: u16,
 
     /// Maximum number of outbound requests. default: 100
     #[arg(long)]
@@ -138,12 +139,12 @@ pub struct DiscoveryArgs {
     pub disable_discv4_discovery: bool,
 
     /// The UDP address to use for P2P discovery/networking. default: 0.0.0.0
-    #[arg(long = "discovery.addr", name = "discovery.addr", value_name = "DISCOVERY_ADDR", default_value_t = Ipv4Addr::UNSPECIFIED)]
+    #[arg(long = "discovery.addr", name = "discovery.addr", value_name = "DISCOVERY_ADDR", default_value_t = DEFAULT_DISCOVERY_ADDR)]
     pub addr: Ipv4Addr,
 
     /// The UDP port to use for P2P discovery/networking. default: 30303
-    #[arg(long = "discovery.port", name = "discovery.port", value_name = "DISCOVERY_PORT")]
-    pub port: Option<u16>,
+    #[arg(long = "discovery.port", name = "discovery.port", value_name = "DISCOVERY_PORT", default_value_t = DEFAULT_DISCOVERY_PORT)]
+    pub port: u16,
 }
 
 impl DiscoveryArgs {

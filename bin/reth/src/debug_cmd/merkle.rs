@@ -10,7 +10,6 @@ use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_db::{cursor::DbCursorRO, init_db, tables, transaction::DbTx, DatabaseEnv};
-use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_interfaces::{consensus::Consensus, p2p::full_block::FullBlockClient};
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
@@ -101,11 +100,11 @@ impl Command {
             .with_task_executor(Box::new(task_executor))
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(
                 self.network.addr,
-                self.network.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
+                self.network.port,
             )))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
                 self.network.discovery.addr,
-                self.network.discovery.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
+                self.network.discovery.port,
             )))
             .build(ProviderFactory::new(db, self.chain.clone()))
             .start_network()

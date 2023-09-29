@@ -34,7 +34,6 @@ use reth_blockchain_tree::{
 };
 use reth_config::{config::PruneConfig, Config};
 use reth_db::{database::Database, init_db, DatabaseEnv};
-use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -769,18 +768,12 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(
                 self.network.addr,
                 // set discovery port based on instance number
-                match self.network.port {
-                    Some(port) => port + self.instance - 1,
-                    None => DEFAULT_DISCOVERY_PORT + self.instance - 1,
-                },
+                self.network.port + self.instance - 1,
             )))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
                 self.network.addr,
                 // set discovery port based on instance number
-                match self.network.port {
-                    Some(port) => port + self.instance - 1,
-                    None => DEFAULT_DISCOVERY_PORT + self.instance - 1,
-                },
+                self.network.port + self.instance - 1,
             )))
             .build(ProviderFactory::new(db, self.chain.clone()))
     }
@@ -944,8 +937,9 @@ async fn run_network_until_shutdown<C>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use reth_primitives::DEV;
-    use std::{net::IpAddr, path::Path};
+    use std::{net::{IpAddr, Ipv4Addr}, path::Path};
 
     #[test]
     fn parse_help_node_command() {
@@ -964,7 +958,7 @@ mod tests {
     #[test]
     fn parse_discovery_port() {
         let cmd = NodeCommand::<()>::try_parse_from(["reth", "--discovery.port", "300"]).unwrap();
-        assert_eq!(cmd.network.discovery.port, Some(300));
+        assert_eq!(cmd.network.discovery.port, 300);
     }
 
     #[test]
@@ -972,8 +966,8 @@ mod tests {
         let cmd =
             NodeCommand::<()>::try_parse_from(["reth", "--discovery.port", "300", "--port", "99"])
                 .unwrap();
-        assert_eq!(cmd.network.discovery.port, Some(300));
-        assert_eq!(cmd.network.port, Some(99));
+        assert_eq!(cmd.network.discovery.port, 300);
+        assert_eq!(cmd.network.port, 99);
     }
 
     #[test]
@@ -1042,32 +1036,32 @@ mod tests {
     fn parse_instance() {
         let mut cmd = NodeCommand::<()>::parse_from(["reth"]);
         cmd.adjust_instance_ports();
-        cmd.network.port = Some(DEFAULT_DISCOVERY_PORT + cmd.instance - 1);
+        cmd.network.port = DEFAULT_DISCOVERY_PORT + cmd.instance - 1;
         // check rpc port numbers
         assert_eq!(cmd.rpc.auth_port, 8551);
         assert_eq!(cmd.rpc.http_port, 8545);
         assert_eq!(cmd.rpc.ws_port, 8546);
         // check network listening port number
-        assert_eq!(cmd.network.port.unwrap(), 30303);
+        assert_eq!(cmd.network.port, 30303);
 
         let mut cmd = NodeCommand::<()>::parse_from(["reth", "--instance", "2"]);
         cmd.adjust_instance_ports();
-        cmd.network.port = Some(DEFAULT_DISCOVERY_PORT + cmd.instance - 1);
+        cmd.network.port = DEFAULT_DISCOVERY_PORT + cmd.instance - 1;
         // check rpc port numbers
         assert_eq!(cmd.rpc.auth_port, 8651);
         assert_eq!(cmd.rpc.http_port, 8544);
         assert_eq!(cmd.rpc.ws_port, 8548);
         // check network listening port number
-        assert_eq!(cmd.network.port.unwrap(), 30304);
+        assert_eq!(cmd.network.port, 30304);
 
         let mut cmd = NodeCommand::<()>::parse_from(["reth", "--instance", "3"]);
         cmd.adjust_instance_ports();
-        cmd.network.port = Some(DEFAULT_DISCOVERY_PORT + cmd.instance - 1);
+        cmd.network.port = DEFAULT_DISCOVERY_PORT + cmd.instance - 1;
         // check rpc port numbers
         assert_eq!(cmd.rpc.auth_port, 8751);
         assert_eq!(cmd.rpc.http_port, 8543);
         assert_eq!(cmd.rpc.ws_port, 8550);
         // check network listening port number
-        assert_eq!(cmd.network.port.unwrap(), 30305);
+        assert_eq!(cmd.network.port, 30305);
     }
 }
