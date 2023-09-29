@@ -235,6 +235,15 @@ pub trait TransactionPool: Send + Sync + Clone {
         base_fee: u64,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
 
+    /// Returns an iterator that yields transactions that are ready for block production with the
+    /// given base fee and optional blob fee attributes.
+    ///
+    /// Consumer: Block production
+    fn best_transactions_with_attributes(
+        &self,
+        best_transactions_attributes: BestTransactionsAttributes,
+    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
+
     /// Returns all transactions that can be included in the next block.
     ///
     /// This is primarily used for the `txpool_` RPC namespace: <https://geth.ethereum.org/docs/interacting-with-geth/rpc/ns-txpool> which distinguishes between `pending` and `queued` transactions, where `pending` are transactions ready for inclusion in the next block and `queued` are transactions that are ready for inclusion in future blocks.
@@ -620,6 +629,35 @@ impl<T> BestTransactions for std::iter::Empty<T> {
     fn skip_blobs(&mut self) {}
 
     fn set_skip_blobs(&mut self, _skip_blobs: bool) {}
+}
+
+/// A Helper type that bundles best transactions attributes together.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct BestTransactionsAttributes {
+    /// The base fee attribute for best transactions.
+    pub basefee: u64,
+    /// The blob fee attribute for best transactions.
+    pub blob_fee: Option<u64>,
+}
+
+// === impl BestTransactionsAttributes ===
+
+impl BestTransactionsAttributes {
+    /// Creates a new `BestTransactionsAttributes` with the given basefee and blob fee.
+    pub fn new(basefee: u64, blob_fee: Option<u64>) -> Self {
+        Self { basefee, blob_fee }
+    }
+
+    /// Creates a new `BestTransactionsAttributes` with the given basefee.
+    pub fn base_fee(basefee: u64) -> Self {
+        Self::new(basefee, None)
+    }
+
+    /// Sets the given blob fee.
+    pub fn with_blob_fee(mut self, blob_fee: u64) -> Self {
+        self.blob_fee = Some(blob_fee);
+        self
+    }
 }
 
 /// Trait for transaction types used inside the pool
