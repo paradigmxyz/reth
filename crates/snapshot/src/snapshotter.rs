@@ -25,6 +25,7 @@ pub struct Snapshotter<DB> {
     block_interval: u64,
 }
 
+/// Tracker for the latest [`HighestSnapshots`] value.
 pub type HighestSnapshotsTracker = watch::Receiver<Option<HighestSnapshots>>;
 
 /// Highest snapshotted block numbers, per data part.
