@@ -34,7 +34,7 @@ use reth_blockchain_tree::{
 };
 use reth_config::{config::PruneConfig, Config};
 use reth_db::{database::Database, init_db, DatabaseEnv};
-use reth_discv4::{DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
+use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -767,7 +767,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .with_task_executor(Box::new(executor))
             .set_head(head)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(
-                self.network.addr.unwrap_or(DEFAULT_DISCOVERY_ADDR),
+                self.network.addr,
                 // set discovery port based on instance number
                 match self.network.port {
                     Some(port) => port + self.instance - 1,
@@ -775,7 +775,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 },
             )))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
-                self.network.addr.unwrap_or(DEFAULT_DISCOVERY_ADDR),
+                self.network.addr,
                 // set discovery port based on instance number
                 match self.network.port {
                     Some(port) => port + self.instance - 1,
