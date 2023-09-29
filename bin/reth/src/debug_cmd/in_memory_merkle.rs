@@ -9,7 +9,7 @@ use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_config::Config;
 use reth_db::{init_db, DatabaseEnv};
-use reth_discv4::DEFAULT_DISCOVERY_PORT;
+use reth_discv4::{DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec};
@@ -91,11 +91,11 @@ impl Command {
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::UNSPECIFIED,
+                self.network.addr.unwrap_or(DEFAULT_DISCOVERY_ADDR),
                 self.network.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
             )))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::UNSPECIFIED,
+                self.network.discovery.addr.unwrap_or(DEFAULT_DISCOVERY_ADDR),
                 self.network.discovery.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
             )))
             .build(ProviderFactory::new(db, self.chain.clone()))
