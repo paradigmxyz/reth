@@ -88,6 +88,11 @@ use reth_net_nat::ResolveNatInterval;
 /// reexport to get public ip.
 pub use reth_net_nat::{external_ip, NatResolver};
 
+/// The default address for discv4 via UDP
+///
+/// Note: the default TCP address is the same.
+pub const DEFAULT_DISCOVERY_ADDR: Ipv4Addr = Ipv4Addr::UNSPECIFIED;
+
 /// The default port for discv4 via UDP
 ///
 /// Note: the default TCP port is the same.
