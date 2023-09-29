@@ -631,6 +631,35 @@ impl<T> BestTransactions for std::iter::Empty<T> {
     fn set_skip_blobs(&mut self, _skip_blobs: bool) {}
 }
 
+/// A Helper type that bundles best transactions attributes together.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct BestTransactionsAttributes {
+    /// The base fee attribute for best transactions.
+    pub basefee: u64,
+    /// The blob fee attribute for best transactions.
+    pub blob_fee: Option<u64>,
+}
+
+// === impl BestTransactionsAttributes ===
+
+impl BestTransactionsAttributes {
+    /// Creates a new `BestTransactionsAttributes` with the given basefee and blob fee.
+    pub fn new(basefee: u64, blob_fee: Option<u64>) -> Self {
+        Self { basefee, blob_fee }
+    }
+
+    /// Creates a new `BestTransactionsAttributes` with the given basefee.
+    pub fn base_fee(basefee: u64) -> Self {
+        Self::new(basefee, None)
+    }
+
+    /// Sets the given blob fee.
+    pub fn with_blob_fee(mut self, blob_fee: u64) -> Self {
+        self.blob_fee = Some(blob_fee);
+        self
+    }
+}
+
 /// Trait for transaction types used inside the pool
 pub trait PoolTransaction:
     fmt::Debug
@@ -1066,13 +1095,4 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
             }
         }
     }
-}
-
-/// A Helper type that bundles best transactions attributes together
-#[derive(Debug)]
-pub struct BestTransactionsAttributes {
-    /// The base fee attribute for best transactions
-    pub basefee: u64,
-    /// The blob fee attribute for best transactions
-    pub blob_fee: Option<u64>,
 }
