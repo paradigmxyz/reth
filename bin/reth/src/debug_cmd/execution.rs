@@ -166,10 +166,7 @@ impl Command {
             .network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
-            .listener_addr(SocketAddr::V4(SocketAddrV4::new(
-                self.network.addr,
-                self.network.port,
-            )))
+            .listener_addr(SocketAddr::V4(SocketAddrV4::new(self.network.addr, self.network.port)))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
                 self.network.discovery.addr,
                 self.network.discovery.port,
@@ -192,7 +189,7 @@ impl Command {
             match get_single_header(&client, BlockHashOrNumber::Number(block)).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?block, "Successfully fetched block");
-                    return Ok(tip_header.hash)
+                    return Ok(tip_header.hash);
                 }
                 Err(error) => {
                     error!(target: "reth::cli", ?block, %error, "Failed to fetch the block. Retrying...");
@@ -245,7 +242,7 @@ impl Command {
             provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
         if latest_block_number.unwrap_or_default() >= self.to {
             info!(target: "reth::cli", latest = latest_block_number, "Nothing to run");
-            return Ok(())
+            return Ok(());
         }
 
         let pipeline_events = pipeline.events();

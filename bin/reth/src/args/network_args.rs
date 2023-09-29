@@ -8,7 +8,7 @@ use reth_net_nat::NatResolver;
 use reth_network::{HelloMessage, NetworkConfigBuilder};
 use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
 use secp256k1::SecretKey;
-use std::{path::PathBuf, net::{Ipv4Addr}, sync::Arc};
+use std::{net::Ipv4Addr, path::PathBuf, sync::Arc};
 
 /// Parameters for configuring the network more granularity via CLI
 #[derive(Debug, Args)]
@@ -116,7 +116,7 @@ impl NetworkArgs {
     /// If `no_persist_peers` is true then this returns the path to the persistent peers file path.
     pub fn persistent_peers_file(&self, peers_file: PathBuf) -> Option<PathBuf> {
         if self.no_persist_peers {
-            return None
+            return None;
         }
 
         Some(peers_file)

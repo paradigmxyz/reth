@@ -98,10 +98,7 @@ impl Command {
             .network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
-            .listener_addr(SocketAddr::V4(SocketAddrV4::new(
-                self.network.addr,
-                self.network.port,
-            )))
+            .listener_addr(SocketAddr::V4(SocketAddrV4::new(self.network.addr, self.network.port)))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
                 self.network.discovery.addr,
                 self.network.discovery.port,
@@ -182,7 +179,7 @@ impl Command {
                 Ok(senders) => senders,
                 Err(err) => {
                     warn!(target: "reth::cli", "Error sealing block with senders: {err:?}. Skipping...");
-                    continue
+                    continue;
                 }
             };
             provider_rw.insert_block(sealed_block.block, Some(sealed_block.senders), None)?;
@@ -198,8 +195,8 @@ impl Command {
                 .into_iter()
                 .map(Option::unwrap_or_default)
                 .any(|checkpoint| {
-                    checkpoint.block_number != execution_checkpoint_block ||
-                        checkpoint.stage_checkpoint.is_some()
+                    checkpoint.block_number != execution_checkpoint_block
+                        || checkpoint.stage_checkpoint.is_some()
                 });
 
         let factory = reth_revm::Factory::new(self.chain.clone());
@@ -293,7 +290,7 @@ impl Command {
                     let clean_result = merkle_stage.execute(&provider_rw, clean_input).await;
                     assert!(clean_result.is_ok(), "Clean state root calculation failed");
                     if clean_result.unwrap().done {
-                        break
+                        break;
                     }
                 }
 
@@ -316,8 +313,8 @@ impl Command {
                 let mut incremental_account_trie_iter =
                     incremental_account_trie.into_iter().peekable();
                 let mut clean_account_trie_iter = clean_account_trie.into_iter().peekable();
-                while incremental_account_trie_iter.peek().is_some() ||
-                    clean_account_trie_iter.peek().is_some()
+                while incremental_account_trie_iter.peek().is_some()
+                    || clean_account_trie_iter.peek().is_some()
                 {
                     match (incremental_account_trie_iter.next(), clean_account_trie_iter.next()) {
                         (Some(incremental), Some(clean)) => {
@@ -326,8 +323,8 @@ impl Command {
                                 clean.0,
                                 "Nibbles don't match"
                             );
-                            if incremental.1 != clean.1 &&
-                                clean.0.inner.len() > self.skip_node_depth.unwrap_or_default()
+                            if incremental.1 != clean.1
+                                && clean.0.inner.len() > self.skip_node_depth.unwrap_or_default()
                             {
                                 incremental_account_mismatched.push(incremental);
                                 clean_account_mismatched.push(clean);
@@ -350,17 +347,17 @@ impl Command {
                 let mut incremental_storage_trie_iter =
                     incremental_storage_trie.into_iter().peekable();
                 let mut clean_storage_trie_iter = clean_storage_trie.into_iter().peekable();
-                while incremental_storage_trie_iter.peek().is_some() ||
-                    clean_storage_trie_iter.peek().is_some()
+                while incremental_storage_trie_iter.peek().is_some()
+                    || clean_storage_trie_iter.peek().is_some()
                 {
                     match (incremental_storage_trie_iter.next(), clean_storage_trie_iter.next()) {
                         (Some(incremental), Some(clean)) => {
-                            if incremental != clean &&
-                                clean.1.nibbles.inner.len() >
-                                    self.skip_node_depth.unwrap_or_default()
+                            if incremental != clean
+                                && clean.1.nibbles.inner.len()
+                                    > self.skip_node_depth.unwrap_or_default()
                             {
                                 first_mismatched_storage = Some((incremental, clean));
-                                break
+                                break;
                             }
                         }
                         (Some(incremental), None) => {

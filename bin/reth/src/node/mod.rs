@@ -735,7 +735,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // try to look up the header in the database
         if let Some(header) = header {
             info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.seal_slow())
+            return Ok(header.seal_slow());
         }
 
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
@@ -743,7 +743,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
-                    return Ok(tip_header)
+                    return Ok(tip_header);
                 }
                 Err(error) => {
                     error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
@@ -939,7 +939,10 @@ mod tests {
     use super::*;
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use reth_primitives::DEV;
-    use std::{net::{IpAddr, Ipv4Addr}, path::Path};
+    use std::{
+        net::{IpAddr, Ipv4Addr},
+        path::Path,
+    };
 
     #[test]
     fn parse_help_node_command() {
@@ -957,15 +960,21 @@ mod tests {
 
     #[test]
     fn parse_discovery_addr() {
-        let cmd = NodeCommand::<()>::try_parse_from(["reth", "--discovery.addr", "127.0.0.1"]).unwrap();
+        let cmd =
+            NodeCommand::<()>::try_parse_from(["reth", "--discovery.addr", "127.0.0.1"]).unwrap();
         assert_eq!(cmd.network.discovery.addr, Ipv4Addr::LOCALHOST);
     }
 
     #[test]
     fn parse_addr() {
-        let cmd =
-            NodeCommand::<()>::try_parse_from(["reth", "--discovery.addr", "127.0.0.1", "--addr", "127.0.0.1"])
-                .unwrap();
+        let cmd = NodeCommand::<()>::try_parse_from([
+            "reth",
+            "--discovery.addr",
+            "127.0.0.1",
+            "--addr",
+            "127.0.0.1",
+        ])
+        .unwrap();
         assert_eq!(cmd.network.discovery.addr, Ipv4Addr::LOCALHOST);
         assert_eq!(cmd.network.addr, Ipv4Addr::LOCALHOST);
     }
