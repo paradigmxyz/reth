@@ -946,7 +946,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
 
         let Some(chain_id) = self.block_indices.get_blocks_chain_id(block_hash) else {
-            warn!(target: "blockchain_tree", ?block_hash,  "Block hash not found in block indices");
+            debug!(target: "blockchain_tree", ?block_hash,  "Block hash not found in block indices");
             return Err(CanonicalError::from(BlockchainTreeError::BlockHashNotFoundInChain {
                 block_hash: *block_hash,
             })
