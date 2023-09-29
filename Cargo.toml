@@ -108,8 +108,8 @@ reth-ecies = { path = "./crates/net/ecies" }
 
 # revm
 # TODO: Switch back to bluealloy/revm once #724 lands
-revm = { git = "https://github.com/Danipopes/revm/", branch = "alloy-rebase2" }
-revm-primitives = { git = "https://github.com/Danipopes/revm/", branch = "alloy-rebase2" }
+revm = { git = "https://github.com/Evalir/revm/", branch = "reintroduce-alloy-rebased" }
+revm-primitives = { git = "https://github.com/Evalir/revm/", branch = "reintroduce-alloy-rebased" }
 
 ## eth
 alloy-primitives = "0.3"
