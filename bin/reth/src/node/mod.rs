@@ -451,6 +451,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             None
         };
 
+        let (highest_snapshots_tx, highest_snapshots_rx) = watch::channel(None);
+
         let mut hooks = EngineHooks::new();
 
         let pruner_events = if let Some(prune_config) = prune_config {
@@ -461,6 +463,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 prune_config.block_interval,
                 prune_config.parts,
                 self.chain.prune_batch_sizes,
+                highest_snapshots_rx,
             );
             let events = pruner.events();
             hooks.add(PruneHook::new(pruner, Box::new(ctx.task_executor.clone())));
@@ -468,6 +471,13 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         } else {
             Either::Right(stream::empty())
         };
+
+        let _snapshotter = reth_snapshot::Snapshotter::new(
+            db,
+            self.chain.clone(),
+            self.chain.snapshot_block_interval,
+            highest_snapshots_tx,
+        );
 
         // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(

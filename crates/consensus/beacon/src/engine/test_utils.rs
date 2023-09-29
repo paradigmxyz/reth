@@ -521,6 +521,7 @@ where
             5,
             PruneModes::none(),
             PruneBatchSizes::default(),
+            watch::channel(None).1,
         );
 
         let mut hooks = EngineHooks::new();
