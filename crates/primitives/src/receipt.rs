@@ -66,6 +66,11 @@ impl Receipts {
         Self { receipt_vec: vec }
     }
 
+    /// Create a new `Receipts` instance from a single block receipt.
+    pub fn from_block_receipt(block_receipts: Vec<Receipt>) -> Self {
+        Self { receipt_vec: vec![block_receipts.into_iter().map(Option::Some).collect()] }
+    }
+
     /// Returns the length of the `Receipts` vector.
     pub fn len(&self) -> usize {
         self.receipt_vec.len()
