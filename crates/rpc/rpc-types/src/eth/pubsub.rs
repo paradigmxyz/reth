@@ -5,7 +5,7 @@ use crate::{
     Log, RichHeader,
 };
 
-use reth_primitives::H256;
+use reth_primitives::B256;
 use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 
 /// Subscription result.
@@ -17,7 +17,7 @@ pub enum SubscriptionResult {
     /// Log
     Log(Box<Log>),
     /// Transaction hash
-    TransactionHash(H256),
+    TransactionHash(B256),
     /// Full Transaction
     FullTransaction(Box<Transaction>),
     /// SyncStatus

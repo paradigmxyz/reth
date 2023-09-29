@@ -247,7 +247,7 @@ mod tests {
         test_utils::{generators, generators::random_block_range},
         RethError,
     };
-    use reth_primitives::{H256, MAINNET};
+    use reth_primitives::{B256, MAINNET};
     use reth_stages::test_utils::TestTransaction;
     use tokio::sync::watch;
 
@@ -267,7 +267,7 @@ mod tests {
         let tx = TestTransaction::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=3, H256::zero(), 2..3);
+        let blocks = random_block_range(&mut rng, 0..=3, B256::ZERO, 2..3);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let mut snapshotter =

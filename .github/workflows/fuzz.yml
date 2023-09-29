@@ -64,7 +64,7 @@ jobs:
   fuzz-success:
     if: always()
     name: fuzz success
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     needs: all
     steps:
       # Note: This check is a dummy because we currently have fuzz tests disabled.

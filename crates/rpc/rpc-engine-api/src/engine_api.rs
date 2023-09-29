@@ -6,7 +6,7 @@ use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_payload_builder::PayloadStore;
-use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, H256, U64};
+use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, B256, U64};
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
@@ -97,8 +97,8 @@ where
     pub async fn new_payload_v3(
         &self,
         payload: ExecutionPayloadV3,
-        versioned_hashes: Vec<H256>,
-        parent_beacon_block_root: H256,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
     ) -> EngineApiResult<PayloadStatus> {
         let payload = ExecutionPayload::from(payload);
         let payload_or_attrs =
@@ -361,7 +361,7 @@ where
         let local_hash = self
             .inner
             .provider
-            .block_hash(terminal_block_number.as_u64())
+            .block_hash(terminal_block_number.to())
             .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
 
         // Transition configuration exchange is successful if block hashes match
@@ -606,8 +606,8 @@ where
     async fn new_payload_v3(
         &self,
         payload: ExecutionPayloadV3,
-        versioned_hashes: Vec<H256>,
-        parent_beacon_block_root: H256,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV3");
         Ok(EngineApi::new_payload_v3(self, payload, versioned_hashes, parent_beacon_block_root)
@@ -726,7 +726,7 @@ where
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV1");
-        Ok(EngineApi::get_payload_bodies_by_range(self, start.as_u64(), count.as_u64()).await?)
+        Ok(EngineApi::get_payload_bodies_by_range(self, start.to(), count.to()).await?)
     }
 
     /// Handler for `engine_exchangeTransitionConfigurationV1`
@@ -759,7 +759,7 @@ mod tests {
     use reth_beacon_consensus::BeaconEngineMessage;
     use reth_interfaces::test_utils::generators::random_block;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
-    use reth_primitives::{SealedBlock, H256, MAINNET};
+    use reth_primitives::{SealedBlock, B256, MAINNET};
     use reth_provider::test_utils::MockEthProvider;
     use reth_tasks::TokioTaskExecutor;
     use std::sync::Arc;
@@ -837,7 +837,7 @@ mod tests {
 
             let (start, count) = (1, 10);
             let blocks =
-                random_block_range(&mut rng, start..=start + count - 1, H256::default(), 0..2);
+                random_block_range(&mut rng, start..=start + count - 1, B256::default(), 0..2);
             handle.provider.extend_blocks(blocks.iter().cloned().map(|b| (b.hash(), b.unseal())));
 
             let expected = blocks
@@ -857,7 +857,7 @@ mod tests {
 
             let (start, count) = (1, 100);
             let blocks =
-                random_block_range(&mut rng, start..=start + count - 1, H256::default(), 0..2);
+                random_block_range(&mut rng, start..=start + count - 1, B256::default(), 0..2);
 
             // Insert only blocks in ranges 1-25 and 50-75
             let first_missing_range = 26..=50;
@@ -952,7 +952,7 @@ mod tests {
             let transition_config = TransitionConfiguration {
                 terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap(),
                 terminal_block_hash: consensus_terminal_block.hash(),
-                terminal_block_number: terminal_block_number.into(),
+                terminal_block_number: U64::from(terminal_block_number),
             };
 
             // Unknown block number
@@ -990,7 +990,7 @@ mod tests {
             let transition_config = TransitionConfiguration {
                 terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap(),
                 terminal_block_hash: terminal_block.hash(),
-                terminal_block_number: terminal_block_number.into(),
+                terminal_block_number: U64::from(terminal_block_number),
             };
 
             handle.provider.add_block(terminal_block.hash(), terminal_block.unseal());

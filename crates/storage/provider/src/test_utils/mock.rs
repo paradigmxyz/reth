@@ -13,9 +13,9 @@ use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber,
     BlockWithSenders, Bytecode, Bytes, ChainInfo, ChainSpec, Header, Receipt, SealedBlock,
     SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, TxHash, TxNumber, H256, U256,
+    TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
 };
-use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
+use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
     collections::{BTreeMap, HashMap},
     ops::{RangeBounds, RangeInclusive},
@@ -26,9 +26,9 @@ use std::{
 #[derive(Debug, Clone)]
 pub struct MockEthProvider {
     /// Local block store
-    pub blocks: Arc<Mutex<HashMap<H256, Block>>>,
+    pub blocks: Arc<Mutex<HashMap<B256, Block>>>,
     /// Local header store
-    pub headers: Arc<Mutex<HashMap<H256, Header>>>,
+    pub headers: Arc<Mutex<HashMap<B256, Header>>>,
     /// Local account store
     pub accounts: Arc<Mutex<HashMap<Address, ExtendedAccount>>>,
     /// Local chain spec
@@ -68,7 +68,7 @@ impl ExtendedAccount {
     pub fn with_bytecode(mut self, bytecode: Bytes) -> Self {
         let hash = keccak256(&bytecode);
         self.account.bytecode_hash = Some(hash);
-        self.bytecode = Some(Bytecode::new_raw(bytecode.into()));
+        self.bytecode = Some(Bytecode::new_raw(bytecode));
         self
     }
 
@@ -85,13 +85,13 @@ impl ExtendedAccount {
 
 impl MockEthProvider {
     /// Add block to local block store
-    pub fn add_block(&self, hash: H256, block: Block) {
+    pub fn add_block(&self, hash: B256, block: Block) {
         self.add_header(hash, block.header.clone());
         self.blocks.lock().insert(hash, block);
     }
 
     /// Add multiple blocks to local block store
-    pub fn extend_blocks(&self, iter: impl IntoIterator<Item = (H256, Block)>) {
+    pub fn extend_blocks(&self, iter: impl IntoIterator<Item = (B256, Block)>) {
         for (hash, block) in iter.into_iter() {
             self.add_header(hash, block.header.clone());
             self.add_block(hash, block)
@@ -99,12 +99,12 @@ impl MockEthProvider {
     }
 
     /// Add header to local header store
-    pub fn add_header(&self, hash: H256, header: Header) {
+    pub fn add_header(&self, hash: B256, header: Header) {
         self.headers.lock().insert(hash, header);
     }
 
     /// Add multiple headers to local header store
-    pub fn extend_headers(&self, iter: impl IntoIterator<Item = (H256, Header)>) {
+    pub fn extend_headers(&self, iter: impl IntoIterator<Item = (B256, Header)>) {
         for (hash, header) in iter.into_iter() {
             self.add_header(hash, header)
         }
@@ -339,7 +339,7 @@ impl ReceiptProvider for MockEthProvider {
 impl ReceiptProviderIdExt for MockEthProvider {}
 
 impl BlockHashReader for MockEthProvider {
-    fn block_hash(&self, number: u64) -> RethResult<Option<H256>> {
+    fn block_hash(&self, number: u64) -> RethResult<Option<B256>> {
         let lock = self.blocks.lock();
 
         let hash = lock.iter().find_map(|(hash, b)| (b.number == number).then_some(*hash));
@@ -350,7 +350,7 @@ impl BlockHashReader for MockEthProvider {
         &self,
         start: BlockNumber,
         end: BlockNumber,
-    ) -> RethResult<Vec<H256>> {
+    ) -> RethResult<Vec<B256>> {
         let range = start..end;
         let lock = self.blocks.lock();
 
@@ -387,7 +387,7 @@ impl BlockNumReader for MockEthProvider {
         self.best_block_number()
     }
 
-    fn block_number(&self, hash: H256) -> RethResult<Option<reth_primitives::BlockNumber>> {
+    fn block_number(&self, hash: B256) -> RethResult<Option<reth_primitives::BlockNumber>> {
         let lock = self.blocks.lock();
         let num = lock.iter().find_map(|(h, b)| (*h == hash).then_some(b.number));
         Ok(num)
@@ -409,7 +409,7 @@ impl BlockIdReader for MockEthProvider {
 }
 
 impl BlockReader for MockEthProvider {
-    fn find_block_by_hash(&self, hash: H256, _source: BlockSource) -> RethResult<Option<Block>> {
+    fn find_block_by_hash(&self, hash: B256, _source: BlockSource) -> RethResult<Option<Block>> {
         self.block(hash.into())
     }
 
@@ -480,7 +480,7 @@ impl AccountReader for MockEthProvider {
 }
 
 impl StateRootProvider for MockEthProvider {
-    fn state_root(&self, _state: &BundleStateWithReceipts) -> RethResult<H256> {
+    fn state_root(&self, _state: &BundleStateWithReceipts) -> RethResult<B256> {
         todo!()
     }
 }
@@ -495,7 +495,7 @@ impl StateProvider for MockEthProvider {
         Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).cloned())
     }
 
-    fn bytecode_by_hash(&self, code_hash: H256) -> RethResult<Option<Bytecode>> {
+    fn bytecode_by_hash(&self, code_hash: B256) -> RethResult<Option<Bytecode>> {
         let lock = self.accounts.lock();
         Ok(lock.values().find_map(|account| {
             match (account.account.bytecode_hash.as_ref(), account.bytecode.as_ref()) {
@@ -510,8 +510,8 @@ impl StateProvider for MockEthProvider {
     fn proof(
         &self,
         _address: Address,
-        _keys: &[H256],
-    ) -> RethResult<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
+        _keys: &[B256],
+    ) -> RethResult<(Vec<Bytes>, B256, Vec<Vec<Bytes>>)> {
         todo!()
     }
 }
@@ -581,7 +581,7 @@ impl StateProviderFactory for MockEthProvider {
         todo!()
     }
 
-    fn pending_state_by_hash(&self, _block_hash: H256) -> RethResult<Option<StateProviderBox<'_>>> {
+    fn pending_state_by_hash(&self, _block_hash: B256) -> RethResult<Option<StateProviderBox<'_>>> {
         todo!()
     }
 
@@ -614,7 +614,7 @@ impl StateProviderFactory for Arc<MockEthProvider> {
         todo!()
     }
 
-    fn pending_state_by_hash(&self, _block_hash: H256) -> RethResult<Option<StateProviderBox<'_>>> {
+    fn pending_state_by_hash(&self, _block_hash: B256) -> RethResult<Option<StateProviderBox<'_>>> {
         todo!()
     }
 

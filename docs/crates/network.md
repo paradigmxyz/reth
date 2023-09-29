@@ -129,7 +129,7 @@ pub struct NetworkConfig<C> {
     /// The id of the network
     pub chain: Chain,
     /// Genesis hash of the network
-    pub genesis_hash: H256,
+    pub genesis_hash: B256,
     /// The [`ForkFilter`] to use at launch for authenticating sessions.
     ///
     /// See also <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2124.md#stale-software-examples>
@@ -279,7 +279,7 @@ pub struct StateFetcher {
         HashMap<PeerId, Request<HeadersRequest, PeerRequestResult<Vec<Header>>>>,
     /// Currently active [`GetBlockBodies`] requests
     inflight_bodies_requests:
-        HashMap<PeerId, Request<Vec<H256>, PeerRequestResult<Vec<BlockBody>>>>,
+        HashMap<PeerId, Request<Vec<B256>, PeerRequestResult<Vec<BlockBody>>>>,
     /// The list of _available_ peers for requests.
     peers: HashMap<PeerId, Peer>,
     /// The handle to the peers manager
@@ -309,7 +309,7 @@ pub struct NetworkState<C> {
     /// Network discovery.
     discovery: Discovery,
     /// The genesis hash of the network we're on
-    genesis_hash: H256,
+    genesis_hash: B256,
     /// The type that handles requests.
     ///
     /// The fetcher streams RLPx related requests on a per-peer basis to this type. This type will
@@ -334,7 +334,7 @@ impl HeadersClient for FetchClient {
 }
 
 impl BodiesClient for FetchClient {
-    async fn get_block_bodies(&self, request: Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> {
+    async fn get_block_bodies(&self, request: Vec<B256>) -> PeerRequestResult<Vec<BlockBody>> {
         let (response, rx) = oneshot::channel();
         self.request_tx.send(DownloadRequest::GetBlockBodies { request, response })?;
         rx.await?
@@ -602,7 +602,7 @@ The `GetBlockBodies` payload is simpler, it just contains a vector of requested 
 ```rust,ignore
 pub struct GetBlockBodies(
     /// The block hashes to request bodies for.
-    pub Vec<H256>,
+    pub Vec<B256>,
 );
 ```
 
@@ -826,7 +826,7 @@ Begins by inserting a `Peer` into `TransactionsManager.peers` by `peer_id`, whic
 ```rust,ignore
 struct Peer {
     /// Keeps track of transactions that we know the peer has seen.
-    transactions: LruCache<H256>,
+    transactions: LruCache<B256>,
     /// A communication channel directly to the session task.
     request_tx: PeerRequestSender,
 }
@@ -878,7 +878,7 @@ Next in the `poll` method, `TransactionsCommand`s sent through the `Transactions
 [File: crates/net/network/src/transactions.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/transactions.rs)
 ```rust,ignore
 enum TransactionsCommand {
-    PropagateHash(H256),
+    PropagateHash(B256),
 }
 ```
 

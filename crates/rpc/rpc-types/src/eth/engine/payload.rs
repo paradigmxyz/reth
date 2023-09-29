@@ -1,7 +1,7 @@
 pub use crate::Withdrawal;
 use reth_primitives::{
     kzg::{Blob, Bytes48},
-    Address, BlobTransactionSidecar, Bloom, Bytes, SealedBlock, H256, H64, U256, U64,
+    Address, BlobTransactionSidecar, Bloom, Bytes, SealedBlock, B256, B64, U256, U64,
 };
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 
@@ -10,14 +10,14 @@ pub type ExecutionPayloadBodiesV1 = Vec<Option<ExecutionPayloadBodyV1>>;
 
 /// And 8-byte identifier for an execution payload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
-pub struct PayloadId(H64);
+pub struct PayloadId(B64);
 
 // === impl PayloadId ===
 
 impl PayloadId {
     /// Creates a new payload id from the given identifier.
     pub fn new(id: [u8; 8]) -> Self {
-        Self(H64::from(id))
+        Self(B64::from(id))
     }
 }
 
@@ -121,19 +121,19 @@ pub struct ExecutionPayloadEnvelopeV3 {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionPayloadV1 {
-    pub parent_hash: H256,
+    pub parent_hash: B256,
     pub fee_recipient: Address,
-    pub state_root: H256,
-    pub receipts_root: H256,
+    pub state_root: B256,
+    pub receipts_root: B256,
     pub logs_bloom: Bloom,
-    pub prev_randao: H256,
+    pub prev_randao: B256,
     pub block_number: U64,
     pub gas_limit: U64,
     pub gas_used: U64,
     pub timestamp: U64,
     pub extra_data: Bytes,
     pub base_fee_per_gas: U256,
-    pub block_hash: H256,
+    pub block_hash: B256,
     pub transactions: Vec<Bytes>,
 }
 
@@ -155,10 +155,10 @@ impl From<SealedBlock> for ExecutionPayloadV1 {
             receipts_root: value.receipts_root,
             logs_bloom: value.logs_bloom,
             prev_randao: value.mix_hash,
-            block_number: value.number.into(),
-            gas_limit: value.gas_limit.into(),
-            gas_used: value.gas_used.into(),
-            timestamp: value.timestamp.into(),
+            block_number: U64::from(value.number),
+            gas_limit: U64::from(value.gas_limit),
+            gas_used: U64::from(value.gas_used),
+            timestamp: U64::from(value.timestamp),
             extra_data: value.extra_data.clone(),
             base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
             block_hash: value.hash(),
@@ -185,7 +185,7 @@ pub struct ExecutionPayloadV2 {
 impl ExecutionPayloadV2 {
     /// Returns the timestamp for the execution payload.
     pub fn timestamp(&self) -> u64 {
-        self.payload_inner.timestamp.as_u64()
+        self.payload_inner.timestamp.to()
     }
 }
 
@@ -215,7 +215,7 @@ impl ExecutionPayloadV3 {
 
     /// Returns the timestamp for the payload.
     pub fn timestamp(&self) -> u64 {
-        self.payload_inner.payload_inner.timestamp.as_u64()
+        self.payload_inner.payload_inner.timestamp.to()
     }
 }
 
@@ -267,14 +267,14 @@ impl ExecutionPayload {
     /// Returns the timestamp for the payload.
     pub fn timestamp(&self) -> u64 {
         match self {
-            ExecutionPayload::V1(payload) => payload.timestamp.as_u64(),
+            ExecutionPayload::V1(payload) => payload.timestamp.to(),
             ExecutionPayload::V2(payload) => payload.timestamp(),
             ExecutionPayload::V3(payload) => payload.timestamp(),
         }
     }
 
     /// Returns the parent hash for the payload.
-    pub fn parent_hash(&self) -> H256 {
+    pub fn parent_hash(&self) -> B256 {
         match self {
             ExecutionPayload::V1(payload) => payload.parent_hash,
             ExecutionPayload::V2(payload) => payload.payload_inner.parent_hash,
@@ -283,7 +283,7 @@ impl ExecutionPayload {
     }
 
     /// Returns the block hash for the payload.
-    pub fn block_hash(&self) -> H256 {
+    pub fn block_hash(&self) -> B256 {
         match self {
             ExecutionPayload::V1(payload) => payload.block_hash,
             ExecutionPayload::V2(payload) => payload.payload_inner.block_hash,
@@ -294,11 +294,9 @@ impl ExecutionPayload {
     /// Returns the block number for this payload.
     pub fn block_number(&self) -> u64 {
         match self {
-            ExecutionPayload::V1(payload) => payload.block_number.as_u64(),
-            ExecutionPayload::V2(payload) => payload.payload_inner.block_number.as_u64(),
-            ExecutionPayload::V3(payload) => {
-                payload.payload_inner.payload_inner.block_number.as_u64()
-            }
+            ExecutionPayload::V1(payload) => payload.block_number.to(),
+            ExecutionPayload::V2(payload) => payload.payload_inner.block_number.to(),
+            ExecutionPayload::V3(payload) => payload.payload_inner.payload_inner.block_number.to(),
         }
     }
 }
@@ -340,16 +338,16 @@ pub enum PayloadError {
     #[error("blockhash mismatch, want {consensus}, got {execution}")]
     BlockHash {
         /// The block hash computed from the payload.
-        execution: H256,
+        execution: B256,
         /// The block hash provided with the payload.
-        consensus: H256,
+        consensus: B256,
     },
     /// Expected blob versioned hashes do not match the given transactions.
     #[error("Expected blob versioned hashes do not match the given transactions")]
     InvalidVersionedHashes,
     /// Encountered decoding error.
     #[error(transparent)]
-    Decode(#[from] reth_rlp::DecodeError),
+    Decode(#[from] alloy_rlp::Error),
 }
 
 impl PayloadError {
@@ -380,7 +378,7 @@ pub struct PayloadAttributes {
     /// Value for the `timestamp` field of the new payload
     pub timestamp: U64,
     /// Value for the `prevRandao` field of the new payload
-    pub prev_randao: H256,
+    pub prev_randao: B256,
     /// Suggested value for the `feeRecipient` field of the new payload
     pub suggested_fee_recipient: Address,
     /// Array of [`Withdrawal`] enabled with V2
@@ -391,7 +389,7 @@ pub struct PayloadAttributes {
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#payloadattributesv3>
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_beacon_block_root: Option<H256>,
+    pub parent_beacon_block_root: Option<B256>,
 }
 
 /// This structure contains the result of processing a payload or fork choice update.
@@ -401,11 +399,11 @@ pub struct PayloadStatus {
     #[serde(flatten)]
     pub status: PayloadStatusEnum,
     /// Hash of the most recent valid block in the branch defined by payload and its ancestors
-    pub latest_valid_hash: Option<H256>,
+    pub latest_valid_hash: Option<B256>,
 }
 
 impl PayloadStatus {
-    pub fn new(status: PayloadStatusEnum, latest_valid_hash: Option<H256>) -> Self {
+    pub fn new(status: PayloadStatusEnum, latest_valid_hash: Option<B256>) -> Self {
         Self { status, latest_valid_hash }
     }
 
@@ -413,12 +411,12 @@ impl PayloadStatus {
         Self { status, latest_valid_hash: None }
     }
 
-    pub fn with_latest_valid_hash(mut self, latest_valid_hash: H256) -> Self {
+    pub fn with_latest_valid_hash(mut self, latest_valid_hash: B256) -> Self {
         self.latest_valid_hash = Some(latest_valid_hash);
         self
     }
 
-    pub fn maybe_latest_valid_hash(mut self, latest_valid_hash: Option<H256>) -> Self {
+    pub fn maybe_latest_valid_hash(mut self, latest_valid_hash: Option<B256>) -> Self {
         self.latest_valid_hash = latest_valid_hash;
         self
     }
@@ -557,9 +555,9 @@ pub enum PayloadValidationError {
     #[error("invalid merkle root: (remote: {remote:?} local: {local:?})")]
     InvalidStateRoot {
         /// The state root of the payload we received from remote (CL)
-        remote: H256,
+        remote: B256,
         /// The state root of the payload that we computed locally.
-        local: H256,
+        local: B256,
     },
 }
 

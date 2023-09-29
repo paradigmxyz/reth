@@ -1,7 +1,7 @@
 use crate::Bytes;
+use alloy_rlp::RlpEncodableWrapper;
 use derive_more::{Deref, DerefMut, From, Index};
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::RlpEncodableWrapper;
 use serde::{Deserialize, Serialize};
 
 /// The nibbles are the keys for the AccountsTrie and the subkeys for the StorageTrie.
@@ -95,14 +95,14 @@ impl<const N: usize> From<&[u8; N]> for Nibbles {
 
 impl std::fmt::Debug for Nibbles {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Nibbles").field("hex_data", &hex::encode(&self.hex_data)).finish()
+        f.debug_struct("Nibbles").field("hex_data", &crate::hex::encode(&self.hex_data)).finish()
     }
 }
 
 impl Nibbles {
     /// Creates a new [Nibbles] instance from bytes.
-    pub fn from_hex(hex: Vec<u8>) -> Self {
-        Nibbles { hex_data: Bytes::from(hex) }
+    pub fn from_hex<T: Into<Bytes>>(hex: T) -> Self {
+        Nibbles { hex_data: hex.into() }
     }
 
     /// Take a byte array (slice or vector) as input and convert it into a [Nibbles] struct
@@ -292,16 +292,14 @@ impl Nibbles {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hex;
     use proptest::prelude::*;
 
     #[test]
     fn hashed_regression() {
-        let nibbles = hex::decode("05010406040a040203030f010805020b050c04070003070e0909070f010b0a0805020301070c0a0902040b0f000f0006040a04050f020b090701000a0a040b").unwrap();
-        let nibbles = Nibbles::from_hex(nibbles);
+        let nibbles = Nibbles::from_hex(hex!("05010406040a040203030f010805020b050c04070003070e0909070f010b0a0805020301070c0a0902040b0f000f0006040a04050f020b090701000a0a040b"));
         let path = nibbles.encode_path_leaf(true);
-        let expected =
-            hex::decode("351464a4233f1852b5c47037e997f1ba852317ca924bf0f064a45f2b9710aa4b")
-                .unwrap();
+        let expected = hex!("351464a4233f1852b5c47037e997f1ba852317ca924bf0f064a45f2b9710aa4b");
         assert_eq!(path, expected);
     }
 

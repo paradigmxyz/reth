@@ -1,4 +1,4 @@
-use reth_primitives::{Address, BlockHash, BlockHashOrNumber, BlockNumber, TxNumber, H256};
+use reth_primitives::{Address, BlockHash, BlockHashOrNumber, BlockNumber, TxNumber, B256};
 
 /// Bundled errors variants thrown by various providers.
 #[allow(missing_docs)]
@@ -21,7 +21,7 @@ pub enum ProviderError {
         /// The account address
         address: Address,
         /// The storage key
-        storage_key: H256,
+        storage_key: B256,
     },
     /// The block number was found for the given address, but the changeset was not found.
     #[error("Account {address:?} ChangeSet for block #{block_number} does not exist")]
@@ -60,10 +60,10 @@ pub enum ProviderError {
     CacheServiceUnavailable,
     /// Thrown when we failed to lookup a block for the pending state
     #[error("Unknown block hash: {0:}")]
-    UnknownBlockHash(H256),
+    UnknownBlockHash(B256),
     /// Thrown when we were unable to find a state for a block hash
     #[error("No State found for block hash: {0:}")]
-    StateForHashNotFound(H256),
+    StateForHashNotFound(B256),
     /// Unable to compute state root on top of historical block
     #[error("Unable to compute state root on top of historical block")]
     StateRootNotAvailableForHistoricalBlock,
@@ -74,9 +74,9 @@ pub enum ProviderError {
     #[error("Merkle trie root mismatch at #{block_number} ({block_hash:?}). Got: {got:?}. Expected: {expected:?}")]
     StateRootMismatch {
         /// Expected root
-        expected: H256,
+        expected: B256,
         /// Calculated root
-        got: H256,
+        got: B256,
         /// Block number
         block_number: BlockNumber,
         /// Block hash
@@ -86,9 +86,9 @@ pub enum ProviderError {
     #[error("Unwind merkle trie root mismatch at #{block_number} ({block_hash:?}). Got: {got:?}. Expected: {expected:?}")]
     UnwindStateRootMismatch {
         /// Expected root
-        expected: H256,
+        expected: B256,
         /// Calculated root
-        got: H256,
+        got: B256,
         /// Target block number
         block_number: BlockNumber,
         /// Block hash

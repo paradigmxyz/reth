@@ -5,7 +5,7 @@ use crate::{
     DatabaseError,
 };
 use derive_more::AsRef;
-use reth_primitives::{BlockNumber, H160, H256};
+use reth_primitives::{Address, BlockNumber, B256};
 use serde::{Deserialize, Serialize};
 
 use super::ShardedKey;
@@ -24,21 +24,21 @@ pub const NUM_OF_INDICES_IN_SHARD: usize = 2_000;
 )]
 pub struct StorageShardedKey {
     /// Storage account address.
-    pub address: H160,
+    pub address: Address,
     /// Storage slot with highest transition id.
     #[as_ref]
-    pub sharded_key: ShardedKey<H256>,
+    pub sharded_key: ShardedKey<B256>,
 }
 
 impl StorageShardedKey {
     /// Creates a new `StorageShardedKey`.
-    pub fn new(address: H160, storage_key: H256, highest_block_number: BlockNumber) -> Self {
+    pub fn new(address: Address, storage_key: B256, highest_block_number: BlockNumber) -> Self {
         Self { address, sharded_key: ShardedKey { key: storage_key, highest_block_number } }
     }
 
     /// Creates a new key with the highest block number set to maximum.
     /// This is useful when we want to search the last value for a given key.
-    pub fn last(address: H160, storage_key: H256) -> Self {
+    pub fn last(address: Address, storage_key: B256) -> Self {
         Self {
             address,
             sharded_key: ShardedKey { key: storage_key, highest_block_number: u64::MAX },
@@ -65,8 +65,8 @@ impl Decode for StorageShardedKey {
         let highest_tx_number = u64::from_be_bytes(
             value[tx_num_index..].try_into().map_err(|_| DatabaseError::DecodeError)?,
         );
-        let address = H160::decode(&value[..20])?;
-        let storage_key = H256::decode(&value[20..52])?;
+        let address = Address::decode(&value[..20])?;
+        let storage_key = B256::decode(&value[20..52])?;
 
         Ok(Self { address, sharded_key: ShardedKey::new(storage_key, highest_tx_number) })
     }

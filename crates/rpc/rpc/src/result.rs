@@ -165,8 +165,8 @@ pub(crate) fn rpc_err(
         code,
         msg.into(),
         data.map(|data| {
-            jsonrpsee::core::to_json_raw_value(&format!("0x{}", hex::encode(data)))
-                .expect("serializing String does fail")
+            jsonrpsee::core::to_json_raw_value(&reth_primitives::hex::encode_prefixed(data))
+                .expect("serializing String can't fail")
         }),
     )
 }

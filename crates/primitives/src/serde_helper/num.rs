@@ -15,15 +15,15 @@ use std::str::FromStr;
 /// let number: U64HexOrNumber = serde_json::from_str(number_json).unwrap();
 /// let hex: U64HexOrNumber = serde_json::from_str(hex_json).unwrap();
 /// assert_eq!(number, hex);
-/// assert_eq!(hex.as_u64(), 100);
+/// assert_eq!(hex.to(), 100);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct U64HexOrNumber(U64);
 
 impl U64HexOrNumber {
     /// Returns the wrapped u64
-    pub fn as_u64(self) -> u64 {
-        self.0.as_u64()
+    pub fn to(self) -> u64 {
+        self.0.to()
     }
 }
 
@@ -41,7 +41,7 @@ impl From<U64> for U64HexOrNumber {
 
 impl From<U64HexOrNumber> for u64 {
     fn from(value: U64HexOrNumber) -> Self {
-        value.as_u64()
+        value.to()
     }
 }
 

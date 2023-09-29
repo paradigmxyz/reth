@@ -7,7 +7,7 @@ use crate::{
 };
 use reth_primitives::{
     Address, BlobTransactionSidecar, IntoRecoveredTransaction, SealedBlock, TransactionKind,
-    TransactionSignedEcRecovered, TxHash, H256, U256,
+    TransactionSignedEcRecovered, TxHash, B256, U256,
 };
 use std::{fmt, time::Instant};
 
@@ -114,7 +114,7 @@ impl<T: PoolTransaction> ValidTransaction<T> {
 
     /// Returns the hash of the transaction.
     #[inline]
-    pub(crate) fn hash(&self) -> &H256 {
+    pub(crate) fn hash(&self) -> &B256 {
         self.transaction().hash()
     }
 

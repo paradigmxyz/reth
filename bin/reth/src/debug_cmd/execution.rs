@@ -23,7 +23,7 @@ use reth_interfaces::{
 };
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, H256};
+use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, B256};
 use reth_provider::{BlockExecutionWriter, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     sets::DefaultStages,
@@ -112,7 +112,7 @@ impl Command {
 
         let stage_conf = &config.stages;
 
-        let (tip_tx, tip_rx) = watch::channel(H256::zero());
+        let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         let factory = reth_revm::Factory::new(self.chain.clone());
 
         let header_mode = HeaderSyncMode::Tip(tip_rx);
@@ -186,7 +186,7 @@ impl Command {
         &self,
         client: Client,
         block: BlockNumber,
-    ) -> eyre::Result<H256> {
+    ) -> eyre::Result<B256> {
         info!(target: "reth::cli", ?block, "Fetching block from the network.");
         loop {
             match get_single_header(&client, BlockHashOrNumber::Number(block)).await {

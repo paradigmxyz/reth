@@ -46,7 +46,6 @@ reth-db = { workspace = true, features = ["test-utils"] }
 tokio = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true, features = ["sync"] }
 arbitrary = { workspace = true, features = ["derive"] }
-hex-literal.workspace = true
 secp256k1 = { workspace = true, features = ["alloc", "recovery", "rand"] }
 
 [features]

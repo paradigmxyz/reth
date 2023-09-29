@@ -5,7 +5,7 @@ use crate::p2p::{
     priority::Priority,
 };
 use futures::future::Either;
-use reth_primitives::H256;
+use reth_primitives::B256;
 
 /// A downloader that combines two different downloaders/client implementations that have the same
 /// associated types.
@@ -45,7 +45,7 @@ where
 
     fn get_block_bodies_with_priority(
         &self,
-        hashes: Vec<H256>,
+        hashes: Vec<B256>,
         priority: Priority,
     ) -> Self::Output {
         match self {

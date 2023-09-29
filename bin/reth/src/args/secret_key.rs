@@ -1,6 +1,5 @@
-use hex::encode as hex_encode;
 use reth_network::config::rng_secret_key;
-use reth_primitives::{fs, fs::FsPathError};
+use reth_primitives::{fs, fs::FsPathError, hex::encode as hex_encode};
 use secp256k1::{Error as SecretKeyBaseError, SecretKey};
 use std::{
     io,
