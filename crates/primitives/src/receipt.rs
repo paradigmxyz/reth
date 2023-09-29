@@ -87,25 +87,6 @@ impl Receipts {
             &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
         ))
     }
-
-    /// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
-    pub fn gas_spent_by_tx(&self) -> Result<Vec<(u64, u64)>, PrunePartError> {
-        self.last()
-            .map(|block_r| {
-                block_r
-                    .iter()
-                    .enumerate()
-                    .map(|(id, tx_r)| {
-                        if let Some(receipt) = tx_r.as_ref() {
-                            Ok((id as u64, receipt.cumulative_gas_used))
-                        } else {
-                            Err(PrunePartError::ReceiptsPruned)
-                        }
-                    })
-                    .collect::<Result<Vec<_>, PrunePartError>>()
-            })
-            .unwrap_or(Ok(vec![]))
-    }
 }
 
 impl Deref for Receipts {
