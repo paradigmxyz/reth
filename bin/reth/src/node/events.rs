@@ -127,11 +127,11 @@ impl NodeState {
                 );
             }
             BeaconConsensusEngineEvent::CanonicalBlockAdded(block) => {
-                self.latest_block = Some(block.number);
-
                 info!(number=block.number, hash=?block.hash, "Block added to canonical chain");
             }
             BeaconConsensusEngineEvent::CanonicalChainCommitted(head, elapsed) => {
+                self.latest_block = Some(head.number);
+
                 info!(number=head.number, hash=?head.hash, ?elapsed, "Canonical chain committed");
             }
             BeaconConsensusEngineEvent::ForkBlockAdded(block) => {
