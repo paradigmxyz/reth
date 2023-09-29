@@ -34,7 +34,7 @@ struct NodeState {
     eta: Eta,
     /// The current checkpoint of the executing stage.
     current_checkpoint: StageCheckpoint,
-    /// The latest block set by either pipeline or consensus engine.
+    /// The latest block reached by either pipeline or consensus engine.
     latest_block: Option<BlockNumber>,
 }
 
@@ -79,7 +79,9 @@ impl NodeState {
                 result: ExecOutput { checkpoint, done },
             } => {
                 self.current_checkpoint = checkpoint;
-                self.latest_block = Some(checkpoint.block_number);
+                if stage_id.is_finish() {
+                    self.latest_block = Some(checkpoint.block_number);
+                }
                 self.eta.update(self.current_checkpoint);
 
                 info!(
