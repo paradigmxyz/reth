@@ -1079,7 +1079,7 @@ where
         payload: ExecutionPayload,
         cancun_fields: Option<CancunPayloadFields>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
-        let block = match self.ensure_well_formed_payload(payload, cancun_fields)? {
+        let block = match self.ensure_well_formed_payload(payload, cancun_fields) {
             Ok(block) => block,
             Err(status) => return Ok(status),
         };
@@ -1148,7 +1148,7 @@ where
         &self,
         payload: ExecutionPayload,
         cancun_fields: Option<CancunPayloadFields>,
-    ) -> Result<Result<SealedBlock, PayloadStatus>, BeaconOnNewPayloadError> {
+    ) -> Result<SealedBlock, PayloadStatus> {
         let parent_hash = payload.parent_hash();
 
         let block_hash = payload.block_hash();
@@ -1158,15 +1158,13 @@ where
         ) {
             Ok(block) => {
                 // make sure there are no blob transactions in the payload if it is pre-cancun
-                // we perform this check before validating the block hash because INVALID_PARAMS
-                // must be returned over an INVALID response.
                 if !self.chain_spec().is_cancun_active_at_timestamp(block.timestamp) &&
                     block.has_blob_transactions()
                 {
-                    return Err(BeaconOnNewPayloadError::PreCancunBlockWithBlobTransactions)
+                    Err(PayloadError::PreCancunBlockWithBlobTransactions)
+                } else {
+                    validate_block_hash(block_hash, block)
                 }
-
-                validate_block_hash(block_hash, block)
             }
             Err(error) => Err(error),
         };
@@ -1185,7 +1183,7 @@ where
                 }
                 let status = PayloadStatusEnum::from(error);
 
-                return Ok(Err(PayloadStatus::new(status, latest_valid_hash)))
+                return Err(PayloadStatus::new(status, latest_valid_hash))
             }
         };
 
@@ -1196,13 +1194,9 @@ where
             .flatten()
             .collect::<Vec<_>>();
 
-        if let Err(status) =
-            self.validate_versioned_hashes(parent_hash, block_versioned_hashes, cancun_fields)
-        {
-            return Ok(Err(status))
-        }
+        self.validate_versioned_hashes(parent_hash, block_versioned_hashes, cancun_fields)?;
 
-        Ok(Ok(block))
+        Ok(block)
     }
 
     /// Returns the currently configured [ChainSpec].
@@ -1749,6 +1743,10 @@ where
                     self.sync_state_updater.update_sync_state(SyncState::Syncing)
                 }
                 EngineHookEvent::Finished(_) => {
+                    // Hook with read-write access to the database has finished running, so engine
+                    // can process new FCU/payload messages from CL again. It's safe to
+                    // return `false` on `eth_syncing` request.
+                    self.sync_state_updater.update_sync_state(SyncState::Idle);
                     // If the hook had read-write access to the database, it means that the engine
                     // may have accumulated some buffered blocks.
                     if let Err(error) =
@@ -1792,48 +1790,60 @@ where
 
         // Control loop that advances the state
         'main: loop {
-            // Poll a running hook with db write access first, as we will not be able to process
-            // any engine messages until it's finished.
-            if let Poll::Ready(result) = this.hooks.poll_running_hook_with_db_write(
-                cx,
-                EngineContext {
-                    tip_block_number: this.blockchain.canonical_tip().number,
-                    finalized_block_number: this.blockchain.finalized_block_number()?,
-                },
-            )? {
-                this.on_hook_result(result)?;
-            }
+            // Poll a running hook with db write access (if any) and CL messages first, draining
+            // both and then proceeding to polling other parts such as SyncController and hooks.
+            loop {
+                // Poll a running hook with db write access first, as we will not be able to process
+                // any engine messages until it's finished.
+                if let Poll::Ready(result) = this.hooks.poll_running_hook_with_db_write(
+                    cx,
+                    EngineContext {
+                        tip_block_number: this.blockchain.canonical_tip().number,
+                        finalized_block_number: this.blockchain.finalized_block_number()?,
+                    },
+                )? {
+                    this.on_hook_result(result)?;
+                    continue
+                }
 
-            // Process all incoming messages from the CL, these can affect the state of the
-            // SyncController, hence they are polled first, and they're also time sensitive, hence
-            // they're always drained first.
-            while let Poll::Ready(Some(msg)) = this.engine_message_rx.poll_next_unpin(cx) {
-                match msg {
-                    BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
-                        match this.on_forkchoice_updated(state, payload_attrs, tx) {
-                            OnForkchoiceUpdateOutcome::Processed => {}
-                            OnForkchoiceUpdateOutcome::ReachedMaxBlock => {
-                                // reached the max block, we can terminate the future
-                                return Poll::Ready(Ok(()))
-                            }
-                            OnForkchoiceUpdateOutcome::Fatal(err) => {
-                                // fatal error, we can terminate the future
-                                return Poll::Ready(Err(RethError::Execution(err).into()))
+                // Process one incoming message from the CL. We don't drain the messages right away,
+                // because we want to sneak a polling of running hook in between them.
+                //
+                // These messages can affect the state of the SyncController and they're also time
+                // sensitive, hence they are polled first.
+                if let Poll::Ready(Some(msg)) = this.engine_message_rx.poll_next_unpin(cx) {
+                    match msg {
+                        BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
+                            match this.on_forkchoice_updated(state, payload_attrs, tx) {
+                                OnForkchoiceUpdateOutcome::Processed => {}
+                                OnForkchoiceUpdateOutcome::ReachedMaxBlock => {
+                                    // reached the max block, we can terminate the future
+                                    return Poll::Ready(Ok(()))
+                                }
+                                OnForkchoiceUpdateOutcome::Fatal(err) => {
+                                    // fatal error, we can terminate the future
+                                    return Poll::Ready(Err(RethError::Execution(err).into()))
+                                }
                             }
                         }
+                        BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {
+                            this.metrics.new_payload_messages.increment(1);
+                            let res = this.on_new_payload(payload, cancun_fields);
+                            let _ = tx.send(res);
+                        }
+                        BeaconEngineMessage::TransitionConfigurationExchanged => {
+                            this.blockchain.on_transition_configuration_exchanged();
+                        }
+                        BeaconEngineMessage::EventListener(tx) => {
+                            this.listeners.push_listener(tx);
+                        }
                     }
-                    BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {
-                        this.metrics.new_payload_messages.increment(1);
-                        let res = this.on_new_payload(payload, cancun_fields);
-                        let _ = tx.send(res);
-                    }
-                    BeaconEngineMessage::TransitionConfigurationExchanged => {
-                        this.blockchain.on_transition_configuration_exchanged();
-                    }
-                    BeaconEngineMessage::EventListener(tx) => {
-                        this.listeners.push_listener(tx);
-                    }
+                    continue
                 }
+
+                // Both running hook with db write access and engine messages are pending,
+                // proceed to other polls
+                break
             }
 
             // process sync events if any

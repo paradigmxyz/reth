@@ -71,7 +71,7 @@ mod tests {
 
     #[test]
     fn test_prune_target_block() {
-        let tip = 1000;
+        let tip = 20000;
         let min_blocks = MINIMUM_PRUNING_DISTANCE;
         let prune_part = PrunePart::Receipts;
 
@@ -91,7 +91,6 @@ mod tests {
                 PruneMode::Before(tip - MINIMUM_PRUNING_DISTANCE - 1),
                 Ok(Some(tip - MINIMUM_PRUNING_DISTANCE - 2)),
             ),
-            // MINIMUM_PRUNING_DISTANCE is 128
             (PruneMode::Before(tip - 1), Err(PrunePartError::Configuration(prune_part))),
         ];
 
@@ -113,7 +112,7 @@ mod tests {
 
     #[test]
     fn test_should_prune() {
-        let tip = 1000;
+        let tip = 20000;
         let should_prune = true;
 
         let tests = vec![

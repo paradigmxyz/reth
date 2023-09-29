@@ -11,8 +11,8 @@ use std::sync::Arc;
 #[derive(Debug, Args, PartialEq, Default)]
 #[command(next_help_heading = "Pruning")]
 pub struct PruningArgs {
-    /// Run full node. Only the most recent 128 block states are stored. This flag takes
-    /// priority over pruning configuration in reth.toml.
+    /// Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored.
+    /// This flag takes priority over pruning configuration in reth.toml.
     #[arg(long, default_value_t = false)]
     pub full: bool,
 }
