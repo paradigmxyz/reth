@@ -1155,6 +1155,12 @@ impl PeersConfig {
         self
     }
 
+    /// Configure how long to ban bad peers
+    pub fn with_ban_duration(mut self, ban_duration: Duration) -> Self {
+        self.ban_duration = ban_duration;
+        self
+    }
+
     /// Maximum occupied slots for outbound connections.
     pub fn with_max_pending_outbound(mut self, num_outbound: usize) -> Self {
         self.connection_info.num_outbound = num_outbound;
@@ -1195,6 +1201,12 @@ impl PeersConfig {
         self
     }
 
+    /// Maximum allowed concurrent outbound dials.
+    pub fn with_max_concurrent_dials(mut self, max_concurrent_outbound_dials: usize) -> Self {
+        self.connection_info.max_concurrent_outbound_dials = max_concurrent_outbound_dials;
+        self
+    }
+
     /// Nodes to always connect to.
     pub fn with_trusted_nodes(mut self, nodes: HashSet<NodeRecord>) -> Self {
         self.trusted_nodes = nodes;
@@ -1216,6 +1228,18 @@ impl PeersConfig {
     /// Configures the max allowed backoff count.
     pub fn with_max_backoff_count(mut self, max_backoff_count: u32) -> Self {
         self.max_backoff_count = max_backoff_count;
+        self
+    }
+
+    /// Configures how to weigh reputation changes.
+    pub fn with_reputation_weights(mut self, reputation_weights: ReputationChangeWeights) -> Self {
+        self.reputation_weights = reputation_weights;
+        self
+    }
+
+    /// Configures how long to backoff peers that are we failed to connect to for non-fatal reasons
+    pub fn with_backoff_durations(mut self, backoff_durations: PeerBackoffDurations) -> Self {
+        self.backoff_durations = backoff_durations;
         self
     }
 
@@ -1325,7 +1349,7 @@ mod test {
     };
     use reth_net_common::ban_list::BanList;
     use reth_network_api::ReputationChangeKind;
-    use reth_primitives::{PeerId, H512};
+    use reth_primitives::{PeerId, B512};
     use std::{
         collections::HashSet,
         future::{poll_fn, Future},
@@ -1978,7 +2002,7 @@ mod test {
         let ban_list = BanList::new(HashSet::new(), vec![ip]);
         let config = PeersConfig::default().with_ban_list(ban_list);
         let mut peer_manager = PeersManager::new(config);
-        peer_manager.add_peer(H512::default(), socket_addr, None);
+        peer_manager.add_peer(B512::default(), socket_addr, None);
 
         assert!(peer_manager.peers.is_empty());
     }
@@ -2007,7 +2031,7 @@ mod test {
     async fn test_on_active_inbound_ban_list() {
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
         let socket_addr = SocketAddr::new(ip, 8008);
-        let given_peer_id: PeerId = H512::from_low_u64_ne(123403423412);
+        let given_peer_id = PeerId::random();
         let ban_list = BanList::new(vec![given_peer_id], HashSet::new());
         let config = PeersConfig::default().with_ban_list(ban_list);
         let mut peer_manager = PeersManager::new(config);

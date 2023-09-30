@@ -1,4 +1,4 @@
-use reth_primitives::H256;
+use reth_primitives::B256;
 use thiserror::Error;
 
 /// State root error.
@@ -36,7 +36,7 @@ pub enum ProofError {
     #[error(
         "Expected leaf account with key greater or equal to {0:?} is missing from the database"
     )]
-    LeafAccountMissing(H256),
+    LeafAccountMissing(B256),
     /// Storage root error.
     #[error(transparent)]
     StorageRootError(#[from] StorageRootError),

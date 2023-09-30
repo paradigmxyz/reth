@@ -1,7 +1,7 @@
 //! Block related models and types.
 
 use reth_codecs::{main_codec, Compact};
-use reth_primitives::{Header, TxNumber, Withdrawal, H256};
+use reth_primitives::{Header, TxNumber, Withdrawal, B256};
 use std::ops::Range;
 
 /// Total number of transactions.
@@ -84,7 +84,7 @@ pub struct StoredBlockWithdrawals {
 }
 
 /// Hash of the block header. Value for [`CanonicalHeaders`][crate::tables::CanonicalHeaders]
-pub type HeaderHash = H256;
+pub type HeaderHash = B256;
 
 #[cfg(test)]
 mod test {

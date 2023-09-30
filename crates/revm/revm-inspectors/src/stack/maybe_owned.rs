@@ -1,7 +1,7 @@
 use reth_primitives::U256;
 use revm::{
     interpreter::{CallInputs, CreateInputs, Gas, InstructionResult, Interpreter},
-    primitives::{db::Database, Bytes, B160, B256},
+    primitives::{db::Database, Address, Bytes, B256},
     EVMData, Inspector,
 };
 use std::{
@@ -96,7 +96,7 @@ where
     fn log(
         &mut self,
         evm_data: &mut EVMData<'_, DB>,
-        address: &B160,
+        address: &Address,
         topics: &[B256],
         data: &Bytes,
     ) {
@@ -158,7 +158,7 @@ where
         &mut self,
         data: &mut EVMData<'_, DB>,
         inputs: &mut CreateInputs,
-    ) -> (InstructionResult, Option<B160>, Gas, Bytes) {
+    ) -> (InstructionResult, Option<Address>, Gas, Bytes) {
         match self {
             MaybeOwnedInspector::Owned(insp) => return insp.borrow_mut().create(data, inputs),
             MaybeOwnedInspector::Stacked(_) => {}
@@ -172,10 +172,10 @@ where
         data: &mut EVMData<'_, DB>,
         inputs: &CreateInputs,
         ret: InstructionResult,
-        address: Option<B160>,
+        address: Option<Address>,
         remaining_gas: Gas,
         out: Bytes,
-    ) -> (InstructionResult, Option<B160>, Gas, Bytes) {
+    ) -> (InstructionResult, Option<Address>, Gas, Bytes) {
         match self {
             MaybeOwnedInspector::Owned(insp) => {
                 return insp.borrow_mut().create_end(data, inputs, ret, address, remaining_gas, out)
@@ -186,7 +186,7 @@ where
         (ret, address, remaining_gas, out)
     }
 
-    fn selfdestruct(&mut self, contract: B160, target: B160, value: U256) {
+    fn selfdestruct(&mut self, contract: Address, target: Address, value: U256) {
         match self {
             MaybeOwnedInspector::Owned(insp) => {
                 return insp.borrow_mut().selfdestruct(contract, target, value)

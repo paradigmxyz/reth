@@ -1,10 +1,9 @@
 use crate::{EthVersion, StatusBuilder};
-
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{
-    hex, Chain, ChainSpec, ForkId, Genesis, Hardfork, Head, H256, MAINNET, U256,
+    hex, Chain, ChainSpec, ForkId, Genesis, Hardfork, Head, NamedChain, B256, MAINNET, U256,
 };
-use reth_rlp::{RlpDecodable, RlpEncodable};
 use std::fmt::{Debug, Display};
 
 #[cfg(feature = "serde")]
@@ -31,10 +30,10 @@ pub struct Status {
     pub total_difficulty: U256,
 
     /// The highest difficulty block hash the peer has seen
-    pub blockhash: H256,
+    pub blockhash: B256,
 
     /// The genesis hash of the peer's chain.
-    pub genesis: H256,
+    pub genesis: B256,
 
     /// The fork identifier, a [CRC32
     /// checksum](https://en.wikipedia.org/wiki/Cyclic_redundancy_check#CRC-32_algorithm) for
@@ -134,7 +133,7 @@ impl Default for Status {
         let mainnet_genesis = MAINNET.genesis_hash();
         Status {
             version: EthVersion::Eth68 as u8,
-            chain: Chain::Named(ethers_core::types::Chain::Mainnet),
+            chain: Chain::Named(NamedChain::Mainnet),
             total_difficulty: U256::from(17_179_869_184u64),
             blockhash: mainnet_genesis,
             genesis: mainnet_genesis,
@@ -148,13 +147,12 @@ impl Default for Status {
 #[cfg(test)]
 mod tests {
     use crate::types::{EthVersion, Status};
-    use ethers_core::types::Chain as NamedChain;
-    use hex_literal::hex;
+    use alloy_rlp::{Decodable, Encodable};
     use rand::Rng;
     use reth_primitives::{
-        Chain, ChainSpec, ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head, H256, U256,
+        hex, Chain, ChainSpec, ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head,
+        NamedChain, B256, U256,
     };
-    use reth_rlp::{Decodable, Encodable};
     use std::str::FromStr;
 
     #[test]
@@ -164,11 +162,11 @@ mod tests {
             version: EthVersion::Eth67 as u8,
             chain: Chain::Named(NamedChain::Mainnet),
             total_difficulty: U256::from(36206751599115524359527u128),
-            blockhash: H256::from_str(
+            blockhash: B256::from_str(
                 "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
             )
             .unwrap(),
-            genesis: H256::from_str(
+            genesis: B256::from_str(
                 "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
             )
             .unwrap(),
@@ -187,11 +185,11 @@ mod tests {
             version: EthVersion::Eth67 as u8,
             chain: Chain::Named(NamedChain::Mainnet),
             total_difficulty: U256::from(36206751599115524359527u128),
-            blockhash: H256::from_str(
+            blockhash: B256::from_str(
                 "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
             )
             .unwrap(),
-            genesis: H256::from_str(
+            genesis: B256::from_str(
                 "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
             )
             .unwrap(),
@@ -208,11 +206,11 @@ mod tests {
             version: EthVersion::Eth66 as u8,
             chain: Chain::Named(NamedChain::BinanceSmartChain),
             total_difficulty: U256::from(37851386u64),
-            blockhash: H256::from_str(
+            blockhash: B256::from_str(
                 "f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27b",
             )
             .unwrap(),
-            genesis: H256::from_str(
+            genesis: B256::from_str(
                 "0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b",
             )
             .unwrap(),
@@ -231,11 +229,11 @@ mod tests {
             version: EthVersion::Eth66 as u8,
             chain: Chain::Named(NamedChain::BinanceSmartChain),
             total_difficulty: U256::from(37851386u64),
-            blockhash: H256::from_str(
+            blockhash: B256::from_str(
                 "f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27b",
             )
             .unwrap(),
-            genesis: H256::from_str(
+            genesis: B256::from_str(
                 "0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b",
             )
             .unwrap(),
@@ -255,11 +253,11 @@ mod tests {
                 "0x000000000000000000000000006d68fcffffffffffffffffffffffffdeab81b8",
             )
             .unwrap(),
-            blockhash: H256::from_str(
+            blockhash: B256::from_str(
                 "523e8163a6d620a4cc152c547a05f28a03fec91a2a615194cb86df9731372c0c",
             )
             .unwrap(),
-            genesis: H256::from_str(
+            genesis: B256::from_str(
                 "6499dccdc7c7def3ebb1ce4c6ee27ec6bd02aee570625ca391919faf77ef27bd",
             )
             .unwrap(),
@@ -271,8 +269,8 @@ mod tests {
 
     #[test]
     fn init_custom_status_fields() {
-        let head_hash = H256::random();
         let mut rng = rand::thread_rng();
+        let head_hash = rng.gen();
         let total_difficulty = U256::from(rng.gen::<u64>());
 
         // create a genesis that has a random part, so we can check that the hash is preserved

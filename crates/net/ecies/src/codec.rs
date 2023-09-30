@@ -1,5 +1,5 @@
 use crate::{algorithm::ECIES, ECIESError, EgressECIESValue, IngressECIESValue};
-use reth_primitives::{bytes::BytesMut, H512 as PeerId};
+use reth_primitives::{bytes::BytesMut, B512 as PeerId};
 use secp256k1::SecretKey;
 use std::{fmt::Debug, io};
 use tokio_util::codec::{Decoder, Encoder};

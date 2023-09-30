@@ -54,7 +54,7 @@ impl<T: Hash + Eq> LruCache<T> {
     }
 
     /// Returns an iterator over all cached entries
-    pub fn iter(&self) -> impl Iterator<Item=&T> +'_ {
+    pub fn iter(&self) -> impl Iterator<Item = &T> + '_ {
         self.inner.iter()
     }
 }

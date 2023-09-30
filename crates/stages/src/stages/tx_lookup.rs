@@ -12,7 +12,7 @@ use reth_interfaces::provider::ProviderError;
 use reth_primitives::{
     keccak256,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    PruneCheckpoint, PruneModes, PrunePart, TransactionSignedNoHash, TxNumber, H256,
+    PruneCheckpoint, PruneModes, PrunePart, TransactionSignedNoHash, TxNumber, B256,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter,
@@ -203,7 +203,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 fn calculate_hash(
     entry: Result<(TxNumber, TransactionSignedNoHash), DatabaseError>,
     rlp_buf: &mut Vec<u8>,
-) -> Result<(H256, TxNumber), Box<StageError>> {
+) -> Result<(B256, TxNumber), Box<StageError>> {
     let (tx_id, tx) = entry.map_err(|e| Box::new(e.into()))?;
     tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
     Ok((keccak256(rlp_buf), tx_id))
@@ -240,7 +240,7 @@ mod tests {
         generators::{random_block, random_block_range},
     };
     use reth_primitives::{
-        stage::StageUnitCheckpoint, BlockNumber, PruneCheckpoint, PruneMode, SealedBlock, H256,
+        stage::StageUnitCheckpoint, BlockNumber, PruneCheckpoint, PruneMode, SealedBlock, B256,
         MAINNET,
     };
     use reth_provider::{
@@ -314,7 +314,7 @@ mod tests {
 
         // Seed only once with full input range
         let seed =
-            random_block_range(&mut rng, stage_progress + 1..=previous_stage, H256::zero(), 0..4); // set tx count range high enough to hit the threshold
+            random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..4); // set tx count range high enough to hit the threshold
         runner.tx.insert_blocks(seed.iter(), None).expect("failed to seed execution");
 
         let total_txs = runner.tx.table::<tables::Transactions>().unwrap().len() as u64;
@@ -379,7 +379,7 @@ mod tests {
 
         // Seed only once with full input range
         let seed =
-            random_block_range(&mut rng, stage_progress + 1..=previous_stage, H256::zero(), 0..2);
+            random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..2);
         runner.tx.insert_blocks(seed.iter(), None).expect("failed to seed execution");
 
         runner.set_prune_modes(PruneModes {
@@ -413,7 +413,7 @@ mod tests {
         let tx = TestTransaction::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=100, H256::zero(), 0..10);
+        let blocks = random_block_range(&mut rng, 0..=100, B256::ZERO, 0..10);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let max_pruned_block = 30;
@@ -541,7 +541,7 @@ mod tests {
             let end = input.target();
             let mut rng = generators::rng();
 
-            let blocks = random_block_range(&mut rng, stage_progress + 1..=end, H256::zero(), 0..2);
+            let blocks = random_block_range(&mut rng, stage_progress + 1..=end, B256::ZERO, 0..2);
             self.tx.insert_blocks(blocks.iter(), None)?;
             Ok(blocks)
         }

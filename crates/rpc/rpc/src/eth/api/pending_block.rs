@@ -4,8 +4,8 @@ use crate::eth::error::{EthApiError, EthResult};
 use core::fmt::Debug;
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
-    proofs, Block, ChainSpec, Header, IntoRecoveredTransaction, Receipt, SealedBlock, SealedHeader,
-    EMPTY_OMMER_ROOT, H256, U256,
+    proofs, Block, ChainSpec, Header, IntoRecoveredTransaction, Receipt, Receipts, SealedBlock,
+    SealedHeader, B256, EMPTY_OMMER_ROOT, U256,
 };
 use reth_provider::{BundleStateWithReceipts, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
@@ -187,7 +187,11 @@ impl PendingBlockEnv {
         // merge all transitions into bundle state.
         db.merge_transitions(BundleRetention::PlainState);
 
-        let bundle = BundleStateWithReceipts::new(db.take_bundle(), vec![receipts], block_number);
+        let bundle = BundleStateWithReceipts::new(
+            db.take_bundle(),
+            Receipts::from_vec(vec![receipts]),
+            block_number,
+        );
 
         let receipts_root = bundle.receipts_root_slow(block_number).expect("Block is present");
         let logs_bloom = bundle.block_logs_bloom(block_number).expect("Block is present");
@@ -246,7 +250,7 @@ fn pre_block_beacon_root_contract_call<DB>(
     block_number: u64,
     initialized_cfg: &CfgEnv,
     initialized_block_env: &BlockEnv,
-    parent_beacon_block_root: Option<H256>,
+    parent_beacon_block_root: Option<B256>,
 ) -> EthResult<()>
 where
     DB: Database + DatabaseCommit,
@@ -298,7 +302,7 @@ impl PendingBlockEnvOrigin {
     }
 
     /// Returns the hash of the pending block should be built on
-    fn build_target_hash(&self) -> H256 {
+    fn build_target_hash(&self) -> B256 {
         match self {
             PendingBlockEnvOrigin::ActualPending(block) => block.parent_hash,
             PendingBlockEnvOrigin::DerivedFromLatest(header) => header.hash,

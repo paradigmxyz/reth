@@ -1,7 +1,7 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
+use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{PooledTransactionsElement, TransactionSigned, H256};
-use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+use reth_primitives::{PooledTransactionsElement, TransactionSigned, B256};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -12,12 +12,12 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GetPooledTransactions(
     /// The transaction hashes to request transaction bodies for.
-    pub Vec<H256>,
+    pub Vec<B256>,
 );
 
 impl<T> From<Vec<T>> for GetPooledTransactions
 where
-    T: Into<H256>,
+    T: Into<B256>,
 {
     fn from(hashes: Vec<T>) -> Self {
         GetPooledTransactions(hashes.into_iter().map(|h| h.into()).collect())
@@ -48,11 +48,10 @@ impl From<Vec<TransactionSigned>> for PooledTransactions {
 #[cfg(test)]
 mod test {
     use crate::{message::RequestPair, GetPooledTransactions, PooledTransactions};
-    use hex_literal::hex;
+    use alloy_rlp::{Decodable, Encodable};
     use reth_primitives::{
         hex, Signature, Transaction, TransactionKind, TransactionSigned, TxEip1559, TxLegacy, U256,
     };
-    use reth_rlp::{Decodable, Encodable};
     use std::str::FromStr;
 
     #[test]

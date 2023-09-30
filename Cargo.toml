@@ -25,8 +25,6 @@ members = [
     "crates/revm",
     "crates/revm/revm-primitives",
     "crates/revm/revm-inspectors",
-    "crates/rlp",
-    "crates/rlp/rlp-derive",
     "crates/rpc/ipc",
     "crates/rpc/rpc",
     "crates/rpc/rpc-api",
@@ -34,6 +32,7 @@ members = [
     "crates/rpc/rpc-engine-api",
     "crates/rpc/rpc-types",
     "crates/rpc/rpc-testing-util",
+    "crates/snapshot",
     "crates/stages",
     "crates/storage/codecs",
     "crates/storage/db",
@@ -59,9 +58,9 @@ default-members = ["bin/reth"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.9"
+version = "0.1.0-alpha.10"
 edition = "2021"
-rust-version = "1.70" # Remember to update .clippy.toml and README.md
+rust-version = "1.70" # Remember to update clippy.toml and README.md
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
@@ -71,6 +70,12 @@ exclude = [".github/"]
 [profile.debug-fast]
 inherits = "release"
 debug = true
+
+# Meant for testing - all optimizations, but with debug assertions and overflow
+# checks
+[profile.hivetests]
+inherits = "test"
+opt-level = 3
 
 [profile.maxperf]
 inherits = "release"
@@ -85,7 +90,6 @@ reth-primitives = { path = "./crates/primitives" }
 reth-interfaces = { path = "./crates/interfaces" }
 reth-provider = { path = "./crates/storage/provider" }
 reth-db = { path = "./crates/storage/db" }
-reth-rlp = { path = "./crates/rlp" }
 reth-rpc-types = { path = "./crates/rpc/rpc-types" }
 reth-rpc-builder = { path = "./crates/rpc/rpc-builder" }
 reth-blockchain-tree = { path = "./crates/blockchain-tree" }
@@ -103,15 +107,19 @@ reth-eth-wire = { path = "./crates/net/eth-wire" }
 reth-ecies = { path = "./crates/net/ecies" }
 
 # revm
-revm = { git = "https://github.com/bluealloy/revm", rev = "516f62cc" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "516f62cc" }
+# TODO: Switch back to bluealloy/revm once #724 lands
+revm = { git = "https://github.com/Evalir/revm/", branch = "reintroduce-alloy-rebased" }
+revm-primitives = { git = "https://github.com/Evalir/revm/", branch = "reintroduce-alloy-rebased" }
 
 ## eth
+alloy-primitives = "0.4"
+alloy-dyn-abi = "0.4"
+alloy-sol-types = "0.4"
+alloy-rlp = "0.3"
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
 ethers-signers = { version = "2.0", default-features = false }
 ethers-middleware = { version = "2.0", default-features = false }
-
 discv5 = { git = "https://github.com/sigp/discv5", rev = "d2e30e04ee62418b9e57278cee907c02b99d5bd1" }
 igd = { git = "https://github.com/stevefan1999-personal/rust-igd", rev = "c2d1f83eb1612a462962453cb0703bc93258b173" }
 
@@ -133,7 +141,7 @@ strum = "0.25"
 rayon = "1.7"
 itertools = "0.11"
 parking_lot = "0.12"
-metrics = "0.21.1"                                    # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
+metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
 hex-literal = "0.4"
 
 ### proc-macros
@@ -164,7 +172,7 @@ secp256k1 = { version = "0.27.0", default-features = false, features = [
 ] }
 enr = { version = "0.9", default-features = false, features = ["k256"] }
 # for eip-4844
-c-kzg = { git = "https://github.com/ethereum/c-kzg-4844", rev = "f5f6f863d475847876a2bd5ee252058d37c3a15d" }
+c-kzg = "0.1.1"
 
 ## config
 confy = "0.5"

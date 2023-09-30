@@ -4,7 +4,7 @@ use crate::tracing::{
     types::{CallTraceNode, CallTraceStepStackItem},
     TracingInspectorConfig,
 };
-use reth_primitives::{Address, Bytes, H256, U256};
+use reth_primitives::{Address, Bytes, B256, U256};
 use reth_rpc_types::trace::geth::{
     AccountState, CallConfig, CallFrame, DefaultFrame, DiffMode, GethDefaultTracingOptions,
     PreStateConfig, PreStateFrame, PreStateMode, StructLog,
@@ -33,7 +33,7 @@ impl GethTraceBuilder {
         &self,
         main_trace_node: &CallTraceNode,
         opts: &GethDefaultTracingOptions,
-        storage: &mut HashMap<Address, BTreeMap<H256, H256>>,
+        storage: &mut HashMap<Address, BTreeMap<B256, B256>>,
         struct_logs: &mut Vec<StructLog>,
     ) {
         // A stack with all the steps of the trace and all its children's steps.
@@ -62,7 +62,7 @@ impl GethTraceBuilder {
             }
 
             if opts.is_return_data_enabled() {
-                log.return_data = Some(trace_node.trace.output.clone().into());
+                log.return_data = Some(trace_node.trace.output.clone());
             }
 
             // Add step to geth trace
@@ -192,14 +192,14 @@ impl GethTraceBuilder {
             let mut prestate = PreStateMode::default();
             for (addr, _) in account_diffs {
                 let db_acc = db.basic(addr)?.unwrap_or_default();
+
                 prestate.0.insert(
                     addr,
-                    AccountState {
-                        balance: Some(db_acc.balance),
-                        nonce: Some(U256::from(db_acc.nonce)),
-                        code: db_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
-                        storage: None,
-                    },
+                    AccountState::from_account_info(
+                        db_acc.nonce,
+                        db_acc.balance,
+                        db_acc.code.as_ref().map(|code| code.original_bytes()),
+                    ),
                 );
             }
             self.update_storage_from_trace(&mut prestate.0, false);
@@ -208,18 +208,16 @@ impl GethTraceBuilder {
             let mut state_diff = DiffMode::default();
             for (addr, changed_acc) in account_diffs {
                 let db_acc = db.basic(addr)?.unwrap_or_default();
-                let pre_state = AccountState {
-                    balance: Some(db_acc.balance),
-                    nonce: Some(U256::from(db_acc.nonce)),
-                    code: db_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
-                    storage: None,
-                };
-                let post_state = AccountState {
-                    balance: Some(changed_acc.balance),
-                    nonce: Some(U256::from(changed_acc.nonce)),
-                    code: changed_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
-                    storage: None,
-                };
+                let pre_state = AccountState::from_account_info(
+                    db_acc.nonce,
+                    db_acc.balance,
+                    db_acc.code.as_ref().map(|code| code.original_bytes()),
+                );
+                let post_state = AccountState::from_account_info(
+                    changed_acc.nonce,
+                    changed_acc.balance,
+                    changed_acc.code.as_ref().map(|code| code.original_bytes()),
+                );
                 state_diff.pre.insert(addr, pre_state);
                 state_diff.post.insert(addr, post_state);
             }

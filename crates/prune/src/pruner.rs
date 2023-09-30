@@ -1,6 +1,6 @@
 //! Support for pruning.
 
-use crate::{Metrics, PrunerError};
+use crate::{Metrics, PrunerError, PrunerEvent};
 use rayon::prelude::*;
 use reth_db::{
     abstraction::cursor::{DbCursorRO, DbCursorRW},
@@ -13,15 +13,17 @@ use reth_db::{
 };
 use reth_interfaces::RethResult;
 use reth_primitives::{
-    BlockNumber, ChainSpec, PruneBatchSizes, PruneCheckpoint, PruneMode, PruneModes, PrunePart,
-    TxNumber, MINIMUM_PRUNING_DISTANCE,
+    listener::EventListeners, BlockNumber, ChainSpec, PruneBatchSizes, PruneCheckpoint, PruneMode,
+    PruneModes, PrunePart, TxNumber, MINIMUM_PRUNING_DISTANCE,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
     TransactionsProvider,
 };
-use std::{collections::HashMap, ops::RangeInclusive, sync::Arc, time::Instant};
-use tracing::{debug, error, info, instrument, trace};
+use reth_snapshot::HighestSnapshotsTracker;
+use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc, time::Instant};
+use tokio_stream::wrappers::UnboundedReceiverStream;
+use tracing::{debug, error, instrument, trace};
 
 /// Result of [Pruner::run] execution.
 ///
@@ -46,6 +48,9 @@ pub struct Pruner<DB> {
     modes: PruneModes,
     /// Maximum entries to prune per block, per prune part.
     batch_sizes: PruneBatchSizes,
+    listeners: EventListeners<PrunerEvent>,
+    #[allow(dead_code)]
+    highest_snapshots_tracker: HighestSnapshotsTracker,
 }
 
 impl<DB: Database> Pruner<DB> {
@@ -56,6 +61,7 @@ impl<DB: Database> Pruner<DB> {
         min_block_interval: usize,
         modes: PruneModes,
         batch_sizes: PruneBatchSizes,
+        highest_snapshots_tracker: HighestSnapshotsTracker,
     ) -> Self {
         Self {
             metrics: Metrics::default(),
@@ -64,7 +70,14 @@ impl<DB: Database> Pruner<DB> {
             last_pruned_block_number: None,
             modes,
             batch_sizes,
+            listeners: Default::default(),
+            highest_snapshots_tracker,
         }
+    }
+
+    /// Listen for events on the prune.
+    pub fn events(&mut self) -> UnboundedReceiverStream<PrunerEvent> {
+        self.listeners.new_listener()
     }
 
     /// Run the pruner
@@ -82,8 +95,10 @@ impl<DB: Database> Pruner<DB> {
         let provider = self.provider_factory.provider_rw()?;
 
         let mut done = true;
+        let mut parts_done = BTreeMap::new();
 
-        let mut parts_done = HashMap::new();
+        // TODO(alexey): prune snapshot parts of data (headers, transactions)
+        // let highest_snapshots = *self.highest_snapshots_tracker.borrow();
 
         if let Some((to_block, prune_mode)) =
             self.modes.prune_target_block_receipts(tip_block_number)?
@@ -235,7 +250,7 @@ impl<DB: Database> Pruner<DB> {
         let elapsed = start.elapsed();
         self.metrics.duration_seconds.record(elapsed);
 
-        info!(
+        trace!(
             target: "pruner",
             %tip_block_number,
             ?elapsed,
@@ -243,6 +258,14 @@ impl<DB: Database> Pruner<DB> {
             ?parts_done,
             "Pruner finished"
         );
+
+        self.listeners.notify(PrunerEvent::Finished {
+            tip_block_number,
+            elapsed,
+            done,
+            parts_done,
+        });
+
         Ok(done)
     }
 
@@ -400,7 +423,8 @@ impl<DB: Database> Pruner<DB> {
         tip_block_number: BlockNumber,
     ) -> PrunerResult {
         // Contract log filtering removes every receipt possible except the ones in the list. So,
-        // for the other receipts it's as if they had a `PruneMode::Distance()` of 128.
+        // for the other receipts it's as if they had a `PruneMode::Distance()` of
+        // `MINIMUM_PRUNING_DISTANCE`.
         let to_block = PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)
             .prune_target_block(
                 tip_block_number,
@@ -929,29 +953,38 @@ mod tests {
     };
     use reth_primitives::{
         BlockNumber, PruneBatchSizes, PruneCheckpoint, PruneMode, PruneModes, PrunePart,
-        ReceiptsLogPruneConfig, TxNumber, H256, MAINNET,
+        ReceiptsLogPruneConfig, TxNumber, B256, MAINNET,
     };
     use reth_provider::{PruneCheckpointReader, TransactionsProvider};
     use reth_stages::test_utils::TestTransaction;
     use std::{collections::BTreeMap, ops::AddAssign};
+    use tokio::sync::watch;
 
     #[test]
     fn is_pruning_needed() {
         let db = create_test_rw_db();
-        let pruner =
-            Pruner::new(db, MAINNET.clone(), 5, PruneModes::none(), PruneBatchSizes::default());
+        let mut pruner = Pruner::new(
+            db,
+            MAINNET.clone(),
+            5,
+            PruneModes::none(),
+            PruneBatchSizes::default(),
+            watch::channel(None).1,
+        );
 
         // No last pruned block number was set before
         let first_block_number = 1;
         assert!(pruner.is_pruning_needed(first_block_number));
+        pruner.last_pruned_block_number = Some(first_block_number);
 
-        // Delta is not less than min block interval
+        // Tip block number delta is >= than min block interval
         let second_block_number = first_block_number + pruner.min_block_interval as u64;
         assert!(pruner.is_pruning_needed(second_block_number));
+        pruner.last_pruned_block_number = Some(second_block_number);
 
-        // Delta is less than min block interval
+        // Tip block number delta is < than min block interval
         let third_block_number = second_block_number;
-        assert!(pruner.is_pruning_needed(third_block_number));
+        assert!(!pruner.is_pruning_needed(third_block_number));
     }
 
     #[test]
@@ -959,7 +992,7 @@ mod tests {
         let tx = TestTransaction::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=100, H256::zero(), 0..10);
+        let blocks = random_block_range(&mut rng, 0..=100, B256::ZERO, 0..10);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let mut receipts = Vec::new();
@@ -989,6 +1022,7 @@ mod tests {
                 PruneModes { receipts: Some(prune_mode), ..Default::default() },
                 // Less than total amount of blocks to prune to test the batching logic
                 PruneBatchSizes::default().with_receipts(10),
+                watch::channel(None).1,
             );
 
             let next_tx_number_to_prune = tx
@@ -1054,7 +1088,7 @@ mod tests {
         let tx = TestTransaction::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=100, H256::zero(), 0..10);
+        let blocks = random_block_range(&mut rng, 0..=100, B256::ZERO, 0..10);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let mut tx_hash_numbers = Vec::new();
@@ -1083,6 +1117,7 @@ mod tests {
                 PruneModes { transaction_lookup: Some(prune_mode), ..Default::default() },
                 // Less than total amount of blocks to prune to test the batching logic
                 PruneBatchSizes::default().with_transaction_lookup(10),
+                watch::channel(None).1,
             );
 
             let next_tx_number_to_prune = tx
@@ -1148,7 +1183,7 @@ mod tests {
         let tx = TestTransaction::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=100, H256::zero(), 0..10);
+        let blocks = random_block_range(&mut rng, 0..=100, B256::ZERO, 0..10);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let mut transaction_senders = Vec::new();
@@ -1180,6 +1215,7 @@ mod tests {
                 PruneModes { sender_recovery: Some(prune_mode), ..Default::default() },
                 // Less than total amount of blocks to prune to test the batching logic
                 PruneBatchSizes::default().with_transaction_senders(10),
+                watch::channel(None).1,
             );
 
             let next_tx_number_to_prune = tx
@@ -1245,7 +1281,7 @@ mod tests {
         let tx = TestTransaction::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=7000, H256::zero(), 0..1);
+        let blocks = random_block_range(&mut rng, 0..=7000, B256::ZERO, 0..1);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let accounts =
@@ -1286,6 +1322,7 @@ mod tests {
                 PruneModes { account_history: Some(prune_mode), ..Default::default() },
                 // Less than total amount of blocks to prune to test the batching logic
                 PruneBatchSizes::default().with_account_history(2000),
+                watch::channel(None).1,
             );
 
             let provider = tx.inner_rw();
@@ -1375,7 +1412,7 @@ mod tests {
         let tx = TestTransaction::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=7000, H256::zero(), 0..1);
+        let blocks = random_block_range(&mut rng, 0..=7000, B256::ZERO, 0..1);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let accounts =
@@ -1416,6 +1453,7 @@ mod tests {
                 PruneModes { storage_history: Some(prune_mode), ..Default::default() },
                 // Less than total amount of blocks to prune to test the batching logic
                 PruneBatchSizes::default().with_storage_history(2000),
+                watch::channel(None).1,
             );
 
             let provider = tx.inner_rw();
@@ -1507,15 +1545,19 @@ mod tests {
         let tx = TestTransaction::default();
         let mut rng = generators::rng();
 
-        let tip = 300;
-        let blocks = random_block_range(&mut rng, 0..=tip, H256::zero(), 1..5);
+        let tip = 20000;
+        let blocks = [
+            random_block_range(&mut rng, 0..=100, B256::ZERO, 1..5),
+            random_block_range(&mut rng, (100 + 1)..=(tip - 100), B256::ZERO, 0..1),
+            random_block_range(&mut rng, (tip - 100 + 1)..=tip, B256::ZERO, 1..5),
+        ]
+        .concat();
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let mut receipts = Vec::new();
 
         let (deposit_contract_addr, _) = random_eoa_account(&mut rng);
         for block in &blocks {
-            assert!(!block.body.is_empty());
             for (txi, transaction) in block.body.iter().enumerate() {
                 let mut receipt = random_receipt(&mut rng, transaction, Some(1));
                 receipt.logs.push(random_log(
@@ -1554,6 +1596,7 @@ mod tests {
                 },
                 // Less than total amount of blocks to prune to test the batching logic
                 PruneBatchSizes::default().with_storage_history(10),
+                watch::channel(None).1,
             );
 
             let result = pruner.prune_receipts_by_logs(&provider, tip);

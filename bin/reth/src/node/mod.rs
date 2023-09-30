@@ -34,7 +34,6 @@ use reth_blockchain_tree::{
 };
 use reth_config::{config::PruneConfig, Config};
 use reth_db::{database::Database, init_db, DatabaseEnv};
-use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -54,7 +53,7 @@ use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     kzg::KzgSettings,
     stage::StageId,
-    BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head, SealedHeader, H256,
+    BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head, SealedHeader, B256,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
@@ -78,7 +77,7 @@ use reth_transaction_pool::{
 };
 use secp256k1::SecretKey;
 use std::{
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    net::{SocketAddr, SocketAddrV4},
     path::PathBuf,
     sync::Arc,
 };
@@ -113,6 +112,7 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     /// - mainnet
     /// - goerli
     /// - sepolia
+    /// - holesky
     /// - dev
     #[arg(
         long,
@@ -450,19 +450,33 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             None
         };
 
+        let (highest_snapshots_tx, highest_snapshots_rx) = watch::channel(None);
+
         let mut hooks = EngineHooks::new();
 
-        if let Some(prune_config) = prune_config {
+        let pruner_events = if let Some(prune_config) = prune_config {
             info!(target: "reth::cli", ?prune_config, "Pruner initialized");
-            let pruner = reth_prune::Pruner::new(
+            let mut pruner = reth_prune::Pruner::new(
                 db.clone(),
                 self.chain.clone(),
                 prune_config.block_interval,
                 prune_config.parts,
                 self.chain.prune_batch_sizes,
+                highest_snapshots_rx,
             );
+            let events = pruner.events();
             hooks.add(PruneHook::new(pruner, Box::new(ctx.task_executor.clone())));
-        }
+            Either::Left(events)
+        } else {
+            Either::Right(stream::empty())
+        };
+
+        let _snapshotter = reth_snapshot::Snapshotter::new(
+            db,
+            self.chain.clone(),
+            self.chain.snapshot_block_interval,
+            highest_snapshots_tx,
+        );
 
         // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
@@ -493,7 +507,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 )
             } else {
                 Either::Right(stream::empty())
-            }
+            },
+            pruner_events.map(Into::into)
         );
         ctx.task_executor.spawn_critical(
             "events task",
@@ -700,7 +715,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         &self,
         db: DB,
         client: Client,
-        tip: H256,
+        tip: B256,
     ) -> RethResult<u64>
     where
         DB: Database,
@@ -761,20 +776,14 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .with_task_executor(Box::new(executor))
             .set_head(head)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::UNSPECIFIED,
+                self.network.addr,
                 // set discovery port based on instance number
-                match self.network.port {
-                    Some(port) => port + self.instance - 1,
-                    None => DEFAULT_DISCOVERY_PORT + self.instance - 1,
-                },
+                self.network.port + self.instance - 1,
             )))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::UNSPECIFIED,
+                self.network.addr,
                 // set discovery port based on instance number
-                match self.network.port {
-                    Some(port) => port + self.instance - 1,
-                    None => DEFAULT_DISCOVERY_PORT + self.instance - 1,
-                },
+                self.network.port + self.instance - 1,
             )))
             .build(ProviderFactory::new(db, self.chain.clone()))
     }
@@ -806,7 +815,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             builder = builder.with_max_block(max_block)
         }
 
-        let (tip_tx, tip_rx) = watch::channel(H256::zero());
+        let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         use reth_revm_inspectors::stack::InspectorStackConfig;
         let factory = reth_revm::Factory::new(self.chain.clone());
 
@@ -938,8 +947,12 @@ async fn run_network_until_shutdown<C>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use reth_primitives::DEV;
-    use std::{net::IpAddr, path::Path};
+    use std::{
+        net::{IpAddr, Ipv4Addr},
+        path::Path,
+    };
 
     #[test]
     fn parse_help_node_command() {
@@ -956,9 +969,30 @@ mod tests {
     }
 
     #[test]
+    fn parse_discovery_addr() {
+        let cmd =
+            NodeCommand::<()>::try_parse_from(["reth", "--discovery.addr", "127.0.0.1"]).unwrap();
+        assert_eq!(cmd.network.discovery.addr, Ipv4Addr::LOCALHOST);
+    }
+
+    #[test]
+    fn parse_addr() {
+        let cmd = NodeCommand::<()>::try_parse_from([
+            "reth",
+            "--discovery.addr",
+            "127.0.0.1",
+            "--addr",
+            "127.0.0.1",
+        ])
+        .unwrap();
+        assert_eq!(cmd.network.discovery.addr, Ipv4Addr::LOCALHOST);
+        assert_eq!(cmd.network.addr, Ipv4Addr::LOCALHOST);
+    }
+
+    #[test]
     fn parse_discovery_port() {
         let cmd = NodeCommand::<()>::try_parse_from(["reth", "--discovery.port", "300"]).unwrap();
-        assert_eq!(cmd.network.discovery.port, Some(300));
+        assert_eq!(cmd.network.discovery.port, 300);
     }
 
     #[test]
@@ -966,8 +1000,8 @@ mod tests {
         let cmd =
             NodeCommand::<()>::try_parse_from(["reth", "--discovery.port", "300", "--port", "99"])
                 .unwrap();
-        assert_eq!(cmd.network.discovery.port, Some(300));
-        assert_eq!(cmd.network.port, Some(99));
+        assert_eq!(cmd.network.discovery.port, 300);
+        assert_eq!(cmd.network.port, 99);
     }
 
     #[test]
@@ -1036,32 +1070,32 @@ mod tests {
     fn parse_instance() {
         let mut cmd = NodeCommand::<()>::parse_from(["reth"]);
         cmd.adjust_instance_ports();
-        cmd.network.port = Some(DEFAULT_DISCOVERY_PORT + cmd.instance - 1);
+        cmd.network.port = DEFAULT_DISCOVERY_PORT + cmd.instance - 1;
         // check rpc port numbers
         assert_eq!(cmd.rpc.auth_port, 8551);
         assert_eq!(cmd.rpc.http_port, 8545);
         assert_eq!(cmd.rpc.ws_port, 8546);
         // check network listening port number
-        assert_eq!(cmd.network.port.unwrap(), 30303);
+        assert_eq!(cmd.network.port, 30303);
 
         let mut cmd = NodeCommand::<()>::parse_from(["reth", "--instance", "2"]);
         cmd.adjust_instance_ports();
-        cmd.network.port = Some(DEFAULT_DISCOVERY_PORT + cmd.instance - 1);
+        cmd.network.port = DEFAULT_DISCOVERY_PORT + cmd.instance - 1;
         // check rpc port numbers
         assert_eq!(cmd.rpc.auth_port, 8651);
         assert_eq!(cmd.rpc.http_port, 8544);
         assert_eq!(cmd.rpc.ws_port, 8548);
         // check network listening port number
-        assert_eq!(cmd.network.port.unwrap(), 30304);
+        assert_eq!(cmd.network.port, 30304);
 
         let mut cmd = NodeCommand::<()>::parse_from(["reth", "--instance", "3"]);
         cmd.adjust_instance_ports();
-        cmd.network.port = Some(DEFAULT_DISCOVERY_PORT + cmd.instance - 1);
+        cmd.network.port = DEFAULT_DISCOVERY_PORT + cmd.instance - 1;
         // check rpc port numbers
         assert_eq!(cmd.rpc.auth_port, 8751);
         assert_eq!(cmd.rpc.http_port, 8543);
         assert_eq!(cmd.rpc.ws_port, 8550);
         // check network listening port number
-        assert_eq!(cmd.network.port.unwrap(), 30305);
+        assert_eq!(cmd.network.port, 30305);
     }
 }

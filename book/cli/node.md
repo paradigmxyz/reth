@@ -31,6 +31,7 @@ Options:
           - mainnet
           - goerli
           - sepolia
+          - holesky
           - dev
           
           [default: mainnet]
@@ -196,7 +197,7 @@ RPC:
       --rpc-max-connections <COUNT>
           Maximum number of RPC server connections
           
-          [default: 100]
+          [default: 500]
 
       --rpc-max-tracing-requests <COUNT>
           Maximum number of concurrent tracing requests
