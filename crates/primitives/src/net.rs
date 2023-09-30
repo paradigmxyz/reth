@@ -1,6 +1,5 @@
 use crate::PeerId;
-use reth_rlp::RlpDecodable;
-use reth_rlp_derive::RlpEncodable;
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 use secp256k1::{SecretKey, SECP256K1};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::{
@@ -91,7 +90,7 @@ impl NodeRecord {
 impl fmt::Display for NodeRecord {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("enode://")?;
-        hex::encode(self.id.as_bytes()).fmt(f)?;
+        crate::hex::encode(self.id.as_slice()).fmt(f)?;
         f.write_char('@')?;
         match self.address {
             IpAddr::V4(ip) => {
@@ -232,9 +231,9 @@ impl FromStr for NodeRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_rlp::{Decodable, Encodable};
     use bytes::BytesMut;
     use rand::{thread_rng, Rng, RngCore};
-    use reth_rlp::{Decodable, Encodable};
 
     #[test]
     fn test_mapped_ipv6() {
@@ -247,7 +246,7 @@ mod tests {
             address: v6.into(),
             tcp_port: rng.gen(),
             udp_port: rng.gen(),
-            id: PeerId::random(),
+            id: rng.gen(),
         };
 
         assert!(record.clone().convert_ipv4_mapped());
@@ -263,7 +262,7 @@ mod tests {
             address: v4.into(),
             tcp_port: rng.gen(),
             udp_port: rng.gen(),
-            id: PeerId::random(),
+            id: rng.gen(),
         };
 
         assert!(!record.clone().convert_ipv4_mapped());
@@ -280,7 +279,7 @@ mod tests {
                 address: IpAddr::V4(ip.into()),
                 tcp_port: rng.gen(),
                 udp_port: rng.gen(),
-                id: PeerId::random(),
+                id: rng.gen(),
             };
 
             let mut buf = BytesMut::new();
@@ -301,7 +300,7 @@ mod tests {
                 address: IpAddr::V6(ip.into()),
                 tcp_port: rng.gen(),
                 udp_port: rng.gen(),
-                id: PeerId::random(),
+                id: rng.gen(),
             };
 
             let mut buf = BytesMut::new();

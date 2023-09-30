@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, H256, U256, U64,
+    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, B256, U256, U64,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
@@ -221,7 +221,7 @@ where
     }
 
     /// Returns the state at the given block number
-    pub fn state_at_hash(&self, block_hash: H256) -> RethResult<StateProviderBox<'_>> {
+    pub fn state_at_hash(&self, block_hash: B256) -> RethResult<StateProviderBox<'_>> {
         self.provider().history_by_block_hash(block_hash)
     }
 

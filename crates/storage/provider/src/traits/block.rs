@@ -8,7 +8,7 @@ use reth_interfaces::RethResult;
 use reth_primitives::{
     Address, Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders,
     ChainSpec, Header, PruneModes, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    H256,
+    B256,
 };
 use std::ops::RangeInclusive;
 
@@ -62,7 +62,7 @@ pub trait BlockReader:
     /// Note: this only operates on the hash because the number might be ambiguous.
     ///
     /// Returns `None` if block is not found.
-    fn find_block_by_hash(&self, hash: H256, source: BlockSource) -> RethResult<Option<Block>>;
+    fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> RethResult<Option<Block>>;
 
     /// Returns the block with given id from the database.
     ///
@@ -86,7 +86,7 @@ pub trait BlockReader:
     /// Returns the block with matching hash from the database.
     ///
     /// Returns `None` if block is not found.
-    fn block_by_hash(&self, hash: H256) -> RethResult<Option<Block>> {
+    fn block_by_hash(&self, hash: B256) -> RethResult<Option<Block>> {
         self.block(hash.into())
     }
 
@@ -106,6 +106,11 @@ pub trait BlockReader:
     ///
     /// Returns `None` if block is not found.
     fn block_with_senders(&self, number: BlockNumber) -> RethResult<Option<BlockWithSenders>>;
+
+    /// Returns all blocks in the given inclusive range.
+    ///
+    /// Note: returns only available blocks
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Block>>;
 }
 
 /// Trait extension for `BlockReader`, for types that implement `BlockId` conversion.

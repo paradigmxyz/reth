@@ -12,7 +12,7 @@ use reth_db::{
 use reth_interfaces::{test_utils::generators::ChangeSet, RethResult};
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader, StorageEntry,
-    TxHash, TxNumber, H256, MAINNET, U256,
+    TxHash, TxNumber, B256, MAINNET, U256,
 };
 use reth_provider::{DatabaseProviderRO, DatabaseProviderRW, HistoryWriter, ProviderFactory};
 use std::{
@@ -384,7 +384,7 @@ impl TestTransaction {
         I: IntoIterator<Item = ChangeSet>,
     {
         let mut accounts = BTreeMap::<Address, Vec<u64>>::new();
-        let mut storages = BTreeMap::<(Address, H256), Vec<u64>>::new();
+        let mut storages = BTreeMap::<(Address, B256), Vec<u64>>::new();
 
         for (block, changeset) in changesets.into_iter().enumerate() {
             for (address, _, storage_entries) in changeset {

@@ -1,10 +1,9 @@
-use crate::{NippyJarError, PerfectHashingFunction};
+use crate::{NippyJarError, PHFKey, PerfectHashingFunction};
 use ph::fmph::{GOBuildConf, GOFunction};
 use serde::{
     de::Error as DeSerdeError, ser::Error as SerdeError, Deserialize, Deserializer, Serialize,
     Serializer,
 };
-use std::{clone::Clone, hash::Hash, marker::Sync};
 
 /// Wrapper struct for [`GOFunction`]. Implementation of the following [paper](https://dl.acm.org/doi/10.1145/3596453).
 #[derive(Default)]
@@ -19,10 +18,7 @@ impl GoFmph {
 }
 
 impl PerfectHashingFunction for GoFmph {
-    fn set_keys<T: AsRef<[u8]> + Sync + Clone + Hash>(
-        &mut self,
-        keys: &[T],
-    ) -> Result<(), NippyJarError> {
+    fn set_keys<T: PHFKey>(&mut self, keys: &[T]) -> Result<(), NippyJarError> {
         self.function = Some(GOFunction::from_slice_with_conf(
             keys,
             GOBuildConf { use_multiple_threads: true, ..Default::default() },

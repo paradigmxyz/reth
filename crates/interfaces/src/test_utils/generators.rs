@@ -5,7 +5,7 @@ use rand::{
 use reth_primitives::{
     proofs, sign_message, Account, Address, BlockNumber, Bytes, Header, Log, Receipt, SealedBlock,
     SealedHeader, Signature, StorageEntry, Transaction, TransactionKind, TransactionSigned,
-    TxLegacy, H160, H256, U256,
+    TxLegacy, B256, U256,
 };
 use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey, SECP256K1};
 use std::{
@@ -40,7 +40,7 @@ pub fn rng() -> StdRng {
 pub fn random_header_range<R: Rng>(
     rng: &mut R,
     range: std::ops::Range<u64>,
-    head: H256,
+    head: B256,
 ) -> Vec<SealedHeader> {
     let mut headers = Vec::with_capacity(range.end.saturating_sub(range.start) as usize);
     for idx in range {
@@ -56,7 +56,7 @@ pub fn random_header_range<R: Rng>(
 /// Generate a random [SealedHeader].
 ///
 /// The header is assumed to not be correct if validated.
-pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<H256>) -> SealedHeader {
+pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<B256>) -> SealedHeader {
     let header = reth_primitives::Header {
         number,
         nonce: rng.gen(),
@@ -79,7 +79,7 @@ pub fn random_tx<R: Rng>(rng: &mut R) -> Transaction {
         nonce: rng.gen::<u16>().into(),
         gas_price: rng.gen::<u16>().into(),
         gas_limit: rng.gen::<u16>().into(),
-        to: TransactionKind::Call(Address::random()),
+        to: TransactionKind::Call(rng.gen()),
         value: rng.gen::<u16>().into(),
         input: Bytes::default(),
     })
@@ -100,7 +100,7 @@ pub fn random_signed_tx<R: Rng>(rng: &mut R) -> TransactionSigned {
 /// Signs the [Transaction] with the given key pair.
 pub fn sign_tx_with_key_pair(key_pair: KeyPair, tx: Transaction) -> TransactionSigned {
     let signature =
-        sign_message(H256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
+        sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
     TransactionSigned::from_transaction_and_signature(tx, signature)
 }
 
@@ -127,7 +127,7 @@ pub fn generate_keys<R: Rng>(rng: &mut R, count: usize) -> Vec<KeyPair> {
 pub fn random_block<R: Rng>(
     rng: &mut R,
     number: u64,
-    parent: Option<H256>,
+    parent: Option<B256>,
     tx_count: Option<u8>,
     ommers_count: Option<u8>,
 ) -> SealedBlock {
@@ -173,7 +173,7 @@ pub fn random_block<R: Rng>(
 pub fn random_block_range<R: Rng>(
     rng: &mut R,
     block_numbers: RangeInclusive<BlockNumber>,
-    head: H256,
+    head: B256,
     tx_count: Range<u8>,
 ) -> Vec<SealedBlock> {
     let mut blocks =
@@ -237,7 +237,7 @@ where
         prev_from.balance = prev_from.balance.wrapping_sub(transfer);
 
         // deposit in receiving account and update storage
-        let (prev_to, storage): &mut (Account, BTreeMap<H256, U256>) = state.get_mut(&to).unwrap();
+        let (prev_to, storage): &mut (Account, BTreeMap<B256, U256>) = state.get_mut(&to).unwrap();
 
         let mut old_entries: Vec<_> = new_entries
             .into_iter()
@@ -303,7 +303,12 @@ pub fn random_account_change<R: Rng>(
 
 /// Generate a random storage change.
 pub fn random_storage_entry<R: Rng>(rng: &mut R, key_range: std::ops::Range<u64>) -> StorageEntry {
-    let key = H256::from_low_u64_be(key_range.sample_single(rng));
+    let key = B256::new({
+        let n = key_range.sample_single(rng);
+        let mut m = [0u8; 32];
+        m[24..32].copy_from_slice(&n.to_be_bytes());
+        m
+    });
     let value = U256::from(rng.gen::<u64>());
 
     StorageEntry { key, value }
@@ -313,7 +318,7 @@ pub fn random_storage_entry<R: Rng>(rng: &mut R, key_range: std::ops::Range<u64>
 pub fn random_eoa_account<R: Rng>(rng: &mut R) -> (Address, Account) {
     let nonce: u64 = rng.gen();
     let balance = U256::from(rng.gen::<u32>());
-    let addr = H160::from(rng.gen::<u64>());
+    let addr = rng.gen();
 
     (addr, Account { nonce, balance, bytecode_hash: None })
 }
@@ -338,7 +343,7 @@ pub fn random_contract_account_range<R: Rng>(
     let mut accounts = Vec::with_capacity(acc_range.end.saturating_sub(acc_range.start) as usize);
     for _ in acc_range {
         let (address, eoa_account) = random_eoa_account(rng);
-        let account = Account { bytecode_hash: Some(H256::random()), ..eoa_account };
+        let account = Account { bytecode_hash: Some(rng.gen()), ..eoa_account };
         accounts.push((address, account))
     }
     accounts
@@ -366,25 +371,23 @@ pub fn random_receipt<R: Rng>(
 
 /// Generate random log
 pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: Option<u8>) -> Log {
-    let data_byte_count = rng.gen::<u8>();
-    let topics_count = topics_count.unwrap_or_else(|| rng.gen::<u8>());
+    let data_byte_count = rng.gen::<u8>() as usize;
+    let topics_count = topics_count.unwrap_or_else(|| rng.gen()) as usize;
     Log {
         address: address.unwrap_or_else(|| rng.gen()),
-        topics: (0..topics_count).map(|_| rng.gen()).collect(),
-        data: Bytes::from((0..data_byte_count).map(|_| rng.gen::<u8>()).collect::<Vec<_>>()),
+        topics: std::iter::repeat_with(|| rng.gen()).take(topics_count).collect(),
+        data: std::iter::repeat_with(|| rng.gen()).take(data_byte_count).collect::<Vec<_>>().into(),
     }
 }
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
-
     use super::*;
-    use hex_literal::hex;
     use reth_primitives::{
-        keccak256, public_key_to_address, AccessList, Address, TransactionKind, TxEip1559,
+        hex, keccak256, public_key_to_address, AccessList, Address, TransactionKind, TxEip1559,
     };
     use secp256k1::KeyPair;
+    use std::str::FromStr;
 
     #[test]
     fn test_sign_message() {
@@ -407,7 +410,7 @@ mod test {
             let key_pair = KeyPair::new(&secp, &mut rand::thread_rng());
 
             let signature =
-                sign_message(H256::from_slice(&key_pair.secret_bytes()[..]), signature_hash)
+                sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), signature_hash)
                     .unwrap();
 
             let signed = TransactionSigned::from_transaction_and_signature(tx.clone(), signature);
@@ -440,12 +443,12 @@ mod test {
 
         let hash = transaction.signature_hash();
         let expected =
-            H256::from_str("daf5a779ae972f972197303d7b574746c7ef83eadac0f2791ad23db92e4c8e53")
+            B256::from_str("daf5a779ae972f972197303d7b574746c7ef83eadac0f2791ad23db92e4c8e53")
                 .unwrap();
         assert_eq!(expected, hash);
 
         let secret =
-            H256::from_str("4646464646464646464646464646464646464646464646464646464646464646")
+            B256::from_str("4646464646464646464646464646464646464646464646464646464646464646")
                 .unwrap();
         let signature = sign_message(secret, hash).unwrap();
 

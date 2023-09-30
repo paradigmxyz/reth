@@ -149,6 +149,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
         None
     }
 
+    fn is_canonical(&self, hash: BlockHash) -> RethResult<bool> {
+        trace!(target: "blockchain_tree", ?hash, "Checking if block is canonical");
+        self.tree.read().is_block_hash_canonical(&hash)
+    }
+
     fn lowest_buffered_ancestor(&self, hash: BlockHash) -> Option<SealedBlockWithSenders> {
         trace!(target: "blockchain_tree", ?hash, "Returning lowest buffered ancestor");
         self.tree.read().lowest_buffered_ancestor(&hash).cloned()
@@ -157,11 +162,6 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
     fn canonical_tip(&self) -> BlockNumHash {
         trace!(target: "blockchain_tree", "Returning canonical tip");
         self.tree.read().block_indices().canonical_tip()
-    }
-
-    fn is_canonical(&self, hash: BlockHash) -> RethResult<bool> {
-        trace!(target: "blockchain_tree", ?hash, "Checking if block is canonical");
-        self.tree.read().is_block_hash_canonical(&hash)
     }
 
     fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {

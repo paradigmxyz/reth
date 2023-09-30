@@ -1,9 +1,9 @@
 //! Clap parser utilities
 
 use reth_primitives::{
-    fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
+    fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256, DEV, GOERLI, HOLESKY, MAINNET,
+    SEPOLIA,
 };
-use reth_revm::primitives::B256 as H256;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
     path::PathBuf,
@@ -53,7 +53,7 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
 
 /// Parse [BlockHashOrNumber]
 pub fn hash_or_num_value_parser(value: &str) -> eyre::Result<BlockHashOrNumber, eyre::Error> {
-    match H256::from_str(value) {
+    match B256::from_str(value) {
         Ok(hash) => Ok(BlockHashOrNumber::Hash(hash)),
         Err(_) => Ok(BlockHashOrNumber::Number(value.parse()?)),
     }

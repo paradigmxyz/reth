@@ -13,15 +13,15 @@ Ethereum network discovery
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-rlp.workspace = true
-reth-rlp-derive = { path = "../../rlp/rlp-derive" }
 reth-net-common = { path = "../common" }
 reth-net-nat = { path = "../nat" }
 
 # ethereum
+alloy-rlp = { workspace = true, features = ["derive"] }
 discv5.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery", "serde"] }
 enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }
+rlp = "0.5" # needed for enr
 
 # async/futures
 tokio = { workspace = true, features = ["io-util", "net", "time"] }
@@ -31,7 +31,6 @@ tokio-stream.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 parking_lot.workspace = true
-hex = "0.4"
 rand = { workspace = true, optional = true }
 generic-array = "0.14"
 serde = { workspace = true, optional = true }
