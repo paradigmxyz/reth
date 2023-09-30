@@ -149,8 +149,9 @@ checksum = "0942ffc6dcaadf03badf6e6a2d0228460359d5e34b57ccdc720b7382dfbd5ec5"
 
 [[package]]
 name = "alloy-dyn-abi"
-version = "0.3.2"
-source = "git+https://github.com/alloy-rs/core?rev=cd4985caf45f4ac6b2aee91d1f06fcdeb665415a#cd4985caf45f4ac6b2aee91d1f06fcdeb665415a"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4a2c94da79130a80677c497eb56e465f72e376e0d85720228be2cf6c85ec5b0"
 dependencies = [
  "alloy-json-abi",
  "alloy-primitives",
@@ -165,8 +166,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-json-abi"
-version = "0.3.2"
-source = "git+https://github.com/alloy-rs/core?rev=cd4985caf45f4ac6b2aee91d1f06fcdeb665415a#cd4985caf45f4ac6b2aee91d1f06fcdeb665415a"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d187c265879ea8fc1fb574f75f95942e9502d2a67eba7e5c9f6ba9879375ddd6"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-type-parser",
@@ -176,8 +178,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-primitives"
-version = "0.3.2"
-source = "git+https://github.com/alloy-rs/core?rev=cd4985caf45f4ac6b2aee91d1f06fcdeb665415a#cd4985caf45f4ac6b2aee91d1f06fcdeb665415a"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b4084879b7257d5b95b9009837c07a1868bd7d60e66418a7764b9b580ae64e0"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
@@ -222,9 +225,11 @@ dependencies = [
 
 [[package]]
 name = "alloy-sol-macro"
-version = "0.3.2"
-source = "git+https://github.com/alloy-rs/core?rev=cd4985caf45f4ac6b2aee91d1f06fcdeb665415a#cd4985caf45f4ac6b2aee91d1f06fcdeb665415a"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de84480ac5979d8513164f7e668f837839cd6d5c4bdb8beecbb8cf062b61cb48"
 dependencies = [
+ "const-hex",
  "dunce",
  "heck",
  "proc-macro2",
@@ -236,16 +241,18 @@ dependencies = [
 
 [[package]]
 name = "alloy-sol-type-parser"
-version = "0.3.2"
-source = "git+https://github.com/alloy-rs/core?rev=cd4985caf45f4ac6b2aee91d1f06fcdeb665415a#cd4985caf45f4ac6b2aee91d1f06fcdeb665415a"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3427d2135d3c28696b437fdf44b86e334f36639d367abc8a5af2f718b3c1992b"
 dependencies = [
  "winnow",
 ]
 
 [[package]]
 name = "alloy-sol-types"
-version = "0.3.2"
-source = "git+https://github.com/alloy-rs/core?rev=cd4985caf45f4ac6b2aee91d1f06fcdeb665415a#cd4985caf45f4ac6b2aee91d1f06fcdeb665415a"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa7e42aa2983db6676af5d762bc8d9371dd74f5948739790d3080c3d652a957b"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-macro",
@@ -6423,7 +6430,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "3.3.0"
-source = "git+https://github.com/Evalir/revm/?branch=reintroduce-alloy-rebased#b6eb3246197c6dfb8715a2a28dd2908e8c84aad7"
+source = "git+https://github.com/Evalir/revm/?branch=reintroduce-alloy-rebased#988e0d7920ab20c3d0a12dd5582654a58e7f9f2c"
 dependencies = [
  "auto_impl",
  "revm-interpreter",
@@ -6433,7 +6440,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "1.1.2"
-source = "git+https://github.com/Evalir/revm/?branch=reintroduce-alloy-rebased#b6eb3246197c6dfb8715a2a28dd2908e8c84aad7"
+source = "git+https://github.com/Evalir/revm/?branch=reintroduce-alloy-rebased#988e0d7920ab20c3d0a12dd5582654a58e7f9f2c"
 dependencies = [
  "revm-primitives",
 ]
@@ -6441,7 +6448,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "2.0.3"
-source = "git+https://github.com/Evalir/revm/?branch=reintroduce-alloy-rebased#b6eb3246197c6dfb8715a2a28dd2908e8c84aad7"
+source = "git+https://github.com/Evalir/revm/?branch=reintroduce-alloy-rebased#988e0d7920ab20c3d0a12dd5582654a58e7f9f2c"
 dependencies = [
  "c-kzg",
  "k256",
@@ -6457,7 +6464,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "1.1.2"
-source = "git+https://github.com/Evalir/revm/?branch=reintroduce-alloy-rebased#b6eb3246197c6dfb8715a2a28dd2908e8c84aad7"
+source = "git+https://github.com/Evalir/revm/?branch=reintroduce-alloy-rebased#988e0d7920ab20c3d0a12dd5582654a58e7f9f2c"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -7472,8 +7479,9 @@ dependencies = [
 
 [[package]]
 name = "syn-solidity"
-version = "0.3.2"
-source = "git+https://github.com/alloy-rs/core?rev=cd4985caf45f4ac6b2aee91d1f06fcdeb665415a#cd4985caf45f4ac6b2aee91d1f06fcdeb665415a"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b8a5a633f1172a0c80b1516a988e7e8efa7ce9cededf56590f54e593e4513b3"
 dependencies = [
  "paste",
  "proc-macro2",
