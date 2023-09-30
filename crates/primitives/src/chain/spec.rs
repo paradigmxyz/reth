@@ -1366,6 +1366,111 @@ Post-merge hard forks (timestamp based):
     }
 
     #[test]
+    fn test_chainspec_satisfy() {
+        let empty_genesis = Genesis::default();
+        // happy path test case
+        let happy_path_case = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(empty_genesis.clone())
+            .with_fork(Hardfork::Frontier, ForkCondition::Block(0))
+            .with_fork(Hardfork::Homestead, ForkCondition::Block(73))
+            .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(11313123))
+            .build();
+        let happy_path_head = happy_path_case.satisfy(ForkCondition::Timestamp(11313123));
+        let happy_path_expected = Head { number: 73, timestamp: 11313123, ..Default::default() };
+        assert_eq!(
+            happy_path_head, happy_path_expected,
+            "expected satisfy() to return {:#?}, but got {:#?} ",
+            happy_path_expected, happy_path_head
+        );
+        // multiple timestamp test case (i.e Shanghai -> Cancun)
+        let multiple_timestamp_fork_case = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(empty_genesis.clone())
+            .with_fork(Hardfork::Frontier, ForkCondition::Block(0))
+            .with_fork(Hardfork::Homestead, ForkCondition::Block(73))
+            .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(11313123))
+            .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(11313398))
+            .build();
+        let multi_timestamp_head =
+            multiple_timestamp_fork_case.satisfy(ForkCondition::Timestamp(11313398));
+        let mult_timestamp_expected =
+            Head { number: 73, timestamp: 11313398, ..Default::default() };
+        assert_eq!(
+            multi_timestamp_head, mult_timestamp_expected,
+            "expected satisfy() to return {:#?}, but got {:#?} ",
+            mult_timestamp_expected, multi_timestamp_head
+        );
+        // no ForkCondition::Block test case
+        let no_block_fork_case = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(empty_genesis.clone())
+            .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(11313123))
+            .build();
+        let no_block_fork_head = no_block_fork_case.satisfy(ForkCondition::Timestamp(11313123));
+        let no_block_fork_expected = Head { number: 0, timestamp: 11313123, ..Default::default() };
+        assert_eq!(
+            no_block_fork_head, no_block_fork_expected,
+            "expected satisfy() to return {:#?}, but got {:#?} ",
+            no_block_fork_expected, no_block_fork_head
+        );
+        // spec w/ ForkCondition::TTD with block_num test case (Sepolia merge netsplit edge case)
+        let fork_cond_ttd_blocknum_case = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(empty_genesis.clone())
+            .with_fork(Hardfork::Frontier, ForkCondition::Block(0))
+            .with_fork(Hardfork::Homestead, ForkCondition::Block(73))
+            .with_fork(
+                Hardfork::Paris,
+                ForkCondition::TTD {
+                    fork_block: Some(101),
+                    total_difficulty: U256::from(10_790_000),
+                },
+            )
+            .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(11313123))
+            .build();
+        let fork_cond_ttd_blocknum_head =
+            fork_cond_ttd_blocknum_case.satisfy(ForkCondition::Timestamp(11313123));
+        let fork_cond_ttd_blocknum_expected =
+            Head { number: 101, timestamp: 11313123, ..Default::default() };
+        assert_eq!(
+            fork_cond_ttd_blocknum_head, fork_cond_ttd_blocknum_expected,
+            "expected satisfy() to return {:#?}, but got {:#?} ",
+            fork_cond_ttd_blocknum_expected, fork_cond_ttd_blocknum_head
+        );
+
+        // spec w/ only ForkCondition::Block - test the match arm for ForkCondition::Block to ensure
+        // no regressions, for these ForkConditions(Block/TTD) - a separate chain spec definition is
+        // technically unecessary - but we include it here for thoroughness
+        let fork_cond_block_only_case = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(empty_genesis.clone())
+            .with_fork(Hardfork::Frontier, ForkCondition::Block(0))
+            .with_fork(Hardfork::Homestead, ForkCondition::Block(73))
+            .build();
+        let fork_cond_block_only_head = fork_cond_block_only_case.satisfy(ForkCondition::Block(73));
+        let fork_cond_block_only_expected = Head { number: 73, ..Default::default() };
+        assert_eq!(
+            fork_cond_block_only_head, fork_cond_block_only_expected,
+            "expected satisfy() to return {:#?}, but got {:#?} ",
+            fork_cond_block_only_expected, fork_cond_block_only_head
+        );
+        // Fork::ConditionTTD test case without a new chain spec to demonstrate ChainSpec::satisfy
+        // is independent of ChainSpec for this(these - including ForkCondition::Block) match arm(s)
+        let fork_cond_ttd_no_new_spec = fork_cond_block_only_case.satisfy(ForkCondition::TTD {
+            fork_block: None,
+            total_difficulty: U256::from(10_790_000),
+        });
+        let fork_cond_ttd_no_new_spec_expected =
+            Head { total_difficulty: U256::from(10_790_000), ..Default::default() };
+        assert_eq!(
+            fork_cond_ttd_no_new_spec, fork_cond_ttd_no_new_spec_expected,
+            "expected satisfy() to return {:#?}, but got {:#?} ",
+            fork_cond_ttd_no_new_spec_expected, fork_cond_ttd_no_new_spec
+        );
+    }
+
+    #[test]
     fn mainnet_hardfork_fork_ids() {
         test_hardfork_fork_ids(
             &MAINNET,
