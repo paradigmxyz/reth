@@ -1,4 +1,4 @@
-use reth_primitives::{NodeRecord, PeerId, H256, U256};
+use reth_primitives::{NodeRecord, PeerId, B256, U256};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -81,11 +81,11 @@ pub struct EthProtocolInfo {
     #[serde(deserialize_with = "reth_primitives::serde_helper::deserialize_json_u256")]
     pub difficulty: U256,
     /// The block hash of the head of the chain.
-    pub head: H256,
+    pub head: B256,
     /// Network ID in base 10.
     pub network: u64,
     /// Genesis block of the current chain.
-    pub genesis: H256,
+    pub genesis: B256,
 }
 
 #[cfg(test)]

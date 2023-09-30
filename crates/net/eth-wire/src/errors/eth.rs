@@ -2,7 +2,7 @@
 use crate::{
     errors::P2PStreamError, version::ParseVersionError, DisconnectReason, EthMessageID, EthVersion,
 };
-use reth_primitives::{Chain, ValidationError, H256};
+use reth_primitives::{Chain, ValidationError, B256};
 use std::io;
 
 /// Errors when sending/receiving messages
@@ -50,8 +50,8 @@ impl From<io::Error> for EthStreamError {
     }
 }
 
-impl From<reth_rlp::DecodeError> for EthStreamError {
-    fn from(err: reth_rlp::DecodeError) -> Self {
+impl From<alloy_rlp::Error> for EthStreamError {
+    fn from(err: alloy_rlp::Error) -> Self {
         P2PStreamError::from(err).into()
     }
 }
@@ -69,7 +69,7 @@ pub enum EthHandshakeError {
     #[error(transparent)]
     InvalidFork(#[from] ValidationError),
     #[error("mismatched genesis in Status message. expected: {expected:?}, got: {got:?}")]
-    MismatchedGenesis { expected: H256, got: H256 },
+    MismatchedGenesis { expected: B256, got: B256 },
     #[error("mismatched protocol version in Status message. expected: {expected:?}, got: {got:?}")]
     MismatchedProtocolVersion { expected: u8, got: u8 },
     #[error("mismatched chain in Status message. expected: {expected:?}, got: {got:?}")]

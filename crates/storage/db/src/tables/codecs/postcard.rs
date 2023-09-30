@@ -29,7 +29,7 @@ macro_rules! impl_postcard {
             }
 
             impl Decode for $name {
-                fn decode<B: Into<bytes::Bytes>>(value: B) -> Result<Self, Error> {
+                fn decode<B: Into<Bytes>>(value: B) -> Result<Self, Error> {
                     from_bytes(&value.into()).map_err(|e| Error::Decode(e.into()))
                 }
             }
@@ -40,4 +40,4 @@ macro_rules! impl_postcard {
 type VecU8 = Vec<u8>;
 
 //#[cfg(feature = "bench-postcard")]
-//impl_postcard!(VecU8, Receipt, H256, U256, H160, u8, u16, u64, Header, Account, Log, TxType);
+//impl_postcard!(VecU8, Receipt, B256, U256, Address, u8, u16, u64, Header, Account, Log, TxType);

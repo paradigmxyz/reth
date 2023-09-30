@@ -1,7 +1,7 @@
 //! clap [Args](clap::Args) for debugging purposes
 
 use clap::Args;
-use reth_primitives::{TxHash, H256};
+use reth_primitives::{TxHash, B256};
 
 /// Parameters for debugging purposes
 #[derive(Debug, Args, PartialEq, Default)]
@@ -21,7 +21,7 @@ pub struct DebugArgs {
     ///
     /// NOTE: This is a temporary flag
     #[arg(long = "debug.tip", help_heading = "Debug", conflicts_with = "continuous")]
-    pub tip: Option<H256>,
+    pub tip: Option<B256>,
 
     /// Runs the sync only up to the specified block.
     #[arg(long = "debug.max-block", help_heading = "Debug")]

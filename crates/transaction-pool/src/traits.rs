@@ -4,15 +4,15 @@ use crate::{
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
+use alloy_rlp::Encodable;
 use futures_util::{ready, Stream};
 use reth_primitives::{
     Address, BlobTransactionSidecar, BlobTransactionValidationError,
     FromRecoveredPooledTransaction, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId,
     PooledTransactionsElement, PooledTransactionsElementEcRecovered, SealedBlock, Transaction,
-    TransactionKind, TransactionSignedEcRecovered, TxEip4844, TxHash, EIP1559_TX_TYPE_ID,
-    EIP4844_TX_TYPE_ID, H256, U256,
+    TransactionKind, TransactionSignedEcRecovered, TxEip4844, TxHash, B256, EIP1559_TX_TYPE_ID,
+    EIP4844_TX_TYPE_ID, U256,
 };
-use reth_rlp::Encodable;
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -235,6 +235,15 @@ pub trait TransactionPool: Send + Sync + Clone {
         base_fee: u64,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
 
+    /// Returns an iterator that yields transactions that are ready for block production with the
+    /// given base fee and optional blob fee attributes.
+    ///
+    /// Consumer: Block production
+    fn best_transactions_with_attributes(
+        &self,
+        best_transactions_attributes: BestTransactionsAttributes,
+    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
+
     /// Returns all transactions that can be included in the next block.
     ///
     /// This is primarily used for the `txpool_` RPC namespace: <https://geth.ethereum.org/docs/interacting-with-geth/rpc/ns-txpool> which distinguishes between `pending` and `queued` transactions, where `pending` are transactions ready for inclusion in the next block and `queued` are transactions that are ready for inclusion in future blocks.
@@ -342,10 +351,10 @@ pub trait TransactionPoolExt: TransactionPool {
     fn update_accounts(&self, accounts: Vec<ChangedAccount>);
 
     /// Deletes the blob sidecar for the given transaction from the blob store
-    fn delete_blob(&self, tx: H256);
+    fn delete_blob(&self, tx: B256);
 
     /// Deletes multiple blob sidecars from the blob store
-    fn delete_blobs(&self, txs: Vec<H256>);
+    fn delete_blobs(&self, txs: Vec<B256>);
 }
 
 /// Determines what kind of new transactions should be emitted by a stream of transactions.
@@ -515,7 +524,7 @@ pub struct CanonicalStateUpdate<'a> {
     /// A set of changed accounts across a range of blocks.
     pub changed_accounts: Vec<ChangedAccount>,
     /// All mined transactions in the block range.
-    pub mined_transactions: Vec<H256>,
+    pub mined_transactions: Vec<B256>,
 }
 
 impl<'a> CanonicalStateUpdate<'a> {
@@ -525,7 +534,7 @@ impl<'a> CanonicalStateUpdate<'a> {
     }
 
     /// Returns the hash of the tip block.
-    pub fn hash(&self) -> H256 {
+    pub fn hash(&self) -> B256 {
         self.new_tip.hash
     }
 
@@ -620,6 +629,35 @@ impl<T> BestTransactions for std::iter::Empty<T> {
     fn skip_blobs(&mut self) {}
 
     fn set_skip_blobs(&mut self, _skip_blobs: bool) {}
+}
+
+/// A Helper type that bundles best transactions attributes together.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct BestTransactionsAttributes {
+    /// The base fee attribute for best transactions.
+    pub basefee: u64,
+    /// The blob fee attribute for best transactions.
+    pub blob_fee: Option<u64>,
+}
+
+// === impl BestTransactionsAttributes ===
+
+impl BestTransactionsAttributes {
+    /// Creates a new `BestTransactionsAttributes` with the given basefee and blob fee.
+    pub fn new(basefee: u64, blob_fee: Option<u64>) -> Self {
+        Self { basefee, blob_fee }
+    }
+
+    /// Creates a new `BestTransactionsAttributes` with the given basefee.
+    pub fn base_fee(basefee: u64) -> Self {
+        Self::new(basefee, None)
+    }
+
+    /// Sets the given blob fee.
+    pub fn with_blob_fee(mut self, blob_fee: u64) -> Self {
+        self.blob_fee = Some(blob_fee);
+        self
+    }
 }
 
 /// Trait for transaction types used inside the pool
@@ -990,7 +1028,7 @@ impl PoolSize {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct BlockInfo {
     /// Hash for the currently tracked block.
-    pub last_seen_block_hash: H256,
+    pub last_seen_block_hash: B256,
     /// Current the currently tracked block.
     pub last_seen_block_number: u64,
     /// Currently enforced base fee: the threshold for the basefee sub-pool.

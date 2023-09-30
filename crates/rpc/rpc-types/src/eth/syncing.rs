@@ -1,4 +1,4 @@
-use reth_primitives::{H512, U256, U64};
+use reth_primitives::{B512, U256, U64};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeMap;
 
@@ -149,7 +149,7 @@ pub struct TransactionStats {
     /// Block no this transaction was first seen.
     pub first_seen: u64,
     /// Peers this transaction was propagated to with count.
-    pub propagated_to: BTreeMap<H512, usize>,
+    pub propagated_to: BTreeMap<B512, usize>,
 }
 
 /// Chain status.

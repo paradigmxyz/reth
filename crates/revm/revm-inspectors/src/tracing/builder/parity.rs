@@ -165,12 +165,8 @@ impl ParityTraceBuilder {
 
         let (trace, vm_trace, state_diff) = self.into_trace_type_traces(trace_types);
 
-        let mut trace = TraceResults {
-            output: output.into(),
-            trace: trace.unwrap_or_default(),
-            vm_trace,
-            state_diff,
-        };
+        let mut trace =
+            TraceResults { output, trace: trace.unwrap_or_default(), vm_trace, state_diff };
 
         // we're setting the gas used of the root trace explicitly to the gas used of the execution
         // result
@@ -561,7 +557,7 @@ where
 
         let code_hash = if db_acc.code_hash != KECCAK_EMPTY { db_acc.code_hash } else { continue };
 
-        curr_ref.code = db.code_by_hash(code_hash)?.original_bytes().into();
+        curr_ref.code = db.code_by_hash(code_hash)?.original_bytes();
     }
 
     Ok(())
