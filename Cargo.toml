@@ -112,9 +112,9 @@ revm = { git = "https://github.com/Evalir/revm/", branch = "reintroduce-alloy-re
 revm-primitives = { git = "https://github.com/Evalir/revm/", branch = "reintroduce-alloy-rebased" }
 
 ## eth
-alloy-primitives = "0.3"
-alloy-dyn-abi = "0.3"
-alloy-sol-types = "0.3"
+alloy-primitives = "0.4"
+alloy-dyn-abi = "0.4"
+alloy-sol-types = "0.4"
 alloy-rlp = "0.3"
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
@@ -185,13 +185,3 @@ assert_matches = "1.5.0"
 proptest = "1.0"
 proptest-derive = "0.4"
 serial_test = "2"
-
-# TODO: Use Alloy 0.4 once it's released
-[patch.crates-io]
-alloy-dyn-abi = { git = "https://github.com/alloy-rs/core", rev = "cd4985caf45f4ac6b2aee91d1f06fcdeb665415a" }
-alloy-json-abi = { git = "https://github.com/alloy-rs/core", rev = "cd4985caf45f4ac6b2aee91d1f06fcdeb665415a" }
-alloy-primitives = { git = "https://github.com/alloy-rs/core", rev = "cd4985caf45f4ac6b2aee91d1f06fcdeb665415a" }
-alloy-sol-macro = { git = "https://github.com/alloy-rs/core", rev = "cd4985caf45f4ac6b2aee91d1f06fcdeb665415a" }
-alloy-sol-type-parser = { git = "https://github.com/alloy-rs/core", rev = "cd4985caf45f4ac6b2aee91d1f06fcdeb665415a" }
-alloy-sol-types = { git = "https://github.com/alloy-rs/core", rev = "cd4985caf45f4ac6b2aee91d1f06fcdeb665415a" }
-syn-solidity = { git = "https://github.com/alloy-rs/core", rev = "cd4985caf45f4ac6b2aee91d1f06fcdeb665415a" }
