@@ -3,8 +3,7 @@ use std::mem;
 use crate::{Address, B256};
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
-use revm_primitives::{B160, U256};
+use alloy_primitives::U256;
 use serde::{Deserialize, Serialize};
 
 /// A list of addresses and storage keys that the transaction plans to access.
@@ -52,13 +51,12 @@ impl AccessList {
         self.flatten().collect()
     }
 
-    /// Converts the ['AccessList'] into a Vec of (B160, `Vec<U256>`), as expected by revm
-    pub fn to_ref_slice(&self) -> Vec<(B160, Vec<U256>)> {
+    /// Converts the ['AccessList'] into a Vec of (Address, `Vec<U256>`), as expected by revm
+    pub fn to_ref_slice(&self) -> Vec<(Address, Vec<U256>)> {
         self.0
             .iter()
             .map(|item| {
-                // Convert Address to B160 (if needed)
-                let address: B160 = item.address;
+                let address: Address = item.address;
                 // Convert Vec<H256> to Vec<Uint<256, 4>>
                 let storage_keys: Vec<U256> =
                     item.storage_keys.iter().map(|h256| U256::from_be_bytes(h256.0)).collect();

@@ -6042,8 +6042,6 @@ dependencies = [
  "rand 0.8.5",
  "rayon",
  "reth-codecs",
- "reth-rlp",
- "reth-rlp-derive",
  "revm",
  "revm-primitives",
  "secp256k1",
@@ -6146,35 +6144,6 @@ name = "reth-revm-primitives"
 version = "0.1.0-alpha.10"
 dependencies = [
  "reth-primitives",
- "revm",
-]
-
-[[package]]
-name = "reth-rlp"
-version = "0.1.0-alpha.10"
-dependencies = [
- "arrayvec",
- "auto_impl",
- "bytes",
- "c-kzg",
- "criterion",
- "ethereum-types",
- "ethnum",
- "hex-literal",
- "pprof",
- "reth-rlp",
- "reth-rlp-derive",
- "revm-primitives",
- "smol_str",
-]
-
-[[package]]
-name = "reth-rlp-derive"
-version = "0.1.0-alpha.10"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.37",
 ]
 
 [[package]]

@@ -23,11 +23,7 @@ pub use error::InvalidTransactionError;
 pub use legacy::TxLegacy;
 pub use meta::TransactionMeta;
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
-use reth_rlp::{Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
 pub use revm::interpreter::gas::initial_tx_gas;
-use serde::{Deserialize, Serialize};
 
 pub use signature::Signature;
 pub use tx_type::{
