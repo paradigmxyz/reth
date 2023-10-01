@@ -159,13 +159,11 @@ where
         let input = tx.input().as_ref();
 
         let access_list: AccessList = match transaction.tx_type() {
-            LEGACY_TX_TYPE_ID => AccessList::default(), // Assuming Legacy tx has no access list
+            LEGACY_TX_TYPE_ID => AccessList::default(), 
             EIP2930_TX_TYPE_ID => {
                 if let Some(access_list_tx) = tx.as_eip2930() {
                     access_list_tx.access_list.clone()
                 } else {
-                    // Handle case where transaction should be EIP2930 but isn't
-                    // Maybe return an error or use a default access list
                     AccessList::default()
                 }
             }
@@ -183,7 +181,7 @@ where
                     AccessList::default()
                 }
             }
-            _ => AccessList::default(), // Default or error for unsupported transaction types
+            _ => AccessList::default(), 
         };
         if transaction.gas_limit() <
             initial_tx_gas::<ShanghaiSpec>(
