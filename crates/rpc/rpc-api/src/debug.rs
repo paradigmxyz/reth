@@ -1,5 +1,5 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, H160, H256};
+use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256};
 use reth_rpc_types::{
     trace::geth::{
         BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
@@ -22,7 +22,7 @@ pub trait DebugApi {
 
     /// Returns a EIP-2718 binary-encoded transaction.
     #[method(name = "getRawTransaction")]
-    async fn raw_transaction(&self, hash: H256) -> RpcResult<Bytes>;
+    async fn raw_transaction(&self, hash: B256) -> RpcResult<Bytes>;
 
     /// Returns an array of EIP-2718 binary-encoded receipts.
     #[method(name = "getRawReceipts")]
@@ -61,7 +61,7 @@ pub trait DebugApi {
     #[method(name = "traceBlockByHash")]
     async fn debug_trace_block_by_hash(
         &self,
-        block: H256,
+        block: B256,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>>;
 
@@ -82,7 +82,7 @@ pub trait DebugApi {
     #[method(name = "traceTransaction")]
     async fn debug_trace_transaction(
         &self,
-        tx_hash: H256,
+        tx_hash: B256,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<GethTrace>;
 
@@ -216,8 +216,8 @@ pub trait DebugApi {
     #[method(name = "getModifiedAccountsByHash")]
     async fn debug_get_modified_accounts_by_hash(
         &self,
-        start_hash: H256,
-        end_hash: H256,
+        start_hash: B256,
+        end_hash: B256,
     ) -> RpcResult<()>;
 
     /// Returns all accounts that have changed between the two blocks specified. A change is defined
@@ -238,7 +238,7 @@ pub trait DebugApi {
     #[method(name = "intermediateRoots")]
     async fn debug_intermediate_roots(
         &self,
-        block_hash: H256,
+        block_hash: B256,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<()>;
 
@@ -254,7 +254,7 @@ pub trait DebugApi {
 
     /// Returns the preimage for a sha3 hash, if known.
     #[method(name = "preimage")]
-    async fn debug_preimage(&self, hash: H256) -> RpcResult<()>;
+    async fn debug_preimage(&self, hash: B256) -> RpcResult<()>;
 
     /// Retrieves a block and returns its pretty printed form.
     #[method(name = "printBlock")]
@@ -262,7 +262,7 @@ pub trait DebugApi {
 
     /// Fetches and retrieves the seed hash of the block by number.
     #[method(name = "seedHash")]
-    async fn debug_seed_hash(&self, number: u64) -> RpcResult<H256>;
+    async fn debug_seed_hash(&self, number: u64) -> RpcResult<B256>;
 
     /// Sets the rate (in samples/sec) of goroutine block profile data collection. A non-zero rate
     /// enables block profiling, setting it to zero stops the profile. Collected profile data can be
@@ -332,10 +332,10 @@ pub trait DebugApi {
     #[method(name = "storageRangeAt")]
     async fn debug_storage_range_at(
         &self,
-        block_hash: H256,
+        block_hash: B256,
         tx_idx: usize,
-        contract_address: H160,
-        key_start: H256,
+        contract_address: Address,
+        key_start: B256,
         max_result: u64,
     ) -> RpcResult<()>;
 
@@ -345,7 +345,7 @@ pub trait DebugApi {
     #[method(name = "traceBadBlock")]
     async fn debug_trace_bad_block(
         &self,
-        block_hash: H256,
+        block_hash: B256,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<()>;
 

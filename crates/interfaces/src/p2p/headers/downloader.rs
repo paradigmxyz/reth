@@ -4,7 +4,7 @@ use crate::{
     p2p::error::{DownloadError, DownloadResult},
 };
 use futures::Stream;
-use reth_primitives::{BlockHashOrNumber, SealedHeader, H256};
+use reth_primitives::{BlockHashOrNumber, SealedHeader, B256};
 
 /// A downloader capable of fetching and yielding block headers.
 ///
@@ -42,7 +42,7 @@ pub enum SyncTarget {
     /// Sync _inclusively_ to the given block hash.
     ///
     /// This target specifies the upper end of the sync gap `(head...tip]`
-    Tip(H256),
+    Tip(B256),
     /// This represents a gap missing headers bounded by the given header `h` in the form of
     /// `(head,..h),h+1,h+2...`
     ///

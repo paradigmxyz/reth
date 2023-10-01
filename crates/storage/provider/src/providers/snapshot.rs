@@ -99,7 +99,7 @@ mod test {
     };
     use reth_interfaces::test_utils::generators::{self, random_header_range};
     use reth_nippy_jar::NippyJar;
-    use reth_primitives::{H256, MAINNET};
+    use reth_primitives::{B256, MAINNET};
 
     #[test]
     fn test_snap() {
@@ -116,7 +116,7 @@ mod test {
         let mut headers = random_header_range(
             &mut generators::rng(),
             *range.start()..(*range.end() + 1),
-            H256::random(),
+            B256::random(),
         );
 
         db.update(|tx| -> std::result::Result<(), DatabaseError> {

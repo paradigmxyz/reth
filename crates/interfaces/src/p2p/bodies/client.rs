@@ -5,7 +5,7 @@ use std::{
 
 use crate::p2p::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
 use futures::{Future, FutureExt};
-use reth_primitives::{BlockBody, H256};
+use reth_primitives::{BlockBody, B256};
 
 /// The bodies future type
 pub type BodiesFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<BlockBody>>> + Send + Sync>>;
@@ -17,23 +17,23 @@ pub trait BodiesClient: DownloadClient {
     type Output: Future<Output = PeerRequestResult<Vec<BlockBody>>> + Sync + Send + Unpin;
 
     /// Fetches the block body for the requested block.
-    fn get_block_bodies(&self, hashes: Vec<H256>) -> Self::Output {
+    fn get_block_bodies(&self, hashes: Vec<B256>) -> Self::Output {
         self.get_block_bodies_with_priority(hashes, Priority::Normal)
     }
 
     /// Fetches the block body for the requested block with priority
-    fn get_block_bodies_with_priority(&self, hashes: Vec<H256>, priority: Priority)
+    fn get_block_bodies_with_priority(&self, hashes: Vec<B256>, priority: Priority)
         -> Self::Output;
 
     /// Fetches a single block body for the requested hash.
-    fn get_block_body(&self, hash: H256) -> SingleBodyRequest<Self::Output> {
+    fn get_block_body(&self, hash: B256) -> SingleBodyRequest<Self::Output> {
         self.get_block_body_with_priority(hash, Priority::Normal)
     }
 
     /// Fetches a single block body for the requested hash with priority
     fn get_block_body_with_priority(
         &self,
-        hash: H256,
+        hash: B256,
         priority: Priority,
     ) -> SingleBodyRequest<Self::Output> {
         let fut = self.get_block_bodies_with_priority(vec![hash], priority);

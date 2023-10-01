@@ -8,7 +8,7 @@ use boa_engine::{
 use boa_gc::{empty_trace, Finalize, Trace};
 use reth_primitives::{
     contract::{create2_address_from_code, create_address},
-    hex, keccak256, Address, H256, U256,
+    hex, keccak256, Address, B256, U256,
 };
 use std::collections::HashSet;
 
@@ -107,8 +107,8 @@ pub(crate) fn bytes_to_address(buf: Vec<u8>) -> Address {
 /// Converts a buffer type to a hash.
 ///
 /// If the buffer is larger than the hash size, it will be cropped from the left
-pub(crate) fn bytes_to_hash(buf: Vec<u8>) -> H256 {
-    let mut hash = H256::default();
+pub(crate) fn bytes_to_hash(buf: Vec<u8>) -> B256 {
+    let mut hash = B256::default();
     let mut buf = &buf[..];
     let hash_len = hash.0.len();
     if buf.len() > hash_len {

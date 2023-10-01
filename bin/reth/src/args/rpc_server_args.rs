@@ -11,8 +11,8 @@ use clap::{
 use futures::TryFutureExt;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider,
-    HeaderProvider, StateProviderFactory,
+    AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
+    EvmEnvProvider, HeaderProvider, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{
@@ -24,6 +24,7 @@ use reth_rpc::{
     },
     JwtError, JwtSecret,
 };
+
 use reth_rpc_builder::{
     auth::{AuthServerConfig, AuthServerHandle},
     constants,
@@ -50,7 +51,7 @@ pub(crate) const RPC_DEFAULT_MAX_REQUEST_SIZE_MB: u32 = 15;
 /// This is only relevant for very large trace responses.
 pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 115;
 /// Default number of incoming connections.
-pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 100;
+pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 500;
 
 /// Parameters for configuring the rpc more granularity via CLI
 #[derive(Debug, Args)]
@@ -187,6 +188,7 @@ impl RpcServerArgs {
     ) -> eyre::Result<(RpcServerHandle, AuthServerHandle)>
     where
         Provider: BlockReaderIdExt
+            + AccountReader
             + HeaderProvider
             + StateProviderFactory
             + EvmEnvProvider
@@ -253,6 +255,7 @@ impl RpcServerArgs {
     ) -> Result<RpcServerHandle, RpcError>
     where
         Provider: BlockReaderIdExt
+            + AccountReader
             + HeaderProvider
             + StateProviderFactory
             + EvmEnvProvider

@@ -54,7 +54,7 @@ impl EngineHooksController {
     ) -> Poll<Result<PolledHook, EngineHookError>> {
         let Some(mut hook) = self.running_hook_with_db_write.take() else { return Poll::Pending };
 
-        match hook.poll(cx, args) {
+        match hook.poll(cx, args)? {
             Poll::Ready((event, action)) => {
                 let result = PolledHook { event, action, db_access_level: hook.db_access_level() };
 
@@ -109,7 +109,7 @@ impl EngineHooksController {
             return Poll::Pending
         }
 
-        if let Poll::Ready((event, action)) = hook.poll(cx, args) {
+        if let Poll::Ready((event, action)) = hook.poll(cx, args)? {
             let result = PolledHook { event, action, db_access_level: hook.db_access_level() };
 
             debug!(

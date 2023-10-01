@@ -11,12 +11,9 @@
 
 pub mod config;
 
-/// Helpers for configuring revm [Env](revm::primitives::Env)
+/// Helpers for configuring Revm [`Env`](reth_primitives::revm_primitives::Env).
 pub mod env;
 
 /// Helpers for type compatibility between reth and revm types
 mod compat;
 pub use compat::*;
-
-/// Re-exports revm types;
-pub use revm::*;

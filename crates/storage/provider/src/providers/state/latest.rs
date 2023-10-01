@@ -9,7 +9,7 @@ use reth_db::{
 };
 use reth_interfaces::{provider::ProviderError, RethError, RethResult};
 use reth_primitives::{
-    keccak256, Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, H256,
+    keccak256, Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, B256,
 };
 use std::marker::PhantomData;
 
@@ -38,7 +38,7 @@ impl<'a, 'b, TX: DbTx<'a>> AccountReader for LatestStateProviderRef<'a, 'b, TX> 
 
 impl<'a, 'b, TX: DbTx<'a>> BlockHashReader for LatestStateProviderRef<'a, 'b, TX> {
     /// Get block hash by number.
-    fn block_hash(&self, number: u64) -> RethResult<Option<H256>> {
+    fn block_hash(&self, number: u64) -> RethResult<Option<B256>> {
         self.db.get::<tables::CanonicalHeaders>(number).map_err(Into::into)
     }
 
@@ -46,7 +46,7 @@ impl<'a, 'b, TX: DbTx<'a>> BlockHashReader for LatestStateProviderRef<'a, 'b, TX
         &self,
         start: BlockNumber,
         end: BlockNumber,
-    ) -> RethResult<Vec<H256>> {
+    ) -> RethResult<Vec<B256>> {
         let range = start..end;
         self.db
             .cursor_read::<tables::CanonicalHeaders>()
@@ -61,7 +61,7 @@ impl<'a, 'b, TX: DbTx<'a>> BlockHashReader for LatestStateProviderRef<'a, 'b, TX
 }
 
 impl<'a, 'b, TX: DbTx<'a>> StateRootProvider for LatestStateProviderRef<'a, 'b, TX> {
-    fn state_root(&self, bundle_state: &BundleStateWithReceipts) -> RethResult<H256> {
+    fn state_root(&self, bundle_state: &BundleStateWithReceipts) -> RethResult<B256> {
         bundle_state.state_root_slow(self.db).map_err(|err| RethError::Database(err.into()))
     }
 }
@@ -83,15 +83,15 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for LatestStateProviderRef<'a, 'b, TX> 
     }
 
     /// Get account code by its hash
-    fn bytecode_by_hash(&self, code_hash: H256) -> RethResult<Option<Bytecode>> {
+    fn bytecode_by_hash(&self, code_hash: B256) -> RethResult<Option<Bytecode>> {
         self.db.get::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
 
     fn proof(
         &self,
         address: Address,
-        _keys: &[H256],
-    ) -> RethResult<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
+        _keys: &[B256],
+    ) -> RethResult<(Vec<Bytes>, B256, Vec<Vec<Bytes>>)> {
         let _hashed_address = keccak256(address);
         let _root = self
             .db

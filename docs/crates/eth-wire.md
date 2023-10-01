@@ -65,7 +65,7 @@ These traits are defined as follows:
 [Crate: crates/rlp](https://github.com/paradigmxyz/reth/tree/1563506aea09049a85e5cc72c2894f3f7a371581/crates/rlp)
 ```rust, ignore
 pub trait Decodable: Sized {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError>;
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self>;
 }
 pub trait Encodable {
     fn encode(&self, out: &mut dyn BufMut);
@@ -127,7 +127,7 @@ impl Encodable for TransactionSigned {
 }
 
 impl Decodable for TransactionSigned {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         // Implementation omitted for brevity
         //...
     }

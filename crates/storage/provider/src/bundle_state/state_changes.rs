@@ -6,10 +6,8 @@ use reth_db::{
 };
 use reth_interfaces::db::DatabaseError;
 use reth_primitives::{Bytecode, StorageEntry, U256};
-use reth_revm_primitives::{
-    db::states::{PlainStorageChangeset, StateChangeset},
-    into_reth_acc,
-};
+use reth_revm_primitives::into_reth_acc;
+use revm::db::states::{PlainStorageChangeset, StateChangeset};
 
 /// A change to the state of the world.
 #[derive(Debug, Default)]
@@ -62,7 +60,7 @@ impl StateChanges {
             if wipe_storage && storages_cursor.seek_exact(address)?.is_some() {
                 storages_cursor.delete_current_duplicates()?;
             }
-            // cast storages to H256.
+            // cast storages to B256.
             let mut storage = storage
                 .into_iter()
                 .map(|(k, value)| StorageEntry { key: k.into(), value })

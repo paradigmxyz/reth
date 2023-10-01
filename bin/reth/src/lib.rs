@@ -62,6 +62,11 @@ pub mod blockchain_tree {
     pub use reth_blockchain_tree::*;
 }
 
+/// Re-exported from `reth_consensus_common`.
+pub mod consensus_common {
+    pub use reth_consensus_common::*;
+}
+
 /// Re-exported from `reth_revm`.
 pub mod revm {
     pub use reth_revm::*;
@@ -103,6 +108,16 @@ pub mod rpc {
     /// Re-exported from `reth_rpc::eth`.
     pub mod eth {
         pub use reth_rpc::eth::*;
+    }
+
+    /// Re-exported from `reth_rpc::rpc`.
+    pub mod result {
+        pub use reth_rpc::result::*;
+    }
+
+    /// Re-exported from `reth_rpc::eth`.
+    pub mod compat {
+        pub use reth_rpc_types_compat::*;
     }
 }
 

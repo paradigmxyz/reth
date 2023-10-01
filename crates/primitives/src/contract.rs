@@ -22,6 +22,7 @@ pub fn create2_address_from_code(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hex;
 
     #[test]
     fn contract_address() {
@@ -41,8 +42,8 @@ mod tests {
         }
     }
 
-    #[test]
     // Test vectors from https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1014.md#examples
+    #[test]
     fn test_create2_address() {
         for (from, salt, init_code, expected) in &[
             (
@@ -94,7 +95,7 @@ mod tests {
             let salt = U256::try_from_be_slice(&salt).unwrap();
             let init_code = hex::decode(init_code).unwrap();
             let expected = expected.parse::<Address>().unwrap();
-            assert_eq!(expected, create2_address_from_code(from, init_code.clone(),salt ));
+            assert_eq!(expected, create2_address_from_code(from, init_code.clone(), salt));
 
             // get_create2_address_from_hash()
             let init_code_hash = keccak256(init_code);
