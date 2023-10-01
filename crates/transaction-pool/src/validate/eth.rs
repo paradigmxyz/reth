@@ -159,7 +159,7 @@ where
         let input = tx.input().as_ref();
 
         let access_list: AccessList = match transaction.tx_type() {
-            LEGACY_TX_TYPE_ID => AccessList::default(), 
+            LEGACY_TX_TYPE_ID => AccessList::default(),
             EIP2930_TX_TYPE_ID => {
                 if let Some(access_list_tx) = tx.as_eip2930() {
                     access_list_tx.access_list.clone()
@@ -181,7 +181,7 @@ where
                     AccessList::default()
                 }
             }
-            _ => AccessList::default(), 
+            _ => AccessList::default(),
         };
         if transaction.gas_limit() <
             initial_tx_gas::<ShanghaiSpec>(

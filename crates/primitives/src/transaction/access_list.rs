@@ -1,9 +1,9 @@
 use std::mem;
 
 use crate::{Address, B256};
+use alloy_primitives::U256;
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs::{main_codec, Compact};
-use alloy_primitives::U256;
 use serde::{Deserialize, Serialize};
 
 /// A list of addresses and storage keys that the transaction plans to access.
