@@ -14,11 +14,13 @@ use reth_primitives::{
         ETHEREUM_BLOCK_GAS_LIMIT,
     },
     kzg::KzgSettings,
-    ChainSpec, InvalidTransactionError, SealedBlock, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
-    EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    transaction::initial_tx_gas,
+    AccessList, ChainSpec, InvalidTransactionError, SealedBlock, TransactionKind,
+    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 use reth_provider::{AccountReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
+use revm::primitives::ShanghaiSpec;
 use std::{
     marker::PhantomData,
     sync::{atomic::AtomicBool, Arc},
@@ -151,6 +153,48 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::OversizedData(size, TX_MAX_SIZE),
+            )
+        }
+        let tx = transaction.to_recovered_transaction();
+        let input = tx.input().as_ref();
+
+        let access_list: AccessList = match transaction.tx_type() {
+            LEGACY_TX_TYPE_ID => AccessList::default(), // Assuming Legacy tx has no access list
+            EIP2930_TX_TYPE_ID => {
+                if let Some(access_list_tx) = tx.as_eip2930() {
+                    access_list_tx.access_list.clone()
+                } else {
+                    // Handle case where transaction should be EIP2930 but isn't
+                    // Maybe return an error or use a default access list
+                    AccessList::default()
+                }
+            }
+            EIP1559_TX_TYPE_ID => {
+                if let Some(dynamic_fee_tx) = transaction.to_recovered_transaction().as_eip1559() {
+                    dynamic_fee_tx.access_list.clone()
+                } else {
+                    AccessList::default()
+                }
+            }
+            EIP4844_TX_TYPE_ID => {
+                if let Some(blob_tx) = transaction.to_recovered_transaction().as_eip4844() {
+                    blob_tx.access_list.clone()
+                } else {
+                    AccessList::default()
+                }
+            }
+            _ => AccessList::default(), // Default or error for unsupported transaction types
+        };
+        if transaction.gas_limit() <
+            initial_tx_gas::<ShanghaiSpec>(
+                input,
+                TransactionKind::Create == *transaction.kind(),
+                access_list.to_ref_slice().as_ref(),
+            )
+        {
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidPoolTransactionError::IntrinsicGasTooLow,
             )
         }
 

@@ -14,7 +14,7 @@ reth-rlp = { workspace = true, features = ["std", "derive", "ethereum-types"] }
 reth-rlp-derive = { path = "../rlp/rlp-derive" }
 reth-codecs = { path = "../storage/codecs" }
 revm-primitives = { workspace = true, features = ["serde"] }
-
+revm.workspace = true
 # ethereum
 ethers-core = { workspace = true, default-features = false }
 tiny-keccak = { version = "2.0", features = ["keccak"] }
