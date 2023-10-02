@@ -115,10 +115,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_transaction_pool::noop::NoopTransactionPool;
     use jsonrpsee::{http_client::HttpClientBuilder, server::ServerBuilder};
-
-
+    use reth_transaction_pool::noop::NoopTransactionPool;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_call_admin_functions_ws() {
@@ -127,14 +125,13 @@ mod tests {
         let client = HttpClientBuilder::default().build(&uri).unwrap();
         let count = TxpoolExtApiClient::transaction_count(&client).await.unwrap();
         assert_eq!(count, 0);
-
     }
 
     async fn start_server() -> std::net::SocketAddr {
         let server = ServerBuilder::default().build("127.0.0.1:0").await.unwrap();
         let addr = server.local_addr().unwrap();
         let pool = NoopTransactionPool::default();
-        let api = TxpoolExt {pool};
+        let api = TxpoolExt { pool };
         let server_handle = server.start(api.into_rpc());
 
         tokio::spawn(server_handle.stopped());
