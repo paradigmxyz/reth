@@ -131,6 +131,7 @@ boa_gc = "0.17"
 aquamarine = "0.3"
 bytes = "1.5"
 bitflags = "2.3"
+clap = "4"
 tracing = "0.1.0"
 tracing-appender = "0.2"
 thiserror = "1.0"
@@ -176,11 +177,12 @@ c-kzg = "0.1.1"
 
 ## config
 confy = "0.5"
-toml = "0.7"
+toml = "0.8"
 
 ### misc-testing
 arbitrary = "1.1"
 assert_matches = "1.5.0"
+tempfile = "3.8"
 
 proptest = "1.0"
 proptest-derive = "0.4"

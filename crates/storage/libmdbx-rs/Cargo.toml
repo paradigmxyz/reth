@@ -33,7 +33,7 @@ pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterio
 criterion = "0.5"
 rand.workspace = true
 rand_xorshift = "0.3"
-tempfile = "3"
+tempfile.workspace = true
 
 [[bench]]
 name = "cursor"
