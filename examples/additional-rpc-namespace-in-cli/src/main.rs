@@ -91,7 +91,8 @@ impl RethNodeCommandConfig for RethCliTxpoolExt {
 /// trait interface for a custom rpc namespace: `txpool`
 ///
 /// This defines an additional namespace where all methods are configured as trait functions.
-#[rpc(client, server, namespace = "txpoolExt")]
+#[cfg_attr(not(test), rpc(server, namespace = "txpoolExt"))]
+#[cfg_attr(test, rpc(server, client, namespace = "txpoolExt"))]
 pub trait TxpoolExtApi {
     /// Returns the number of transactions in the pool.
     #[method(name = "transactionCount")]
