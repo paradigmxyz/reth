@@ -21,6 +21,7 @@ dependencies = [
  "jsonrpsee",
  "reth",
  "reth-transaction-pool",
+ "tokio",
 ]
 
 [[package]]
