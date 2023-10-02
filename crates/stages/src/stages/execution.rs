@@ -239,6 +239,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(block_number - start_block, state.size_hint() as u64)
             {
+                println!("break ===================, block_number: {:?}", block_number);
                 break
             }
         }
@@ -254,6 +255,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             if let Some(metrics_tx) = &mut self.metrics_tx {
                 let _ = metrics_tx.send(MetricEvent::WriteToDbTime { time });
             }
+            println!("write_to_db ============ {:?} ns", time);
         }
 
         #[cfg(not(feature = "open_performance_dashboard"))]
