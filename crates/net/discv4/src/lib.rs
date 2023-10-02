@@ -1634,7 +1634,15 @@ impl Stream for Discv4Service {
     type Item = Discv4Event;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Poll::Ready(Some(ready!(self.get_mut().poll(cx))))
+        // Poll the internal poll method
+        let event = ready!(self.get_mut().poll(cx));
+
+        match event {
+            // If the event is Terminated, return Poll::Ready(None)
+            Discv4Event::Terminated => Poll::Ready(None),
+            // For any other event, return Poll::Ready(Some(event))
+            _ => Poll::Ready(Some(event)),
+        }
     }
 }
 
