@@ -283,9 +283,17 @@ impl Discv4 {
         self.lookup_node(None).await
     }
 
-    /// Looks up the given node id
+    /// Looks up the given node id.
+    ///
+    /// Returning the closest nodes to the given node id.
     pub async fn lookup(&self, node_id: PeerId) -> Result<Vec<NodeRecord>, Discv4Error> {
         self.lookup_node(Some(node_id)).await
+    }
+
+    /// Sends a message to the service to lookup the closest nodes
+    pub fn send_lookup(&self, node_id: PeerId) {
+        let cmd = Discv4Command::Lookup { node_id: Some(node_id), tx: None };
+        self.send_to_service(cmd);
     }
 
     async fn lookup_node(&self, node_id: Option<PeerId>) -> Result<Vec<NodeRecord>, Discv4Error> {
