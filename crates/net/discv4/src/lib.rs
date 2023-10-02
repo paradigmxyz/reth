@@ -1562,7 +1562,8 @@ impl Discv4Service {
 
                     Discv4Command::Terminated => {
                         //self.terminate();
-                        todo!()
+                        //todos!
+                        self.queued_events.push_back(Discv4Event::Terminated);
                     }
                 }
             }
@@ -1654,6 +1655,8 @@ pub enum Discv4Event {
     EnrRequest,
     /// A `EnrResponse` message was handled.
     EnrResponse,
+    /// A
+    Terminated,
 }
 
 /// Continuously reads new messages from the channel and writes them to the socket
