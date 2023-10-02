@@ -485,6 +485,15 @@ impl EthTransactionValidatorBuilder {
         self
     }
 
+    /// Configures validation rules based on the head block's timestamp.
+    ///
+    /// For example, whether the Shanghai and Cancun hardfork is activated at launch.
+    pub fn with_head_timestamp(mut self, timestamp: u64) -> Self {
+        self.cancun = self.chain_spec.is_cancun_active_at_timestamp(timestamp);
+        self.shanghai = self.chain_spec.is_shanghai_active_at_timestamp(timestamp);
+        self
+    }
+
     /// Builds a the [EthTransactionValidator] and spawns validation tasks via the
     /// [TransactionValidationTaskExecutor]
     ///
