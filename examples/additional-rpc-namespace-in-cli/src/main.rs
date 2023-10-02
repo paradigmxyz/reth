@@ -120,7 +120,7 @@ mod tests {
     use reth_transaction_pool::noop::NoopTransactionPool;
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_call_admin_functions_ws() {
+    async fn test_call_transaction_count_http() {
         let server_addr = start_server().await;
         let uri = format!("http://{}", server_addr);
         let client = HttpClientBuilder::default().build(&uri).unwrap();
