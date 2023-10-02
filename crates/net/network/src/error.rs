@@ -154,7 +154,7 @@ impl SessionError for EthStreamError {
                         )) |
                         P2PStreamError::UnknownReservedMessageId(_) |
                         P2PStreamError::EmptyProtocolMessage |
-                        P2PStreamError::ParseVersionError(_) |
+                        P2PStreamError::ParseSharedCapability(_) |
                         P2PStreamError::Disconnected(DisconnectReason::UselessPeer) |
                         P2PStreamError::Disconnected(
                             DisconnectReason::IncompatibleP2PProtocolVersion

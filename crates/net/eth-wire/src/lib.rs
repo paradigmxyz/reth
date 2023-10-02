@@ -22,6 +22,7 @@ mod ethstream;
 mod hello;
 mod p2pstream;
 mod pinger;
+mod sharedstream;
 pub use builder::*;
 pub mod types;
 pub use types::*;
@@ -33,7 +34,9 @@ pub use tokio_util::codec::{
 
 pub use crate::{
     disconnect::{CanDisconnect, DisconnectReason},
-    ethstream::{EthStream, UnauthedEthStream, MAX_MESSAGE_SIZE},
+    ethstream::{EthStream, UnauthedEthStream},
     hello::HelloMessage,
     p2pstream::{P2PMessage, P2PMessageID, P2PStream, ProtocolVersion, UnauthedP2PStream},
+    sharedstream::SharedStream,
+    types::message::MAX_MESSAGE_SIZE,
 };

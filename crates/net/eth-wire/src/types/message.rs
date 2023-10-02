@@ -12,6 +12,10 @@ use std::{fmt::Debug, sync::Arc};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+/// [`MAX_MESSAGE_SIZE`] is the maximum cap on the size of a protocol message.
+// https://github.com/ethereum/go-ethereum/blob/30602163d5d8321fbc68afdcbbaf2362b2641bde/eth/protocols/eth/protocol.go#L50
+pub const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
+
 /// An `eth` protocol message, containing a message ID and payload.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

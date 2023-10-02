@@ -819,7 +819,7 @@ async fn authenticate(
 
     let unauthed = UnauthedP2PStream::new(stream);
 
-    let auth = authenticate_stream(
+    let auth = authenticate_eth_stream(
         unauthed,
         session_id,
         remote_addr,
@@ -863,11 +863,11 @@ async fn get_eciess_stream<Io: AsyncRead + AsyncWrite + Unpin + HasRemoteAddr>(
     }
 }
 
-/// Authenticate the stream via handshake
+/// Authenticate the eth stream via handshake
 ///
 /// On Success return the authenticated stream as [`PendingSessionEvent`]
 #[allow(clippy::too_many_arguments)]
-async fn authenticate_stream(
+async fn authenticate_eth_stream(
     stream: UnauthedP2PStream<ECIESStream<MeteredStream<TcpStream>>>,
     session_id: SessionId,
     remote_addr: SocketAddr,
@@ -893,7 +893,9 @@ async fn authenticate_stream(
     // if the hello handshake was successful we can try status handshake
     //
     // Before trying status handshake, set up the version to shared_capability
-    let status = Status { version: p2p_stream.shared_capability().version(), ..status };
+
+    let status =
+        Status { version: p2p_stream.shared_capabilities().first().unwrap().version(), ..status };
     let eth_unauthed = UnauthedEthStream::new(p2p_stream);
     let (eth_stream, their_status) = match eth_unauthed.handshake(status, fork_filter).await {
         Ok(stream_res) => stream_res,
