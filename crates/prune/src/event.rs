@@ -8,7 +8,6 @@ pub enum PrunerEvent {
     Finished {
         tip_block_number: BlockNumber,
         elapsed: Duration,
-        done: bool,
-        parts_done: BTreeMap<PrunePart, bool>,
+        parts: BTreeMap<PrunePart, (bool, usize)>,
     },
 }
