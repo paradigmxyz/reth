@@ -389,6 +389,10 @@ impl Discv4 {
         self.to_service.send(cmd)?;
         Ok(rx.await?)
     }
+    pub fn terminated_discv4(&self) {
+        let cmd = Discv4Command::Terminated;
+        self.to_service.send(cmd).unwrap();
+    }
 }
 
 /// Manages discv4 peer discovery over UDP.
@@ -1554,6 +1558,9 @@ impl Discv4Service {
                             let _ = self.local_eip_868_enr.set_tcp6(port, &self.secret_key);
                         }
                     }
+                    Discv4Command::Terminated => {
+                        self.terminated_discv4();
+                    }
                 }
             }
 
@@ -1714,6 +1721,7 @@ enum Discv4Command {
     Lookup { node_id: Option<PeerId>, tx: Option<NodeRecordSender> },
     SetLookupInterval(Duration),
     Updates(OneshotSender<ReceiverStream<DiscoveryUpdate>>),
+    Terminated,
 }
 
 /// Event type receiver produces
