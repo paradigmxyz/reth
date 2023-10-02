@@ -389,7 +389,8 @@ impl Discv4 {
         self.to_service.send(cmd)?;
         Ok(rx.await?)
     }
-    //  Terminate discv4
+    /// Terminates the Discv4Service.
+
     pub fn terminate(&self) {
         let cmd = Discv4Command::Terminated;
         self.send_to_service(cmd);
