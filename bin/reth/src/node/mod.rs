@@ -276,7 +276,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
-            db.clone(),
+            Arc::clone(&db),
             Arc::clone(&consensus),
             Factory::new(self.chain.clone()),
             Arc::clone(&self.chain),
@@ -296,11 +296,15 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .with_sync_metrics_tx(metrics_tx.clone()),
         );
 
+        // fetch the head block from the database
+        let head = self.lookup_head(Arc::clone(&db)).wrap_err("the head block is missing")?;
+
         // setup the blockchain provider
         let factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
         let blockchain_db = BlockchainProvider::new(factory, blockchain_tree.clone())?;
         let blob_store = InMemoryBlobStore::default();
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
+            .with_head_timestamp(head.timestamp)
             .kzg_settings(self.kzg_settings()?)
             .with_additional_tasks(1)
             .build_with_tasks(blockchain_db.clone(), ctx.task_executor.clone(), blob_store.clone());
@@ -333,7 +337,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         debug!(target: "reth::cli", ?network_secret_path, "Loading p2p key file");
         let secret_key = get_secret_key(&network_secret_path)?;
         let default_peers_path = data_dir.known_peers_path();
-        let head = self.lookup_head(Arc::clone(&db)).expect("the head block is missing");
         let network_config = self.load_network_config(
             &config,
             Arc::clone(&db),
@@ -680,6 +683,9 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         Ok(handle)
     }
 
+    /// Fetches the head block from the database.
+    ///
+    /// If the database is empty, returns the genesis block.
     fn lookup_head(&self, db: Arc<DatabaseEnv>) -> RethResult<Head> {
         let factory = ProviderFactory::new(db, self.chain.clone());
         let provider = factory.provider()?;
