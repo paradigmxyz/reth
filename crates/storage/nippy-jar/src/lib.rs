@@ -45,7 +45,7 @@ pub use cursor::NippyJarCursor;
 const NIPPY_JAR_VERSION: usize = 1;
 
 /// A [`Row`] is a list of its selected column values.
-type Row = Vec<Vec<u8>>;
+type Row<'a> = Vec<&'a [u8]>;
 
 /// Alias type for a column value wrapped in `Result`
 pub type ColumnResult<T> = Result<T, Box<dyn StdError + Send + Sync>>;
@@ -85,7 +85,7 @@ pub struct NippyJar<H = ()> {
     /// Number of data columns in the jar.
     columns: usize,
     /// Optional compression algorithm applied to the data.
-    compressor: Option<Compressors>,
+    pub compressor: Option<Compressors>,
     /// Optional filter function for data membership checks.
     filter: Option<InclusionFilters>,
     /// Optional Perfect Hashing Function (PHF) for unique offset mapping.
@@ -159,6 +159,12 @@ where
     pub fn with_zstd(mut self, use_dict: bool, max_dict_size: usize) -> Self {
         self.compressor =
             Some(Compressors::Zstd(compression::Zstd::new(use_dict, max_dict_size, self.columns)));
+        self
+    }
+
+    /// Adds [`compression::Lz4`] compression.
+    pub fn with_lz4(mut self) -> Self {
+        self.compressor = Some(Compressors::Lz4(compression::Lz4::new(self.columns)));
         self
     }
 
@@ -304,7 +310,7 @@ where
 
         // Temporary buffer to avoid multiple reallocations if compressing to a buffer (eg. zstd w/
         // dict)
-        let mut tmp_buf = Vec::with_capacity(100);
+        let mut tmp_buf = Vec::with_capacity(1_000_000);
 
         // Write all rows while taking all row start offsets
         let mut row_number = 0u64;
@@ -336,7 +342,9 @@ where
                                     Some(dict_compressors.get_mut(column_number).expect("exists")),
                                 )?;
                             } else {
-                                compression.compress_to(&value, &mut file)?;
+                                let before = tmp_buf.len();
+                                let len = compression.compress_to(&value, &mut tmp_buf)?;
+                                file.write_all(&tmp_buf[before..before + len])?;
                             }
                         } else {
                             file.write_all(&value)?;
@@ -354,6 +362,7 @@ where
                 iterators.push(column_iter);
             }
 
+            tmp_buf.clear();
             row_number += 1;
             if row_number == total_rows {
                 break
@@ -638,9 +647,47 @@ mod tests {
             // Iterate over compressed values and compare
             let mut row_index = 0usize;
             while let Some(row) = cursor.next_row().unwrap() {
-                assert_eq!((&row[0], &row[1]), (&col1[row_index], &col2[row_index]));
+                assert_eq!(
+                    (row[0], row[1]),
+                    (col1[row_index].as_slice(), col2[row_index].as_slice())
+                );
                 row_index += 1;
             }
+        }
+    }
+
+    #[test]
+    fn test_lz4() {
+        let (col1, col2) = test_data(None);
+        let num_rows = col1.len() as u64;
+        let num_columns = 2;
+        let file_path = tempfile::NamedTempFile::new().unwrap();
+
+        let nippy = NippyJar::new_without_header(num_columns, file_path.path());
+        assert!(nippy.compressor.is_none());
+
+        let mut nippy = NippyJar::new_without_header(num_columns, file_path.path()).with_lz4();
+        assert!(nippy.compressor.is_some());
+
+        nippy.freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows).unwrap();
+
+        let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+        assert_eq!(nippy, loaded_nippy);
+
+        if let Some(Compressors::Lz4(_)) = loaded_nippy.compressor.as_ref() {
+            let mut cursor = NippyJarCursor::new(&loaded_nippy, None).unwrap();
+
+            // Iterate over compressed values and compare
+            let mut row_index = 0usize;
+            while let Some(row) = cursor.next_row().unwrap() {
+                assert_eq!(
+                    (row[0], row[1]),
+                    (col1[row_index].as_slice(), col2[row_index].as_slice())
+                );
+                row_index += 1;
+            }
+        } else {
+            panic!("Expected Lz4 compressor")
         }
     }
 
@@ -671,7 +718,10 @@ mod tests {
             // Iterate over compressed values and compare
             let mut row_index = 0usize;
             while let Some(row) = cursor.next_row().unwrap() {
-                assert_eq!((&row[0], &row[1]), (&col1[row_index], &col2[row_index]));
+                assert_eq!(
+                    (row[0], row[1]),
+                    (col1[row_index].as_slice(), col2[row_index].as_slice())
+                );
                 row_index += 1;
             }
         } else {
@@ -733,7 +783,10 @@ mod tests {
                 // Iterate over compressed values and compare
                 let mut row_num = 0usize;
                 while let Some(row) = cursor.next_row().unwrap() {
-                    assert_eq!((&row[0], &row[1]), (&data[0][row_num], &data[1][row_num]));
+                    assert_eq!(
+                        (row[0], row[1]),
+                        (data[0][row_num].as_slice(), data[1][row_num].as_slice())
+                    );
                     row_num += 1;
                 }
 
@@ -744,12 +797,20 @@ mod tests {
                 for (row_num, (v0, v1)) in data {
                     // Simulates `by_hash` queries by iterating col1 values, which were used to
                     // create the inner index.
-                    let row_by_value = cursor.row_by_key(v0).unwrap().unwrap();
-                    assert_eq!((&row_by_value[0], &row_by_value[1]), (v0, v1));
+                    {
+                        let row_by_value = cursor
+                            .row_by_key(v0)
+                            .unwrap()
+                            .unwrap()
+                            .iter()
+                            .map(|a| a.to_vec())
+                            .collect::<Vec<_>>();
+                        assert_eq!((&row_by_value[0], &row_by_value[1]), (v0, v1));
 
-                    // Simulates `by_number` queries
-                    let row_by_num = cursor.row_by_number(row_num).unwrap().unwrap();
-                    assert_eq!(row_by_value, row_by_num);
+                        // Simulates `by_number` queries
+                        let row_by_num = cursor.row_by_number(row_num).unwrap().unwrap();
+                        assert_eq!(row_by_value, row_by_num);
+                    }
                 }
             }
         }
@@ -807,7 +868,10 @@ mod tests {
                     let row_by_value = cursor
                         .row_by_key_with_cols::<BLOCKS_FULL_MASK, BLOCKS_COLUMNS>(v0)
                         .unwrap()
-                        .unwrap();
+                        .unwrap()
+                        .iter()
+                        .map(|a| a.to_vec())
+                        .collect::<Vec<_>>();
                     assert_eq!((&row_by_value[0], &row_by_value[1]), (*v0, *v1));
 
                     // Simulates `by_number` queries
@@ -826,7 +890,10 @@ mod tests {
                     let row_by_value = cursor
                         .row_by_key_with_cols::<BLOCKS_BLOCK_MASK, BLOCKS_COLUMNS>(v0)
                         .unwrap()
-                        .unwrap();
+                        .unwrap()
+                        .iter()
+                        .map(|a| a.to_vec())
+                        .collect::<Vec<_>>();
                     assert_eq!(row_by_value.len(), 1);
                     assert_eq!(&row_by_value[0], *v0);
 
@@ -847,7 +914,10 @@ mod tests {
                     let row_by_value = cursor
                         .row_by_key_with_cols::<BLOCKS_WITHDRAWAL_MASK, BLOCKS_COLUMNS>(v0)
                         .unwrap()
-                        .unwrap();
+                        .unwrap()
+                        .iter()
+                        .map(|a| a.to_vec())
+                        .collect::<Vec<_>>();
                     assert_eq!(row_by_value.len(), 1);
                     assert_eq!(&row_by_value[0], *v1);
 
