@@ -8,6 +8,8 @@ use reth_primitives::{PruneCheckpoint, PrunePart};
 use reth_provider::{DatabaseProviderRW, PruneCheckpointWriter, TransactionsProvider};
 use tracing::{instrument, trace};
 
+#[derive(Default)]
+#[non_exhaustive]
 pub(crate) struct Receipts {}
 
 impl Part for Receipts {
@@ -116,7 +118,7 @@ mod tests {
         let test_prune = |to_block: BlockNumber, expected_result: (bool, usize)| {
             let prune_mode = PruneMode::Before(to_block);
             let input = PruneInput { to_block, delete_limit: 10 };
-            let part = Receipts {};
+            let part = Receipts::default();
 
             let next_tx_number_to_prune = tx
                 .inner()

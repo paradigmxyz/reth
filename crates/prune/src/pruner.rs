@@ -121,7 +121,7 @@ impl<DB: Database> Pruner<DB> {
             );
 
             let part_start = Instant::now();
-            let part = parts::Receipts {};
+            let part = parts::Receipts::default();
             let output = part.prune(&provider, PruneInput { to_block, delete_limit })?;
             if let Some(checkpoint) = output.checkpoint {
                 part.save_checkpoint(&provider, checkpoint.as_prune_checkpoint(prune_mode))?;

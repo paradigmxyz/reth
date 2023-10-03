@@ -19,14 +19,17 @@ use tracing::error;
 ///    [Part::save_checkpoint].
 /// 3. Subtract `pruned` of [PruneOutput] from `delete_limit` of next [PruneInput].
 pub(crate) trait Part {
+    /// Part of the data that's pruned.
     const PART: PrunePart;
 
+    /// Prune data for [Self::PART] using the provided input.
     fn prune<DB: Database>(
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError>;
 
+    /// Save checkpoint for [Self::PART] to the database.
     fn save_checkpoint<DB: Database>(
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
