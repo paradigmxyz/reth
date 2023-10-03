@@ -2,7 +2,7 @@ use crate::{compression::Compression, NippyJarError};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-/// Lz4 compression structure. Supports a compression dictionary per column.
+/// Lz4 compression structure.
 pub struct Lz4 {
     /// Number of columns to compress.
     columns: usize,
@@ -92,13 +92,5 @@ impl Compression for Lz4 {
 
     fn is_ready(&self) -> bool {
         true
-    }
-
-    /// If using it with dictionaries, prepares a dictionary for each column.
-    fn prepare_compression(
-        &mut self,
-        _columns: Vec<impl IntoIterator<Item = Vec<u8>>>,
-    ) -> Result<(), NippyJarError> {
-        Ok(())
     }
 }
