@@ -10,7 +10,7 @@ use tracing::{instrument, trace};
 
 #[derive(Default)]
 #[non_exhaustive]
-pub(crate) struct Receipts {}
+pub(crate) struct Receipts;
 
 impl Segment for Receipts {
     const SEGMENT: PruneSegment = PruneSegment::Receipts;
