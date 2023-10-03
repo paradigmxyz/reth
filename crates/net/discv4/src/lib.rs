@@ -1662,7 +1662,7 @@ pub enum Discv4Event {
     EnrRequest,
     /// A `EnrResponse` message was handled.
     EnrResponse,
-    /// A
+    /// Service is being terminated
     Terminated,
 }
 
