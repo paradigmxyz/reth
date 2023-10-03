@@ -107,8 +107,8 @@ reth-eth-wire = { path = "./crates/net/eth-wire" }
 reth-ecies = { path = "./crates/net/ecies" }
 
 # revm
-revm = { git = "https://github.com/bluealloy/revm/" }
-revm-primitives = { git = "https://github.com/bluealloy/revm/" }
+revm = "3.5.0"
+revm-primitives = "1.3.0"
 
 ## eth
 alloy-primitives = "0.4"
