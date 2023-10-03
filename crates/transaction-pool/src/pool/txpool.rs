@@ -1366,7 +1366,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             transaction =
                 self.ensure_valid_blob_transaction(transaction, on_chain_balance, ancestor)?;
             let blob_fee_cap = transaction.transaction.max_fee_per_blob_gas().unwrap_or_default();
-            if blob_fee_cap >= self.pending_blob_fee as u128 {
+            if blob_fee_cap >= self.pending_blob_fee {
                 state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
             }
         } else {
