@@ -1,19 +1,15 @@
 //! Support for integrating customizations into the CLI.
 
-use crate::cli::config::{PayloadBuilderConfig, RethRpcConfig};
+use crate::cli::{
+    components::RethNodeComponents,
+    config::{PayloadBuilderConfig, RethRpcConfig},
+};
 use clap::Args;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_network_api::{NetworkInfo, Peers};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::ChainSpec;
-use reth_provider::{
-    AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EvmEnvProvider, StateProviderFactory,
-};
 use reth_rpc_builder::{RethModuleRegistry, TransportRpcModules};
 use reth_tasks::TaskSpawner;
-use reth_transaction_pool::TransactionPool;
-use std::{fmt, sync::Arc};
+use std::fmt;
 
 /// A trait that allows for extending parts of the CLI with additional functionality.
 ///
@@ -36,32 +32,47 @@ impl RethCliExt for () {
 /// A trait that allows for extending and customizing parts of the node command
 /// [NodeCommand](crate::node::NodeCommand).
 pub trait RethNodeCommandConfig: fmt::Debug {
+    /// Event hook called once all components have been initialized.
+    fn on_components_initialized<Reth: RethNodeComponents>(
+        &mut self,
+        components: &Reth,
+    ) -> eyre::Result<()> {
+        let _ = components;
+        Ok(())
+    }
+
+    /// Event hook called once the node has been launched.
+    fn on_node_started<Reth: RethNodeComponents>(&mut self, components: &Reth) -> eyre::Result<()> {
+        let _ = components;
+        Ok(())
+    }
+
     /// Allows for registering additional RPC modules for the transports.
     ///
     /// This is expected to call the merge functions of [TransportRpcModules], for example
     /// [TransportRpcModules::merge_configured]
-    fn extend_rpc_modules<Conf, Provider, Pool, Network, Tasks, Events>(
+    #[allow(clippy::type_complexity)]
+    fn extend_rpc_modules<Conf, Reth>(
         &mut self,
-        _config: &Conf,
-        _registry: &mut RethModuleRegistry<Provider, Pool, Network, Tasks, Events>,
-        _modules: &mut TransportRpcModules,
+        config: &Conf,
+        components: &Reth,
+        registry: &mut RethModuleRegistry<
+            Reth::Provider,
+            Reth::Pool,
+            Reth::Network,
+            Reth::Tasks,
+            Reth::Events,
+        >,
+        modules: &mut TransportRpcModules,
     ) -> eyre::Result<()>
     where
         Conf: RethRpcConfig,
-        Provider: BlockReaderIdExt
-            + AccountReader
-            + StateProviderFactory
-            + EvmEnvProvider
-            + ChainSpecProvider
-            + ChangeSetReader
-            + Clone
-            + Unpin
-            + 'static,
-        Pool: TransactionPool + Clone + 'static,
-        Network: NetworkInfo + Peers + Clone + 'static,
-        Tasks: TaskSpawner + Clone + 'static,
-        Events: CanonStateSubscriptions + Clone + 'static,
+        Reth: RethNodeComponents,
     {
+        let _ = config;
+        let _ = components;
+        let _ = registry;
+        let _ = modules;
         Ok(())
     }
 
@@ -70,35 +81,32 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     ///
     /// By default this spawns a [BasicPayloadJobGenerator] with the default configuration
     /// [BasicPayloadJobGeneratorConfig].
-    fn spawn_payload_builder_service<Conf, Provider, Pool, Tasks>(
+    fn spawn_payload_builder_service<Conf, Reth>(
         &mut self,
         conf: &Conf,
-        provider: Provider,
-        pool: Pool,
-        executor: Tasks,
-        chain_spec: Arc<ChainSpec>,
+        components: &Reth,
     ) -> eyre::Result<PayloadBuilderHandle>
     where
         Conf: PayloadBuilderConfig,
-        Provider: StateProviderFactory + BlockReaderIdExt + Clone + Unpin + 'static,
-        Pool: TransactionPool + Unpin + 'static,
-        Tasks: TaskSpawner + Clone + Unpin + 'static,
+        Reth: RethNodeComponents,
     {
         let payload_generator = BasicPayloadJobGenerator::new(
-            provider,
-            pool,
-            executor.clone(),
+            components.provider(),
+            components.pool(),
+            components.task_executor(),
             BasicPayloadJobGeneratorConfig::default()
                 .interval(conf.interval())
                 .deadline(conf.deadline())
                 .max_payload_tasks(conf.max_payload_tasks())
                 .extradata(conf.extradata_rlp_bytes())
                 .max_gas_limit(conf.max_gas_limit()),
-            chain_spec,
+            components.chain_spec(),
         );
         let (payload_service, payload_builder) = PayloadBuilderService::new(payload_generator);
 
-        executor.spawn_critical("payload builder service", Box::pin(payload_service));
+        components
+            .task_executor()
+            .spawn_critical("payload builder service", Box::pin(payload_service));
 
         Ok(payload_builder)
     }
@@ -165,52 +173,42 @@ impl<T> NoArgs<T> {
 }
 
 impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
-    fn extend_rpc_modules<Conf, Provider, Pool, Network, Tasks, Events>(
+    fn extend_rpc_modules<Conf, Reth>(
         &mut self,
         config: &Conf,
-        registry: &mut RethModuleRegistry<Provider, Pool, Network, Tasks, Events>,
-        modules: &mut TransportRpcModules<()>,
+        components: &Reth,
+        registry: &mut RethModuleRegistry<
+            Reth::Provider,
+            Reth::Pool,
+            Reth::Network,
+            Reth::Tasks,
+            Reth::Events,
+        >,
+        modules: &mut TransportRpcModules,
     ) -> eyre::Result<()>
     where
         Conf: RethRpcConfig,
-        Provider: BlockReaderIdExt
-            + AccountReader
-            + StateProviderFactory
-            + EvmEnvProvider
-            + ChainSpecProvider
-            + ChangeSetReader
-            + Clone
-            + Unpin
-            + 'static,
-        Pool: TransactionPool + Clone + 'static,
-        Network: NetworkInfo + Peers + Clone + 'static,
-        Tasks: TaskSpawner + Clone + 'static,
-        Events: CanonStateSubscriptions + Clone + 'static,
+        Reth: RethNodeComponents,
     {
         if let Some(conf) = self.inner_mut() {
-            conf.extend_rpc_modules(config, registry, modules)
+            conf.extend_rpc_modules(config, components, registry, modules)
         } else {
             Ok(())
         }
     }
 
-    fn spawn_payload_builder_service<Conf, Provider, Pool, Tasks>(
+    fn spawn_payload_builder_service<Conf, Reth>(
         &mut self,
         conf: &Conf,
-        provider: Provider,
-        pool: Pool,
-        executor: Tasks,
-        chain_spec: Arc<ChainSpec>,
+        components: &Reth,
     ) -> eyre::Result<PayloadBuilderHandle>
     where
         Conf: PayloadBuilderConfig,
-        Provider: StateProviderFactory + BlockReaderIdExt + Clone + Unpin + 'static,
-        Pool: TransactionPool + Unpin + 'static,
-        Tasks: TaskSpawner + Clone + Unpin + 'static,
+        Reth: RethNodeComponents,
     {
         self.inner_mut()
             .ok_or_else(|| eyre::eyre!("config value must be set"))?
-            .spawn_payload_builder_service(conf, provider, pool, executor, chain_spec)
+            .spawn_payload_builder_service(conf, components)
     }
 }
 

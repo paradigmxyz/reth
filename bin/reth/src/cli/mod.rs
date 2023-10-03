@@ -19,6 +19,7 @@ use reth_tracing::{
 };
 use std::{fmt, fmt::Display, sync::Arc};
 
+pub mod components;
 pub mod config;
 pub mod ext;
 

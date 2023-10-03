@@ -15,17 +15,12 @@ use clap::Parser;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth::{
     cli::{
+        components::RethNodeComponents,
         config::RethRpcConfig,
         ext::{RethCliExt, RethNodeCommandConfig},
         Cli,
     },
-    network::{NetworkInfo, Peers},
-    providers::{
-        BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-        EvmEnvProvider, StateProviderFactory,
-    },
     rpc::builder::{RethModuleRegistry, TransportRpcModules},
-    tasks::TaskSpawner,
 };
 use reth_transaction_pool::TransactionPool;
 
@@ -51,26 +46,22 @@ struct RethCliTxpoolExt {
 
 impl RethNodeCommandConfig for RethCliTxpoolExt {
     // This is the entrypoint for the CLI to extend the RPC server with custom rpc namespaces.
-    fn extend_rpc_modules<Conf, Provider, Pool, Network, Tasks, Events>(
+    fn extend_rpc_modules<Conf, Reth>(
         &mut self,
         _config: &Conf,
-        registry: &mut RethModuleRegistry<Provider, Pool, Network, Tasks, Events>,
+        _components: &Reth,
+        registry: &mut RethModuleRegistry<
+            Reth::Provider,
+            Reth::Pool,
+            Reth::Network,
+            Reth::Tasks,
+            Reth::Events,
+        >,
         modules: &mut TransportRpcModules,
     ) -> eyre::Result<()>
     where
         Conf: RethRpcConfig,
-        Provider: BlockReaderIdExt
-            + StateProviderFactory
-            + EvmEnvProvider
-            + ChainSpecProvider
-            + ChangeSetReader
-            + Clone
-            + Unpin
-            + 'static,
-        Pool: TransactionPool + Clone + 'static,
-        Network: NetworkInfo + Peers + Clone + 'static,
-        Tasks: TaskSpawner + Clone + 'static,
-        Events: CanonStateSubscriptions + Clone + 'static,
+        Reth: RethNodeComponents,
     {
         if !self.enable_ext {
             return Ok(())
