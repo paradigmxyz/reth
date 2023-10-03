@@ -25,6 +25,7 @@ reth-stages = { path = "../stages" }
 parking_lot.workspace = true
 lru = "0.11"
 tracing.workspace = true
+tokio = { workspace = true, features = ["macros", "sync"] }
 
 # metrics
 reth-metrics = { workspace = true, features = ["common"] }
@@ -41,7 +42,6 @@ reth-primitives = { workspace = true , features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 parking_lot.workspace = true
 assert_matches.workspace = true
-tokio = { workspace = true, features = ["macros", "sync"] }
 
 [features]
 test-utils = []

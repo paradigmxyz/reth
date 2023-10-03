@@ -281,20 +281,15 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             Factory::new(self.chain.clone()),
             Arc::clone(&self.chain),
         );
-        let tree_config = BlockchainTreeConfig::default();
-        // The size of the broadcast is twice the maximum reorg depth, because at maximum reorg
-        // depth at least N blocks must be sent at once.
-        let (canon_state_notification_sender, _receiver) =
-            tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
-        let blockchain_tree = ShareableBlockchainTree::new(
-            BlockchainTree::new(
-                tree_externals,
-                canon_state_notification_sender.clone(),
-                tree_config,
-                prune_config.clone().map(|config| config.parts),
-            )?
-            .with_sync_metrics_tx(metrics_tx.clone()),
-        );
+        let _tree_config = BlockchainTreeConfig::default();
+        let tree = BlockchainTree::new(
+            tree_externals,
+            BlockchainTreeConfig::default(),
+            prune_config.clone().map(|config| config.parts),
+        )?
+        .with_sync_metrics_tx(metrics_tx.clone());
+        let canon_state_notification_sender = tree.canon_state_notification_sender();
+        let blockchain_tree = ShareableBlockchainTree::new(tree);
 
         // fetch the head block from the database
         let head = self.lookup_head(Arc::clone(&db)).wrap_err("the head block is missing")?;
