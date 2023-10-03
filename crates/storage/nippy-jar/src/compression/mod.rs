@@ -63,10 +63,23 @@ impl Compression for Compressors {
     }
 
     fn compress_to(&self, src: &[u8], dest: &mut Vec<u8>) -> Result<usize, NippyJarError> {
-        match self {
-            Compressors::Zstd(zstd) => zstd.compress_to(src, dest),
-            Compressors::Lz4(lz4) => lz4.compress_to(src, dest),
-            Compressors::Unused => unimplemented!(),
+        let initial_capacity = dest.capacity();
+        loop {
+            let result = match self {
+                Compressors::Zstd(zstd) => zstd.compress_to(src, dest),
+                Compressors::Lz4(lz4) => lz4.compress_to(src, dest),
+                Compressors::Unused => unimplemented!(),
+            };
+
+            match result {
+                Ok(v) => return Ok(v),
+                Err(err) => match err {
+                    NippyJarError::OutputTooSmall => {
+                        dest.reserve(initial_capacity);
+                    }
+                    _ => return Err(err),
+                },
+            }
         }
     }
 
