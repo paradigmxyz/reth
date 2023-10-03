@@ -96,25 +96,18 @@ pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
     prune_modes: Option<PruneModes>,
 }
 
-/// A container that wraps chains and block indices to allow searching for block hashes across all
-/// sidechains.
-#[derive(Debug)]
-pub struct BlockHashes<'a> {
-    /// The current tracked chains.
-    pub chains: &'a mut HashMap<BlockChainId, AppendableChain>,
-    /// The block indices for all chains.
-    pub indices: &'a BlockIndices,
-}
-
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> {
     /// Create a new blockchain tree.
     pub fn new(
         externals: TreeExternals<DB, C, EF>,
-        canon_state_notification_sender: CanonStateNotificationSender,
         config: BlockchainTreeConfig,
         prune_modes: Option<PruneModes>,
     ) -> RethResult<Self> {
         let max_reorg_depth = config.max_reorg_depth();
+        // The size of the broadcast is twice the maximum reorg depth, because at maximum reorg
+        // depth at least N blocks must be sent at once.
+        let (canon_state_notification_sender, _receiver) =
+            tokio::sync::broadcast::channel(max_reorg_depth as usize * 2);
 
         let last_canonical_hashes = externals
             .db
@@ -1069,9 +1062,14 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
     /// Subscribe to new blocks events.
     ///
-    /// Note: Only canonical blocks are send.
+    /// Note: Only canonical blocks are emitted by the tree.
     pub fn subscribe_canon_state(&self) -> CanonStateNotifications {
         self.canon_state_notification_sender.subscribe()
+    }
+
+    /// Returns a clone of the sender for the canonical state notifications.
+    pub fn canon_state_notification_sender(&self) -> CanonStateNotificationSender {
+        self.canon_state_notification_sender.clone()
     }
 
     /// Canonicalize the given chain and commit it to the database.
@@ -1167,6 +1165,16 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             let _ = metrics_tx.send(MetricEvent::SyncHeight { height });
         }
     }
+}
+
+/// A container that wraps chains and block indices to allow searching for block hashes across all
+/// sidechains.
+#[derive(Debug)]
+pub struct BlockHashes<'a> {
+    /// The current tracked chains.
+    pub chains: &'a mut HashMap<BlockChainId, AppendableChain>,
+    /// The block indices for all chains.
+    pub indices: &'a BlockIndices,
 }
 
 #[cfg(test)]
@@ -1316,10 +1324,9 @@ mod tests {
 
         // make tree
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
-        let (sender, mut canon_notif) = tokio::sync::broadcast::channel(10);
-        let mut tree =
-            BlockchainTree::new(externals, sender, config, None).expect("failed to create tree");
+        let mut tree = BlockchainTree::new(externals, config, None).expect("failed to create tree");
 
+        let mut canon_notif = tree.subscribe_canon_state();
         // genesis block 10 is already canonical
         tree.make_canonical(&B256::ZERO).unwrap();
 
