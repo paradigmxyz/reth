@@ -1,8 +1,8 @@
 //! Support for pruning.
 
 use crate::{
-    part::{Part, PruneInput},
-    parts, Metrics, PrunerError, PrunerEvent,
+    parts::{self, Part, PruneInput},
+    Metrics, PrunerError, PrunerEvent,
 };
 use rayon::prelude::*;
 use reth_db::{

@@ -12,7 +12,6 @@
 mod error;
 mod event;
 mod metrics;
-mod part;
 mod parts;
 mod pruner;
 

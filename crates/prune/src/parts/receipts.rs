@@ -1,5 +1,5 @@
 use crate::{
-    part::{Part, PruneInput, PruneOutput},
+    parts::{Part, PruneInput, PruneOutput},
     PrunerError,
 };
 use reth_db::{database::Database, tables};
@@ -70,10 +70,7 @@ impl Part for Receipts {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        part::{Part, PruneInput, PruneOutput},
-        parts::Receipts,
-    };
+    use crate::parts::{Part, PruneInput, PruneOutput, Receipts};
     use assert_matches::assert_matches;
     use itertools::{
         FoldWhile::{Continue, Done},
