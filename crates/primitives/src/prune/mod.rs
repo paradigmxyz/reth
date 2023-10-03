@@ -89,18 +89,18 @@ impl ReceiptsLogPruneConfig {
 
 /// Progress of pruning.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum PrunePartProgress {
+pub enum PruneProgress {
     /// There is more data to prune.
     HasMoreData,
     /// Pruning has been finished.
     Finished,
 }
 
-impl PrunePartProgress {
-    /// Creates new [PrunePartProgress] from `done` boolean value.
+impl PruneProgress {
+    /// Creates new [PruneProgress] from `done` boolean value.
     ///
-    /// If `done == true`, returns [PrunePartProgress::Finished], otherwise
-    /// [PrunePartProgress::HasMoreData] is returned.
+    /// If `done == true`, returns [PruneProgress::Finished], otherwise [PruneProgress::HasMoreData]
+    /// is returned.
     pub fn from_done(done: bool) -> Self {
         if done {
             Self::Finished

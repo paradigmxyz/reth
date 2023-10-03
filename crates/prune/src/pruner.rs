@@ -1,7 +1,8 @@
 //! Support for pruning.
 
 use crate::{
-    parts::{self, Part, PruneInput},
+    parts,
+    parts::{Part, PruneInput},
     Metrics, PrunerError, PrunerEvent,
 };
 use rayon::prelude::*;
@@ -17,7 +18,7 @@ use reth_db::{
 use reth_interfaces::RethResult;
 use reth_primitives::{
     listener::EventListeners, BlockNumber, ChainSpec, PruneCheckpoint, PruneMode, PruneModes,
-    PrunePart, PrunePartProgress, TxNumber, MINIMUM_PRUNING_DISTANCE,
+    PrunePart, PruneProgress, TxNumber, MINIMUM_PRUNING_DISTANCE,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
@@ -29,10 +30,10 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, instrument, trace};
 
 /// Result of [Pruner::run] execution.
-pub type PrunerResult = Result<PrunePartProgress, PrunerError>;
+pub type PrunerResult = Result<PruneProgress, PrunerError>;
 
 /// Result of part pruning.
-type PrunePartResult = Result<(PrunePartProgress, usize), PrunerError>;
+type PrunePartResult = Result<(PruneProgress, usize), PrunerError>;
 
 /// The pruner type itself with the result of [Pruner::run]
 pub type PrunerWithResult<DB> = (Pruner<DB>, PrunerResult);
@@ -89,7 +90,7 @@ impl<DB: Database> Pruner<DB> {
             self.last_pruned_block_number = Some(tip_block_number);
 
             trace!(target: "pruner", %tip_block_number, "Nothing to prune yet");
-            return Ok(PrunePartProgress::Finished)
+            return Ok(PruneProgress::Finished)
         }
 
         trace!(target: "pruner", %tip_block_number, "Pruner started");
@@ -134,7 +135,7 @@ impl<DB: Database> Pruner<DB> {
             delete_limit = delete_limit.saturating_sub(output.pruned);
             parts.insert(
                 PrunePart::Receipts,
-                (PrunePartProgress::from_done(output.done), output.pruned),
+                (PruneProgress::from_done(output.done), output.pruned),
             );
         } else {
             trace!(target: "pruner", prune_part = ?PrunePart::Receipts, "No target block to prune");
@@ -294,7 +295,7 @@ impl<DB: Database> Pruner<DB> {
 
         self.listeners.notify(PrunerEvent::Finished { tip_block_number, elapsed, parts });
 
-        Ok(PrunePartProgress::from_done(done))
+        Ok(PruneProgress::from_done(done))
     }
 
     /// Returns `true` if the pruning is needed at the provided tip block number.
@@ -571,7 +572,7 @@ impl<DB: Database> Pruner<DB> {
                 prune_mode: PruneMode::Before(prune_mode_block),
             },
         )?;
-        Ok((PrunePartProgress::from_done(done), delete_limit - limit))
+        Ok((PruneProgress::from_done(done), delete_limit - limit))
     }
 
     /// Prune transaction lookup entries up to the provided block, inclusive, respecting the batch
@@ -592,7 +593,7 @@ impl<DB: Database> Pruner<DB> {
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No transaction lookup entries to prune");
-                return Ok((PrunePartProgress::Finished, 0))
+                return Ok((PruneProgress::Finished, 0))
             }
         }
         .into_inner();
@@ -644,7 +645,7 @@ impl<DB: Database> Pruner<DB> {
             },
         )?;
 
-        Ok((PrunePartProgress::from_done(done), deleted))
+        Ok((PruneProgress::from_done(done), deleted))
     }
 
     /// Prune transaction senders up to the provided block, inclusive.
@@ -664,7 +665,7 @@ impl<DB: Database> Pruner<DB> {
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No transaction senders to prune");
-                return Ok((PrunePartProgress::Finished, 0))
+                return Ok((PruneProgress::Finished, 0))
             }
         };
         let tx_range_end = *tx_range.end();
@@ -694,7 +695,7 @@ impl<DB: Database> Pruner<DB> {
             },
         )?;
 
-        Ok((PrunePartProgress::from_done(done), deleted))
+        Ok((PruneProgress::from_done(done), deleted))
     }
 
     /// Prune account history up to the provided block, inclusive.
@@ -714,7 +715,7 @@ impl<DB: Database> Pruner<DB> {
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No account history to prune");
-                return Ok((PrunePartProgress::Finished, 0))
+                return Ok((PruneProgress::Finished, 0))
             }
         };
         let range_end = *range.end();
@@ -753,7 +754,7 @@ impl<DB: Database> Pruner<DB> {
             },
         )?;
 
-        Ok((PrunePartProgress::from_done(done), deleted_changesets + deleted_indices))
+        Ok((PruneProgress::from_done(done), deleted_changesets + deleted_indices))
     }
 
     /// Prune storage history up to the provided block, inclusive.
@@ -773,7 +774,7 @@ impl<DB: Database> Pruner<DB> {
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No storage history to prune");
-                return Ok((PrunePartProgress::Finished, 0))
+                return Ok((PruneProgress::Finished, 0))
             }
         };
         let range_end = *range.end();
@@ -812,7 +813,7 @@ impl<DB: Database> Pruner<DB> {
             },
         )?;
 
-        Ok((PrunePartProgress::from_done(done), deleted_changesets + deleted_indices))
+        Ok((PruneProgress::from_done(done), deleted_changesets + deleted_indices))
     }
 
     /// Prune history indices up to the provided block, inclusive.
@@ -939,7 +940,7 @@ mod tests {
         },
     };
     use reth_primitives::{
-        BlockNumber, PruneCheckpoint, PruneMode, PruneModes, PrunePart, PrunePartProgress,
+        BlockNumber, PruneCheckpoint, PruneMode, PruneModes, PrunePart, PruneProgress,
         ReceiptsLogPruneConfig, TxNumber, B256, MAINNET,
     };
     use reth_provider::{PruneCheckpointReader, TransactionsProvider};
@@ -996,7 +997,7 @@ mod tests {
             tx.table::<tables::TxHashNumber>().unwrap().len()
         );
 
-        let test_prune = |to_block: BlockNumber, expected_result: (PrunePartProgress, usize)| {
+        let test_prune = |to_block: BlockNumber, expected_result: (PruneProgress, usize)| {
             let prune_mode = PruneMode::Before(to_block);
             let pruner = Pruner::new(
                 tx.inner_raw(),
@@ -1069,9 +1070,9 @@ mod tests {
             );
         };
 
-        test_prune(6, (PrunePartProgress::HasMoreData, 10));
-        test_prune(6, (PrunePartProgress::Finished, 2));
-        test_prune(10, (PrunePartProgress::Finished, 8));
+        test_prune(6, (PruneProgress::HasMoreData, 10));
+        test_prune(6, (PruneProgress::Finished, 2));
+        test_prune(10, (PruneProgress::Finished, 8));
     }
 
     #[test]
@@ -1103,7 +1104,7 @@ mod tests {
             tx.table::<tables::TxSenders>().unwrap().len()
         );
 
-        let test_prune = |to_block: BlockNumber, expected_result: (PrunePartProgress, usize)| {
+        let test_prune = |to_block: BlockNumber, expected_result: (PruneProgress, usize)| {
             let prune_mode = PruneMode::Before(to_block);
             let pruner = Pruner::new(
                 tx.inner_raw(),
@@ -1176,9 +1177,9 @@ mod tests {
             );
         };
 
-        test_prune(6, (PrunePartProgress::HasMoreData, 10));
-        test_prune(6, (PrunePartProgress::Finished, 2));
-        test_prune(10, (PrunePartProgress::Finished, 8));
+        test_prune(6, (PruneProgress::HasMoreData, 10));
+        test_prune(6, (PruneProgress::Finished, 2));
+        test_prune(10, (PruneProgress::Finished, 8));
     }
 
     #[test]
@@ -1220,7 +1221,7 @@ mod tests {
 
         let test_prune = |to_block: BlockNumber,
                           run: usize,
-                          expected_result: (PrunePartProgress, usize)| {
+                          expected_result: (PruneProgress, usize)| {
             let prune_mode = PruneMode::Before(to_block);
             let pruner = Pruner::new(
                 tx.inner_raw(),
@@ -1314,9 +1315,9 @@ mod tests {
             );
         };
 
-        test_prune(998, 1, (PrunePartProgress::HasMoreData, 1000));
-        test_prune(998, 2, (PrunePartProgress::Finished, 998));
-        test_prune(1400, 3, (PrunePartProgress::Finished, 804));
+        test_prune(998, 1, (PruneProgress::HasMoreData, 1000));
+        test_prune(998, 2, (PruneProgress::Finished, 998));
+        test_prune(1400, 3, (PruneProgress::Finished, 804));
     }
 
     #[test]
@@ -1358,7 +1359,7 @@ mod tests {
 
         let test_prune = |to_block: BlockNumber,
                           run: usize,
-                          expected_result: (PrunePartProgress, usize)| {
+                          expected_result: (PruneProgress, usize)| {
             let prune_mode = PruneMode::Before(to_block);
             let pruner = Pruner::new(
                 tx.inner_raw(),
@@ -1454,9 +1455,9 @@ mod tests {
             );
         };
 
-        test_prune(998, 1, (PrunePartProgress::HasMoreData, 1000));
-        test_prune(998, 2, (PrunePartProgress::Finished, 998));
-        test_prune(1400, 3, (PrunePartProgress::Finished, 804));
+        test_prune(998, 1, (PruneProgress::HasMoreData, 1000));
+        test_prune(998, 2, (PruneProgress::Finished, 998));
+        test_prune(1400, 3, (PruneProgress::Finished, 804));
     }
 
     #[test]
