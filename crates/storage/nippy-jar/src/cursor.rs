@@ -1,6 +1,6 @@
 use crate::{
     compression::{Compression, Zstd},
-    InclusionFilter, NippyJar, NippyJarError, PerfectHashingFunction, Row,
+    InclusionFilter, NippyJar, NippyJarError, PerfectHashingFunction, RefRow,
 };
 use memmap2::Mmap;
 use serde::{de::Deserialize, ser::Serialize};
@@ -19,9 +19,8 @@ pub struct NippyJarCursor<'a, H = ()> {
     file_handle: File,
     /// Data file.
     mmap_handle: Mmap,
-    /// Temporary buffer to unload data to (if necessary), without reallocating memory on each
-    /// retrieval.
-    tmp_buf: Vec<u8>,
+    /// Internal buffer to unload data to without reallocating memory on each retrieval.
+    internal_buffer: Vec<u8>,
     /// Cursor row position.
     row: u64,
 }
@@ -53,7 +52,7 @@ where
             zstd_decompressors,
             file_handle: file,
             mmap_handle: mmap,
-            tmp_buf: Vec::with_capacity(jar.max_row_size),
+            internal_buffer: Vec::with_capacity(jar.max_row_size),
             row: 0,
         })
     }
@@ -69,7 +68,7 @@ where
     ///
     /// Example usage would be querying a transactions file with a transaction hash which is **NOT**
     /// stored in file.
-    pub fn row_by_key(&mut self, key: &[u8]) -> Result<Option<Row<'_>>, NippyJarError> {
+    pub fn row_by_key(&mut self, key: &[u8]) -> Result<Option<RefRow<'_>>, NippyJarError> {
         if let (Some(filter), Some(phf)) = (&self.jar.filter, &self.jar.phf) {
             // TODO: is it worth to parallize both?
 
@@ -93,13 +92,15 @@ where
     }
 
     /// Returns a row by its number.
-    pub fn row_by_number(&mut self, row: usize) -> Result<Option<Row<'_>>, NippyJarError> {
+    pub fn row_by_number(&mut self, row: usize) -> Result<Option<RefRow<'_>>, NippyJarError> {
         self.row = row as u64;
         self.next_row()
     }
 
     /// Returns the current value and advances the row.
-    pub fn next_row(&mut self) -> Result<Option<Row<'_>>, NippyJarError> {
+    pub fn next_row(&mut self) -> Result<Option<RefRow<'_>>, NippyJarError> {
+        self.internal_buffer.clear();
+
         if self.row as usize * self.jar.columns >= self.jar.offsets.len() {
             // Has reached the end
             return Ok(None)
@@ -118,7 +119,7 @@ where
             row.into_iter()
                 .map(|v| match v {
                     ValueRange::Mmap(range) => &self.mmap_handle[range],
-                    ValueRange::Internal(range) => &self.tmp_buf[range],
+                    ValueRange::Internal(range) => &self.internal_buffer[range],
                 })
                 .collect(),
         ))
@@ -134,7 +135,7 @@ where
     pub fn row_by_key_with_cols<const MASK: usize, const COLUMNS: usize>(
         &mut self,
         key: &[u8],
-    ) -> Result<Option<Row<'_>>, NippyJarError> {
+    ) -> Result<Option<RefRow<'_>>, NippyJarError> {
         if let (Some(filter), Some(phf)) = (&self.jar.filter, &self.jar.phf) {
             // TODO: is it worth to parallize both?
 
@@ -161,7 +162,7 @@ where
     pub fn row_by_number_with_cols<const MASK: usize, const COLUMNS: usize>(
         &mut self,
         row: usize,
-    ) -> Result<Option<Row<'_>>, NippyJarError> {
+    ) -> Result<Option<RefRow<'_>>, NippyJarError> {
         self.row = row as u64;
         self.next_row_with_cols::<MASK, COLUMNS>()
     }
@@ -171,8 +172,8 @@ where
     /// Uses a `MASK` to only read certain columns from the row.
     pub fn next_row_with_cols<const MASK: usize, const COLUMNS: usize>(
         &mut self,
-    ) -> Result<Option<Row<'_>>, NippyJarError> {
-        debug_assert!(COLUMNS == self.jar.columns);
+    ) -> Result<Option<RefRow<'_>>, NippyJarError> {
+        self.internal_buffer.clear();
 
         if self.row as usize * self.jar.columns >= self.jar.offsets.len() {
             // Has reached the end
@@ -180,7 +181,7 @@ where
         }
 
         let mut row = Vec::with_capacity(COLUMNS);
-        self.tmp_buf.clear();
+        self.internal_buffer.clear();
 
         for column in 0..COLUMNS {
             if MASK & (1 << column) != 0 {
@@ -193,7 +194,7 @@ where
             row.into_iter()
                 .map(|v| match v {
                     ValueRange::Mmap(range) => &self.mmap_handle[range],
-                    ValueRange::Internal(range) => &self.tmp_buf[range],
+                    ValueRange::Internal(range) => &self.internal_buffer[range],
                 })
                 .collect(),
         ))
@@ -218,22 +219,22 @@ where
         };
 
         if let Some(zstd_dict_decompressors) = self.zstd_decompressors.as_mut() {
-            let from: usize = self.tmp_buf.len();
+            let from: usize = self.internal_buffer.len();
             if let Some(decompressor) = zstd_dict_decompressors.get_mut(column) {
                 Zstd::decompress_with_dictionary(
                     &self.mmap_handle[column_offset_range],
-                    &mut self.tmp_buf,
+                    &mut self.internal_buffer,
                     decompressor,
                 )?;
             }
-            let to = self.tmp_buf.len();
+            let to = self.internal_buffer.len();
 
             row.push(ValueRange::Internal(from..to));
         } else if let Some(compression) = &self.jar.compressor {
             // Uses the chosen default decompressor
-            let from = self.tmp_buf.len();
-            compression.decompress_to(&self.mmap_handle[column_offset_range], &mut self.tmp_buf)?;
-            let to = self.tmp_buf.len();
+            let from = self.internal_buffer.len();
+            compression.decompress_to(&self.mmap_handle[column_offset_range], &mut self.internal_buffer)?;
+            let to = self.internal_buffer.len();
 
             row.push(ValueRange::Internal(from..to));
         } else {

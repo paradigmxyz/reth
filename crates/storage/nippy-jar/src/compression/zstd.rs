@@ -100,10 +100,10 @@ impl Zstd {
         }
     }
 
-    /// Compresses a value using a dictionary. Reserves additional capacity for `tmp_buf` if necessary.
+    /// Compresses a value using a dictionary. Reserves additional capacity for `buffer` if necessary.
     pub fn compress_with_dictionary(
         column_value: &[u8],
-        tmp_buf: &mut Vec<u8>,
+        buffer: &mut Vec<u8>,
         handle: &mut File,
         compressor: Option<&mut Compressor<'_>>,
     ) -> Result<(), NippyJarError> {
@@ -113,16 +113,16 @@ impl Zstd {
             // enough, the compressed buffer will actually be larger. We keep retrying.
             // If we eventually fail, it probably means it's another kind of error.
             let mut multiplier = 1;
-            while let Err(err) = compressor.compress_to_buffer(column_value, tmp_buf) {
-                tmp_buf.reserve(column_value.len() * multiplier);
+            while let Err(err) = compressor.compress_to_buffer(column_value, buffer) {
+                buffer.reserve(column_value.len() * multiplier);
                 multiplier += 1;
                 if multiplier == 5 {
                     return Err(NippyJarError::Disconnect(err))
                 }
             }
 
-            handle.write_all(tmp_buf)?;
-            tmp_buf.clear();
+            handle.write_all(buffer)?;
+            buffer.clear();
         } else {
             handle.write_all(column_value)?;
         }

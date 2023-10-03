@@ -44,8 +44,8 @@ pub use cursor::NippyJarCursor;
 
 const NIPPY_JAR_VERSION: usize = 1;
 
-/// A [`Row`] is a list of its selected column values.
-type Row<'a> = Vec<&'a [u8]>;
+/// A [`RefRow`] is a list of column value slices pointing to either an internal buffer or a memory-mapped file.
+type RefRow<'a> = Vec<&'a [u8]>;
 
 /// Alias type for a column value wrapped in `Result`
 pub type ColumnResult<T> = Result<T, Box<dyn StdError + Send + Sync>>;
