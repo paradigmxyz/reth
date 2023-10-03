@@ -3,18 +3,17 @@ use crate::{
     PrunerError,
 };
 use reth_db::{database::Database, tables};
-use reth_interfaces::RethResult;
-use reth_primitives::{PruneCheckpoint, PruneSegment};
-use reth_provider::{DatabaseProviderRW, PruneCheckpointWriter, TransactionsProvider};
+use reth_primitives::PruneSegment;
+use reth_provider::{DatabaseProviderRW, TransactionsProvider};
 use tracing::{instrument, trace};
 
 #[derive(Default)]
 #[non_exhaustive]
-pub(crate) struct Receipts;
+pub(crate) struct SenderRecovery;
 
-impl<DB: Database> Segment<DB> for Receipts {
+impl<DB: Database> Segment<DB> for SenderRecovery {
     fn segment(&self) -> PruneSegment {
-        PruneSegment::Receipts
+        PruneSegment::SenderRecovery
     }
 
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
@@ -26,26 +25,26 @@ impl<DB: Database> Segment<DB> for Receipts {
         let tx_range = match input.get_next_tx_num_range(provider)? {
             Some(range) => range,
             None => {
-                trace!(target: "pruner", "No receipts to prune");
+                trace!(target: "pruner", "No transaction senders to prune");
                 return Ok(PruneOutput::done())
             }
         };
         let tx_range_end = *tx_range.end();
 
         let mut last_pruned_transaction = tx_range_end;
-        let (pruned, done) = provider.prune_table_with_range::<tables::Receipts>(
+        let (pruned, done) = provider.prune_table_with_range::<tables::TxSenders>(
             tx_range,
             input.delete_limit,
             |_| false,
             |row| last_pruned_transaction = row.0,
         )?;
-        trace!(target: "pruner", %pruned, %done, "Pruned receipts");
+        trace!(target: "pruner", %pruned, %done, "Pruned transaction senders");
 
         let last_pruned_block = provider
             .transaction_block(last_pruned_transaction)?
             .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
-            // If there's more receipts to prune, set the checkpoint block number to previous,
-            // so we could finish pruning its receipts on the next run.
+            // If there's more transaction senders to prune, set the checkpoint block number to
+            // previous, so we could finish pruning its transaction senders on the next run.
             .checked_sub(if done { 0 } else { 1 });
 
         Ok(PruneOutput {
@@ -57,35 +56,18 @@ impl<DB: Database> Segment<DB> for Receipts {
             }),
         })
     }
-
-    fn save_checkpoint(
-        &self,
-        provider: &DatabaseProviderRW<'_, DB>,
-        checkpoint: PruneCheckpoint,
-    ) -> RethResult<()> {
-        provider.save_prune_checkpoint(PruneSegment::Receipts, checkpoint)?;
-
-        // `PruneSegment::Receipts` overrides `PruneSegment::ContractLogs`, so we can preemptively
-        // limit their pruning start point.
-        provider.save_prune_checkpoint(PruneSegment::ContractLogs, checkpoint)?;
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{PruneInput, PruneOutput, Receipts, Segment};
+    use crate::segments::{PruneInput, PruneOutput, Segment, SenderRecovery};
     use assert_matches::assert_matches;
     use itertools::{
         FoldWhile::{Continue, Done},
         Itertools,
     };
     use reth_db::tables;
-    use reth_interfaces::test_utils::{
-        generators,
-        generators::{random_block_range, random_receipt},
-    };
+    use reth_interfaces::test_utils::{generators, generators::random_block_range};
     use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, TxNumber, B256};
     use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::TestTransaction;
@@ -99,14 +81,17 @@ mod tests {
         let blocks = random_block_range(&mut rng, 1..=10, B256::ZERO, 2..3);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
-        let mut receipts = Vec::new();
+        let mut transaction_senders = Vec::new();
         for block in &blocks {
             for transaction in &block.body {
-                receipts
-                    .push((receipts.len() as u64, random_receipt(&mut rng, transaction, Some(0))));
+                transaction_senders.push((
+                    transaction_senders.len() as u64,
+                    transaction.recover_signer().expect("recover signer"),
+                ));
             }
         }
-        tx.insert_receipts(receipts.clone()).expect("insert receipts");
+        tx.insert_transaction_senders(transaction_senders.clone())
+            .expect("insert transaction senders");
 
         assert_eq!(
             tx.table::<tables::Transactions>().unwrap().len(),
@@ -114,7 +99,7 @@ mod tests {
         );
         assert_eq!(
             tx.table::<tables::Transactions>().unwrap().len(),
-            tx.table::<tables::Receipts>().unwrap().len()
+            tx.table::<tables::TxSenders>().unwrap().len()
         );
 
         let test_prune = |to_block: BlockNumber, expected_result: (bool, usize)| {
@@ -122,16 +107,16 @@ mod tests {
             let input = PruneInput {
                 previous_checkpoint: tx
                     .inner()
-                    .get_prune_checkpoint(PruneSegment::Receipts)
+                    .get_prune_checkpoint(PruneSegment::SenderRecovery)
                     .unwrap(),
                 to_block,
                 delete_limit: 10,
             };
-            let segment = Receipts::default();
+            let segment = SenderRecovery::default();
 
             let next_tx_number_to_prune = tx
                 .inner()
-                .get_prune_checkpoint(PruneSegment::Receipts)
+                .get_prune_checkpoint(PruneSegment::SenderRecovery)
                 .unwrap()
                 .and_then(|checkpoint| checkpoint.tx_number)
                 .map(|tx_number| tx_number + 1)
@@ -178,11 +163,11 @@ mod tests {
                 last_pruned_block_number.checked_sub(if result.done { 0 } else { 1 });
 
             assert_eq!(
-                tx.table::<tables::Receipts>().unwrap().len(),
-                receipts.len() - (last_pruned_tx_number + 1)
+                tx.table::<tables::TxSenders>().unwrap().len(),
+                transaction_senders.len() - (last_pruned_tx_number + 1)
             );
             assert_eq!(
-                tx.inner().get_prune_checkpoint(PruneSegment::Receipts).unwrap(),
+                tx.inner().get_prune_checkpoint(PruneSegment::SenderRecovery).unwrap(),
                 Some(PruneCheckpoint {
                     block_number: last_pruned_block_number,
                     tx_number: Some(last_pruned_tx_number as TxNumber),
