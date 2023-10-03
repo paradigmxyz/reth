@@ -100,7 +100,8 @@ impl Zstd {
         }
     }
 
-    /// Compresses a value using a dictionary. Reserves additional capacity for `buffer` if necessary.
+    /// Compresses a value using a dictionary. Reserves additional capacity for `buffer` if
+    /// necessary.
     pub fn compress_with_dictionary(
         column_value: &[u8],
         buffer: &mut Vec<u8>,

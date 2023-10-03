@@ -181,7 +181,6 @@ where
         }
 
         let mut row = Vec::with_capacity(COLUMNS);
-        self.internal_buffer.clear();
 
         for column in 0..COLUMNS {
             if MASK & (1 << column) != 0 {
@@ -233,7 +232,8 @@ where
         } else if let Some(compression) = &self.jar.compressor {
             // Uses the chosen default decompressor
             let from = self.internal_buffer.len();
-            compression.decompress_to(&self.mmap_handle[column_offset_range], &mut self.internal_buffer)?;
+            compression
+                .decompress_to(&self.mmap_handle[column_offset_range], &mut self.internal_buffer)?;
             let to = self.internal_buffer.len();
 
             row.push(ValueRange::Internal(from..to));
