@@ -79,8 +79,7 @@ mod tests {
                 .unwrap();
         }
 
-        let db_data =
-            cursor.walk_range(..).unwrap().collect::<std::result::Result<Vec<_>, _>>().unwrap();
+        let db_data = cursor.walk_range(..).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
         assert_eq!(db_data[0].0.inner.to_vec(), data[0]);
         assert_eq!(db_data[1].0.inner.to_vec(), data[1]);
         assert_eq!(db_data[2].0.inner.to_vec(), data[2]);

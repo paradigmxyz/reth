@@ -49,7 +49,7 @@ pub enum BlockchainTreeError {
 }
 
 /// Result alias for `CanonicalError`
-pub type CanonicalResult<T> = std::result::Result<T, CanonicalError>;
+pub type CanonicalResult<T> = Result<T, CanonicalError>;
 
 /// Canonical Errors
 #[allow(missing_docs)]
