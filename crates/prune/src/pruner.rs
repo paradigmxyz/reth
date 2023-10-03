@@ -1,6 +1,9 @@
 //! Support for pruning.
 
-use crate::{Metrics, PrunerError, PrunerEvent};
+use crate::{
+    part::{Part, PruneInput},
+    parts, Metrics, PrunerError, PrunerEvent,
+};
 use rayon::prelude::*;
 use reth_db::{
     abstraction::cursor::{DbCursorRO, DbCursorRW},
@@ -124,16 +127,20 @@ impl<DB: Database> Pruner<DB> {
             );
 
             let part_start = Instant::now();
-            let (part_done, deleted) =
-                self.prune_receipts(&provider, to_block, prune_mode, delete_limit)?;
+            let part = parts::Receipts {};
+            let output =
+                part.prune(&provider, PruneInput { to_block, prune_mode, delete_limit })?;
+            if let Some(checkpoint) = output.checkpoint {
+                part.save_checkpoint(&provider, checkpoint)?;
+            }
             self.metrics
                 .get_prune_part_metrics(PrunePart::Receipts)
                 .duration_seconds
                 .record(part_start.elapsed());
 
-            done = done && part_done;
-            delete_limit = delete_limit.saturating_sub(deleted);
-            parts.insert(PrunePart::Receipts, (part_done, deleted));
+            done = done && output.done;
+            delete_limit = delete_limit.saturating_sub(output.pruned);
+            parts.insert(PrunePart::Receipts, (output.done, output.pruned));
         } else {
             trace!(target: "pruner", prune_part = ?PrunePart::Receipts, "No target block to prune");
         }
@@ -386,59 +393,6 @@ impl<DB: Database> Pruner<DB> {
         }
 
         Ok(Some(range))
-    }
-
-    /// Prune receipts up to the provided block, inclusive, respecting the batch size.
-    #[instrument(level = "trace", skip(self, provider), target = "pruner")]
-    fn prune_receipts(
-        &self,
-        provider: &DatabaseProviderRW<'_, DB>,
-        to_block: BlockNumber,
-        prune_mode: PruneMode,
-        delete_limit: usize,
-    ) -> PrunePartResult {
-        let tx_range = match self.get_next_tx_num_range_from_checkpoint(
-            provider,
-            PrunePart::Receipts,
-            to_block,
-        )? {
-            Some(range) => range,
-            None => {
-                trace!(target: "pruner", "No receipts to prune");
-                return Ok((true, 0))
-            }
-        };
-        let tx_range_end = *tx_range.end();
-
-        let mut last_pruned_transaction = tx_range_end;
-        let (deleted, done) = provider.prune_table_with_range::<tables::Receipts>(
-            tx_range,
-            delete_limit,
-            |_| false,
-            |row| last_pruned_transaction = row.0,
-        )?;
-        trace!(target: "pruner", %deleted, %done, "Pruned receipts");
-
-        let last_pruned_block = provider
-            .transaction_block(last_pruned_transaction)?
-            .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
-            // If there's more receipts to prune, set the checkpoint block number to previous,
-            // so we could finish pruning its receipts on the next run.
-            .checked_sub(if done { 0 } else { 1 });
-
-        let prune_checkpoint = PruneCheckpoint {
-            block_number: last_pruned_block,
-            tx_number: Some(last_pruned_transaction),
-            prune_mode,
-        };
-
-        provider.save_prune_checkpoint(PrunePart::Receipts, prune_checkpoint)?;
-
-        // `PrunePart::Receipts` overrides `PrunePart::ContractLogs`, so we can preemptively
-        // limit their pruning start point.
-        provider.save_prune_checkpoint(PrunePart::ContractLogs, prune_checkpoint)?;
-
-        Ok((done, deleted))
     }
 
     /// Prune receipts up to the provided block, inclusive, by filtering logs. Works as in inclusion
@@ -1020,105 +974,6 @@ mod tests {
         // Tip block number delta is < than min block interval
         let third_block_number = second_block_number;
         assert!(!pruner.is_pruning_needed(third_block_number));
-    }
-
-    #[test]
-    fn prune_receipts() {
-        let tx = TestTransaction::default();
-        let mut rng = generators::rng();
-
-        let blocks = random_block_range(&mut rng, 1..=10, B256::ZERO, 2..3);
-        tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
-
-        let mut receipts = Vec::new();
-        for block in &blocks {
-            for transaction in &block.body {
-                receipts
-                    .push((receipts.len() as u64, random_receipt(&mut rng, transaction, Some(0))));
-            }
-        }
-        tx.insert_receipts(receipts.clone()).expect("insert receipts");
-
-        assert_eq!(
-            tx.table::<tables::Transactions>().unwrap().len(),
-            blocks.iter().map(|block| block.body.len()).sum::<usize>()
-        );
-        assert_eq!(
-            tx.table::<tables::Transactions>().unwrap().len(),
-            tx.table::<tables::Receipts>().unwrap().len()
-        );
-
-        let test_prune = |to_block: BlockNumber, expected_result: (bool, usize)| {
-            let prune_mode = PruneMode::Before(to_block);
-            let pruner = Pruner::new(
-                tx.inner_raw(),
-                MAINNET.clone(),
-                1,
-                PruneModes { receipts: Some(prune_mode), ..Default::default() },
-                // Less than total amount of receipts to prune to test the batching logic
-                10,
-                watch::channel(None).1,
-            );
-
-            let next_tx_number_to_prune = tx
-                .inner()
-                .get_prune_checkpoint(PrunePart::Receipts)
-                .unwrap()
-                .and_then(|checkpoint| checkpoint.tx_number)
-                .map(|tx_number| tx_number + 1)
-                .unwrap_or_default();
-
-            let last_pruned_tx_number = blocks
-                .iter()
-                .take(to_block as usize)
-                .map(|block| block.body.len())
-                .sum::<usize>()
-                .min(next_tx_number_to_prune as usize + pruner.delete_limit)
-                .sub(1);
-
-            let last_pruned_block_number = blocks
-                .iter()
-                .fold_while((0, 0), |(_, mut tx_count), block| {
-                    tx_count += block.body.len();
-
-                    if tx_count > last_pruned_tx_number {
-                        Done((block.number, tx_count))
-                    } else {
-                        Continue((block.number, tx_count))
-                    }
-                })
-                .into_inner()
-                .0;
-
-            let provider = tx.inner_rw();
-            let result =
-                pruner.prune_receipts(&provider, to_block, prune_mode, pruner.delete_limit);
-            provider.commit().expect("commit");
-
-            assert_matches!(result, Ok(_));
-            let result = result.unwrap();
-            assert_eq!(result, expected_result);
-
-            let last_pruned_block_number =
-                last_pruned_block_number.checked_sub(if result.0 { 0 } else { 1 });
-
-            assert_eq!(
-                tx.table::<tables::Receipts>().unwrap().len(),
-                receipts.len() - (last_pruned_tx_number + 1)
-            );
-            assert_eq!(
-                tx.inner().get_prune_checkpoint(PrunePart::Receipts).unwrap(),
-                Some(PruneCheckpoint {
-                    block_number: last_pruned_block_number,
-                    tx_number: Some(last_pruned_tx_number as TxNumber),
-                    prune_mode
-                })
-            );
-        };
-
-        test_prune(6, (false, 10));
-        test_prune(6, (true, 2));
-        test_prune(10, (true, 8));
     }
 
     #[test]
