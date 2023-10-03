@@ -520,7 +520,7 @@ pub struct CanonicalStateUpdate<'a> {
     /// EIP-4844 blob fee of the _next_ (pending) block
     ///
     /// Only after Cancun
-    pub pending_block_blob_fee: Option<u64>,
+    pub pending_block_blob_fee: Option<u128>,
     /// A set of changed accounts across a range of blocks.
     pub changed_accounts: Vec<ChangedAccount>,
     /// All mined transactions in the block range.
@@ -1040,7 +1040,7 @@ pub struct BlockInfo {
     ///
     /// Note: this is the derived blob fee of the _next_ block that builds on the block the pool is
     /// currently tracking
-    pub pending_blob_fee: Option<u64>,
+    pub pending_blob_fee: Option<u128>,
 }
 
 /// The limit to enforce for [TransactionPool::get_pooled_transaction_elements].

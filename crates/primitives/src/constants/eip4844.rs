@@ -29,7 +29,7 @@ pub const TARGET_BLOBS_PER_BLOCK: u64 = TARGET_DATA_GAS_PER_BLOCK / DATA_GAS_PER
 pub const BLOB_GASPRICE_UPDATE_FRACTION: u64 = 3_338_477u64; // 3338477
 
 /// Minimum gas price for a data blob
-pub const BLOB_TX_MIN_BLOB_GASPRICE: u64 = 1u64;
+pub const BLOB_TX_MIN_BLOB_GASPRICE: u128 = 1u128;
 
 /// Commitment version of a KZG commitment
 pub const VERSIONED_HASH_VERSION_KZG: u8 = 0x01;
