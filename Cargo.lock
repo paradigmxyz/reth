@@ -6431,8 +6431,8 @@ dependencies = [
 
 [[package]]
 name = "revm"
-version = "3.3.0"
-source = "git+https://github.com/Evalir/revm/?branch=reintroduce-alloy-rebased#988e0d7920ab20c3d0a12dd5582654a58e7f9f2c"
+version = "3.4.0"
+source = "git+https://github.com/bluealloy/revm/#4e78fbe86ef4d030968d00f461926abbcb813943"
 dependencies = [
  "auto_impl",
  "revm-interpreter",
@@ -6441,16 +6441,16 @@ dependencies = [
 
 [[package]]
 name = "revm-interpreter"
-version = "1.1.2"
-source = "git+https://github.com/Evalir/revm/?branch=reintroduce-alloy-rebased#988e0d7920ab20c3d0a12dd5582654a58e7f9f2c"
+version = "1.2.0"
+source = "git+https://github.com/bluealloy/revm/#4e78fbe86ef4d030968d00f461926abbcb813943"
 dependencies = [
  "revm-primitives",
 ]
 
 [[package]]
 name = "revm-precompile"
-version = "2.0.3"
-source = "git+https://github.com/Evalir/revm/?branch=reintroduce-alloy-rebased#988e0d7920ab20c3d0a12dd5582654a58e7f9f2c"
+version = "2.1.0"
+source = "git+https://github.com/bluealloy/revm/#4e78fbe86ef4d030968d00f461926abbcb813943"
 dependencies = [
  "c-kzg",
  "k256",
@@ -6465,8 +6465,8 @@ dependencies = [
 
 [[package]]
 name = "revm-primitives"
-version = "1.1.2"
-source = "git+https://github.com/Evalir/revm/?branch=reintroduce-alloy-rebased#988e0d7920ab20c3d0a12dd5582654a58e7f9f2c"
+version = "1.2.0"
+source = "git+https://github.com/bluealloy/revm/#4e78fbe86ef4d030968d00f461926abbcb813943"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",

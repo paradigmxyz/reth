@@ -815,7 +815,7 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// Expected base fee for the pending block.
     pending_basefee: u64,
     /// Expected blob fee for the pending block.
-    pending_blob_fee: u64,
+    pending_blob_fee: u128,
     /// Configured price bump settings for replacements
     price_bumps: PriceBumpConfig,
 }

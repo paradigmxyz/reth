@@ -184,7 +184,7 @@ impl PayloadBuilderAttributes {
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
         // cancun now, we need to set the excess blob gas to the default value
         let blob_excess_gas_and_price = parent
-            .next_block_blob_fee()
+            .next_block_excess_blob_gas()
             .map_or_else(
                 || {
                     if cfg.spec_id == SpecId::CANCUN {
