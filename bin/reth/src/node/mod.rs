@@ -291,7 +291,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 tree_externals,
                 canon_state_notification_sender.clone(),
                 tree_config,
-                prune_config.clone().map(|config| config.parts),
+                prune_config.clone().map(|config| config.segments),
             )?
             .with_sync_metrics_tx(metrics_tx.clone()),
         );
@@ -460,7 +460,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 db.clone(),
                 self.chain.clone(),
                 prune_config.block_interval,
-                prune_config.parts,
+                prune_config.segments,
                 self.chain.prune_delete_limit,
                 highest_snapshots_rx,
             );
@@ -834,7 +834,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         let factory = factory.with_stack_config(stack_config);
 
-        let prune_modes = prune_config.map(|prune| prune.parts).unwrap_or_default();
+        let prune_modes = prune_config.map(|prune| prune.segments).unwrap_or_default();
 
         let header_mode =
             if continuous { HeaderSyncMode::Continuous } else { HeaderSyncMode::Tip(tip_rx) };

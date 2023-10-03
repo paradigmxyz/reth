@@ -4,42 +4,42 @@ pub(crate) use receipts::Receipts;
 use crate::PrunerError;
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
-use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PrunePart, TxNumber};
+use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, TxNumber};
 use reth_provider::{
     BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter,
 };
 use std::ops::RangeInclusive;
 use tracing::error;
 
-/// A part represents a segment of data for pruning.
+/// A segment represents a pruning of some portion of the data.
 ///
-/// Parts are called from [Pruner](crate::Pruner) with the following lifecycle:
-/// 1. Call [Part::prune] with `delete_limit` of [PruneInput].
-/// 2. If [Part::prune] returned a [Some] in `checkpoint` of [PruneOutput], call
-///    [Part::save_checkpoint].
+/// Segments are called from [Pruner](crate::Pruner) with the following lifecycle:
+/// 1. Call [Segment::prune] with `delete_limit` of [PruneInput].
+/// 2. If [Segment::prune] returned a [Some] in `checkpoint` of [PruneOutput], call
+///    [Segment::save_checkpoint].
 /// 3. Subtract `pruned` of [PruneOutput] from `delete_limit` of next [PruneInput].
-pub(crate) trait Part {
-    /// Part of the data that's pruned.
-    const PART: PrunePart;
+pub(crate) trait Segment {
+    /// Segment of the data that's pruned.
+    const SEGMENT: PruneSegment;
 
-    /// Prune data for [Self::PART] using the provided input.
+    /// Prune data for [Self::SEGMENT] using the provided input.
     fn prune<DB: Database>(
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError>;
 
-    /// Save checkpoint for [Self::PART] to the database.
+    /// Save checkpoint for [Self::SEGMENT] to the database.
     fn save_checkpoint<DB: Database>(
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
         checkpoint: PruneCheckpoint,
     ) -> RethResult<()> {
-        provider.save_prune_checkpoint(Self::PART, checkpoint)
+        provider.save_prune_checkpoint(Self::SEGMENT, checkpoint)
     }
 }
 
-/// Part pruning input, see [Part::prune].
+/// Segment pruning input, see [Segment::prune].
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PruneInput {
     /// Target block up to which the pruning needs to be done, inclusive.
@@ -60,15 +60,15 @@ impl PruneInput {
     pub(crate) fn get_next_tx_num_range_from_checkpoint<DB: Database>(
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
-        prune_part: PrunePart,
+        segment: PruneSegment,
     ) -> RethResult<Option<RangeInclusive<TxNumber>>> {
         let from_tx_number = provider
-            .get_prune_checkpoint(prune_part)?
+            .get_prune_checkpoint(segment)?
             // Checkpoint exists, prune from the next transaction after the highest pruned one
             .and_then(|checkpoint| match checkpoint.tx_number {
                 Some(tx_number) => Some(tx_number + 1),
                 _ => {
-                    error!(target: "pruner", %prune_part, ?checkpoint, "Expected transaction number in prune checkpoint, found None");
+                    error!(target: "pruner", %segment, ?checkpoint, "Expected transaction number in prune checkpoint, found None");
                     None
                 },
             })
@@ -90,7 +90,7 @@ impl PruneInput {
     }
 }
 
-/// Part pruning output, see [Part::prune].
+/// Segment pruning output, see [Segment::prune].
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PruneOutput {
     /// `true` if pruning has been completed up to the target block, and `false` if there's more

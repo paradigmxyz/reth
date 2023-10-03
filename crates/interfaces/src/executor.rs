@@ -1,4 +1,4 @@
-use reth_primitives::{BlockNumHash, Bloom, PrunePartError, B256};
+use reth_primitives::{BlockNumHash, Bloom, PruneSegmentError, B256};
 use thiserror::Error;
 
 /// Transaction validation errors
@@ -76,9 +76,9 @@ pub enum BlockExecutionError {
     /// Validation error, transparently wrapping `BlockValidationError`
     #[error(transparent)]
     Validation(#[from] BlockValidationError),
-    /// Pruning error, transparently wrapping `PrunePartError`
+    /// Pruning error, transparently wrapping `PruneSegmentError`
     #[error(transparent)]
-    Pruning(#[from] PrunePartError),
+    Pruning(#[from] PruneSegmentError),
     /// Error representing a provider error
     #[error("Provider error")]
     ProviderError,

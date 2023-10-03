@@ -51,12 +51,12 @@ pub struct SnapshotTargets {
 }
 
 impl SnapshotTargets {
-    /// Returns `true` if any of the data parts has targets, i.e. is [`Some`].
+    /// Returns `true` if any of the targets are [Some].
     pub fn any(&self) -> bool {
         self.headers.is_some() || self.receipts.is_some() || self.transactions.is_some()
     }
 
-    /// Returns `true` if all targets are either [`None`] or multiple of `block_interval`.
+    /// Returns `true` if all targets are either [None] or multiple of `block_interval`.
     fn is_multiple_of_block_interval(&self, block_interval: u64) -> bool {
         [
             self.headers.as_ref(),

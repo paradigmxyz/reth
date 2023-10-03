@@ -1,6 +1,6 @@
 use crate::{
-    prune::PrunePartError, serde_helper::deserialize_opt_prune_mode_with_min_blocks, BlockNumber,
-    PruneMode, PrunePart, ReceiptsLogPruneConfig,
+    prune::PruneSegmentError, serde_helper::deserialize_opt_prune_mode_with_min_blocks,
+    BlockNumber, PruneMode, PruneSegment, ReceiptsLogPruneConfig,
 };
 use paste::paste;
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 ///    unwind is required.
 pub const MINIMUM_PRUNING_DISTANCE: u64 = 32 * 2 + 10_000;
 
-/// Pruning configuration for every part of the data that can be pruned.
+/// Pruning configuration for every segment of the data that can be pruned.
 #[derive(Debug, Clone, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct PruneModes {
@@ -49,8 +49,8 @@ pub struct PruneModes {
     pub receipts_log_filter: ReceiptsLogPruneConfig,
 }
 
-macro_rules! impl_prune_parts {
-    ($(($part:ident, $variant:ident, $min_blocks:expr)),+) => {
+macro_rules! impl_prune_segments {
+    ($(($segment:ident, $variant:ident, $min_blocks:expr)),+) => {
         $(
             paste! {
                 #[doc = concat!(
@@ -58,8 +58,8 @@ macro_rules! impl_prune_parts {
                     stringify!($variant),
                     " should be pruned at the target block according to the provided tip."
                 )]
-                pub fn [<should_prune_ $part>](&self, block: BlockNumber, tip: BlockNumber) -> bool {
-                    if let Some(mode) = &self.$part {
+                pub fn [<should_prune_ $segment>](&self, block: BlockNumber, tip: BlockNumber) -> bool {
+                    if let Some(mode) = &self.$segment {
                         return mode.should_prune(block, tip)
                     }
                     false
@@ -74,9 +74,9 @@ macro_rules! impl_prune_parts {
                     stringify!($variant),
                     " pruning needs to be done, inclusive, according to the provided tip."
                 )]
-                pub fn [<prune_target_block_ $part>](&self, tip: BlockNumber) -> Result<Option<(BlockNumber, PruneMode)>, PrunePartError> {
-                     match self.$part {
-                        Some(mode) => mode.prune_target_block(tip, $min_blocks.unwrap_or_default(), PrunePart::$variant),
+                pub fn [<prune_target_block_ $segment>](&self, tip: BlockNumber) -> Result<Option<(BlockNumber, PruneMode)>, PruneSegmentError> {
+                     match self.$segment {
+                        Some(mode) => mode.prune_target_block(tip, $min_blocks.unwrap_or_default(), PruneSegment::$variant),
                         None => Ok(None)
                     }
                 }
@@ -87,7 +87,7 @@ macro_rules! impl_prune_parts {
         pub fn all() -> Self {
             Self {
                 $(
-                    $part: Some(PruneMode::Full),
+                    $segment: Some(PruneMode::Full),
                 )+
                 receipts_log_filter: Default::default()
             }
@@ -102,7 +102,7 @@ impl PruneModes {
         PruneModes::default()
     }
 
-    impl_prune_parts!(
+    impl_prune_segments!(
         (sender_recovery, SenderRecovery, None),
         (transaction_lookup, TransactionLookup, None),
         (receipts, Receipts, Some(MINIMUM_PRUNING_DISTANCE)),

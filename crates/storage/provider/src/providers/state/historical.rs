@@ -319,11 +319,11 @@ delegate_provider_impls!(HistoricalStateProvider<'a, TX> where [TX: DbTx<'a>]);
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LowestAvailableBlocks {
     /// Lowest block number at which the account history is available. It may not be available if
-    /// [reth_primitives::PrunePart::AccountHistory] was pruned.
+    /// [reth_primitives::PruneSegment::AccountHistory] was pruned.
     /// [Option::None] means all history is available.
     pub account_history_block_number: Option<BlockNumber>,
     /// Lowest block number at which the storage history is available. It may not be available if
-    /// [reth_primitives::PrunePart::StorageHistory] was pruned.
+    /// [reth_primitives::PruneSegment::StorageHistory] was pruned.
     /// [Option::None] means all history is available.
     pub storage_history_block_number: Option<BlockNumber>,
 }

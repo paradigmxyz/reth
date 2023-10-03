@@ -1,12 +1,12 @@
 mod checkpoint;
 mod mode;
-mod part;
+mod segment;
 mod target;
 
 use crate::{Address, BlockNumber};
 pub use checkpoint::PruneCheckpoint;
 pub use mode::PruneMode;
-pub use part::{PrunePart, PrunePartError};
+pub use segment::{PruneSegment, PruneSegmentError};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 pub use target::{PruneModes, MINIMUM_PRUNING_DISTANCE};
@@ -40,7 +40,7 @@ impl ReceiptsLogPruneConfig {
         &self,
         tip: BlockNumber,
         pruned_block: Option<BlockNumber>,
-    ) -> Result<BTreeMap<BlockNumber, Vec<&Address>>, PrunePartError> {
+    ) -> Result<BTreeMap<BlockNumber, Vec<&Address>>, PruneSegmentError> {
         let mut map = BTreeMap::new();
         let pruned_block = pruned_block.unwrap_or_default();
 
@@ -53,7 +53,7 @@ impl ReceiptsLogPruneConfig {
             // Reminder, that we increment because the [`BlockNumber`] key of the new map should be
             // viewed as `PruneMode::Before(block)`
             let block = (pruned_block + 1).max(
-                mode.prune_target_block(tip, MINIMUM_PRUNING_DISTANCE, PrunePart::ContractLogs)?
+                mode.prune_target_block(tip, MINIMUM_PRUNING_DISTANCE, PruneSegment::ContractLogs)?
                     .map(|(block, _)| block)
                     .unwrap_or_default() +
                     1,
@@ -69,15 +69,17 @@ impl ReceiptsLogPruneConfig {
         &self,
         tip: BlockNumber,
         pruned_block: Option<BlockNumber>,
-    ) -> Result<Option<BlockNumber>, PrunePartError> {
+    ) -> Result<Option<BlockNumber>, PruneSegmentError> {
         let pruned_block = pruned_block.unwrap_or_default();
         let mut lowest = None;
 
         for (_, mode) in self.0.iter() {
             if let PruneMode::Distance(_) = mode {
-                if let Some((block, _)) =
-                    mode.prune_target_block(tip, MINIMUM_PRUNING_DISTANCE, PrunePart::ContractLogs)?
-                {
+                if let Some((block, _)) = mode.prune_target_block(
+                    tip,
+                    MINIMUM_PRUNING_DISTANCE,
+                    PruneSegment::ContractLogs,
+                )? {
                     lowest = Some(lowest.unwrap_or(u64::MAX).min(block));
                 }
             }

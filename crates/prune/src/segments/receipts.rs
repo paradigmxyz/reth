@@ -1,10 +1,10 @@
 use crate::{
-    parts::{Part, PruneInput, PruneOutput, PruneOutputCheckpoint},
+    segments::{PruneInput, PruneOutput, PruneOutputCheckpoint, Segment},
     PrunerError,
 };
 use reth_db::{database::Database, tables};
 use reth_interfaces::RethResult;
-use reth_primitives::{PruneCheckpoint, PrunePart};
+use reth_primitives::{PruneCheckpoint, PruneSegment};
 use reth_provider::{DatabaseProviderRW, PruneCheckpointWriter, TransactionsProvider};
 use tracing::{instrument, trace};
 
@@ -12,8 +12,8 @@ use tracing::{instrument, trace};
 #[non_exhaustive]
 pub(crate) struct Receipts {}
 
-impl Part for Receipts {
-    const PART: PrunePart = PrunePart::Receipts;
+impl Segment for Receipts {
+    const SEGMENT: PruneSegment = PruneSegment::Receipts;
 
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
     fn prune<DB: Database>(
@@ -21,7 +21,7 @@ impl Part for Receipts {
         provider: &DatabaseProviderRW<'_, DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
-        let tx_range = match input.get_next_tx_num_range_from_checkpoint(provider, Self::PART)? {
+        let tx_range = match input.get_next_tx_num_range_from_checkpoint(provider, Self::SEGMENT)? {
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No receipts to prune");
@@ -61,11 +61,11 @@ impl Part for Receipts {
         provider: &DatabaseProviderRW<'_, DB>,
         checkpoint: PruneCheckpoint,
     ) -> RethResult<()> {
-        provider.save_prune_checkpoint(Self::PART, checkpoint)?;
+        provider.save_prune_checkpoint(Self::SEGMENT, checkpoint)?;
 
-        // `PrunePart::Receipts` overrides `PrunePart::ContractLogs`, so we can preemptively
+        // `PruneSegment::Receipts` overrides `PruneSegmnt::ContractLogs`, so we can preemptively
         // limit their pruning start point.
-        provider.save_prune_checkpoint(PrunePart::ContractLogs, checkpoint)?;
+        provider.save_prune_checkpoint(PruneSegment::ContractLogs, checkpoint)?;
 
         Ok(())
     }
@@ -73,7 +73,7 @@ impl Part for Receipts {
 
 #[cfg(test)]
 mod tests {
-    use crate::parts::{Part, PruneInput, PruneOutput, Receipts};
+    use crate::segments::{PruneInput, PruneOutput, Receipts, Segment};
     use assert_matches::assert_matches;
     use itertools::{
         FoldWhile::{Continue, Done},
@@ -118,11 +118,11 @@ mod tests {
         let test_prune = |to_block: BlockNumber, expected_result: (bool, usize)| {
             let prune_mode = PruneMode::Before(to_block);
             let input = PruneInput { to_block, delete_limit: 10 };
-            let part = Receipts::default();
+            let segment = Receipts::default();
 
             let next_tx_number_to_prune = tx
                 .inner()
-                .get_prune_checkpoint(Receipts::PART)
+                .get_prune_checkpoint(Receipts::SEGMENT)
                 .unwrap()
                 .and_then(|checkpoint| checkpoint.tx_number)
                 .map(|tx_number| tx_number + 1)
@@ -151,17 +151,18 @@ mod tests {
                 .0;
 
             let provider = tx.inner_rw();
-            let result = part.prune(&provider, input).unwrap();
+            let result = segment.prune(&provider, input).unwrap();
             assert_matches!(
                 result,
                 PruneOutput {done, pruned, checkpoint: Some(_)}
                     if (done, pruned) == expected_result
             );
-            part.save_checkpoint(
-                &provider,
-                result.checkpoint.unwrap().as_prune_checkpoint(prune_mode),
-            )
-            .unwrap();
+            segment
+                .save_checkpoint(
+                    &provider,
+                    result.checkpoint.unwrap().as_prune_checkpoint(prune_mode),
+                )
+                .unwrap();
             provider.commit().expect("commit");
 
             let last_pruned_block_number =
@@ -172,7 +173,7 @@ mod tests {
                 receipts.len() - (last_pruned_tx_number + 1)
             );
             assert_eq!(
-                tx.inner().get_prune_checkpoint(Receipts::PART).unwrap(),
+                tx.inner().get_prune_checkpoint(Receipts::SEGMENT).unwrap(),
                 Some(PruneCheckpoint {
                     block_number: last_pruned_block_number,
                     tx_number: Some(last_pruned_tx_number as TxNumber),

@@ -335,8 +335,8 @@ nanos = 0
 
 The prune section configures the pruning configuration.
 
-You can configure the pruning of different parts of the data independently of others.
-For any unspecified parts, the default setting is no pruning.
+You can configure the pruning of different segments of the data independently of others.
+For any unspecified segments, the default setting is no pruning.
 
 ### Default config
 

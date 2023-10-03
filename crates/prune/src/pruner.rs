@@ -1,8 +1,8 @@
 //! Support for pruning.
 
 use crate::{
-    parts,
-    parts::{Part, PruneInput},
+    segments,
+    segments::{PruneInput, Segment},
     Metrics, PrunerError, PrunerEvent,
 };
 use rayon::prelude::*;
@@ -18,7 +18,7 @@ use reth_db::{
 use reth_interfaces::RethResult;
 use reth_primitives::{
     listener::EventListeners, BlockNumber, ChainSpec, PruneCheckpoint, PruneMode, PruneModes,
-    PrunePart, PruneProgress, TxNumber, MINIMUM_PRUNING_DISTANCE,
+    PruneProgress, PruneSegment, TxNumber, MINIMUM_PRUNING_DISTANCE,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
@@ -32,8 +32,8 @@ use tracing::{debug, error, instrument, trace};
 /// Result of [Pruner::run] execution.
 pub type PrunerResult = Result<PruneProgress, PrunerError>;
 
-/// Result of part pruning.
-type PrunePartResult = Result<(PruneProgress, usize), PrunerError>;
+/// Result of segment pruning.
+type PruneSegmentResult = Result<(PruneProgress, usize), PrunerError>;
 
 /// The pruner type itself with the result of [Pruner::run]
 pub type PrunerWithResult<DB> = (Pruner<DB>, PrunerResult);
@@ -43,7 +43,7 @@ pub type PrunerWithResult<DB> = (Pruner<DB>, PrunerResult);
 pub struct Pruner<DB> {
     metrics: Metrics,
     provider_factory: ProviderFactory<DB>,
-    /// Minimum pruning interval measured in blocks. All prune parts are checked and, if needed,
+    /// Minimum pruning interval measured in blocks. All prune segments are checked and, if needed,
     /// pruned, when the chain advances by the specified number of blocks.
     min_block_interval: usize,
     /// Last pruned block number. Used in conjunction with `min_block_interval` to determine
@@ -99,9 +99,9 @@ impl<DB: Database> Pruner<DB> {
         let provider = self.provider_factory.provider_rw()?;
 
         let mut done = true;
-        let mut parts = BTreeMap::new();
+        let mut segments = BTreeMap::new();
 
-        // TODO(alexey): prune snapshot parts of data (headers, transactions)
+        // TODO(alexey): prune snapshotted segments of data (headers, transactions)
         // let highest_snapshots = *self.highest_snapshots_tracker.borrow();
 
         let mut delete_limit = self.delete_limit *
@@ -114,47 +114,47 @@ impl<DB: Database> Pruner<DB> {
         {
             trace!(
                 target: "pruner",
-                prune_part = ?PrunePart::Receipts,
+                segment = ?PruneSegment::Receipts,
                 %to_block,
                 ?prune_mode,
                 "Got target block to prune"
             );
 
-            let part_start = Instant::now();
-            let part = parts::Receipts::default();
-            let output = part.prune(&provider, PruneInput { to_block, delete_limit })?;
+            let segment_start = Instant::now();
+            let segment = segments::Receipts::default();
+            let output = segment.prune(&provider, PruneInput { to_block, delete_limit })?;
             if let Some(checkpoint) = output.checkpoint {
-                part.save_checkpoint(&provider, checkpoint.as_prune_checkpoint(prune_mode))?;
+                segment.save_checkpoint(&provider, checkpoint.as_prune_checkpoint(prune_mode))?;
             }
             self.metrics
-                .get_prune_part_metrics(PrunePart::Receipts)
+                .get_prune_segment_metrics(PruneSegment::Receipts)
                 .duration_seconds
-                .record(part_start.elapsed());
+                .record(segment_start.elapsed());
 
             done = done && output.done;
             delete_limit = delete_limit.saturating_sub(output.pruned);
-            parts.insert(
-                PrunePart::Receipts,
+            segments.insert(
+                PruneSegment::Receipts,
                 (PruneProgress::from_done(output.done), output.pruned),
             );
         } else {
-            trace!(target: "pruner", prune_part = ?PrunePart::Receipts, "No target block to prune");
+            trace!(target: "pruner", prune_segment = ?PruneSegment::Receipts, "No target block to prune");
         }
 
         if !self.modes.receipts_log_filter.is_empty() {
-            let part_start = Instant::now();
-            let (part_progress, deleted) =
+            let segment_start = Instant::now();
+            let (segment_progress, deleted) =
                 self.prune_receipts_by_logs(&provider, tip_block_number, delete_limit)?;
             self.metrics
-                .get_prune_part_metrics(PrunePart::ContractLogs)
+                .get_prune_segment_metrics(PruneSegment::ContractLogs)
                 .duration_seconds
-                .record(part_start.elapsed());
+                .record(segment_start.elapsed());
 
-            done = done && part_progress.is_finished();
+            done = done && segment_progress.is_finished();
             delete_limit = delete_limit.saturating_sub(deleted);
-            parts.insert(PrunePart::ContractLogs, (part_progress, deleted));
+            segments.insert(PruneSegment::ContractLogs, (segment_progress, deleted));
         } else {
-            trace!(target: "pruner", prune_part = ?PrunePart::ContractLogs, "No filter to prune");
+            trace!(target: "pruner", prune_segment = ?PruneSegment::ContractLogs, "No filter to prune");
         }
 
         if let Some((to_block, prune_mode)) =
@@ -162,27 +162,27 @@ impl<DB: Database> Pruner<DB> {
         {
             trace!(
                 target: "pruner",
-                prune_part = ?PrunePart::TransactionLookup,
+                prune_segment = ?PruneSegment::TransactionLookup,
                 %to_block,
                 ?prune_mode,
                 "Got target block to prune"
             );
 
-            let part_start = Instant::now();
-            let (part_progress, deleted) =
+            let segment_start = Instant::now();
+            let (segment_progress, deleted) =
                 self.prune_transaction_lookup(&provider, to_block, prune_mode, delete_limit)?;
             self.metrics
-                .get_prune_part_metrics(PrunePart::TransactionLookup)
+                .get_prune_segment_metrics(PruneSegment::TransactionLookup)
                 .duration_seconds
-                .record(part_start.elapsed());
+                .record(segment_start.elapsed());
 
-            done = done && part_progress.is_finished();
+            done = done && segment_progress.is_finished();
             delete_limit = delete_limit.saturating_sub(deleted);
-            parts.insert(PrunePart::TransactionLookup, (part_progress, deleted));
+            segments.insert(PruneSegment::TransactionLookup, (segment_progress, deleted));
         } else {
             trace!(
                 target: "pruner",
-                prune_part = ?PrunePart::TransactionLookup,
+                prune_segment = ?PruneSegment::TransactionLookup,
                 "No target block to prune"
             );
         }
@@ -192,27 +192,27 @@ impl<DB: Database> Pruner<DB> {
         {
             trace!(
                 target: "pruner",
-                prune_part = ?PrunePart::SenderRecovery,
+                prune_segment = ?PruneSegment::SenderRecovery,
                 %to_block,
                 ?prune_mode,
                 "Got target block to prune"
             );
 
-            let part_start = Instant::now();
-            let (part_progress, deleted) =
+            let segment_start = Instant::now();
+            let (segment_progress, deleted) =
                 self.prune_transaction_senders(&provider, to_block, prune_mode, delete_limit)?;
             self.metrics
-                .get_prune_part_metrics(PrunePart::SenderRecovery)
+                .get_prune_segment_metrics(PruneSegment::SenderRecovery)
                 .duration_seconds
-                .record(part_start.elapsed());
+                .record(segment_start.elapsed());
 
-            done = done && part_progress.is_finished();
+            done = done && segment_progress.is_finished();
             delete_limit = delete_limit.saturating_sub(deleted);
-            parts.insert(PrunePart::SenderRecovery, (part_progress, deleted));
+            segments.insert(PruneSegment::SenderRecovery, (segment_progress, deleted));
         } else {
             trace!(
                 target: "pruner",
-                prune_part = ?PrunePart::SenderRecovery,
+                prune_segment = ?PruneSegment::SenderRecovery,
                 "No target block to prune"
             );
         }
@@ -222,27 +222,27 @@ impl<DB: Database> Pruner<DB> {
         {
             trace!(
                 target: "pruner",
-                prune_part = ?PrunePart::AccountHistory,
+                prune_segment = ?PruneSegment::AccountHistory,
                 %to_block,
                 ?prune_mode,
                 "Got target block to prune"
             );
 
-            let part_start = Instant::now();
-            let (part_progress, deleted) =
+            let segment_start = Instant::now();
+            let (segment_progress, deleted) =
                 self.prune_account_history(&provider, to_block, prune_mode, delete_limit)?;
             self.metrics
-                .get_prune_part_metrics(PrunePart::AccountHistory)
+                .get_prune_segment_metrics(PruneSegment::AccountHistory)
                 .duration_seconds
-                .record(part_start.elapsed());
+                .record(segment_start.elapsed());
 
-            done = done && part_progress.is_finished();
+            done = done && segment_progress.is_finished();
             delete_limit = delete_limit.saturating_sub(deleted);
-            parts.insert(PrunePart::AccountHistory, (part_progress, deleted));
+            segments.insert(PruneSegment::AccountHistory, (segment_progress, deleted));
         } else {
             trace!(
                 target: "pruner",
-                prune_part = ?PrunePart::AccountHistory,
+                prune_segment = ?PruneSegment::AccountHistory,
                 "No target block to prune"
             );
         }
@@ -252,27 +252,27 @@ impl<DB: Database> Pruner<DB> {
         {
             trace!(
                 target: "pruner",
-                prune_part = ?PrunePart::StorageHistory,
+                prune_segment = ?PruneSegment::StorageHistory,
                 %to_block,
                 ?prune_mode,
                 "Got target block to prune"
             );
 
-            let part_start = Instant::now();
-            let (part_progress, deleted) =
+            let segment_start = Instant::now();
+            let (segment_progress, deleted) =
                 self.prune_storage_history(&provider, to_block, prune_mode, delete_limit)?;
             self.metrics
-                .get_prune_part_metrics(PrunePart::StorageHistory)
+                .get_prune_segment_metrics(PruneSegment::StorageHistory)
                 .duration_seconds
-                .record(part_start.elapsed());
+                .record(segment_start.elapsed());
 
-            done = done && part_progress.is_finished();
+            done = done && segment_progress.is_finished();
             delete_limit = delete_limit.saturating_sub(deleted);
-            parts.insert(PrunePart::StorageHistory, (part_progress, deleted));
+            segments.insert(PruneSegment::StorageHistory, (segment_progress, deleted));
         } else {
             trace!(
                 target: "pruner",
-                prune_part = ?PrunePart::StorageHistory,
+                prune_segment = ?PruneSegment::StorageHistory,
                 "No target block to prune"
             );
         }
@@ -289,11 +289,11 @@ impl<DB: Database> Pruner<DB> {
             ?elapsed,
             %delete_limit,
             %done,
-            ?parts,
+            ?segments,
             "Pruner finished"
         );
 
-        self.listeners.notify(PrunerEvent::Finished { tip_block_number, elapsed, parts });
+        self.listeners.notify(PrunerEvent::Finished { tip_block_number, elapsed, segments });
 
         Ok(PruneProgress::from_done(done))
     }
@@ -331,11 +331,11 @@ impl<DB: Database> Pruner<DB> {
     fn get_next_block_range_from_checkpoint(
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
-        prune_part: PrunePart,
+        prune_segment: PruneSegment,
         to_block: BlockNumber,
     ) -> RethResult<Option<RangeInclusive<BlockNumber>>> {
         let from_block = provider
-            .get_prune_checkpoint(prune_part)?
+            .get_prune_checkpoint(prune_segment)?
             .and_then(|checkpoint| checkpoint.block_number)
             // Checkpoint exists, prune from the next block after the highest pruned one
             .map(|block_number| block_number + 1)
@@ -361,16 +361,16 @@ impl<DB: Database> Pruner<DB> {
     fn get_next_tx_num_range_from_checkpoint(
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
-        prune_part: PrunePart,
+        prune_segment: PruneSegment,
         to_block: BlockNumber,
     ) -> RethResult<Option<RangeInclusive<TxNumber>>> {
         let from_tx_number = provider
-            .get_prune_checkpoint(prune_part)?
+            .get_prune_checkpoint(prune_segment)?
             // Checkpoint exists, prune from the next transaction after the highest pruned one
             .and_then(|checkpoint| match checkpoint.tx_number {
                 Some(tx_number) => Some(tx_number + 1),
                 _ => {
-                    error!(target: "pruner", %prune_part, ?checkpoint, "Expected transaction number in prune checkpoint, found None");
+                    error!(target: "pruner", %prune_segment, ?checkpoint, "Expected transaction number in prune checkpoint, found None");
                     None
                 },
             })
@@ -399,7 +399,7 @@ impl<DB: Database> Pruner<DB> {
         provider: &DatabaseProviderRW<'_, DB>,
         tip_block_number: BlockNumber,
         delete_limit: usize,
-    ) -> PrunePartResult {
+    ) -> PruneSegmentResult {
         // Contract log filtering removes every receipt possible except the ones in the list. So,
         // for the other receipts it's as if they had a `PruneMode::Distance()` of
         // `MINIMUM_PRUNING_DISTANCE`.
@@ -407,14 +407,14 @@ impl<DB: Database> Pruner<DB> {
             .prune_target_block(
                 tip_block_number,
                 MINIMUM_PRUNING_DISTANCE,
-                PrunePart::ContractLogs,
+                PruneSegment::ContractLogs,
             )?
             .map(|(bn, _)| bn)
             .unwrap_or_default();
 
         // Get status checkpoint from latest run
         let mut last_pruned_block = provider
-            .get_prune_checkpoint(PrunePart::ContractLogs)?
+            .get_prune_checkpoint(PruneSegment::ContractLogs)?
             .and_then(|checkpoint| checkpoint.block_number);
 
         let initial_last_pruned_block = last_pruned_block;
@@ -565,7 +565,7 @@ impl<DB: Database> Pruner<DB> {
             .unwrap_or(to_block);
 
         provider.save_prune_checkpoint(
-            PrunePart::ContractLogs,
+            PruneSegment::ContractLogs,
             PruneCheckpoint {
                 block_number: Some(prune_mode_block.min(last_pruned_block.unwrap_or(u64::MAX))),
                 tx_number: last_pruned_transaction,
@@ -584,10 +584,10 @@ impl<DB: Database> Pruner<DB> {
         to_block: BlockNumber,
         prune_mode: PruneMode,
         delete_limit: usize,
-    ) -> PrunePartResult {
+    ) -> PruneSegmentResult {
         let (start, end) = match self.get_next_tx_num_range_from_checkpoint(
             provider,
-            PrunePart::TransactionLookup,
+            PruneSegment::TransactionLookup,
             to_block,
         )? {
             Some(range) => range,
@@ -637,7 +637,7 @@ impl<DB: Database> Pruner<DB> {
             .checked_sub(if done { 0 } else { 1 });
 
         provider.save_prune_checkpoint(
-            PrunePart::TransactionLookup,
+            PruneSegment::TransactionLookup,
             PruneCheckpoint {
                 block_number: last_pruned_block,
                 tx_number: Some(last_pruned_transaction),
@@ -656,10 +656,10 @@ impl<DB: Database> Pruner<DB> {
         to_block: BlockNumber,
         prune_mode: PruneMode,
         delete_limit: usize,
-    ) -> PrunePartResult {
+    ) -> PruneSegmentResult {
         let tx_range = match self.get_next_tx_num_range_from_checkpoint(
             provider,
-            PrunePart::SenderRecovery,
+            PruneSegment::SenderRecovery,
             to_block,
         )? {
             Some(range) => range,
@@ -687,7 +687,7 @@ impl<DB: Database> Pruner<DB> {
             .checked_sub(if done { 0 } else { 1 });
 
         provider.save_prune_checkpoint(
-            PrunePart::SenderRecovery,
+            PruneSegment::SenderRecovery,
             PruneCheckpoint {
                 block_number: last_pruned_block,
                 tx_number: Some(last_pruned_transaction),
@@ -706,10 +706,10 @@ impl<DB: Database> Pruner<DB> {
         to_block: BlockNumber,
         prune_mode: PruneMode,
         delete_limit: usize,
-    ) -> PrunePartResult {
+    ) -> PruneSegmentResult {
         let range = match self.get_next_block_range_from_checkpoint(
             provider,
-            PrunePart::AccountHistory,
+            PruneSegment::AccountHistory,
             to_block,
         )? {
             Some(range) => range,
@@ -746,7 +746,7 @@ impl<DB: Database> Pruner<DB> {
         trace!(target: "pruner", %processed, deleted = %deleted_indices, %done, "Pruned account history (history)" );
 
         provider.save_prune_checkpoint(
-            PrunePart::AccountHistory,
+            PruneSegment::AccountHistory,
             PruneCheckpoint {
                 block_number: Some(last_changeset_pruned_block),
                 tx_number: None,
@@ -765,10 +765,10 @@ impl<DB: Database> Pruner<DB> {
         to_block: BlockNumber,
         prune_mode: PruneMode,
         delete_limit: usize,
-    ) -> PrunePartResult {
+    ) -> PruneSegmentResult {
         let range = match self.get_next_block_range_from_checkpoint(
             provider,
-            PrunePart::StorageHistory,
+            PruneSegment::StorageHistory,
             to_block,
         )? {
             Some(range) => range,
@@ -805,7 +805,7 @@ impl<DB: Database> Pruner<DB> {
         trace!(target: "pruner", %processed, deleted = %deleted_indices, %done, "Pruned storage history (history)" );
 
         provider.save_prune_checkpoint(
-            PrunePart::StorageHistory,
+            PruneSegment::StorageHistory,
             PruneCheckpoint {
                 block_number: Some(last_changeset_pruned_block),
                 tx_number: None,
@@ -940,7 +940,7 @@ mod tests {
         },
     };
     use reth_primitives::{
-        BlockNumber, PruneCheckpoint, PruneMode, PruneModes, PrunePart, PruneProgress,
+        BlockNumber, PruneCheckpoint, PruneMode, PruneModes, PruneProgress, PruneSegment,
         ReceiptsLogPruneConfig, TxNumber, B256, MAINNET,
     };
     use reth_provider::{PruneCheckpointReader, TransactionsProvider};
@@ -1012,7 +1012,7 @@ mod tests {
 
             let next_tx_number_to_prune = tx
                 .inner()
-                .get_prune_checkpoint(PrunePart::TransactionLookup)
+                .get_prune_checkpoint(PruneSegment::TransactionLookup)
                 .unwrap()
                 .and_then(|checkpoint| checkpoint.tx_number)
                 .map(|tx_number| tx_number + 1)
@@ -1061,7 +1061,7 @@ mod tests {
                 tx_hash_numbers.len() - (last_pruned_tx_number + 1)
             );
             assert_eq!(
-                tx.inner().get_prune_checkpoint(PrunePart::TransactionLookup).unwrap(),
+                tx.inner().get_prune_checkpoint(PruneSegment::TransactionLookup).unwrap(),
                 Some(PruneCheckpoint {
                     block_number: last_pruned_block_number,
                     tx_number: Some(last_pruned_tx_number as TxNumber),
@@ -1119,7 +1119,7 @@ mod tests {
 
             let next_tx_number_to_prune = tx
                 .inner()
-                .get_prune_checkpoint(PrunePart::SenderRecovery)
+                .get_prune_checkpoint(PruneSegment::SenderRecovery)
                 .unwrap()
                 .and_then(|checkpoint| checkpoint.tx_number)
                 .map(|tx_number| tx_number + 1)
@@ -1168,7 +1168,7 @@ mod tests {
                 transaction_senders.len() - (last_pruned_tx_number + 1)
             );
             assert_eq!(
-                tx.inner().get_prune_checkpoint(PrunePart::SenderRecovery).unwrap(),
+                tx.inner().get_prune_checkpoint(PruneSegment::SenderRecovery).unwrap(),
                 Some(PruneCheckpoint {
                     block_number: last_pruned_block_number,
                     tx_number: Some(last_pruned_tx_number as TxNumber),
@@ -1306,7 +1306,7 @@ mod tests {
             assert_eq!(actual_shards, expected_shards);
 
             assert_eq!(
-                tx.inner().get_prune_checkpoint(PrunePart::AccountHistory).unwrap(),
+                tx.inner().get_prune_checkpoint(PruneSegment::AccountHistory).unwrap(),
                 Some(PruneCheckpoint {
                     block_number: Some(last_pruned_block_number),
                     tx_number: None,
@@ -1446,7 +1446,7 @@ mod tests {
             assert_eq!(actual_shards, expected_shards);
 
             assert_eq!(
-                tx.inner().get_prune_checkpoint(PrunePart::StorageHistory).unwrap(),
+                tx.inner().get_prune_checkpoint(PruneSegment::StorageHistory).unwrap(),
                 Some(PruneCheckpoint {
                     block_number: Some(last_pruned_block_number),
                     tx_number: None,
@@ -1527,7 +1527,7 @@ mod tests {
 
             let (pruned_block, pruned_tx) = tx
                 .inner()
-                .get_prune_checkpoint(PrunePart::ContractLogs)
+                .get_prune_checkpoint(PruneSegment::ContractLogs)
                 .unwrap()
                 .map(|checkpoint| (checkpoint.block_number.unwrap(), checkpoint.tx_number.unwrap()))
                 .unwrap_or_default();
