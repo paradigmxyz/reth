@@ -442,7 +442,7 @@ storage_history = { distance = 16384 }
 
         let alpha_0_0_11 = r"#
 [prune.segments]
-sender_recovery = { distance = 128 }
+sender_recovery = { distance = 16384 }
 transaction_lookup = 'full'
 receipts = { before = 1920000 }
 account_history = { distance = 16384 }
