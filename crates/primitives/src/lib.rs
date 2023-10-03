@@ -45,6 +45,8 @@ mod transaction;
 pub mod trie;
 mod withdrawal;
 
+mod precaution;
+
 pub use account::{Account, Bytecode};
 pub use block::{
     Block, BlockBody, BlockBodyRoots, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,

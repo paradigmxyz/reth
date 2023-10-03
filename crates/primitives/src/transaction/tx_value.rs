@@ -88,6 +88,8 @@ impl Compact for TxValue {
         }
         #[cfg(not(feature = "value-256"))]
         {
+            // SAFETY: For ethereum mainnet this is safe as the max value is
+            // 120000000000000000000000000 wei
             let i: u128 = self.0.uint_try_to().expect("value could not be converted to u128");
             i.to_compact(buf)
         }
