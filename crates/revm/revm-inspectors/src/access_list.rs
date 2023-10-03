@@ -1,10 +1,9 @@
-use hashbrown::{HashMap, HashSet};
 use reth_primitives::{AccessList, AccessListItem, Address, B256};
 use revm::{
     interpreter::{opcode, InstructionResult, Interpreter},
     Database, EVMData, Inspector,
 };
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 /// An [Inspector] that collects touched accounts and storage slots.
 ///

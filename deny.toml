@@ -97,7 +97,6 @@ unknown-git = "deny"
 allow-git = [
     # TODO: remove, see ./Cargo.toml
     "https://github.com/Evalir/revm",
-    "https://github.com/alloy-rs/core",
     # "https://github.com/bluealloy/revm",
 
     "https://github.com/ethereum/c-kzg-4844",

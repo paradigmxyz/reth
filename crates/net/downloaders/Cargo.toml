@@ -34,7 +34,7 @@ thiserror.workspace = true
 
 # optional deps for the test-utils feature
 alloy-rlp = { workspace = true, optional = true }
-tempfile = { version = "3.3", optional = true }
+tempfile = { workspace = true, optional = true }
 itertools = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -47,7 +47,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 alloy-rlp.workspace = true
 itertools.workspace = true
 
-tempfile = "3.3"
+tempfile.workspace = true
 
 [features]
 test-utils = ["dep:alloy-rlp", "dep:tempfile", "dep:itertools"]

@@ -161,10 +161,11 @@ where
 {
     let block_id = BlockId::Number(BlockNumberOrTag::default());
     let trace_filter = TraceFilter {
-        from_block: None,
-        to_block: None,
-        from_address: None,
-        to_address: None,
+        from_block: Default::default(),
+        to_block: Default::default(),
+        from_address: Default::default(),
+        to_address: Default::default(),
+        mode: Default::default(),
         after: None,
         count: None,
     };
@@ -182,9 +183,7 @@ where
     TraceApiClient::trace_block(client, block_id).await.unwrap();
     TraceApiClient::replay_block_transactions(client, block_id, HashSet::default()).await.unwrap();
 
-    assert!(is_unimplemented(
-        TraceApiClient::trace_filter(client, trace_filter).await.err().unwrap()
-    ));
+    TraceApiClient::trace_filter(client, trace_filter).await.unwrap();
 }
 
 async fn test_basic_web3_calls<C>(client: &C)

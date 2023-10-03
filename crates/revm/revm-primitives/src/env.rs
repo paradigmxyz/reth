@@ -191,6 +191,8 @@ where
             tx_env.chain_id = *chain_id;
             tx_env.nonce = Some(*nonce);
             tx_env.access_list.clear();
+            tx_env.blob_hashes.clear();
+            tx_env.max_fee_per_blob_gas.take();
         }
         Transaction::Eip2930(TxEip2930 {
             nonce,
@@ -220,6 +222,8 @@ where
                     (l.address, l.storage_keys.iter().map(|k| U256::from_be_bytes(k.0)).collect())
                 })
                 .collect();
+            tx_env.blob_hashes.clear();
+            tx_env.max_fee_per_blob_gas.take();
         }
         Transaction::Eip1559(TxEip1559 {
             nonce,
@@ -250,6 +254,8 @@ where
                     (l.address, l.storage_keys.iter().map(|k| U256::from_be_bytes(k.0)).collect())
                 })
                 .collect();
+            tx_env.blob_hashes.clear();
+            tx_env.max_fee_per_blob_gas.take();
         }
         Transaction::Eip4844(TxEip4844 {
             nonce,
