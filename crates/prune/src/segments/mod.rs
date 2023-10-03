@@ -8,7 +8,7 @@ mod transaction_lookup;
 
 pub(crate) use account_history::AccountHistory;
 pub(crate) use receipts::Receipts;
-pub(crate) use receipts_by_logs::prune_receipts_by_logs;
+pub(crate) use receipts_by_logs::ReceiptsByLogs;
 pub(crate) use sender_recovery::SenderRecovery;
 pub(crate) use storage_history::StorageHistory;
 pub(crate) use transaction_lookup::TransactionLookup;

@@ -2,7 +2,7 @@
 
 use crate::{
     segments,
-    segments::{prune_receipts_by_logs, PruneInput, Segment},
+    segments::{PruneInput, Segment},
     Metrics, PrunerError, PrunerEvent,
 };
 use reth_db::database::Database;
@@ -127,8 +127,9 @@ impl<DB: Database> Pruner<DB> {
             ),
         ];
 
-        for (segment, prune_target_block) in segments {
-            if let Some((to_block, prune_mode)) = prune_target_block(&self.modes, tip_block_number)?
+        for (segment, get_prune_target_block) in segments {
+            if let Some((to_block, prune_mode)) =
+                get_prune_target_block(&self.modes, tip_block_number)?
             {
                 trace!(
                     target: "pruner",
@@ -165,7 +166,7 @@ impl<DB: Database> Pruner<DB> {
         // TODO(alexey): make it not a special case
         if !self.modes.receipts_log_filter.is_empty() {
             let segment_start = Instant::now();
-            let output = prune_receipts_by_logs(
+            let output = segments::ReceiptsByLogs::default().prune_receipts_by_logs(
                 &provider,
                 &self.modes.receipts_log_filter,
                 tip_block_number,
@@ -183,7 +184,7 @@ impl<DB: Database> Pruner<DB> {
                 (PruneProgress::from_done(output.done), output.pruned),
             );
         } else {
-            trace!(target: "pruner", prune_segment = ?PruneSegment::ContractLogs, "No filter to prune");
+            trace!(target: "pruner", segment = ?PruneSegment::ContractLogs, "No filter to prune");
         }
 
         provider.commit()?;
