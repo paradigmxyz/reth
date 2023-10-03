@@ -96,6 +96,10 @@ pub struct NippyJar<H = ()> {
     /// Offsets within the file for each column value, arranged by row and column.
     #[serde(skip)]
     offsets: EliasFano,
+    /// Maximum uncompressed row size. This will enable decompression without any resizing of the
+    /// output buffer.
+    #[serde(skip)]
+    max_row_size: usize,
     /// Data path for file. Index file will be `{path}.idx`
     #[serde(skip)]
     path: Option<PathBuf>,
@@ -115,6 +119,7 @@ impl<H: std::fmt::Debug> std::fmt::Debug for NippyJar<H> {
             .field("offsets (len)", &self.offsets.len())
             .field("offsets (size in bytes)", &self.offsets.size_in_bytes())
             .field("path", &self.path)
+            .field("max_row_size", &self.max_row_size)
             .finish_non_exhaustive()
     }
 }
@@ -146,6 +151,7 @@ where
             version: NIPPY_JAR_VERSION,
             user_header,
             columns,
+            max_row_size: 0,
             compressor: None,
             filter: None,
             phf: None,
@@ -210,7 +216,8 @@ where
         let mmap = unsafe { memmap2::Mmap::map(&offsets_file)? };
         let mut offsets_reader = mmap.as_ref();
         obj.offsets = EliasFano::deserialize_from(&mut offsets_reader)?;
-        obj.offsets_index = PrefixSummedEliasFano::deserialize_from(offsets_reader)?;
+        obj.offsets_index = PrefixSummedEliasFano::deserialize_from(&mut offsets_reader)?;
+        obj.max_row_size = bincode::deserialize_from(offsets_reader)?;
 
         Ok(obj)
     }
@@ -325,11 +332,14 @@ where
 
             // Write the column value of each row
             // TODO: iter_mut if we remove the IntoIterator interface.
+            let mut uncompressed_row_size = 0;
             for (column_number, mut column_iter) in column_iterators.enumerate() {
                 offsets.push(file.stream_position()? as usize);
 
                 match column_iter.next() {
                     Some(Ok(value)) => {
+                        uncompressed_row_size += value.len();
+
                         if let Some(compression) = &self.compressor {
                             // Special zstd case with dictionaries
                             if let (Some(dict_compressors), Compressors::Zstd(_)) =
@@ -364,6 +374,8 @@ where
 
             tmp_buf.clear();
             row_number += 1;
+            self.max_row_size = self.max_row_size.max(uncompressed_row_size);
+
             if row_number == total_rows {
                 break
             }
@@ -397,7 +409,8 @@ where
 
         let mut file = File::create(self.index_path())?;
         self.offsets.serialize_into(&mut file)?;
-        self.offsets_index.serialize_into(file)?;
+        self.offsets_index.serialize_into(&mut file)?;
+        self.max_row_size.serialize_into(file)?;
         Ok(())
     }
 

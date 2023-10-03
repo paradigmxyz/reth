@@ -53,7 +53,7 @@ where
             zstd_decompressors,
             file_handle: file,
             mmap_handle: mmap,
-            tmp_buf: Vec::with_capacity(1_000_000),
+            tmp_buf: Vec::with_capacity(jar.max_row_size),
             row: 0,
         })
     }
