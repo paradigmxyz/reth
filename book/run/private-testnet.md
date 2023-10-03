@@ -39,7 +39,7 @@ First, in your home directory, create a file with the name `network_params.json`
 
 Next, run the following command from your command line:
 ```bash
-kurtosis run github.com/kurtosis-tech/ethereum-package "$(cat ~/network_params.json)"
+kurtosis run github.com/kurtosis-tech/ethereum-package --args-file ~/network_params.json
 ```
 Kurtosis will spin up an [enclave](https://docs.kurtosis.com/concepts-reference/enclaves) (i.e an ephemeral, isolated environment) and begin to configure and instantiate the nodes in your network. In the end, Kurtosis will print the services running in your enclave that form your private testnet alongside all the container ports and files that were generated & used to start up the private testnet. Here is a sample output:
 ```console
