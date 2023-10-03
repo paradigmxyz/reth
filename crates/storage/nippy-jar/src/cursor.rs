@@ -4,7 +4,7 @@ use crate::{
 };
 use memmap2::Mmap;
 use serde::{de::Deserialize, ser::Serialize};
-use std::{clone::Clone, fs::File};
+use std::{fs::File, ops::Range};
 use sucds::int_vectors::Access;
 use zstd::bulk::Decompressor;
 
@@ -53,7 +53,7 @@ where
             zstd_decompressors,
             file_handle: file,
             mmap_handle: mmap,
-            tmp_buf: vec![],
+            tmp_buf: Vec::with_capacity(1_000_000),
             row: 0,
         })
     }
@@ -69,7 +69,7 @@ where
     ///
     /// Example usage would be querying a transactions file with a transaction hash which is **NOT**
     /// stored in file.
-    pub fn row_by_key(&mut self, key: &[u8]) -> Result<Option<Row>, NippyJarError> {
+    pub fn row_by_key(&mut self, key: &[u8]) -> Result<Option<Row<'_>>, NippyJarError> {
         if let (Some(filter), Some(phf)) = (&self.jar.filter, &self.jar.phf) {
             // TODO: is it worth to parallize both?
 
@@ -93,13 +93,13 @@ where
     }
 
     /// Returns a row by its number.
-    pub fn row_by_number(&mut self, row: usize) -> Result<Option<Row>, NippyJarError> {
+    pub fn row_by_number(&mut self, row: usize) -> Result<Option<Row<'_>>, NippyJarError> {
         self.row = row as u64;
         self.next_row()
     }
 
     /// Returns the current value and advances the row.
-    pub fn next_row(&mut self) -> Result<Option<Row>, NippyJarError> {
+    pub fn next_row(&mut self) -> Result<Option<Row<'_>>, NippyJarError> {
         if self.row as usize * self.jar.columns >= self.jar.offsets.len() {
             // Has reached the end
             return Ok(None)
@@ -114,7 +114,14 @@ where
 
         self.row += 1;
 
-        Ok(Some(row))
+        Ok(Some(
+            row.into_iter()
+                .map(|v| match v {
+                    ValueRange::Mmap(range) => &self.mmap_handle[range],
+                    ValueRange::Internal(range) => &self.tmp_buf[range],
+                })
+                .collect(),
+        ))
     }
 
     /// Returns a row, searching it by a key used during [`NippyJar::prepare_index`]  by using a
@@ -127,7 +134,7 @@ where
     pub fn row_by_key_with_cols<const MASK: usize, const COLUMNS: usize>(
         &mut self,
         key: &[u8],
-    ) -> Result<Option<Row>, NippyJarError> {
+    ) -> Result<Option<Row<'_>>, NippyJarError> {
         if let (Some(filter), Some(phf)) = (&self.jar.filter, &self.jar.phf) {
             // TODO: is it worth to parallize both?
 
@@ -154,7 +161,7 @@ where
     pub fn row_by_number_with_cols<const MASK: usize, const COLUMNS: usize>(
         &mut self,
         row: usize,
-    ) -> Result<Option<Row>, NippyJarError> {
+    ) -> Result<Option<Row<'_>>, NippyJarError> {
         self.row = row as u64;
         self.next_row_with_cols::<MASK, COLUMNS>()
     }
@@ -164,7 +171,7 @@ where
     /// Uses a `MASK` to only read certain columns from the row.
     pub fn next_row_with_cols<const MASK: usize, const COLUMNS: usize>(
         &mut self,
-    ) -> Result<Option<Row>, NippyJarError> {
+    ) -> Result<Option<Row<'_>>, NippyJarError> {
         debug_assert!(COLUMNS == self.jar.columns);
 
         if self.row as usize * self.jar.columns >= self.jar.offsets.len() {
@@ -173,51 +180,74 @@ where
         }
 
         let mut row = Vec::with_capacity(COLUMNS);
+        self.tmp_buf.clear();
 
         for column in 0..COLUMNS {
             if MASK & (1 << column) != 0 {
                 self.read_value(column, &mut row)?
             }
         }
-
         self.row += 1;
 
-        Ok(Some(row))
+        Ok(Some(
+            row.into_iter()
+                .map(|v| match v {
+                    ValueRange::Mmap(range) => &self.mmap_handle[range],
+                    ValueRange::Internal(range) => &self.tmp_buf[range],
+                })
+                .collect(),
+        ))
     }
 
-    /// Takes the column index and reads the value for the corresponding column.
-    fn read_value(&mut self, column: usize, row: &mut Row) -> Result<(), NippyJarError> {
+    /// Takes the column index and reads the range value for the corresponding column.
+    fn read_value(
+        &mut self,
+        column: usize,
+        row: &mut Vec<ValueRange>,
+    ) -> Result<(), NippyJarError> {
         // Find out the offset of the column value
         let offset_pos = self.row as usize * self.jar.columns + column;
         let value_offset = self.jar.offsets.select(offset_pos).expect("should exist");
 
-        let column_value = if self.jar.offsets.len() == (offset_pos + 1) {
+        let column_offset_range = if self.jar.offsets.len() == (offset_pos + 1) {
             // It's the last column of the last row
-            &self.mmap_handle[value_offset..]
+            value_offset..self.mmap_handle.len()
         } else {
             let next_value_offset = self.jar.offsets.select(offset_pos + 1).expect("should exist");
-            &self.mmap_handle[value_offset..next_value_offset]
+            value_offset..next_value_offset
         };
 
         if let Some(zstd_dict_decompressors) = self.zstd_decompressors.as_mut() {
-            self.tmp_buf.clear();
-
+            let from: usize = self.tmp_buf.len();
             if let Some(decompressor) = zstd_dict_decompressors.get_mut(column) {
-                Zstd::decompress_with_dictionary(column_value, &mut self.tmp_buf, decompressor)?;
+                Zstd::decompress_with_dictionary(
+                    &self.mmap_handle[column_offset_range],
+                    &mut self.tmp_buf,
+                    decompressor,
+                )?;
             }
+            let to = self.tmp_buf.len();
 
-            debug_assert!(!self.tmp_buf.is_empty());
-
-            row.push(self.tmp_buf.clone());
+            row.push(ValueRange::Internal(from..to));
         } else if let Some(compression) = &self.jar.compressor {
             // Uses the chosen default decompressor
-            row.push(compression.decompress(column_value)?);
+            let from = self.tmp_buf.len();
+            compression.decompress_to(&self.mmap_handle[column_offset_range], &mut self.tmp_buf)?;
+            let to = self.tmp_buf.len();
+
+            row.push(ValueRange::Internal(from..to));
         } else {
             // Not compressed
-            // TODO: return Cow<&> instead of copying if there's no compression
-            row.push(column_value.to_vec())
+            row.push(ValueRange::Mmap(column_offset_range));
         }
 
         Ok(())
     }
+}
+
+/// Helper type that stores the range of the decompressed column value either on a `mmap` slice or
+/// on the internal buffer.
+enum ValueRange {
+    Mmap(Range<usize>),
+    Internal(Range<usize>),
 }
