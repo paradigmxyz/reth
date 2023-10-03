@@ -86,3 +86,31 @@ impl ReceiptsLogPruneConfig {
         Ok(lowest.map(|lowest| lowest.max(pruned_block)))
     }
 }
+
+/// Progress of pruning.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum PrunePartProgress {
+    /// There is more data to prune.
+    HasMoreData,
+    /// Pruning has been finished.
+    Finished,
+}
+
+impl PrunePartProgress {
+    /// Creates new [PrunePartProgress] from `done` boolean value.
+    ///
+    /// If `done == true`, returns [PrunePartProgress::Finished], otherwise
+    /// [PrunePartProgress::HasMoreData] is returned.
+    pub fn from_done(done: bool) -> Self {
+        if done {
+            Self::Finished
+        } else {
+            Self::HasMoreData
+        }
+    }
+
+    /// Returns `true` if pruning has been finished.
+    pub fn is_finished(&self) -> bool {
+        matches!(self, Self::Finished)
+    }
+}
