@@ -1,17 +1,14 @@
 use crate::{compression::Compression, NippyJarError};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-/// Lz4 compression structure.
-pub struct Lz4 {
-    /// Number of columns to compress.
-    columns: usize,
-}
+/// Wrapper type for `lz4_flex` that implements [`Compression`].
+#[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
+pub struct Lz4;
 
 impl Lz4 {
     /// Creates new [`Lz4`].
-    pub fn new(columns: usize) -> Self {
-        Self { columns }
+    pub fn new() -> Self {
+        Lz4 {}
     }
 }
 
@@ -88,9 +85,5 @@ impl Compression for Lz4 {
 
     fn compress(&self, src: &[u8]) -> Result<Vec<u8>, NippyJarError> {
         Ok(lz4_flex::compress(src))
-    }
-
-    fn is_ready(&self) -> bool {
-        true
     }
 }

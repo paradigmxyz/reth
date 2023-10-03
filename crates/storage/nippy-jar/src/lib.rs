@@ -171,7 +171,7 @@ where
 
     /// Adds [`compression::Lz4`] compression.
     pub fn with_lz4(mut self) -> Self {
-        self.compressor = Some(Compressors::Lz4(compression::Lz4::new(self.columns)));
+        self.compressor = Some(Compressors::Lz4(compression::Lz4::new()));
         self
     }
 
