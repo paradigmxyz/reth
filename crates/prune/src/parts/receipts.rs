@@ -1,5 +1,5 @@
 use crate::{
-    parts::{Part, PruneInput, PruneOutput},
+    parts::{Part, PruneInput, PruneOutput, PruneOutputCheckpoint},
     PrunerError,
 };
 use reth_db::{database::Database, tables};
@@ -44,13 +44,14 @@ impl Part for Receipts {
             // so we could finish pruning its receipts on the next run.
             .checked_sub(if done { 0 } else { 1 });
 
-        let checkpoint = PruneCheckpoint {
-            block_number: last_pruned_block,
-            tx_number: Some(last_pruned_transaction),
-            prune_mode: input.prune_mode,
-        };
-
-        Ok(PruneOutput { done, pruned, checkpoint: Some(checkpoint) })
+        Ok(PruneOutput {
+            done,
+            pruned,
+            checkpoint: Some(PruneOutputCheckpoint {
+                block_number: last_pruned_block,
+                tx_number: Some(last_pruned_transaction),
+            }),
+        })
     }
 
     fn save_checkpoint<DB: Database>(
@@ -114,7 +115,7 @@ mod tests {
 
         let test_prune = |to_block: BlockNumber, expected_result: (bool, usize)| {
             let prune_mode = PruneMode::Before(to_block);
-            let input = PruneInput { prune_mode, to_block, delete_limit: 10 };
+            let input = PruneInput { to_block, delete_limit: 10 };
             let part = Receipts {};
 
             let next_tx_number_to_prune = tx
@@ -154,7 +155,11 @@ mod tests {
                 PruneOutput {done, pruned, checkpoint: Some(_)}
                     if (done, pruned) == expected_result
             );
-            part.save_checkpoint(&provider, result.checkpoint.unwrap()).unwrap();
+            part.save_checkpoint(
+                &provider,
+                result.checkpoint.unwrap().as_prune_checkpoint(prune_mode),
+            )
+            .unwrap();
             provider.commit().expect("commit");
 
             let last_pruned_block_number =

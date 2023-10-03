@@ -16,7 +16,7 @@ use tracing::error;
 /// Parts are called from [Pruner](crate::Pruner) with the following lifecycle:
 /// 1. Call [Part::prune] with `delete_limit` of [PruneInput].
 /// 2. If [Part::prune] returned a [Some] in `checkpoint` of [PruneOutput], call
-///    [Prune::save_checkpoint].
+///    [Part::save_checkpoint].
 /// 3. Subtract `pruned` of [PruneOutput] from `delete_limit` of next [PruneInput].
 pub(crate) trait Part {
     const PART: PrunePart;
@@ -39,8 +39,9 @@ pub(crate) trait Part {
 /// Part pruning input, see [Part::prune].
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PruneInput {
-    pub(crate) prune_mode: PruneMode,
+    /// Target block up to which the pruning needs to be done, inclusive.
     pub(crate) to_block: BlockNumber,
+    /// Maximum entries to delete from the database.
     pub(crate) delete_limit: usize,
 }
 
@@ -95,11 +96,28 @@ pub(crate) struct PruneOutput {
     /// Number of entries pruned, i.e. deleted from the database.
     pub(crate) pruned: usize,
     /// Pruning checkpoint to save to database, if any.
-    pub(crate) checkpoint: Option<PruneCheckpoint>,
+    pub(crate) checkpoint: Option<PruneOutputCheckpoint>,
 }
 
 impl PruneOutput {
+    /// Returns a [PruneOutput] with `done = true`, `pruned = 0` and `checkpoint = None`.
+    /// Use when no pruning is needed.
     pub(crate) fn done() -> Self {
         Self { done: true, pruned: 0, checkpoint: None }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PruneOutputCheckpoint {
+    /// Highest pruned block number. If it's [None], the pruning for block `0` is not finished yet.
+    pub(crate) block_number: Option<BlockNumber>,
+    /// Highest pruned transaction number, if applicable.
+    pub(crate) tx_number: Option<TxNumber>,
+}
+
+impl PruneOutputCheckpoint {
+    /// Converts [PruneOutputCheckpoint] to [PruneCheckpoint] with the provided [PruneMode]
+    pub(crate) fn as_prune_checkpoint(&self, prune_mode: PruneMode) -> PruneCheckpoint {
+        PruneCheckpoint { block_number: self.block_number, tx_number: self.tx_number, prune_mode }
     }
 }
