@@ -5,10 +5,8 @@ use std::{
     io::{Read, Write},
 };
 use tracing::*;
-use zstd::{
-    bulk::{Compressor, Decompressor},
-    dict::DecoderDictionary,
-};
+use zstd::bulk::Compressor;
+pub use zstd::{bulk::Decompressor, dict::DecoderDictionary};
 
 type RawDictionary = Vec<u8>;
 
@@ -27,7 +25,7 @@ pub struct Zstd {
     /// Compression level. A level of `0` uses zstd's default (currently `3`).
     pub(crate) level: i32,
     /// Uses custom dictionaries to compress data.
-    pub(crate) use_dict: bool,
+    pub use_dict: bool,
     /// Max size of a dictionary
     pub(crate) max_dict_size: usize,
     /// List of column dictionaries.
@@ -132,38 +130,46 @@ impl Zstd {
         Ok(())
     }
 
-    /// Decompresses a value using a dictionary to a user provided buffer.
+    /// Appends a decompressed value using a dictionary to a user provided buffer.
     pub fn decompress_with_dictionary(
         column_value: &[u8],
         output: &mut Vec<u8>,
         decompressor: &mut Decompressor<'_>,
     ) -> Result<(), NippyJarError> {
-        let mut multiplier = 1;
+        let previous_length = output.len();
 
-        // Just an estimation.
-        let required_capacity = column_value.len() * 2;
-
-        output.reserve(required_capacity.saturating_sub(output.capacity()));
-
-        // Decompressor requires the destination buffer to be big enough to write to, otherwise it
-        // fails. However, we don't know how big it will be. We keep retrying.
-        // If we eventually fail, it probably means it's another kind of error.
-        while let Err(err) = decompressor.decompress_to_buffer(column_value, output) {
-            output.reserve(
-                Decompressor::upper_bound(column_value).unwrap_or(required_capacity) * multiplier,
-            );
-
-            multiplier += 1;
-            if multiplier == 5 {
-                return Err(NippyJarError::Disconnect(err))
-            }
+        // SAFETY: We're setting len to the existing capacity.
+        unsafe {
+            output.set_len(output.capacity());
         }
 
-        Ok(())
+        match decompressor.decompress_to_buffer(column_value, &mut output[previous_length..]) {
+            Ok(written) => {
+                // SAFETY: `decompress_to_buffer` can only write if there's enough capacity.
+                // Therefore, it shouldn't write more than our capacity.
+                unsafe {
+                    output.set_len(previous_length + written);
+                }
+                Ok(())
+            }
+            Err(_) => {
+                // SAFETY: we are resetting it to the previous value.
+                unsafe {
+                    output.set_len(previous_length);
+                }
+                Err(NippyJarError::OutputTooSmall)
+            }
+        }
     }
 }
 
 impl Compression for Zstd {
+    fn decompress_to(&self, value: &[u8], dest: &mut Vec<u8>) -> Result<(), NippyJarError> {
+        let mut decoder = zstd::Decoder::with_dictionary(value, &[])?;
+        decoder.read_to_end(dest)?;
+        Ok(())
+    }
+
     fn decompress(&self, value: &[u8]) -> Result<Vec<u8>, NippyJarError> {
         let mut decompressed = Vec::with_capacity(value.len() * 2);
         let mut decoder = zstd::Decoder::new(value)?;
@@ -171,13 +177,15 @@ impl Compression for Zstd {
         Ok(decompressed)
     }
 
-    fn compress_to<W: Write>(&self, src: &[u8], dest: &mut W) -> Result<(), NippyJarError> {
+    fn compress_to(&self, src: &[u8], dest: &mut Vec<u8>) -> Result<usize, NippyJarError> {
+        let before = dest.len();
+
         let mut encoder = zstd::Encoder::new(dest, self.level)?;
         encoder.write_all(src)?;
 
-        encoder.finish()?;
+        let dest = encoder.finish()?;
 
-        Ok(())
+        Ok(dest.len() - before)
     }
 
     fn compress(&self, src: &[u8]) -> Result<Vec<u8>, NippyJarError> {
