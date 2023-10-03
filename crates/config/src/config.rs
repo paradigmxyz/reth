@@ -429,11 +429,11 @@ nanos = 0
 block_interval = 5
 
 [prune.parts]
-sender_recovery = { distance = 128 }
+sender_recovery = { distance = 16384 }
 transaction_lookup = 'full'
 receipts = { before = 1920000 }
-account_history = { distance = 128 }
-storage_history = { distance = 128 }
+account_history = { distance = 16384 }
+storage_history = { distance = 16384 }
 [prune.parts.receipts_log_filter]
 '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48' = { before = 17000000 }
 '0xdac17f958d2ee523a2206206994597c13d831ec7' = { distance = 1000 }
@@ -445,8 +445,8 @@ storage_history = { distance = 128 }
 sender_recovery = { distance = 128 }
 transaction_lookup = 'full'
 receipts = { before = 1920000 }
-account_history = { distance = 128 }
-storage_history = { distance = 128 }
+account_history = { distance = 16384 }
+storage_history = { distance = 16384 }
 [prune.segments.receipts_log_filter]
 '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48' = { before = 17000000 }
 '0xdac17f958d2ee523a2206206994597c13d831ec7' = { distance = 1000 }
