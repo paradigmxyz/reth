@@ -5,13 +5,19 @@ use crate::{
     U256,
 };
 use alloy_rlp::{Decodable, Encodable, Error};
-use reth_codecs::{derive_arbitrary, Compact};
+use reth_codecs::{add_arbitrary_tests, Compact};
 use serde::{Deserialize, Serialize};
+
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest::{
+    arbitrary::ParamsFor,
+    strategy::{BoxedStrategy, Strategy},
+};
 
 /// TxValue is the type of the `value` field in the various Ethereum transactions structs.
 /// While the field is 256 bits, for many chains it's not possible for the field to use
 /// this full precision, hence we use a wrapper type to allow for overriding of encoding.
-#[derive_arbitrary(compact, rlp)]
+#[add_arbitrary_tests(compact, rlp)]
 #[derive(Default, Debug, Copy, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TxValue(U256);
 
@@ -108,4 +114,39 @@ impl Compact for TxValue {
             (TxValue::from(i), buf)
         }
     }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for TxValue {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        #[cfg(feature = "value-256")]
+        {
+            Ok(Self(U256::arbitrary(u)?))
+        }
+
+        #[cfg(not(feature = "value-256"))]
+        {
+            Ok(Self::try_from(u128::arbitrary(u)?).expect("to fit"))
+        }
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::arbitrary::Arbitrary for TxValue {
+    type Parameters = ParamsFor<()>;
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        #[cfg(feature = "value-256")]
+        {
+            proptest::prelude::any::<U256>().prop_map(Self).boxed()
+        }
+
+        #[cfg(not(feature = "value-256"))]
+        {
+            proptest::prelude::any::<u128>()
+                .prop_map(|num| Self::try_from(num).expect("to fit"))
+                .boxed()
+        }
+    }
+
+    type Strategy = BoxedStrategy<TxValue>;
 }
