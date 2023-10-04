@@ -168,13 +168,7 @@ pub use crate::{
         state::SubPool, AllTransactionsEvents, FullTransactionEvent, TransactionEvent,
         TransactionEvents,
     },
-    traits::{
-        AllPoolTransactions, BestTransactions, BestTransactionsAttributes, BlockInfo,
-        CanonicalStateUpdate, ChangedAccount, EthBlobTransactionSidecar, EthPoolTransaction,
-        EthPooledTransaction, GetPooledTransactionLimit, NewBlobSidecar, NewTransactionEvent,
-        PoolSize, PoolTransaction, PropagateKind, PropagatedTransactions, TransactionListenerKind,
-        TransactionOrigin, TransactionPool, TransactionPoolExt,
-    },
+    traits::*,
     validate::{
         EthTransactionValidator, TransactionValidationOutcome, TransactionValidationTaskExecutor,
         TransactionValidator, ValidPoolTransaction,
