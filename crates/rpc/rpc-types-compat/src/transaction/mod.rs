@@ -111,7 +111,7 @@ fn fill(
         nonce: U64::from(signed_tx.nonce()),
         from: signer,
         to,
-        value: U256::from(signed_tx.value()),
+        value: signed_tx.value().into(),
         gas_price,
         max_fee_per_gas,
         max_priority_fee_per_gas: signed_tx.max_priority_fee_per_gas().map(U128::from),
