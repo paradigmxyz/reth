@@ -66,7 +66,9 @@ pub trait TraceApi {
         block_id: BlockId,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>>;
 
-    /// Returns traces matching given filter
+    /// Returns traces matching given filter.
+    ///
+    /// This is similar to `eth_getLogs` but for traces.
     #[method(name = "filter")]
     async fn trace_filter(&self, filter: TraceFilter) -> RpcResult<Vec<LocalizedTransactionTrace>>;
 

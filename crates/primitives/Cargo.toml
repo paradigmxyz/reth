@@ -49,8 +49,8 @@ url = "2.3"
 once_cell = "1.17.0"
 zstd = { version = "0.12", features = ["experimental"] }
 paste = "1.0"
-rayon = "1.7"
-tempfile = "3.3"
+rayon.workspace = true
+tempfile.workspace = true
 sha2 = "0.10.7"
 itertools = "0.11"
 num_enum = "0.7"
@@ -74,7 +74,7 @@ arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-derive.workspace = true
 assert_matches.workspace = true
-toml = "0.7.4"
+toml.workspace = true
 triehash = "0.8"
 
 plain_hasher = "0.2"

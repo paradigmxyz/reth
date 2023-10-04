@@ -63,7 +63,7 @@ rand.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
 enr = { workspace = true, features = ["rust-secp256k1"], optional = true }
-tempfile = { version = "3.3", optional = true }
+tempfile = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth
@@ -88,7 +88,7 @@ enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
 
 # misc
 serial_test.workspace = true
-tempfile = "3.3"
+tempfile.workspace = true
 
 [features]
 default = ["serde"]

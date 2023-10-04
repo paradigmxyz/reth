@@ -91,7 +91,8 @@ impl RethNodeCommandConfig for RethCliTxpoolExt {
 /// trait interface for a custom rpc namespace: `txpool`
 ///
 /// This defines an additional namespace where all methods are configured as trait functions.
-#[rpc(server, namespace = "txpoolExt")]
+#[cfg_attr(not(test), rpc(server, namespace = "txpoolExt"))]
+#[cfg_attr(test, rpc(server, client, namespace = "txpoolExt"))]
 pub trait TxpoolExtApi {
     /// Returns the number of transactions in the pool.
     #[method(name = "transactionCount")]
@@ -109,5 +110,33 @@ where
 {
     fn transaction_count(&self) -> RpcResult<usize> {
         Ok(self.pool.pool_size().total)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jsonrpsee::{http_client::HttpClientBuilder, server::ServerBuilder};
+    use reth_transaction_pool::noop::NoopTransactionPool;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_call_transaction_count_http() {
+        let server_addr = start_server().await;
+        let uri = format!("http://{}", server_addr);
+        let client = HttpClientBuilder::default().build(&uri).unwrap();
+        let count = TxpoolExtApiClient::transaction_count(&client).await.unwrap();
+        assert_eq!(count, 0);
+    }
+
+    async fn start_server() -> std::net::SocketAddr {
+        let server = ServerBuilder::default().build("127.0.0.1:0").await.unwrap();
+        let addr = server.local_addr().unwrap();
+        let pool = NoopTransactionPool::default();
+        let api = TxpoolExt { pool };
+        let server_handle = server.start(api.into_rpc());
+
+        tokio::spawn(server_handle.stopped());
+
+        addr
     }
 }

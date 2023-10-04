@@ -94,8 +94,8 @@ hyper = "0.14.25"
 # misc
 aquamarine.workspace = true
 eyre = "0.6.8"
-clap = { version = "4", features = ["derive"] }
-tempfile = { version = "3.3.0" }
+clap = { workspace = true, features = ["derive"] }
+tempfile.workspace = true
 backon = "0.4"
 thiserror.workspace = true
 pretty_assertions = "1.3.0"
