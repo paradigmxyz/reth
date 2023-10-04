@@ -676,8 +676,8 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     gas_limit: *gas_limit,
                     to: *to,
                     value: (*value).into(),
-                    input: (*input).clone().into(),
-                    accessslist: (*access_list).clone().into(),
+                    input: (*input).clone(),
+                    accessslist: (*access_list).clone(),
                 },
                 Transaction::Eip4844(TxEip4844 {
                     nonce,
@@ -700,8 +700,8 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     gas_limit: *gas_limit,
                     to: *to,
                     value: (*value).into(),
-                    input: (*input).clone().into(),
-                    accessslist: (*access_list).clone().into(),
+                    input: (*input).clone(),
+                    accessslist: (*access_list).clone(),
                 },
             })
             .boxed()
