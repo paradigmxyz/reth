@@ -13,7 +13,7 @@ use rand::{
 };
 use reth_primitives::{
     constants::{eip4844::DATA_GAS_PER_BLOB, MIN_PROTOCOL_BASE_FEE},
-    hex, Address, FromRecoveredPooledTransaction, FromRecoveredTransaction,
+    hex, AccessList, Address, FromRecoveredPooledTransaction, FromRecoveredTransaction,
     IntoRecoveredTransaction, PooledTransactionsElementEcRecovered, Signature, Transaction,
     TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930,
     TxEip4844, TxHash, TxLegacy, TxType, TxValue, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
@@ -420,6 +420,10 @@ impl PoolTransaction for MockTransaction {
         }
     }
 
+    fn access_list(&self) -> Option<&AccessList> {
+        None
+    }
+
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
         match self {
             MockTransaction::Legacy { .. } => None,
@@ -468,6 +472,10 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Eip1559 { to, .. } => to,
             MockTransaction::Eip4844 { to, .. } => to,
         }
+    }
+
+    fn input(&self) -> &[u8] {
+        &[]
     }
 
     fn size(&self) -> usize {

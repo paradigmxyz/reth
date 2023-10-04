@@ -178,6 +178,18 @@ impl Transaction {
         }
     }
 
+    /// Returns the [AccessList] of the transaction.
+    ///
+    /// Returns `None` for legacy transactions.
+    pub fn access_list(&self) -> Option<&AccessList> {
+        match self {
+            Transaction::Legacy(_) => None,
+            Transaction::Eip2930(tx) => Some(&tx.access_list),
+            Transaction::Eip1559(tx) => Some(&tx.access_list),
+            Transaction::Eip4844(tx) => Some(&tx.access_list),
+        }
+    }
+
     /// Get the gas limit of the transaction.
     pub fn gas_limit(&self) -> u64 {
         match self {
@@ -563,6 +575,18 @@ impl TransactionKind {
             TransactionKind::Create => None,
             TransactionKind::Call(to) => Some(to),
         }
+    }
+
+    /// Returns true if the transaction is a contract creation.
+    #[inline]
+    pub fn is_create(self) -> bool {
+        matches!(self, TransactionKind::Create)
+    }
+
+    /// Returns true if the transaction is a contract call.
+    #[inline]
+    pub fn is_call(self) -> bool {
+        matches!(self, TransactionKind::Call(_))
     }
 
     /// Calculates a heuristic for the in-memory size of the [TransactionKind].

@@ -41,6 +41,8 @@ mod receipt;
 pub mod serde_helper;
 pub mod stage;
 mod storage;
+
+/// Helpers for working with transactions
 mod transaction;
 pub mod trie;
 mod withdrawal;
