@@ -489,7 +489,11 @@ impl PoolTransaction for MockTransaction {
     }
 
     fn input(&self) -> &[u8] {
-        &[]
+        match self {
+            MockTransaction::Legacy { .. } => &[],
+            MockTransaction::Eip1559 { input, .. } => input,
+            MockTransaction::Eip4844 { input, .. } => input,
+        }
     }
 
     fn size(&self) -> usize {
