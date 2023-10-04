@@ -433,8 +433,8 @@ impl PoolTransaction for MockTransaction {
     fn access_list(&self) -> Option<&AccessList> {
         match self {
             MockTransaction::Legacy { .. } => None,
-            MockTransaction::Eip1559 { accessslist, .. } => Some(accessslist),
-            MockTransaction::Eip4844 { accessslist, .. } => Some(accessslist),
+            MockTransaction::Eip1559 {  accesslist, .. } => Some( accesslist),
+            MockTransaction::Eip4844 {  accesslist, .. } => Some( accesslist),
         }
     }
 
