@@ -11,7 +11,7 @@ use reth_primitives::{
     FromRecoveredPooledTransaction, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId,
     PooledTransactionsElement, PooledTransactionsElementEcRecovered, SealedBlock, Transaction,
     TransactionKind, TransactionSignedEcRecovered, TxEip4844, TxHash, B256, EIP1559_TX_TYPE_ID,
-    EIP4844_TX_TYPE_ID, U256,
+    EIP4844_TX_TYPE_ID, U256,AccessList
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -696,6 +696,10 @@ pub trait PoolTransaction:
     /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
     fn max_fee_per_gas(&self) -> u128;
 
+    /// Returns the access_list for the particular transaction type.
+    /// For Legacy transactions, returns default.
+    fn access_list(&self) -> AccessList;
+
     /// Returns the EIP-1559 Priority fee the caller is paying to the block author.
     ///
     /// This will return `None` for non-EIP1559 transactions
@@ -907,6 +911,15 @@ impl PoolTransaction for EthPooledTransaction {
 
     fn max_fee_per_blob_gas(&self) -> Option<u128> {
         self.transaction.max_fee_per_blob_gas()
+    }
+
+    fn access_list(&self) -> AccessList{
+        match &self.transaction().transaction{
+            Transaction::Legacy(_) => AccessList::default(),
+            Transaction::Eip2930(tx) => tx.access_list.clone(),
+            Transaction::Eip1559(tx) => tx.access_list.clone(),
+            Transaction::Eip4844(tx) => tx.access_list.clone()
+        }
     }
 
     /// Returns the effective tip for this transaction.

@@ -1,7 +1,9 @@
 use reth_primitives::{
     revm_primitives::{AccountInfo, Log},
-    Account, Log as RethLog, KECCAK_EMPTY,
+    transaction::initial_tx_gas,
+    Account, Log as RethLog, KECCAK_EMPTY, TransactionSignedEcRecovered,AccessList,TransactionKind
 };
+use revm::primitives::{ShanghaiSpec,CancunSpec};
 
 /// Check equality between Revm and Reth `Log`s.
 pub fn is_log_equal(revm_log: &Log, reth_log: &reth_primitives::Log) -> bool {
@@ -37,4 +39,16 @@ pub fn into_revm_acc(reth_acc: Account) -> AccountInfo {
         code_hash: reth_acc.bytecode_hash.unwrap_or(KECCAK_EMPTY),
         code: None,
     }
+}
+
+/// Calculates the Intrinsic Gas usage for a Transaction
+pub fn calculate_intrinsic_gas(tx:TransactionSignedEcRecovered,access_list:AccessList,kind:&TransactionKind,is_cancun:bool) -> u64{
+
+    if is_cancun{
+        return initial_tx_gas::<CancunSpec>(tx.input().as_ref(), TransactionKind::Create == *kind, access_list.flattened().as_ref())
+    }
+    else {
+        return initial_tx_gas::<ShanghaiSpec>(tx.input().as_ref(), TransactionKind::Create == *kind, access_list.flattened().as_ref())
+    }
+
 }

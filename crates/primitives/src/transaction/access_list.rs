@@ -51,21 +51,6 @@ impl AccessList {
         self.flatten().collect()
     }
 
-    /// Converts the ['AccessList'] into a Vec of (Address, `Vec<U256>`), as expected by revm
-    pub fn to_ref_slice(&self) -> Vec<(Address, Vec<U256>)> {
-        self.0
-            .iter()
-            .map(|item| {
-                let address: Address = item.address;
-                // Convert Vec<H256> to Vec<Uint<256, 4>>
-                let storage_keys: Vec<U256> =
-                    item.storage_keys.iter().map(|h256| U256::from_be_bytes(h256.0)).collect();
-
-                (address, storage_keys)
-            })
-            .collect()
-    }
-
     /// Returns an iterator over the list's addresses and storage keys.
     pub fn flatten(self) -> impl Iterator<Item = (Address, Vec<U256>)> {
         self.0.into_iter().map(|item| {

@@ -14,13 +14,12 @@ use reth_primitives::{
         ETHEREUM_BLOCK_GAS_LIMIT,
     },
     kzg::KzgSettings,
-    transaction::initial_tx_gas,
-    AccessList, ChainSpec, InvalidTransactionError, SealedBlock, TransactionKind,
+    AccessList, ChainSpec, InvalidTransactionError, SealedBlock,
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 use reth_provider::{AccountReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
-use revm::primitives::ShanghaiSpec;
+use reth_revm_primitives::calculate_intrinsic_gas;
 use std::{
     marker::PhantomData,
     sync::{atomic::AtomicBool, Arc},
@@ -155,40 +154,15 @@ where
                 InvalidPoolTransactionError::OversizedData(size, TX_MAX_SIZE),
             )
         }
-        let tx = transaction.to_recovered_transaction();
-        let input = tx.input().as_ref();
+        
+        let is_cancun = self.fork_tracker.is_cancun_activated();
 
-        let access_list: AccessList = match transaction.tx_type() {
-            LEGACY_TX_TYPE_ID => AccessList::default(),
-            EIP2930_TX_TYPE_ID => {
-                if let Some(access_list_tx) = tx.as_eip2930() {
-                    access_list_tx.access_list.clone()
-                } else {
-                    AccessList::default()
-                }
-            }
-            EIP1559_TX_TYPE_ID => {
-                if let Some(dynamic_fee_tx) = transaction.to_recovered_transaction().as_eip1559() {
-                    dynamic_fee_tx.access_list.clone()
-                } else {
-                    AccessList::default()
-                }
-            }
-            EIP4844_TX_TYPE_ID => {
-                if let Some(blob_tx) = transaction.to_recovered_transaction().as_eip4844() {
-                    blob_tx.access_list.clone()
-                } else {
-                    AccessList::default()
-                }
-            }
-            _ => AccessList::default(),
-        };
+        let tx = transaction.to_recovered_transaction();
+        let access_list:AccessList = transaction.access_list();
+        let kind = transaction.kind();
+    
         if transaction.gas_limit() <
-            initial_tx_gas::<ShanghaiSpec>(
-                input,
-                TransactionKind::Create == *transaction.kind(),
-                access_list.to_ref_slice().as_ref(),
-            )
+        calculate_intrinsic_gas(tx,access_list,kind,is_cancun)
         {
             return TransactionValidationOutcome::Invalid(
                 transaction,
@@ -202,6 +176,7 @@ where
                 return TransactionValidationOutcome::Invalid(transaction, err)
             }
         }
+
 
         // Checks for gas limit
         if transaction.gas_limit() > self.block_gas_limit {
@@ -310,7 +285,7 @@ where
                                 ),
                             )
                         }
-                        // store the extracted blob
+                        // store the extracted blob 
                         maybe_blob_sidecar = Some(blob);
                     } else {
                         // this should not happen

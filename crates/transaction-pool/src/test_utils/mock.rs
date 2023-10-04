@@ -17,7 +17,7 @@ use reth_primitives::{
     IntoRecoveredTransaction, PooledTransactionsElementEcRecovered, Signature, Transaction,
     TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930,
     TxEip4844, TxHash, TxLegacy, TxType, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
-    LEGACY_TX_TYPE_ID, U128, U256,
+    LEGACY_TX_TYPE_ID, U128, U256,AccessList
 };
 use std::{ops::Range, sync::Arc, time::Instant};
 
@@ -417,6 +417,14 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Legacy { gas_price, .. } => *gas_price,
             MockTransaction::Eip1559 { max_fee_per_gas, .. } => *max_fee_per_gas,
             MockTransaction::Eip4844 { max_fee_per_gas, .. } => *max_fee_per_gas,
+        }
+    }
+
+    fn access_list(&self) -> AccessList{
+        match self{
+            MockTransaction::Legacy {..} => AccessList::default(),
+            MockTransaction::Eip1559{..} => self.access_list().clone(),
+            MockTransaction::Eip4844{..} => self.access_list().clone()
         }
     }
 
