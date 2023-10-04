@@ -16,7 +16,7 @@ use reth_primitives::{
     hex, Address, FromRecoveredPooledTransaction, FromRecoveredTransaction,
     IntoRecoveredTransaction, PooledTransactionsElementEcRecovered, Signature, Transaction,
     TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930,
-    TxEip4844, TxHash, TxLegacy, TxType, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
+    TxEip4844, TxHash, TxLegacy, TxType, TxValue, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID, U128, U256,
 };
 use std::{ops::Range, sync::Arc, time::Instant};
@@ -512,7 +512,7 @@ impl FromRecoveredTransaction for MockTransaction {
                 gas_price,
                 gas_limit,
                 to,
-                value: U256::from(value),
+                value: value.into(),
             },
             Transaction::Eip1559(TxEip1559 {
                 chain_id: _,
@@ -532,7 +532,7 @@ impl FromRecoveredTransaction for MockTransaction {
                 max_priority_fee_per_gas,
                 gas_limit,
                 to,
-                value: U256::from(value),
+                value: value.into(),
             },
             Transaction::Eip4844(TxEip4844 {
                 chain_id: _,
@@ -555,7 +555,7 @@ impl FromRecoveredTransaction for MockTransaction {
                 max_fee_per_blob_gas,
                 gas_limit,
                 to,
-                value: U256::from(value),
+                value: value.into(),
             },
             Transaction::Eip2930 { .. } => {
                 unimplemented!()
@@ -626,7 +626,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     gas_price: *gas_price,
                     gas_limit: *gas_limit,
                     to: *to,
-                    value: U256::from(*value),
+                    value: (*value).into(),
                 },
                 Transaction::Eip1559(TxEip1559 {
                     nonce,
@@ -645,7 +645,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     max_priority_fee_per_gas: *max_priority_fee_per_gas,
                     gas_limit: *gas_limit,
                     to: *to,
-                    value: U256::from(*value),
+                    value: (*value).into(),
                 },
                 Transaction::Eip4844(TxEip4844 {
                     nonce,
@@ -666,7 +666,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     max_fee_per_blob_gas: *max_fee_per_blob_gas,
                     gas_limit: *gas_limit,
                     to: *to,
-                    value: U256::from(*value),
+                    value: (*value).into(),
                 },
             })
             .boxed()

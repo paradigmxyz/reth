@@ -811,7 +811,8 @@ impl EthPooledTransaction {
                 U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit)
             }
         };
-        let mut cost = gas_cost + U256::from(transaction.value());
+        let mut cost: U256 = transaction.value().into();
+        cost += gas_cost;
 
         if let Some(blob_tx) = transaction.as_eip4844() {
             // add max blob cost
