@@ -7,11 +7,11 @@ use crate::{
 use alloy_rlp::Encodable;
 use futures_util::{ready, Stream};
 use reth_primitives::{
-    Address, BlobTransactionSidecar, BlobTransactionValidationError,
+    AccessList, Address, BlobTransactionSidecar, BlobTransactionValidationError,
     FromRecoveredPooledTransaction, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId,
     PooledTransactionsElement, PooledTransactionsElementEcRecovered, SealedBlock, Transaction,
     TransactionKind, TransactionSignedEcRecovered, TxEip4844, TxHash, B256, EIP1559_TX_TYPE_ID,
-    EIP4844_TX_TYPE_ID, U256,AccessList
+    EIP4844_TX_TYPE_ID, U256,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -913,12 +913,12 @@ impl PoolTransaction for EthPooledTransaction {
         self.transaction.max_fee_per_blob_gas()
     }
 
-    fn access_list(&self) -> AccessList{
-        match &self.transaction().transaction{
+    fn access_list(&self) -> AccessList {
+        match &self.transaction().transaction {
             Transaction::Legacy(_) => AccessList::default(),
             Transaction::Eip2930(tx) => tx.access_list.clone(),
             Transaction::Eip1559(tx) => tx.access_list.clone(),
-            Transaction::Eip4844(tx) => tx.access_list.clone()
+            Transaction::Eip4844(tx) => tx.access_list.clone(),
         }
     }
 

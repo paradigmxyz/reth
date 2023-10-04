@@ -14,12 +14,12 @@ use reth_primitives::{
         ETHEREUM_BLOCK_GAS_LIMIT,
     },
     kzg::KzgSettings,
-    AccessList, ChainSpec, InvalidTransactionError, SealedBlock,
-    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    AccessList, ChainSpec, InvalidTransactionError, SealedBlock, EIP1559_TX_TYPE_ID,
+    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 use reth_provider::{AccountReader, StateProviderFactory};
-use reth_tasks::TaskSpawner;
 use reth_revm_primitives::calculate_intrinsic_gas;
+use reth_tasks::TaskSpawner;
 use std::{
     marker::PhantomData,
     sync::{atomic::AtomicBool, Arc},
@@ -154,16 +154,14 @@ where
                 InvalidPoolTransactionError::OversizedData(size, TX_MAX_SIZE),
             )
         }
-        
+
         let is_cancun = self.fork_tracker.is_cancun_activated();
 
         let tx = transaction.to_recovered_transaction();
-        let access_list:AccessList = transaction.access_list();
+        let access_list: AccessList = transaction.access_list();
         let kind = transaction.kind();
-    
-        if transaction.gas_limit() <
-        calculate_intrinsic_gas(tx,access_list,kind,is_cancun)
-        {
+
+        if transaction.gas_limit() < calculate_intrinsic_gas(tx, access_list, kind, is_cancun) {
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::IntrinsicGasTooLow,
@@ -176,7 +174,6 @@ where
                 return TransactionValidationOutcome::Invalid(transaction, err)
             }
         }
-
 
         // Checks for gas limit
         if transaction.gas_limit() > self.block_gas_limit {
@@ -285,7 +282,7 @@ where
                                 ),
                             )
                         }
-                        // store the extracted blob 
+                        // store the extracted blob
                         maybe_blob_sidecar = Some(blob);
                     } else {
                         // this should not happen
