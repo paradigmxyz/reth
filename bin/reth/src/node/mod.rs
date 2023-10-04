@@ -9,6 +9,7 @@ use crate::{
         RpcServerArgs, TxPoolArgs,
     },
     cli::{
+        components::RethNodeComponentsImpl,
         config::RethRpcConfig,
         ext::{RethCliExt, RethNodeCommandConfig},
     },
@@ -352,17 +353,19 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
         let network_client = network.fetch_client().await?;
 
-        let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
+        let components = RethNodeComponentsImpl {
+            provider: blockchain_db.clone(),
+            pool: transaction_pool.clone(),
+            network: network.clone(),
+            task_executor: ctx.task_executor.clone(),
+            events: blockchain_db.clone(),
+        };
+        self.ext.on_components_initialized(&components)?;
 
         debug!(target: "reth::cli", "Spawning payload builder service");
-        let payload_builder = self.ext.spawn_payload_builder_service(
-            &self.builder,
-            blockchain_db.clone(),
-            transaction_pool.clone(),
-            ctx.task_executor.clone(),
-            Arc::clone(&self.chain),
-        )?;
+        let payload_builder = self.ext.spawn_payload_builder_service(&self.builder, &components)?;
 
+        let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
         let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
         } else if let Some(tip) = self.debug.tip {
@@ -530,19 +533,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         self.adjust_instance_ports();
 
         // Start RPC servers
-        let (_rpc_server, _auth_server) = self
-            .rpc
-            .start_servers(
-                blockchain_db.clone(),
-                transaction_pool.clone(),
-                network.clone(),
-                ctx.task_executor.clone(),
-                blockchain_tree,
-                engine_api,
-                jwt_secret,
-                &mut self.ext,
-            )
-            .await?;
+        let (_rpc_server, _auth_server) =
+            self.rpc.start_servers(&components, engine_api, jwt_secret, &mut self.ext).await?;
 
         // Run consensus engine to completion
         let (tx, rx) = oneshot::channel();
@@ -551,6 +543,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             let res = beacon_consensus_engine.await;
             let _ = tx.send(res);
         });
+
+        self.ext.on_node_started(&components)?;
 
         rx.await??;
 
