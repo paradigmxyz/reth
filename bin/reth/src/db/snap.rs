@@ -3,7 +3,7 @@ use clap::{clap_derive::ValueEnum, Parser};
 use eyre::WrapErr;
 use reth_db::{
     database::Database, snapshot::create_snapshot_T1_T2, table::Table, tables, transaction::DbTx,
-    DatabaseEnvRO, TableViewer,
+    DatabaseEnvRO,
 };
 use reth_nippy_jar::NippyJar;
 use reth_primitives::BlockNumber;
