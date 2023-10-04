@@ -156,7 +156,7 @@ impl MockTransaction {
             gas_limit: 0,
             to: TransactionKind::Call(Address::random()),
             value: Default::default(),
-            accesslist: todo!(),
+            accesslist: AccessList(Vec::new()),
             input: Bytes::new(),
         }
     }
@@ -173,7 +173,7 @@ impl MockTransaction {
             gas_limit: 0,
             to: TransactionKind::Call(Address::random()),
             value: Default::default(),
-            accesslist: todo!(),
+            accesslist: AccessList(Vec::new()),
             input: Bytes::new(),
         }
     }
