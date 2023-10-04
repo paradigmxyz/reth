@@ -18,7 +18,7 @@ impl ReceiptsByLogs {
     /// Prune receipts up to the provided block, inclusive, by filtering logs. Works as in inclusion
     /// list, and removes every receipt not belonging to it. Respects the batch size.
     #[instrument(level = "trace", skip(self, provider), target = "pruner")]
-    pub(crate) fn prune_receipts_by_logs<DB: Database>(
+    pub(crate) fn prune<DB: Database>(
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
         receipts_log_filter: &ReceiptsLogPruneConfig,
@@ -261,12 +261,7 @@ mod tests {
             let receipts_log_filter =
                 ReceiptsLogPruneConfig(BTreeMap::from([(deposit_contract_addr, prune_mode)]));
 
-            let result = ReceiptsByLogs::default().prune_receipts_by_logs(
-                &provider,
-                &receipts_log_filter,
-                tip,
-                10,
-            );
+            let result = ReceiptsByLogs::default().prune(&provider, &receipts_log_filter, tip, 10);
             provider.commit().expect("commit");
 
             assert_matches!(result, Ok(_));

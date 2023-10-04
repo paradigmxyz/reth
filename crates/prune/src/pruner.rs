@@ -166,7 +166,7 @@ impl<DB: Database> Pruner<DB> {
         // TODO(alexey): make it not a special case
         if !self.modes.receipts_log_filter.is_empty() {
             let segment_start = Instant::now();
-            let output = segments::ReceiptsByLogs::default().prune_receipts_by_logs(
+            let output = segments::ReceiptsByLogs::default().prune(
                 &provider,
                 &self.modes.receipts_log_filter,
                 tip_block_number,
