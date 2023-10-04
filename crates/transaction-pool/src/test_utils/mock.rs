@@ -13,9 +13,9 @@ use rand::{
 };
 use reth_primitives::{
     constants::{eip4844::DATA_GAS_PER_BLOB, MIN_PROTOCOL_BASE_FEE},
-    hex, AccessList, Address, FromRecoveredPooledTransaction, FromRecoveredTransaction,
+    hex, AccessList, Address, Bytes, FromRecoveredPooledTransaction, FromRecoveredTransaction,
     IntoRecoveredTransaction, PooledTransactionsElementEcRecovered, Signature, Transaction,
-    TransactionKind, Bytes, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930,
+    TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930,
     TxEip4844, TxHash, TxLegacy, TxType, TxValue, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID, U128, U256,
 };
@@ -91,7 +91,7 @@ pub enum MockTransaction {
         gas_limit: u64,
         to: TransactionKind,
         value: U256,
-         //legacy don't have access list, so we don't add it
+        //legacy don't have so we don't add
     },
     Eip1559 {
         hash: B256,
@@ -102,7 +102,7 @@ pub enum MockTransaction {
         gas_limit: u64,
         to: TransactionKind,
         value: U256,
-        accesslist: AccessList,
+        accessslist: AccessList,
         input: Bytes,
     },
     Eip4844 {
@@ -115,9 +115,8 @@ pub enum MockTransaction {
         gas_limit: u64,
         to: TransactionKind,
         value: U256,
-        accesslist: AccessList,
+        accessslist: AccessList,
         input: Bytes,
-        
     },
 }
 
@@ -156,8 +155,8 @@ impl MockTransaction {
             gas_limit: 0,
             to: TransactionKind::Call(Address::random()),
             value: Default::default(),
-            accesslist: AccessList(Vec::new()),
             input: Bytes::new(),
+            accessslist: AccessList(Vec::new()),
         }
     }
 
@@ -173,8 +172,8 @@ impl MockTransaction {
             gas_limit: 0,
             to: TransactionKind::Call(Address::random()),
             value: Default::default(),
-            accesslist: AccessList(Vec::new()),
             input: Bytes::new(),
+            accessslist: AccessList(Vec::new()),
         }
     }
 
@@ -194,8 +193,8 @@ impl MockTransaction {
 
     /// Sets the priority fee for dynamic fee transactions (EIP-1559 and EIP-4844)
     pub fn set_priority_fee(&mut self, val: u128) -> &mut Self {
-        if let (MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } |
-        MockTransaction::Eip4844 { max_priority_fee_per_gas, .. }) = self
+        if let (MockTransaction::Eip1559 { max_priority_fee_per_gas, .. }
+        | MockTransaction::Eip4844 { max_priority_fee_per_gas, .. }) = self
         {
             *max_priority_fee_per_gas = val;
         }
@@ -208,8 +207,8 @@ impl MockTransaction {
     }
 
     pub fn get_priority_fee(&self) -> Option<u128> {
-        if let (MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } |
-        MockTransaction::Eip4844 { max_priority_fee_per_gas, .. }) = self
+        if let (MockTransaction::Eip1559 { max_priority_fee_per_gas, .. }
+        | MockTransaction::Eip4844 { max_priority_fee_per_gas, .. }) = self
         {
             Some(*max_priority_fee_per_gas)
         } else {
@@ -218,8 +217,8 @@ impl MockTransaction {
     }
 
     pub fn set_max_fee(&mut self, val: u128) -> &mut Self {
-        if let (MockTransaction::Eip1559 { max_fee_per_gas, .. } |
-        MockTransaction::Eip4844 { max_fee_per_gas, .. }) = self
+        if let (MockTransaction::Eip1559 { max_fee_per_gas, .. }
+        | MockTransaction::Eip4844 { max_fee_per_gas, .. }) = self
         {
             *max_fee_per_gas = val;
         }
@@ -232,8 +231,8 @@ impl MockTransaction {
     }
 
     pub fn get_max_fee(&self) -> Option<u128> {
-        if let (MockTransaction::Eip1559 { max_fee_per_gas, .. } |
-        MockTransaction::Eip4844 { max_fee_per_gas, .. }) = self
+        if let (MockTransaction::Eip1559 { max_fee_per_gas, .. }
+        | MockTransaction::Eip4844 { max_fee_per_gas, .. }) = self
         {
             Some(*max_fee_per_gas)
         } else {
@@ -433,8 +432,8 @@ impl PoolTransaction for MockTransaction {
     fn access_list(&self) -> Option<&AccessList> {
         match self {
             MockTransaction::Legacy { .. } => None,
-            MockTransaction::Eip1559 {  accesslist, .. } => Some( accesslist),
-            MockTransaction::Eip4844 {  accesslist, .. } => Some( accesslist),
+            MockTransaction::Eip1559 { accessslist, .. } => Some(accessslist),
+            MockTransaction::Eip4844 { accessslist, .. } => Some(accessslist),
         }
     }
 
@@ -461,12 +460,12 @@ impl PoolTransaction for MockTransaction {
         let base_fee = base_fee as u128;
         let max_fee_per_gas = self.max_fee_per_gas();
         if max_fee_per_gas < base_fee {
-            return None
+            return None;
         }
 
         let fee = max_fee_per_gas - base_fee;
         if let Some(priority_fee) = self.max_priority_fee_per_gas() {
-            return Some(fee.min(priority_fee))
+            return Some(fee.min(priority_fee));
         }
 
         Some(fee)
@@ -548,8 +547,8 @@ impl FromRecoveredTransaction for MockTransaction {
                 max_priority_fee_per_gas,
                 to,
                 value,
-                input: _,
-                access_list: _,
+                input,
+                access_list,
             }) => MockTransaction::Eip1559 {
                 hash,
                 sender,
@@ -559,8 +558,8 @@ impl FromRecoveredTransaction for MockTransaction {
                 gas_limit,
                 to,
                 value: value.into(),
-                accesslist: todo!(),
-                input: todo!(),
+                input,
+                accessslist: access_list,
             },
             Transaction::Eip4844(TxEip4844 {
                 chain_id: _,
@@ -570,8 +569,8 @@ impl FromRecoveredTransaction for MockTransaction {
                 max_priority_fee_per_gas,
                 to,
                 value,
-                input: _,
-                access_list: _,
+                input,
+                access_list,
                 blob_versioned_hashes: _,
                 max_fee_per_blob_gas,
             }) => MockTransaction::Eip4844 {
@@ -584,8 +583,8 @@ impl FromRecoveredTransaction for MockTransaction {
                 gas_limit,
                 to,
                 value: value.into(),
-                accesslist: todo!(),
-                input: todo!(),
+                input,
+                accessslist: access_list,
             },
             Transaction::Eip2930 { .. } => {
                 unimplemented!()
@@ -640,8 +639,8 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     value,
                     input,
                     ..
-                }) |
-                Transaction::Eip2930(TxEip2930 {
+                })
+                | Transaction::Eip2930(TxEip2930 {
                     nonce,
                     gas_price,
                     gas_limit,
@@ -666,6 +665,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     to,
                     value,
                     input,
+                    access_list,
                     ..
                 }) => MockTransaction::Eip1559 {
                     sender,
@@ -676,8 +676,8 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     gas_limit: *gas_limit,
                     to: *to,
                     value: (*value).into(),
-                    accesslist: todo!(),
-                    input: todo!(),
+                    input: (*input).clone().into(),
+                    accessslist: (*access_list).clone().into(),
                 },
                 Transaction::Eip4844(TxEip4844 {
                     nonce,
@@ -688,6 +688,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     value,
                     input,
                     max_fee_per_blob_gas,
+                    access_list,
                     ..
                 }) => MockTransaction::Eip4844 {
                     sender,
@@ -699,8 +700,8 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     gas_limit: *gas_limit,
                     to: *to,
                     value: (*value).into(),
-                    accesslist: todo!(),
-                    input: todo!(),
+                    input: (*input).clone().into(),
+                    accessslist: (*access_list).clone().into(),
                 },
             })
             .boxed()
