@@ -97,8 +97,8 @@ pub struct NippyJar<H = ()> {
     /// Offsets within the file for each column value, arranged by row and column.
     #[serde(skip)]
     offsets: EliasFano,
-    /// Maximum uncompressed row size of the set. This will enable decompression without any resizing of the
-    /// output buffer.
+    /// Maximum uncompressed row size of the set. This will enable decompression without any
+    /// resizing of the output buffer.
     #[serde(skip)]
     max_row_size: usize,
     /// Data path for file. Index file will be `{path}.idx`

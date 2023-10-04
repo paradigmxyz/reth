@@ -14,7 +14,8 @@ pub trait Compression: Serialize + for<'a> Deserialize<'a> {
     /// Returns decompressed data.
     fn decompress(&self, value: &[u8]) -> Result<Vec<u8>, NippyJarError>;
 
-    /// Appends compressed data from `src` to `dest`. `dest`. Requires `dest` to have sufficient capacity.
+    /// Appends compressed data from `src` to `dest`. `dest`. Requires `dest` to have sufficient
+    /// capacity.
     ///
     /// Returns number of bytes written to `dest`.
     fn compress_to(&self, src: &[u8], dest: &mut Vec<u8>) -> Result<usize, NippyJarError>;
@@ -44,8 +45,6 @@ pub trait Compression: Serialize + for<'a> Deserialize<'a> {
 pub enum Compressors {
     Zstd(Zstd),
     Lz4(Lz4),
-    // Avoids irrefutable let errors. Remove this after adding another one.
-    Unused,
 }
 
 impl Compression for Compressors {
@@ -53,14 +52,12 @@ impl Compression for Compressors {
         match self {
             Compressors::Zstd(zstd) => zstd.decompress_to(value, dest),
             Compressors::Lz4(lz4) => lz4.decompress_to(value, dest),
-            Compressors::Unused => unimplemented!(),
         }
     }
     fn decompress(&self, value: &[u8]) -> Result<Vec<u8>, NippyJarError> {
         match self {
             Compressors::Zstd(zstd) => zstd.decompress(value),
             Compressors::Lz4(lz4) => lz4.decompress(value),
-            Compressors::Unused => unimplemented!(),
         }
     }
 
@@ -70,7 +67,6 @@ impl Compression for Compressors {
             let result = match self {
                 Compressors::Zstd(zstd) => zstd.compress_to(src, dest),
                 Compressors::Lz4(lz4) => lz4.compress_to(src, dest),
-                Compressors::Unused => unimplemented!(),
             };
 
             match result {
@@ -89,7 +85,6 @@ impl Compression for Compressors {
         match self {
             Compressors::Zstd(zstd) => zstd.compress(src),
             Compressors::Lz4(lz4) => lz4.compress(src),
-            Compressors::Unused => unimplemented!(),
         }
     }
 
@@ -97,7 +92,6 @@ impl Compression for Compressors {
         match self {
             Compressors::Zstd(zstd) => zstd.is_ready(),
             Compressors::Lz4(lz4) => lz4.is_ready(),
-            Compressors::Unused => unimplemented!(),
         }
     }
 
@@ -108,7 +102,6 @@ impl Compression for Compressors {
         match self {
             Compressors::Zstd(zstd) => zstd.prepare_compression(columns),
             Compressors::Lz4(lz4) => lz4.prepare_compression(columns),
-            Compressors::Unused => Ok(()),
         }
     }
 }
