@@ -6042,7 +6042,6 @@ dependencies = [
  "rand 0.8.5",
  "rayon",
  "reth-codecs",
- "revm",
  "revm-primitives",
  "secp256k1",
  "serde",

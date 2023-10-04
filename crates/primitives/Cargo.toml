@@ -12,7 +12,7 @@ description = "Commonly used types in reth."
 # reth
 reth-codecs = { path = "../storage/codecs" }
 revm-primitives = { workspace = true, features = ["serde"] }
-revm.workspace = true
+
 # ethereum
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }

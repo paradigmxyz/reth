@@ -420,12 +420,8 @@ impl PoolTransaction for MockTransaction {
         }
     }
 
-    fn access_list(&self) -> AccessList {
-        match self {
-            MockTransaction::Legacy { .. } => AccessList::default(),
-            MockTransaction::Eip1559 { .. } => self.access_list().clone(),
-            MockTransaction::Eip4844 { .. } => self.access_list().clone(),
-        }
+    fn access_list(&self) -> Option<&AccessList> {
+        None
     }
 
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
@@ -476,6 +472,10 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Eip1559 { to, .. } => to,
             MockTransaction::Eip4844 { to, .. } => to,
         }
+    }
+
+    fn input(&self) -> &[u8] {
+        &[]
     }
 
     fn size(&self) -> usize {

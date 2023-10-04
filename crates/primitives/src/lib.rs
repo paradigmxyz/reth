@@ -43,7 +43,7 @@ pub mod stage;
 mod storage;
 
 /// Helpers for working with transactions
-pub mod transaction;
+mod transaction;
 pub mod trie;
 mod withdrawal;
 
@@ -83,7 +83,6 @@ pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts};
 pub use serde_helper::JsonU256;
 pub use storage::StorageEntry;
 pub use transaction::{
-    initial_tx_gas,
     util::secp256k1::{public_key_to_address, recover_signer, sign_message},
     AccessList, AccessListItem, AccessListWithGasUsed, BlobTransaction, BlobTransactionSidecar,
     BlobTransactionValidationError, FromRecoveredPooledTransaction, FromRecoveredTransaction,

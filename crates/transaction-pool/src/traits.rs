@@ -698,7 +698,7 @@ pub trait PoolTransaction:
 
     /// Returns the access_list for the particular transaction type.
     /// For Legacy transactions, returns default.
-    fn access_list(&self) -> AccessList;
+    fn access_list(&self) -> Option<&AccessList>;
 
     /// Returns the EIP-1559 Priority fee the caller is paying to the block author.
     ///
@@ -723,6 +723,9 @@ pub trait PoolTransaction:
     /// Returns the transaction's [`TransactionKind`], which is the address of the recipient or
     /// [`TransactionKind::Create`] if the transaction is a contract creation.
     fn kind(&self) -> &TransactionKind;
+
+    /// Returns the input data of this transaction.
+    fn input(&self) -> &[u8];
 
     /// Returns a measurement of the heap usage of this type and all its internals.
     fn size(&self) -> usize;
@@ -913,13 +916,8 @@ impl PoolTransaction for EthPooledTransaction {
         self.transaction.max_fee_per_blob_gas()
     }
 
-    fn access_list(&self) -> AccessList {
-        match &self.transaction().transaction {
-            Transaction::Legacy(_) => AccessList::default(),
-            Transaction::Eip2930(tx) => tx.access_list.clone(),
-            Transaction::Eip1559(tx) => tx.access_list.clone(),
-            Transaction::Eip4844(tx) => tx.access_list.clone(),
-        }
+    fn access_list(&self) -> Option<&AccessList> {
+        self.transaction.access_list()
     }
 
     /// Returns the effective tip for this transaction.
@@ -940,6 +938,10 @@ impl PoolTransaction for EthPooledTransaction {
     /// [`TransactionKind::Create`] if the transaction is a contract creation.
     fn kind(&self) -> &TransactionKind {
         self.transaction.kind()
+    }
+
+    fn input(&self) -> &[u8] {
+        self.transaction.input().as_ref()
     }
 
     /// Returns a measurement of the heap usage of this type and all its internals.

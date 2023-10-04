@@ -1,10 +1,11 @@
 use reth_primitives::{
     revm_primitives::{AccountInfo, Log},
-    transaction::initial_tx_gas,
-    AccessList, Account, Log as RethLog, TransactionKind, TransactionSignedEcRecovered,
-    KECCAK_EMPTY,
+    Account, Address, Log as RethLog, TransactionKind, KECCAK_EMPTY, U256,
 };
-use revm::primitives::{CancunSpec, ShanghaiSpec};
+use revm::{
+    interpreter::gas::initial_tx_gas,
+    primitives::{MergeSpec, ShanghaiSpec},
+};
 
 /// Check equality between Revm and Reth `Log`s.
 pub fn is_log_equal(revm_log: &Log, reth_log: &reth_primitives::Log) -> bool {
@@ -43,23 +44,18 @@ pub fn into_revm_acc(reth_acc: Account) -> AccountInfo {
 }
 
 /// Calculates the Intrinsic Gas usage for a Transaction
-pub fn calculate_intrinsic_gas(
-    tx: TransactionSignedEcRecovered,
-    access_list: AccessList,
+///
+/// Caution: This only checks past the Merge hardfork.
+#[inline]
+pub fn calculate_intrinsic_gas_after_merge(
+    input: &[u8],
     kind: &TransactionKind,
-    is_cancun: bool,
+    access_list: &[(Address, Vec<U256>)],
+    is_shanghai: bool,
 ) -> u64 {
-    if is_cancun {
-        return initial_tx_gas::<CancunSpec>(
-            tx.input().as_ref(),
-            TransactionKind::Create == *kind,
-            access_list.flattened().as_ref(),
-        )
+    if is_shanghai {
+        initial_tx_gas::<ShanghaiSpec>(input, kind.is_create(), access_list)
     } else {
-        return initial_tx_gas::<ShanghaiSpec>(
-            tx.input().as_ref(),
-            TransactionKind::Create == *kind,
-            access_list.flattened().as_ref(),
-        )
+        initial_tx_gas::<MergeSpec>(input, kind.is_create(), access_list)
     }
 }

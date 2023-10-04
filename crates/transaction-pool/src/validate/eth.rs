@@ -14,11 +14,11 @@ use reth_primitives::{
         ETHEREUM_BLOCK_GAS_LIMIT,
     },
     kzg::KzgSettings,
-    AccessList, ChainSpec, InvalidTransactionError, SealedBlock, EIP1559_TX_TYPE_ID,
-    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    ChainSpec, InvalidTransactionError, SealedBlock, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
+    EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 use reth_provider::{AccountReader, StateProviderFactory};
-use reth_revm_primitives::calculate_intrinsic_gas;
+use reth_revm_primitives::calculate_intrinsic_gas_after_merge;
 use reth_tasks::TaskSpawner;
 use std::{
     marker::PhantomData,
@@ -155,19 +155,6 @@ where
             )
         }
 
-        let is_cancun = self.fork_tracker.is_cancun_activated();
-
-        let tx = transaction.to_recovered_transaction();
-        let access_list: AccessList = transaction.access_list();
-        let kind = transaction.kind();
-
-        if transaction.gas_limit() < calculate_intrinsic_gas(tx, access_list, kind, is_cancun) {
-            return TransactionValidationOutcome::Invalid(
-                transaction,
-                InvalidPoolTransactionError::IntrinsicGasTooLow,
-            )
-        }
-
         // Check whether the init code size has been exceeded.
         if self.fork_tracker.is_shanghai_activated() {
             if let Err(err) = self.ensure_max_init_code_size(&transaction, MAX_INIT_CODE_SIZE) {
@@ -212,6 +199,25 @@ where
                     InvalidTransactionError::ChainIdMismatch.into(),
                 )
             }
+        }
+
+        // intrinsic gas checks
+        let access_list =
+            transaction.access_list().map(|list| list.flattened()).unwrap_or_default();
+        let is_shanghai = self.fork_tracker.is_shanghai_activated();
+
+        if transaction.gas_limit() <
+            calculate_intrinsic_gas_after_merge(
+                transaction.input(),
+                transaction.kind(),
+                &access_list,
+                is_shanghai,
+            )
+        {
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidPoolTransactionError::IntrinsicGasTooLow,
+            )
         }
 
         let mut maybe_blob_sidecar = None;
