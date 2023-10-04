@@ -7,7 +7,7 @@ use crate::{
 use alloy_rlp::Encodable;
 use futures_util::{ready, Stream};
 use reth_primitives::{
-    Address, BlobTransactionSidecar, BlobTransactionValidationError,
+    AccessList, Address, BlobTransactionSidecar, BlobTransactionValidationError,
     FromRecoveredPooledTransaction, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId,
     PooledTransactionsElement, PooledTransactionsElementEcRecovered, SealedBlock, Transaction,
     TransactionKind, TransactionSignedEcRecovered, TxEip4844, TxHash, B256, EIP1559_TX_TYPE_ID,
@@ -696,6 +696,10 @@ pub trait PoolTransaction:
     /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
     fn max_fee_per_gas(&self) -> u128;
 
+    /// Returns the access_list for the particular transaction type.
+    /// For Legacy transactions, returns default.
+    fn access_list(&self) -> Option<&AccessList>;
+
     /// Returns the EIP-1559 Priority fee the caller is paying to the block author.
     ///
     /// This will return `None` for non-EIP1559 transactions
@@ -719,6 +723,9 @@ pub trait PoolTransaction:
     /// Returns the transaction's [`TransactionKind`], which is the address of the recipient or
     /// [`TransactionKind::Create`] if the transaction is a contract creation.
     fn kind(&self) -> &TransactionKind;
+
+    /// Returns the input data of this transaction.
+    fn input(&self) -> &[u8];
 
     /// Returns a measurement of the heap usage of this type and all its internals.
     fn size(&self) -> usize;
@@ -910,6 +917,10 @@ impl PoolTransaction for EthPooledTransaction {
         self.transaction.max_fee_per_blob_gas()
     }
 
+    fn access_list(&self) -> Option<&AccessList> {
+        self.transaction.access_list()
+    }
+
     /// Returns the effective tip for this transaction.
     ///
     /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
@@ -928,6 +939,10 @@ impl PoolTransaction for EthPooledTransaction {
     /// [`TransactionKind::Create`] if the transaction is a contract creation.
     fn kind(&self) -> &TransactionKind {
         self.transaction.kind()
+    }
+
+    fn input(&self) -> &[u8] {
+        self.transaction.input().as_ref()
     }
 
     /// Returns a measurement of the heap usage of this type and all its internals.
