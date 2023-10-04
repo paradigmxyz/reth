@@ -31,14 +31,14 @@ use tracing::error;
 pub(crate) trait Segment<DB: Database> {
     fn segment(&self) -> PruneSegment;
 
-    /// Prune data for [Self::SEGMENT] using the provided input.
+    /// Prune data for [Self::segment] using the provided input.
     fn prune(
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError>;
 
-    /// Save checkpoint for [Self::SEGMENT] to the database.
+    /// Save checkpoint for [Self::segment] to the database.
     fn save_checkpoint(
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
