@@ -15,7 +15,7 @@ use reth_primitives::{
     constants::{eip4844::DATA_GAS_PER_BLOB, MIN_PROTOCOL_BASE_FEE},
     hex, AccessList, Address, FromRecoveredPooledTransaction, FromRecoveredTransaction,
     IntoRecoveredTransaction, PooledTransactionsElementEcRecovered, Signature, Transaction,
-    TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930,
+    TransactionKind, Bytes, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930,
     TxEip4844, TxHash, TxLegacy, TxType, TxValue, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID, U128, U256,
 };
@@ -115,8 +115,8 @@ pub enum MockTransaction {
         gas_limit: u64,
         to: TransactionKind,
         value: U256,
-        accesslist: Vec<AccessList>,
-        input: Vec<u8>,
+        accesslist: AccessList,
+        input: Bytes,
         
     },
 }
@@ -156,8 +156,8 @@ impl MockTransaction {
             gas_limit: 0,
             to: TransactionKind::Call(Address::random()),
             value: Default::default(),
-            accesslist: Vec::new(),
-            input: Vec::new(),
+            accesslist: todo!(),
+            input: Bytes::new(),
         }
     }
 
@@ -173,8 +173,8 @@ impl MockTransaction {
             gas_limit: 0,
             to: TransactionKind::Call(Address::random()),
             value: Default::default(),
-            accesslist: Vec::new(),
-            input: Vec::new(),
+            accesslist: todo!(),
+            input: Bytes::new(),
         }
     }
 
