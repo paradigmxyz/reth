@@ -459,7 +459,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 self.chain.clone(),
                 prune_config.block_interval,
                 prune_config.parts,
-                self.chain.prune_batch_sizes,
+                self.chain.prune_delete_limit,
                 highest_snapshots_rx,
             );
             let events = pruner.events();

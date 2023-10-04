@@ -1,4 +1,4 @@
-use reth_primitives::{BlockNumber, PrunePart};
+use reth_primitives::{BlockNumber, PrunePart, PruneProgress};
 use std::{collections::BTreeMap, time::Duration};
 
 /// An event emitted by a [Pruner][crate::Pruner].
@@ -8,7 +8,6 @@ pub enum PrunerEvent {
     Finished {
         tip_block_number: BlockNumber,
         elapsed: Duration,
-        done: bool,
-        parts_done: BTreeMap<PrunePart, bool>,
+        parts: BTreeMap<PrunePart, (PruneProgress, usize)>,
     },
 }
