@@ -431,7 +431,11 @@ impl PoolTransaction for MockTransaction {
     }
 
     fn access_list(&self) -> Option<&AccessList> {
-        None
+        match self {
+            MockTransaction::Legacy { .. } => None,
+            MockTransaction::Eip1559 { accessslist, .. } => Some(accessslist),
+            MockTransaction::Eip4844 { accessslist, .. } => Some(accessslist),
+        }
     }
 
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
