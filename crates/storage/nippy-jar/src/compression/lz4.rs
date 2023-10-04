@@ -3,14 +3,8 @@ use serde::{Deserialize, Serialize};
 
 /// Wrapper type for `lz4_flex` that implements [`Compression`].
 #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
+#[non_exhaustive]
 pub struct Lz4;
-
-impl Lz4 {
-    /// Creates new [`Lz4`].
-    pub fn new() -> Self {
-        Lz4 {}
-    }
-}
 
 impl Compression for Lz4 {
     fn decompress_to(&self, value: &[u8], dest: &mut Vec<u8>) -> Result<(), NippyJarError> {
