@@ -86,7 +86,7 @@ pub struct NippyJar<H = ()> {
     /// Number of data columns in the jar.
     columns: usize,
     /// Optional compression algorithm applied to the data.
-    pub compressor: Option<Compressors>,
+    compressor: Option<Compressors>,
     /// Optional filter function for data membership checks.
     filter: Option<InclusionFilters>,
     /// Optional Perfect Hashing Function (PHF) for unique offset mapping.
@@ -196,6 +196,16 @@ where
     /// Gets a reference to the user header.
     pub fn user_header(&self) -> &H {
         &self.user_header
+    }
+
+    /// Gets a reference to the compressor.
+    pub fn compressor(&self) -> Option<&Compressors> {
+        self.compressor.as_ref()
+    }
+
+    /// Gets a mutable reference to the compressor.
+    pub fn compressor_mut(&mut self) -> Option<&mut Compressors> {
+        self.compressor.as_mut()
     }
 
     /// Loads the file configuration and returns [`Self`].
@@ -609,13 +619,13 @@ mod tests {
         let file_path = tempfile::NamedTempFile::new().unwrap();
 
         let nippy = NippyJar::new_without_header(num_columns, file_path.path());
-        assert!(nippy.compressor.is_none());
+        assert!(nippy.compressor().is_none());
 
         let mut nippy =
             NippyJar::new_without_header(num_columns, file_path.path()).with_zstd(true, 5000);
-        assert!(nippy.compressor.is_some());
+        assert!(nippy.compressor().is_some());
 
-        if let Some(Compressors::Zstd(zstd)) = &mut nippy.compressor {
+        if let Some(Compressors::Zstd(zstd)) = &mut nippy.compressor_mut() {
             assert!(matches!(zstd.generate_compressors(), Err(NippyJarError::CompressorNotReady)));
 
             // Make sure the number of column iterators match the initial set up ones.
@@ -634,7 +644,7 @@ mod tests {
 
         nippy.prepare_compression(vec![col1.clone(), col2.clone()]).unwrap();
 
-        if let Some(Compressors::Zstd(zstd)) = &nippy.compressor {
+        if let Some(Compressors::Zstd(zstd)) = &nippy.compressor() {
             assert!(matches!(
                 (&zstd.state, zstd.raw_dictionaries.as_ref().map(|dict| dict.len())),
                 (compression::ZstdState::Ready, Some(columns)) if columns == num_columns
@@ -647,11 +657,11 @@ mod tests {
         assert_eq!(nippy, loaded_nippy);
 
         let mut dicts = vec![];
-        if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor.as_mut() {
+        if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor_mut() {
             dicts = zstd.generate_decompress_dictionaries().unwrap()
         }
 
-        if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor.as_ref() {
+        if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor() {
             let mut cursor = NippyJarCursor::new(
                 &loaded_nippy,
                 Some(zstd.generate_decompressors(&dicts).unwrap()),
@@ -678,17 +688,17 @@ mod tests {
         let file_path = tempfile::NamedTempFile::new().unwrap();
 
         let nippy = NippyJar::new_without_header(num_columns, file_path.path());
-        assert!(nippy.compressor.is_none());
+        assert!(nippy.compressor().is_none());
 
         let mut nippy = NippyJar::new_without_header(num_columns, file_path.path()).with_lz4();
-        assert!(nippy.compressor.is_some());
+        assert!(nippy.compressor().is_some());
 
         nippy.freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows).unwrap();
 
         let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
         assert_eq!(nippy, loaded_nippy);
 
-        if let Some(Compressors::Lz4(_)) = loaded_nippy.compressor.as_ref() {
+        if let Some(Compressors::Lz4(_)) = loaded_nippy.compressor() {
             let mut cursor = NippyJarCursor::new(&loaded_nippy, None).unwrap();
 
             // Iterate over compressed values and compare
@@ -713,18 +723,18 @@ mod tests {
         let file_path = tempfile::NamedTempFile::new().unwrap();
 
         let nippy = NippyJar::new_without_header(num_columns, file_path.path());
-        assert!(nippy.compressor.is_none());
+        assert!(nippy.compressor().is_none());
 
         let mut nippy =
             NippyJar::new_without_header(num_columns, file_path.path()).with_zstd(false, 5000);
-        assert!(nippy.compressor.is_some());
+        assert!(nippy.compressor().is_some());
 
         nippy.freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows).unwrap();
 
         let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
         assert_eq!(nippy, loaded_nippy);
 
-        if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor.as_ref() {
+        if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor() {
             assert!(!zstd.use_dict);
 
             let mut cursor = NippyJarCursor::new(&loaded_nippy, None).unwrap();
@@ -778,16 +788,16 @@ mod tests {
         {
             let mut loaded_nippy = NippyJar::<BlockJarHeader>::load(file_path.path()).unwrap();
 
-            assert!(loaded_nippy.compressor.is_some());
+            assert!(loaded_nippy.compressor().is_some());
             assert!(loaded_nippy.filter.is_some());
             assert!(loaded_nippy.phf.is_some());
             assert_eq!(loaded_nippy.user_header().block_start, block_start);
 
             let mut dicts = vec![];
-            if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor.as_mut() {
+            if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor_mut() {
                 dicts = zstd.generate_decompress_dictionaries().unwrap()
             }
-            if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor.as_ref() {
+            if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor() {
                 let mut cursor = NippyJarCursor::new(
                     &loaded_nippy,
                     Some(zstd.generate_decompressors(&dicts).unwrap()),
@@ -857,10 +867,10 @@ mod tests {
             let mut loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
 
             let mut dicts = vec![];
-            if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor.as_mut() {
+            if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor_mut() {
                 dicts = zstd.generate_decompress_dictionaries().unwrap()
             }
-            if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor.as_ref() {
+            if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor() {
                 let mut cursor = NippyJarCursor::new(
                     &loaded_nippy,
                     Some(zstd.generate_decompressors(&dicts).unwrap()),

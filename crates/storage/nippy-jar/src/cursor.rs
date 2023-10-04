@@ -229,7 +229,7 @@ where
             let to = self.internal_buffer.len();
 
             row.push(ValueRange::Internal(from..to));
-        } else if let Some(compression) = &self.jar.compressor {
+        } else if let Some(compression) = self.jar.compressor() {
             // Uses the chosen default decompressor
             let from = self.internal_buffer.len();
             compression
