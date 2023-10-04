@@ -25,6 +25,7 @@ use reth_rpc::{
     JwtError, JwtSecret,
 };
 
+use crate::cli::components::RethNodeComponents;
 use reth_rpc_builder::{
     auth::{AuthServerConfig, AuthServerHandle},
     constants,
@@ -175,32 +176,15 @@ impl RpcServerArgs {
     /// for the auth server that handles the `engine_` API that's accessed by the consensus
     /// layer.
     #[allow(clippy::too_many_arguments)]
-    pub async fn start_servers<Provider, Pool, Network, Tasks, Events, Engine, Conf>(
+    pub async fn start_servers<Reth, Engine, Conf>(
         &self,
-        provider: Provider,
-        pool: Pool,
-        network: Network,
-        executor: Tasks,
-        events: Events,
+        components: &Reth,
         engine_api: Engine,
         jwt_secret: JwtSecret,
         conf: &mut Conf,
     ) -> eyre::Result<(RpcServerHandle, AuthServerHandle)>
     where
-        Provider: BlockReaderIdExt
-            + AccountReader
-            + HeaderProvider
-            + StateProviderFactory
-            + EvmEnvProvider
-            + ChainSpecProvider
-            + ChangeSetReader
-            + Clone
-            + Unpin
-            + 'static,
-        Pool: TransactionPool + Clone + 'static,
-        Network: NetworkInfo + Peers + Clone + 'static,
-        Tasks: TaskSpawner + Clone + 'static,
-        Events: CanonStateSubscriptions + Clone + 'static,
+        Reth: RethNodeComponents,
         Engine: EngineApiServer,
         Conf: RethNodeCommandConfig,
     {
@@ -210,15 +194,15 @@ impl RpcServerArgs {
         debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
 
         let (mut rpc_modules, auth_module, mut registry) = RpcModuleBuilder::default()
-            .with_provider(provider)
-            .with_pool(pool)
-            .with_network(network)
-            .with_events(events)
-            .with_executor(executor)
+            .with_provider(components.provider())
+            .with_pool(components.pool())
+            .with_network(components.network())
+            .with_events(components.events())
+            .with_executor(components.task_executor())
             .build_with_auth_server(module_config, engine_api);
 
         // apply configured customization
-        conf.extend_rpc_modules(self, &mut registry, &mut rpc_modules)?;
+        conf.extend_rpc_modules(self, components, &mut registry, &mut rpc_modules)?;
 
         let server_config = self.rpc_server_config();
         let launch_rpc = rpc_modules.start_server(server_config).map_ok(|handle| {
