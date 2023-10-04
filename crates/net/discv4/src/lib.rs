@@ -432,6 +432,11 @@ pub struct Discv4Service {
     queued_pings: VecDeque<(NodeRecord, PingReason)>,
     /// Currently active pings to specific nodes.
     pending_pings: HashMap<PeerId, PingRequest>,
+    /// Currently active endpoint proof verification lookups to specific nodes.
+    ///
+    /// Entries here means we've proven the peer's endpoint but haven't completed our end of the
+    /// endpoint proof
+    pending_lookup: HashMap<PeerId, LookupContext>,
     /// Currently active FindNode requests
     pending_find_nodes: HashMap<PeerId, FindNodeRequest>,
     /// Currently active ENR requests
@@ -546,6 +551,7 @@ impl Discv4Service {
             egress: egress_tx,
             queued_pings: Default::default(),
             pending_pings: Default::default(),
+            pending_lookup: Default::default(),
             pending_find_nodes: Default::default(),
             pending_enr_requests: Default::default(),
             commands_rx,
@@ -988,10 +994,17 @@ impl Discv4Service {
         // the ping interval
         let mut is_new_insert = false;
         let mut needs_bond = false;
+        let mut is_proven = false;
 
         let old_enr = match self.kbuckets.entry(&key) {
-            kbucket::Entry::Present(mut entry, _) => entry.value_mut().update_with_enr(ping.enr_sq),
-            kbucket::Entry::Pending(mut entry, _) => entry.value().update_with_enr(ping.enr_sq),
+            kbucket::Entry::Present(mut entry, _) => {
+                is_proven = entry.value().has_endpoint_proof;
+                entry.value_mut().update_with_enr(ping.enr_sq)
+            }
+            kbucket::Entry::Pending(mut entry, _) => {
+                is_proven = entry.value().has_endpoint_proof;
+                entry.value().update_with_enr(ping.enr_sq)
+            }
             kbucket::Entry::Absent(entry) => {
                 let mut node = NodeEntry::new(record);
                 node.last_enr_seq = ping.enr_sq;
@@ -1044,6 +1057,19 @@ impl Discv4Service {
             self.try_ping(record, PingReason::InitialInsert);
         } else if needs_bond {
             self.try_ping(record, PingReason::EstablishBond);
+        } else if is_proven {
+            // if node has been proven, this means we've recieved a pong and verified its endpoint
+            // proof. We've also sent a pong above to verify our endpoint proof, so we can now
+            // send our find_nodes request if PingReason::Lookup
+            if let Some(ctx) = self.pending_lookup.remove(&record.id) {
+                if self.pending_find_nodes.contains_key(&record.id) {
+                    // there's already another pending request, unmark it so the next round can
+                    // try to send it
+                    ctx.unmark_queried(record.id);
+                } else {
+                    self.find_node(&record, ctx);
+                }
+            }
         } else {
             // Request ENR if included in the ping
             match (ping.enr_sq, old_enr) {
@@ -1156,13 +1182,9 @@ impl Discv4Service {
             }
             PingReason::Lookup(node, ctx) => {
                 self.update_on_pong(node, pong.enr_sq);
-                if self.pending_find_nodes.contains_key(&node.id) {
-                    // there's already another pending request, unmark it so the next round can try
-                    // to send it
-                    ctx.unmark_queried(node.id);
-                } else {
-                    self.find_node(&node, ctx);
-                }
+                // insert node and assoc. lookup_context into the pending_lookup table to complete
+                // our side of the endpoint proof verification
+                self.pending_lookup.insert(node.id, ctx);
             }
         }
     }
@@ -1279,7 +1301,7 @@ impl Discv4Service {
         };
 
         // This is the recursive lookup step where we initiate new FindNode requests for new nodes
-        // that where discovered.
+        // that were discovered.
         for node in msg.nodes.into_iter().map(NodeRecord::into_ipv4_mapped) {
             // prevent banned peers from being added to the context
             if self.config.ban_list.is_banned(&node.id, &node.address) {
@@ -1299,7 +1321,8 @@ impl Discv4Service {
             match self.kbuckets.entry(&key) {
                 BucketEntry::Absent(entry) => {
                     // the node's endpoint is not proven yet, so we need to ping it first, on
-                    // success, it will initiate a `FindNode` request.
+                    // success, we will add the node to the pending_lookup table, and wait to send
+                    // back a Pong before initiating a FindNode request.
                     // In order to prevent that this node is selected again on subsequent responses,
                     // while the ping is still active, we always mark it as queried.
                     ctx.mark_queried(closest.id);
