@@ -650,6 +650,9 @@ where
         &self,
         hashes: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        if hashes.is_empty() {
+            return Vec::new()
+        }
         let removed = self.pool.write().remove_transactions(hashes);
 
         let mut listener = self.event_listener.write();
@@ -692,6 +695,9 @@ where
         &self,
         txs: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        if txs.is_empty() {
+            return Vec::new()
+        }
         self.pool.read().get_all(txs).collect()
     }
 
