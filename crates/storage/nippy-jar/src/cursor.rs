@@ -52,6 +52,7 @@ where
             zstd_decompressors,
             file_handle: file,
             mmap_handle: mmap,
+            // Makes sure that we have enough buffer capacity to decompress any row of data.
             internal_buffer: Vec::with_capacity(jar.max_row_size),
             row: 0,
         })
