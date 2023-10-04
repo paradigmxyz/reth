@@ -1,11 +1,9 @@
-mod batch_sizes;
 mod checkpoint;
 mod mode;
 mod part;
 mod target;
 
 use crate::{Address, BlockNumber};
-pub use batch_sizes::PruneBatchSizes;
 pub use checkpoint::PruneCheckpoint;
 pub use mode::PruneMode;
 pub use part::{PrunePart, PrunePartError};
@@ -86,5 +84,33 @@ impl ReceiptsLogPruneConfig {
         }
 
         Ok(lowest.map(|lowest| lowest.max(pruned_block)))
+    }
+}
+
+/// Progress of pruning.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum PruneProgress {
+    /// There is more data to prune.
+    HasMoreData,
+    /// Pruning has been finished.
+    Finished,
+}
+
+impl PruneProgress {
+    /// Creates new [PruneProgress] from `done` boolean value.
+    ///
+    /// If `done == true`, returns [PruneProgress::Finished], otherwise [PruneProgress::HasMoreData]
+    /// is returned.
+    pub fn from_done(done: bool) -> Self {
+        if done {
+            Self::Finished
+        } else {
+            Self::HasMoreData
+        }
+    }
+
+    /// Returns `true` if pruning has been finished.
+    pub fn is_finished(&self) -> bool {
+        matches!(self, Self::Finished)
     }
 }

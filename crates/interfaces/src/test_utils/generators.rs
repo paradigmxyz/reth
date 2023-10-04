@@ -39,7 +39,7 @@ pub fn rng() -> StdRng {
 /// The headers are assumed to not be correct if validated.
 pub fn random_header_range<R: Rng>(
     rng: &mut R,
-    range: std::ops::Range<u64>,
+    range: Range<u64>,
     head: B256,
 ) -> Vec<SealedHeader> {
     let mut headers = Vec::with_capacity(range.end.saturating_sub(range.start) as usize);
@@ -204,8 +204,8 @@ pub fn random_changeset_range<'a, R: Rng, IBlk, IAcc>(
     rng: &mut R,
     blocks: IBlk,
     accounts: IAcc,
-    n_storage_changes: std::ops::Range<u64>,
-    key_range: std::ops::Range<u64>,
+    n_storage_changes: Range<u64>,
+    key_range: Range<u64>,
 ) -> (Vec<ChangeSet>, BTreeMap<Address, AccountState>)
 where
     IBlk: IntoIterator<Item = &'a SealedBlock>,
@@ -280,8 +280,8 @@ where
 pub fn random_account_change<R: Rng>(
     rng: &mut R,
     valid_addresses: &Vec<Address>,
-    n_storage_changes: std::ops::Range<u64>,
-    key_range: std::ops::Range<u64>,
+    n_storage_changes: Range<u64>,
+    key_range: Range<u64>,
 ) -> (Address, Address, U256, Vec<StorageEntry>) {
     let mut addresses = valid_addresses.choose_multiple(rng, 2).cloned();
 
@@ -302,7 +302,7 @@ pub fn random_account_change<R: Rng>(
 }
 
 /// Generate a random storage change.
-pub fn random_storage_entry<R: Rng>(rng: &mut R, key_range: std::ops::Range<u64>) -> StorageEntry {
+pub fn random_storage_entry<R: Rng>(rng: &mut R, key_range: Range<u64>) -> StorageEntry {
     let key = B256::new({
         let n = key_range.sample_single(rng);
         let mut m = [0u8; 32];
@@ -326,7 +326,7 @@ pub fn random_eoa_account<R: Rng>(rng: &mut R) -> (Address, Account) {
 /// Generate random Externally Owned Accounts
 pub fn random_eoa_account_range<R: Rng>(
     rng: &mut R,
-    acc_range: std::ops::Range<u64>,
+    acc_range: Range<u64>,
 ) -> Vec<(Address, Account)> {
     let mut accounts = Vec::with_capacity(acc_range.end.saturating_sub(acc_range.start) as usize);
     for _ in acc_range {
@@ -338,7 +338,7 @@ pub fn random_eoa_account_range<R: Rng>(
 /// Generate random Contract Accounts
 pub fn random_contract_account_range<R: Rng>(
     rng: &mut R,
-    acc_range: &mut std::ops::Range<u64>,
+    acc_range: &mut Range<u64>,
 ) -> Vec<(Address, Account)> {
     let mut accounts = Vec::with_capacity(acc_range.end.saturating_sub(acc_range.start) as usize);
     for _ in acc_range {

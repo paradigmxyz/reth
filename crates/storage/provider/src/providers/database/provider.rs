@@ -178,14 +178,14 @@ impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
     }
 
     /// Return full table as Vec
-    pub fn table<T: Table>(&self) -> std::result::Result<Vec<KeyValue<T>>, DatabaseError>
+    pub fn table<T: Table>(&self) -> Result<Vec<KeyValue<T>>, DatabaseError>
     where
         T::Key: Default + Ord,
     {
         self.tx
             .cursor_read::<T>()?
             .walk(Some(T::Key::default()))?
-            .collect::<std::result::Result<Vec<_>, DatabaseError>>()
+            .collect::<Result<Vec<_>, DatabaseError>>()
     }
 }
 
@@ -380,7 +380,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     pub fn get_or_take<T: Table, const TAKE: bool>(
         &self,
         range: impl RangeBounds<T::Key>,
-    ) -> std::result::Result<Vec<KeyValue<T>>, DatabaseError> {
+    ) -> Result<Vec<KeyValue<T>>, DatabaseError> {
         if TAKE {
             let mut cursor_write = self.tx.cursor_write::<T>()?;
             let mut walker = cursor_write.walk_range(range)?;
@@ -391,10 +391,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             }
             Ok(items)
         } else {
-            self.tx
-                .cursor_read::<T>()?
-                .walk_range(range)?
-                .collect::<std::result::Result<Vec<_>, _>>()
+            self.tx.cursor_read::<T>()?.walk_range(range)?.collect::<Result<Vec<_>, _>>()
         }
     }
 
@@ -625,7 +622,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     ///
     /// Note: Key is not inclusive and specified key would stay in db.
     #[inline]
-    pub fn unwind_table_by_num<T>(&self, num: u64) -> std::result::Result<usize, DatabaseError>
+    pub fn unwind_table_by_num<T>(&self, num: u64) -> Result<usize, DatabaseError>
     where
         T: Table<Key = u64>,
     {
@@ -640,7 +637,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         &self,
         key: u64,
         mut selector: F,
-    ) -> std::result::Result<usize, DatabaseError>
+    ) -> Result<usize, DatabaseError>
     where
         T: Table,
         F: FnMut(T::Key) -> u64,
@@ -661,10 +658,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     }
 
     /// Unwind a table forward by a [Walker][reth_db::abstraction::cursor::Walker] on another table
-    pub fn unwind_table_by_walker<T1, T2>(
-        &self,
-        start_at: T1::Key,
-    ) -> std::result::Result<(), DatabaseError>
+    pub fn unwind_table_by_walker<T1, T2>(&self, start_at: T1::Key) -> Result<(), DatabaseError>
     where
         T1: Table,
         T2: Table<Key = T1::Value>,
@@ -685,21 +679,21 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         keys: impl IntoIterator<Item = T::Key>,
         limit: usize,
         mut delete_callback: impl FnMut(TableRow<T>),
-    ) -> std::result::Result<(usize, bool), DatabaseError> {
+    ) -> Result<(usize, bool), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut deleted = 0;
 
         let mut keys = keys.into_iter();
         for key in &mut keys {
+            if deleted == limit {
+                break
+            }
+
             let row = cursor.seek_exact(key.clone())?;
             if let Some(row) = row {
                 cursor.delete_current()?;
                 deleted += 1;
                 delete_callback(row);
-            }
-
-            if deleted == limit {
-                break
             }
         }
 
@@ -708,27 +702,27 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
     /// Prune the table for the specified key range.
     ///
-    /// Returns number of total unique keys and total rows pruned pruned.
+    /// Returns number of rows pruned.
     pub fn prune_table_with_range<T: Table>(
         &self,
         keys: impl RangeBounds<T::Key> + Clone + Debug,
         limit: usize,
         mut skip_filter: impl FnMut(&TableRow<T>) -> bool,
         mut delete_callback: impl FnMut(TableRow<T>),
-    ) -> std::result::Result<(usize, bool), DatabaseError> {
+    ) -> Result<(usize, bool), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut walker = cursor.walk_range(keys)?;
         let mut deleted = 0;
 
         while let Some(row) = walker.next().transpose()? {
+            if deleted == limit {
+                break
+            }
+
             if !skip_filter(&row) {
                 walker.delete_current()?;
                 deleted += 1;
                 delete_callback(row);
-            }
-
-            if deleted == limit {
-                break
             }
         }
 
@@ -824,7 +818,7 @@ impl<'this, TX: DbTx<'this>> AccountExtReader for DatabaseProvider<'this, TX> {
         Ok(iter
             .into_iter()
             .map(|address| plain_accounts.seek_exact(address).map(|a| (address, a.map(|(_, v)| v))))
-            .collect::<std::result::Result<Vec<_>, _>>()?)
+            .collect::<Result<Vec<_>, _>>()?)
     }
 
     fn changed_accounts_and_blocks_with_range(
@@ -1116,7 +1110,7 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
                         tx_cursor
                             .walk_range(tx_range)?
                             .map(|result| result.map(|(_, tx)| tx.into()))
-                            .collect::<std::result::Result<Vec<_>, _>>()?
+                            .collect::<Result<Vec<_>, _>>()?
                     };
 
                     // If we are past shanghai, then all blocks should have a withdrawal list,
@@ -1237,7 +1231,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
                     let transactions = tx_cursor
                         .walk_range(tx_range)?
                         .map(|result| result.map(|(_, tx)| tx.into()))
-                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                        .collect::<Result<Vec<_>, _>>()?;
                     Ok(Some(transactions))
                 }
             }
@@ -1262,7 +1256,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
                     tx_cursor
                         .walk_range(tx_num_range)?
                         .map(|result| result.map(|(_, tx)| tx.into()))
-                        .collect::<std::result::Result<Vec<_>, _>>()?,
+                        .collect::<Result<Vec<_>, _>>()?,
                 );
             }
         }
@@ -1278,7 +1272,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
             .cursor_read::<tables::Transactions>()?
             .walk_range(range)?
             .map(|entry| entry.map(|tx| tx.1))
-            .collect::<std::result::Result<Vec<_>, _>>()?)
+            .collect::<Result<Vec<_>, _>>()?)
     }
 
     fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> RethResult<Vec<Address>> {
@@ -1287,7 +1281,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
             .cursor_read::<tables::TxSenders>()?
             .walk_range(range)?
             .map(|entry| entry.map(|sender| sender.1))
-            .collect::<std::result::Result<Vec<_>, _>>()?)
+            .collect::<Result<Vec<_>, _>>()?)
     }
 
     fn transaction_sender(&self, id: TxNumber) -> RethResult<Option<Address>> {
@@ -1319,7 +1313,7 @@ impl<'this, TX: DbTx<'this>> ReceiptProvider for DatabaseProvider<'this, TX> {
                     let receipts = receipts_cursor
                         .walk_range(tx_range)?
                         .map(|result| result.map(|(_, receipt)| receipt))
-                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                        .collect::<Result<Vec<_>, _>>()?;
                     Ok(Some(receipts))
                 }
             }
@@ -1612,7 +1606,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
             .tx
             .cursor_read::<tables::StorageChangeSet>()?
             .walk_range(range)?
-            .collect::<std::result::Result<Vec<_>, _>>()?
+            .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .rev()
             // fold all account to get the old balance/nonces and account that needs to be removed
@@ -1710,7 +1704,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
             .tx
             .cursor_read::<tables::AccountChangeSet>()?
             .walk_range(range)?
-            .collect::<std::result::Result<Vec<_>, _>>()?
+            .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .rev()
             // fold all account to get the old balance/nonces and account that needs to be removed
@@ -1813,7 +1807,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
             .tx
             .cursor_read::<tables::StorageChangeSet>()?
             .walk_range(range)?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
         let changesets = storage_changesets.len();
 
         let last_indices = storage_changesets
@@ -1863,7 +1857,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
             .tx
             .cursor_read::<tables::AccountChangeSet>()?
             .walk_range(range)?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
         let changesets = account_changeset.len();
 
         let last_indices = account_changeset

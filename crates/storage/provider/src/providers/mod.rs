@@ -557,17 +557,14 @@ where
     DB: Send + Sync,
     Tree: BlockchainTreeEngine,
 {
-    fn buffer_block(
-        &self,
-        block: SealedBlockWithSenders,
-    ) -> std::result::Result<(), InsertBlockError> {
+    fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
         self.tree.buffer_block(block)
     }
 
     fn insert_block(
         &self,
         block: SealedBlockWithSenders,
-    ) -> std::result::Result<InsertPayloadOk, InsertBlockError> {
+    ) -> Result<InsertPayloadOk, InsertBlockError> {
         self.tree.insert_block(block)
     }
 
@@ -628,7 +625,7 @@ where
         self.tree.find_canonical_ancestor(hash)
     }
 
-    fn is_canonical(&self, hash: BlockHash) -> std::result::Result<bool, RethError> {
+    fn is_canonical(&self, hash: BlockHash) -> Result<bool, RethError> {
         self.tree.is_canonical(hash)
     }
 

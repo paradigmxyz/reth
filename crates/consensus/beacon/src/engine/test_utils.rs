@@ -19,7 +19,7 @@ use reth_interfaces::{
     test_utils::{NoopFullBlockClient, TestConsensus},
 };
 use reth_payload_builder::test_utils::spawn_test_payload_service;
-use reth_primitives::{BlockNumber, ChainSpec, PruneBatchSizes, PruneModes, B256, U256};
+use reth_primitives::{BlockNumber, ChainSpec, PruneModes, B256, U256};
 use reth_provider::{
     providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockExecutor,
     BundleStateWithReceipts, ExecutorFactory, ProviderFactory, PrunableBlockExecutor,
@@ -518,7 +518,7 @@ where
             self.base_config.chain_spec.clone(),
             5,
             PruneModes::none(),
-            PruneBatchSizes::default(),
+            self.base_config.chain_spec.prune_delete_limit,
             watch::channel(None).1,
         );
 

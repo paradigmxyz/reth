@@ -119,7 +119,7 @@ mod test {
             B256::random(),
         );
 
-        db.update(|tx| -> std::result::Result<(), DatabaseError> {
+        db.update(|tx| -> Result<(), DatabaseError> {
             let mut td = U256::ZERO;
             for header in headers.clone() {
                 td += header.header.difficulty;
