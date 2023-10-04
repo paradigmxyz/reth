@@ -102,7 +102,9 @@ impl<DB: Database> Pruner<DB> {
         // let highest_snapshots = *self.highest_snapshots_tracker.borrow();
 
         // Multiply `delete_limit` (number of row to delete per block) by number of blocks since
-        // last pruner run. See docs
+        // last pruner run. `previous_tip_block_number` is close to `tip_block_number`, usually
+        // within `self.block_interval` blocks, so `delete_limit` will not be too high. Also see
+        // docs for `self.previous_tip_block_number`.
         let mut delete_limit = self.delete_limit *
             self.previous_tip_block_number
                 .map_or(1, |previous_tip_block_number| tip_block_number - previous_tip_block_number)
