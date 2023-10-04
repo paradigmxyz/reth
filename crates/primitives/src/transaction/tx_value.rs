@@ -135,9 +135,17 @@ impl<'a> arbitrary::Arbitrary<'a> for TxValue {
 impl proptest::arbitrary::Arbitrary for TxValue {
     type Parameters = ParamsFor<()>;
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        proptest::prelude::any::<u128>()
-            .prop_map(|num| Self::try_from(num).expect("to fit"))
-            .boxed()
+        #[cfg(feature = "value-256")]
+        {
+            proptest::prelude::any::<U256>().prop_map(Self).boxed()
+        }
+
+        #[cfg(not(feature = "value-256"))]
+        {
+            proptest::prelude::any::<u128>()
+                .prop_map(|num| Self::try_from(num).expect("to fit"))
+                .boxed()
+        }
     }
 
     type Strategy = BoxedStrategy<TxValue>;
