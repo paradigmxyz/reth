@@ -8,13 +8,13 @@ pub use self::lz4::Lz4;
 
 /// Trait that will compress column values
 pub trait Compression: Serialize + for<'a> Deserialize<'a> {
-    /// Appends decompressed data to the dest buffer. `dest` should be allocated with enough memory.
+    /// Appends decompressed data to the dest buffer. Requires `dest` to have sufficient capacity.
     fn decompress_to(&self, value: &[u8], dest: &mut Vec<u8>) -> Result<(), NippyJarError>;
 
     /// Returns decompressed data.
     fn decompress(&self, value: &[u8]) -> Result<Vec<u8>, NippyJarError>;
 
-    /// Appends compressed data from `src` to `dest`. `dest` should be allocated with enough memory.
+    /// Appends compressed data from `src` to `dest`. `dest`. Requires `dest` to have sufficient capacity.
     ///
     /// Returns number of bytes written to `dest`.
     fn compress_to(&self, src: &[u8], dest: &mut Vec<u8>) -> Result<usize, NippyJarError>;
