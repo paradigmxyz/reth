@@ -91,6 +91,7 @@ pub enum MockTransaction {
         gas_limit: u64,
         to: TransactionKind,
         value: U256,
+         //legacy don't have access list, so we don't add it
     },
     Eip1559 {
         hash: B256,
@@ -101,6 +102,8 @@ pub enum MockTransaction {
         gas_limit: u64,
         to: TransactionKind,
         value: U256,
+        accesslist: Vec<AccessList>,
+        input: Vec<u8>,
     },
     Eip4844 {
         hash: B256,
@@ -112,6 +115,9 @@ pub enum MockTransaction {
         gas_limit: u64,
         to: TransactionKind,
         value: U256,
+        accesslist: Vec<AccessList>,
+        input: Vec<u8>,
+        
     },
 }
 
@@ -150,6 +156,8 @@ impl MockTransaction {
             gas_limit: 0,
             to: TransactionKind::Call(Address::random()),
             value: Default::default(),
+            accesslist: Vec::new(),
+            input: Vec::new(),
         }
     }
 
@@ -165,6 +173,8 @@ impl MockTransaction {
             gas_limit: 0,
             to: TransactionKind::Call(Address::random()),
             value: Default::default(),
+            accesslist: Vec::new(),
+            input: Vec::new(),
         }
     }
 
@@ -541,6 +551,8 @@ impl FromRecoveredTransaction for MockTransaction {
                 gas_limit,
                 to,
                 value: value.into(),
+                accesslist: todo!(),
+                input: todo!(),
             },
             Transaction::Eip4844(TxEip4844 {
                 chain_id: _,
@@ -564,6 +576,8 @@ impl FromRecoveredTransaction for MockTransaction {
                 gas_limit,
                 to,
                 value: value.into(),
+                accesslist: todo!(),
+                input: todo!(),
             },
             Transaction::Eip2930 { .. } => {
                 unimplemented!()
@@ -654,6 +668,8 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     gas_limit: *gas_limit,
                     to: *to,
                     value: (*value).into(),
+                    accesslist: todo!(),
+                    input: todo!(),
                 },
                 Transaction::Eip4844(TxEip4844 {
                     nonce,
@@ -675,6 +691,8 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     gas_limit: *gas_limit,
                     to: *to,
                     value: (*value).into(),
+                    accesslist: todo!(),
+                    input: todo!(),
                 },
             })
             .boxed()
