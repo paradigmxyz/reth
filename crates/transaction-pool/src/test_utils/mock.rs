@@ -102,8 +102,8 @@ pub enum MockTransaction {
         gas_limit: u64,
         to: TransactionKind,
         value: U256,
-        accesslist: Vec<AccessList>,
-        input: Vec<u8>,
+        accesslist: AccessList,
+        input: Bytes,
     },
     Eip4844 {
         hash: B256,
