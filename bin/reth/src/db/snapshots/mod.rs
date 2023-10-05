@@ -75,7 +75,7 @@ impl Command {
                 for ((mode, compression), phf) in all_combinations.clone() {
                     match mode {
                         Snapshots::Headers => {
-                            self.generate_headers_snapshot(&tool, compression, phf)?
+                            self.generate_headers_snapshot(&tool, *compression, *phf)?
                         }
                         Snapshots::Transactions => todo!(),
                         Snapshots::Receipts => todo!(),
@@ -91,8 +91,8 @@ impl Command {
                         db_path,
                         log_level,
                         chain.clone(),
-                        compression,
-                        phf,
+                        *compression,
+                        *phf,
                     )?,
                     Snapshots::Transactions => todo!(),
                     Snapshots::Receipts => todo!(),
@@ -125,13 +125,12 @@ impl Command {
     fn prepare_jar<F: Fn() -> eyre::Result<Option<Rows>>>(
         &self,
         num_columns: usize,
+        jar_config: JarConfig,
         tool: &DbTool<'_, DatabaseEnvRO>,
-        mode: Snapshots,
-        compression: &Compression,
-        phf: &PerfectHashingFunction,
         prepare_compression: F,
     ) -> eyre::Result<NippyJar> {
-        let snap_file = self.get_file_path(mode, compression, phf);
+        let (mode, compression, phf) = jar_config;
+        let snap_file = self.get_file_path(jar_config);
         let table_name = match mode {
             Snapshots::Headers => tables::Headers::NAME,
             Snapshots::Transactions | Snapshots::Receipts => tables::Transactions::NAME,
@@ -181,12 +180,8 @@ impl Command {
     }
 
     /// Generates a filename according to the desired configuration.
-    fn get_file_path(
-        &self,
-        mode: Snapshots,
-        compression: &Compression,
-        phf: &PerfectHashingFunction,
-    ) -> PathBuf {
+    fn get_file_path(&self, jar_config: JarConfig) -> PathBuf {
+        let (mode, compression, phf) = jar_config;
         format!(
             "snapshot_{mode:?}_{}_{}_{compression:?}_{phf:?}",
             self.from,

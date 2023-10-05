@@ -19,10 +19,10 @@ impl Command {
     pub(crate) fn generate_headers_snapshot(
         &self,
         tool: &DbTool<'_, DatabaseEnvRO>,
-        compression: &Compression,
-        phf: &PerfectHashingFunction,
+        compression: Compression,
+        phf: PerfectHashingFunction,
     ) -> eyre::Result<()> {
-        let mut jar = self.prepare_jar(2, tool, Snapshots::Headers, compression, phf, || {
+        let mut jar = self.prepare_jar(2, (Snapshots::Headers, compression, phf), tool, || {
             // Generates the dataset to train a zstd dictionary if necessary, with the most recent
             // rows (at most 1000).
             let dataset = tool.db.view(|tx| {
@@ -75,8 +75,8 @@ impl Command {
         db_path: &Path,
         log_level: Option<LogLevel>,
         chain: Arc<ChainSpec>,
-        compression: &Compression,
-        phf: &PerfectHashingFunction,
+        compression: Compression,
+        phf: PerfectHashingFunction,
     ) -> eyre::Result<()> {
         let mode = Snapshots::Headers;
         let mut row_indexes = (self.from..(self.from + self.block_interval)).collect::<Vec<_>>();
@@ -95,7 +95,7 @@ impl Command {
             bench(
                 bench_kind,
                 (open_db_read_only(db_path, log_level)?, chain.clone()),
-                (mode, *compression, *phf),
+                (mode, compression, phf),
                 || {
                     for num in row_indexes.iter() {
                         Header::decompress(
@@ -129,7 +129,7 @@ impl Command {
             bench(
                 BenchKind::RandomOne,
                 (open_db_read_only(db_path, log_level)?, chain.clone()),
-                (mode, *compression, *phf),
+                (mode, compression, phf),
                 || {
                     Header::decompress(
                         cursor
@@ -159,7 +159,7 @@ impl Command {
             bench(
                 BenchKind::RandomHash,
                 (open_db_read_only(db_path, log_level)?, chain.clone()),
-                (mode, *compression, *phf),
+                (mode, compression, phf),
                 || {
                     let header = Header::decompress(
                         cursor
