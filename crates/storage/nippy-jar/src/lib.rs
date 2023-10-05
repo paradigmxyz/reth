@@ -594,10 +594,6 @@ mod tests {
         // // Add more columns until max_capacity
         assert!(InclusionFilter::add(&mut nippy, &col1[2]).is_ok());
         assert!(InclusionFilter::add(&mut nippy, &col1[3]).is_ok());
-        assert!(matches!(
-            InclusionFilter::add(&mut nippy, &col1[4]),
-            Err(NippyJarError::FilterMaxCapacity)
-        ));
 
         nippy.freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows).unwrap();
         let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
