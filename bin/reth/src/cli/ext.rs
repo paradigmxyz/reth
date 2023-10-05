@@ -173,6 +173,25 @@ impl<T> NoArgs<T> {
 }
 
 impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
+    fn on_components_initialized<Reth: RethNodeComponents>(
+        &mut self,
+        components: &Reth,
+    ) -> eyre::Result<()> {
+        if let Some(conf) = self.inner_mut() {
+            conf.on_components_initialized(components)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn on_node_started<Reth: RethNodeComponents>(&mut self, components: &Reth) -> eyre::Result<()> {
+        if let Some(conf) = self.inner_mut() {
+            conf.on_node_started(components)
+        } else {
+            Ok(())
+        }
+    }
+
     fn extend_rpc_modules<Conf, Reth>(
         &mut self,
         config: &Conf,
