@@ -12,7 +12,7 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     Address, Block, BlockNumber, Bloom, ChainSpec, Hardfork, Header, PruneMode, PruneModes,
-    PrunePartError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, B256,
+    PruneSegmentError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, B256,
     MINIMUM_PRUNING_DISTANCE, U256,
 };
 use reth_provider::{
@@ -394,7 +394,7 @@ impl<'a> EVMProcessor<'a> {
     fn prune_receipts(
         &mut self,
         receipts: &mut Vec<Option<Receipt>>,
-    ) -> Result<(), PrunePartError> {
+    ) -> Result<(), PruneSegmentError> {
         let (first_block, tip) = match self.first_block.zip(self.tip) {
             Some((block, tip)) => (block, tip),
             _ => return Ok(()),
@@ -404,7 +404,7 @@ impl<'a> EVMProcessor<'a> {
 
         // Block receipts should not be retained
         if self.prune_modes.receipts == Some(PruneMode::Full) ||
-                // [`PrunePart::Receipts`] takes priority over [`PrunePart::ContractLogs`]
+                // [`PruneSegment::Receipts`] takes priority over [`PruneSegment::ContractLogs`]
                 self.prune_modes.should_prune_receipts(block_number, tip)
         {
             receipts.clear();
@@ -412,7 +412,7 @@ impl<'a> EVMProcessor<'a> {
         }
 
         // All receipts from the last 128 blocks are required for blockchain tree, even with
-        // [`PrunePart::ContractLogs`].
+        // [`PruneSegment::ContractLogs`].
         let prunable_receipts =
             PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(block_number, tip);
         if !prunable_receipts {

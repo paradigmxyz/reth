@@ -12,7 +12,7 @@ use reth_interfaces::provider::ProviderError;
 use reth_primitives::{
     keccak256,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    PruneCheckpoint, PruneModes, PrunePart, TransactionSignedNoHash, TxNumber, B256,
+    PruneCheckpoint, PruneModes, PruneSegment, TransactionSignedNoHash, TxNumber, B256,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter,
@@ -66,14 +66,14 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 
                 // Save prune checkpoint only if we don't have one already.
                 // Otherwise, pruner may skip the unpruned range of blocks.
-                if provider.get_prune_checkpoint(PrunePart::TransactionLookup)?.is_none() {
+                if provider.get_prune_checkpoint(PruneSegment::TransactionLookup)?.is_none() {
                     let target_prunable_tx_number = provider
                         .block_body_indices(target_prunable_block)?
                         .ok_or(ProviderError::BlockBodyIndicesNotFound(target_prunable_block))?
                         .last_tx_num();
 
                     provider.save_prune_checkpoint(
-                        PrunePart::TransactionLookup,
+                        PruneSegment::TransactionLookup,
                         PruneCheckpoint {
                             block_number: Some(target_prunable_block),
                             tx_number: Some(target_prunable_tx_number),
@@ -213,7 +213,7 @@ fn stage_checkpoint<DB: Database>(
     provider: &DatabaseProviderRW<'_, &DB>,
 ) -> Result<EntitiesCheckpoint, StageError> {
     let pruned_entries = provider
-        .get_prune_checkpoint(PrunePart::TransactionLookup)?
+        .get_prune_checkpoint(PruneSegment::TransactionLookup)?
         .and_then(|checkpoint| checkpoint.tx_number)
         // `+1` is needed because `TxNumber` is 0-indexed
         .map(|tx_number| tx_number + 1)
@@ -434,7 +434,7 @@ mod tests {
         let provider = tx.inner_rw();
         provider
             .save_prune_checkpoint(
-                PrunePart::TransactionLookup,
+                PruneSegment::TransactionLookup,
                 PruneCheckpoint {
                     block_number: Some(max_pruned_block),
                     tx_number: Some(

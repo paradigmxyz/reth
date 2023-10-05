@@ -38,7 +38,7 @@ use reth_primitives::{
     stage::StageCheckpoint,
     trie::{BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey},
     Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, PruneCheckpoint,
-    PrunePart, Receipt, StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, B256,
+    PruneSegment, Receipt, StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, B256,
 };
 
 /// Enum for the types of tables present in libmdbx.
@@ -417,8 +417,8 @@ table!(
 );
 
 table!(
-    /// Stores the highest pruned block number and prune mode of each prune part.
-    ( PruneCheckpoints ) PrunePart | PruneCheckpoint
+    /// Stores the highest pruned block number and prune mode of each prune segment.
+    ( PruneCheckpoints ) PruneSegment | PruneCheckpoint
 );
 
 /// Alias Types

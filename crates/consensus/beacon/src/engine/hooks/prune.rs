@@ -174,7 +174,7 @@ struct Metrics {
 impl From<PrunerError> for EngineHookError {
     fn from(err: PrunerError) -> Self {
         match err {
-            PrunerError::PrunePart(_) | PrunerError::InconsistentData(_) => {
+            PrunerError::PruneSegment(_) | PrunerError::InconsistentData(_) => {
                 EngineHookError::Internal(Box::new(err))
             }
             PrunerError::Interface(err) => err.into(),

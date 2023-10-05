@@ -1,13 +1,13 @@
 use reth_db::DatabaseError;
 use reth_interfaces::RethError;
-use reth_primitives::PrunePartError;
+use reth_primitives::PruneSegmentError;
 use reth_provider::ProviderError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum PrunerError {
     #[error(transparent)]
-    PrunePart(#[from] PrunePartError),
+    PruneSegment(#[from] PruneSegmentError),
 
     #[error("Inconsistent data: {0}")]
     InconsistentData(&'static str),

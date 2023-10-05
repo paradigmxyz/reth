@@ -286,7 +286,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let tree = BlockchainTree::new(
             tree_externals,
             BlockchainTreeConfig::default(),
-            prune_config.clone().map(|config| config.parts),
+            prune_config.clone().map(|config| config.segments),
         )?
         .with_sync_metrics_tx(metrics_tx.clone());
         let canon_state_notification_sender = tree.canon_state_notification_sender();
@@ -461,7 +461,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 db.clone(),
                 self.chain.clone(),
                 prune_config.block_interval,
-                prune_config.parts,
+                prune_config.segments,
                 self.chain.prune_delete_limit,
                 highest_snapshots_rx,
             );
@@ -829,7 +829,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         let factory = factory.with_stack_config(stack_config);
 
-        let prune_modes = prune_config.map(|prune| prune.parts).unwrap_or_default();
+        let prune_modes = prune_config.map(|prune| prune.segments).unwrap_or_default();
 
         let header_mode =
             if continuous { HeaderSyncMode::Continuous } else { HeaderSyncMode::Tip(tip_rx) };

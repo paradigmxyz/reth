@@ -2,7 +2,7 @@ use crate::{
     compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR},
     logs_bloom,
     proofs::calculate_receipt_root_ref,
-    Bloom, Log, PrunePartError, TxType, B256,
+    Bloom, Log, PruneSegmentError, TxType, B256,
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable};
 use bytes::{Buf, BufMut, BytesMut};
@@ -94,7 +94,7 @@ impl Receipts {
     }
 
     /// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
-    pub fn gas_spent_by_tx(&self) -> Result<Vec<(u64, u64)>, PrunePartError> {
+    pub fn gas_spent_by_tx(&self) -> Result<Vec<(u64, u64)>, PruneSegmentError> {
         self.last()
             .map(|block_r| {
                 block_r
@@ -104,10 +104,10 @@ impl Receipts {
                         if let Some(receipt) = tx_r.as_ref() {
                             Ok((id as u64, receipt.cumulative_gas_used))
                         } else {
-                            Err(PrunePartError::ReceiptsPruned)
+                            Err(PruneSegmentError::ReceiptsPruned)
                         }
                     })
-                    .collect::<Result<Vec<_>, PrunePartError>>()
+                    .collect::<Result<Vec<_>, PruneSegmentError>>()
             })
             .unwrap_or(Ok(vec![]))
     }

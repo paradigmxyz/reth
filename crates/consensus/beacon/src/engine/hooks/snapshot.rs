@@ -84,7 +84,7 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
 
                 let targets = snapshotter.get_snapshot_targets(finalized_block_number)?;
 
-                // Check if the snapshotting of any parts has been requested.
+                // Check if the snapshotting of any data has been requested.
                 if targets.any() {
                     let (tx, rx) = oneshot::channel();
                     self.task_spawner.spawn_critical_blocking(

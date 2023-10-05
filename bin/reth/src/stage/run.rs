@@ -205,7 +205,7 @@ impl Command {
                                 max_cumulative_gas: None,
                             },
                             config.stages.merkle.clean_threshold,
-                            config.prune.map(|prune| prune.parts).unwrap_or_default(),
+                            config.prune.map(|prune| prune.segments).unwrap_or_default(),
                         )),
                         None,
                     )

@@ -193,7 +193,7 @@ impl ImportCommand {
                         .clean_threshold
                         .max(config.stages.account_hashing.clean_threshold)
                         .max(config.stages.storage_hashing.clean_threshold),
-                    config.prune.map(|prune| prune.parts).unwrap_or_default(),
+                    config.prune.map(|prune| prune.segments).unwrap_or_default(),
                 )),
             )
             .build(db, self.chain.clone());

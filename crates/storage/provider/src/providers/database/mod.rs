@@ -10,7 +10,7 @@ use reth_interfaces::{db::LogLevel, RethError, RethResult};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
-    ChainSpec, Header, PruneCheckpoint, PrunePart, Receipt, SealedBlock, SealedHeader,
+    ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock, SealedHeader,
     TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal,
     B256, U256,
 };
@@ -104,14 +104,14 @@ impl<DB: Database> ProviderFactory<DB> {
         block_number += 1;
 
         let account_history_prune_checkpoint =
-            provider.get_prune_checkpoint(PrunePart::AccountHistory)?;
+            provider.get_prune_checkpoint(PruneSegment::AccountHistory)?;
         let storage_history_prune_checkpoint =
-            provider.get_prune_checkpoint(PrunePart::StorageHistory)?;
+            provider.get_prune_checkpoint(PruneSegment::StorageHistory)?;
 
         let mut state_provider = HistoricalStateProvider::new(provider.into_tx(), block_number);
 
         // If we pruned account or storage history, we can't return state on every historical block.
-        // Instead, we should cap it at the latest prune checkpoint for corresponding prune part.
+        // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
         if let Some(prune_checkpoint_block_number) =
             account_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
         {
@@ -404,8 +404,8 @@ where
 }
 
 impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
-    fn get_prune_checkpoint(&self, part: PrunePart) -> RethResult<Option<PruneCheckpoint>> {
-        self.provider()?.get_prune_checkpoint(part)
+    fn get_prune_checkpoint(&self, segment: PruneSegment) -> RethResult<Option<PruneCheckpoint>> {
+        self.provider()?.get_prune_checkpoint(segment)
     }
 }
 
