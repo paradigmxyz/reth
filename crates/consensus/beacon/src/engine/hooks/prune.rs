@@ -9,7 +9,7 @@ use crate::{
 use futures::FutureExt;
 use metrics::Counter;
 use reth_db::database::Database;
-use reth_interfaces::RethError;
+use reth_interfaces::{RethError, RethResult};
 use reth_primitives::BlockNumber;
 use reth_prune::{Pruner, PrunerError, PrunerWithResult};
 use reth_tasks::TaskSpawner;
@@ -55,7 +55,7 @@ impl<DB: Database + 'static> PruneHook<DB> {
     fn poll_pruner(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<(EngineHookEvent, Option<EngineHookAction>)> {
+    ) -> Poll<RethResult<(EngineHookEvent, Option<EngineHookAction>)>> {
         let result = match self.pruner_state {
             PrunerState::Idle(_) => return Poll::Pending,
             PrunerState::Running(ref mut fut) => {
@@ -69,14 +69,7 @@ impl<DB: Database + 'static> PruneHook<DB> {
 
                 match result {
                     Ok(_) => EngineHookEvent::Finished(Ok(())),
-                    Err(err) => EngineHookEvent::Finished(Err(match err {
-                        PrunerError::PrunePart(_) | PrunerError::InconsistentData(_) => {
-                            EngineHookError::Internal(Box::new(err))
-                        }
-                        PrunerError::Interface(err) => err.into(),
-                        PrunerError::Database(err) => RethError::Database(err).into(),
-                        PrunerError::Provider(err) => RethError::Provider(err).into(),
-                    })),
+                    Err(err) => EngineHookEvent::Finished(Err(err.into())),
                 }
             }
             Err(_) => {
@@ -85,14 +78,15 @@ impl<DB: Database + 'static> PruneHook<DB> {
             }
         };
 
-        Poll::Ready((event, None))
+        Poll::Ready(Ok((event, None)))
     }
 
     /// This will try to spawn the pruner if it is idle:
     /// 1. Check if pruning is needed through [Pruner::is_pruning_needed].
-    /// 2a. If pruning is needed, pass tip block number to the [Pruner::run] and spawn it in a
+    /// 2.
+    ///     1. If pruning is needed, pass tip block number to the [Pruner::run] and spawn it in a
     /// separate task. Set pruner state to [PrunerState::Running].
-    /// 2b. If pruning is not needed, set pruner state back to [PrunerState::Idle].
+    ///     2. If pruning is not needed, set pruner state back to [PrunerState::Idle].
     ///
     /// If pruner is already running, do nothing.
     fn try_spawn_pruner(
@@ -136,11 +130,11 @@ impl<DB: Database + 'static> EngineHook for PruneHook<DB> {
         &mut self,
         cx: &mut Context<'_>,
         ctx: EngineContext,
-    ) -> Poll<(EngineHookEvent, Option<EngineHookAction>)> {
+    ) -> Poll<RethResult<(EngineHookEvent, Option<EngineHookAction>)>> {
         // Try to spawn a pruner
         match self.try_spawn_pruner(ctx.tip_block_number) {
             Some((EngineHookEvent::NotReady, _)) => return Poll::Pending,
-            Some((event, action)) => return Poll::Ready((event, action)),
+            Some((event, action)) => return Poll::Ready(Ok((event, action))),
             None => (),
         }
 
@@ -175,4 +169,17 @@ enum PrunerState<DB> {
 struct Metrics {
     /// The number of times the pruner was run.
     runs: Counter,
+}
+
+impl From<PrunerError> for EngineHookError {
+    fn from(err: PrunerError) -> Self {
+        match err {
+            PrunerError::PruneSegment(_) | PrunerError::InconsistentData(_) => {
+                EngineHookError::Internal(Box::new(err))
+            }
+            PrunerError::Interface(err) => err.into(),
+            PrunerError::Database(err) => RethError::Database(err).into(),
+            PrunerError::Provider(err) => RethError::Provider(err).into(),
+        }
+    }
 }

@@ -1,6 +1,6 @@
 //! Support for maintaining the blob pool.
 
-use reth_primitives::{BlockNumber, H256};
+use reth_primitives::{BlockNumber, B256};
 use reth_provider::chain::ChainBlocks;
 use std::collections::BTreeMap;
 
@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 #[derive(Debug, Default, Eq, PartialEq)]
 pub struct BlobStoreCanonTracker {
     /// Keeps track of the blob transactions included in blocks.
-    blob_txs_in_blocks: BTreeMap<BlockNumber, Vec<H256>>,
+    blob_txs_in_blocks: BTreeMap<BlockNumber, Vec<B256>>,
 }
 
 impl BlobStoreCanonTracker {
@@ -16,7 +16,7 @@ impl BlobStoreCanonTracker {
     pub fn add_block(
         &mut self,
         block_number: BlockNumber,
-        blob_txs: impl IntoIterator<Item = H256>,
+        blob_txs: impl IntoIterator<Item = B256>,
     ) {
         self.blob_txs_in_blocks.insert(block_number, blob_txs.into_iter().collect());
     }
@@ -24,7 +24,7 @@ impl BlobStoreCanonTracker {
     /// Adds all blocks to the tracked list of blocks.
     pub fn add_blocks(
         &mut self,
-        blocks: impl IntoIterator<Item = (BlockNumber, impl IntoIterator<Item = H256>)>,
+        blocks: impl IntoIterator<Item = (BlockNumber, impl IntoIterator<Item = B256>)>,
     ) {
         for (block_number, blob_txs) in blocks {
             self.add_block(block_number, blob_txs);
@@ -66,7 +66,7 @@ pub enum BlobStoreUpdates {
     /// No updates.
     None,
     /// Delete the given finalized transactions from the blob store.
-    Finalized(Vec<H256>),
+    Finalized(Vec<B256>),
 }
 
 #[cfg(test)]
@@ -77,9 +77,9 @@ mod tests {
     fn test_finalized_tracker() {
         let mut tracker = BlobStoreCanonTracker::default();
 
-        let block1 = vec![H256::random()];
-        let block2 = vec![H256::random()];
-        let block3 = vec![H256::random()];
+        let block1 = vec![B256::random()];
+        let block2 = vec![B256::random()];
+        let block3 = vec![B256::random()];
         tracker.add_block(1, block1.clone());
         tracker.add_block(2, block2.clone());
         tracker.add_block(3, block3.clone());

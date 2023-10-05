@@ -19,7 +19,7 @@
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![warn(missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
@@ -60,6 +60,11 @@ pub mod beacon_consensus {
 /// Re-exported from `reth_blockchain_tree`.
 pub mod blockchain_tree {
     pub use reth_blockchain_tree::*;
+}
+
+/// Re-exported from `reth_consensus_common`.
+pub mod consensus_common {
+    pub use reth_consensus_common::*;
 }
 
 /// Re-exported from `reth_revm`.
@@ -103,6 +108,16 @@ pub mod rpc {
     /// Re-exported from `reth_rpc::eth`.
     pub mod eth {
         pub use reth_rpc::eth::*;
+    }
+
+    /// Re-exported from `reth_rpc::rpc`.
+    pub mod result {
+        pub use reth_rpc::result::*;
+    }
+
+    /// Re-exported from `reth_rpc::eth`.
+    pub mod compat {
+        pub use reth_rpc_types_compat::*;
     }
 }
 

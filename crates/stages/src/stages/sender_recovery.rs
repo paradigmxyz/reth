@@ -11,7 +11,7 @@ use reth_interfaces::consensus;
 use reth_primitives::{
     keccak256,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    PrunePart, TransactionSignedNoHash, TxNumber, H160,
+    Address, PruneSegment, TransactionSignedNoHash, TxNumber,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
@@ -191,7 +191,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 fn recover_sender(
     entry: Result<(RawKey<TxNumber>, RawValue<TransactionSignedNoHash>), DatabaseError>,
     rlp_buf: &mut Vec<u8>,
-) -> Result<(u64, H160), Box<SenderRecoveryStageError>> {
+) -> Result<(u64, Address), Box<SenderRecoveryStageError>> {
     let (tx_id, transaction) =
         entry.map_err(|e| Box::new(SenderRecoveryStageError::StageError(e.into())))?;
     let tx_id = tx_id.key().expect("key to be formated");
@@ -211,7 +211,7 @@ fn stage_checkpoint<DB: Database>(
     provider: &DatabaseProviderRW<'_, &DB>,
 ) -> Result<EntitiesCheckpoint, StageError> {
     let pruned_entries = provider
-        .get_prune_checkpoint(PrunePart::SenderRecovery)?
+        .get_prune_checkpoint(PruneSegment::SenderRecovery)?
         .and_then(|checkpoint| checkpoint.tx_number)
         .unwrap_or_default();
     Ok(EntitiesCheckpoint {
@@ -249,7 +249,7 @@ mod tests {
     };
     use reth_primitives::{
         stage::StageUnitCheckpoint, BlockNumber, PruneCheckpoint, PruneMode, SealedBlock,
-        TransactionSigned, H256, MAINNET,
+        TransactionSigned, B256, MAINNET,
     };
     use reth_provider::{ProviderFactory, PruneCheckpointWriter, TransactionsProvider};
 
@@ -320,7 +320,7 @@ mod tests {
 
         // Manually seed once with full input range
         let seed =
-            random_block_range(&mut rng, stage_progress + 1..=previous_stage, H256::zero(), 0..4); // set tx count range high enough to hit the threshold
+            random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..4); // set tx count range high enough to hit the threshold
         runner.tx.insert_blocks(seed.iter(), None).expect("failed to seed execution");
 
         let total_transactions = runner.tx.table::<tables::Transactions>().unwrap().len() as u64;
@@ -381,7 +381,7 @@ mod tests {
         let tx = TestTransaction::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=100, H256::zero(), 0..10);
+        let blocks = random_block_range(&mut rng, 0..=100, B256::ZERO, 0..10);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let max_pruned_block = 30;
@@ -403,7 +403,7 @@ mod tests {
         let provider = tx.inner_rw();
         provider
             .save_prune_checkpoint(
-                PrunePart::SenderRecovery,
+                PruneSegment::SenderRecovery,
                 PruneCheckpoint {
                     block_number: Some(max_pruned_block),
                     tx_number: Some(
@@ -495,7 +495,7 @@ mod tests {
             let stage_progress = input.checkpoint().block_number;
             let end = input.target();
 
-            let blocks = random_block_range(&mut rng, stage_progress..=end, H256::zero(), 0..2);
+            let blocks = random_block_range(&mut rng, stage_progress..=end, B256::ZERO, 0..2);
             self.tx.insert_blocks(blocks.iter(), None)?;
             Ok(blocks)
         }

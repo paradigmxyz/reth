@@ -138,7 +138,7 @@
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
@@ -168,13 +168,7 @@ pub use crate::{
         state::SubPool, AllTransactionsEvents, FullTransactionEvent, TransactionEvent,
         TransactionEvents,
     },
-    traits::{
-        AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
-        EthBlobTransactionSidecar, EthPoolTransaction, EthPooledTransaction,
-        GetPooledTransactionLimit, NewBlobSidecar, NewTransactionEvent, PoolSize, PoolTransaction,
-        PropagateKind, PropagatedTransactions, TransactionListenerKind, TransactionOrigin,
-        TransactionPool, TransactionPoolExt,
-    },
+    traits::*,
     validate::{
         EthTransactionValidator, TransactionValidationOutcome, TransactionValidationTaskExecutor,
         TransactionValidator, ValidPoolTransaction,
@@ -417,6 +411,13 @@ where
         base_fee: u64,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
         self.pool.best_transactions_with_base_fee(base_fee)
+    }
+
+    fn best_transactions_with_attributes(
+        &self,
+        best_transactions_attributes: BestTransactionsAttributes,
+    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
+        self.pool.best_transactions_with_attributes(best_transactions_attributes)
     }
 
     fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {

@@ -10,7 +10,7 @@
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
@@ -24,7 +24,7 @@ use reth_interfaces::{
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     proofs, Address, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Bloom, ChainSpec,
-    Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, EMPTY_OMMER_ROOT, H256,
+    Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, B256, EMPTY_OMMER_ROOT,
     U256,
 };
 use reth_provider::{
@@ -207,7 +207,7 @@ pub(crate) struct StorageInner {
     /// Tracks best block
     pub(crate) best_block: u64,
     /// Tracks hash of best block
-    pub(crate) best_hash: H256,
+    pub(crate) best_hash: B256,
     /// The total difficulty of the chain until this block
     pub(crate) total_difficulty: U256,
 }
@@ -340,7 +340,7 @@ impl StorageInner {
                 .map(|r| (*r).clone().expect("receipts have not been pruned").into())
                 .collect::<Vec<ReceiptWithBloom>>();
             header.logs_bloom =
-                receipts_with_bloom.iter().fold(Bloom::zero(), |bloom, r| bloom | r.bloom);
+                receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
             proofs::calculate_receipt_root(&receipts_with_bloom)
         };
 

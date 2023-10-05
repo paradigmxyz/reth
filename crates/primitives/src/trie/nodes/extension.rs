@@ -1,5 +1,5 @@
 use super::{super::Nibbles, rlp_node};
-use reth_rlp::{BufMut, Encodable};
+use alloy_rlp::{BufMut, Encodable};
 
 /// An intermediate node that exists solely to compress the trie's paths. It contains a path segment
 /// (a shared prefix of keys) and a single child pointer. Essentially, an extension node can be
@@ -30,7 +30,7 @@ impl<'a> ExtensionNode<'a> {
 
 impl Encodable for ExtensionNode<'_> {
     fn encode(&self, out: &mut dyn BufMut) {
-        let h = reth_rlp::Header {
+        let h = alloy_rlp::Header {
             list: true,
             payload_length: self.prefix.as_slice().length() + self.node.len(),
         };
@@ -45,8 +45,8 @@ impl Encodable for ExtensionNode<'_> {
 impl std::fmt::Debug for ExtensionNode<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExtensionNode")
-            .field("prefix", &hex::encode(&self.prefix))
-            .field("node", &hex::encode(self.node))
+            .field("prefix", &crate::hex::encode(&self.prefix))
+            .field("node", &crate::hex::encode(self.node))
             .finish()
     }
 }

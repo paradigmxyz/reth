@@ -1,4 +1,4 @@
-use reth_primitives::{BlockNumHash, Bloom, PrunePartError, H256};
+use reth_primitives::{BlockNumHash, Bloom, PruneSegmentError, B256};
 use thiserror::Error;
 
 /// Transaction validation errors
@@ -9,7 +9,7 @@ pub enum BlockValidationError {
     #[error("EVM reported invalid transaction ({hash:?}): {message}")]
     EVM {
         /// The hash of the transaction
-        hash: H256,
+        hash: B256,
         /// Error message
         message: String,
     },
@@ -23,9 +23,9 @@ pub enum BlockValidationError {
     #[error("Receipt root {got:?} is different than expected {expected:?}.")]
     ReceiptRootDiff {
         /// The actual receipt root
-        got: H256,
+        got: B256,
         /// The expected receipt root
-        expected: H256,
+        expected: B256,
     },
     /// Error when header bloom filter doesn't match expected value
     #[error("Header bloom filter {got:?} is different than expected {expected:?}.")]
@@ -57,10 +57,10 @@ pub enum BlockValidationError {
     #[error("Block {hash:?} is pre merge")]
     BlockPreMerge {
         /// The hash of the block
-        hash: H256,
+        hash: B256,
     },
     #[error("Missing total difficulty for block {hash:?}")]
-    MissingTotalDifficulty { hash: H256 },
+    MissingTotalDifficulty { hash: B256 },
     /// Error for EIP-4788 when parent beacon block root is missing
     #[error("EIP-4788 Parent beacon block root missing for active Cancun block")]
     MissingParentBeaconBlockRoot,
@@ -76,9 +76,9 @@ pub enum BlockExecutionError {
     /// Validation error, transparently wrapping `BlockValidationError`
     #[error(transparent)]
     Validation(#[from] BlockValidationError),
-    /// Pruning error, transparently wrapping `PrunePartError`
+    /// Pruning error, transparently wrapping `PruneSegmentError`
     #[error(transparent)]
-    Pruning(#[from] PrunePartError),
+    Pruning(#[from] PruneSegmentError),
     /// Error representing a provider error
     #[error("Provider error")]
     ProviderError,

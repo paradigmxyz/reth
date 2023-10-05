@@ -1,5 +1,5 @@
 use crate::blobstore::{BlobStore, BlobStoreError, BlobTransactionSidecar};
-use reth_primitives::H256;
+use reth_primitives::B256;
 
 /// A blobstore implementation that does nothing
 #[derive(Clone, Copy, Debug, PartialOrd, PartialEq, Default)]
@@ -7,34 +7,34 @@ use reth_primitives::H256;
 pub struct NoopBlobStore;
 
 impl BlobStore for NoopBlobStore {
-    fn insert(&self, _tx: H256, _data: BlobTransactionSidecar) -> Result<(), BlobStoreError> {
+    fn insert(&self, _tx: B256, _data: BlobTransactionSidecar) -> Result<(), BlobStoreError> {
         Ok(())
     }
 
-    fn insert_all(&self, _txs: Vec<(H256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError> {
+    fn insert_all(&self, _txs: Vec<(B256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError> {
         Ok(())
     }
 
-    fn delete(&self, _tx: H256) -> Result<(), BlobStoreError> {
+    fn delete(&self, _tx: B256) -> Result<(), BlobStoreError> {
         Ok(())
     }
 
-    fn delete_all(&self, _txs: Vec<H256>) -> Result<(), BlobStoreError> {
+    fn delete_all(&self, _txs: Vec<B256>) -> Result<(), BlobStoreError> {
         Ok(())
     }
 
-    fn get(&self, _tx: H256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
+    fn get(&self, _tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
         Ok(None)
     }
 
     fn get_all(
         &self,
-        _txs: Vec<H256>,
-    ) -> Result<Vec<(H256, BlobTransactionSidecar)>, BlobStoreError> {
+        _txs: Vec<B256>,
+    ) -> Result<Vec<(B256, BlobTransactionSidecar)>, BlobStoreError> {
         Ok(vec![])
     }
 
-    fn get_exact(&self, txs: Vec<H256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
+    fn get_exact(&self, txs: Vec<B256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
         if txs.is_empty() {
             return Ok(vec![])
         }

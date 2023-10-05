@@ -27,6 +27,7 @@ jobs:
         with:
           context: .
           tags: paradigmxyz/reth:main
+          build-args: BUILD_PROFILE=hivetests
           outputs: type=docker,dest=./artifacts/reth_image.tar
           cache-from: type=gha
           cache-to: type=gha,mode=max

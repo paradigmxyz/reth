@@ -96,25 +96,18 @@ pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
     prune_modes: Option<PruneModes>,
 }
 
-/// A container that wraps chains and block indices to allow searching for block hashes across all
-/// sidechains.
-#[derive(Debug)]
-pub struct BlockHashes<'a> {
-    /// The current tracked chains.
-    pub chains: &'a mut HashMap<BlockChainId, AppendableChain>,
-    /// The block indices for all chains.
-    pub indices: &'a BlockIndices,
-}
-
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> {
     /// Create a new blockchain tree.
     pub fn new(
         externals: TreeExternals<DB, C, EF>,
-        canon_state_notification_sender: CanonStateNotificationSender,
         config: BlockchainTreeConfig,
         prune_modes: Option<PruneModes>,
     ) -> RethResult<Self> {
         let max_reorg_depth = config.max_reorg_depth();
+        // The size of the broadcast is twice the maximum reorg depth, because at maximum reorg
+        // depth at least N blocks must be sent at once.
+        let (canon_state_notification_sender, _receiver) =
+            tokio::sync::broadcast::channel(max_reorg_depth as usize * 2);
 
         let last_canonical_hashes = externals
             .db
@@ -946,7 +939,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
 
         let Some(chain_id) = self.block_indices.get_blocks_chain_id(block_hash) else {
-            warn!(target: "blockchain_tree", ?block_hash,  "Block hash not found in block indices");
+            debug!(target: "blockchain_tree", ?block_hash,  "Block hash not found in block indices");
             return Err(CanonicalError::from(BlockchainTreeError::BlockHashNotFoundInChain {
                 block_hash: *block_hash,
             })
@@ -1069,9 +1062,14 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
     /// Subscribe to new blocks events.
     ///
-    /// Note: Only canonical blocks are send.
+    /// Note: Only canonical blocks are emitted by the tree.
     pub fn subscribe_canon_state(&self) -> CanonStateNotifications {
         self.canon_state_notification_sender.subscribe()
+    }
+
+    /// Returns a clone of the sender for the canonical state notifications.
+    pub fn canon_state_notification_sender(&self) -> CanonStateNotificationSender {
+        self.canon_state_notification_sender.clone()
     }
 
     /// Canonicalize the given chain and commit it to the database.
@@ -1169,6 +1167,16 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     }
 }
 
+/// A container that wraps chains and block indices to allow searching for block hashes across all
+/// sidechains.
+#[derive(Debug)]
+pub struct BlockHashes<'a> {
+    /// The current tracked chains.
+    pub chains: &'a mut HashMap<BlockChainId, AppendableChain>,
+    /// The block indices for all chains.
+    pub indices: &'a BlockIndices,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1178,7 +1186,7 @@ mod tests {
     use reth_db::{test_utils::create_test_rw_db, transaction::DbTxMut, DatabaseEnv};
     use reth_interfaces::test_utils::TestConsensus;
     use reth_primitives::{
-        proofs::EMPTY_ROOT, stage::StageCheckpoint, ChainSpecBuilder, H256, MAINNET,
+        proofs::EMPTY_ROOT, stage::StageCheckpoint, ChainSpecBuilder, B256, MAINNET,
     };
     use reth_provider::{
         test_utils::{blocks::BlockChainTestData, TestExecutorFactory},
@@ -1218,7 +1226,7 @@ mod tests {
         for i in 0..10 {
             provider
                 .tx_ref()
-                .put::<tables::CanonicalHeaders>(i, H256([100 + i as u8; 32]))
+                .put::<tables::CanonicalHeaders>(i, B256::new([100 + i as u8; 32]))
                 .unwrap();
         }
         provider
@@ -1316,15 +1324,14 @@ mod tests {
 
         // make tree
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
-        let (sender, mut canon_notif) = tokio::sync::broadcast::channel(10);
-        let mut tree =
-            BlockchainTree::new(externals, sender, config, None).expect("failed to create tree");
+        let mut tree = BlockchainTree::new(externals, config, None).expect("failed to create tree");
 
+        let mut canon_notif = tree.subscribe_canon_state();
         // genesis block 10 is already canonical
-        tree.make_canonical(&H256::zero()).unwrap();
+        tree.make_canonical(&B256::ZERO).unwrap();
 
         // make sure is_block_hash_canonical returns true for genesis block
-        tree.is_block_hash_canonical(&H256::zero()).unwrap();
+        tree.is_block_hash_canonical(&B256::ZERO).unwrap();
 
         // make genesis block 10 as finalized
         tree.finalize_block(10);
@@ -1356,7 +1363,7 @@ mod tests {
         );
 
         // check if random block is known
-        let old_block = BlockNumHash::new(1, H256([32; 32]));
+        let old_block = BlockNumHash::new(1, B256::new([32; 32]));
         let err = BlockchainTreeError::PendingBlockIsFinalized { last_finalized: 10 };
 
         assert_eq!(tree.is_block_known(old_block).unwrap_err().as_tree_error(), Some(err));
@@ -1424,10 +1431,10 @@ mod tests {
         /**** INSERT SIDE BLOCKS *** */
 
         let mut block1a = block1.clone();
-        let block1a_hash = H256([0x33; 32]);
+        let block1a_hash = B256::new([0x33; 32]);
         block1a.hash = block1a_hash;
         let mut block2a = block2.clone();
-        let block2a_hash = H256([0x34; 32]);
+        let block2a_hash = B256::new([0x34; 32]);
         block2a.hash = block2a_hash;
 
         // reinsert two blocks that point to canonical chain
@@ -1627,8 +1634,8 @@ mod tests {
 
         // insert unconnected block2b
         let mut block2b = block2a.clone();
-        block2b.hash = H256([0x99; 32]);
-        block2b.parent_hash = H256([0x88; 32]);
+        block2b.hash = B256::new([0x99; 32]);
+        block2b.parent_hash = B256::new([0x88; 32]);
 
         assert_eq!(
             tree.insert_block(block2b.clone()).unwrap(),

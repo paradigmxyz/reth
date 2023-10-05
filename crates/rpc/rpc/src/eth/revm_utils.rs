@@ -2,7 +2,7 @@
 
 use crate::eth::error::{EthApiError, EthResult, RpcInvalidTransactionError};
 use reth_primitives::{
-    AccessList, Address, TransactionSigned, TransactionSignedEcRecovered, TxHash, H256, U256,
+    AccessList, Address, Bytes, TransactionSigned, TransactionSignedEcRecovered, TxHash, B256, U256,
 };
 use reth_revm::env::{fill_tx_env, fill_tx_env_with_recovered};
 use reth_rpc_types::{
@@ -155,7 +155,7 @@ pub(crate) fn replay_transactions_until<DB, I, Tx>(
     cfg: CfgEnv,
     block_env: BlockEnv,
     transactions: I,
-    target_tx_hash: H256,
+    target_tx_hash: B256,
 ) -> EthResult<()>
 where
     DB: DatabaseRef,
@@ -307,9 +307,9 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         gas_priority_fee: max_priority_fee_per_gas,
         transact_to: to.map(TransactTo::Call).unwrap_or_else(TransactTo::create),
         value: value.unwrap_or_default(),
-        data: input.try_into_unique_input()?.map(|data| data.0).unwrap_or_default(),
-        chain_id: chain_id.map(|c| c.as_u64()),
-        access_list: access_list.map(AccessList::flattened).unwrap_or_default(),
+        data: input.try_into_unique_input()?.unwrap_or_default(),
+        chain_id: chain_id.map(|c| c.to()),
+        access_list: access_list.map(AccessList::into_flattened).unwrap_or_default(),
         // EIP-4844 fields
         blob_hashes: blob_versioned_hashes.unwrap_or_default(),
         max_fee_per_blob_gas,
@@ -394,7 +394,7 @@ impl CallFees {
         call_max_fee: Option<U256>,
         call_priority_fee: Option<U256>,
         block_base_fee: U256,
-        blob_versioned_hashes: Option<&[H256]>,
+        blob_versioned_hashes: Option<&[B256]>,
         max_fee_per_blob_gas: Option<U256>,
         block_blob_fee: Option<U256>,
     ) -> EthResult<CallFees> {
@@ -483,10 +483,10 @@ fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
         env.difficulty = difficulty;
     }
     if let Some(time) = time {
-        env.timestamp = U256::from(time.as_u64());
+        env.timestamp = U256::from(time);
     }
     if let Some(gas_limit) = gas_limit {
-        env.gas_limit = U256::from(gas_limit.as_u64());
+        env.gas_limit = U256::from(gas_limit);
     }
     if let Some(coinbase) = coinbase {
         env.coinbase = coinbase;
@@ -526,10 +526,10 @@ where
     let mut account_info = DatabaseRef::basic(db, account)?.unwrap_or_default();
 
     if let Some(nonce) = account_override.nonce {
-        account_info.nonce = nonce.as_u64();
+        account_info.nonce = nonce.to();
     }
     if let Some(code) = account_override.code {
-        account_info.code = Some(Bytecode::new_raw(code.0));
+        account_info.code = Some(Bytecode::new_raw(code));
     }
     if let Some(balance) = account_override.balance {
         account_info.balance = balance;
@@ -584,7 +584,7 @@ where
 ///
 /// TODO: Can be phased out when <https://github.com/bluealloy/revm/pull/509> is released
 #[inline]
-pub(crate) fn result_output(res: &ExecutionResult) -> Option<bytes::Bytes> {
+pub(crate) fn result_output(res: &ExecutionResult) -> Option<Bytes> {
     match res {
         ExecutionResult::Success { output, .. } => Some(output.clone().into_data()),
         ExecutionResult::Revert { output, .. } => Some(output.clone()),
@@ -617,7 +617,7 @@ mod tests {
             None,
             None,
             U256::from(99),
-            Some(&[H256::from(U256::ZERO)]),
+            Some(&[B256::from(U256::ZERO)]),
             None,
             Some(U256::from(99)),
         )

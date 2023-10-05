@@ -6,15 +6,15 @@ use crate::{
     TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
-use reth_interfaces::{RethError, RethResult};
+use reth_interfaces::{db::LogLevel, RethError, RethResult};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
-    ChainSpec, Header, PruneCheckpoint, PrunePart, Receipt, SealedBlock, SealedHeader,
+    ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock, SealedHeader,
     TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal,
-    H256, U256,
+    B256, U256,
 };
-use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
+use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
@@ -23,7 +23,6 @@ use tracing::trace;
 
 mod provider;
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
-use reth_interfaces::db::LogLevel;
 
 /// A common provider that fetches data from a database.
 ///
@@ -105,14 +104,14 @@ impl<DB: Database> ProviderFactory<DB> {
         block_number += 1;
 
         let account_history_prune_checkpoint =
-            provider.get_prune_checkpoint(PrunePart::AccountHistory)?;
+            provider.get_prune_checkpoint(PruneSegment::AccountHistory)?;
         let storage_history_prune_checkpoint =
-            provider.get_prune_checkpoint(PrunePart::StorageHistory)?;
+            provider.get_prune_checkpoint(PruneSegment::StorageHistory)?;
 
         let mut state_provider = HistoricalStateProvider::new(provider.into_tx(), block_number);
 
         // If we pruned account or storage history, we can't return state on every historical block.
-        // Instead, we should cap it at the latest prune checkpoint for corresponding prune part.
+        // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
         if let Some(prune_checkpoint_block_number) =
             account_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
         {
@@ -188,7 +187,7 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
 }
 
 impl<DB: Database> BlockHashReader for ProviderFactory<DB> {
-    fn block_hash(&self, number: u64) -> RethResult<Option<H256>> {
+    fn block_hash(&self, number: u64) -> RethResult<Option<B256>> {
         self.provider()?.block_hash(number)
     }
 
@@ -196,7 +195,7 @@ impl<DB: Database> BlockHashReader for ProviderFactory<DB> {
         &self,
         start: BlockNumber,
         end: BlockNumber,
-    ) -> RethResult<Vec<H256>> {
+    ) -> RethResult<Vec<B256>> {
         self.provider()?.canonical_hashes_range(start, end)
     }
 }
@@ -214,13 +213,13 @@ impl<DB: Database> BlockNumReader for ProviderFactory<DB> {
         self.provider()?.last_block_number()
     }
 
-    fn block_number(&self, hash: H256) -> RethResult<Option<BlockNumber>> {
+    fn block_number(&self, hash: B256) -> RethResult<Option<BlockNumber>> {
         self.provider()?.block_number(hash)
     }
 }
 
 impl<DB: Database> BlockReader for ProviderFactory<DB> {
-    fn find_block_by_hash(&self, hash: H256, source: BlockSource) -> RethResult<Option<Block>> {
+    fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> RethResult<Option<Block>> {
         self.provider()?.find_block_by_hash(hash, source)
     }
 
@@ -405,8 +404,8 @@ where
 }
 
 impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
-    fn get_prune_checkpoint(&self, part: PrunePart) -> RethResult<Option<PruneCheckpoint>> {
-        self.provider()?.get_prune_checkpoint(part)
+    fn get_prune_checkpoint(&self, segment: PruneSegment) -> RethResult<Option<PruneCheckpoint>> {
+        self.provider()?.get_prune_checkpoint(segment)
     }
 }
 
@@ -414,6 +413,7 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
 mod tests {
     use super::ProviderFactory;
     use crate::{BlockHashReader, BlockNumReader, BlockWriter, TransactionsProvider};
+    use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_db::{
         tables,
@@ -422,9 +422,8 @@ mod tests {
     };
     use reth_interfaces::test_utils::{generators, generators::random_block};
     use reth_primitives::{
-        hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, TxNumber, H256,
+        hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, TxNumber, B256,
     };
-    use reth_rlp::Decodable;
     use std::{ops::RangeInclusive, sync::Arc};
 
     #[test]
@@ -444,7 +443,7 @@ mod tests {
 
         let chain_info = provider.chain_info().expect("should be ok");
         assert_eq!(chain_info.best_number, 0);
-        assert_eq!(chain_info.best_hash, H256::zero());
+        assert_eq!(chain_info.best_hash, B256::ZERO);
     }
 
     #[test]

@@ -5,8 +5,8 @@ use crate::{
     EthApi,
 };
 use reth_primitives::{
-    serde_helper::JsonStorageKey, Address, BlockId, BlockNumberOrTag, Bytes, H256, KECCAK_EMPTY,
-    U256,
+    serde_helper::JsonStorageKey, Address, BlockId, BlockNumberOrTag, Bytes, B256, KECCAK_EMPTY,
+    U256, U64,
 };
 use reth_provider::{
     AccountReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider,
@@ -25,7 +25,7 @@ where
     pub(crate) fn get_code(&self, address: Address, block_id: Option<BlockId>) -> EthResult<Bytes> {
         let state = self.state_at_block_id_or_latest(block_id)?;
         let code = state.account_code(address)?.unwrap_or_default();
-        Ok(code.original_bytes().into())
+        Ok(code.original_bytes())
     }
 
     pub(crate) fn balance(&self, address: Address, block_id: Option<BlockId>) -> EthResult<U256> {
@@ -78,10 +78,10 @@ where
         address: Address,
         index: JsonStorageKey,
         block_id: Option<BlockId>,
-    ) -> EthResult<H256> {
+    ) -> EthResult<B256> {
         let state = self.state_at_block_id_or_latest(block_id)?;
         let value = state.storage(address, index.0)?.unwrap_or_default();
-        Ok(H256(value.to_be_bytes()))
+        Ok(B256::new(value.to_be_bytes()))
     }
 
     #[allow(unused)]
@@ -137,7 +137,7 @@ where
 
         if let Some(account) = state.basic_account(proof.address)? {
             proof.balance = account.balance;
-            proof.nonce = account.nonce.into();
+            proof.nonce = U64::from(account.nonce);
             proof.code_hash = account.get_bytecode_hash();
         }
 
@@ -174,7 +174,7 @@ mod tests {
         );
         let address = Address::random();
         let storage = eth_api.storage_at(address, U256::ZERO.into(), None).unwrap();
-        assert_eq!(storage, U256::ZERO.into());
+        assert_eq!(storage, U256::ZERO.to_be_bytes());
 
         // === Mock ===
         let mock_provider = MockEthProvider::default();
@@ -197,6 +197,6 @@ mod tests {
 
         let storage_key: U256 = storage_key.into();
         let storage = eth_api.storage_at(address, storage_key.into(), None).unwrap();
-        assert_eq!(storage, storage_value.into());
+        assert_eq!(storage, storage_value.to_be_bytes());
     }
 }

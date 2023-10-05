@@ -19,6 +19,7 @@ use reth_tracing::{
 };
 use std::{fmt, fmt::Display, sync::Arc};
 
+pub mod components;
 pub mod config;
 pub mod ext;
 
@@ -40,6 +41,7 @@ pub struct Cli<Ext: RethCliExt = ()> {
     /// - mainnet
     /// - goerli
     /// - sepolia
+    /// - holesky
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",

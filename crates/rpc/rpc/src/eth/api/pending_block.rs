@@ -4,8 +4,8 @@ use crate::eth::error::{EthApiError, EthResult};
 use core::fmt::Debug;
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
-    proofs, Block, ChainSpec, Header, IntoRecoveredTransaction, Receipt, SealedBlock, SealedHeader,
-    EMPTY_OMMER_ROOT, H256, U256,
+    proofs, Block, ChainSpec, Header, IntoRecoveredTransaction, Receipt, Receipts, SealedBlock,
+    SealedHeader, B256, EMPTY_OMMER_ROOT, U256,
 };
 use reth_provider::{BundleStateWithReceipts, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
@@ -115,14 +115,6 @@ impl PendingBlockEnv {
                     // for regular transactions above.
                     best_txs.mark_invalid(&pool_tx);
                     continue
-                } else {
-                    // add to the data gas if we're going to execute the transaction
-                    sum_blob_gas_used += tx_blob_gas;
-
-                    // if we've reached the max data gas per block, we can skip blob txs entirely
-                    if sum_blob_gas_used == MAX_DATA_GAS_PER_BLOCK {
-                        best_txs.skip_blobs();
-                    }
                 }
             }
 
@@ -155,9 +147,21 @@ impl PendingBlockEnv {
                 }
             };
 
-            let gas_used = result.gas_used();
             // commit changes
             db.commit(state);
+
+            // add to the total blob gas used if the transaction successfully executed
+            if let Some(blob_tx) = tx.transaction.as_eip4844() {
+                let tx_blob_gas = blob_tx.blob_gas();
+                sum_blob_gas_used += tx_blob_gas;
+
+                // if we've reached the max data gas per block, we can skip blob txs entirely
+                if sum_blob_gas_used == MAX_DATA_GAS_PER_BLOCK {
+                    best_txs.skip_blobs();
+                }
+            }
+
+            let gas_used = result.gas_used();
 
             // add gas used by the transaction to cumulative gas used, before creating the receipt
             cumulative_gas_used += gas_used;
@@ -187,7 +191,11 @@ impl PendingBlockEnv {
         // merge all transitions into bundle state.
         db.merge_transitions(BundleRetention::PlainState);
 
-        let bundle = BundleStateWithReceipts::new(db.take_bundle(), vec![receipts], block_number);
+        let bundle = BundleStateWithReceipts::new(
+            db.take_bundle(),
+            Receipts::from_vec(vec![receipts]),
+            block_number,
+        );
 
         let receipts_root = bundle.receipts_root_slow(block_number).expect("Block is present");
         let logs_bloom = bundle.block_logs_bloom(block_number).expect("Block is present");
@@ -246,7 +254,7 @@ fn pre_block_beacon_root_contract_call<DB>(
     block_number: u64,
     initialized_cfg: &CfgEnv,
     initialized_block_env: &BlockEnv,
-    parent_beacon_block_root: Option<H256>,
+    parent_beacon_block_root: Option<B256>,
 ) -> EthResult<()>
 where
     DB: Database + DatabaseCommit,
@@ -298,7 +306,7 @@ impl PendingBlockEnvOrigin {
     }
 
     /// Returns the hash of the pending block should be built on
-    fn build_target_hash(&self) -> H256 {
+    fn build_target_hash(&self) -> B256 {
         match self {
             PendingBlockEnvOrigin::ActualPending(block) => block.parent_hash,
             PendingBlockEnvOrigin::DerivedFromLatest(header) => header.hash,

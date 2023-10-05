@@ -8,10 +8,10 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
-reth-rlp = { workspace = true, features = ["derive", "ethereum-types", "std"] }
 reth-primitives.workspace = true
 reth-net-common = { path = "../common" }
 
+alloy-rlp = { workspace = true, features = ["derive"] }
 futures.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
@@ -38,6 +38,3 @@ aes = "0.8.1"
 hmac = "0.12.1"
 block-padding = "0.3.2"
 cipher = { version = "0.4.3", features = ["block-padding"] }
-
-[dev-dependencies]
-hex-literal.workspace = true

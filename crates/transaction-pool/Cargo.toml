@@ -21,8 +21,10 @@ normal = [
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-interfaces.workspace = true
-reth-rlp.workspace = true
 reth-tasks.workspace = true
+revm.workspace = true
+reth-revm-primitives = { path = "../revm/revm-primitives" }
+alloy-rlp.workspace = true
 
 # async/futures
 async-trait.workspace = true

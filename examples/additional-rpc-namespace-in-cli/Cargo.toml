@@ -9,6 +9,9 @@ license.workspace = true
 reth.workspace = true
 reth-transaction-pool.workspace = true
 
-clap = { version = "4", features = ["derive"] }
+clap = { workspace = true, features = ["derive"] }
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
 eyre = "0.6"
+
+[dev-dependencies]
+tokio.workspace = true

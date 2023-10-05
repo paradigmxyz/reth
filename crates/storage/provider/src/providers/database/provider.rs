@@ -31,17 +31,17 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainInfo, ChainSpec, Hardfork, Head, Header, PruneCheckpoint, PruneModes, PrunePart, Receipt,
-    SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
+    ChainInfo, ChainSpec, Hardfork, Head, Header, PruneCheckpoint, PruneModes, PruneSegment,
+    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber,
-    Withdrawal, H256, U256,
+    Withdrawal, B256, U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
     env::{fill_block_env, fill_cfg_and_block_env, fill_cfg_env},
-    primitives::{BlockEnv, CfgEnv, SpecId},
 };
 use reth_trie::{prefix_set::PrefixSetMut, StateRoot};
+use revm::primitives::{BlockEnv, CfgEnv, SpecId};
 use std::{
     collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
@@ -178,14 +178,14 @@ impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
     }
 
     /// Return full table as Vec
-    pub fn table<T: Table>(&self) -> std::result::Result<Vec<KeyValue<T>>, DatabaseError>
+    pub fn table<T: Table>(&self) -> Result<Vec<KeyValue<T>>, DatabaseError>
     where
         T::Key: Default + Ord,
     {
         self.tx
             .cursor_read::<T>()?
             .walk(Some(T::Key::default()))?
-            .collect::<std::result::Result<Vec<_>, DatabaseError>>()
+            .collect::<Result<Vec<_>, DatabaseError>>()
     }
 }
 
@@ -368,7 +368,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             state,
             reverts,
             Vec::new(),
-            receipts,
+            reth_primitives::Receipts::from_vec(receipts),
             start_block_number,
         ))
     }
@@ -380,7 +380,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     pub fn get_or_take<T: Table, const TAKE: bool>(
         &self,
         range: impl RangeBounds<T::Key>,
-    ) -> std::result::Result<Vec<KeyValue<T>>, DatabaseError> {
+    ) -> Result<Vec<KeyValue<T>>, DatabaseError> {
         if TAKE {
             let mut cursor_write = self.tx.cursor_write::<T>()?;
             let mut walker = cursor_write.walk_range(range)?;
@@ -391,10 +391,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             }
             Ok(items)
         } else {
-            self.tx
-                .cursor_read::<T>()?
-                .walk_range(range)?
-                .collect::<std::result::Result<Vec<_>, _>>()
+            self.tx.cursor_read::<T>()?.walk_range(range)?.collect::<Result<Vec<_>, _>>()
         }
     }
 
@@ -625,7 +622,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     ///
     /// Note: Key is not inclusive and specified key would stay in db.
     #[inline]
-    pub fn unwind_table_by_num<T>(&self, num: u64) -> std::result::Result<usize, DatabaseError>
+    pub fn unwind_table_by_num<T>(&self, num: u64) -> Result<usize, DatabaseError>
     where
         T: Table<Key = u64>,
     {
@@ -640,7 +637,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         &self,
         key: u64,
         mut selector: F,
-    ) -> std::result::Result<usize, DatabaseError>
+    ) -> Result<usize, DatabaseError>
     where
         T: Table,
         F: FnMut(T::Key) -> u64,
@@ -661,10 +658,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     }
 
     /// Unwind a table forward by a [Walker][reth_db::abstraction::cursor::Walker] on another table
-    pub fn unwind_table_by_walker<T1, T2>(
-        &self,
-        start_at: T1::Key,
-    ) -> std::result::Result<(), DatabaseError>
+    pub fn unwind_table_by_walker<T1, T2>(&self, start_at: T1::Key) -> Result<(), DatabaseError>
     where
         T1: Table,
         T2: Table<Key = T1::Value>,
@@ -685,21 +679,21 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         keys: impl IntoIterator<Item = T::Key>,
         limit: usize,
         mut delete_callback: impl FnMut(TableRow<T>),
-    ) -> std::result::Result<(usize, bool), DatabaseError> {
+    ) -> Result<(usize, bool), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut deleted = 0;
 
         let mut keys = keys.into_iter();
         for key in &mut keys {
+            if deleted == limit {
+                break
+            }
+
             let row = cursor.seek_exact(key.clone())?;
             if let Some(row) = row {
                 cursor.delete_current()?;
                 deleted += 1;
                 delete_callback(row);
-            }
-
-            if deleted == limit {
-                break
             }
         }
 
@@ -708,27 +702,27 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
     /// Prune the table for the specified key range.
     ///
-    /// Returns number of total unique keys and total rows pruned pruned.
+    /// Returns number of rows pruned.
     pub fn prune_table_with_range<T: Table>(
         &self,
         keys: impl RangeBounds<T::Key> + Clone + Debug,
         limit: usize,
         mut skip_filter: impl FnMut(&TableRow<T>) -> bool,
         mut delete_callback: impl FnMut(TableRow<T>),
-    ) -> std::result::Result<(usize, bool), DatabaseError> {
+    ) -> Result<(usize, bool), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut walker = cursor.walk_range(keys)?;
         let mut deleted = 0;
 
         while let Some(row) = walker.next().transpose()? {
+            if deleted == limit {
+                break
+            }
+
             if !skip_filter(&row) {
                 walker.delete_current()?;
                 deleted += 1;
                 delete_callback(row);
-            }
-
-            if deleted == limit {
-                break
             }
         }
 
@@ -824,7 +818,7 @@ impl<'this, TX: DbTx<'this>> AccountExtReader for DatabaseProvider<'this, TX> {
         Ok(iter
             .into_iter()
             .map(|address| plain_accounts.seek_exact(address).map(|a| (address, a.map(|(_, v)| v))))
-            .collect::<std::result::Result<Vec<_>, _>>()?)
+            .collect::<Result<Vec<_>, _>>()?)
     }
 
     fn changed_accounts_and_blocks_with_range(
@@ -930,7 +924,7 @@ impl<'this, TX: DbTx<'this>> HeaderProvider for DatabaseProvider<'this, TX> {
 }
 
 impl<'this, TX: DbTx<'this>> BlockHashReader for DatabaseProvider<'this, TX> {
-    fn block_hash(&self, number: u64) -> RethResult<Option<H256>> {
+    fn block_hash(&self, number: u64) -> RethResult<Option<B256>> {
         Ok(self.tx.get::<tables::CanonicalHeaders>(number)?)
     }
 
@@ -938,7 +932,7 @@ impl<'this, TX: DbTx<'this>> BlockHashReader for DatabaseProvider<'this, TX> {
         &self,
         start: BlockNumber,
         end: BlockNumber,
-    ) -> RethResult<Vec<H256>> {
+    ) -> RethResult<Vec<B256>> {
         let range = start..end;
         let mut cursor = self.tx.cursor_read::<tables::CanonicalHeaders>()?;
         cursor
@@ -966,13 +960,13 @@ impl<'this, TX: DbTx<'this>> BlockNumReader for DatabaseProvider<'this, TX> {
         Ok(self.tx.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default().0)
     }
 
-    fn block_number(&self, hash: H256) -> RethResult<Option<BlockNumber>> {
+    fn block_number(&self, hash: B256) -> RethResult<Option<BlockNumber>> {
         Ok(self.tx.get::<tables::HeaderNumbers>(hash)?)
     }
 }
 
 impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
-    fn find_block_by_hash(&self, hash: H256, source: BlockSource) -> RethResult<Option<Block>> {
+    fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> RethResult<Option<Block>> {
         if source.is_database() {
             self.block(hash.into())
         } else {
@@ -1116,7 +1110,7 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
                         tx_cursor
                             .walk_range(tx_range)?
                             .map(|result| result.map(|(_, tx)| tx.into()))
-                            .collect::<std::result::Result<Vec<_>, _>>()?
+                            .collect::<Result<Vec<_>, _>>()?
                     };
 
                     // If we are past shanghai, then all blocks should have a withdrawal list,
@@ -1237,7 +1231,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
                     let transactions = tx_cursor
                         .walk_range(tx_range)?
                         .map(|result| result.map(|(_, tx)| tx.into()))
-                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                        .collect::<Result<Vec<_>, _>>()?;
                     Ok(Some(transactions))
                 }
             }
@@ -1262,7 +1256,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
                     tx_cursor
                         .walk_range(tx_num_range)?
                         .map(|result| result.map(|(_, tx)| tx.into()))
-                        .collect::<std::result::Result<Vec<_>, _>>()?,
+                        .collect::<Result<Vec<_>, _>>()?,
                 );
             }
         }
@@ -1278,7 +1272,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
             .cursor_read::<tables::Transactions>()?
             .walk_range(range)?
             .map(|entry| entry.map(|tx| tx.1))
-            .collect::<std::result::Result<Vec<_>, _>>()?)
+            .collect::<Result<Vec<_>, _>>()?)
     }
 
     fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> RethResult<Vec<Address>> {
@@ -1287,7 +1281,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
             .cursor_read::<tables::TxSenders>()?
             .walk_range(range)?
             .map(|entry| entry.map(|sender| sender.1))
-            .collect::<std::result::Result<Vec<_>, _>>()?)
+            .collect::<Result<Vec<_>, _>>()?)
     }
 
     fn transaction_sender(&self, id: TxNumber) -> RethResult<Option<Address>> {
@@ -1319,7 +1313,7 @@ impl<'this, TX: DbTx<'this>> ReceiptProvider for DatabaseProvider<'this, TX> {
                     let receipts = receipts_cursor
                         .walk_range(tx_range)?
                         .map(|result| result.map(|(_, receipt)| receipt))
-                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                        .collect::<Result<Vec<_>, _>>()?;
                     Ok(Some(receipts))
                 }
             }
@@ -1474,7 +1468,7 @@ impl<'this, TX: DbTxMut<'this>> StageCheckpointWriter for DatabaseProvider<'this
 impl<'this, TX: DbTx<'this>> StorageReader for DatabaseProvider<'this, TX> {
     fn plainstate_storages(
         &self,
-        addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = H256>)>,
+        addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = B256>)>,
     ) -> RethResult<Vec<(Address, Vec<StorageEntry>)>> {
         let mut plain_storage = self.tx.cursor_dup_read::<tables::PlainStorageState>()?;
 
@@ -1498,13 +1492,13 @@ impl<'this, TX: DbTx<'this>> StorageReader for DatabaseProvider<'this, TX> {
     fn changed_storages_with_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> RethResult<BTreeMap<Address, BTreeSet<H256>>> {
+    ) -> RethResult<BTreeMap<Address, BTreeSet<B256>>> {
         self.tx
             .cursor_read::<tables::StorageChangeSet>()?
             .walk_range(BlockNumberAddress::range(range))?
             // fold all storages and save its old state so we can remove it from HashedStorage
             // it is needed as it is dup table.
-            .try_fold(BTreeMap::new(), |mut accounts: BTreeMap<Address, BTreeSet<H256>>, entry| {
+            .try_fold(BTreeMap::new(), |mut accounts: BTreeMap<Address, BTreeSet<B256>>, entry| {
                 let (BlockNumberAddress((_, address)), storage_entry) = entry?;
                 accounts.entry(address).or_default().insert(storage_entry.key);
                 Ok(accounts)
@@ -1514,13 +1508,13 @@ impl<'this, TX: DbTx<'this>> StorageReader for DatabaseProvider<'this, TX> {
     fn changed_storages_and_blocks_with_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> RethResult<BTreeMap<(Address, H256), Vec<u64>>> {
+    ) -> RethResult<BTreeMap<(Address, B256), Vec<u64>>> {
         let mut changeset_cursor = self.tx.cursor_read::<tables::StorageChangeSet>()?;
 
         let storage_changeset_lists =
             changeset_cursor.walk_range(BlockNumberAddress::range(range))?.try_fold(
                 BTreeMap::new(),
-                |mut storages: BTreeMap<(Address, H256), Vec<u64>>, entry| -> RethResult<_> {
+                |mut storages: BTreeMap<(Address, B256), Vec<u64>>, entry| -> RethResult<_> {
                     let (index, storage) = entry?;
                     storages
                         .entry((index.address(), storage.key))
@@ -1538,12 +1532,12 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
     fn insert_hashes(
         &self,
         range: RangeInclusive<BlockNumber>,
-        end_block_hash: H256,
-        expected_state_root: H256,
+        end_block_hash: B256,
+        expected_state_root: B256,
     ) -> RethResult<()> {
         // Initialize prefix sets.
         let mut account_prefix_set = PrefixSetMut::default();
-        let mut storage_prefix_set: HashMap<H256, PrefixSetMut> = HashMap::default();
+        let mut storage_prefix_set: HashMap<B256, PrefixSetMut> = HashMap::default();
         let mut destroyed_accounts = HashSet::default();
 
         // storage hashing stage
@@ -1604,7 +1598,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
     fn unwind_storage_hashing(
         &self,
         range: Range<BlockNumberAddress>,
-    ) -> RethResult<HashMap<H256, BTreeSet<H256>>> {
+    ) -> RethResult<HashMap<B256, BTreeSet<B256>>> {
         let mut hashed_storage = self.tx.cursor_dup_write::<tables::HashedStorage>()?;
 
         // Aggregate all block changesets and make list of accounts that have been changed.
@@ -1612,13 +1606,13 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
             .tx
             .cursor_read::<tables::StorageChangeSet>()?
             .walk_range(range)?
-            .collect::<std::result::Result<Vec<_>, _>>()?
+            .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .rev()
             // fold all account to get the old balance/nonces and account that needs to be removed
             .fold(
                 BTreeMap::new(),
-                |mut accounts: BTreeMap<(Address, H256), U256>,
+                |mut accounts: BTreeMap<(Address, B256), U256>,
                  (BlockNumberAddress((_, address)), storage_entry)| {
                     accounts.insert((address, storage_entry.key), storage_entry.value);
                     accounts
@@ -1630,7 +1624,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
             .map(|((address, key), value)| ((keccak256(address), keccak256(key)), value))
             .collect::<BTreeMap<_, _>>();
 
-        let mut hashed_storage_keys: HashMap<H256, BTreeSet<H256>> = HashMap::default();
+        let mut hashed_storage_keys: HashMap<B256, BTreeSet<B256>> = HashMap::default();
         for (hashed_address, hashed_slot) in hashed_storages.keys() {
             hashed_storage_keys.entry(*hashed_address).or_default().insert(*hashed_slot);
         }
@@ -1659,7 +1653,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
     fn insert_storage_for_hashing(
         &self,
         storages: impl IntoIterator<Item = (Address, impl IntoIterator<Item = StorageEntry>)>,
-    ) -> RethResult<HashMap<H256, BTreeSet<H256>>> {
+    ) -> RethResult<HashMap<B256, BTreeSet<B256>>> {
         // hash values
         let hashed_storages =
             storages.into_iter().fold(BTreeMap::new(), |mut map, (address, storage)| {
@@ -1702,7 +1696,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
     fn unwind_account_hashing(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> RethResult<BTreeMap<H256, Option<Account>>> {
+    ) -> RethResult<BTreeMap<B256, Option<Account>>> {
         let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccount>()?;
 
         // Aggregate all block changesets and make a list of accounts that have been changed.
@@ -1710,7 +1704,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
             .tx
             .cursor_read::<tables::AccountChangeSet>()?
             .walk_range(range)?
-            .collect::<std::result::Result<Vec<_>, _>>()?
+            .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .rev()
             // fold all account to get the old balance/nonces and account that needs to be removed
@@ -1745,12 +1739,12 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
     fn insert_account_for_hashing(
         &self,
         accounts: impl IntoIterator<Item = (Address, Option<Account>)>,
-    ) -> RethResult<BTreeMap<H256, Option<Account>>> {
+    ) -> RethResult<BTreeMap<B256, Option<Account>>> {
         let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccount>()?;
 
         let hashed_accounts = accounts.into_iter().fold(
             BTreeMap::new(),
-            |mut map: BTreeMap<H256, Option<Account>>, (address, account)| {
+            |mut map: BTreeMap<B256, Option<Account>>, (address, account)| {
                 map.insert(keccak256(address), account);
                 map
             },
@@ -1788,7 +1782,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
 
     fn insert_storage_history_index(
         &self,
-        storage_transitions: BTreeMap<(Address, H256), Vec<u64>>,
+        storage_transitions: BTreeMap<(Address, B256), Vec<u64>>,
     ) -> RethResult<()> {
         self.append_history_index::<_, tables::StorageHistory>(
             storage_transitions,
@@ -1813,7 +1807,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
             .tx
             .cursor_read::<tables::StorageChangeSet>()?
             .walk_range(range)?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
         let changesets = storage_changesets.len();
 
         let last_indices = storage_changesets
@@ -1823,7 +1817,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
             // fold all storages and get last block number
             .fold(
                 BTreeMap::new(),
-                |mut accounts: BTreeMap<(Address, H256), u64>, (index, storage)| {
+                |mut accounts: BTreeMap<(Address, B256), u64>, (index, storage)| {
                     // we just need address and lowest block number.
                     accounts.insert((index.address(), storage.key), index.block_number());
                     accounts
@@ -1863,7 +1857,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
             .tx
             .cursor_read::<tables::AccountChangeSet>()?
             .walk_range(range)?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
         let changesets = account_changeset.len();
 
         let last_indices = account_changeset
@@ -1913,7 +1907,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockExecutionWriter for DatabaseP
 
             // Initialize prefix sets.
             let mut account_prefix_set = PrefixSetMut::default();
-            let mut storage_prefix_set: HashMap<H256, PrefixSetMut> = HashMap::default();
+            let mut storage_prefix_set: HashMap<B256, PrefixSetMut> = HashMap::default();
             let mut destroyed_accounts = HashSet::default();
 
             // Unwind account hashes. Add changed accounts to account prefix set.
@@ -2136,17 +2130,17 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
 }
 
 impl<'this, TX: DbTx<'this>> PruneCheckpointReader for DatabaseProvider<'this, TX> {
-    fn get_prune_checkpoint(&self, part: PrunePart) -> RethResult<Option<PruneCheckpoint>> {
-        Ok(self.tx.get::<tables::PruneCheckpoints>(part)?)
+    fn get_prune_checkpoint(&self, segment: PruneSegment) -> RethResult<Option<PruneCheckpoint>> {
+        Ok(self.tx.get::<tables::PruneCheckpoints>(segment)?)
     }
 }
 
 impl<'this, TX: DbTxMut<'this>> PruneCheckpointWriter for DatabaseProvider<'this, TX> {
     fn save_prune_checkpoint(
         &self,
-        part: PrunePart,
+        segment: PruneSegment,
         checkpoint: PruneCheckpoint,
     ) -> RethResult<()> {
-        Ok(self.tx.put::<tables::PruneCheckpoints>(part, checkpoint)?)
+        Ok(self.tx.put::<tables::PruneCheckpoints>(segment, checkpoint)?)
     }
 }

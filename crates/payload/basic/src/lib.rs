@@ -3,13 +3,14 @@
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::metrics::PayloadBuilderMetrics;
+use alloy_rlp::Encodable;
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_interfaces::{RethError, RethResult};
@@ -18,14 +19,14 @@ use reth_payload_builder::{
     PayloadBuilderAttributes, PayloadJob, PayloadJobGenerator,
 };
 use reth_primitives::{
-    bytes::{Bytes, BytesMut},
+    bytes::BytesMut,
     calculate_excess_blob_gas,
     constants::{
         eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
         EMPTY_WITHDRAWALS, ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
     },
-    proofs, Block, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
-    SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
+    proofs, Block, BlockNumberOrTag, Bytes, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
+    Receipts, SealedBlock, Withdrawal, B256, EMPTY_OMMER_ROOT, U256,
 };
 use reth_provider::{BlockReaderIdExt, BlockSource, BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::{
@@ -34,7 +35,6 @@ use reth_revm::{
     into_reth_log,
     state_change::{apply_beacon_root_contract_call, post_block_withdrawals_balance_increments},
 };
-use reth_rlp::Encodable;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::{
@@ -256,7 +256,7 @@ impl Default for BasicPayloadJobGeneratorConfig {
         let mut extradata = BytesMut::new();
         RETH_CLIENT_VERSION.as_bytes().encode(&mut extradata);
         Self {
-            extradata: extradata.freeze(),
+            extradata: extradata.freeze().into(),
             max_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             interval: Duration::from_secs(1),
             // 12s slot time
@@ -705,14 +705,6 @@ where
                 // the gas limit condition for regular transactions above.
                 best_txs.mark_invalid(&pool_tx);
                 continue
-            } else {
-                // add to the data gas if we're going to execute the transaction
-                sum_blob_gas_used += tx_blob_gas;
-
-                // if we've reached the max data gas per block, we can skip blob txs entirely
-                if sum_blob_gas_used == MAX_DATA_GAS_PER_BLOCK {
-                    best_txs.skip_blobs();
-                }
             }
         }
 
@@ -740,6 +732,7 @@ where
                             trace!(?err, ?tx, "skipping invalid transaction and its descendants");
                             best_txs.mark_invalid(&pool_tx);
                         }
+
                         continue
                     }
                     err => {
@@ -750,9 +743,21 @@ where
             }
         };
 
-        let gas_used = result.gas_used();
         // commit changes
         db.commit(state);
+
+        // add to the total blob gas used if the transaction successfully executed
+        if let Some(blob_tx) = tx.transaction.as_eip4844() {
+            let tx_blob_gas = blob_tx.blob_gas();
+            sum_blob_gas_used += tx_blob_gas;
+
+            // if we've reached the max data gas per block, we can skip blob txs entirely
+            if sum_blob_gas_used == MAX_DATA_GAS_PER_BLOCK {
+                best_txs.skip_blobs();
+            }
+        }
+
+        let gas_used = result.gas_used();
 
         // add gas used by the transaction to cumulative gas used, before creating the receipt
         cumulative_gas_used += gas_used;
@@ -787,7 +792,11 @@ where
     // 4788 contract call
     db.merge_transitions(BundleRetention::PlainState);
 
-    let bundle = BundleStateWithReceipts::new(db.take_bundle(), vec![receipts], block_number);
+    let bundle = BundleStateWithReceipts::new(
+        db.take_bundle(),
+        Receipts::from_vec(vec![receipts]),
+        block_number,
+    );
     let receipts_root = bundle.receipts_root_slow(block_number).expect("Number is in range");
     let logs_bloom = bundle.block_logs_bloom(block_number).expect("Number is in range");
 
@@ -839,7 +848,7 @@ where
         gas_limit: block_gas_limit,
         difficulty: U256::ZERO,
         gas_used: cumulative_gas_used,
-        extra_data: extra_data.into(),
+        extra_data,
         parent_beacon_block_root: attributes.parent_beacon_block_root,
         blob_gas_used,
         excess_blob_gas,
@@ -907,7 +916,8 @@ where
     db.merge_transitions(BundleRetention::PlainState);
 
     // calculate the state root
-    let bundle_state = BundleStateWithReceipts::new(db.take_bundle(), vec![], block_number);
+    let bundle_state =
+        BundleStateWithReceipts::new(db.take_bundle(), Receipts::new(), block_number);
     let state_root = state.state_root(&bundle_state)?;
 
     let header = Header {
@@ -929,7 +939,7 @@ where
         gas_used: 0,
         blob_gas_used: None,
         excess_blob_gas: None,
-        extra_data: extra_data.into(),
+        extra_data,
         parent_beacon_block_root: attributes.parent_beacon_block_root,
     };
 
@@ -944,7 +954,7 @@ where
 #[derive(Default)]
 struct WithdrawalsOutcome {
     withdrawals: Option<Vec<Withdrawal>>,
-    withdrawals_root: Option<H256>,
+    withdrawals_root: Option<B256>,
 }
 
 impl WithdrawalsOutcome {

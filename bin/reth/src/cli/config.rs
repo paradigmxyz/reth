@@ -1,7 +1,7 @@
 //! Config traits for various node components.
 
-use reth_revm::primitives::bytes::BytesMut;
-use reth_rlp::Encodable;
+use alloy_rlp::Encodable;
+use reth_primitives::{Bytes, BytesMut};
 use reth_rpc::{eth::gas_oracle::GasPriceOracleConfig, JwtError, JwtSecret};
 use reth_rpc_builder::{
     auth::AuthServerConfig, error::RpcError, EthConfig, IpcServerBuilder, RpcServerConfig,
@@ -72,10 +72,10 @@ pub trait PayloadBuilderConfig {
     fn extradata(&self) -> Cow<'_, str>;
 
     /// Returns the rlp-encoded extradata bytes.
-    fn extradata_rlp_bytes(&self) -> reth_primitives::bytes::Bytes {
+    fn extradata_rlp_bytes(&self) -> Bytes {
         let mut extradata = BytesMut::new();
         self.extradata().as_bytes().encode(&mut extradata);
-        extradata.freeze()
+        extradata.freeze().into()
     }
 
     /// The interval at which the job should build a new payload after the last.

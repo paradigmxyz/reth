@@ -4,10 +4,11 @@ use crate::eth::error::EthApiError;
 use jsonrpsee::core::RpcResult;
 use reth_interfaces::RethResult;
 use reth_primitives::Block;
+use reth_rpc_types::engine::PayloadError;
 use std::fmt::Display;
 
 /// Helper trait to easily convert various `Result` types into [`RpcResult`]
-pub(crate) trait ToRpcResult<Ok, Err> {
+pub trait ToRpcResult<Ok, Err> {
     /// Converts the error of the [Result] to an [RpcResult] via the `Err` [Display] impl.
     fn to_rpc_result(self) -> RpcResult<Ok>
     where
@@ -101,6 +102,7 @@ macro_rules! impl_to_rpc_result {
     };
 }
 
+impl_to_rpc_result!(PayloadError);
 impl_to_rpc_result!(reth_interfaces::RethError);
 impl_to_rpc_result!(reth_network_api::NetworkError);
 
@@ -165,8 +167,8 @@ pub(crate) fn rpc_err(
         code,
         msg.into(),
         data.map(|data| {
-            jsonrpsee::core::to_json_raw_value(&format!("0x{}", hex::encode(data)))
-                .expect("serializing String does fail")
+            jsonrpsee::core::to_json_raw_value(&reth_primitives::hex::encode_prefixed(data))
+                .expect("serializing String can't fail")
         }),
     )
 }

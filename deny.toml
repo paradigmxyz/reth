@@ -95,8 +95,9 @@ unknown-registry = "warn"
 # in the allow list is encountered
 unknown-git = "deny"
 allow-git = [
+    # TODO: remove, see ./Cargo.toml
     "https://github.com/bluealloy/revm",
-    "https://github.com/boa-dev/boa",
+
     "https://github.com/ethereum/c-kzg-4844",
     "https://github.com/sigp/discv5",
     "https://github.com/stevefan1999-personal/rust-igd",

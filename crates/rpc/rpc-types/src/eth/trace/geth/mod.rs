@@ -2,7 +2,7 @@
 #![allow(missing_docs)]
 
 use crate::{state::StateOverride, BlockOverrides};
-use reth_primitives::{Bytes, H256, U256};
+use reth_primitives::{Bytes, B256, U256};
 use serde::{de::DeserializeOwned, ser::SerializeMap, Deserialize, Serialize, Serializer};
 use std::collections::BTreeMap;
 
@@ -29,7 +29,7 @@ pub struct BlockTraceResult {
     /// Block number corresponding to the trace task
     pub block: U256,
     /// Block hash corresponding to the trace task
-    pub hash: H256,
+    pub hash: B256,
     /// Trace results produced by the trace task
     pub traces: Vec<TraceResult>,
 }
@@ -80,7 +80,7 @@ pub struct StructLog {
         skip_serializing_if = "Option::is_none",
         serialize_with = "serialize_string_storage_map_opt"
     )]
-    pub storage: Option<BTreeMap<H256, H256>>,
+    pub storage: Option<BTreeMap<B256, B256>>,
     /// Current call depth
     pub depth: u64,
     /// Refund counter
@@ -354,7 +354,7 @@ pub struct GethDebugTracingCallOptions {
 
 /// Serializes a storage map as a list of key-value pairs _without_ 0x-prefix
 fn serialize_string_storage_map_opt<S: Serializer>(
-    storage: &Option<BTreeMap<H256, H256>>,
+    storage: &Option<BTreeMap<B256, B256>>,
     s: S,
 ) -> Result<S::Ok, S::Error> {
     match storage {

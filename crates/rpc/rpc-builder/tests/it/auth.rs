@@ -2,7 +2,7 @@
 
 use crate::utils::launch_auth;
 use jsonrpsee::core::client::{ClientT, SubscriptionClientT};
-use reth_primitives::Block;
+use reth_primitives::{Block, U64};
 use reth_rpc::JwtSecret;
 use reth_rpc_api::clients::EngineApiClient;
 use reth_rpc_types::engine::{ForkchoiceState, PayloadId, TransitionConfiguration};
@@ -21,7 +21,7 @@ where
     EngineApiClient::get_payload_v1(client, PayloadId::new([0, 0, 0, 0, 0, 0, 0, 0])).await;
     EngineApiClient::get_payload_v2(client, PayloadId::new([0, 0, 0, 0, 0, 0, 0, 0])).await;
     EngineApiClient::get_payload_bodies_by_hash_v1(client, vec![]).await;
-    EngineApiClient::get_payload_bodies_by_range_v1(client, 0u64.into(), 1u64.into()).await;
+    EngineApiClient::get_payload_bodies_by_range_v1(client, U64::ZERO, U64::from(1u64)).await;
     EngineApiClient::exchange_transition_configuration(client, TransitionConfiguration::default())
         .await;
     EngineApiClient::exchange_capabilities(client, vec![]).await;

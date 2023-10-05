@@ -19,7 +19,7 @@ use reth_interfaces::{
     test_utils::{NoopFullBlockClient, TestConsensus},
 };
 use reth_payload_builder::test_utils::spawn_test_payload_service;
-use reth_primitives::{BlockNumber, ChainSpec, PruneBatchSizes, PruneModes, H256, U256};
+use reth_primitives::{BlockNumber, ChainSpec, PruneModes, B256, U256};
 use reth_provider::{
     providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockExecutor,
     BundleStateWithReceipts, ExecutorFactory, ProviderFactory, PrunableBlockExecutor,
@@ -55,14 +55,14 @@ pub struct TestEnv<DB> {
     pub db: DB,
     // Keep the tip receiver around, so it's not dropped.
     #[allow(dead_code)]
-    tip_rx: watch::Receiver<H256>,
+    tip_rx: watch::Receiver<B256>,
     engine_handle: BeaconConsensusEngineHandle,
 }
 
 impl<DB> TestEnv<DB> {
     fn new(
         db: DB,
-        tip_rx: watch::Receiver<H256>,
+        tip_rx: watch::Receiver<B256>,
         engine_handle: BeaconConsensusEngineHandle,
     ) -> Self {
         Self { db, tip_rx, engine_handle }
@@ -468,7 +468,7 @@ where
         };
 
         // Setup pipeline
-        let (tip_tx, tip_rx) = watch::channel(H256::default());
+        let (tip_tx, tip_rx) = watch::channel(B256::default());
         let mut pipeline = match self.base_config.pipeline_config {
             TestPipelineConfig::Test(outputs) => Pipeline::builder()
                 .add_stages(TestStages::new(outputs, Default::default()))
@@ -506,10 +506,8 @@ where
             self.base_config.chain_spec.clone(),
         );
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
-        let (canon_state_notification_sender, _) = tokio::sync::broadcast::channel(3);
         let tree = ShareableBlockchainTree::new(
-            BlockchainTree::new(externals, canon_state_notification_sender, config, None)
-                .expect("failed to create tree"),
+            BlockchainTree::new(externals, config, None).expect("failed to create tree"),
         );
         let shareable_db = ProviderFactory::new(db.clone(), self.base_config.chain_spec.clone());
         let latest = self.base_config.chain_spec.genesis_header().seal_slow();
@@ -520,7 +518,8 @@ where
             self.base_config.chain_spec.clone(),
             5,
             PruneModes::none(),
-            PruneBatchSizes::default(),
+            self.base_config.chain_spec.prune_delete_limit,
+            watch::channel(None).1,
         );
 
         let mut hooks = EngineHooks::new();

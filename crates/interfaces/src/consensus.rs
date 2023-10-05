@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use reth_primitives::{
-    BlockHash, BlockNumber, Header, InvalidTransactionError, SealedBlock, SealedHeader, H256, U256,
+    BlockHash, BlockNumber, Header, InvalidTransactionError, SealedBlock, SealedHeader, B256, U256,
 };
 use std::fmt::Debug;
 
@@ -94,18 +94,18 @@ pub enum ConsensusError {
     #[error("Block ommer hash ({got:?}) is different from expected: ({expected:?})")]
     BodyOmmersHashDiff {
         /// The actual ommer hash.
-        got: H256,
+        got: B256,
         /// The expected ommer hash.
-        expected: H256,
+        expected: B256,
     },
 
     /// Error when the state root in the block is different from the expected state root.
     #[error("Block state root ({got:?}) is different from expected: ({expected:?})")]
     BodyStateRootDiff {
         /// The actual state root.
-        got: H256,
+        got: B256,
         /// The expected state root.
-        expected: H256,
+        expected: B256,
     },
 
     /// Error when the transaction root in the block is different from the expected transaction
@@ -113,9 +113,9 @@ pub enum ConsensusError {
     #[error("Block transaction root ({got:?}) is different from expected ({expected:?})")]
     BodyTransactionRootDiff {
         /// The actual transaction root.
-        got: H256,
+        got: B256,
         /// The expected transaction root.
-        expected: H256,
+        expected: B256,
     },
 
     /// Error when the withdrawals root in the block is different from the expected withdrawals
@@ -123,9 +123,9 @@ pub enum ConsensusError {
     #[error("Block withdrawals root ({got:?}) is different from expected ({expected:?})")]
     BodyWithdrawalsRootDiff {
         /// The actual withdrawals root.
-        got: H256,
+        got: B256,
         /// The expected withdrawals root.
-        expected: H256,
+        expected: B256,
     },
 
     /// Error when a block with a specific hash and number is already known.
@@ -161,9 +161,9 @@ pub enum ConsensusError {
     )]
     ParentHashMismatch {
         /// The expected parent hash.
-        expected_parent_hash: H256,
+        expected_parent_hash: B256,
         /// The actual parent hash.
-        got_parent_hash: H256,
+        got_parent_hash: B256,
     },
 
     /// Error when the block timestamp is in the past compared to the parent timestamp.
@@ -245,15 +245,6 @@ pub enum ConsensusError {
     /// Error when an unexpected withdrawals root is encountered.
     #[error("Unexpected withdrawals root")]
     WithdrawalsRootUnexpected,
-
-    /// Error when the withdrawal index is invalid.
-    #[error("Withdrawal index #{got} is invalid. Expected: #{expected}.")]
-    WithdrawalIndexInvalid {
-        /// The actual withdrawal index.
-        got: u64,
-        /// The expected withdrawal index.
-        expected: u64,
-    },
 
     /// Error when withdrawals are missing.
     #[error("Missing withdrawals")]

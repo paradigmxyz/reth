@@ -12,7 +12,7 @@ use reth_db::{
 };
 use reth_interfaces::RethResult;
 use reth_primitives::{
-    Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, H256,
+    Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, B256,
 };
 use std::marker::PhantomData;
 
@@ -183,7 +183,7 @@ impl<'a, 'b, TX: DbTx<'a>> AccountReader for HistoricalStateProviderRef<'a, 'b, 
 
 impl<'a, 'b, TX: DbTx<'a>> BlockHashReader for HistoricalStateProviderRef<'a, 'b, TX> {
     /// Get block hash by number.
-    fn block_hash(&self, number: u64) -> RethResult<Option<H256>> {
+    fn block_hash(&self, number: u64) -> RethResult<Option<B256>> {
         self.tx.get::<tables::CanonicalHeaders>(number).map_err(Into::into)
     }
 
@@ -191,7 +191,7 @@ impl<'a, 'b, TX: DbTx<'a>> BlockHashReader for HistoricalStateProviderRef<'a, 'b
         &self,
         start: BlockNumber,
         end: BlockNumber,
-    ) -> RethResult<Vec<H256>> {
+    ) -> RethResult<Vec<B256>> {
         let range = start..end;
         self.tx
             .cursor_read::<tables::CanonicalHeaders>()
@@ -206,7 +206,7 @@ impl<'a, 'b, TX: DbTx<'a>> BlockHashReader for HistoricalStateProviderRef<'a, 'b
 }
 
 impl<'a, 'b, TX: DbTx<'a>> StateRootProvider for HistoricalStateProviderRef<'a, 'b, TX> {
-    fn state_root(&self, _post_state: &BundleStateWithReceipts) -> RethResult<H256> {
+    fn state_root(&self, _post_state: &BundleStateWithReceipts) -> RethResult<B256> {
         Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
     }
 }
@@ -243,7 +243,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
     }
 
     /// Get account code by its hash
-    fn bytecode_by_hash(&self, code_hash: H256) -> RethResult<Option<Bytecode>> {
+    fn bytecode_by_hash(&self, code_hash: B256) -> RethResult<Option<Bytecode>> {
         self.tx.get::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
 
@@ -251,8 +251,8 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
     fn proof(
         &self,
         _address: Address,
-        _keys: &[H256],
-    ) -> RethResult<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
+        _keys: &[B256],
+    ) -> RethResult<(Vec<Bytes>, B256, Vec<Vec<Bytes>>)> {
         Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
     }
 }
@@ -319,11 +319,11 @@ delegate_provider_impls!(HistoricalStateProvider<'a, TX> where [TX: DbTx<'a>]);
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LowestAvailableBlocks {
     /// Lowest block number at which the account history is available. It may not be available if
-    /// [reth_primitives::PrunePart::AccountHistory] was pruned.
+    /// [reth_primitives::PruneSegment::AccountHistory] was pruned.
     /// [Option::None] means all history is available.
     pub account_history_block_number: Option<BlockNumber>,
     /// Lowest block number at which the storage history is available. It may not be available if
-    /// [reth_primitives::PrunePart::StorageHistory] was pruned.
+    /// [reth_primitives::PruneSegment::StorageHistory] was pruned.
     /// [Option::None] means all history is available.
     pub storage_history_block_number: Option<BlockNumber>,
 }
@@ -357,12 +357,11 @@ mod tests {
         BlockNumberList,
     };
     use reth_interfaces::provider::ProviderError;
-    use reth_primitives::{hex_literal::hex, Account, StorageEntry, H160, H256, U256};
+    use reth_primitives::{address, b256, Account, Address, StorageEntry, B256, U256};
 
-    const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));
-    const HIGHER_ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000005"));
-    const STORAGE: H256 =
-        H256(hex!("0000000000000000000000000000000000000000000000000000000000000001"));
+    const ADDRESS: Address = address!("0000000000000000000000000000000000000001");
+    const HIGHER_ADDRESS: Address = address!("0000000000000000000000000000000000000005");
+    const STORAGE: B256 = b256!("0000000000000000000000000000000000000000000000000000000000000001");
 
     fn assert_state_provider<T: StateProvider>() {}
     #[allow(unused)]

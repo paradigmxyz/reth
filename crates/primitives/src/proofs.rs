@@ -1,22 +1,23 @@
+//! Helper function for calculating Merkle proofs and hashes.
+
 use crate::{
-    keccak256,
+    b256, keccak256,
     trie::{HashBuilder, Nibbles},
     Address, GenesisAccount, Header, Log, ReceiptWithBloom, ReceiptWithBloomRef, TransactionSigned,
-    Withdrawal, H256,
+    Withdrawal, B256,
 };
+use alloy_rlp::Encodable;
 use bytes::{BufMut, BytesMut};
-use hex_literal::hex;
 use itertools::Itertools;
-use reth_rlp::Encodable;
 use std::collections::HashMap;
 
 /// Keccak-256 hash of the RLP of an empty list, KEC("\xc0").
-pub const EMPTY_LIST_HASH: H256 =
-    H256(hex!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"));
+pub const EMPTY_LIST_HASH: B256 =
+    b256!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347");
 
 /// Root hash of an empty trie.
-pub const EMPTY_ROOT: H256 =
-    H256(hex!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"));
+pub const EMPTY_ROOT: B256 =
+    b256!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421");
 
 /// Adjust the index of an item for rlp encoding.
 pub const fn adjust_index_for_rlp(i: usize, len: usize) -> usize {
@@ -30,12 +31,12 @@ pub const fn adjust_index_for_rlp(i: usize, len: usize) -> usize {
 }
 
 /// Compute a trie root of the collection of rlp encodable items.
-pub fn ordered_trie_root<T: Encodable>(items: &[T]) -> H256 {
+pub fn ordered_trie_root<T: Encodable>(items: &[T]) -> B256 {
     ordered_trie_root_with_encoder(items, |item, buf| item.encode(buf))
 }
 
 /// Compute a trie root of the collection of items with a custom encoder.
-pub fn ordered_trie_root_with_encoder<T, F>(items: &[T], mut encode: F) -> H256
+pub fn ordered_trie_root_with_encoder<T, F>(items: &[T], mut encode: F) -> B256
 where
     F: FnMut(&T, &mut dyn BufMut),
 {
@@ -62,7 +63,7 @@ where
 /// Calculate a transaction root.
 ///
 /// `(rlp(index), encoded(tx))` pairs.
-pub fn calculate_transaction_root<T>(transactions: &[T]) -> H256
+pub fn calculate_transaction_root<T>(transactions: &[T]) -> B256
 where
     T: AsRef<TransactionSigned>,
 {
@@ -70,19 +71,19 @@ where
 }
 
 /// Calculates the root hash of the withdrawals.
-pub fn calculate_withdrawals_root(withdrawals: &[Withdrawal]) -> H256 {
+pub fn calculate_withdrawals_root(withdrawals: &[Withdrawal]) -> B256 {
     ordered_trie_root(withdrawals)
 }
 
 /// Calculates the receipt root for a header.
-pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> H256 {
+pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> B256 {
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
 }
 
 /// Calculates the receipt root for a header for the reference type of [ReceiptWithBloom].
 ///
 /// NOTE: Prefer [calculate_receipt_root] if you have log blooms memoized.
-pub fn calculate_receipt_root_ref<T>(receipts: &[&T]) -> H256
+pub fn calculate_receipt_root_ref<T>(receipts: &[&T]) -> B256
 where
     for<'a> ReceiptWithBloomRef<'a>: From<&'a T>,
 {
@@ -92,24 +93,24 @@ where
 }
 
 /// Calculates the log root for headers.
-pub fn calculate_log_root(logs: &[Log]) -> H256 {
+pub fn calculate_log_root(logs: &[Log]) -> B256 {
     //https://github.com/ethereum/go-ethereum/blob/356bbe343a30789e77bb38f25983c8f2f2bfbb47/cmd/evm/internal/t8ntool/execution.go#L255
     let mut logs_rlp = Vec::new();
-    reth_rlp::encode_list(logs, &mut logs_rlp);
+    alloy_rlp::encode_list(logs, &mut logs_rlp);
     keccak256(logs_rlp)
 }
 
 /// Calculates the root hash for ommer/uncle headers.
-pub fn calculate_ommers_root(ommers: &[Header]) -> H256 {
+pub fn calculate_ommers_root(ommers: &[Header]) -> B256 {
     // RLP Encode
     let mut ommers_rlp = Vec::new();
-    reth_rlp::encode_list(ommers, &mut ommers_rlp);
+    alloy_rlp::encode_list(ommers, &mut ommers_rlp);
     keccak256(ommers_rlp)
 }
 
 /// Calculates the root hash for the state, this corresponds to [geth's
 /// `deriveHash`](https://github.com/ethereum/go-ethereum/blob/6c149fd4ad063f7c24d726a73bc0546badd1bc73/core/genesis.go#L119).
-pub fn genesis_state_root(genesis_alloc: &HashMap<Address, GenesisAccount>) -> H256 {
+pub fn genesis_state_root(genesis_alloc: &HashMap<Address, GenesisAccount>) -> B256 {
     let accounts_with_sorted_hashed_keys = genesis_alloc
         .iter()
         .map(|(address, account)| (keccak256(address), account))
@@ -130,7 +131,7 @@ pub fn genesis_state_root(genesis_alloc: &HashMap<Address, GenesisAccount>) -> H
 /// for compatibility with `triehash` crate.
 #[cfg(any(test, feature = "test-utils"))]
 pub mod triehash {
-    use super::{keccak256, H256};
+    use super::{keccak256, B256};
     use hash_db::Hasher;
     use plain_hasher::PlainHasher;
 
@@ -141,7 +142,7 @@ pub mod triehash {
 
     #[cfg(any(test, feature = "test-utils"))]
     impl Hasher for KeccakHasher {
-        type Out = H256;
+        type Out = B256;
         type StdHasher = PlainHasher;
 
         const LENGTH: usize = 32;
@@ -154,15 +155,11 @@ pub mod triehash {
 
 #[cfg(test)]
 mod tests {
-    use super::{calculate_withdrawals_root, EMPTY_ROOT};
+    use super::*;
     use crate::{
-        hex_literal::hex,
-        proofs::{calculate_receipt_root, calculate_transaction_root, genesis_state_root},
-        Address, Block, Bloom, GenesisAccount, Log, Receipt, ReceiptWithBloom, TxType, GOERLI,
-        H160, H256, HOLESKY, MAINNET, SEPOLIA, U256,
+        bloom, hex, Block, Receipt, TxType, B256, GOERLI, HOLESKY, MAINNET, SEPOLIA, U256,
     };
-    use reth_rlp::Decodable;
-    use std::collections::HashMap;
+    use alloy_rlp::Decodable;
 
     #[test]
     fn check_transaction_root() {
@@ -176,8 +173,8 @@ mod tests {
 
     #[test]
     fn check_receipt_root() {
-        let logs = vec![Log { address: H160::zero(), topics: vec![], data: Default::default() }];
-        let bloom =  Bloom(hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001"));
+        let logs = vec![Log { address: Address::ZERO, topics: vec![], data: Default::default() }];
+        let bloom = bloom!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001");
         let receipt = ReceiptWithBloom {
             receipt: Receipt {
                 tx_type: TxType::EIP2930,
@@ -189,10 +186,7 @@ mod tests {
         };
         let receipt = vec![receipt];
         let root = calculate_receipt_root(&receipt);
-        assert_eq!(
-            root,
-            H256(hex!("fe70ae4a136d98944951b2123859698d59ad251a381abc9960fa81cae3d0d4a0"))
-        );
+        assert_eq!(root, b256!("fe70ae4a136d98944951b2123859698d59ad251a381abc9960fa81cae3d0d4a0"));
     }
 
     #[test]
@@ -231,7 +225,7 @@ mod tests {
         // with a maximum balance, and is the only account in the state.
         // these test cases are generated by using geth with a custom genesis.json (with a single
         // account that has max balance)
-        let fixtures: Vec<(Address, H256)> = vec![
+        let fixtures: Vec<(Address, B256)> = vec![
             (
                 hex!("9fe4abd71ad081f091bd06dd1c16f7e92927561e").into(),
                 hex!("4b35be4231841d212ce2fa43aedbddeadd6eb7d420195664f9f0d55629db8c32").into(),
@@ -257,7 +251,7 @@ mod tests {
     #[test]
     fn test_chain_state_roots() {
         let expected_mainnet_state_root =
-            H256::from(hex!("d7f8974fb5ac78d9ac099b9ad5018bedc2ce0a72dad1827a1709da30580f0544"));
+            b256!("d7f8974fb5ac78d9ac099b9ad5018bedc2ce0a72dad1827a1709da30580f0544");
         let calculated_mainnet_state_root = genesis_state_root(&MAINNET.genesis.alloc);
         assert_eq!(
             expected_mainnet_state_root, calculated_mainnet_state_root,
@@ -265,7 +259,7 @@ mod tests {
         );
 
         let expected_goerli_state_root =
-            H256::from(hex!("5d6cded585e73c4e322c30c2f782a336316f17dd85a4863b9d838d2d4b8b3008"));
+            b256!("5d6cded585e73c4e322c30c2f782a336316f17dd85a4863b9d838d2d4b8b3008");
         let calculated_goerli_state_root = genesis_state_root(&GOERLI.genesis.alloc);
         assert_eq!(
             expected_goerli_state_root, calculated_goerli_state_root,
@@ -273,7 +267,7 @@ mod tests {
         );
 
         let expected_sepolia_state_root =
-            H256::from(hex!("5eb6e371a698b8d68f665192350ffcecbbbf322916f4b51bd79bb6887da3f494"));
+            b256!("5eb6e371a698b8d68f665192350ffcecbbbf322916f4b51bd79bb6887da3f494");
         let calculated_sepolia_state_root = genesis_state_root(&SEPOLIA.genesis.alloc);
         assert_eq!(
             expected_sepolia_state_root, calculated_sepolia_state_root,
@@ -281,7 +275,7 @@ mod tests {
         );
 
         let expected_holesky_state_root =
-            H256::from(hex!("69d8c9d72f6fa4ad42d4702b433707212f90db395eb54dc20bc85de253788783"));
+            b256!("69d8c9d72f6fa4ad42d4702b433707212f90db395eb54dc20bc85de253788783");
         let calculated_holesky_state_root = genesis_state_root(&HOLESKY.genesis.alloc);
         assert_eq!(
             expected_holesky_state_root, calculated_holesky_state_root,
