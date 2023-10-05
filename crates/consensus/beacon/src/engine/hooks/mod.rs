@@ -113,7 +113,7 @@ pub enum EngineHookError {
 }
 
 /// Level of database access the hook needs for execution.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum EngineHookDBAccessLevel {
     /// Read-only database access.
     ReadOnly,
