@@ -99,7 +99,7 @@ where
             let gas = tx.gas_limit();
             let summary = TxpoolInspectSummary {
                 to,
-                value: U256::from(value),
+                value: value.into(),
                 gas: U256::from(gas),
                 gas_price: U256::from(gas_price),
             };

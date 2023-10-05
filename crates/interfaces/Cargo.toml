@@ -39,7 +39,7 @@ secp256k1 = { workspace = true, default-features = false, features = [
 ], optional = true }
 modular-bitfield = "0.11.2"
 parking_lot.workspace = true
-clap = { version = "4", features = ["derive"], optional = true }
+clap = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }

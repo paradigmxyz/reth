@@ -185,7 +185,7 @@ impl Header {
     /// Returns the blob fee for _this_ block according to the EIP-4844 spec.
     ///
     /// Returns `None` if `excess_blob_gas` is None
-    pub fn blob_fee(&self) -> Option<u64> {
+    pub fn blob_fee(&self) -> Option<u128> {
         self.excess_blob_gas.map(calc_blob_gasprice)
     }
 
@@ -194,7 +194,7 @@ impl Header {
     /// Returns `None` if `excess_blob_gas` is None.
     ///
     /// See also [Self::next_block_excess_blob_gas]
-    pub fn next_block_blob_fee(&self) -> Option<u64> {
+    pub fn next_block_blob_fee(&self) -> Option<u128> {
         self.next_block_excess_blob_gas().map(calc_blob_gasprice)
     }
 

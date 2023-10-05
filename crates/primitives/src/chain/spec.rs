@@ -437,6 +437,16 @@ impl ChainSpec {
         &self.hardforks
     }
 
+    /// Get the fork id for the given hardfork.
+    pub fn hardfork_fork_id(&self, fork: Hardfork) -> Option<ForkId> {
+        fork.fork_id(self)
+    }
+
+    /// Convenience method to get the fork id for [Hardfork::Shanghai] from a given chainspec.
+    pub fn shanghai_fork_id(&self) -> Option<ForkId> {
+        Hardfork::Shanghai.fork_id(self)
+    }
+
     /// Get the fork condition for the given fork.
     pub fn fork(&self, fork: Hardfork) -> ForkCondition {
         self.hardforks.get(&fork).copied().unwrap_or(ForkCondition::Never)
@@ -533,6 +543,62 @@ impl ChainSpec {
         }
 
         ForkId { hash: forkhash, next: 0 }
+    }
+
+    /// An internal helper function that returns a head block that satisfies a given Fork condition.
+    pub(crate) fn satisfy(&self, cond: ForkCondition) -> Head {
+        match cond {
+            ForkCondition::Block(number) => Head { number, ..Default::default() },
+            ForkCondition::Timestamp(timestamp) => {
+                // to satisfy every timestamp ForkCondition, we find the last ForkCondition::Block
+                // if one exists, and include its block_num in the returned Head
+                if let Some(last_block_num) = self.last_block_fork_before_merge_or_timestamp() {
+                    return Head { timestamp, number: last_block_num, ..Default::default() }
+                }
+                Head { timestamp, ..Default::default() }
+            }
+            ForkCondition::TTD { total_difficulty, .. } => {
+                Head { total_difficulty, ..Default::default() }
+            }
+            ForkCondition::Never => unreachable!(),
+        }
+    }
+
+    /// An internal helper function that returns the block number of the last block-based
+    /// fork that occurs before any existing TTD (merge)/timestamp based forks.
+    ///
+    /// Note: this returns None if the ChainSpec is not configured with a TTD/Timestamp fork.
+    pub(crate) fn last_block_fork_before_merge_or_timestamp(&self) -> Option<u64> {
+        let mut hardforks_iter = self.forks_iter().peekable();
+        while let Some((_, curr_cond)) = hardforks_iter.next() {
+            if let Some((_, next_cond)) = hardforks_iter.peek() {
+                // peek and find the first occurence of ForkCondition::TTD (merge) , or in
+                // custom ChainSpecs, the first occurence of
+                // ForkCondition::Timestamp. If curr_cond is ForkCondition::Block at
+                // this point, which it should be in most "normal" ChainSpecs,
+                // return its block_num
+                match next_cond {
+                    ForkCondition::TTD { fork_block, .. } => {
+                        // handle Sepolia merge netsplit case
+                        if fork_block.is_some() {
+                            return *fork_block
+                        }
+                        // ensure curr_cond is indeed ForkCondition::Block and return block_num
+                        if let ForkCondition::Block(block_num) = curr_cond {
+                            return Some(block_num)
+                        }
+                    }
+                    ForkCondition::Timestamp(_) => {
+                        // ensure curr_cond is indeed ForkCondition::Block and return block_num
+                        if let ForkCondition::Block(block_num) = curr_cond {
+                            return Some(block_num)
+                        }
+                    }
+                    ForkCondition::Block(_) | ForkCondition::Never => continue,
+                }
+            }
+        }
+        None
     }
 
     /// Build a chainspec using [`ChainSpecBuilder`]
@@ -941,18 +1007,6 @@ impl ForkCondition {
         }
     }
 
-    /// An internal helper function that gives a value that satisfies this condition.
-    pub(crate) fn satisfy(&self) -> Head {
-        match *self {
-            ForkCondition::Block(number) => Head { number, ..Default::default() },
-            ForkCondition::Timestamp(timestamp) => Head { timestamp, ..Default::default() },
-            ForkCondition::TTD { total_difficulty, .. } => {
-                Head { total_difficulty, ..Default::default() }
-            }
-            ForkCondition::Never => unreachable!(),
-        }
-    }
-
     /// Returns the timestamp of the fork condition, if it is timestamp based.
     pub fn as_timestamp(&self) -> Option<u64> {
         match self {
@@ -1151,6 +1205,29 @@ mod tests {
         }
     }
 
+    fn test_hardfork_fork_ids(spec: &ChainSpec, cases: &[(Hardfork, ForkId)]) {
+        for (hardfork, expected_id) in cases {
+            if let Some(computed_id) = spec.hardfork_fork_id(*hardfork) {
+                assert_eq!(
+                    expected_id, &computed_id,
+                    "Expected fork ID {:?}, computed fork ID {:?} for hardfork {}",
+                    expected_id, computed_id, hardfork
+                );
+                if let Hardfork::Shanghai = hardfork {
+                    if let Some(shangai_id) = spec.shanghai_fork_id() {
+                        assert_eq!(
+                            expected_id, &shangai_id,
+                            "Expected fork ID {:?}, computed fork ID {:?} for Shanghai hardfork",
+                            expected_id, computed_id
+                        );
+                    } else {
+                        panic!("Expected ForkCondition to return Some for Hardfork::Shanghai");
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn test_hardfork_list_display_mainnet() {
         assert_eq!(
@@ -1285,6 +1362,278 @@ Post-merge hard forks (timestamp based):
             unique_spec.fork_id(&Head { number: 2, ..Default::default() }),
             duplicate_spec.fork_id(&Head { number: 2, ..Default::default() }),
             "duplicate fork blocks should be deduplicated for fork filters"
+        );
+    }
+
+    #[test]
+    fn test_chainspec_satisfy() {
+        let empty_genesis = Genesis::default();
+        // happy path test case
+        let happy_path_case = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(empty_genesis.clone())
+            .with_fork(Hardfork::Frontier, ForkCondition::Block(0))
+            .with_fork(Hardfork::Homestead, ForkCondition::Block(73))
+            .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(11313123))
+            .build();
+        let happy_path_head = happy_path_case.satisfy(ForkCondition::Timestamp(11313123));
+        let happy_path_expected = Head { number: 73, timestamp: 11313123, ..Default::default() };
+        assert_eq!(
+            happy_path_head, happy_path_expected,
+            "expected satisfy() to return {:#?}, but got {:#?} ",
+            happy_path_expected, happy_path_head
+        );
+        // multiple timestamp test case (i.e Shanghai -> Cancun)
+        let multiple_timestamp_fork_case = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(empty_genesis.clone())
+            .with_fork(Hardfork::Frontier, ForkCondition::Block(0))
+            .with_fork(Hardfork::Homestead, ForkCondition::Block(73))
+            .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(11313123))
+            .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(11313398))
+            .build();
+        let multi_timestamp_head =
+            multiple_timestamp_fork_case.satisfy(ForkCondition::Timestamp(11313398));
+        let mult_timestamp_expected =
+            Head { number: 73, timestamp: 11313398, ..Default::default() };
+        assert_eq!(
+            multi_timestamp_head, mult_timestamp_expected,
+            "expected satisfy() to return {:#?}, but got {:#?} ",
+            mult_timestamp_expected, multi_timestamp_head
+        );
+        // no ForkCondition::Block test case
+        let no_block_fork_case = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(empty_genesis.clone())
+            .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(11313123))
+            .build();
+        let no_block_fork_head = no_block_fork_case.satisfy(ForkCondition::Timestamp(11313123));
+        let no_block_fork_expected = Head { number: 0, timestamp: 11313123, ..Default::default() };
+        assert_eq!(
+            no_block_fork_head, no_block_fork_expected,
+            "expected satisfy() to return {:#?}, but got {:#?} ",
+            no_block_fork_expected, no_block_fork_head
+        );
+        // spec w/ ForkCondition::TTD with block_num test case (Sepolia merge netsplit edge case)
+        let fork_cond_ttd_blocknum_case = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(empty_genesis.clone())
+            .with_fork(Hardfork::Frontier, ForkCondition::Block(0))
+            .with_fork(Hardfork::Homestead, ForkCondition::Block(73))
+            .with_fork(
+                Hardfork::Paris,
+                ForkCondition::TTD {
+                    fork_block: Some(101),
+                    total_difficulty: U256::from(10_790_000),
+                },
+            )
+            .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(11313123))
+            .build();
+        let fork_cond_ttd_blocknum_head =
+            fork_cond_ttd_blocknum_case.satisfy(ForkCondition::Timestamp(11313123));
+        let fork_cond_ttd_blocknum_expected =
+            Head { number: 101, timestamp: 11313123, ..Default::default() };
+        assert_eq!(
+            fork_cond_ttd_blocknum_head, fork_cond_ttd_blocknum_expected,
+            "expected satisfy() to return {:#?}, but got {:#?} ",
+            fork_cond_ttd_blocknum_expected, fork_cond_ttd_blocknum_head
+        );
+
+        // spec w/ only ForkCondition::Block - test the match arm for ForkCondition::Block to ensure
+        // no regressions, for these ForkConditions(Block/TTD) - a separate chain spec definition is
+        // technically unecessary - but we include it here for thoroughness
+        let fork_cond_block_only_case = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(empty_genesis.clone())
+            .with_fork(Hardfork::Frontier, ForkCondition::Block(0))
+            .with_fork(Hardfork::Homestead, ForkCondition::Block(73))
+            .build();
+        let fork_cond_block_only_head = fork_cond_block_only_case.satisfy(ForkCondition::Block(73));
+        let fork_cond_block_only_expected = Head { number: 73, ..Default::default() };
+        assert_eq!(
+            fork_cond_block_only_head, fork_cond_block_only_expected,
+            "expected satisfy() to return {:#?}, but got {:#?} ",
+            fork_cond_block_only_expected, fork_cond_block_only_head
+        );
+        // Fork::ConditionTTD test case without a new chain spec to demonstrate ChainSpec::satisfy
+        // is independent of ChainSpec for this(these - including ForkCondition::Block) match arm(s)
+        let fork_cond_ttd_no_new_spec = fork_cond_block_only_case.satisfy(ForkCondition::TTD {
+            fork_block: None,
+            total_difficulty: U256::from(10_790_000),
+        });
+        let fork_cond_ttd_no_new_spec_expected =
+            Head { total_difficulty: U256::from(10_790_000), ..Default::default() };
+        assert_eq!(
+            fork_cond_ttd_no_new_spec, fork_cond_ttd_no_new_spec_expected,
+            "expected satisfy() to return {:#?}, but got {:#?} ",
+            fork_cond_ttd_no_new_spec_expected, fork_cond_ttd_no_new_spec
+        );
+    }
+
+    #[test]
+    fn mainnet_hardfork_fork_ids() {
+        test_hardfork_fork_ids(
+            &MAINNET,
+            &[
+                (
+                    Hardfork::Frontier,
+                    ForkId { hash: ForkHash([0xfc, 0x64, 0xec, 0x04]), next: 1150000 },
+                ),
+                (
+                    Hardfork::Homestead,
+                    ForkId { hash: ForkHash([0x97, 0xc2, 0xc3, 0x4c]), next: 1920000 },
+                ),
+                (Hardfork::Dao, ForkId { hash: ForkHash([0x91, 0xd1, 0xf9, 0x48]), next: 2463000 }),
+                (
+                    Hardfork::Tangerine,
+                    ForkId { hash: ForkHash([0x7a, 0x64, 0xda, 0x13]), next: 2675000 },
+                ),
+                (
+                    Hardfork::SpuriousDragon,
+                    ForkId { hash: ForkHash([0x3e, 0xdd, 0x5b, 0x10]), next: 4370000 },
+                ),
+                (
+                    Hardfork::Byzantium,
+                    ForkId { hash: ForkHash([0xa0, 0x0b, 0xc3, 0x24]), next: 7280000 },
+                ),
+                (
+                    Hardfork::Constantinople,
+                    ForkId { hash: ForkHash([0x66, 0x8d, 0xb0, 0xaf]), next: 9069000 },
+                ),
+                (
+                    Hardfork::Petersburg,
+                    ForkId { hash: ForkHash([0x66, 0x8d, 0xb0, 0xaf]), next: 9069000 },
+                ),
+                (
+                    Hardfork::Istanbul,
+                    ForkId { hash: ForkHash([0x87, 0x9d, 0x6e, 0x30]), next: 9200000 },
+                ),
+                (
+                    Hardfork::MuirGlacier,
+                    ForkId { hash: ForkHash([0xe0, 0x29, 0xe9, 0x91]), next: 12244000 },
+                ),
+                (
+                    Hardfork::Berlin,
+                    ForkId { hash: ForkHash([0x0e, 0xb4, 0x40, 0xf6]), next: 12965000 },
+                ),
+                (
+                    Hardfork::London,
+                    ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 13773000 },
+                ),
+                (
+                    Hardfork::ArrowGlacier,
+                    ForkId { hash: ForkHash([0x20, 0xc3, 0x27, 0xfc]), next: 15050000 },
+                ),
+                (
+                    Hardfork::GrayGlacier,
+                    ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 1681338455 },
+                ),
+                (Hardfork::Shanghai, ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 0 }),
+            ],
+        );
+    }
+
+    #[test]
+    fn goerli_hardfork_fork_ids() {
+        test_hardfork_fork_ids(
+            &GOERLI,
+            &[
+                (
+                    Hardfork::Frontier,
+                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
+                ),
+                (
+                    Hardfork::Homestead,
+                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
+                ),
+                (
+                    Hardfork::Tangerine,
+                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
+                ),
+                (
+                    Hardfork::SpuriousDragon,
+                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
+                ),
+                (
+                    Hardfork::Byzantium,
+                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
+                ),
+                (
+                    Hardfork::Constantinople,
+                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
+                ),
+                (
+                    Hardfork::Petersburg,
+                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
+                ),
+                (
+                    Hardfork::Istanbul,
+                    ForkId { hash: ForkHash([0xc2, 0x5e, 0xfa, 0x5c]), next: 4460644 },
+                ),
+                (
+                    Hardfork::Berlin,
+                    ForkId { hash: ForkHash([0x75, 0x7a, 0x1c, 0x47]), next: 5062605 },
+                ),
+                (
+                    Hardfork::London,
+                    ForkId { hash: ForkHash([0xb8, 0xc6, 0x29, 0x9d]), next: 1678832736 },
+                ),
+                (Hardfork::Shanghai, ForkId { hash: ForkHash([0xf9, 0x84, 0x3a, 0xbf]), next: 0 }),
+            ],
+        );
+    }
+
+    #[test]
+    fn sepolia_hardfork_fork_ids() {
+        test_hardfork_fork_ids(
+            &SEPOLIA,
+            &[
+                (
+                    Hardfork::Frontier,
+                    ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
+                ),
+                (
+                    Hardfork::Homestead,
+                    ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
+                ),
+                (
+                    Hardfork::Tangerine,
+                    ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
+                ),
+                (
+                    Hardfork::SpuriousDragon,
+                    ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
+                ),
+                (
+                    Hardfork::Byzantium,
+                    ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
+                ),
+                (
+                    Hardfork::Constantinople,
+                    ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
+                ),
+                (
+                    Hardfork::Petersburg,
+                    ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
+                ),
+                (
+                    Hardfork::Istanbul,
+                    ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
+                ),
+                (
+                    Hardfork::Berlin,
+                    ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
+                ),
+                (
+                    Hardfork::London,
+                    ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
+                ),
+                (
+                    Hardfork::Paris,
+                    ForkId { hash: ForkHash([0xb9, 0x6c, 0xbd, 0x13]), next: 1677557088 },
+                ),
+                (Hardfork::Shanghai, ForkId { hash: ForkHash([0xf7, 0xf9, 0xbc, 0x08]), next: 0 }),
+            ],
         );
     }
 

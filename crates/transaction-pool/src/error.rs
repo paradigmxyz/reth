@@ -187,6 +187,10 @@ pub enum InvalidPoolTransactionError {
     /// Any other error that occurred while inserting/validating that is transaction specific
     #[error("{0:?}")]
     Other(Box<dyn PoolTransactionError>),
+    /// The transaction is specified to use less gas than required to start the
+    /// invocation.
+    #[error("intrinsic gas too low")]
+    IntrinsicGasTooLow,
 }
 
 // === impl InvalidPoolTransactionError ===
@@ -240,6 +244,7 @@ impl InvalidPoolTransactionError {
                 // local setting
                 false
             }
+            InvalidPoolTransactionError::IntrinsicGasTooLow => true,
             InvalidPoolTransactionError::Overdraft => false,
             InvalidPoolTransactionError::Other(err) => err.is_bad_transaction(),
             InvalidPoolTransactionError::Eip4844(eip4844_err) => {

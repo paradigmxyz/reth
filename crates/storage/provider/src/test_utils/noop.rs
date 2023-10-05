@@ -388,7 +388,7 @@ impl WithdrawalsProvider for NoopProvider {
 }
 
 impl PruneCheckpointReader for NoopProvider {
-    fn get_prune_checkpoint(&self, _part: PruneSegment) -> RethResult<Option<PruneCheckpoint>> {
+    fn get_prune_checkpoint(&self, _segment: PruneSegment) -> RethResult<Option<PruneCheckpoint>> {
         Ok(None)
     }
 }

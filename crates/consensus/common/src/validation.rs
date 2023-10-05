@@ -576,7 +576,7 @@ mod tests {
             gas_price: 0x28f000fff,
             gas_limit: 10,
             to: TransactionKind::Call(Address::default()),
-            value: 3,
+            value: 3_u64.into(),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),
         });
@@ -598,7 +598,7 @@ mod tests {
             max_fee_per_blob_gas: 0x7,
             gas_limit: 10,
             to: TransactionKind::Call(Address::default()),
-            value: 3,
+            value: 3_u64.into(),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),
             blob_versioned_hashes: std::iter::repeat_with(|| rng.gen()).take(num_blobs).collect(),

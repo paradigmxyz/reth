@@ -30,9 +30,10 @@ pub struct Pruner<DB> {
     /// Minimum pruning interval measured in blocks. All prune segments are checked and, if needed,
     /// pruned, when the chain advances by the specified number of blocks.
     min_block_interval: usize,
-    /// Last pruned block number. Used in conjunction with `min_block_interval` to determine
-    /// when the pruning needs to be initiated.
-    last_pruned_block_number: Option<BlockNumber>,
+    /// Previous tip block number when the pruner was run. Even if no data was pruned, this block
+    /// number is updated with the tip block number the pruner was called with. It's used in
+    /// conjunction with `min_block_interval` to determine when the pruning needs to be initiated.
+    previous_tip_block_number: Option<BlockNumber>,
     modes: PruneModes,
     /// Maximum total entries to prune (delete from database) per block.
     delete_limit: usize,
@@ -55,7 +56,7 @@ impl<DB: Database> Pruner<DB> {
             metrics: Metrics::default(),
             provider_factory: ProviderFactory::new(db, chain_spec),
             min_block_interval,
-            last_pruned_block_number: None,
+            previous_tip_block_number: None,
             modes,
             delete_limit,
             listeners: Default::default(),
@@ -71,7 +72,7 @@ impl<DB: Database> Pruner<DB> {
     /// Run the pruner
     pub fn run(&mut self, tip_block_number: BlockNumber) -> PrunerResult {
         if tip_block_number == 0 {
-            self.last_pruned_block_number = Some(tip_block_number);
+            self.previous_tip_block_number = Some(tip_block_number);
 
             trace!(target: "pruner", %tip_block_number, "Nothing to prune yet");
             return Ok(PruneProgress::Finished)
@@ -88,9 +89,13 @@ impl<DB: Database> Pruner<DB> {
         // TODO(alexey): prune snapshotted segments of data (headers, transactions)
         // let highest_snapshots = *self.highest_snapshots_tracker.borrow();
 
+        // Multiply `delete_limit` (number of row to delete per block) by number of blocks since
+        // last pruner run. `previous_tip_block_number` is close to `tip_block_number`, usually
+        // within `self.block_interval` blocks, so `delete_limit` will not be too high. Also see
+        // docs for `self.previous_tip_block_number`.
         let mut delete_limit = self.delete_limit *
-            self.last_pruned_block_number
-                .map_or(1, |last_pruned_block_number| tip_block_number - last_pruned_block_number)
+            self.previous_tip_block_number
+                .map_or(1, |previous_tip_block_number| tip_block_number - previous_tip_block_number)
                 as usize;
 
         // TODO(alexey): this is cursed, refactor
@@ -128,6 +133,10 @@ impl<DB: Database> Pruner<DB> {
         ];
 
         for (segment, get_prune_target_block) in segments {
+            if delete_limit == 0 {
+                break
+            }
+
             if let Some((to_block, prune_mode)) =
                 get_prune_target_block(&self.modes, tip_block_number)?
             {
@@ -188,7 +197,7 @@ impl<DB: Database> Pruner<DB> {
         }
 
         provider.commit()?;
-        self.last_pruned_block_number = Some(tip_block_number);
+        self.previous_tip_block_number = Some(tip_block_number);
 
         let elapsed = start.elapsed();
         self.metrics.duration_seconds.record(elapsed);
@@ -211,16 +220,16 @@ impl<DB: Database> Pruner<DB> {
     /// Returns `true` if the pruning is needed at the provided tip block number.
     /// This determined by the check against minimum pruning interval and last pruned block number.
     pub fn is_pruning_needed(&self, tip_block_number: BlockNumber) -> bool {
-        if self.last_pruned_block_number.map_or(true, |last_pruned_block_number| {
+        if self.previous_tip_block_number.map_or(true, |previous_tip_block_number| {
             // Saturating subtraction is needed for the case when the chain was reverted, meaning
-            // current block number might be less than the previously pruned block number. If
-            // that's the case, no pruning is needed as outdated data is also reverted.
-            tip_block_number.saturating_sub(last_pruned_block_number) >=
+            // current block number might be less than the previous tip block number.
+            // If that's the case, no pruning is needed as outdated data is also reverted.
+            tip_block_number.saturating_sub(previous_tip_block_number) >=
                 self.min_block_interval as u64
         }) {
             debug!(
                 target: "pruner",
-                last_pruned_block_number = ?self.last_pruned_block_number,
+                previous_tip_block_number = ?self.previous_tip_block_number,
                 %tip_block_number,
                 "Minimum pruning interval reached"
             );
@@ -247,12 +256,12 @@ mod tests {
         // No last pruned block number was set before
         let first_block_number = 1;
         assert!(pruner.is_pruning_needed(first_block_number));
-        pruner.last_pruned_block_number = Some(first_block_number);
+        pruner.previous_tip_block_number = Some(first_block_number);
 
         // Tip block number delta is >= than min block interval
         let second_block_number = first_block_number + pruner.min_block_interval as u64;
         assert!(pruner.is_pruning_needed(second_block_number));
-        pruner.last_pruned_block_number = Some(second_block_number);
+        pruner.previous_tip_block_number = Some(second_block_number);
 
         // Tip block number delta is < than min block interval
         let third_block_number = second_block_number;

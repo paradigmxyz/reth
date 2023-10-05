@@ -685,15 +685,15 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
         let mut keys = keys.into_iter();
         for key in &mut keys {
+            if deleted == limit {
+                break
+            }
+
             let row = cursor.seek_exact(key.clone())?;
             if let Some(row) = row {
                 cursor.delete_current()?;
                 deleted += 1;
                 delete_callback(row);
-            }
-
-            if deleted == limit {
-                break
             }
         }
 
@@ -715,14 +715,14 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         let mut deleted = 0;
 
         while let Some(row) = walker.next().transpose()? {
+            if deleted == limit {
+                break
+            }
+
             if !skip_filter(&row) {
                 walker.delete_current()?;
                 deleted += 1;
                 delete_callback(row);
-            }
-
-            if deleted == limit {
-                break
             }
         }
 
@@ -2130,17 +2130,17 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
 }
 
 impl<'this, TX: DbTx<'this>> PruneCheckpointReader for DatabaseProvider<'this, TX> {
-    fn get_prune_checkpoint(&self, part: PruneSegment) -> RethResult<Option<PruneCheckpoint>> {
-        Ok(self.tx.get::<tables::PruneCheckpoints>(part)?)
+    fn get_prune_checkpoint(&self, segment: PruneSegment) -> RethResult<Option<PruneCheckpoint>> {
+        Ok(self.tx.get::<tables::PruneCheckpoints>(segment)?)
     }
 }
 
 impl<'this, TX: DbTxMut<'this>> PruneCheckpointWriter for DatabaseProvider<'this, TX> {
     fn save_prune_checkpoint(
         &self,
-        part: PruneSegment,
+        segment: PruneSegment,
         checkpoint: PruneCheckpoint,
     ) -> RethResult<()> {
-        Ok(self.tx.put::<tables::PruneCheckpoints>(part, checkpoint)?)
+        Ok(self.tx.put::<tables::PruneCheckpoints>(segment, checkpoint)?)
     }
 }

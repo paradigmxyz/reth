@@ -1,6 +1,10 @@
 use reth_primitives::{
     revm_primitives::{AccountInfo, Log},
-    Account, Log as RethLog, KECCAK_EMPTY,
+    Account, Address, Log as RethLog, TransactionKind, KECCAK_EMPTY, U256,
+};
+use revm::{
+    interpreter::gas::initial_tx_gas,
+    primitives::{MergeSpec, ShanghaiSpec},
 };
 
 /// Check equality between Revm and Reth `Log`s.
@@ -36,5 +40,22 @@ pub fn into_revm_acc(reth_acc: Account) -> AccountInfo {
         nonce: reth_acc.nonce,
         code_hash: reth_acc.bytecode_hash.unwrap_or(KECCAK_EMPTY),
         code: None,
+    }
+}
+
+/// Calculates the Intrinsic Gas usage for a Transaction
+///
+/// Caution: This only checks past the Merge hardfork.
+#[inline]
+pub fn calculate_intrinsic_gas_after_merge(
+    input: &[u8],
+    kind: &TransactionKind,
+    access_list: &[(Address, Vec<U256>)],
+    is_shanghai: bool,
+) -> u64 {
+    if is_shanghai {
+        initial_tx_gas::<ShanghaiSpec>(input, kind.is_create(), access_list)
+    } else {
+        initial_tx_gas::<MergeSpec>(input, kind.is_create(), access_list)
     }
 }
