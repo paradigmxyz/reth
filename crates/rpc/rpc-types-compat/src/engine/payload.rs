@@ -67,7 +67,7 @@ pub fn try_payload_v2_to_block(payload: ExecutionPayloadV2) -> Result<Block, Pay
     let withdrawals: Vec<_> = payload
         .withdrawals
         .iter()
-        .map(|w| convert_standalonewithdraw_to_withdrawal(w.clone()))
+        .map(|w| convert_standalone_withdraw_to_withdrawal(w.clone()))
         .collect();
     let withdrawals_root = proofs::calculate_withdrawals_root(&withdrawals);
     base_sealed_block.withdrawals = Some(withdrawals);
@@ -146,7 +146,7 @@ pub fn try_block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
         .clone()
         .unwrap_or_default()
         .into_iter()
-        .map(convert_withdrawal_to_standalonewithdraw)
+        .map(convert_withdrawal_to_standalone_withdraw)
         .collect();
 
     ExecutionPayloadV2 {
@@ -187,7 +187,7 @@ pub fn block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
         .clone()
         .unwrap_or_default()
         .into_iter()
-        .map(convert_withdrawal_to_standalonewithdraw)
+        .map(convert_withdrawal_to_standalone_withdraw)
         .collect();
 
     ExecutionPayloadV3 {
@@ -248,7 +248,7 @@ pub fn convert_payload_input_v2_to_payload(value: ExecutionPayloadInputV2) -> Ex
 /// Converts [SealedBlock] to [ExecutionPayloadInputV2]
 pub fn convert_block_to_payload_input_v2(value: SealedBlock) -> ExecutionPayloadInputV2 {
     let withdraw = value.withdrawals.clone().map(|withdrawals| {
-        withdrawals.into_iter().map(convert_withdrawal_to_standalonewithdraw).collect::<Vec<_>>()
+        withdrawals.into_iter().map(convert_withdrawal_to_standalone_withdraw).collect::<Vec<_>>()
     });
     ExecutionPayloadInputV2 {
         withdrawals: withdraw,
@@ -320,7 +320,7 @@ pub fn validate_block_hash(
 }
 
 /// Converts [Withdrawal] to [reth_rpc_types::engine::payload::Withdrawal]
-pub fn convert_withdrawal_to_standalonewithdraw(
+pub fn convert_withdrawal_to_standalone_withdraw(
     withdrawal: Withdrawal,
 ) -> reth_rpc_types::engine::payload::Withdrawal {
     reth_rpc_types::engine::payload::Withdrawal {
@@ -332,7 +332,7 @@ pub fn convert_withdrawal_to_standalonewithdraw(
 }
 
 /// Converts [reth_rpc_types::engine::payload::Withdrawal] to [Withdrawal]
-pub fn convert_standalonewithdraw_to_withdrawal(
+pub fn convert_standalone_withdraw_to_withdrawal(
     standalone: reth_rpc_types::engine::payload::Withdrawal,
 ) -> Withdrawal {
     Withdrawal {
@@ -354,7 +354,7 @@ pub fn convert_to_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
         value.withdrawals.map(|withdrawals| {
             withdrawals
                 .into_iter()
-                .map(convert_withdrawal_to_standalonewithdraw)
+                .map(convert_withdrawal_to_standalone_withdraw)
                 .collect::<Vec<_>>()
         });
     ExecutionPayloadBodyV1 { transactions: transactions.collect(), withdrawals: withdraw }
