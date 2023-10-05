@@ -13,14 +13,11 @@
 //! ```
 use clap::Parser;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth::{
-    cli::{
-        components::RethNodeComponents,
-        config::RethRpcConfig,
-        ext::{RethCliExt, RethNodeCommandConfig},
-        Cli,
-    },
-    rpc::builder::{RethModuleRegistry, TransportRpcModules},
+use reth::cli::{
+    components::{RethNodeComponents, RethRpcComponents},
+    config::RethRpcConfig,
+    ext::{RethCliExt, RethNodeCommandConfig},
+    Cli,
 };
 use reth_transaction_pool::TransactionPool;
 
@@ -50,14 +47,7 @@ impl RethNodeCommandConfig for RethCliTxpoolExt {
         &mut self,
         _config: &Conf,
         _components: &Reth,
-        registry: &mut RethModuleRegistry<
-            Reth::Provider,
-            Reth::Pool,
-            Reth::Network,
-            Reth::Tasks,
-            Reth::Events,
-        >,
-        modules: &mut TransportRpcModules,
+        rpc_components: RethRpcComponents<'_, Reth>,
     ) -> eyre::Result<()>
     where
         Conf: RethRpcConfig,
@@ -68,11 +58,11 @@ impl RethNodeCommandConfig for RethCliTxpoolExt {
         }
 
         // here we get the configured pool type from the CLI.
-        let pool = registry.pool().clone();
+        let pool = rpc_components.registry.pool().clone();
         let ext = TxpoolExt { pool };
 
         // now we merge our extension namespace into all configured transports
-        modules.merge_configured(ext.into_rpc())?;
+        rpc_components.modules.merge_configured(ext.into_rpc())?;
 
         println!("txpool extension enabled");
         Ok(())
