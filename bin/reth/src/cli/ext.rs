@@ -7,10 +7,6 @@ use crate::cli::{
 use clap::Args;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-#[doc(hidden)]
-#[allow(unused)]
-/// For doc purposes
-use reth_rpc_builder::TransportRpcModules;
 use reth_tasks::TaskSpawner;
 use std::fmt;
 
@@ -52,14 +48,14 @@ pub trait RethNodeCommandConfig: fmt::Debug {
 
     /// Allows for registering additional RPC modules for the transports.
     ///
-    /// This is expected to call the merge functions of [TransportRpcModules], for example
-    /// [TransportRpcModules::merge_configured]
+    /// This is expected to call the merge functions of [reth_rpc_builder::TransportRpcModules], for
+    /// example [reth_rpc_builder::TransportRpcModules::merge_configured]
     #[allow(clippy::type_complexity)]
     fn extend_rpc_modules<Conf, Reth>(
         &mut self,
         config: &Conf,
         components: &Reth,
-        node_components: &mut RethRpcComponents<'_, Reth>,
+        rpc_components: &mut RethRpcComponents<'_, Reth>,
     ) -> eyre::Result<()>
     where
         Conf: RethRpcConfig,
@@ -67,8 +63,7 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     {
         let _ = config;
         let _ = components;
-        let _ = node_components.registry;
-        let _ = node_components.modules;
+        let _ = rpc_components;
         Ok(())
     }
 

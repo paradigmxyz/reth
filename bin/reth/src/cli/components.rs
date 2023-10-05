@@ -74,10 +74,16 @@ pub trait RethNodeComponents {
 
 /// Helper function to encapsulate [RethModuleRegistry] and [TransportRpcModules]
 /// generic over [RethNodeComponents]
+#[allow(clippy::type_complexity)]
 pub struct RethRpcComponents<'a, Reth: RethNodeComponents> {
     /// A Helper type the holds instances of the configured modules.
-    pub registry:
-        RethModuleRegistry<Reth::Provider, Reth::Pool, Reth::Network, Reth::Tasks, Reth::Events>,
+    pub registry: &'a mut RethModuleRegistry<
+        Reth::Provider,
+        Reth::Pool,
+        Reth::Network,
+        Reth::Tasks,
+        Reth::Events,
+    >,
     /// Holds installed modules per transport type.
     pub modules: &'a mut TransportRpcModules,
 }

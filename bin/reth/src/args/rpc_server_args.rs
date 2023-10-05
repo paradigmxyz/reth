@@ -193,14 +193,15 @@ impl RpcServerArgs {
         let module_config = self.transport_rpc_module_config();
         debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
 
-        let (mut modules, auth_module, registry) = RpcModuleBuilder::default()
+        let (mut modules, auth_module, mut registry) = RpcModuleBuilder::default()
             .with_provider(components.provider())
             .with_pool(components.pool())
             .with_network(components.network())
             .with_events(components.events())
             .with_executor(components.task_executor())
             .build_with_auth_server(module_config, engine_api);
-        let node_modules = &mut RethRpcComponents::<Reth> { registry, modules: &mut modules };
+        let node_modules =
+            &mut RethRpcComponents::<Reth> { registry: &mut registry, modules: &mut modules };
         // apply configured customization
         conf.extend_rpc_modules(self, components, node_modules)?;
 
