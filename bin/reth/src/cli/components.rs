@@ -72,11 +72,17 @@ pub trait RethNodeComponents {
     }
 }
 
-/// Helper function to encapsulate [RethModuleRegistry] and [TransportRpcModules]
-/// generic over [RethNodeComponents]
+/// Helper container to encapsulate [RethModuleRegistry] and [TransportRpcModules].
+///
+/// This can be used to access installed modules, or create commonly used handlers like
+/// [reth_rpc::EthApi], and ultimately merge additional rpc handler into the configured transport
+/// modules [TransportRpcModules].
+#[derive(Debug)]
 #[allow(clippy::type_complexity)]
 pub struct RethRpcComponents<'a, Reth: RethNodeComponents> {
     /// A Helper type the holds instances of the configured modules.
+    ///
+    /// This provides easy access to rpc handlers, such as [RethModuleRegistry::eth_api].
     pub registry: &'a mut RethModuleRegistry<
         Reth::Provider,
         Reth::Pool,
@@ -85,6 +91,9 @@ pub struct RethRpcComponents<'a, Reth: RethNodeComponents> {
         Reth::Events,
     >,
     /// Holds installed modules per transport type.
+    ///
+    /// This can be used to merge additional modules into the configured transports (http, ipc,
+    /// ws). See [TransportRpcModules::merge_configured]
     pub modules: &'a mut TransportRpcModules,
 }
 

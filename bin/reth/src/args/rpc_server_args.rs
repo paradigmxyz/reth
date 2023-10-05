@@ -200,8 +200,7 @@ impl RpcServerArgs {
             .with_events(components.events())
             .with_executor(components.task_executor())
             .build_with_auth_server(module_config, engine_api);
-        let node_modules =
-            &mut RethRpcComponents::<Reth> { registry: &mut registry, modules: &mut modules };
+        let node_modules = RethRpcComponents { registry: &mut registry, modules: &mut modules };
         // apply configured customization
         conf.extend_rpc_modules(self, components, node_modules)?;
 

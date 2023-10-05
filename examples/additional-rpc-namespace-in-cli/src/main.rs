@@ -47,7 +47,7 @@ impl RethNodeCommandConfig for RethCliTxpoolExt {
         &mut self,
         _config: &Conf,
         _components: &Reth,
-        node_components: &mut RethRpcComponents<'_, Reth>,
+        rpc_components: RethRpcComponents<'_, Reth>,
     ) -> eyre::Result<()>
     where
         Conf: RethRpcConfig,
@@ -58,11 +58,11 @@ impl RethNodeCommandConfig for RethCliTxpoolExt {
         }
 
         // here we get the configured pool type from the CLI.
-        let pool = node_components.registry.pool().clone();
+        let pool = rpc_components.registry.pool().clone();
         let ext = TxpoolExt { pool };
 
         // now we merge our extension namespace into all configured transports
-        node_components.modules.merge_configured(ext.into_rpc())?;
+        rpc_components.modules.merge_configured(ext.into_rpc())?;
 
         println!("txpool extension enabled");
         Ok(())

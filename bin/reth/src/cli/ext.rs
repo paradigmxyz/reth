@@ -50,12 +50,11 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     ///
     /// This is expected to call the merge functions of [reth_rpc_builder::TransportRpcModules], for
     /// example [reth_rpc_builder::TransportRpcModules::merge_configured]
-    #[allow(clippy::type_complexity)]
     fn extend_rpc_modules<Conf, Reth>(
         &mut self,
         config: &Conf,
         components: &Reth,
-        rpc_components: &mut RethRpcComponents<'_, Reth>,
+        rpc_components: RethRpcComponents<'_, Reth>,
     ) -> eyre::Result<()>
     where
         Conf: RethRpcConfig,
@@ -187,14 +186,14 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
         &mut self,
         config: &Conf,
         components: &Reth,
-        node_components: &mut RethRpcComponents<'_, Reth>,
+        rpc_components: RethRpcComponents<'_, Reth>,
     ) -> eyre::Result<()>
     where
         Conf: RethRpcConfig,
         Reth: RethNodeComponents,
     {
         if let Some(conf) = self.inner_mut() {
-            conf.extend_rpc_modules(config, components, node_components)
+            conf.extend_rpc_modules(config, components, rpc_components)
         } else {
             Ok(())
         }
