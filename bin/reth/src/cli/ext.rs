@@ -135,7 +135,7 @@ impl RethNodeCommandConfig for () {}
 /// Note: This type must be manually filled with a [RethNodeCommandConfig] manually before executing
 /// the [NodeCommand](crate::node::NodeCommand).
 #[derive(Debug, Clone, Copy, Default, Args)]
-pub struct NoArgs<T> {
+pub struct NoArgs<T = ()> {
     #[clap(skip)]
     inner: Option<T>,
 }
