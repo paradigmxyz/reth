@@ -248,7 +248,7 @@ impl BlobsBundleV1 {
     /// # Panics
     ///
     /// If len is more than the blobs bundle len.
-    fn take(&mut self, len: usize) -> (Vec<Bytes48>, Vec<Bytes48>, Vec<Blob>) {
+    pub fn take(&mut self, len: usize) -> (Vec<Bytes48>, Vec<Bytes48>, Vec<Blob>) {
         (
             self.commitments.drain(0..len).collect(),
             self.proofs.drain(0..len).collect(),
