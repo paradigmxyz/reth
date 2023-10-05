@@ -520,7 +520,7 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Legacy { gas_price, .. } => *gas_price,
             MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } => *max_priority_fee_per_gas,
             MockTransaction::Eip4844 { max_priority_fee_per_gas, .. } => *max_priority_fee_per_gas,
-            MockTransaction::Eip2930 { .. } => 0,
+            MockTransaction::Eip2930 { gas_price,.. } => *gas_price,
         }
     }
 
