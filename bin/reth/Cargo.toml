@@ -75,6 +75,7 @@ metrics.workspace = true
 
 # test vectors generation
 proptest.workspace = true
+rand.workspace = true
 
 # tui
 comfy-table = "7.0"

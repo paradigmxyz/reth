@@ -213,9 +213,7 @@ impl Command {
                 command.execute(&db)?;
             }
             Subcommands::Snapshot(command) => {
-                let db = open_db_read_only(&db_path, self.db.log_level)?;
-                let tool = DbTool::new(&db, self.chain.clone())?;
-                command.execute(&tool)?;
+                command.execute(&db_path, self.db.log_level, self.chain.clone())?;
             }
             Subcommands::Version => {
                 let local_db_version = match get_db_version(&db_path) {
