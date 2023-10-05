@@ -183,8 +183,9 @@ macro_rules! can_disconnect_impl {
 
 /// Stream sharing underlying stream. First instant owns the stream and following instants cloned
 /// from first own a weak clone of stream. Only the first instant can poll the underlying stream,
-/// but doing so triggers poll to immediately repeat once for every weak clone. [`CapStream`]
-/// ensures at most one shared stream is opened per shared capability.
+/// but doing so triggers poll to immediately repeat once for every weak clone. At most one stream
+/// share per message type, e.g. [`EthMessage`], can be open. This is ensured by the underlying
+/// [`CapStream`].
 #[derive(Debug)]
 pub struct SharedStream<S> {
     inner: S,
@@ -284,6 +285,7 @@ pub struct CapStream<S> {
 }
 
 impl<S> CapStream<S> {
+    /// Creates a new [`CapStream`] to demux incoming and mux outgoing capability messages. 
     pub fn new(inner: S, shared_capabilities: SharedCapabilities) -> Self {
         let demux = HashMap::new();
         let (mux_tx, mux) = mpsc::unbounded_channel();
@@ -291,6 +293,7 @@ impl<S> CapStream<S> {
         Self { inner, mux, mux_tx, demux, shared_capabilities }
     }
 
+    /// Wraps [`CapStream`] in a [`SharedStream`] that can be used to send and receive capability specific messages.
     pub fn into_shared<T: 'static>(mut self) -> Result<SharedStream<Self>, CapStreamError> {
         let cap_msg_type = TypeId::of::<T>();
         let cap = self.try_shared_for(cap_msg_type)?;
