@@ -2130,17 +2130,17 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
 }
 
 impl<'this, TX: DbTx<'this>> PruneCheckpointReader for DatabaseProvider<'this, TX> {
-    fn get_prune_checkpoint(&self, part: PruneSegment) -> RethResult<Option<PruneCheckpoint>> {
-        Ok(self.tx.get::<tables::PruneCheckpoints>(part)?)
+    fn get_prune_checkpoint(&self, segment: PruneSegment) -> RethResult<Option<PruneCheckpoint>> {
+        Ok(self.tx.get::<tables::PruneCheckpoints>(segment)?)
     }
 }
 
 impl<'this, TX: DbTxMut<'this>> PruneCheckpointWriter for DatabaseProvider<'this, TX> {
     fn save_prune_checkpoint(
         &self,
-        part: PruneSegment,
+        segment: PruneSegment,
         checkpoint: PruneCheckpoint,
     ) -> RethResult<()> {
-        Ok(self.tx.put::<tables::PruneCheckpoints>(part, checkpoint)?)
+        Ok(self.tx.put::<tables::PruneCheckpoints>(segment, checkpoint)?)
     }
 }

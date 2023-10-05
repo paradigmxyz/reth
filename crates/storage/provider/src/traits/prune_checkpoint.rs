@@ -5,7 +5,7 @@ use reth_primitives::{PruneCheckpoint, PruneSegment};
 #[auto_impl::auto_impl(&, Arc)]
 pub trait PruneCheckpointReader: Send + Sync {
     /// Fetch the checkpoint for the given prune segment.
-    fn get_prune_checkpoint(&self, part: PruneSegment) -> RethResult<Option<PruneCheckpoint>>;
+    fn get_prune_checkpoint(&self, segment: PruneSegment) -> RethResult<Option<PruneCheckpoint>>;
 }
 
 /// The trait for updating prune checkpoint related data.
@@ -14,7 +14,7 @@ pub trait PruneCheckpointWriter: Send + Sync {
     /// Save prune checkpoint.
     fn save_prune_checkpoint(
         &self,
-        part: PruneSegment,
+        segment: PruneSegment,
         checkpoint: PruneCheckpoint,
     ) -> RethResult<()>;
 }

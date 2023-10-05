@@ -466,8 +466,8 @@ where
     DB: Database,
     Tree: Send + Sync,
 {
-    fn get_prune_checkpoint(&self, part: PruneSegment) -> RethResult<Option<PruneCheckpoint>> {
-        self.database.provider()?.get_prune_checkpoint(part)
+    fn get_prune_checkpoint(&self, segment: PruneSegment) -> RethResult<Option<PruneCheckpoint>> {
+        self.database.provider()?.get_prune_checkpoint(segment)
     }
 }
 

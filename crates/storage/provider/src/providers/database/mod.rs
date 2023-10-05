@@ -404,8 +404,8 @@ where
 }
 
 impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
-    fn get_prune_checkpoint(&self, part: PruneSegment) -> RethResult<Option<PruneCheckpoint>> {
-        self.provider()?.get_prune_checkpoint(part)
+    fn get_prune_checkpoint(&self, segment: PruneSegment) -> RethResult<Option<PruneCheckpoint>> {
+        self.provider()?.get_prune_checkpoint(segment)
     }
 }
 
