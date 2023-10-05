@@ -148,18 +148,12 @@ where
             block.seal(attributes.parent)
         };
 
-        // configure evm env based on parent block
-        let (initialized_cfg, initialized_block_env) =
-            attributes.cfg_and_block_env(&self.chain_spec, &parent_block);
-
-        let config = PayloadConfig {
-            initialized_block_env,
-            initialized_cfg,
-            parent_block: Arc::new(parent_block),
-            extra_data: self.config.extradata.clone(),
+        let config = PayloadConfig::new(
+            Arc::new(parent_block),
+            self.config.extradata.clone(),
             attributes,
-            chain_spec: Arc::clone(&self.chain_spec),
-        };
+            Arc::clone(&self.chain_spec),
+        );
 
         let until = tokio::time::Instant::now() + self.config.deadline;
         let deadline = Box::pin(tokio::time::sleep_until(until));
@@ -514,13 +508,13 @@ impl Future for PendingPayload {
 ///
 /// If dropped, it will set the `cancelled` flag to true.
 #[derive(Default, Clone, Debug)]
-struct Cancelled(Arc<AtomicBool>);
+pub struct Cancelled(Arc<AtomicBool>);
 
 // === impl Cancelled ===
 
 impl Cancelled {
     /// Returns true if the job was cancelled.
-    fn is_cancelled(&self) -> bool {
+    pub fn is_cancelled(&self) -> bool {
         self.0.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
@@ -533,7 +527,7 @@ impl Drop for Cancelled {
 
 /// Static config for how to build a payload.
 #[derive(Clone, Debug)]
-struct PayloadConfig {
+pub struct PayloadConfig {
     /// Pre-configured block environment.
     initialized_block_env: BlockEnv,
     /// Configuration for the environment.
@@ -546,6 +540,29 @@ struct PayloadConfig {
     attributes: PayloadBuilderAttributes,
     /// The chain spec.
     chain_spec: Arc<ChainSpec>,
+}
+
+impl PayloadConfig {
+    /// Create new payload config.
+    pub fn new(
+        parent_block: Arc<SealedBlock>,
+        extra_data: Bytes,
+        attributes: PayloadBuilderAttributes,
+        chain_spec: Arc<ChainSpec>,
+    ) -> Self {
+        // configure evm env based on parent block
+        let (initialized_cfg, initialized_block_env) =
+            attributes.cfg_and_block_env(&chain_spec, &parent_block);
+
+        Self {
+            initialized_block_env,
+            initialized_cfg,
+            parent_block,
+            extra_data,
+            attributes,
+            chain_spec,
+        }
+    }
 }
 
 /// The possible outcomes of a payload building attempt.
@@ -582,6 +599,20 @@ pub struct BuildArguments<Pool, Client> {
     config: PayloadConfig,
     cancel: Cancelled,
     best_payload: Option<Arc<BuiltPayload>>,
+}
+
+impl<Pool, Client> BuildArguments<Pool, Client> {
+    /// Create new build arguments.
+    pub fn new(
+        client: Client,
+        pool: Pool,
+        cached_reads: CachedReads,
+        config: PayloadConfig,
+        cancel: Cancelled,
+        best_payload: Option<Arc<BuiltPayload>>,
+    ) -> Self {
+        Self { client, pool, cached_reads, config, cancel, best_payload }
+    }
 }
 
 /// A trait for building payloads that encapsulate Ethereum transactions.
@@ -631,7 +662,7 @@ where
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
 #[inline]
-fn default_payload_builder<Pool, Client>(
+pub fn default_payload_builder<Pool, Client>(
     args: BuildArguments<Pool, Client>,
 ) -> Result<BuildOutcome, PayloadBuilderError>
 where
